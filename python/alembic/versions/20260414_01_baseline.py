@@ -1,7 +1,7 @@
 """baseline
 
 Revision ID: 20260414_01
-Revises: 
+Revises:
 Create Date: 2026-04-14 00:00:00
 """
 

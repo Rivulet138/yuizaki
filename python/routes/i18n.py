@@ -29,13 +29,13 @@ async def get_available_locales():
 @router.post("/locale")
 async def set_current_locale(locale: str = Query(...)):
     """设置当前语言
-    
+
     Args:
         locale: 语言代码 (zh-CN, en-US, ja-JP)
     """
     i18n = get_i18n()
     success = set_locale(locale)
-    
+
     if success:
         logger.info(f"Locale changed to: {locale}")
         return {
@@ -67,7 +67,7 @@ async def get_current_locale():
 @router.get("/messages")
 async def get_all_messages(locale: str = Query(None)):
     """获取所有翻译消息
-    
+
     Args:
         locale: 语言代码 (可选，默认使用当前语言)
     """
@@ -82,7 +82,7 @@ async def get_all_messages(locale: str = Query(None)):
 @router.get("/message/{key:path}")
 async def get_message(key: str, locale: str = Query(None)):
     """获取单个翻译消息
-    
+
     Args:
         key: 翻译键 (支持点号分隔: common.save)
         locale: 语言代码 (可选)
@@ -99,7 +99,7 @@ async def get_message(key: str, locale: str = Query(None)):
 @router.get("/error/{error_key:path}")
 async def get_error_message(error_key: str, locale: str = Query(None)):
     """获取错误消息翻译
-    
+
     Args:
         error_key: 错误键 (errors.networkError)
         locale: 语言代码 (可选)

@@ -165,7 +165,7 @@ class EmbeddingService:
       raise RuntimeError("embedding_model_dimension_unavailable")
     self.dimension = int(dimension)
     logger.info(f"Embedding dimension: {self.dimension}")
-  
+
   def embed(self, text: str) -> np.ndarray:
     """Generate embedding vector for text"""
     return np.asarray(self.model.encode(text, convert_to_numpy=True), dtype=np.float32)
@@ -183,7 +183,7 @@ class EmbeddingService:
     if callable(encode_document):
       return np.asarray(encode_document(text, convert_to_numpy=True), dtype=np.float32)
     return self.embed(text)
-  
+
   def embed_batch(self, texts: List[str]) -> np.ndarray:
     """Batch embedding for efficiency"""
     return np.asarray(self.model.encode(texts, convert_to_numpy=True), dtype=np.float32)
@@ -325,7 +325,7 @@ class VectorStore:
       (self._docs[doc_ids[i]], float(scores[i]))
       for i in idx
     ]
-  
+
   def search_with_rerank(
     self,
     query: str,
@@ -337,27 +337,27 @@ class VectorStore:
   ) -> List[Tuple[Document, float]]:
     """
     Advanced search with type filtering and recency reranking (Task 1.4).
-    
+
     Args:
       query: Search query text
       top_k: Number of results to return
       memory_types: Filter by memory types (None = all types)
       recency_weight: Weight for recency score (0-1, default 0.2)
-    
+
     Returns:
       List of (Document, final_score) tuples
     """
     if not self._docs:
       return []
-    
+
     filtered_ids = []
     for doc_id, doc in self._docs.items():
       if self._doc_matches_filters(doc, filters=filters, memory_types=memory_types):
         filtered_ids.append(doc_id)
-    
+
     if not filtered_ids:
       return []
-    
+
     # Semantic search
     vector_ids = [doc_id for doc_id in filtered_ids if doc_id in self._vectors]
     if not vector_ids:
@@ -367,16 +367,16 @@ class VectorStore:
     mats_norm = mats / (np.linalg.norm(mats, axis=1, keepdims=True) + 1e-8)
     q_norm = q / (np.linalg.norm(q) + 1e-8)
     semantic_scores = mats_norm @ q_norm
-    
+
     # Rerank with recency
     from datetime import datetime
     now = datetime.now()
     scored = []
-    
+
     for i, doc_id in enumerate(vector_ids):
       doc = self._docs[doc_id]
       semantic_score = float(semantic_scores[i])
-      
+
       # Calculate recency score (30-day half-life)
       timestamp_str = doc.metadata.get("timestamp")
       if timestamp_str:
@@ -388,13 +388,13 @@ class VectorStore:
           recency_score = 0.5  # Default for invalid timestamps
       else:
         recency_score = 0.5
-      
+
       quality_score = float(doc.metadata.get("quality_score") or doc.metadata.get("confidence") or 0.6)
       quality_score = max(0.0, min(1.0, quality_score))
       semantic_weight = max(0.0, 1 - recency_weight - quality_weight)
       final_score = semantic_score * semantic_weight + recency_score * recency_weight + quality_score * quality_weight
       scored.append((final_score, doc, semantic_score))
-    
+
     # Sort and return top_k
     scored.sort(reverse=True, key=lambda x: x[0])
     return [(doc, final_score) for final_score, doc, _ in scored[:top_k]]

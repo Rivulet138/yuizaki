@@ -49,7 +49,7 @@ export function useAppOrchestrator() {
         router.push(moduleRoute(workspace.id, 'companion', activeSession?.id)),
       )
     }
-    
+
     const workspaceModelId = workspace.context?.modelId
     const workspaceModelType = workspace.context?.modelType
     const isLegacyDefaultModel = workspaceModelId === LEGACY_DEFAULT_MODEL_ID && workspaceModelType === 'live2d'
@@ -84,18 +84,18 @@ export function useAppOrchestrator() {
     const initialTab = resolveInitialTab()
     await runRecoverableTask('load companions', () => companionStore.loadCompanions())
     await runRecoverableTask('sync workspaces', () => workspaceStore.syncFromBackend())
-    
+
     if (workspaceStore.activeWorkspace.companion_profile_id) {
       companionStore.setActiveCompanion(workspaceStore.activeWorkspace.companion_profile_id)
     }
     await runRecoverableTask('apply active companion runtime', applyActiveCompanionRuntime)
     await runRecoverableTask('load sessions', () => sessionStore.loadSessions())
-    
+
     const activeSessionId = sessionStore.activeSession?.id
     if (activeSessionId) {
       await runRecoverableTask('load chat history', () => chatStore.loadHistory(activeSessionId, workspaceStore.activeWorkspaceId))
     }
-    
+
     if (route.path === '/') {
       const session = sessionStore.activeSession
       const tab = initialTab

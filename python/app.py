@@ -327,7 +327,7 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
     global _llm_client, _vision_llm_client, _tts_client, _asr_manager, _svc_client, _ocr_client, _generation_mgr, _janitor_task, db_repo, settings_api, settings_manager, _retrieval_pipeline, _heartbeat_scheduler
     logger.info("Starting Yuizaki backend...")
     enforce_schema_policy()
-    
+
     # Initialize settings system
     from modules.system.settings_store import SettingsStore
 
@@ -372,10 +372,10 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
     service_manager.register("asr", _init_asr, _cleanup_asr)
     service_manager.register("svc", _init_svc, _cleanup_svc)
     service_manager.register("ocr", _init_ocr, _cleanup_ocr)
-    
+
     # Register health checks
     register_app_runtime_health_checks(health_checker, runtime_health_providers)
-    
+
     # Start all services
     if not await service_manager.start_all():
         logger.error("Failed to start all services")
@@ -392,7 +392,7 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
         relationship_summary_provider=lambda: _relationship_evolution_summary(),
     )
     await _heartbeat_scheduler.start()
-    
+
     # Start cache janitor
     _janitor_task = asyncio.create_task(run_audio_cache_janitor(config.cache, config.tts, logger))
     logger.info("Backend startup complete")
@@ -415,9 +415,9 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
         active_workspace_provider=_get_active_workspace_id,
     )
     logger.info("Socket.IO server ready")
-    
+
     yield
-    
+
     logger.info("Shutting down Yuizaki backend...")
     if _heartbeat_scheduler:
         await _heartbeat_scheduler.stop()

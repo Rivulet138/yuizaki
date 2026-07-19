@@ -79,7 +79,7 @@
               <el-option v-for="c in companions" :key="c.id" :label="c.name" :value="c.id" />
             </el-select>
           </el-form-item>
-          
+
           <div class="flex flex-wrap gap-2 mb-4">
             <el-button size="small" plain @click="$emit('create-companion')">
               新建

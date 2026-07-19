@@ -570,7 +570,7 @@ onMounted(() => {
     loadHeartbeat(),
     loadGovernance(),
   ])
-  
+
   syncTimer = window.setInterval(() => {
     void syncPetData(true)
   }, 5000)

@@ -60,7 +60,7 @@ export function usePluginDomain() {
     const next = new Set(cancellingInvocationIds.value)
     next.add(invocationId)
     cancellingInvocationIds.value = next
-    
+
     try {
       const result = await cancelRequest.execute(() => pluginClient.cancelExecution(pluginId, routeId, invocationId))
       if (!result?.ok) {

@@ -71,7 +71,7 @@ class SettingsStore:
 
     def __init__(self, storage_path: str = DEFAULT_SETTINGS_PATH_STR):
         """Initialize settings store.
-        
+
         Args:
             storage_path: Path to JSON settings file.
         """
@@ -107,11 +107,11 @@ class SettingsStore:
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get a setting value.
-        
+
         Args:
             key: Setting key (supports dot notation: "section.key").
             default: Default value if key not found.
-            
+
         Returns:
             Setting value or default.
         """
@@ -128,39 +128,39 @@ class SettingsStore:
 
     def set(self, key: str, value: Any) -> None:
         """Set a setting value.
-        
+
         Args:
             key: Setting key (supports dot notation: "section.key").
             value: Value to set.
         """
         keys = key.split(".")
         current = self.settings
-        
+
         for k in keys[:-1]:
             if k not in current:
                 current[k] = {}
             current = current[k]
-        
+
         current[keys[-1]] = value
         logger.debug("Set setting %s = %s", key, redact_sensitive_config_value(value, key))
 
     def delete(self, key: str) -> bool:
         """Delete a setting.
-        
+
         Args:
             key: Setting key.
-            
+
         Returns:
             True if deleted, False if not found.
         """
         keys = key.split(".")
         current = self.settings
-        
+
         for k in keys[:-1]:
             if k not in current:
                 return False
             current = current[k]
-        
+
         if keys[-1] in current:
             del current[keys[-1]]
             logger.debug(f"Deleted setting {key}")
@@ -196,7 +196,7 @@ class SettingsStore:
 
     def update(self, updates: Dict[str, Any]) -> None:
         """Update multiple settings.
-        
+
         Args:
             updates: Dictionary of settings to update.
         """
@@ -206,7 +206,7 @@ class SettingsStore:
 
     def export(self, filepath: str) -> None:
         """Export settings to file.
-        
+
         Args:
             filepath: Path to export to.
         """
@@ -228,7 +228,7 @@ class SettingsStore:
 
     def import_settings(self, filepath: str) -> None:
         """Import settings from file.
-        
+
         Args:
             filepath: Path to import from.
         """
@@ -247,7 +247,7 @@ class SettingsStore:
 
     def get_metadata(self) -> Dict[str, Any]:
         """Get settings metadata.
-        
+
         Returns:
             Metadata including file path, size, and last modified time.
         """

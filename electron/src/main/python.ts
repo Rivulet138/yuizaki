@@ -4,6 +4,7 @@ import path from 'path';
 import axios from 'axios';
 import util from 'util';
 import { resolvePythonApiOrigin } from './http/python-origin';
+import { resolvePythonRuntime } from './python-runtime';
 
 export class PythonService {
   private process: ChildProcess | null = null;
@@ -150,12 +151,7 @@ export class PythonService {
   }
 
   private resolvePythonExe(): string {
-    const venvPython = path.join(this.pythonDir, '.venv', 'Scripts', 'python.exe');
-    if (fs.existsSync(venvPython)) {
-      return venvPython;
-    }
-
-    return 'python';
+    return resolvePythonRuntime(this.pythonDir).executable;
   }
 
   private resolveManagedExternally(): boolean {

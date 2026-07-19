@@ -23,7 +23,7 @@ class ServiceInfo:
 
     def __init__(self, name: str, init_func: Callable[[], Any], cleanup_func: Optional[Callable[[], Any]] = None):
         """Initialize service info.
-        
+
         Args:
             name: Service name
             init_func: Async function to initialize service
@@ -63,7 +63,7 @@ class ServiceManager:
         depends_on: Optional[list[str]] = None,
     ) -> None:
         """Register a service.
-        
+
         Args:
             name: Service name
             init_func: Async initialization function
@@ -92,7 +92,7 @@ class ServiceManager:
 
     async def start_all(self) -> bool:
         """Start all registered services.
-        
+
         Returns:
             True if all services started successfully, False otherwise.
         """
@@ -143,10 +143,10 @@ class ServiceManager:
 
     def get_status(self, service_name: Optional[str] = None) -> dict[str, Any]:
         """Get service status.
-        
+
         Args:
             service_name: Specific service name, or None for all services.
-            
+
         Returns:
             Service status information.
         """
@@ -161,7 +161,7 @@ class ServiceManager:
 
     def is_healthy(self) -> bool:
         """Check if all services are healthy.
-        
+
         Returns:
             True if all services are running, False otherwise.
         """

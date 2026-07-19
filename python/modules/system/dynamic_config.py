@@ -25,7 +25,7 @@ class ConfigChangeListener:
 
     def __init__(self, callback: Callable[[str, Any, Any], Awaitable[None]], keys: Optional[List[str]] = None):
         """Initialize listener.
-        
+
         Args:
             callback: Async function to call on config change.
             keys: Specific keys to listen for. If None, listens to all changes.
@@ -44,7 +44,7 @@ class ConfigChangeEvent:
 
     def __init__(self, key: str, old_value: Any, new_value: Any):
         """Initialize change event.
-        
+
         Args:
             key: Configuration key that changed.
             old_value: Previous value.
@@ -77,7 +77,7 @@ class DynamicConfigManager:
 
     def register_listener(self, listener: ConfigChangeListener) -> None:
         """Register a configuration change listener.
-        
+
         Args:
             listener: Listener to register.
         """
@@ -86,7 +86,7 @@ class DynamicConfigManager:
 
     def unregister_listener(self, listener: ConfigChangeListener) -> None:
         """Unregister a configuration change listener.
-        
+
         Args:
             listener: Listener to unregister.
         """
@@ -96,16 +96,16 @@ class DynamicConfigManager:
 
     async def update(self, key: str, value: Any) -> bool:
         """Update configuration and notify listeners.
-        
+
         Args:
             key: Configuration key.
             value: New value.
-            
+
         Returns:
             True if update was successful, False otherwise.
         """
         old_value = self.config.get(key)
-        
+
         if old_value == value:
             logger.debug(f"Config {key} unchanged, skipping update")
             return True
@@ -136,10 +136,10 @@ class DynamicConfigManager:
 
     async def update_batch(self, updates: Dict[str, Any]) -> bool:
         """Update multiple configuration values.
-        
+
         Args:
             updates: Dictionary of key-value pairs to update.
-            
+
         Returns:
             True if all updates were successful, False otherwise.
         """
@@ -151,11 +151,11 @@ class DynamicConfigManager:
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get configuration value.
-        
+
         Args:
             key: Configuration key.
             default: Default value if key not found.
-            
+
         Returns:
             Configuration value or default.
         """
@@ -163,7 +163,7 @@ class DynamicConfigManager:
 
     def get_all(self) -> Dict[str, Any]:
         """Get all configuration values.
-        
+
         Returns:
             Dictionary of all configuration values.
         """
@@ -171,11 +171,11 @@ class DynamicConfigManager:
 
     def get_history(self, key: Optional[str] = None, limit: int = 10) -> List[Dict[str, Any]]:
         """Get configuration change history.
-        
+
         Args:
             key: Specific key to filter by. If None, returns all changes.
             limit: Maximum number of entries to return.
-            
+
         Returns:
             List of change events.
         """
@@ -186,11 +186,11 @@ class DynamicConfigManager:
 
     def validate_update(self, key: str, value: Any) -> tuple[bool, str]:
         """Validate a configuration update.
-        
+
         Args:
             key: Configuration key.
             value: Value to validate.
-            
+
         Returns:
             Tuple of (is_valid, error_message).
         """
@@ -201,10 +201,10 @@ class DynamicConfigManager:
 
     def rollback(self, steps: int = 1) -> bool:
         """Rollback configuration changes.
-        
+
         Args:
             steps: Number of changes to rollback.
-            
+
         Returns:
             True if rollback was successful, False otherwise.
         """

@@ -14,6 +14,7 @@ import {
 } from '../../resource-manager'
 import type { ManagedModelResourceId } from '../../../shared/resource-manager'
 import type { HttpRouteHandler } from '../types'
+import { resolvePythonRuntime } from '../../python-runtime'
 import { parseRequestBody, sendJson } from '../utils'
 import { resolvePythonApiOrigin } from '../python-origin'
 import type { SkillCatalogItem, SkillCatalogSnapshot } from '../../../shared/capability'
@@ -588,11 +589,13 @@ const buildRestorePlan = (manifest: BackupManifest, realBackupDir: string, dryRu
 const collectEnvironmentChecks = () => {
   const electronRoot = resolveElectronRoot()
   const projectRoot = resolveProjectRoot()
+  const pythonRuntime = resolvePythonRuntime(path.join(projectRoot, 'python'))
   return {
     electronRoot,
     projectRoot,
     pythonAppExists: fs.existsSync(path.join(projectRoot, 'python/app.py')),
-    pythonVenvExists: fs.existsSync(path.join(projectRoot, 'python/.venv/Scripts/python.exe')),
+    pythonVenvExists: pythonRuntime.venvExists,
+    pythonVenvPath: path.relative(projectRoot, pythonRuntime.venvPath).split(path.sep).join('/'),
     rendererDistExists: fs.existsSync(path.join(electronRoot, 'dist/renderer/index.html')),
     pluginDirExists: fs.existsSync(path.join(electronRoot, 'plugins')),
     backupDirExists: fs.existsSync(path.join(projectRoot, 'backups')),

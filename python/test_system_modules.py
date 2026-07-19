@@ -25,7 +25,7 @@ class TestServiceManager:
     async def test_register_and_start_service(self):
         """Test registering and starting a service."""
         manager = ServiceManager()
-        
+
         init_called = False
         async def init_service():
             nonlocal init_called
@@ -33,7 +33,7 @@ class TestServiceManager:
 
         manager.register("test_service", init_service)
         assert "test_service" in manager.services
-        
+
         success = await manager.start_all()
         assert success
         assert init_called
@@ -42,11 +42,11 @@ class TestServiceManager:
     async def test_service_cleanup(self):
         """Test service cleanup."""
         manager = ServiceManager()
-        
+
         cleanup_called = False
         async def init_service():
             pass
-        
+
         async def cleanup_service():
             nonlocal cleanup_called
             cleanup_called = True
@@ -59,7 +59,7 @@ class TestServiceManager:
     def test_get_service_status(self):
         """Test getting service status."""
         manager = ServiceManager()
-        
+
         async def init_service():
             pass
 
@@ -99,7 +99,7 @@ class TestHealthChecker:
     async def test_register_and_check(self):
         """Test registering and running health checks."""
         checker = HealthChecker()
-        
+
         async def check_service():
             return True, "Service healthy"
 
@@ -111,10 +111,10 @@ class TestHealthChecker:
     async def test_degraded_health(self):
         """Test degraded health status."""
         checker = HealthChecker()
-        
+
         async def check_healthy():
             return True, "Healthy"
-        
+
         async def check_degraded():
             return False, "Degraded"
 
@@ -127,7 +127,7 @@ class TestHealthChecker:
     async def test_unhealthy_status(self):
         """Test unhealthy status."""
         checker = HealthChecker()
-        
+
         async def check_unhealthy():
             raise Exception("Service error")
 
@@ -139,7 +139,7 @@ class TestHealthChecker:
     async def test_health_check_timeout_is_bounded(self):
         """Test that one stalled check cannot block the health endpoint."""
         checker = HealthChecker(check_timeout_seconds=0.01)
-        
+
         async def check_timeout():
             await asyncio.sleep(10)
             return True, "Should not complete"
@@ -501,7 +501,7 @@ class TestDynamicConfigManager:
     async def test_listener_notification(self):
         """Test listener notification on config change."""
         manager = DynamicConfigManager()
-        
+
         callback_called = False
         async def callback(key, old_value, new_value):
             nonlocal callback_called
@@ -519,7 +519,7 @@ class TestDynamicConfigManager:
         manager = DynamicConfigManager()
         await manager.update("key1", "value1")
         await manager.update("key1", "value2")
-        
+
         history = manager.get_history("key1")
         assert len(history) == 2
 
@@ -529,7 +529,7 @@ class TestDynamicConfigManager:
         manager = DynamicConfigManager()
         await manager.update("key1", "value1")
         await manager.update("key1", "value2")
-        
+
         manager.rollback(1)
         assert manager.get("key1") == "value1"
 

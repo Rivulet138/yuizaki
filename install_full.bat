@@ -2,7 +2,14 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
+call :require_cmd node || exit /b 1
 call :require_cmd npm || exit /b 1
+node -e "const [major, minor] = process.versions.node.split('.').map(Number); process.exit(major > 22 || (major === 22 && minor >= 13) ? 0 : 1)" >nul 2>nul
+if errorlevel 1 (
+  for /f %%V in ('node -p "process.versions.node" 2^>nul') do set "NODE_VERSION=%%V"
+  echo [ERROR] Node.js 22.13+ is required. Current version: %NODE_VERSION%.
+  exit /b 1
+)
 call :resolve_python || exit /b 1
 
 echo [1/3] Installing Electron dependencies...

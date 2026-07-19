@@ -1,6 +1,9 @@
 import path from 'path'
 
-const normalizeFsPath = (inputPath: string): string => path.resolve(inputPath).replace(/\\/g, '/').toLowerCase()
+const normalizeFsPath = (inputPath: string, platform: NodeJS.Platform): string => {
+  const resolved = path.resolve(inputPath).replace(/\\/g, '/')
+  return platform === 'win32' ? resolved.toLowerCase() : resolved
+}
 
 export const isPluginHostAllowed = (allowedHosts: string[] | undefined, targetHost: string): boolean => {
   if (!allowedHosts || allowedHosts.length === 0) {
@@ -11,14 +14,18 @@ export const isPluginHostAllowed = (allowedHosts: string[] | undefined, targetHo
   return allowedHosts.some((host) => host.trim().toLowerCase() === normalized)
 }
 
-export const isPluginPathAllowed = (allowedPaths: string[] | undefined, targetPath: string): boolean => {
+export const isPluginPathAllowed = (
+  allowedPaths: string[] | undefined,
+  targetPath: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean => {
   if (!allowedPaths || allowedPaths.length === 0) {
     return false
   }
 
-  const normalizedTarget = normalizeFsPath(targetPath)
+  const normalizedTarget = normalizeFsPath(targetPath, platform)
   return allowedPaths.some((basePath) => {
-    const normalizedBase = normalizeFsPath(basePath)
+    const normalizedBase = normalizeFsPath(basePath, platform)
     return normalizedTarget === normalizedBase || normalizedTarget.startsWith(`${normalizedBase}/`)
   })
 }

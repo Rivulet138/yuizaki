@@ -926,7 +926,7 @@ def create_memory_router(state: MemoryState, get_active_workspace_id: Callable[[
 
     await _write_memory_document(Document(id=doc_id, text=text, metadata=metadata))
     return {"status": "updated", "id": doc_id, "layer": layer, "scope": scope, "importance": importance}
-  
+
   @router.post("/memory/add")
   async def add_memory(payload: MemoryAddPayload) -> Dict[str, Any]:
     """Add typed memory with importance filtering (Week 1 Task 1.3)"""
@@ -934,14 +934,14 @@ def create_memory_router(state: MemoryState, get_active_workspace_id: Callable[[
     text = payload.text.strip()
     if not text:
       raise HTTPException(status_code=400, detail="text is required")
-    
+
     memory_type = _memory_type_value(payload_dict.get("type", MemoryType.FACT))
     importance = _coerce_importance(payload_dict.get("importance", 0.5))
-    
+
     # Filter low-importance memories
     if importance < 0.3:
       return {"skipped": True, "reason": "low_importance", "threshold": 0.3}
-    
+
     doc_id = str(uuid4())
     layer = _resolve_memory_layer(payload_dict)
     scope = _resolve_memory_scope(payload_dict)
@@ -988,7 +988,7 @@ def create_memory_router(state: MemoryState, get_active_workspace_id: Callable[[
 
     doc = Document(id=doc_id, text=text, metadata=metadata)
     await _write_memory_document(doc)
-    
+
     return {"status": "ok", "id": doc_id, "type": memory_type, "layer": layer, "scope": scope, "importance": importance}
 
   @router.delete("/docs/{doc_id:path}")
@@ -1044,7 +1044,7 @@ def create_memory_router(state: MemoryState, get_active_workspace_id: Callable[[
   async def rag_query(payload: MemoryRagQueryPayload) -> Dict[str, Any]:
     """
     RAG query with optional type filtering and recency reranking (Week 1 Task 1.5).
-    
+
     Payload:
       - query: str (required)
       - top_k: int (default 5)
@@ -1068,7 +1068,7 @@ def create_memory_router(state: MemoryState, get_active_workspace_id: Callable[[
       workspace_id=resolved_workspace_id,
       layers=payload.layers,
     )
-    
+
     if state.pipeline:
       request = RetrievalRequest(
           query=query,

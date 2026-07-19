@@ -44,23 +44,23 @@ class DatabaseError(RepositoryError):
 
 class DatabaseRepository:
     """数据库操作类"""
-    
+
     def __init__(self, db_path: str = DEFAULT_DB_PATH_STR):
         """初始化数据库连接
-        
+
         Args:
             db_path: SQLite 数据库文件路径
         """
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # 创建数据库引擎
         self.engine = create_engine(
             f"sqlite:///{self.db_path}",
             connect_args={"check_same_thread": False},
             echo=False
         )
-        
+
         # 创建会话工厂
         self.SessionLocal = sessionmaker(bind=self.engine)
         logger.info(f"Database initialized at {self.db_path}")
@@ -93,17 +93,17 @@ class DatabaseRepository:
             "model": message.model,
         }
 
-    def save_message(self, session_id: str, role: str, content: str, 
+    def save_message(self, session_id: str, role: str, content: str,
                      tokens: int = 0, model: str = "", workspace_id: str = "default") -> dict[str, Any]:
         """保存聊天消息
-        
+
         Args:
             session_id: 会话 ID
             role: 角色（user/assistant）
             content: 消息内容
             tokens: 使用的 token 数
             model: 使用的模型
-            
+
         Raises:
             DatabaseError: 保存失败时抛出
         """
@@ -119,7 +119,7 @@ class DatabaseRepository:
                 model=model
             )
             session.add(msg)
-            
+
             # 更新或创建会话
             chat_session = session.query(ChatSession).filter_by(id=session_id).first()
             if not chat_session:
@@ -138,11 +138,11 @@ class DatabaseRepository:
                 raise DatabaseError(
                     f"session_workspace_mismatch: {session_id} belongs to {chat_session.workspace_id}, not {normalized_workspace_id}"
                 )
-            
+
             chat_session.message_count = (chat_session.message_count or 0) + 1
             chat_session.total_tokens = (chat_session.total_tokens or 0) + tokens
             chat_session.updated_at = datetime.now(timezone.utc)
-            
+
             session.flush()
             saved_message = self._message_to_record(msg)
             session.commit()
@@ -218,17 +218,17 @@ class DatabaseRepository:
             raise DatabaseError(f"failed_to_save_message_pair: {exc}") from exc
         finally:
             session.close()
-    
+
     def get_chat_history(self, session_id: str, limit: int = 100) -> list[dict[str, Any]]:
         """获取聊天历史
-        
+
         Args:
             session_id: 会话 ID
             limit: 返回的最大消息数
-            
+
         Returns:
             消息列表
-            
+
         Raises:
             DatabaseError: 查询失败时抛出
         """
@@ -239,7 +239,7 @@ class DatabaseRepository:
                 .order_by(ChatMessage.timestamp.asc())\
                 .limit(limit)\
                 .all()
-            
+
             return [
                 {
                     "id": m.id,
@@ -256,13 +256,13 @@ class DatabaseRepository:
             raise DatabaseError(f"failed_to_get_chat_history: {exc}") from exc
         finally:
             session.close()
-    
+
     def get_all_sessions(self) -> list[dict[str, Any]]:
         """获取所有会话
-        
+
         Returns:
             会话列表
-            
+
         Raises:
             DatabaseError: 查询失败时抛出
         """
@@ -271,7 +271,7 @@ class DatabaseRepository:
             sessions = session.query(ChatSession)\
                 .order_by(ChatSession.updated_at.desc())\
                 .all()
-            
+
             return [
                 {
                     "id": s.id,
@@ -438,13 +438,13 @@ class DatabaseRepository:
             raise DatabaseError(f"failed_to_clear_session_messages: {exc}") from exc
         finally:
             session.close()
-    
+
     def delete_session(self, session_id: str) -> None:
         """删除会话及其所有消息
-        
+
         Args:
             session_id: 会话 ID
-            
+
         Raises:
             DatabaseError: 删除失败时抛出
         """
@@ -452,10 +452,10 @@ class DatabaseRepository:
         try:
             # 删除消息
             session.query(ChatMessage).filter_by(session_id=session_id).delete()
-            
+
             # 删除会话
             session.query(ChatSession).filter_by(id=session_id).delete()
-            
+
             session.commit()
             logger.info(f"Session deleted: {session_id}")
         except Exception as exc:
@@ -464,13 +464,13 @@ class DatabaseRepository:
             raise DatabaseError(f"failed_to_delete_session: {exc}") from exc
         finally:
             session.close()
-    
+
     def get_statistics(self, days: int = 7) -> list[dict[str, Any]]:
         """获取统计数据
-        
+
         Args:
             days: 获取最近 N 天的数据
-            
+
         Returns:
             统计数据列表
 
@@ -483,7 +483,7 @@ class DatabaseRepository:
                 .order_by(UserStatistics.date.desc())\
                 .limit(days)\
                 .all()
-            
+
             return [
                 {
                     "date": s.date,
@@ -500,44 +500,44 @@ class DatabaseRepository:
             raise DatabaseError(f"failed_to_get_statistics: {exc}") from exc
         finally:
             session.close()
-    
+
     def update_daily_statistics(self) -> None:
         """更新每日统计数据
-        
+
         Raises:
             DatabaseError: 更新失败时抛出
         """
         session = self.SessionLocal()
         try:
             today = datetime.now().strftime("%Y-%m-%d")
-            
+
             # 统计今日数据
             today_start = datetime.strptime(today, "%Y-%m-%d")
             today_end = today_start + timedelta(days=1)
-            
+
             total_msgs = session.query(func.count(ChatMessage.id))\
                 .filter(ChatMessage.timestamp >= today_start)\
                 .filter(ChatMessage.timestamp < today_end)\
                 .scalar() or 0
-            
+
             total_tokens = session.query(func.sum(ChatMessage.tokens_used))\
                 .filter(ChatMessage.timestamp >= today_start)\
                 .filter(ChatMessage.timestamp < today_end)\
                 .scalar() or 0
-            
+
             # 计算平均响应时间（简化版）
             avg_response_time = 0.0
-            
+
             # 更新或创建统计记录
             stat = session.query(UserStatistics).filter_by(date=today).first()
             if not stat:
                 stat = UserStatistics(date=today)
                 session.add(stat)
-            
+
             stat.total_messages = total_msgs
             stat.total_tokens = total_tokens
             stat.avg_response_time = avg_response_time
-            
+
             session.commit()
             logger.info(f"Statistics updated for {today}")
         except Exception as exc:
@@ -546,13 +546,13 @@ class DatabaseRepository:
             raise DatabaseError(f"failed_to_update_statistics: {exc}") from exc
         finally:
             session.close()
-    
+
     def export_to_json(self, session_id: str | None = None) -> str:
         """导出为 JSON 格式
-        
+
         Args:
             session_id: 会话 ID（None 表示导出所有）
-            
+
         Returns:
             JSON 字符串
         """
@@ -564,7 +564,7 @@ class DatabaseRepository:
                     .all()
             else:
                 messages = session.query(ChatMessage).all()
-            
+
             data = [
                 {
                     "session_id": m.session_id,
@@ -576,20 +576,20 @@ class DatabaseRepository:
                 }
                 for m in messages
             ]
-            
+
             return json.dumps(data, ensure_ascii=False, indent=2)
         except Exception as exc:
             logger.exception(f"Failed to export JSON: {exc}")
             raise DatabaseError(f"failed_to_export_json: {exc}") from exc
         finally:
             session.close()
-    
+
     def export_to_csv(self, session_id: str | None = None) -> str:
         """导出为 CSV 格式
-        
+
         Args:
             session_id: 会话 ID（None 表示导出所有）
-            
+
         Returns:
             CSV 字符串
         """
@@ -601,11 +601,11 @@ class DatabaseRepository:
                     .all()
             else:
                 messages = session.query(ChatMessage).all()
-            
+
             output = StringIO()
             writer = csv.writer(output)
             writer.writerow(["Session ID", "Role", "Content", "Timestamp", "Tokens", "Model"])
-            
+
             for m in messages:
                 writer.writerow([
                     m.session_id,
@@ -615,21 +615,21 @@ class DatabaseRepository:
                     m.tokens_used,
                     m.model or ""
                 ])
-            
+
             return output.getvalue()
         except Exception as exc:
             logger.exception(f"Failed to export CSV: {exc}")
             raise DatabaseError(f"failed_to_export_csv: {exc}") from exc
         finally:
             session.close()
-    
+
     def save_setting(self, key: str, value: Any) -> None:
         """保存用户设置
-        
+
         Args:
             key: 设置键
             value: 设置值
-            
+
         Raises:
             DatabaseError: 保存失败时抛出
         """
@@ -639,7 +639,7 @@ class DatabaseRepository:
             if not setting:
                 setting = UserSettings(key=key)
                 session.add(setting)
-            
+
             setting.value = json.dumps(value) if not isinstance(value, str) else value
             session.commit()
             logger.debug(f"Setting saved: {key}")
@@ -649,14 +649,14 @@ class DatabaseRepository:
             raise DatabaseError(f"failed_to_save_setting: {exc}") from exc
         finally:
             session.close()
-    
+
     def get_setting(self, key: str, default: Any | None = None) -> Any:
         """获取用户设置
-        
+
         Args:
             key: 设置键
             default: 默认值
-            
+
         Returns:
             设置值
         """
@@ -665,7 +665,7 @@ class DatabaseRepository:
             setting = session.query(UserSettings).filter_by(key=key).first()
             if not setting:
                 raise NotFoundError(f"setting_not_found: {key}")
-            
+
             try:
                 raw_value = setting.value
                 if raw_value is None:
@@ -684,13 +684,13 @@ class DatabaseRepository:
             raise DatabaseError(f"failed_to_get_setting: {exc}") from exc
         finally:
             session.close()
-    
+
     def get_database_stats(self) -> dict[str, Any]:
         """获取数据库统计信息
-        
+
         Returns:
             统计信息字典
-            
+
         Raises:
             DatabaseError: 查询失败时抛出
         """
@@ -699,7 +699,7 @@ class DatabaseRepository:
             total_messages = session.query(func.count(ChatMessage.id)).scalar() or 0
             total_sessions = session.query(func.count(ChatSession.id)).scalar() or 0
             total_tokens = session.query(func.sum(ChatMessage.tokens_used)).scalar() or 0
-            
+
             return {
                 "total_messages": total_messages,
                 "total_sessions": total_sessions,

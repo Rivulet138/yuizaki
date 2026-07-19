@@ -6,9 +6,9 @@
 
 | 项 | 当前要求 |
 | --- | --- |
-| OS | Windows 优先 |
-| Node.js | 20+ |
-| Python | 当前工作区使用 `python\.venv`，Python 3.13 |
+| OS | Windows 10/11；主流 x86_64 Linux 桌面发行版 |
+| Node.js | 22.13+ |
+| Python | 3.12+；本地模型原生包按平台和 Python 版本支持情况选择 |
 | Docker | 可选，仅 Qdrant 和 SoulX-SVC 需要 |
 | Electron | 42.x |
 | Vue/Vite | Vue 3.5, Vite 8 |
@@ -18,6 +18,15 @@
 ```bat
 install_full.bat
 ```
+
+Linux:
+
+```bash
+./install_full.sh
+./start.sh --check
+```
+
+Linux 系统依赖、Wayland 和 PipeWire 说明见 [LINUX.md](LINUX.md)。
 
 手动安装等价流程:
 

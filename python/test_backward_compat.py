@@ -145,11 +145,11 @@ def test_svc_client_init():
 if __name__ == "__main__":
     import sys
     sys.path.insert(0, ".")
-    
+
     print("\n" + "="*60)
     print("BACKWARD COMPATIBILITY TEST SUITE")
     print("="*60 + "\n")
-    
+
     tests = [
         ("WebSocket: Chat routing", test_websocket_chat_routing),
         ("WebSocket: Audio chunks", test_audio_chunk_handling),
@@ -167,10 +167,10 @@ if __name__ == "__main__":
         ("Service: TTSClient", test_tts_client_init),
         ("Service: SVCClient", test_svc_client_init),
     ]
-    
+
     passed = 0
     failed = 0
-    
+
     for test_name, test_func in tests:
         try:
             test_func()
@@ -178,9 +178,9 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"[FAIL] {test_name}: {e}")
             failed += 1
-    
+
     print("\n" + "="*60)
     print(f"RESULTS: {passed} passed, {failed} failed")
     print("="*60 + "\n")
-    
+
     sys.exit(0 if failed == 0 else 1)

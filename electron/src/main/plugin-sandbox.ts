@@ -278,9 +278,20 @@ const normalizeSandboxResponse = (value: unknown): PluginRouteResponse => {
   return response
 }
 
-export const buildPluginSandboxProcessArgs = (handlerPath: string): string[] => [
+export const resolveNodePermissionFlag = (nodeVersion = process.versions.node): string => {
+  const [major = 0, minor = 0] = nodeVersion.split('.').map((part) => Number.parseInt(part, 10) || 0)
+  const stablePermissionFlag = major > 23
+    || (major === 23 && minor >= 5)
+    || (major === 22 && minor >= 13)
+  return stablePermissionFlag ? '--permission' : '--experimental-permission'
+}
+
+export const buildPluginSandboxProcessArgs = (
+  handlerPath: string,
+  nodeVersion = process.versions.node,
+): string[] => [
   '--max-old-space-size=64',
-  '--permission',
+  resolveNodePermissionFlag(nodeVersion),
   `--allow-fs-read=${path.resolve(handlerPath)}`,
   '-e',
   SANDBOX_PROCESS_SOURCE,

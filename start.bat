@@ -335,23 +335,21 @@ if errorlevel 1 (
 call :log_info "Checking Node.js..."
 where node >nul 2>nul
 if errorlevel 1 (
-  call :fail "node is not available in PATH. Install Node.js 20+."
+  call :fail "node is not available in PATH. Install Node.js 22.13+."
   exit /b 1
 )
-for /f "tokens=1 delims=." %%V in ('node -p "process.versions.node.split('.')[0]" 2^>nul') do set "NODE_MAJOR=%%V"
-if not defined NODE_MAJOR (
-  call :fail "Unable to detect Node.js version. Install Node.js 20+."
-  exit /b 1
-)
-if %NODE_MAJOR% LSS 20 (
-  call :fail "Node.js 20+ is required. Current major version: %NODE_MAJOR%."
+node -e "const [major, minor] = process.versions.node.split('.').map(Number); process.exit(major > 22 || (major === 22 && minor >= 13) ? 0 : 1)" >nul 2>nul
+if errorlevel 1 (
+  for /f %%V in ('node -p "process.versions.node" 2^>nul') do set "NODE_VERSION=%%V"
+  if not defined NODE_VERSION set "NODE_VERSION=unknown"
+  call :fail "Node.js 22.13+ is required. Current version: %NODE_VERSION%."
   exit /b 1
 )
 
 call :log_info "Checking npm..."
 where npm >nul 2>nul
 if errorlevel 1 (
-  call :fail "npm is not available in PATH. Install Node.js 20+ and ensure npm is in PATH."
+  call :fail "npm is not available in PATH. Install Node.js 22.13+ and ensure npm is in PATH."
   exit /b 1
 )
 

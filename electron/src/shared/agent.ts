@@ -359,6 +359,7 @@ export interface DiagnosticsEnvCheck {
   electronRoot: string
   pythonAppExists: boolean
   pythonVenvExists: boolean
+  pythonVenvPath: string
   rendererDistExists: boolean
   pluginDirExists: boolean
   backupDirExists: boolean

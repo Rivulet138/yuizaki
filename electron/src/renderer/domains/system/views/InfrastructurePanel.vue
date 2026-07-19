@@ -341,7 +341,7 @@ const envChecks = computed(() => {
   if (!env) return []
   return [
     { label: 'Python 应用', value: 'python/app.py', ok: env.pythonAppExists },
-    { label: 'Python 虚拟环境', value: '.venv/Scripts/python.exe', ok: env.pythonVenvExists },
+    { label: 'Python 虚拟环境', value: env.pythonVenvPath, ok: env.pythonVenvExists },
     { label: '渲染产物', value: 'dist/renderer/index.html', ok: env.rendererDistExists },
     { label: '插件目录', value: 'electron/plugins', ok: env.pluginDirExists },
     { label: '备份目录', value: '../backups', ok: env.backupDirExists },

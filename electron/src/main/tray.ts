@@ -1,4 +1,4 @@
-﻿import { Menu, Tray, app, nativeImage, shell } from 'electron'
+import { Menu, Tray, app, nativeImage, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { Live2DWindow } from './live2d-window'

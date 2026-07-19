@@ -27,18 +27,18 @@ class TestSystemIntegration:
     async def test_full_service_lifecycle(self):
         """Test complete service lifecycle."""
         manager = ServiceManager()
-        
+
         service_states = []
-        
+
         async def init_service1():
             service_states.append("service1_init")
-        
+
         async def cleanup_service1():
             service_states.append("service1_cleanup")
-        
+
         async def init_service2():
             service_states.append("service2_init")
-        
+
         async def cleanup_service2():
             service_states.append("service2_cleanup")
 
@@ -61,17 +61,17 @@ class TestSystemIntegration:
         """Test health checks with running services."""
         manager = ServiceManager()
         checker = HealthChecker()
-        
+
         service_running = False
-        
+
         async def init_service():
             nonlocal service_running
             service_running = True
-        
+
         async def cleanup_service():
             nonlocal service_running
             service_running = False
-        
+
         async def check_service():
             return service_running, "Service running" if service_running else "Service stopped"
 
@@ -118,10 +118,10 @@ class TestSystemIntegration:
     async def test_service_failure_handling(self):
         """Test handling of service initialization failures."""
         manager = ServiceManager()
-        
+
         async def failing_service():
             raise RuntimeError("Service initialization failed")
-        
+
         async def dependent_service():
             pass
 
@@ -138,16 +138,16 @@ class TestSystemIntegration:
     async def test_concurrent_health_checks(self):
         """Test concurrent health checks."""
         checker = HealthChecker()
-        
+
         check_times = []
-        
+
         async def slow_check():
             import time
             start = time.time()
             await asyncio.sleep(0.1)
             check_times.append(time.time() - start)
             return True, "Slow check complete"
-        
+
         async def fast_check():
             return True, "Fast check complete"
 
@@ -239,7 +239,7 @@ class TestSystemIntegration:
     async def test_config_change_history_tracking(self):
         """Test configuration change history tracking."""
         manager = DynamicConfigManager()
-        
+
         # Make several changes
         await manager.update("setting1", "value1")
         await manager.update("setting1", "value2")

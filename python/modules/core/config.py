@@ -32,7 +32,7 @@ def _clean_optional_secret(value: str | None, placeholders: set[str]) -> str:
 class LLMConfig(BaseModel):
     """LLM service configuration."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     provider: str = Field(default="custom")
     base_url: str = Field(default="")
     api_key: str = Field(default="")
@@ -107,7 +107,7 @@ class SVCConfig(BaseModel):
 class CacheConfig(BaseModel):
     """Cache and cleanup configuration."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     max_age: int = Field(default=1800)
     janitor_interval: int = Field(default=600)
 
@@ -115,7 +115,7 @@ class CacheConfig(BaseModel):
 class SummaryConfig(BaseModel):
     """Summary governance configuration."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     trigger_messages: int = Field(default=24)
     keep_recent_messages: int = Field(default=8)
     item_max_chars: int = Field(default=140)
@@ -146,7 +146,7 @@ class MemoryConfig(BaseModel):
 class AppConfig(BaseModel):
     """Main application configuration."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     llm: LLMConfig = Field(default_factory=LLMConfig)
     tts: TTSConfig = Field(default_factory=TTSConfig)
     asr: ASRConfig = Field(default_factory=ASRConfig)

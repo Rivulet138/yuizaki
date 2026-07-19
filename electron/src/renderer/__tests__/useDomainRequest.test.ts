@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { useDomainRequest } from '../shared/composables/useDomainRequest'
 
 type Deferred<T> = {

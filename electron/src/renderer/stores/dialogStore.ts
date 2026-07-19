@@ -20,7 +20,7 @@ export const useDialogStore = defineStore('dialog', () => {
   const editCompanionTargetId = ref('default')
 
   const permissionRequest = ref<PermissionRequestPayload | null>(null)
-  
+
   const openWorkspaceDrawer = () => {
     workspaceDrawerVisible.value = true
   }

@@ -89,7 +89,7 @@
               <div>
                 <strong>启动命令</strong>
               </div>
-              <el-tag type="primary">Windows 本地优先</el-tag>
+              <el-tag type="primary">{{ platformCommands.label }}</el-tag>
             </div>
           </template>
           <div class="command-list">
@@ -113,6 +113,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import { systemClient, summaryClient } from '@/api/client'
 import { resolveBackendUrl } from '@/api/clients/http-client'
+import { buildDeployPlatformCommands, resolveDeployPlatform } from '../platform-commands'
 
 type StepStatus = 'done' | 'active' | 'pending' | 'blocked'
 
@@ -404,24 +405,8 @@ const stepStatusLabel = (status: StepStatus) => {
   return labels[status]
 }
 
-const commandCards = [
-  {
-    title: '统一启动',
-    command: 'start.bat',
-  },
-  {
-    title: '带 MCP 启动',
-    command: 'start.bat --with-mcp',
-  },
-  {
-    title: '仅前端调试',
-    command: 'start.bat --dev-renderer',
-  },
-  {
-    title: '仅后端调试',
-    command: 'scripts\\run_backend_dev.bat',
-  },
-]
+const platformCommands = buildDeployPlatformCommands(resolveDeployPlatform(navigator.userAgent))
+const commandCards = platformCommands.commands
 
 const refreshAll = async () => {
   refreshGeneration++

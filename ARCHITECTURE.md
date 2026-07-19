@@ -255,7 +255,7 @@ QDRANT_AUTO_START=1
 启动策略:
 
 - `inmemory`: 不启动 Qdrant。
-- `qdrant` 且本地 HTTP URL: `start.bat` 调用 `scripts/ensure_qdrant_docker.ps1` 检查并拉起 Docker。
+- `qdrant` 且本地 HTTP URL: Windows 的 `start.bat` 可调用 `scripts/ensure_qdrant_docker.ps1` 检查并拉起 Docker；Linux 可连接现有 Docker Qdrant 服务，默认 SQLite 记忆不依赖 Qdrant。
 - `qdrant` 且远程 URL: 不自动拉本地 Docker。
 - `--no-qdrant`: 本轮启动禁用 Qdrant 自动拉起。
 

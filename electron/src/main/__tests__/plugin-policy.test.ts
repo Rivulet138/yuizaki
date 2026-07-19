@@ -24,6 +24,11 @@ describe('plugin-policy', () => {
     expect(isPluginPathAllowed([base], path.join(base, 'routes', 'handler.js'))).toBe(true)
   })
 
+  it('preserves Linux path case while treating Windows paths case-insensitively', () => {
+    expect(isPluginPathAllowed(['/opt/Yuizaki/plugin'], '/opt/yuizaki/plugin/handler.js', 'linux')).toBe(false)
+    expect(isPluginPathAllowed(['C:/Yuizaki/plugin'], 'c:/yuizaki/plugin/handler.js', 'win32')).toBe(true)
+  })
+
   it('requires exact command allowlist matches', () => {
     expect(isPluginCommandAllowed(undefined, 'node')).toBe(false)
     expect(isPluginCommandAllowed(['node'], 'node')).toBe(true)

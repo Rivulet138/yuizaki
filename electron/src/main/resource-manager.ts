@@ -13,6 +13,7 @@ import type {
   SoulxResourceStatus,
   TtsResourceStatus,
 } from '../shared/resource-manager'
+import { resolvePythonRuntime } from './python-runtime'
 
 const DEFAULT_SHERPA_ASSET_URL = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2025-01-06.tar.bz2'
 const DEFAULT_SHERPA_ONLINE_ASSET_URL = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01.tar.bz2'
@@ -59,9 +60,7 @@ const resolveProjectRoot = (): string => {
 
 const PROJECT_ROOT = resolveProjectRoot()
 const PYTHON_DIR = path.join(PROJECT_ROOT, 'python')
-const PYTHON_EXE = fs.existsSync(path.join(PYTHON_DIR, '.venv', 'Scripts', 'python.exe'))
-  ? path.join(PYTHON_DIR, '.venv', 'Scripts', 'python.exe')
-  : 'python'
+const PYTHON_EXE = resolvePythonRuntime(PYTHON_DIR).executable
 const SETTINGS_PATH = path.join(PYTHON_DIR, 'config', 'settings.json')
 const SHERPA_DIR = path.join(PYTHON_DIR, '.cache', 'sherpa-onnx', 'sensevoice')
 const DEFAULT_SHERPA_MODEL_PATH = path.join(SHERPA_DIR, 'model.int8.onnx')
@@ -74,7 +73,7 @@ const DEFAULT_EMBEDDING_MODEL = 'Qwen/Qwen3-Embedding-0.6B'
 const DEFAULT_GENIE_DATA_DIR = path.join(PYTHON_DIR, '.cache', 'GenieData', 'GenieData')
 const SOULX_SERVICE_DIR = path.join(PROJECT_ROOT, 'services', 'soulx-svc')
 const SOULX_DOWNLOAD_SCRIPT = path.join(SOULX_SERVICE_DIR, 'download_models.py')
-const SOULX_LAUNCHER = path.join(PROJECT_ROOT, 'start_soulx_svc.bat')
+const SOULX_LAUNCHER = path.join(PROJECT_ROOT, process.platform === 'win32' ? 'start_soulx_svc.bat' : 'start_soulx_svc.sh')
 const SOULX_MODEL_DIR = path.join(SOULX_SERVICE_DIR, 'models', 'SoulX-Singer')
 const SOULX_PREPROCESS_DIR = path.join(SOULX_SERVICE_DIR, 'models', 'SoulX-Singer-Preprocess')
 const SOULX_REFERENCE_DIR = path.join(SOULX_SERVICE_DIR, 'references')

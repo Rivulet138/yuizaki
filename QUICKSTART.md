@@ -1,8 +1,10 @@
 # Quick Start
 
-适用环境: Windows、PowerShell 或 `cmd.exe`、Node.js 20+、Python 3.13 环境。Docker 只在启用 Qdrant 或 SoulX-SVC 时需要。
+适用环境: Windows 或 x86_64 Linux 桌面、Node.js 22.13+、Python 3.12+。Docker 只在启用 Qdrant 或 SoulX-SVC 时需要。
 
 ## 1. 安装
+
+Windows:
 
 完整安装:
 
@@ -16,12 +18,27 @@ install_full.bat
 install_core.bat
 ```
 
+Linux:
+
+```bash
+./install_full.sh
+# 或仅安装核心依赖
+./install_core.sh
+```
+
 安装脚本会创建 `python\.venv`，安装 Electron、后端和可选 MCP 所需依赖，并在缺少时从 `python\.env.example` 复制 `python\.env`。
 
 ## 2. 启动前检查
 
 ```bat
 start.bat --check --no-qdrant
+```
+
+Linux:
+
+```bash
+./start.sh --check
+./start.sh
 ```
 
 该命令只做本地路径、依赖、端口和脚本完整性检查，不启动应用。默认记忆后端是 `inmemory`，所以普通启动不需要 Qdrant。

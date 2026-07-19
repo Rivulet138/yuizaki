@@ -7,10 +7,17 @@ on:
   pull_request:
     branches: [main, master]
 
+permissions:
+  contents: read
+
 jobs:
   electron-build:
-    name: Electron Validate & Build
-    runs-on: windows-latest
+    name: Electron Validate & Build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: electron
@@ -19,7 +26,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22.13'
           cache: 'npm'
           cache-dependency-path: electron/package-lock.json
 
@@ -28,6 +35,28 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - name: Validate Linux launch scripts
+        if: runner.os == 'Linux'
+        working-directory: ${{ github.workspace }}
+        run: bash -n install_core.sh install_full.sh start.sh start_soulx_svc.sh scripts/run_backend_dev.sh
+
+  node-mcp-test:
+    name: Node MCP Test (Linux)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: node-mcp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13'
+          cache: 'npm'
+          cache-dependency-path: node-mcp/package-lock.json
+
+      - run: npm ci
+      - run: npm test
 
   python-test:
     name: Python Lint & Test

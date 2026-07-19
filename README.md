@@ -1,9 +1,9 @@
 # Yuizaki
 
-文档状态: 2026-07-07  
+文档状态: 2026-07-07
 维护入口: 本仓库以中文文档为准。
 
-Yuizaki 是一个 Windows-first 的本地 AI 桌宠 agent。它把 Electron/Vue 桌面壳、Python FastAPI 后端、Socket.IO 实时对话、LLM/Agent、Live2D/VRM 桌宠、TTS/ASR/OCR/SVC、记忆系统和可选 MCP 工具桥接放在同一个本地角色体验里。
+Yuizaki 是一个面向 Windows 和 Linux 的本地 AI 桌宠 agent。它把 Electron/Vue 桌面壳、Python FastAPI 后端、Socket.IO 实时对话、LLM/Agent、Live2D/VRM 桌宠、TTS/ASR/OCR/SVC、记忆系统和可选 MCP 工具桥接放在同一个本地角色体验里。
 
 ## 当前定位
 
@@ -23,7 +23,7 @@ Yuizaki 是一个 Windows-first 的本地 AI 桌宠 agent。它把 Electron/Vue 
 | `python/` | FastAPI 后端、Socket.IO 服务、Agent/LLM/TTS/ASR/OCR/SVC、设置、数据库、记忆和后端测试 |
 | `node-mcp/` | 可选 Express + Playwright MCP 桥接服务，默认 `127.0.0.1:7777` |
 | `services/soulx-svc/` | 可选 SoulX-Singer-SVC Docker 服务，默认 `127.0.0.1:7861` |
-| `scripts/` | `start.bat` 使用的启动和检查辅助脚本 |
+| `scripts/` | Windows/Linux 启动和检查辅助脚本 |
 | `data/`, `python/data/` | SQLite 运行数据 |
 | `python/.cache/`, `python/CharacterModels/`, `services/soulx-svc/models/` | 本地模型、TTS、ASR 和 SVC 资源 |
 
@@ -40,7 +40,7 @@ flowchart LR
   Python --> SocketIO["Socket.IO /socket.io"]
   SocketIO --> Agent["Agent Pipeline"]
   Agent --> LLM["LLM Provider"]
-  Agent --> Memory["Memory: inmemory 或 Qdrant"]
+  Agent --> Memory["Memory: SQLite + 可选 Qdrant 索引"]
   Python --> ASR["ASR: service 或 sherpa-onnx"]
   Python --> TTS["Genie-TTS"]
   Python --> SVC["SoulX SVC Docker"]
@@ -50,11 +50,21 @@ flowchart LR
 
 ## 快速启动
 
+Windows:
+
 ```bat
 install_full.bat
 start.bat --check
 start.bat --verify
 start.bat
+```
+
+Linux:
+
+```bash
+./install_full.sh
+./start.sh --check
+./start.sh
 ```
 
 常用模式:
@@ -66,7 +76,7 @@ start.bat --dev-renderer
 start.bat --smoke
 ```
 
-`start.bat` 会启动 Python 后端、Electron 控制服务、桌宠层和可选 MCP。若 `memory.backend=qdrant` 且 Qdrant URL 是本地 HTTP 地址，启动器会按设置尝试拉起 Docker Qdrant；如果保持默认 `inmemory`，不会强依赖 Qdrant。
+`start.bat`（Windows）和 `start.sh`（Linux）会启动 Python 后端、Electron 控制服务、桌宠层和可选 MCP。Windows 启动器可在配置 Qdrant 时拉起本地 Docker；默认 SQLite 记忆不依赖 Qdrant。
 
 详细安装和启动见 [QUICKSTART.md](QUICKSTART.md) 与 [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)。
 
@@ -117,10 +127,15 @@ start.bat --smoke
 - [ARCHITECTURE.md](ARCHITECTURE.md): 技术栈、Agent 设置、LLM/Live2D/TTS/ASR/记忆链路。
 - [QUICKSTART.md](QUICKSTART.md): 安装、配置、启动和常见问题。
 - [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md): 环境变量、资源目录和运行环境。
+- [LINUX.md](LINUX.md): Linux 安装、启动、Wayland/PipeWire 和排障。
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md): 第三方资产、许可证边界和发布门禁。
+- [SECURITY.md](SECURITY.md): 安全支持与私密漏洞报告。
 - [API.md](API.md): HTTP 与 Socket.IO 接口摘要。
 - [PRODUCT.md](PRODUCT.md): 产品定位与设计原则。
 
 ## 验证
+
+Windows:
 
 ```bat
 cd python
@@ -133,4 +148,12 @@ npm test
 
 cd ..
 start.bat --check --no-qdrant
+```
+
+Linux:
+
+```bash
+./start.sh --check
+cd electron && npm run lint && npm run type-check && npm test && npm run build
+cd ../python && pytest -q --tb=short
 ```

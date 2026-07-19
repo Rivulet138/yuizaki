@@ -1,4 +1,4 @@
-﻿import { ref } from 'vue'
+import { ref } from 'vue'
 import type { HttpClientError } from '@/api/clients/http-client'
 
 export interface DomainRequestState<T> {

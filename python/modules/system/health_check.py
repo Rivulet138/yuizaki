@@ -25,7 +25,7 @@ class ComponentHealth:
 
     def __init__(self, name: str, status: HealthStatus = HealthStatus.HEALTHY):
         """Initialize component health.
-        
+
         Args:
             name: Component name
             status: Initial health status
@@ -59,7 +59,7 @@ class HealthChecker:
 
     def register_check(self, name: str, check_func: HealthCheckFunc) -> None:
         """Register a health check function.
-        
+
         Args:
             name: Check name
             check_func: Async function that returns (is_healthy: bool, message: str)
@@ -70,7 +70,7 @@ class HealthChecker:
 
     async def check_all(self) -> Dict[str, Any]:
         """Run all health checks.
-        
+
         Returns:
             Health check results.
         """
@@ -115,7 +115,7 @@ class HealthChecker:
 
     def get_status(self) -> Dict[str, Any]:
         """Get current health status.
-        
+
         Returns:
             Health status information.
         """
@@ -138,7 +138,7 @@ class HealthChecker:
 
     def is_healthy(self) -> bool:
         """Check if system is healthy.
-        
+
         Returns:
             True if all components are healthy, False otherwise.
         """
@@ -149,7 +149,7 @@ class HealthChecker:
 
     def is_degraded(self) -> bool:
         """Check if system is degraded.
-        
+
         Returns:
             True if any component is degraded or unhealthy, False otherwise.
         """

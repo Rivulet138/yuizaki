@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <PanelShell :title="t('settings.title')" tone="admin">
     <AsyncState :loading="settingsRequest.loading && !settings" :empty="!settings && !settingsRequest.error" :empty-text="t('settings.empty')">
       <div class="settings-panel">

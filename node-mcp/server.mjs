@@ -5,6 +5,8 @@
 import express from 'express';
 import { chromium } from 'playwright';
 
+import { resolveMcpPort } from './config.mjs';
+
 const useStdio = process.argv.includes('--stdio');
 const sseClients = new Set();
 
@@ -152,7 +154,7 @@ if (useStdio) {
     }
   });
 
-  const PORT = 7777;
+  const PORT = resolveMcpPort();
   app.listen(PORT, '127.0.0.1', () => {
     console.log(`Playwright MCP server listening on http://127.0.0.1:${PORT}`);
   });

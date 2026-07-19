@@ -1,11 +1,14 @@
 {
   "name": "yuizaki-playwright-mcp",
   "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
   "description": "Node-based Playwright MCP server for Yuizaki",
   "type": "module",
   "main": "server.mjs",
   "scripts": {
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "test": "node --test"
   },
   "dependencies": {
     "express": "^5.2.1",

@@ -20,7 +20,7 @@ Electron 控制服务:
 - 公开只读资源: `/api/pet/assets/live2d/*`, `/api/pet/assets/vrm/*`。
 - 其他 `/api/*` 需要控制 token。
 
-`start.bat` 会在未显式配置 token 时生成本轮 token，并传给 Electron、渲染端和后端。
+`start.bat`（Windows）和 `start.sh`（Linux）会在未显式配置 token 时生成本轮 token，并传给 Electron、渲染端和后端。
 
 ## Python HTTP
 
@@ -75,7 +75,7 @@ Provider 的 Base URL 会被归一化，真实上游调用为 `{base}/models` �
 | `POST` | `/svc/convert` | 上传音频做可选 SVC 转换 |
 | `GET` | `/audio/{filename}` | 读取生成音频 |
 
-`/vision/ocr` 使用 `multipart/form-data` 字段 `file`。  
+`/vision/ocr` 使用 `multipart/form-data` 字段 `file`。
 `/svc/convert` 使用 `multipart/form-data` 字段 `file`，可选 `speaker_id` 和 `pitch`。
 
 ### Memory
