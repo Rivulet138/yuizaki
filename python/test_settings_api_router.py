@@ -757,7 +757,7 @@ def test_settings_router_preserves_empty_qdrant_url_and_normalizes_docker_fields
         assert response.status_code == 200
         assert store.get("memory.qdrant_url") == ""
         assert store.get("memory.qdrant_collection") == "memories"
-        assert store.get("memory.qdrant_docker_image") == "qdrant/qdrant:latest"
+        assert store.get("memory.qdrant_docker_image") == "qdrant/qdrant:v1.18.3"
         assert store.get("memory.qdrant_docker_container") == "yuizaki-qdrant"
         assert store.get("memory.qdrant_docker_volume") == "yuizaki-qdrant-storage"
 

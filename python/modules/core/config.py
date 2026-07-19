@@ -11,7 +11,7 @@ from .paths import DEFAULT_AUDIO_CACHE_DIR, audio_cache_dir_from_env, data_dir_f
 SUMMARY_ADMIN_TOKEN_PLACEHOLDERS = {"your-admin-token-here"}
 DEFAULT_TTS_LANG = "ja"
 DEFAULT_EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-0.6B"
-DEFAULT_QDRANT_DOCKER_IMAGE = "qdrant/qdrant:latest"
+DEFAULT_QDRANT_DOCKER_IMAGE = "qdrant/qdrant:v1.18.3"
 DEFAULT_QDRANT_DOCKER_CONTAINER = "yuizaki-qdrant"
 DEFAULT_QDRANT_DOCKER_VOLUME = "yuizaki-qdrant-storage"
 DEFAULT_MEMORY_SQLITE_PATH = data_dir_from_env() / "memory.db"

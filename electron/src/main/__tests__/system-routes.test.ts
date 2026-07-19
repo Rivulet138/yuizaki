@@ -192,11 +192,13 @@ describe('system routes', () => {
     const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yuizaki-project-root-'))
     const electronRoot = path.join(projectRoot, 'electron')
     const chatDbPath = path.join(projectRoot, 'python/data/chat.db')
+    const memoryDbPath = path.join(projectRoot, 'python/data/memory.db')
 
     try {
       fs.mkdirSync(electronRoot, { recursive: true })
       fs.mkdirSync(path.dirname(chatDbPath), { recursive: true })
       fs.writeFileSync(chatDbPath, 'snapshot-version', 'utf8')
+      fs.writeFileSync(memoryDbPath, 'memory-snapshot-version', 'utf8')
       process.env['YUIZAKI_ELECTRON_ROOT'] = electronRoot
 
       const { handleSystemRoutes } = await import('../http/routes/system-routes')
@@ -213,8 +215,10 @@ describe('system routes', () => {
       expect(createHandled).toBe(true)
       expect(createResponse.getStatus()).toBe(200)
       expect(createPayload.manifest.targets.find((target) => target.path === chatDbPath)?.backupPath).toBeTruthy()
+      expect(createPayload.manifest.targets.find((target) => target.path === memoryDbPath)?.backupPath).toBeTruthy()
 
       fs.writeFileSync(chatDbPath, 'mutated-version', 'utf8')
+      fs.writeFileSync(memoryDbPath, 'memory-mutated-version', 'utf8')
 
       const restoreResponse = createJsonResponse()
       const restoreHandled = await handleSystemRoutes(
@@ -229,7 +233,9 @@ describe('system routes', () => {
       expect(restoreHandled).toBe(true)
       expect(restoreResponse.getStatus()).toBe(200)
       expect(fs.readFileSync(chatDbPath, 'utf8')).toBe('snapshot-version')
+      expect(fs.readFileSync(memoryDbPath, 'utf8')).toBe('memory-snapshot-version')
       expect(restorePayload.restorePlan.find((target) => target.path === chatDbPath)?.restored).toBe(true)
+      expect(restorePayload.restorePlan.find((target) => target.path === memoryDbPath)?.restored).toBe(true)
     } finally {
       fs.rmSync(projectRoot, { recursive: true, force: true })
     }

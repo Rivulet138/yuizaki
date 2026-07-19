@@ -558,7 +558,7 @@
                 </el-form-item>
                 <div v-if="form.memory.backend === 'qdrant' && form.memory.qdrant_auto_start" class="form-grid three">
                   <el-form-item :label="t('settings.memory.qdrantDockerImage')">
-                    <el-input v-model="form.memory.qdrant_docker_image" placeholder="qdrant/qdrant:latest" @change="debouncedSave({ memory: { qdrant_docker_image: $event } })" />
+                    <el-input v-model="form.memory.qdrant_docker_image" :placeholder="DEFAULT_QDRANT_DOCKER_IMAGE" @change="debouncedSave({ memory: { qdrant_docker_image: $event } })" />
                   </el-form-item>
                   <el-form-item :label="t('settings.memory.qdrantDockerContainer')">
                     <el-input v-model="form.memory.qdrant_docker_container" placeholder="yuizaki-qdrant" @change="debouncedSave({ memory: { qdrant_docker_container: $event } })" />
@@ -1107,6 +1107,11 @@ import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import { useDomainRequest } from '@/shared/composables/useDomainRequest'
 import { useSettingsStore } from '@/state/settingsStore'
+import {
+  DEFAULT_LLM_CONTEXT_MAX_TOKENS,
+  DEFAULT_LLM_MAX_OUTPUT_TOKENS,
+  DEFAULT_QDRANT_DOCKER_IMAGE,
+} from '@/../shared/runtime-defaults'
 import { useInputBindingsStore } from '@/state/inputBindingsStore'
 import { settingsClient, type BackendTokenMutationResponse, type BackendTokenStatusResponse, type LocalRuntimeCandidate, type LocalRuntimeDiscoveryResponse, type TtsRuntimeStatusResponse } from '@/api/clients/settings-client'
 import { resourceClient } from '@/api/clients/resource-client'
@@ -1224,8 +1229,8 @@ const form = reactive({
     presence_penalty: 0,
     repetition_penalty: 1,
     timeout: 60,
-    context_max_tokens: 1145140,
-    default_max_output_tokens: 65535,
+    context_max_tokens: DEFAULT_LLM_CONTEXT_MAX_TOKENS,
+    default_max_output_tokens: DEFAULT_LLM_MAX_OUTPUT_TOKENS,
     vision_enabled: false,
     vision_provider: 'custom' as LlmProviderPreset,
     vision_base_url: '',
@@ -1286,7 +1291,7 @@ const form = reactive({
     qdrant_collection: 'memories',
     qdrant_timeout: 10,
     qdrant_auto_start: true,
-    qdrant_docker_image: 'qdrant/qdrant:latest',
+    qdrant_docker_image: DEFAULT_QDRANT_DOCKER_IMAGE,
     qdrant_docker_container: 'yuizaki-qdrant',
     qdrant_docker_volume: 'yuizaki-qdrant-storage',
     embedding_model: DEFAULT_EMBEDDING_MODEL,
@@ -1607,8 +1612,8 @@ const defaultLlmProfile = (provider: LlmProviderPreset): LlmProfile => ({
   presence_penalty: 0,
   repetition_penalty: 1,
   timeout: 60,
-  context_max_tokens: 1145140,
-  default_max_output_tokens: 65535,
+  context_max_tokens: DEFAULT_LLM_CONTEXT_MAX_TOKENS,
+  default_max_output_tokens: DEFAULT_LLM_MAX_OUTPUT_TOKENS,
 })
 
 const sanitizeLlmProfile = (provider: LlmProviderPreset, value?: Partial<LlmProfile> | null): LlmProfile => {
@@ -3153,8 +3158,8 @@ const hydrateForm = () => {
       presence_penalty: s.llm.presence_penalty ?? 0,
       repetition_penalty: s.llm.repetition_penalty ?? 1,
       timeout: s.llm.timeout ?? 60,
-      context_max_tokens: s.llm.context_max_tokens ?? 1145140,
-      default_max_output_tokens: s.llm.default_max_output_tokens ?? 65535,
+      context_max_tokens: s.llm.context_max_tokens ?? DEFAULT_LLM_CONTEXT_MAX_TOKENS,
+      default_max_output_tokens: s.llm.default_max_output_tokens ?? DEFAULT_LLM_MAX_OUTPUT_TOKENS,
     })
     llmProfiles[activeProvider] = activeProfile
     llmProviderPreset.value = activeProvider
@@ -3228,7 +3233,7 @@ const hydrateForm = () => {
     form.memory.qdrant_collection = s.memory.qdrant_collection ?? 'memories'
     form.memory.qdrant_timeout = s.memory.qdrant_timeout ?? 10
     form.memory.qdrant_auto_start = s.memory.qdrant_auto_start ?? true
-    form.memory.qdrant_docker_image = s.memory.qdrant_docker_image ?? 'qdrant/qdrant:latest'
+    form.memory.qdrant_docker_image = s.memory.qdrant_docker_image ?? DEFAULT_QDRANT_DOCKER_IMAGE
     form.memory.qdrant_docker_container = s.memory.qdrant_docker_container ?? 'yuizaki-qdrant'
     form.memory.qdrant_docker_volume = s.memory.qdrant_docker_volume ?? 'yuizaki-qdrant-storage'
     form.memory.embedding_model = s.memory.embedding_model ?? DEFAULT_EMBEDDING_MODEL

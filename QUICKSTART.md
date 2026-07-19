@@ -1,201 +1,145 @@
-# Quick Start
+# 快速开始
 
-适用环境: Windows 或 x86_64 Linux 桌面、Node.js 22.13+、Python 3.12+。Docker 只在启用 Qdrant 或 SoulX-SVC 时需要。
+## 1. 选择安装范围
 
-## 1. 安装
+核心安装只准备桌面端、Python 后端和必要依赖，模型在首次使用或手动勾选时下载：
 
-Windows:
-
-完整安装:
-
-```bat
-install_full.bat
+```powershell
+.\install_core.bat
 ```
-
-轻量安装:
-
-```bat
-install_core.bat
-```
-
-Linux:
 
 ```bash
-./install_full.sh
-# 或仅安装核心依赖
 ./install_core.sh
 ```
 
-安装脚本会创建 `python\.venv`，安装 Electron、后端和可选 MCP 所需依赖，并在缺少时从 `python\.env.example` 复制 `python\.env`。
+需要额外本地模型与完整能力时使用：
 
-## 2. 启动前检查
-
-```bat
-start.bat --check --no-qdrant
+```powershell
+.\install_full.bat
 ```
 
-Linux:
+```bash
+./install_full.sh
+```
+
+建议先使用核心安装，确认基础对话、桌宠窗口和云端模型可用后，再准备本地 ASR、TTS、嵌入或 SoulX。
+
+## 2. 配置后端
+
+首次安装会从 `python/.env.example` 创建 `python/.env`。至少配置一个 OpenAI 兼容的文本模型：
+
+```dotenv
+LLM_PROVIDER=custom
+LLM_BASE_URL=https://example.com/v1
+LLM_API_KEY=replace-me
+LLM_MODEL=your-model
+```
+
+视觉模型单独配置，避免普通对话每轮携带屏幕图像：
+
+```dotenv
+VISION_LLM_ENABLED=1
+VISION_LLM_PROVIDER=custom
+VISION_LLM_BASE_URL=https://example.com/v1
+VISION_LLM_API_KEY=replace-me
+VISION_LLM_MODEL=your-vision-model
+```
+
+默认长期记忆已启用：
+
+```dotenv
+MEMORY_BACKEND=sqlite
+MEMORY_SQLITE_PATH=./data/memory.db
+```
+
+不要把真实密钥提交到 Git。运行时设置页会写入 `python/config/settings.json`，其中敏感字段通过后端受控接口管理。
+
+## 3. 启动
+
+Windows：
+
+```powershell
+.\start.bat
+```
+
+Linux：
 
 ```bash
-./start.sh --check
 ./start.sh
 ```
 
-该命令只做本地路径、依赖、端口和脚本完整性检查，不启动应用。默认记忆后端是 `inmemory`，所以普通启动不需要 Qdrant。
+脚本会启动 Python 服务、Electron 控制服务和桌宠窗口。开发模式可以分别启动：
 
-## 3. 配置 LLM
-
-启动应用后打开 `模型与语音 -> LLM`。
-
-1. 选择提供商: DeepSeek、Qwen、Gemini、ChatGPT、Claude、Grok 或自定义。
-2. 填写 Base URL、模型名和 API Key。
-3. Base URL 写基础路径即可，例如 `https://api.openai.com/v1`。如果误贴 `/models` 或 `/chat/completions`，前后端会归一化回基础路径。
-4. 点击模型检测或 LLM 测试。
-
-当前调用约定是 OpenAI-compatible:
-
-- 模型列表: `{base}/models`
-- 聊天补全: `{base}/chat/completions`
-
-Claude 预设也按这个兼容链路处理，因此需要使用支持 OpenAI-compatible 路径的端点或网关。
-
-## 4. 配置 TTS
-
-默认 TTS 语言为 `ja`。常用设置在 `模型与语音 -> TTS`:
-
-- `genie_character`
-- `genie_model_dir`
-- `ref_audio`
-- `ref_text`
-- `lang`
-- `device`
-- `quality`
-- `split`
-- `mode`
-- `save_mode`
-
-用户当前常用参考音频可写入:
-
-```text
-E:/GPT-SoVITS-1007-cu124/GPT-SoVITS-1007-cu124/custom_refs/【_unk_】もうこんなひどいことさせないからね.wav
+```powershell
+.\scripts\run_backend_dev.bat
+.\scripts\run_electron_dev.bat
 ```
 
-参考文本:
-
-```text
-もうこんなひどいことさせないからね
+```bash
+./scripts/run_backend_dev.sh
+cd electron && npm run dev
 ```
 
-如果需要预热 Genie 资源，可在 `模型与语音 -> 资源` 中运行预取。
+## 4. 配置语音
 
-## 5. 配置 ASR
+默认 ASR 配置：
 
-默认 ASR:
-
-```env
+```dotenv
 ASR_PROVIDER=sensevoice-service
-ASR_BASE_URL=http://127.0.0.1:8899/v1
-SENSEVOICE_MODEL=iic/SenseVoiceSmall
-WHISPER_LANG=zh
+ASR_LANGUAGE=zh
+VAD_MIN_SILENCE_MS=300
 ```
 
-该模式要求外部服务提供:
+桌宠支持按住说话。默认可以使用鼠标侧键，设置页中可重新绑定麦克风和其他桌宠快捷键。释放按键后进入 ASR 最终结果、LLM、TTS 播放链路；再次按下可触发打断。
 
-- `GET /v1/models`
-- `POST /v1/audio/transcriptions`
+Genie TTS 示例：
 
-本地 ONNX ASR:
-
-```env
-ASR_PROVIDER=sherpa-onnx
-SHERPA_ONNX_MODEL_PATH=./.cache/sherpa-onnx/sensevoice/model.int8.onnx
-SHERPA_ONNX_TOKENS_PATH=./.cache/sherpa-onnx/sensevoice/tokens.txt
-SHERPA_ONNX_NUM_THREADS=2
-SHERPA_ONNX_PROVIDER=cpu
+```dotenv
+TTS_PROVIDER=genie-tts
+TTS_REF_AUDIO=/path/to/reference.wav
+TTS_REF_TEXT=参考音频的准确文本
+TTS_LANG=zh
+TTS_DEVICE=cpu
 ```
 
-可在资源面板下载 Sherpa SenseVoice 文件。
+参考音频路径必须指向本机真实文件，不要把个人绝对路径写回模板或文档。
 
-## 6. 配置记忆
+## 5. 准备模型资源
 
-默认:
+设置页的资源区可以查看并准备：
 
-```env
-MEMORY_BACKEND=inmemory
-EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B
-```
+- `sherpa`：离线 ASR
+- `sherpa_online`：流式 ASR
+- `embedding`：语义记忆嵌入模型
+- `tts`：Genie TTS 资源
+- `soulx`：变声服务资源
 
-启用 Qdrant:
+资源操作会合并重复请求，但下载体积可能很大。下载目录、清理范围和当前限制见 [RESOURCE_MANAGEMENT.md](RESOURCE_MANAGEMENT.md)。
 
-```env
+## 6. 可选 Qdrant
+
+SQLite 是权威长期记忆默认值。需要向量检索时启用 Qdrant：
+
+```dotenv
 MEMORY_BACKEND=qdrant
 QDRANT_URL=http://127.0.0.1:6333
-QDRANT_COLLECTION=memories
 QDRANT_AUTO_START=1
+QDRANT_DOCKER_IMAGE=qdrant/qdrant:v1.18.3
 ```
 
-启用 Qdrant 后，`start.bat` 可自动拉起本地 Docker Qdrant。切换 embedding 模型或维度后，需要重建 collection 并重新写入向量。
+Windows 可预先运行：
 
-## 7. 导入 Live2D/VRM
-
-打开 `人物与桌宠`:
-
-- 选择 Live2D 文件夹时需要包含 `.model3.json`。
-- 选择 VRM 时需要 `.vrm` 文件。
-- 导入后资源会复制到 Electron 用户数据目录，由控制服务统一管理。
-
-LLM 输出的 `pet_control` 会通过白名单映射到当前模型可用的 expression、motion group 和 motion index，避免模型不存在的动作被直接执行。
-
-## 8. 启动
-
-```bat
-start.bat
+```powershell
+.\scripts\ensure_qdrant_docker.ps1
 ```
 
-常用参数:
+Qdrant 不可用时应切回 `sqlite`，不要切到非持久的内存后端。
 
-```bat
-start.bat --no-qdrant
-start.bat --with-mcp
-start.bat --dev-renderer
-start.bat --smoke
-```
+## 7. 常见问题
 
-如果要启动 SoulX-SVC:
-
-```bat
-start_soulx_svc.bat --check
-start_soulx_svc.bat path\to\reference.wav
-```
-
-## 9. 验证
-
-后端 ASR 相关测试:
-
-```bat
-cd python
-.venv\Scripts\python.exe -m pytest tests\test_asr_pipeline.py tests\test_voice_service_clients.py -q
-```
-
-前端:
-
-```bat
-cd electron
-npm run lint
-npm run type-check
-npm test
-```
-
-启动脚本:
-
-```bat
-start.bat --check --no-qdrant
-```
-
-## 常见问题
-
-- LLM 模型列表为空: 先确认 Base URL 是基础路径，远程提供商通常需要 API Key。
-- ASR 没反应: 检查 `ASR_PROVIDER`，外部服务是否提供 `/v1/audio/transcriptions`，以及前端麦克风权限。
-- TTS 无声: 检查 Genie 模型目录、参考音频、参考文本和音频缓存目录。
-- Live2D 不动: 确认当前模型确实有对应 expression 或 motion group，查看 `pet:control` 事件是否发出。
-- Qdrant 启动失败: 先保持 `MEMORY_BACKEND=inmemory` 或使用 `start.bat --no-qdrant`，待 Docker 可用后再切换。
+- Electron 无法启动：运行 `cd electron && npm ci && npm run start:check`。
+- Python 导入失败：确认使用项目 `.venv`，然后执行 `python -m pip check`。
+- Linux 窗口为空：运行 `scripts/check_linux_environment.sh`，确认 X11/Wayland 兼容库完整。
+- 模型下载失败：检查磁盘、代理和 Hugging Face 访问；不要反复删除部分下载目录。
+- 长期记忆为空：确认 `MEMORY_BACKEND=sqlite` 且 `python/data/memory.db` 可写。
+- 屏幕理解无结果：确认视觉模型已配置；OCR 只负责显式精确读字，不代替实时视觉。

@@ -405,6 +405,7 @@ const collectBackupTargets = () => {
   const userDataDir = app.getPath('userData')
   return [
     path.join(projectRoot, 'python/data/chat.db'),
+    path.join(projectRoot, 'python/data/memory.db'),
     path.join(projectRoot, 'python/config/settings.json'),
     path.join(projectRoot, 'python/data/governance_alert_state.json'),
     path.join(projectRoot, 'python/audio_cache'),

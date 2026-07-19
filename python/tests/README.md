@@ -1,34 +1,43 @@
-# Python Tests Execution Notes
+# Python 测试
 
-当前仓库的 Python 测试依赖定义在：
+测试覆盖配置、认证、设置、记忆、摘要、实时协议、视觉、音频、工具、插件、资源清理和跨层契约。
 
-- `python/requirements-dev.txt`
+## 运行
 
-如果系统全局没有安装 `pytest`，请优先使用仓库内虚拟环境执行：
-
-## Windows PowerShell
+Windows：
 
 ```powershell
-".venv\Scripts\python.exe" -m pytest "tests/test_workspace_companion_integrity.py"
+cd python
+.\.venv\Scripts\python.exe -m pytest -q --tb=short
 ```
 
-## 通用建议
+Linux：
 
-- 在 `E:\yuizaki\python` 目录下运行测试。
-- 若首次执行失败，请先安装开发依赖：
-
-```powershell
-".venv\Scripts\python.exe" -m pip install -r requirements-dev.txt
+```bash
+cd python
+.venv/bin/python -m pytest -q --tb=short
 ```
 
-## 当前重点测试
+单文件：
 
-- `tests/test_workspace_companion_integrity.py`
-- `tests/test_migration_bootstrap.py`
-- `test_heartbeat.py`
+```bash
+python -m pytest -q tests/test_repository_contracts.py
+python -m pytest -q test_settings_api_router.py
+```
 
-这些测试分别覆盖：
+## 静态检查
 
-- Workspace ↔ Companion 完整性
-- migration bootstrap 对已知 schema 阶段的识别
-- heartbeat / relationship runtime 行为
+```bash
+ruff check . --select E9,F63,F7,F82
+pyright --pythonversion 3.12
+```
+
+## 测试约定
+
+- 文件系统测试使用临时目录，不写真实 `python/data`。
+- 外部模型、Docker、网络和音频设备必须 mock 或显式标记为集成测试。
+- 新增环境变量时同步更新 `.env.example`、`ENVIRONMENT_SETUP.md` 和仓库契约测试。
+- 修改 Socket.IO 事件时同时验证事件名、payload 与取消行为。
+- 修改永久删除或恢复逻辑时覆盖路径逃逸、符号链接和 dry-run。
+
+CI 使用 Python 3.12，安装 `requirements-dev.txt` 后执行 Ruff、Pyright 和完整 pytest。

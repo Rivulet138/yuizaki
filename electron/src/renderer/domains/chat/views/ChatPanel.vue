@@ -689,6 +689,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { DEFAULT_DAILY_PROMPT, DEFAULT_WORK_PROMPT, useWorkspaceStore } from '@/stores/workspaceStore'
 import { useDialogStore } from '@/stores/dialogStore'
 import { useSettingsStore } from '@/state/settingsStore'
+import { DEFAULT_LLM_MAX_OUTPUT_TOKENS } from '@/../shared/runtime-defaults'
 import { useInputBindingsStore } from '@/state/inputBindingsStore'
 import { settingsClient, systemClient } from '@/api/client'
 import { renderMarkdown } from '@/utils/markdown'
@@ -1019,8 +1020,8 @@ watch(activePromptProfile, (profile) => {
   chatStore.setPromptProfile(profile)
 }, { immediate: true, deep: true })
 const maxChatOutputTokens = computed(() => {
-  const configured = Number(settingsStore.state.llm.default_max_output_tokens || 65535)
-  const safeConfigured = Number.isFinite(configured) ? Math.round(configured) : 65535
+  const configured = Number(settingsStore.state.llm.default_max_output_tokens || DEFAULT_LLM_MAX_OUTPUT_TOKENS)
+  const safeConfigured = Number.isFinite(configured) ? Math.round(configured) : DEFAULT_LLM_MAX_OUTPUT_TOKENS
   return Math.max(256, Math.min(65535, safeConfigured))
 })
 const canSendComposer = computed(() => Boolean(inputText.value.trim() || attachments.value.length))

@@ -1,1 +1,4 @@
 export const DEFAULT_VAD_MIN_SILENCE_MS = 300
+export const DEFAULT_LLM_CONTEXT_MAX_TOKENS = 131_072
+export const DEFAULT_LLM_MAX_OUTPUT_TOKENS = 8_192
+export const DEFAULT_QDRANT_DOCKER_IMAGE = 'qdrant/qdrant:v1.18.3'

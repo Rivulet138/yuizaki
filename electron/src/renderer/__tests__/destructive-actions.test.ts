@@ -138,7 +138,7 @@ const settingsResponse = {
     qdrant_api_key: '',
     qdrant_collection: 'memories',
     qdrant_auto_start: true,
-    qdrant_docker_image: 'qdrant/qdrant:latest',
+    qdrant_docker_image: 'qdrant/qdrant:v1.18.3',
     qdrant_docker_container: 'yuizaki-qdrant',
     qdrant_docker_volume: 'yuizaki-qdrant-storage',
     embedding_model: 'Qwen/Qwen3-Embedding-0.6B',

@@ -2,7 +2,12 @@ import { reactive } from 'vue';
 import { settingsClient } from '@/api/client';
 import { isAuthMissingError } from '@/api/clients/http-client';
 import type { SettingsResponse } from '@/api/clients/settings-client';
-import { DEFAULT_VAD_MIN_SILENCE_MS } from '@/../shared/runtime-defaults';
+import {
+  DEFAULT_LLM_CONTEXT_MAX_TOKENS,
+  DEFAULT_LLM_MAX_OUTPUT_TOKENS,
+  DEFAULT_QDRANT_DOCKER_IMAGE,
+  DEFAULT_VAD_MIN_SILENCE_MS,
+} from '@/../shared/runtime-defaults';
 import { logger } from '../logger';
 
 const DEFAULT_EMBEDDING_MODEL = 'Qwen/Qwen3-Embedding-0.6B'
@@ -26,8 +31,8 @@ const state = reactive<SettingsState>({
     presence_penalty: 0,
     repetition_penalty: 1,
     timeout: 60,
-    context_max_tokens: 1145140,
-    default_max_output_tokens: 65535,
+    context_max_tokens: DEFAULT_LLM_CONTEXT_MAX_TOKENS,
+    default_max_output_tokens: DEFAULT_LLM_MAX_OUTPUT_TOKENS,
     vision_enabled: false,
     vision_provider: 'custom',
     vision_base_url: '',
@@ -93,7 +98,7 @@ const state = reactive<SettingsState>({
     qdrant_collection: 'memories',
     qdrant_timeout: 10,
     qdrant_auto_start: true,
-    qdrant_docker_image: 'qdrant/qdrant:latest',
+    qdrant_docker_image: DEFAULT_QDRANT_DOCKER_IMAGE,
     qdrant_docker_container: 'yuizaki-qdrant',
     qdrant_docker_volume: 'yuizaki-qdrant-storage',
     embedding_model: DEFAULT_EMBEDDING_MODEL,

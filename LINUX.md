@@ -1,115 +1,95 @@
-# Linux support
+# Linux 使用
 
-Yuizaki supports Linux development and local use on x86_64 desktop
-distributions with Node.js 22.13+, Python 3.12+, and a graphical session.
+Linux 与 Windows 使用同一 Electron、Vue 和 Python 代码。当前 CI 在 Ubuntu 上执行构建、测试、启动脚本语法检查和 Xvfb GUI 冒烟。
 
-## System packages
+## 支持范围
 
-Install the packages required by Electron/Chromium, Python virtual
-environments, audio, and desktop capture. Package names differ by
-distribution; the required capabilities are:
+- x86_64 主流发行版
+- X11；Wayland 通过 Electron/XWayland 兼容层运行
+- Node.js 22.13 以上，优先 Node 24 LTS
+- Python 3.12
+- PulseAudio 或 PipeWire 兼容音频栈
 
-- Python venv and development runtime;
-- GTK 3, NSS, GBM, ATK/AT-SPI, X11/XCB, and ALSA compatibility libraries;
-- PipeWire and `xdg-desktop-portal` for Wayland screen capture;
-- Docker Engine with Compose v2 only when Qdrant or SoulX-SVC is enabled.
+全局鼠标侧键、透明窗口、置顶行为和屏幕捕获受桌面环境及 Wayland 权限影响。功能缺失时应降级为键盘按住说话，不应让桌宠整体无法启动。
 
-Ubuntu/Debian example:
+## 安装
+
+Ubuntu/Debian 常见依赖：
 
 ```bash
-sudo apt update
-sudo apt install python3 python3-venv \
-  libgtk-3-0 libnss3 libgbm1 libxss1 libatk-bridge2.0-0 \
-  libasound2 libxtst6 xdg-desktop-portal pipewire
+sudo apt-get update
+sudo apt-get install -y python3.12 python3.12-venv build-essential libxtst6 libasound2t64 libnss3 libgtk-3-0 libgbm1
 ```
 
-Install Node.js 22.13 or newer with a maintained distribution package, `nvm`,
-or another version manager. Do not rely on the older Node.js package shipped
-by distributions whose repository version is below this requirement.
-
-On distributions that use `t64` package names, install the corresponding
-`libgtk-3-0t64` and `libasound2t64` packages.
-
-## Install
+然后：
 
 ```bash
-chmod +x install_core.sh install_full.sh start.sh start_soulx_svc.sh \
-  scripts/run_backend_dev.sh
-./install_full.sh
-```
-
-Use `./install_core.sh` when local TTS/ASR and embedding runtimes are not
-needed yet. Optional model files remain first-use or manually selected
-downloads and are not stored in Git.
-
-## Start
-
-```bash
-./start.sh --check
+chmod +x install_core.sh start.sh scripts/*.sh
+./install_core.sh
 ./start.sh
 ```
 
-`start.sh --check` validates Node/Python versions, Electron shared libraries,
-and the global-input native module. A missing graphical session is a warning
-in check mode and an error when the application is launched.
-
-Maintainers can install `xvfb` and `xauth`, then run
-`xvfb-run -a ./scripts/smoke_linux_electron.sh` to verify that the Electron
-control service starts and the desktop pet renders visible pixels in a Linux
-GUI session.
-
-Optional modes:
+完整安装：
 
 ```bash
-./start.sh --with-mcp
-./start.sh --dev-renderer
-./start.sh --smoke
+./install_full.sh
+```
+
+模型仍遵循按需下载，不要求启动前拥有全部资源。
+
+## 环境检查
+
+```bash
+./scripts/check_linux_environment.sh
+bash -n install_core.sh install_full.sh start.sh start_soulx_svc.sh scripts/*.sh
+```
+
+开发后端：
+
+```bash
 ./scripts/run_backend_dev.sh
-./start_soulx_svc.sh /path/to/reference.wav
 ```
 
-The Linux launcher selects free loopback ports, creates a per-run API token,
-applies database migrations, builds Electron, starts the backend and optional
-services, and terminates owned child processes when Electron exits.
-
-## Wayland and X11
-
-Electron runs natively on Wayland in current releases. Wayland compositors
-intentionally restrict programmatic window positioning and desktop capture:
-
-- desktop capture is selected through PipeWire/desktop portals and can return
-  only the user-approved source;
-- moving or docking the pet window programmatically may be limited by the
-  compositor;
-- global shortcuts and mouse side buttons depend on compositor policy.
-
-Screen frames use Electron `desktopCapturer` directly. Wayland capture is
-therefore mediated by PipeWire and the desktop portal; the application no
-longer depends on X11-only `xrandr` or ImageMagick screenshot commands.
-
-Use an X11 session or XWayland when unrestricted pet positioning is required.
-Do not use `--no-sandbox`; the application keeps Electron renderer sandboxing
-enabled on every platform.
-
-If the distribution disables unprivileged user namespaces, configure the
-Electron SUID helper instead of disabling the Chromium sandbox:
+开发桌面端：
 
 ```bash
-sudo chown root electron/node_modules/electron/dist/chrome-sandbox
-sudo chmod 4755 electron/node_modules/electron/dist/chrome-sandbox
+cd electron
+npm ci
+npm run start:check
+npm run dev
 ```
 
-The Go source under `tools/yuizaki-launcher` builds the Windows packaging
-launcher. Linux users should use `start.sh`; the application runtime itself is
-shared across both platforms.
+## Wayland 与全局输入
 
-## Troubleshooting
+Wayland 会限制全局输入监听和无提示屏幕捕获。建议顺序：
 
-- Blank or missing capture picker: verify PipeWire and the desktop-specific
-  `xdg-desktop-portal` backend are running.
-- Electron fails to load a shared library: install the missing Chromium system
-  library from the distribution package manager.
-- No microphone: grant microphone permission in the desktop environment and
-  verify the input device with PipeWire/PulseAudio tools.
-- Local model wheel unavailable: use the service provider mode or a Python
-  version supported by that model's native package.
+1. 优先使用桌面门户授权屏幕捕获。
+2. 鼠标侧键不可用时使用设置中的键盘按住说话绑定。
+3. 必要时以 XWayland 运行 Electron，而不是禁用系统安全机制。
+4. 不要要求 root 运行桌宠。
+
+## 音频
+
+确认输入输出设备：
+
+```bash
+pactl info
+pactl list short sources
+pactl list short sinks
+```
+
+容器化 SoulX 需要单独映射 GPU 和音频/文件资源。普通 TTS/ASR 本地进程不应依赖容器音频直通。
+
+## GPU
+
+CPU 路径应始终可启动。NVIDIA 加速需要与宿主驱动兼容的 CUDA 运行时；不要因为检测到 GPU 就自动安装或替换系统 CUDA。SoulX 容器基于 CUDA 12.1，详见 [services/soulx-svc/README.md](services/soulx-svc/README.md)。
+
+## 常见故障
+
+- `chrome-sandbox` 权限错误：使用发行版/Electron 推荐的 sandbox 权限，不要长期加 `--no-sandbox`。
+- 窗口空白：执行 `npm run start:check`，检查 `libgbm`、GTK、NSS 和显示变量。
+- 全局快捷键失效：检查 Wayland 限制，改用键盘绑定或 XWayland。
+- 麦克风无数据：检查 PipeWire/PulseAudio source 和桌面权限。
+- Python 模型轮子缺失：保持 Python 3.12，确认对应平台 wheel 后再升级 Python。
+
+跨平台发布仍需在目标发行版做真实桌面测试；Xvfb 只能证明窗口可以创建，不能证明音频、门户和鼠标侧键全部可用。

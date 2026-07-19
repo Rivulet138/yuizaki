@@ -1,140 +1,77 @@
-# SoulX-Singer-SVC Docker Service
+# SoulX SVC 服务
 
-This service wraps [Soul-AILab/SoulX-Singer](https://github.com/Soul-AILab/SoulX-Singer) as Yuizaki's external SVC provider.
+该目录提供 Yuizaki 可选的 SoulX 音色转换服务。它不是桌宠基础启动的必需组件，建议在用户首次启用 SVC 或手动准备资源时下载。
 
-SoulX-Singer-SVC is prompt/reference based: it does not have a native `speaker_id` concept. In Yuizaki, `speaker_id` is treated as a reference-audio id and mapped by the service to a mounted file under `references/`.
+## 组成
 
-## Layout
+- `server.py`：HTTP 服务适配层
+- `download_models.py`：从 Hugging Face 下载模型
+- `Dockerfile`：CUDA 12.1 运行镜像
+- `docker-compose.yml`：本地 GPU 服务
+- `references/`：用户参考音频受管目录
+- `models/`：下载或挂载的上游模型
 
-```text
-services/soulx-svc/
-  Dockerfile
-  docker-compose.yml
-  server.py
-  download_models.py
-  models/                         # ignored, downloaded HF weights
-    SoulX-Singer/
-    SoulX-Singer-Preprocess/
-  references/                     # ignored except .gitkeep
-    0.wav                         # speaker_id=0
-    1/prompt.wav                  # speaker_id=1
-```
+## 启动
 
-## One-Click Run
-
-From the repository root:
-
-```bat
-start_soulx_svc.bat --check
-start_soulx_svc.bat path\to\reference.wav
-```
-
-On first run, `start_soulx_svc.bat` can also be double-clicked. If no `speaker_id=0` reference audio exists yet, it opens a file picker, copies the selected `.wav`, `.mp3`, `.flac`, or `.m4a` into `references/`, downloads the Hugging Face model assets, builds the Docker image, and starts `http://127.0.0.1:7861`.
-
-Later runs can use:
-
-```bat
-start_soulx_svc.bat
-```
-
-## Download Models
-
-The one-click launcher downloads models automatically. Use this manual path only when you want to prefetch model assets without starting Docker.
-
-Run this from the repository root:
+Windows：
 
 ```powershell
-.\python\.venv\Scripts\python.exe -m pip install huggingface_hub
-.\python\.venv\Scripts\python.exe services\soulx-svc\download_models.py
+.\start_soulx_svc.bat
 ```
 
-The script downloads:
+Linux：
 
-- `Soul-AILab/SoulX-Singer`
-- `Soul-AILab/SoulX-Singer-Preprocess`
-
-Depending on the upstream snapshot, the main checkpoint may be stored as either `model-svc.pt` or `model.pt`. Yuizaki's launcher and service wrapper accept both names.
-
-The model weights are not committed to this repo.
-
-## Add Reference Audio
-
-Place a clean singing reference file for each id:
-
-```text
-services/soulx-svc/references/0.wav
-services/soulx-svc/references/1/prompt.wav
+```bash
+./start_soulx_svc.sh
 ```
 
-Yuizaki sends `speaker_id`; the service resolves it in this order:
+Docker：
 
-- `references/{speaker_id}/prompt.wav`
-- `references/{speaker_id}/reference.wav`
-- `references/{speaker_id}/voice.wav`
-- `references/{speaker_id}.wav`
-- `references/{speaker_id}.mp3`
-- `references/default.wav`
-
-## Run
-
-The preferred run command is the root launcher:
-
-```bat
-start_soulx_svc.bat
-```
-
-Manual Docker Compose startup is also available:
-
-```powershell
-cd services\soulx-svc
+```bash
+cd services/soulx-svc
 docker compose up --build
 ```
 
-Then set Yuizaki:
+默认服务地址由根目录 `python/.env` 的 `SVC_BASE_URL` 配置，默认 `http://127.0.0.1:7861`。
 
-```env
-SVC_PROVIDER=soulx-service
-SVC_BASE_URL=http://127.0.0.1:7861
-SVC_SPEAKER_ID=0
-SVC_PITCH=0
+## 模型下载
+
+```bash
+python download_models.py --output-dir ./models
 ```
 
-You can also prepare the same assets from the desktop app through `Settings -> Resources`:
+下载器支持指定 Hugging Face revision。发布构建必须使用不可变 commit hash，不应依赖默认分支：
 
-- `Download SoulX Models`
-- `Import Reference Audio`
-
-## API
-
-`POST /convert`
-
-Multipart fields:
-
-- `file`: target singing/audio file
-- `generation_id`: optional request id
-- `speaker_id`: reference audio id
-- `pitch` or `f0_shift`: semitone shift
-- `auto_shift`: optional boolean, default from `SOULX_AUTO_SHIFT`
-- `prompt_vocal_sep`: optional boolean
-- `target_vocal_sep`: optional boolean
-- `n_steps`: optional integer, default `32`
-- `cfg`: optional float, default `3.0`
-- `response_format`: `wav` or `json`
-
-Default response is `audio/wav`. With `response_format=json`, the service returns:
-
-```json
-{
-  "status": "done",
-  "provider": "soulx-service",
-  "audio_base64": "...",
-  "speaker_id": "0",
-  "pitch": 0
-}
+```bash
+python download_models.py --revision <commit-sha> --output-dir ./models
 ```
 
-## Notes
+当前 Docker 构建参数 `SOULX_REF` 默认仍可能跟随 `main`。这是不可复现风险，发布前应固定到审计过的提交，并在资源锁中记录仓库、revision、模型 hash 和许可证。
 
-- The official SoulX repository currently provides CLI and Gradio entry points, not a production HTTP API or official Docker image.
-- CPU mode is possible but slow; GPU with NVIDIA Container Toolkit is recommended.
-- Keep reference audio authorized and private. Do not use SVC to impersonate people without consent.
+## GPU
+
+容器基于 `nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04`。需要：
+
+- 兼容的 NVIDIA 驱动
+- Docker 与 NVIDIA Container Toolkit
+- Compose GPU device 配置可用
+
+没有 GPU 时不要自动启动该容器；桌宠基础对话和普通 TTS/ASR 应保持可用。
+
+## 数据与隐私
+
+`references/` 可能包含用户声音，默认被 Git 忽略。参考音频不得进入镜像、日志、测试夹具或公开问题报告。删除参考音频是永久操作。
+
+转换生成的临时文件应使用 Yuizaki 受管命名并由 cache janitor 清理，不得扫描或删除用户其他音频目录。
+
+## 安全
+
+- 服务默认仅绑定本机或受控容器网络。
+- 不要把 7861 端口直接暴露到公网。
+- 限制上传大小、格式与处理超时。
+- 模型代码和依赖都视为供应链输入，固定 revision 并校验内容。
+- 上游模型卡位于 `models/` 子目录，保留其授权说明。
+
+## 健康检查
+
+启动后先检查服务健康与模型加载，再由 Yuizaki 设置页执行 SVC 测试。失败应区分 GPU、依赖、模型缺失、参考音频和请求格式，而不是重复下载全部资源。

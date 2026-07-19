@@ -11,6 +11,16 @@ permissions:
   contents: read
 
 jobs:
+  documentation:
+    name: Documentation Contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/check_docs.py
+
   electron-build:
     name: Electron Validate & Build (${{ matrix.os }})
     strategy:

@@ -100,7 +100,7 @@ function Get-EffectiveConfig {
     qdrant_url = "http://127.0.0.1:6333"
     qdrant_api_key = ""
     qdrant_auto_start = $true
-    qdrant_docker_image = "qdrant/qdrant:latest"
+    qdrant_docker_image = "qdrant/qdrant:v1.18.3"
     qdrant_docker_container = "yuizaki-qdrant"
     qdrant_docker_volume = "yuizaki-qdrant-storage"
   }
@@ -164,7 +164,7 @@ function Get-EffectiveConfig {
     $config[$key] = ([string]$config[$key]).Trim()
   }
   if (-not $config["qdrant_docker_image"]) {
-    $config["qdrant_docker_image"] = "qdrant/qdrant:latest"
+    $config["qdrant_docker_image"] = "qdrant/qdrant:v1.18.3"
   }
   if (-not $config["qdrant_docker_container"]) {
     $config["qdrant_docker_container"] = "yuizaki-qdrant"

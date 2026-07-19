@@ -62,7 +62,7 @@ describe('plugin routes', () => {
       id: 'plugin-unpermitted',
       name: 'Unpermitted Plugin',
       permissions: { routes: [], toolScopes: [], modelScopes: [] },
-      execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 1000, allowCancellation: true },
+      execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 5_000, allowCancellation: true },
       routes: [{ id: 'run', namespace: 'plugin', handler: handlerPath }],
     }
     registry.register(plugin)
@@ -99,7 +99,7 @@ describe('plugin routes', () => {
       id: 'plugin-agent',
       routes: [{ id: 'ask', namespace: 'plugin', handler: handlerPath }],
       permissions: { routes: ['ask'], toolScopes: [], modelScopes: [], agentBridge: true },
-      execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 1000, allowCancellation: true },
+      execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 5_000, allowCancellation: true },
     }
     const cancellationPromise = new Promise<never>(() => {})
 
@@ -154,7 +154,7 @@ describe('plugin routes', () => {
       id: 'plugin-agent-denied',
       name: 'Denied Agent Plugin',
       permissions: { routes: ['ask'], toolScopes: [], modelScopes: [] },
-      execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 1000, allowCancellation: true },
+      execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 5_000, allowCancellation: true },
       routes: [{ id: 'ask', namespace: 'plugin', handler: handlerPath }],
     }
     registry.register(plugin)
@@ -262,7 +262,7 @@ describe('plugin routes', () => {
         id: 'plugin-sandbox-blocked',
         name: 'Sandbox Blocked Plugin',
         permissions: { routes: ['blocked'], toolScopes: [], modelScopes: [] },
-        execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 1000, allowCancellation: true },
+        execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 5_000, allowCancellation: true },
         routes: [{ id: 'blocked', namespace: 'plugin', handler: handlerPath }],
       }
       registry.register(plugin)
@@ -307,7 +307,7 @@ describe('plugin routes', () => {
         id: 'plugin-source-words',
         name: 'Source Words Plugin',
         permissions: { routes: ['source'], toolScopes: [], modelScopes: [] },
-        execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 1000, allowCancellation: true },
+        execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 5_000, allowCancellation: true },
         routes: [{ id: 'source', namespace: 'plugin', handler: handlerPath }],
       })
       const { response, getStatus, getJson } = createJsonResponse()
@@ -347,7 +347,7 @@ describe('plugin routes', () => {
         id: 'plugin-file-broker',
         name: 'File Broker Plugin',
         permissions: { routes: ['file'], toolScopes: [], modelScopes: [], allowedPaths: [allowedDir] },
-        execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 1000, allowCancellation: true },
+        execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 5_000, allowCancellation: true },
         routes: [{ id: 'file', namespace: 'plugin', handler: handlerPath }],
       }
       registry.register(plugin)
@@ -392,7 +392,7 @@ describe('plugin routes', () => {
         id: 'plugin-network-denied',
         name: 'Network Denied Plugin',
         permissions: { routes: ['net'], toolScopes: [], modelScopes: [] },
-        execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 1000, allowCancellation: true },
+        execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 5_000, allowCancellation: true },
         routes: [{ id: 'net', namespace: 'plugin', handler: handlerPath }],
       }
       registry.register(plugin)
@@ -444,7 +444,7 @@ describe('plugin routes', () => {
         permissions: {
           routes: ['net'], toolScopes: [], modelScopes: [], allowedHosts: ['api.example.test'],
         },
-        execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 1000, allowCancellation: true },
+        execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 5_000, allowCancellation: true },
         routes: [{ id: 'net', namespace: 'plugin', handler: handlerPath }],
       })
       const { response, getStatus, getJson } = createJsonResponse()
@@ -616,7 +616,7 @@ describe('plugin routes', () => {
         allowedHosts: ['api.example.test'],
         allowedPaths: ['C:/safe/plugin-data'],
       },
-      execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 1000, allowCancellation: true },
+      execution: { maxConcurrentExecutions: 1, maxExecutionTimeMs: 5_000, allowCancellation: true },
       routes: [{ id: 'policy', namespace: 'plugin', handler: handlerPath }],
     }
     registry.register(plugin)

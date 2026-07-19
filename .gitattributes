@@ -21,6 +21,7 @@ LICENSE text eol=lf
 *.yaml text eol=lf
 *.toml text eol=lf
 *.ini text eol=lf
+*.example text eol=lf
 *.css text eol=lf
 *.html text eol=lf
 

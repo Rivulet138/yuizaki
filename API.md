@@ -1,165 +1,122 @@
-# API Reference
+# API
 
-Yuizaki 有三类本地接口:
+维护基线：2026-07-19。默认 Python 服务为 `http://127.0.0.1:8001`，Electron 控制服务为 `http://127.0.0.1:38945`。
 
-- Python FastAPI: `http://127.0.0.1:8001`
-- Electron 控制服务: `http://127.0.0.1:38945`
-- 可选 Playwright MCP: `http://127.0.0.1:7777`
+## 认证
 
-## 鉴权
+Python 的 `/api`、`/memory`、`/vision`、`/svc` 等受保护前缀默认要求 backend token。Electron 控制服务负责把桌面端请求代理到后端。仅隔离本地开发可以设置 `YUIZAKI_ALLOW_UNAUTHENTICATED_LOCAL_DEV=1`。
 
-Python 后端:
+不要把 token 放进 URL、日志或前端持久化明文。健康检查与必要的静态音频读取按中间件白名单处理。
 
-- 公开: `/health`, `/audio/*`, `/socket.io/*`, OpenAPI 文档。
-- 保护: `/api`, `/memory`, `/v1`, `/vision`, `/svc`, `/system`。
-- 保护路由默认需要 `Authorization: Bearer <YUIZAKI_BACKEND_API_TOKEN>`。
+## 系统与健康
 
-Electron 控制服务:
-
-- 公开: `/api/health`。
-- 公开只读资源: `/api/pet/assets/live2d/*`, `/api/pet/assets/vrm/*`。
-- 其他 `/api/*` 需要控制 token。
-
-`start.bat`（Windows）和 `start.sh`（Linux）会在未显式配置 token 时生成本轮 token，并传给 Electron、渲染端和后端。
-
-## Python HTTP
-
-### System
-
-| Method | Path | 说明 |
+| 方法 | 路径 | 作用 |
 | --- | --- | --- |
-| `GET` | `/health` | 后端健康 |
-| `GET` | `/api/readiness` | 运行服务 readiness |
-| `GET` | `/api/system/capabilities` | 能力快照 |
-| `GET` | `/api/system/companion-runtime` | 陪伴运行状态 |
-| `GET` | `/api/system/mcp` | MCP 状态 |
-| `POST` | `/api/system/mcp` | 添加 MCP 服务 |
-| `POST` | `/api/system/mcp/{server_name}/toggle` | 启停 MCP 服务 |
-| `GET` | `/api/system/agent-plugins` | 插件状态 |
-| `POST` | `/api/system/agent-plugins/{plugin_id}/toggle` | 启停插件 |
-| `GET` | `/api/system/schedules` | 计划任务 |
-| `POST` | `/api/system/schedules/once` | 创建一次性任务 |
-| `POST` | `/api/system/schedules/interval` | 创建循环任务 |
+| GET | `/health` | Python 健康状态 |
+| GET | `/api/readiness` | 依赖就绪状态 |
+| GET | `/system/status` | 后端模块状态 |
+| GET | `/api/system/heartbeat` | 桌宠心跳 |
+| GET | `/api/system/capabilities` | 能力注册信息 |
+| GET | `/api/system/experience-metrics` | 延迟与体验指标 |
+| GET | `/api/system/agent-trace` | Agent 执行记录 |
 
-### Settings
+## 对话与模型
 
-| Method | Path | 说明 |
+| 方法 | 路径 | 作用 |
 | --- | --- | --- |
-| `GET` | `/api/settings/` | 读取设置 |
-| `PATCH` | `/api/settings/` | 批量更新设置 |
-| `GET` | `/api/settings/{key}` | 读取单项设置 |
-| `POST` | `/api/settings/{key}` | 更新单项设置 |
-| `DELETE` | `/api/settings/{key}` | 重置单项设置 |
-| `POST` | `/api/settings/test/llm` | 测试当前 LLM |
-| `POST` | `/api/settings/llm/models` | 拉取模型列表 |
-| `POST` | `/api/settings/test/tts` | 测试 TTS |
-| `POST` | `/api/settings/import` | 导入设置 |
-| `GET` | `/api/settings/export` | 导出设置 |
+| POST | `/v1/chat/completions` | OpenAI 兼容文本生成 |
+| POST | `/v1/models` | 查询模型列表 |
+| POST | `/api/chat/translate` | 翻译 |
+| GET | `/api/sessions` | 会话列表 |
+| GET | `/api/history/{session_id}` | 会话历史 |
+| PATCH | `/api/messages/{message_id}` | 修改消息 |
+| DELETE | `/api/messages/{message_id}` | 永久删除消息 |
+| POST | `/api/export/json` | 导出 JSON |
+| POST | `/api/export/csv` | 导出 CSV |
 
-设置接口会校验 schema，运行时可热更新 `llm`、`tts`、`asr`、`svc`、`summary` 和 `memory`。
+## 工作区与角色
 
-### OpenAI-compatible LLM Proxy
-
-| Method | Path | 说明 |
+| 方法 | 路径 | 作用 |
 | --- | --- | --- |
-| `GET/POST` | `/v1/models` | 当前 LLM provider 模型列表 |
-| `POST` | `/v1/chat/completions` | 聊天补全，支持流式 |
+| GET/POST | `/api/workspaces` | 列出或创建工作区 |
+| PATCH/DELETE | `/api/workspaces/{workspace_id}` | 更新或永久删除工作区 |
+| GET/POST | `/api/workspaces/{workspace_id}/sessions` | 工作区会话 |
+| GET/POST | `/api/companions` | 列出或创建桌宠角色 |
+| GET/PATCH/DELETE | `/api/companions/{companion_id}` | 读取、更新或永久删除角色 |
 
-Provider 的 Base URL 会被归一化，真实上游调用为 `{base}/models` 与 `{base}/chat/completions`。
+## 记忆与摘要
 
-### Media
-
-| Method | Path | 说明 |
+| 方法 | 路径 | 作用 |
 | --- | --- | --- |
-| `POST` | `/vision/ocr` | 上传图片做 OCR |
-| `POST` | `/svc/convert` | 上传音频做可选 SVC 转换 |
-| `GET` | `/audio/{filename}` | 读取生成音频 |
+| GET/POST | `/memory/docs` | 记忆文档列表与新增 |
+| PUT/DELETE | `/memory/docs/{doc_id}` | 更新或永久删除记忆 |
+| POST | `/memory/docs/batch-delete` | 批量永久删除 |
+| POST | `/memory/memory/add` | 新增记忆项 |
+| POST | `/memory/rag/query` | RAG 查询 |
+| GET | `/memory/index/status` | 索引状态 |
+| POST | `/memory/index/rebuild` | 重建索引 |
+| POST | `/memory/maintenance/preview` | 维护预览 |
+| POST | `/memory/maintenance/apply` | 应用维护 |
+| GET | `/api/summary` | 摘要总览 |
+| GET | `/api/summary/audit` | 摘要审计 |
+| POST | `/api/summary/{session_id}/rewrite` | 重写会话摘要 |
 
-`/vision/ocr` 使用 `multipart/form-data` 字段 `file`。
-`/svc/convert` 使用 `multipart/form-data` 字段 `file`，可选 `speaker_id` 和 `pitch`。
+存储清理目标 `memory` 只做数据库压缩，不删除记忆记录；记录删除使用明确的 memory API。
 
-### Memory
+## 视觉、语音与 SVC
 
-| Method | Path | 说明 |
+| 方法 | 路径 | 作用 |
 | --- | --- | --- |
-| `GET` | `/memory/docs` | 列出记忆文档 |
-| `POST` | `/memory/docs` | 添加文档 |
-| `PUT` | `/memory/docs/{doc_id}` | 更新文档 |
-| `DELETE` | `/memory/docs/{doc_id}` | 删除文档 |
-| `POST` | `/memory/memory/add` | 添加记忆 |
-| `GET` | `/memory/index/status` | 索引状态 |
-| `POST` | `/memory/rag/query` | RAG 查询 |
-| `GET` | `/api/memory/pipeline/query` | pipeline 查询 |
+| POST | `/vision/ocr` | 对上传图片做显式 OCR |
+| POST | `/svc/convert` | 音色转换 |
+| POST | `/api/settings/test/tts` | TTS 测试 |
+| POST | `/api/settings/tts/warmup` | TTS 预热 |
+| GET | `/api/settings/tts/status` | TTS 状态 |
 
-默认后端是 `inmemory`。当 `memory.backend=qdrant` 时，向量写入 Qdrant collection。
+实时视觉帧和流式语音通过 Socket.IO 传输，不通过 OCR 路由轮询。
 
-## Socket.IO
+## 设置
 
-Socket.IO 挂载在 `/socket.io`。
+设置路由前缀为 `/api/settings`：
 
-### 对话
-
-| Event | 方向 | 说明 |
-| --- | --- | --- |
-| `agent:chat` | 前端 -> 后端 | Agent 对话入口 |
-| `llm:request` | 前端 -> 后端 | 直接 LLM 请求 |
-| `llm:token` | 后端 -> 前端 | 流式 token |
-| `llm:final` | 后端 -> 前端 | 最终文本 |
-| `pet:control` | 后端 -> 前端 | 桌宠动作/表情控制 |
-| `tts:done` | 后端 -> 前端 | TTS 音频生成完成 |
-| `tool:*` | 双向 | 工具执行和状态 |
-
-### ASR
-
-| Event | 方向 | 说明 |
-| --- | --- | --- |
-| `audio:chunk` | 前端 -> 后端 | 16 kHz mono PCM16 音频块 |
-| `asr:partial` | 后端 -> 前端 | partial 转写 |
-| `asr:final` | 后端 -> 前端 | final 转写 |
-| `asr:vad_start` | 后端 -> 前端 | VAD 检测到开始说话 |
-
-ASR 链路:
-
-```mermaid
-sequenceDiagram
-  participant R as Renderer
-  participant S as Socket.IO
-  participant M as ASRManager
-  participant P as ASRPipeline
-  participant E as ASR Engine
-  R->>S: audio:chunk
-  S->>M: handle_audio_chunk
-  M->>P: feed_chunk
-  P->>E: generate(input, language, use_itn)
-  E-->>P: text segments
-  P-->>M: text
-  M-->>S: asr_partial/asr_final
-  S-->>R: asr:* event
-```
+- `GET /`、`PATCH /`：读取与批量更新
+- `GET /metadata`：字段元数据
+- `GET/DELETE /history`：历史与清空
+- `GET /export`、`POST /import`：导出导入
+- `POST /rollback`：回滚
+- `POST /test/llm`、`POST /llm/models`、`GET /llm/status`
+- `GET/POST/DELETE /{key}`：单字段操作
 
 ## Electron 控制服务
 
-| Method | Path | 说明 |
+| 方法 | 路径 | 作用 |
 | --- | --- | --- |
-| `GET` | `/api/health` | 控制服务健康 |
-| `GET` | `/api/ping` | 代理到 Python 的健康探测 |
-| `GET` | `/api/pet/assets/live2d/*` | Live2D 资源读取 |
-| `GET` | `/api/pet/assets/vrm/*` | VRM 资源读取 |
-| `POST` | `/api/pet/import` | 导入桌宠资源 |
-| `POST` | `/api/pet/control` | 控制桌宠动作 |
+| GET | `/api/system/resources` | 受管模型资源状态 |
+| POST | `/api/system/resources/prepare` | 批量准备资源 |
+| POST | `/api/system/resources/sherpa/download` | 准备离线 Sherpa |
+| POST | `/api/system/resources/sherpa-online/download` | 准备在线 Sherpa |
+| POST | `/api/system/resources/embedding/prefetch` | 预取嵌入模型 |
+| POST | `/api/system/resources/tts/prefetch` | 预取 TTS |
+| POST | `/api/system/resources/soulx/download` | 准备 SoulX |
+| GET | `/api/system/storage` | 存储用量 |
+| POST | `/api/system/storage/cleanup` | 永久清理受管临时文件 |
+| GET | `/api/system/backup/targets` | 备份目标 |
+| POST | `/api/system/backup/create` | 创建备份 |
+| POST | `/api/system/backup/restore` | 预览或执行恢复 |
 
-控制服务负责把 Electron 用户数据目录中的模型资源安全暴露给渲染端，同时代理部分 Python 后端请求。
+清理请求必须带 `confirmation: "PERMANENT_CLEAN"`。具体类别见 [RESOURCE_MANAGEMENT.md](RESOURCE_MANAGEMENT.md)。
 
-## Playwright MCP
+## Socket.IO 事件族
 
-可选服务由 `node-mcp/server.mjs` 提供:
+- `system.*`：心跳、错误、延迟、打断、权限
+- `audio.*`：音频块、ASR partial/final、VAD 与 speech start
+- `llm.*`：请求、delta、final
+- `tts.*`：音频 chunk、done
+- `agent.*`：对话与结构化动作结果
+- `tool.*`：调用、结果和错误
+- `screenshot.*`：最新视觉帧与分析结果
+- `pet.*`：桌宠状态与动作控制
+- `memory.*`：实时记忆查询
+- `svc.*`：音色转换
 
-```bat
-start.bat --with-mcp
-```
-
-健康检查:
-
-```bat
-curl http://127.0.0.1:7777/health
-```
+事件 payload 在 `python/protocol/` 与前端共享类型附近维护。新增事件时必须同时更新协议测试和本文档。
