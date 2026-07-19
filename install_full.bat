@@ -16,6 +16,8 @@ echo [1/3] Installing Electron dependencies...
 pushd electron
 call npm install
 if errorlevel 1 goto :error
+call npm run install:runtime
+if errorlevel 1 goto :error
 popd
 
 echo [2/3] Installing node-mcp dependencies...

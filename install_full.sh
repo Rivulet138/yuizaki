@@ -5,17 +5,10 @@ SCRIPT_DIR="$(dirname "$0")"
 ROOT="$(cd "$SCRIPT_DIR" && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
-for command in node npm "$PYTHON_BIN"; do
-	command -v "$command" >/dev/null 2>&1 || {
-		echo "[ERROR] Command not found: $command" >&2
-		exit 1
-	}
-done
-
-node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 13)) { console.error('[ERROR] Node.js 22.13+ is required. Current: ' + process.versions.node); process.exit(1) }"
+PYTHON_BIN="$PYTHON_BIN" bash "$ROOT/scripts/check_linux_environment.sh" --install
 
 echo "[1/3] Installing Electron dependencies..."
-(cd "$ROOT/electron" && npm ci)
+(cd "$ROOT/electron" && npm ci && npm run install:runtime)
 
 echo "[2/3] Installing node-mcp dependencies..."
 (cd "$ROOT/node-mcp" && npm ci)

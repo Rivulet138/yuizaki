@@ -33,14 +33,9 @@ require_file() { [[ -e "$1" ]] || {
 	echo "[ERROR] Missing: $1" >&2
 	exit 1
 }; }
-require_command() { command -v "$1" >/dev/null 2>&1 || {
-	echo "[ERROR] Command not found: $1" >&2
-	exit 1
-}; }
-
-require_command node
-require_command npm
-node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 13)) { console.error('[ERROR] Node.js 22.13+ is required. Current: ' + process.versions.node); process.exit(1) }"
+preflight_mode="--launch"
+if ((CHECK_ONLY)); then preflight_mode="--check"; fi
+PYTHON_BIN="$PYTHON" bash "$ROOT/scripts/check_linux_environment.sh" "$preflight_mode"
 require_file "$PYTHON"
 require_file "$ROOT/python/app.py"
 require_file "$ROOT/electron/package.json"

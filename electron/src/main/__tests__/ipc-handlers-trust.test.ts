@@ -95,7 +95,7 @@ const buildIpcContext = (): IpcContext => {
     applyPetStateToRenderer: vi.fn(),
     normalizePetPatch: vi.fn((patch) => patch),
     dockPetToBottomRight: vi.fn(),
-    screenshotDesktop: vi.fn(async () => Buffer.from([])),
+    captureDisplayPng: vi.fn(async () => Buffer.from([])),
     pluginRegistry: {
       snapshot: vi.fn(() => ({
         plugins: [],
@@ -446,7 +446,7 @@ describe('IPC handler sender trust', () => {
 
     expect(handler).toBeDefined()
     await expect(handler?.(untrustedEvent, { displayIndex: 0 })).rejects.toThrow(/Blocked IPC from untrusted renderer/)
-    expect(ctx.screenshotDesktop).not.toHaveBeenCalled()
+    expect(ctx.captureDisplayPng).not.toHaveBeenCalled()
   })
 
   it('downscales realtime vision captures and encodes them as bounded JPEG data', async () => {
@@ -469,7 +469,7 @@ describe('IPC handler sender trust', () => {
     }])
     const { registerIpcHandlers } = await import('../ipc-handlers')
     const ctx = buildIpcContext()
-    vi.mocked(ctx.screenshotDesktop).mockResolvedValue(Buffer.from('full-resolution-png'))
+    vi.mocked(ctx.captureDisplayPng).mockResolvedValue(Buffer.from('full-resolution-png'))
     registerIpcHandlers(ctx)
 
     const handler = electronMock.handlers.get('screen:capture')
@@ -512,7 +512,7 @@ describe('IPC handler sender trust', () => {
     }])
     const { registerIpcHandlers } = await import('../ipc-handlers')
     const ctx = buildIpcContext()
-    vi.mocked(ctx.screenshotDesktop).mockResolvedValue(Buffer.from('full-resolution-png'))
+    vi.mocked(ctx.captureDisplayPng).mockResolvedValue(Buffer.from('full-resolution-png'))
     registerIpcHandlers(ctx)
 
     const handler = electronMock.handlers.get('screen:capture')
@@ -554,7 +554,7 @@ describe('IPC handler sender trust', () => {
     }])
     const { registerIpcHandlers } = await import('../ipc-handlers')
     const ctx = buildIpcContext()
-    vi.mocked(ctx.screenshotDesktop).mockResolvedValue(Buffer.from('full-resolution-png'))
+    vi.mocked(ctx.captureDisplayPng).mockResolvedValue(Buffer.from('full-resolution-png'))
     registerIpcHandlers(ctx)
 
     const handler = electronMock.handlers.get('screen:capture')
@@ -620,7 +620,7 @@ describe('IPC handler sender trust', () => {
     })
     const { registerIpcHandlers } = await import('../ipc-handlers')
     const ctx = buildIpcContext()
-    vi.mocked(ctx.screenshotDesktop).mockResolvedValue(Buffer.from('full-screen'))
+    vi.mocked(ctx.captureDisplayPng).mockResolvedValue(Buffer.from('full-screen'))
     registerIpcHandlers(ctx)
 
     const handler = electronMock.handlers.get('screen:capture-region')
@@ -632,7 +632,7 @@ describe('IPC handler sender trust', () => {
       height: 25,
     })
 
-    expect(ctx.screenshotDesktop).toHaveBeenCalledWith({ screen: '10' })
+    expect(ctx.captureDisplayPng).toHaveBeenCalledWith(expect.objectContaining({ id: 10 }), 0)
     expect(crop).toHaveBeenCalledWith({ x: 100, y: 50, width: 100, height: 50 })
     expect(result).toBe(`data:image/png;base64,${Buffer.from('cropped').toString('base64')}`)
   })
@@ -646,7 +646,7 @@ describe('IPC handler sender trust', () => {
 
     expect(handler).toBeDefined()
     await expect(handler?.(untrustedEvent, { displayIndex: 0 })).rejects.toThrow(/Blocked IPC from untrusted renderer/)
-    expect(ctx.screenshotDesktop).not.toHaveBeenCalled()
+    expect(ctx.captureDisplayPng).not.toHaveBeenCalled()
   })
 
   it('proxies trusted screen OCR requests to the Python OCR endpoint without returning the screenshot', async () => {
@@ -665,13 +665,13 @@ describe('IPC handler sender trust', () => {
 
     const { registerIpcHandlers } = await import('../ipc-handlers')
     const ctx = buildIpcContext()
-    vi.mocked(ctx.screenshotDesktop).mockResolvedValue(Buffer.from('raw-png-bytes'))
+    vi.mocked(ctx.captureDisplayPng).mockResolvedValue(Buffer.from('raw-png-bytes'))
     registerIpcHandlers(ctx)
 
     const handler = electronMock.handlers.get('screen:ocr')
     const result = await handler?.(trustedEvent, { displayIndex: 0 })
 
-    expect(ctx.screenshotDesktop).toHaveBeenCalledWith({ screen: '10' })
+    expect(ctx.captureDisplayPng).toHaveBeenCalledWith(expect.objectContaining({ id: 10 }), 0)
     expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8001/vision/ocr', expect.objectContaining({
       method: 'POST',
       headers: expect.objectContaining({

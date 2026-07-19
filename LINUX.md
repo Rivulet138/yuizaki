@@ -20,7 +20,7 @@ Ubuntu/Debian example:
 sudo apt update
 sudo apt install python3 python3-venv \
   libgtk-3-0 libnss3 libgbm1 libxss1 libatk-bridge2.0-0 \
-  libasound2 xdg-desktop-portal pipewire
+  libasound2 libxtst6 xdg-desktop-portal pipewire
 ```
 
 Install Node.js 22.13 or newer with a maintained distribution package, `nvm`,
@@ -49,6 +49,15 @@ downloads and are not stored in Git.
 ./start.sh
 ```
 
+`start.sh --check` validates Node/Python versions, Electron shared libraries,
+and the global-input native module. A missing graphical session is a warning
+in check mode and an error when the application is launched.
+
+Maintainers can install `xvfb` and `xauth`, then run
+`xvfb-run -a ./scripts/smoke_linux_electron.sh` to verify that the Electron
+control service starts and the desktop pet renders visible pixels in a Linux
+GUI session.
+
 Optional modes:
 
 ```bash
@@ -74,9 +83,21 @@ intentionally restrict programmatic window positioning and desktop capture:
   compositor;
 - global shortcuts and mouse side buttons depend on compositor policy.
 
+Screen frames use Electron `desktopCapturer` directly. Wayland capture is
+therefore mediated by PipeWire and the desktop portal; the application no
+longer depends on X11-only `xrandr` or ImageMagick screenshot commands.
+
 Use an X11 session or XWayland when unrestricted pet positioning is required.
 Do not use `--no-sandbox`; the application keeps Electron renderer sandboxing
 enabled on every platform.
+
+If the distribution disables unprivileged user namespaces, configure the
+Electron SUID helper instead of disabling the Chromium sandbox:
+
+```bash
+sudo chown root electron/node_modules/electron/dist/chrome-sandbox
+sudo chmod 4755 electron/node_modules/electron/dist/chrome-sandbox
+```
 
 The Go source under `tools/yuizaki-launcher` builds the Windows packaging
 launcher. Linux users should use `start.sh`; the application runtime itself is

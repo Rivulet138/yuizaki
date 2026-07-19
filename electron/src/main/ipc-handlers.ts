@@ -91,7 +91,7 @@ export interface IpcContext {
   applyPetStateToRenderer: (state: PetControlState) => void
   normalizePetPatch: (patch: PetControlConfigPatch) => PetControlConfigPatch
   dockPetToBottomRight: () => void
-  screenshotDesktop: (options?: unknown) => Promise<Buffer>
+  captureDisplayPng: (display: Display, displayIndex: number) => Promise<Buffer>
   pluginRegistry: PluginRegistry
   backendApiToken: string
   controlOrigin: string
@@ -932,10 +932,12 @@ function encodeScreenCaptureDataUrl(
   return encodeNativeImageDataUrl(image, options, privacyContext)
 }
 
-function resolveDisplay(displayIndex?: number): Display | null {
+function resolveDisplay(displayIndex?: number): { display: Display; index: number } | null {
   const displays = screen.getAllDisplays()
-  const index = displayIndex ?? 0
-  return displays[index] ?? displays[0] ?? null
+  const requestedIndex = displayIndex ?? 0
+  const index = displays[requestedIndex] ? requestedIndex : 0
+  const display = displays[index]
+  return display ? { display, index } : null
 }
 
 function cropScreenshotToDataUrl(
@@ -1016,11 +1018,12 @@ function registerScreenCaptureHandlers(ctx: IpcContext): void {
   ) => {
     assertTrustedIpcSender(event)
     try {
-      const target = resolveDisplay(options?.displayIndex)
-      if (!target) {
+      const resolved = resolveDisplay(options?.displayIndex)
+      if (!resolved) {
         return null
       }
-      const buf: Buffer = await ctx.screenshotDesktop({ screen: target.id.toString() })
+      const { display: target, index } = resolved
+      const buf = await ctx.captureDisplayPng(target, index)
       return encodeScreenCaptureDataUrl(buf, options ?? undefined, {
         target,
         viewport: { x: 0, y: 0, width: target.bounds.width, height: target.bounds.height },
@@ -1045,11 +1048,12 @@ function registerScreenCaptureHandlers(ctx: IpcContext): void {
     ) => {
       assertTrustedIpcSender(event)
       try {
-        const target = resolveDisplay(payload.displayIndex)
-        if (!target) {
+        const resolved = resolveDisplay(payload.displayIndex)
+        if (!resolved) {
           return null
         }
-        const buf: Buffer = await ctx.screenshotDesktop({ screen: target.id.toString() })
+        const { display: target, index } = resolved
+        const buf = await ctx.captureDisplayPng(target, index)
         return cropScreenshotToDataUrl(buf, target, payload)
       } catch (error) {
         logger.error('Region screenshot failed:', error)
@@ -1061,12 +1065,12 @@ function registerScreenCaptureHandlers(ctx: IpcContext): void {
   ipcMain.handle('screen:ocr', async (event, options?: { displayIndex?: number } | null) => {
     assertTrustedIpcSender(event)
     try {
-      const target = resolveDisplay(options?.displayIndex)
-      if (!target) {
+      const resolved = resolveDisplay(options?.displayIndex)
+      if (!resolved) {
         return null
       }
-
-      const buf: Buffer = await ctx.screenshotDesktop({ screen: target.id.toString() })
+      const { display: target, index } = resolved
+      const buf = await ctx.captureDisplayPng(target, index)
       const { body, boundary } = buildScreenshotMultipartBody(buf)
       const response = await fetch(`${resolvePythonApiOrigin()}/vision/ocr`, {
         method: 'POST',

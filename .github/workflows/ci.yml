@@ -30,7 +30,14 @@ jobs:
           cache: 'npm'
           cache-dependency-path: electron/package-lock.json
 
+      - uses: actions/setup-python@v5
+        if: runner.os == 'Linux'
+        with:
+          python-version: '3.12'
+
       - run: npm ci
+      - run: npm run install:runtime
+      - run: npm run start:check
       - run: npm run type-check
       - run: npm run lint
       - run: npm test
@@ -38,7 +45,19 @@ jobs:
       - name: Validate Linux launch scripts
         if: runner.os == 'Linux'
         working-directory: ${{ github.workspace }}
-        run: bash -n install_core.sh install_full.sh start.sh start_soulx_svc.sh scripts/run_backend_dev.sh
+        run: bash -n install_core.sh install_full.sh start.sh start_soulx_svc.sh scripts/check_linux_environment.sh scripts/run_backend_dev.sh scripts/smoke_linux_electron.sh
+      - name: Install Linux GUI runtime libraries
+        if: runner.os == 'Linux'
+        working-directory: ${{ github.workspace }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxtst6 xvfb xauth
+          sudo chown root electron/node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 electron/node_modules/electron/dist/chrome-sandbox
+      - name: Smoke test Linux Electron GUI
+        if: runner.os == 'Linux'
+        working-directory: ${{ github.workspace }}
+        run: xvfb-run -a env PYTHON_BIN=python scripts/smoke_linux_electron.sh
 
   node-mcp-test:
     name: Node MCP Test (Linux)

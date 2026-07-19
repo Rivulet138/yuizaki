@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, desktopCapturer } from 'electron'
 import path from 'path'
 import { ControlServer } from './control-server'
 import { Live2DWindow } from './live2d-window'
@@ -32,12 +32,9 @@ import {
   registerRendererProtocol,
   registerRendererProtocolPrivileges,
 } from './renderer-protocol'
+import { captureDisplayPng } from './desktop-capture'
 
 registerRendererProtocolPrivileges()
-
-// screenshot-desktop is CommonJS-only and does not publish TypeScript types.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const screenshotDesktop = require('screenshot-desktop') as (options?: any) => Promise<Buffer>
 
 let petWindow: PetWindow
 let live2dWindow: Live2DWindow
@@ -351,7 +348,11 @@ function setupIPC(): void {
     applyPetStateToRenderer,
     normalizePetPatch,
     dockPetToBottomRight,
-    screenshotDesktop,
+    captureDisplayPng: (display, displayIndex) => captureDisplayPng(
+      display,
+      displayIndex,
+      (options) => desktopCapturer.getSources(options),
+    ),
     pluginRegistry,
     backendApiToken: controlServer.getControlToken(),
     controlOrigin: controlServer.panelUrl.replace(/\/$/, ''),

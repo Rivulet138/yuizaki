@@ -13,6 +13,7 @@ from modules.pet_control import (
     filter_pet_control_payload,
     merge_messages_with_pet_control_prompt,
 )
+from modules.pet_control.parser import PET_CONTROL_SYSTEM_PROMPT
 
 
 def _control_context() -> dict[str, object]:
@@ -83,6 +84,12 @@ def test_pet_action_prompt_is_not_injected_twice() -> None:
 def test_pet_action_prompt_is_not_injected_without_avatar_context() -> None:
     messages = [{"role": "user", "content": "普通文本请求"}]
     assert merge_messages_with_pet_control_prompt(messages, None) == messages
+
+
+def test_pet_action_prompt_requires_current_visual_evidence_without_platform_lock_in() -> None:
+    assert "Windows 本地 AI 桌宠" not in PET_CONTROL_SYSTEM_PROMPT
+    assert "带来源和时间戳的视觉证据" in PET_CONTROL_SYSTEM_PROMPT
+    assert "不得把历史画面、OCR 文本或推测描述成实时所见" in PET_CONTROL_SYSTEM_PROMPT
 
 
 def test_avatar_manifest_prompt_and_identifiers_remain_source_labeled_json_data() -> None:
