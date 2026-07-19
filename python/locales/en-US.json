@@ -1,0 +1,11 @@
+{
+  "common": {
+    "success": "Success",
+    "save": "Save",
+    "cancel": "Cancel"
+  },
+  "errors": {
+    "invalidRequest": "Invalid request",
+    "networkError": "Network error"
+  }
+}

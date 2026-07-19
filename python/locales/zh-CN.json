@@ -1,0 +1,11 @@
+{
+  "common": {
+    "success": "??",
+    "save": "??",
+    "cancel": "??"
+  },
+  "errors": {
+    "invalidRequest": "????",
+    "networkError": "????"
+  }
+}

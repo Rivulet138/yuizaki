@@ -1,0 +1,11 @@
+{
+  "common": {
+    "success": "成功",
+    "save": "保存",
+    "cancel": "キャンセル"
+  },
+  "errors": {
+    "invalidRequest": "無効なリクエスト",
+    "networkError": "ネットワークエラー"
+  }
+}

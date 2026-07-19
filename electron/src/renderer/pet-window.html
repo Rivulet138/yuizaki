@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file: https:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:* https://api.openai.com https://api.deepseek.com; media-src 'self' data: blob: file: http://localhost:* http://127.0.0.1:*; worker-src 'self' blob:; object-src 'none'; base-uri 'self';" />
+  <link rel="icon" type="image/png" href="./yuizaki-icon.png" />
+  <title>Desktop Pet - Live2D</title>
+  <style>
+    @font-face {
+      font-family: 'ZenMaruGothic-Medium';
+      src: url('/assets/font/ZenMaruGothic-Medium.ttf') format('truetype');
+      font-style: normal;
+      font-weight: 500;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: '萝莉体 第二版';
+      src: url('/assets/font/loli.ttf') format('truetype');
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+    }
+
+    :root {
+      --yui-font-sans: 'ZenMaruGothic-Medium', '萝莉体 第二版', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      --yui-font-display: 'ZenMaruGothic-Medium', '萝莉体 第二版', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+      user-select: none;
+      font-family: var(--yui-font-sans);
+      font-feature-settings: 'palt' 1;
+      text-rendering: optimizeLegibility;
+    }
+
+    #pet-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .interact-mode #pet-canvas {
+      cursor: grab;
+    }
+
+    .interact-mode #pet-canvas:active {
+      cursor: grabbing;
+    }
+
+    button,
+    input,
+    textarea,
+    select {
+      font-family: var(--yui-font-sans);
+    }
+
+    .pet-notice {
+      position: fixed;
+      left: 10px;
+      bottom: 10px;
+      z-index: 80;
+      font-size: 12px;
+      color: #0f172a;
+      border-radius: 8px;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: rgba(255, 255, 255, 0.86);
+      padding: 6px 10px;
+      pointer-events: none;
+    }
+
+    .pet-quick-menu {
+      position: fixed;
+      z-index: 120;
+      display: none;
+      min-width: 136px;
+      padding: 6px;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      border-radius: 12px;
+      background: rgba(15, 23, 42, 0.78);
+      box-shadow: 0 18px 42px rgba(15, 23, 42, 0.28);
+      backdrop-filter: blur(14px);
+      pointer-events: auto;
+    }
+
+    .pet-quick-menu button {
+      width: 100%;
+      margin: 0;
+      padding: 7px 9px;
+      border: 0;
+      border-radius: 8px;
+      color: #e2e8f0;
+      background: transparent;
+      text-align: left;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .pet-quick-menu button:hover {
+      color: #fff;
+      background: rgba(125, 211, 252, 0.18);
+    }
+
+  </style>
+</head>
+<body>
+  <div id="pet-canvas"></div>
+  <script type="module" src="./pet-renderer.ts"></script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+{
+  "include": [
+    "python"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/.venv",
+    "**/site-packages",
+    "python/test_*.py",
+    "python/tests"
+  ],
+  "ignore": [
+    "python/alembic/**",
+    "python/.venv/**"
+  ],
+  "venvPath": "python",
+  "venv": ".venv",
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": [
+        "python"
+      ]
+    }
+  ],
+  "typeCheckingMode": "standard",
+  "pythonVersion": "3.13",
+  "reportGeneralTypeIssues": true,
+  "reportOptionalMemberAccess": true,
+  "reportOptionalSubscript": true,
+  "reportOptionalOperand": true,
+  "reportOptionalIterable": true,
+  "reportOptionalContextManager": true,
+  "reportTypedDictNotRequiredAccess": false,
+  "reportConstantRedefinition": true,
+  "reportInvalidTypeForm": true,
+  "reportIncompatibleMethodOverride": true,
+  "reportIncompatibleVariableOverride": true,
+  "reportInconsistentConstructor": true,
+  "reportImportCycles": "warning",
+  "reportUninitializedInstanceVariable": false,
+  "reportInvalidStringEscapeSequence": true,
+  "reportUnknownParameterType": false,
+  "reportUnknownVariableType": false,
+  "reportUnknownMemberType": false,
+  "reportUnknownLambdaType": false,
+  "reportUnknownArgumentType": false,
+  "reportPrivateUsage": false,
+  "reportPrivateImportUsage": false,
+  "reportInvalidTypeVarUse": true,
+  "reportUnsupportedDunderAll": true,
+  "reportUntypedBaseClass": false,
+  "reportUntypedNamedTuple": false,
+  "reportUnusedImport": "warning",
+  "reportUnusedClass": "warning",
+  "reportUnusedFunction": "warning",
+  "reportUnusedVariable": "warning",
+  "reportDuplicateImport": true,
+  "reportWildcardImportFromLibrary": true,
+  "reportAbstractUsage": true,
+  "reportMatchNotExhaustive": true,
+  "reportUnnecessaryIsInstance": false,
+  "reportUnnecessaryCast": true,
+  "reportUnnecessaryComparison": true,
+  "reportAssertAlwaysTrue": true,
+  "reportSelfClsParameterName": true,
+  "reportMissingSuperCall": false,
+  "reportPropertyTypeMismatch": true,
+  "reportMissingTypeStubs": false,
+  "reportMissingTypeArgument": false
+}

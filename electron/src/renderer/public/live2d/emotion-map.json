@@ -1,0 +1,47 @@
+{
+  "hiyori": {
+    "emotions": {
+      "happy": {
+        "label": "开心",
+        "motions": [
+          { "group": "Tap", "index": 0 },
+          { "group": "Tap", "index": 1 }
+        ]
+      },
+      "angry": {
+        "label": "生气",
+        "motions": [
+          { "group": "Flick@Body", "index": 0 },
+          { "group": "Flick", "index": 0 }
+        ]
+      },
+      "sad": {
+        "label": "难过",
+        "motions": [
+          { "group": "FlickDown", "index": 0 },
+          { "group": "Idle", "index": 2 }
+        ]
+      },
+      "surprised": {
+        "label": "惊讶",
+        "motions": [
+          { "group": "FlickUp", "index": 0 },
+          { "group": "Tap", "index": 0 }
+        ]
+      },
+      "shy": {
+        "label": "害羞",
+        "motions": [
+          { "group": "Idle", "index": 1 }
+        ]
+      },
+      "playful": {
+        "label": "调皮",
+        "motions": [
+          { "group": "Tap", "index": 1 },
+          { "group": "Idle", "index": 0 }
+        ]
+      }
+    }
+  }
+}

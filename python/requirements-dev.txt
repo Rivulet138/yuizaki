@@ -1,0 +1,17 @@
+# Development dependencies.
+# Install from python/: pip install -r requirements-dev.txt
+
+-r requirements.txt
+
+# Testing
+pytest>=9.0,<10
+pytest-asyncio>=1.4,<2
+pytest-cov>=7.1,<8
+
+# Code quality
+ruff>=0.15,<1
+black>=26,<27
+
+# Type checking
+basedpyright>=1.39,<2
+pyright>=1.1.410,<2

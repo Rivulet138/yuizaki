@@ -1,0 +1,40 @@
+{
+  "manifestVersion": 2,
+  "id": "example-manifest-plugin",
+  "name": "Example Manifest Plugin",
+  "version": "0.1.0",
+  "permissions": {
+    "routes": ["plugin-list-route"],
+    "toolScopes": ["example-tool-capability"],
+    "modelScopes": ["example-vrm-provider"],
+    "agentBridge": true
+  },
+  "execution": {
+    "maxExecutionTimeMs": 1500,
+    "maxConcurrentExecutions": 1,
+    "allowCancellation": true
+  },
+  "routes": [
+    {
+      "id": "plugin-list-route",
+      "namespace": "plugin",
+      "path": "/api/plugin/example-manifest-plugin/plugin-list-route",
+      "handler": "./routes/plugin-list-route.mjs"
+    }
+  ],
+  "modelProviders": [
+    {
+      "id": "example-vrm-provider",
+      "modelType": "vrm",
+      "name": "Example VRM Provider",
+      "assetPath": "providers/example-vrm-provider"
+    }
+  ],
+  "toolCapabilities": [
+    {
+      "id": "example-tool-capability",
+      "name": "示例工具能力",
+      "desc": "演示插件工具能力已被主进程扫描"
+    }
+  ]
+}

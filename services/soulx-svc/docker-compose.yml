@@ -1,0 +1,24 @@
+services:
+  soulx-svc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SOULX_REF: main
+    image: yuizaki/soulx-svc:local
+    ports:
+      - "7861:7861"
+    environment:
+      SOULX_DEVICE: auto
+      SOULX_FP16: "true"
+      SOULX_TARGET_VOCAL_SEP: "true"
+      SOULX_PROMPT_VOCAL_SEP: "false"
+      SOULX_AUTO_SHIFT: "true"
+      SOULX_STEPS: "32"
+      SOULX_CFG: "3.0"
+    volumes:
+      - ./models/SoulX-Singer:/models/SoulX-Singer:ro
+      - ./models/SoulX-Singer-Preprocess:/models/SoulX-Singer-Preprocess:ro
+      - ./references:/models/references:ro
+    # Uncomment when Docker Compose is backed by NVIDIA Container Toolkit.
+    # gpus: all

@@ -1,0 +1,148 @@
+{
+  "deepseek:deepseek-v4-flash": {
+    "vision": false,
+    "tools": true,
+    "structuredOutput": true,
+    "realtimeAudio": false,
+    "computerUse": false,
+    "latency": "fast",
+    "source": "registry",
+    "metadata": {
+      "canonicalModel": "deepseek-v4-flash",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 384000,
+      "lifecycle": "stable",
+      "pricing": { "inputPerMillionUsd": 0.14, "outputPerMillionUsd": 0.28, "cachedInputPerMillionUsd": 0.0028 },
+      "verifiedAt": "2026-07-17",
+      "documentationUrl": "https://api-docs.deepseek.com/quick_start/pricing"
+    }
+  },
+  "deepseek:deepseek-v4-pro": {
+    "vision": false,
+    "tools": true,
+    "structuredOutput": true,
+    "realtimeAudio": false,
+    "computerUse": false,
+    "latency": "deliberate",
+    "source": "registry",
+    "metadata": {
+      "canonicalModel": "deepseek-v4-pro",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 384000,
+      "lifecycle": "stable",
+      "pricing": { "inputPerMillionUsd": 0.435, "outputPerMillionUsd": 0.87, "cachedInputPerMillionUsd": 0.003625 },
+      "verifiedAt": "2026-07-17",
+      "documentationUrl": "https://api-docs.deepseek.com/quick_start/pricing"
+    }
+  },
+  "deepseek:deepseek-chat": {
+    "vision": false,
+    "tools": true,
+    "structuredOutput": true,
+    "realtimeAudio": false,
+    "computerUse": false,
+    "latency": "fast",
+    "source": "registry",
+    "metadata": {
+      "canonicalModel": "deepseek-v4-flash",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 384000,
+      "lifecycle": "deprecated",
+      "deprecationAt": "2026-07-24T15:59:00Z",
+      "pricing": { "inputPerMillionUsd": 0.14, "outputPerMillionUsd": 0.28, "cachedInputPerMillionUsd": 0.0028 },
+      "verifiedAt": "2026-07-17",
+      "documentationUrl": "https://api-docs.deepseek.com/quick_start/pricing"
+    }
+  },
+  "deepseek:deepseek-reasoner": {
+    "vision": false,
+    "tools": true,
+    "structuredOutput": true,
+    "realtimeAudio": false,
+    "computerUse": false,
+    "latency": "deliberate",
+    "source": "registry",
+    "metadata": {
+      "canonicalModel": "deepseek-v4-flash",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 384000,
+      "lifecycle": "deprecated",
+      "deprecationAt": "2026-07-24T15:59:00Z",
+      "pricing": { "inputPerMillionUsd": 0.14, "outputPerMillionUsd": 0.28, "cachedInputPerMillionUsd": 0.0028 },
+      "verifiedAt": "2026-07-17",
+      "documentationUrl": "https://api-docs.deepseek.com/quick_start/pricing"
+    }
+  },
+  "gemini:gemini-3.5-flash": {
+    "vision": true,
+    "tools": true,
+    "structuredOutput": true,
+    "realtimeAudio": false,
+    "computerUse": true,
+    "latency": "fast",
+    "source": "registry",
+    "metadata": {
+      "canonicalModel": "gemini-3.5-flash",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 65000,
+      "lifecycle": "stable",
+      "pricing": null,
+      "verifiedAt": "2026-07-19",
+      "documentationUrl": "https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash"
+    }
+  },
+  "gemini:gemini-3.1-flash-lite": {
+    "vision": true,
+    "tools": true,
+    "structuredOutput": true,
+    "realtimeAudio": false,
+    "computerUse": false,
+    "latency": "fast",
+    "source": "registry",
+    "metadata": {
+      "canonicalModel": "gemini-3.1-flash-lite",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 64000,
+      "lifecycle": "stable",
+      "pricing": { "inputPerMillionUsd": 0.25, "outputPerMillionUsd": 1.5, "note": "Text/image/video reference rate; audio input differs." },
+      "verifiedAt": "2026-07-19",
+      "documentationUrl": "https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite"
+    }
+  },
+  "gemini:gemini-3-flash-preview": {
+    "vision": true,
+    "tools": true,
+    "structuredOutput": true,
+    "realtimeAudio": false,
+    "computerUse": false,
+    "latency": "fast",
+    "source": "registry",
+    "metadata": {
+      "canonicalModel": "gemini-3-flash-preview",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 64000,
+      "lifecycle": "preview",
+      "pricing": { "inputPerMillionUsd": 0.5, "outputPerMillionUsd": 3 },
+      "verifiedAt": "2026-07-17",
+      "documentationUrl": "https://ai.google.dev/gemini-api/docs/gemini-3"
+    }
+  },
+  "gemini:gemini-3.1-pro-preview": {
+    "vision": true,
+    "tools": true,
+    "structuredOutput": true,
+    "realtimeAudio": false,
+    "computerUse": false,
+    "latency": "deliberate",
+    "source": "registry",
+    "metadata": {
+      "canonicalModel": "gemini-3.1-pro-preview",
+      "contextWindowTokens": 1000000,
+      "maxOutputTokens": 64000,
+      "lifecycle": "preview",
+      "pricing": { "inputPerMillionUsd": 2, "outputPerMillionUsd": 12, "note": "Standard tier rate up to 200K input tokens." },
+      "verifiedAt": "2026-07-17",
+      "documentationUrl": "https://ai.google.dev/gemini-api/docs/gemini-3"
+    }
+  }
+}

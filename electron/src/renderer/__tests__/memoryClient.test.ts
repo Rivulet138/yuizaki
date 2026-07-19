@@ -1,0 +1,154 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { CONTROL_ORIGIN, clearControlAuthToken } from '../api/clients/http-client'
+import { memoryClient } from '../api/clients/memory-client'
+
+describe('memoryClient', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    clearControlAuthToken()
+    window.sessionStorage.clear()
+  })
+
+  it('routes memory panel JSON requests through the Electron control server', async () => {
+    window.sessionStorage.setItem('yuizaki.control.token', 'memory-token')
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ docs: [], results: [], trace: {} }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await memoryClient.getDocs({ scope: 'workspace', workspaceId: 'default' })
+    await memoryClient.getIndexStatus()
+    await memoryClient.rebuildIndex()
+    await memoryClient.updateDoc('doc 1', { text: 'updated memory' })
+    await memoryClient.removeDocs(['doc 1', 'doc 2'])
+    await memoryClient.queryPipeline('hello', { workspaceId: 'default', topK: 3 })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      `${CONTROL_ORIGIN}/memory/docs?scope=workspace&workspace_id=default`,
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer memory-token' }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `${CONTROL_ORIGIN}/memory/index/status`,
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer memory-token' }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      `${CONTROL_ORIGIN}/memory/index/rebuild`,
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer memory-token' }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      `${CONTROL_ORIGIN}/memory/docs/doc%201`,
+      expect.objectContaining({
+        method: 'PUT',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer memory-token',
+          'Content-Type': 'application/json',
+        }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      `${CONTROL_ORIGIN}/memory/docs/batch-delete`,
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer memory-token',
+          'Content-Type': 'application/json',
+        }),
+        body: JSON.stringify({ ids: ['doc 1', 'doc 2'] }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      `${CONTROL_ORIGIN}/api/memory/pipeline/query?query=hello&top_k=3&workspace_id=default`,
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer memory-token' }),
+      }),
+    )
+  })
+
+  it('encodes memory document ids before using them in route paths', async () => {
+    window.sessionStorage.setItem('yuizaki.control.token', 'memory-token')
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ status: 'ok', id: 'folder/doc 1' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await memoryClient.updateDoc('folder/doc 1', { text: 'updated memory' })
+    await memoryClient.removeDoc('folder/doc 1')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      `${CONTROL_ORIGIN}/memory/docs/folder%2Fdoc%201`,
+      expect.objectContaining({ method: 'PUT' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `${CONTROL_ORIGIN}/memory/docs/folder%2Fdoc%201`,
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
+  it('maps maintenance preview and purge controls to explicit backend contracts', async () => {
+    window.sessionStorage.setItem('yuizaki.control.token', 'memory-token')
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ status: 'preview', summary: {}, candidates: [] }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const policy = {
+      scope: 'workspace',
+      workspace_id: 'default',
+      working_retention_days: 14,
+      low_quality_threshold: 0.55,
+      include_stale_working: true,
+      include_low_quality: true,
+      include_exact_duplicates: true,
+    }
+
+    await memoryClient.previewMaintenance(policy)
+    const previewToken = 'a'.repeat(64)
+    await memoryClient.applyMaintenance({
+      ...policy,
+      confirmation: 'PERMANENT_DELETE',
+      preview_token: previewToken,
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      `${CONTROL_ORIGIN}/memory/maintenance/preview`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify(policy),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `${CONTROL_ORIGIN}/memory/maintenance/apply`,
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer memory-token' }),
+        body: JSON.stringify({
+          ...policy,
+          confirmation: 'PERMANENT_DELETE',
+          preview_token: previewToken,
+        }),
+      }),
+    )
+  })
+})

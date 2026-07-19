@@ -1,0 +1,1 @@
+export const DEFAULT_VAD_MIN_SILENCE_MS = 300

@@ -1,0 +1,676 @@
+import { BrowserWindow, screen, type Rectangle, type WebContentsConsoleMessageEventParams, type Event } from 'electron'
+import fs from 'node:fs'
+import path from 'node:path'
+import {
+  type PetCompanionIdleProfile,
+  type PetControlConfigPatch,
+  type PetControlState,
+  type PetDisplayInfo,
+  type PetPlacement,
+} from '../shared/pet-control'
+import { logger } from './logger'
+import { resolveAppIcon } from './app-icon'
+import { hasVisibleAlpha } from './pet-alpha-hit-test'
+import {
+  configureTrustedNavigation,
+  resolveTrustedDevServerUrl,
+} from './trusted-renderer-url'
+import { buildPackagedRendererUrl } from './renderer-protocol'
+
+const getRendererLogPath = (): string =>
+  path.join(__dirname, '../../live2d-renderer.log')
+
+const writeRendererLog = (message: string, payload?: unknown): void => {
+  const prefix = `[${new Date().toISOString()}] ${message}`
+  const content =
+    payload === undefined
+      ? `${prefix}\n`
+      : `${prefix} ${JSON.stringify(payload, null, 2)}\n`
+
+  const logPath = getRendererLogPath()
+  fs.mkdirSync(path.dirname(logPath), { recursive: true })
+  fs.appendFileSync(logPath, content, 'utf8')
+}
+
+const TOPMOST_GUARD_INTERVAL_MS = 30000
+const RENDERER_RECOVERY_DELAY_MS = 1000
+
+type RendererConsoleLevel = 'debug' | 'info' | 'warning' | 'error'
+
+type PetRendererConfigPayload = PetControlConfigPatch
+
+interface PetWindowLayoutResult {
+  positionX: number | null
+  positionY: number | null
+  placement: PetPlacement
+  displayId: number
+}
+
+const clamp = (value: number, min: number, max: number): number =>
+  Math.min(max, Math.max(min, value))
+
+const normalizeRendererConsoleLevel = (level: unknown): RendererConsoleLevel => {
+  if (typeof level === 'number') {
+    if (level <= 0) {
+      return 'debug'
+    }
+    if (level === 2) {
+      return 'warning'
+    }
+    if (level >= 3) {
+      return 'error'
+    }
+    return 'info'
+  }
+
+  const value = String(level ?? 'info').toLowerCase()
+  if (value === 'verbose' || value === 'debug') {
+    return 'debug'
+  }
+  if (value === 'warning' || value === 'warn') {
+    return 'warning'
+  }
+  if (value === 'error') {
+    return 'error'
+  }
+  return 'info'
+}
+
+const logRendererConsoleMessage = (
+  levelName: RendererConsoleLevel,
+  message: string,
+  sourceId: string,
+  lineNumber: number,
+): void => {
+  const line = `[Live2DRenderer:${levelName}] ${message} (${sourceId}:${lineNumber})`
+  if (levelName === 'error') {
+    logger.error(line)
+    return
+  }
+  if (levelName === 'warning') {
+    logger.warn(line)
+    return
+  }
+  logger.info(line)
+}
+
+export class Live2DWindow {
+  private win: BrowserWindow | null = null
+  private allowClose = false
+  private interactMode = false
+  private locked = false
+  private clickThrough = true
+  private requestedMousePassthrough = false
+  private ignoreMouseEvents: boolean | null = null
+  private ignoreMouseEventsForward: boolean | null = null
+  private rendererLoaded = false
+  private lastPetConfig: PetRendererConfigPayload = {}
+  private lastCompanionIdleProfile: PetCompanionIdleProfile | null = null
+  private topMostGuardTimer: NodeJS.Timeout | null = null
+  private recoveryTimer: NodeJS.Timeout | null = null
+
+  create(controlOrigin = ''): BrowserWindow {
+    const primaryDisplay = screen.getPrimaryDisplay()
+    const workArea = primaryDisplay.workArea
+    const normalizedControlOrigin = controlOrigin.trim().replace(/\/$/, '')
+
+    this.win = new BrowserWindow({
+      width: workArea.width,
+      height: workArea.height,
+      x: workArea.x,
+      y: workArea.y,
+      show: false,
+      icon: resolveAppIcon(),
+      webPreferences: {
+        preload: path.join(__dirname, '../preload/live2d-preload.js'),
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+      },
+      transparent: true,
+      frame: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      focusable: true,
+      hasShadow: false,
+      resizable: false,
+      movable: false,
+      fullscreenable: false,
+      backgroundColor: '#00000000',
+    })
+
+    this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+
+    this.applyEffectiveMousePassthrough(true)
+    this.rendererLoaded = false
+    this.ensureTopMost()
+    this.startTopMostGuard()
+    configureTrustedNavigation(this.win.webContents)
+
+    const devServerUrl = resolveTrustedDevServerUrl(process.env['VITE_DEV_SERVER_URL'])
+    if (devServerUrl) {
+      const petWindowUrl = new URL('pet-window.html', devServerUrl)
+      if (normalizedControlOrigin) {
+        petWindowUrl.searchParams.set('control_origin', normalizedControlOrigin)
+      }
+      this.win.loadURL(petWindowUrl.toString())
+    } else {
+      this.win.loadURL(buildPackagedRendererUrl(
+        'pet-window.html',
+        normalizedControlOrigin ? { control_origin: normalizedControlOrigin } : undefined,
+      ))
+    }
+
+    writeRendererLog('session-start', {
+      mode: devServerUrl ? 'dev' : 'prod',
+      url: devServerUrl
+        ? new URL('pet-window.html', devServerUrl).toString()
+        : buildPackagedRendererUrl('pet-window.html'),
+      controlOrigin: normalizedControlOrigin,
+      window: { width: workArea.width, height: workArea.height },
+    })
+
+    this.win.webContents.on('did-finish-load', () => {
+      this.rendererLoaded = true
+      logger.info('[Live2DWindow] renderer loaded')
+      writeRendererLog('did-finish-load')
+      this.setLocked(this.locked)
+      this.setClickThrough(this.clickThrough)
+      this.win?.webContents.send('pet:interact-toggle', this.interactMode)
+      if (Object.keys(this.lastPetConfig).length > 0) {
+        this.sendToRenderer('pet:apply-config', this.lastPetConfig)
+        this.requestPetState()
+      }
+      if (this.lastCompanionIdleProfile) {
+        this.sendToRenderer('pet:companion-idle-profile', this.lastCompanionIdleProfile)
+      }
+    })
+
+    this.win.webContents.on(
+      'did-fail-load',
+      (_event, errorCode, errorDescription, validatedURL) => {
+        logger.error('[Live2DWindow] failed to load renderer:', {
+          errorCode,
+          errorDescription,
+          validatedURL,
+        })
+        writeRendererLog('did-fail-load', {
+          errorCode,
+          errorDescription,
+          validatedURL,
+        })
+        this.scheduleRendererRecovery('did-fail-load')
+      },
+    )
+
+    this.win.webContents.on('console-message', (details: Event<WebContentsConsoleMessageEventParams>) => {
+      const eventDetails = details as Event<WebContentsConsoleMessageEventParams> & Partial<WebContentsConsoleMessageEventParams>
+      const levelName = normalizeRendererConsoleLevel(eventDetails.level)
+      const message = String(eventDetails.message ?? '')
+      const lineNumber = eventDetails.lineNumber ?? 0
+      const sourceId = eventDetails.sourceId ?? ''
+
+      logRendererConsoleMessage(levelName, message, sourceId, lineNumber)
+      writeRendererLog('console-message', {
+        level: levelName,
+        message,
+        line: lineNumber,
+        sourceId,
+      })
+    })
+
+    this.win.webContents.on('render-process-gone', (_event, details) => {
+      logger.error('[Live2DWindow] renderer process gone:', details)
+      writeRendererLog('render-process-gone', details)
+      this.rendererLoaded = false
+      this.scheduleRendererRecovery('render-process-gone')
+    })
+
+    this.win.on('blur', () => {
+      this.ensureTopMost()
+    })
+
+    this.win.on('closed', () => {
+      this.stopTopMostGuard()
+      this.stopRendererRecovery()
+      this.win = null
+      this.rendererLoaded = false
+      this.allowClose = false
+    })
+
+    this.win.on('close', (event) => {
+      if (this.allowClose) {
+        return
+      }
+      event.preventDefault()
+      this.hide()
+    })
+
+    return this.win
+  }
+
+  get window(): BrowserWindow | null {
+    return this.win
+  }
+
+  get isInteracting(): boolean {
+    return this.interactMode
+  }
+
+  toggleInteract(): boolean {
+    this.interactMode = !this.interactMode
+    this.lastPetConfig = {
+      ...this.lastPetConfig,
+      interactMode: this.interactMode,
+    }
+
+    if (this.rendererLoaded) {
+      this.sendToRenderer('pet:interact-toggle', this.interactMode)
+    }
+
+    return this.interactMode
+  }
+
+  setInteractMode(enabled: boolean): void {
+    this.interactMode = Boolean(enabled)
+    this.lastPetConfig = {
+      ...this.lastPetConfig,
+      interactMode: this.interactMode,
+    }
+
+    if (this.rendererLoaded) {
+      this.sendToRenderer('pet:interact-toggle', this.interactMode)
+    }
+  }
+
+  setLocked(enabled: boolean): void {
+    this.locked = Boolean(enabled)
+    this.lastPetConfig = {
+      ...this.lastPetConfig,
+      locked: this.locked,
+    }
+    this.sendToRenderer('pet:apply-config', { locked: this.locked })
+  }
+
+  get isLocked(): boolean {
+    return this.locked
+  }
+
+  setClickThrough(enabled: boolean): void {
+    this.clickThrough = Boolean(enabled)
+    if (!this.clickThrough) {
+      this.requestedMousePassthrough = false
+    }
+    this.lastPetConfig = {
+      ...this.lastPetConfig,
+      clickThrough: this.clickThrough,
+    }
+    this.applyEffectiveMousePassthrough(true)
+    this.sendToRenderer('pet:apply-config', { clickThrough: this.clickThrough })
+  }
+
+  get isClickThrough(): boolean {
+    return this.clickThrough
+  }
+
+  setMousePassthrough(ignore: boolean, forward = true): void {
+    this.requestedMousePassthrough = Boolean(ignore)
+    this.applyEffectiveMousePassthrough(forward)
+  }
+
+  private applyEffectiveMousePassthrough(forward = true): void {
+    if (!this.win || this.win.isDestroyed()) {
+      return
+    }
+
+    const shouldIgnore = this.clickThrough || this.requestedMousePassthrough
+    const shouldForward = shouldIgnore ? Boolean(forward) : false
+
+    if (this.ignoreMouseEvents === shouldIgnore && this.ignoreMouseEventsForward === shouldForward) {
+      return
+    }
+
+    this.win.setIgnoreMouseEvents(
+      shouldIgnore,
+      shouldIgnore ? { forward: shouldForward } : undefined,
+    )
+
+    if (shouldIgnore && this.win.isFocused()) {
+      this.win.blur()
+    } else if (!shouldIgnore && !this.win.isFocused()) {
+      this.win.focus()
+    }
+
+    this.ignoreMouseEvents = shouldIgnore
+    this.ignoreMouseEventsForward = shouldForward
+
+    writeRendererLog('mouse-passthrough', {
+      ignore: shouldIgnore,
+      forward: shouldForward,
+      interactMode: this.interactMode,
+      clickThrough: this.clickThrough,
+      locked: this.locked,
+    })
+  }
+
+  moveTo(x?: number, y?: number, duration: number = 300): { x: number; y: number } | null {
+    if (!this.win || this.win.isDestroyed()) {
+      return null
+    }
+
+    const bounds = this.win.getBounds()
+    if (this.locked) {
+      return { x: bounds.x, y: bounds.y }
+    }
+    const targetX = x ?? bounds.x
+    const targetY = y ?? bounds.y
+
+    if (duration <= 0) {
+      this.win.setBounds({ x: targetX, y: targetY, width: bounds.width, height: bounds.height })
+      return { x: targetX, y: targetY }
+    }
+
+    const startX = bounds.x
+    const startY = bounds.y
+    const startTime = Date.now()
+
+    const animate = () => {
+      if (!this.win || this.win.isDestroyed()) {
+        return
+      }
+
+      const elapsed = Date.now() - startTime
+      const progress = Math.min(elapsed / duration, 1)
+      const eased = this.easeInOutCubic(progress)
+
+      const currentX = Math.round(startX + (targetX - startX) * eased)
+      const currentY = Math.round(startY + (targetY - startY) * eased)
+
+      this.win.setBounds({ x: currentX, y: currentY, width: bounds.width, height: bounds.height })
+
+      if (progress < 1) {
+        setTimeout(animate, 16)
+      }
+    }
+
+    animate()
+    return { x: targetX, y: targetY }
+  }
+
+  setScale(scale: number): void {
+    this.lastPetConfig = {
+      ...this.lastPetConfig,
+      scale,
+    }
+
+    this.sendToRenderer('pet:apply-config', { scale })
+  }
+
+  setOpacity(opacity: number): void {
+    if (!this.win || this.win.isDestroyed()) {
+      return
+    }
+    this.win.setOpacity(opacity)
+    this.sendToRenderer('pet:apply-config', { opacity })
+  }
+
+  getDisplays(): PetDisplayInfo[] {
+    const primaryId = screen.getPrimaryDisplay().id
+    return screen.getAllDisplays()
+      .sort((a, b) => a.bounds.x === b.bounds.x ? a.bounds.y - b.bounds.y : a.bounds.x - b.bounds.x)
+      .map((display, index) => ({
+        id: display.id,
+        label: `屏幕 ${index + 1}`,
+        primary: display.id === primaryId,
+        bounds: {
+          x: display.bounds.x,
+          y: display.bounds.y,
+          width: display.bounds.width,
+          height: display.bounds.height,
+        },
+        workArea: {
+          x: display.workArea.x,
+          y: display.workArea.y,
+          width: display.workArea.width,
+          height: display.workArea.height,
+        },
+      }))
+  }
+
+  private easeInOutCubic(t: number): number {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+  }
+
+  show(): void {
+    this.win?.show()
+    this.ensureTopMost()
+  }
+
+  hide(): void {
+    this.win?.hide()
+  }
+
+  close(): void {
+    this.stopTopMostGuard()
+    this.stopRendererRecovery()
+    this.allowClose = true
+    this.win?.close()
+  }
+
+  applyPetConfig(config: PetRendererConfigPayload): void {
+    this.lastPetConfig = {
+      ...this.lastPetConfig,
+      ...config,
+    }
+
+    this.sendToRenderer('pet:apply-config', this.lastPetConfig)
+  }
+
+  applyCompanionIdleProfile(profile: PetCompanionIdleProfile): void {
+    this.lastCompanionIdleProfile = { ...profile }
+    this.sendToRenderer('pet:companion-idle-profile', this.lastCompanionIdleProfile)
+  }
+
+  applyWindowLayout(state: PetControlState): PetWindowLayoutResult | null {
+    if (!this.win || this.win.isDestroyed()) {
+      return null
+    }
+
+    const currentBounds = this.win.getBounds()
+    const displayInfo = this.resolveDisplay(state.displayId)
+    const display = displayInfo.workArea
+    if (
+      currentBounds.x !== display.x ||
+      currentBounds.y !== display.y ||
+      currentBounds.width !== display.width ||
+      currentBounds.height !== display.height
+    ) {
+      this.win.setBounds({ x: display.x, y: display.y, width: display.width, height: display.height }, false)
+    }
+
+    return {
+      positionX: state.positionX,
+      positionY: state.positionY,
+      placement: state.placement,
+      displayId: displayInfo.id,
+    }
+  }
+
+  moveBy(deltaX: number, deltaY: number): { x: number; y: number } | null {
+    if (!this.win || this.win.isDestroyed()) {
+      return null
+    }
+
+    if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) {
+      const currentBounds = this.win.getBounds()
+      return { x: currentBounds.x, y: currentBounds.y }
+    }
+
+    const currentBounds = this.win.getBounds()
+    if (this.locked) {
+      return { x: currentBounds.x, y: currentBounds.y }
+    }
+    const nextBounds = this.clampBounds(
+      currentBounds.x + Math.round(deltaX),
+      currentBounds.y + Math.round(deltaY),
+      currentBounds.width,
+      currentBounds.height,
+    )
+
+    if (currentBounds.x !== nextBounds.x || currentBounds.y !== nextBounds.y) {
+      this.win.setPosition(nextBounds.x, nextBounds.y, false)
+    }
+
+    return { x: nextBounds.x, y: nextBounds.y }
+  }
+
+  getBounds(): Rectangle | null {
+    if (!this.win || this.win.isDestroyed()) {
+      return null
+    }
+
+    return this.win.getBounds()
+  }
+
+  requestPetState(): void {
+    this.sendToRenderer('pet:request-state')
+  }
+
+  async hasVisiblePixelAt(x: number, y: number, alphaThreshold = 8): Promise<boolean> {
+    if (!this.win || this.win.isDestroyed()) {
+      return false
+    }
+
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return false
+    }
+
+    const bounds = this.win.getBounds()
+    const localX = clamp(Math.round(x), 0, Math.max(0, bounds.width - 1))
+    const localY = clamp(Math.round(y), 0, Math.max(0, bounds.height - 1))
+
+    try {
+      const image = await this.win.webContents.capturePage({ x: localX, y: localY, width: 1, height: 1 })
+      return hasVisibleAlpha(image.toBitmap(), alphaThreshold)
+    } catch (error) {
+      logger.warn('[Live2DWindow] alpha hit test failed:', error)
+      return true
+    }
+  }
+
+  async hasVisiblePixels(alphaThreshold = 8): Promise<boolean> {
+    if (!this.win || this.win.isDestroyed() || !this.win.isVisible()) {
+      return false
+    }
+
+    const bounds = this.win.getBounds()
+    if (bounds.width <= 0 || bounds.height <= 0) {
+      return false
+    }
+
+    try {
+      const image = await this.win.webContents.capturePage({
+        x: 0,
+        y: 0,
+        width: bounds.width,
+        height: bounds.height,
+      })
+      return hasVisibleAlpha(image.toBitmap(), alphaThreshold)
+    } catch (error) {
+      logger.warn('[Live2DWindow] alpha visibility scan failed:', error)
+      return true
+    }
+  }
+
+  reloadRenderer(): void {
+    if (!this.win || this.win.isDestroyed()) {
+      return
+    }
+
+    this.rendererLoaded = false
+    this.win.webContents.reloadIgnoringCache()
+  }
+
+  sendToRenderer(channel: string, data?: unknown): void {
+    if (this.win && !this.win.isDestroyed() && this.rendererLoaded) {
+      this.win.webContents.send(channel, data)
+    }
+  }
+
+  private ensureTopMost(): void {
+    if (!this.win || this.win.isDestroyed()) {
+      return
+    }
+
+    if (!this.win.isAlwaysOnTop()) {
+      this.win.setAlwaysOnTop(true, 'screen-saver')
+    }
+  }
+
+  private startTopMostGuard(): void {
+    this.stopTopMostGuard()
+    this.topMostGuardTimer = setInterval(() => {
+      this.ensureTopMost()
+    }, TOPMOST_GUARD_INTERVAL_MS)
+  }
+
+  private stopTopMostGuard(): void {
+    if (this.topMostGuardTimer) {
+      clearInterval(this.topMostGuardTimer)
+      this.topMostGuardTimer = null
+    }
+  }
+
+  private scheduleRendererRecovery(reason: string): void {
+    if (this.allowClose || !this.win || this.win.isDestroyed()) {
+      return
+    }
+
+    this.stopRendererRecovery()
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = null
+      logger.warn(`[Live2DWindow] recovering renderer after ${reason}`)
+      writeRendererLog('renderer-recovery', { reason })
+      this.reloadRenderer()
+    }, RENDERER_RECOVERY_DELAY_MS)
+  }
+
+  private stopRendererRecovery(): void {
+    if (this.recoveryTimer) {
+      clearTimeout(this.recoveryTimer)
+      this.recoveryTimer = null
+    }
+  }
+
+  private clampBounds(x: number, y: number, width: number, height: number): Rectangle {
+    const display = screen.getDisplayNearestPoint({
+      x: Math.round(x + width / 2),
+      y: Math.round(y + height / 2),
+    })
+    const area = display.workArea
+
+    const minX = area.x
+    const maxX = area.x + Math.max(0, area.width - width)
+    const minY = area.y
+    const maxY = area.y + Math.max(0, area.height - height)
+
+    return {
+      x: clamp(Math.round(x), minX, maxX),
+      y: clamp(Math.round(y), minY, maxY),
+      width,
+      height,
+    }
+  }
+
+  private resolveDisplay(displayId: number | null | undefined) {
+    const displays = screen.getAllDisplays()
+    if (typeof displayId === 'number' && Number.isFinite(displayId)) {
+      const matched = displays.find((display) => display.id === displayId)
+      if (matched) {
+        return matched
+      }
+    }
+    return screen.getPrimaryDisplay()
+  }
+
+}
