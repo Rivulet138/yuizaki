@@ -2,7 +2,7 @@ FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG SOULX_REPO=https://github.com/Soul-AILab/SoulX-Singer.git
-ARG SOULX_REF=main
+ARG SOULX_REF=81aeb3ae772c70093c3de74dc23c92d983801ae4
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -27,6 +27,9 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel \
 
 COPY server.py /opt/soulx-service/server.py
 
+RUN useradd --create-home --shell /usr/sbin/nologin soulx \
+    && chown -R soulx:soulx /opt/SoulX-Singer /opt/soulx-service
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/opt/SoulX-Singer \
     SOULX_ROOT=/opt/SoulX-Singer \
@@ -37,4 +40,5 @@ ENV PYTHONUNBUFFERED=1 \
     SOULX_PORT=7861
 
 EXPOSE 7861
+USER soulx
 CMD ["python3", "/opt/soulx-service/server.py"]

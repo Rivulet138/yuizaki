@@ -1,92 +1,74 @@
 # 资源管理
 
-本文定义模型、缓存、数据库、备份与永久清理的实际行为。删除操作均为永久删除，不提供软删除兼容层。
+运行时 Python 依赖版本由平台 lock 文件固定；模型质量指标和 smoke fixture 见 [MODEL_EVALUATION.md](MODEL_EVALUATION.md)。
 
-## 资源分类
+## 数据位置
 
-| 类型 | 默认位置 | 生命周期 | 是否备份 |
-| --- | --- | --- | --- |
-| 对话库 | `python/data/chat.db` | 持久 | 是 |
-| 长期记忆 | `python/data/memory.db` | 持久 | 是 |
-| 设置 | `python/config/settings.json` | 持久 | 是 |
-| TTS 音频 | `python/audio_cache/` | 临时 | 当前备份包含 |
-| 实时视觉帧 | 进程内存 | 会话级，默认 TTL 60 秒 | 否 |
-| OCR 上传 | 请求内存 | 请求级 | 否 |
-| Electron 依赖 | `electron/node_modules/` | 可重建 | 否 |
-| Python 环境 | `python/.venv/` | 可重建 | 否 |
-| Hugging Face/模型缓存 | `python/.cache/` 等 | 可重下 | 否 |
-| 桌宠模型 | 内置资源或受管导入目录 | 持久 | 导入目录按功能管理 |
+| 资源 | 默认位置 | 保留方式 |
+| --- | --- | --- |
+| 对话 | `python/data/chat.db` | 持久 |
+| 长期记忆 | `python/data/memory.db` | 持久 |
+| 设置 | `python/config/settings.json` | 持久 |
+| TTS 音频 | `python/audio_cache/` | 临时 |
+| 实时视觉帧 | 内存 | 会话级 |
+| Electron 依赖 | `electron/node_modules/` | 可重建 |
+| Python 环境 | `python/.venv/` | 可重建 |
+| 模型缓存 | 受管模型目录 | 可重新下载 |
 
-自定义 `MEMORY_SQLITE_PATH` 指向仓库外时，不会被默认备份自动发现。生产使用自定义路径时必须配置外部备份。
+## 模型下载
 
-## 按需下载
+模型默认不随核心安装包分发。首次启用能力或在资源页勾选后下载。
 
-资源管理器识别 `soulx`、`sherpa`、`sherpa_online`、`embedding` 和 `tts`。第一次调用能力或用户在设置中手动准备时下载；同一资源的并发准备请求会合并。
+| 资源 | 固定版本 | 下载量 | 授权 | 校验 |
+| --- | --- | ---: | --- | --- |
+| Sherpa SenseVoice | `2025-09-09-int8` | 158 MiB | FunASR Model License | SHA-256；仅显式选择 SenseVoice 时准备 |
+| Sherpa Streaming Zipformer | `2025-04-01-int8` | 20 MiB | Apache-2.0 | SHA-256 + 加载验证；默认 ASR |
+| Qwen3 Embedding 0.6B | `97b0c614be4d` | 1.12 GiB | Apache-2.0 | Hugging Face commit |
+| Genie TTS | `2.0.2` / `52b17272e0b7` | 约 391 MiB | MIT | Python 包版本 + Hugging Face commit |
+| SoulX Singer SVC | `2026-02` | 约 9.04 GiB | Apache-2.0 | Hugging Face/Git commit |
 
-当前 ready 判断主要基于文件存在与模型加载验证。后续必须升级为资源锁：固定 revision、SHA-256、许可证、体积、平台和状态。未通过校验的部分下载不得标记 ready。
+CrossEncoder reranker（默认关闭）不属于首次资源准备；启用后由 Sentence Transformers 按需加载 `MEMORY_RERANKER_MODEL`，先使用 embedding 召回候选再重排。
 
-## 自动清理
+权威元数据位于 `resources.lock.json`。自定义嵌入模型不继承默认模型的授权和 revision 状态。
 
-Python janitor 默认每 600 秒运行一次，只删除超过 1800 秒的受管生成文件：
+## 永久清理
 
-- `python/audio_cache/*.wav`
-- Yuizaki 命名的预热与 SVC 临时音频
+可清理项目：
 
-它不会删除用户任意音频、数据库、模型缓存或实时视觉 PNG。实时视觉本身不写 PNG，只在内存中替换每个会话的最新帧。
+- TTS 临时音频
+- 运行时临时文件
+- 不再使用的模型资源
+- 导入的 Live2D/VRM 模型
+- 对话、记忆和工作区数据
 
-## 手动永久清理
+数据库压缩不等于删除记忆。删除记忆必须使用明确的永久删除操作。
 
-`GET /api/system/storage` 返回类别、大小和文件数。`POST /api/system/storage/cleanup` 使用固定确认词 `PERMANENT_CLEAN`，可处理：
+模型卸载直接删除受管资源，不进入回收站或软删除区。正在下载的模型必须先取消；参考音频、导入角色和仓库外自定义模型不随模型卸载删除。
 
-- `tts_audio`：永久删除受管 TTS 音频文件
-- `runtime_temp`：永久删除受管运行时临时文件
-- `memory`：压缩 SQLite/Qdrant 存储，不删除记忆记录
+Sherpa 下载显示实际字节与百分比，并在受管模型目录的 `.download` 中保留可续传 `.part` 文件和 JSON 日志。再次下载时使用 HTTP Range；服务器忽略 Range 时重新覆盖，SHA-256 失败时永久删除损坏断点，安装完成后删除下载文件。模型永久卸载会一并删除断点和日志。
 
-`visual_frames` 始终是内存状态，不存在磁盘清理动作。实现会跳过符号链接，避免越过受管目录。
+Hugging Face 和 Genie 下载复用磁盘缓存；重启后显示已缓存字节，不生成虚假百分比。Windows 取消会终止任务进程树，Linux 与 macOS 会终止独立进程组。
 
-## 备份与恢复
+Genie 共享资源位于 `python/.cache/GenieData/`，预定义角色位于 `python/CharacterModels/v2ProPlus/<角色>/`。卸载 Genie 会永久删除共享资源、当前预定义角色、仓库缓存、下载元数据和仓库锁目录，不删除 `genie_model_dir` 指向的自定义模型。
 
-默认备份目标：
+资源失败返回稳定错误码：`cancelled`、`network_timeout`、`network_unreachable`、`authentication_required`、`disk_full`、`integrity_failed`、`dependency_failed`、`unknown`。`retryable` 标识可直接重试的网络、取消和完整性错误。
 
-- `python/data/chat.db`
-- `python/data/memory.db`
-- `python/config/settings.json`
-- `python/data/governance_alert_state.json`
-- `python/audio_cache/`
-- Electron `pet-state.json`
-- `electron/plugins/`
+## 备份
 
-恢复默认先生成 dry-run 计划；执行恢复时会拒绝受管根目录外路径、符号链接目标和被替换成符号链接的父目录。
+默认备份包含：
 
-模型资源不进入备份，原因是体积大且应由资源锁重建。角色资源的授权文件不可在清理时单独丢弃。
+- 对话数据库
+- 长期记忆数据库
+- 设置
+- 桌宠状态
+- 插件
+- 治理状态
 
-## 本次磁盘取证
+模型、依赖目录和仓库外自定义数据库不进入默认备份。
 
-本机开发目录抽样：
+## 边界
 
-| 路径 | 占用 |
-| --- | ---: |
-| `python/.cache` | 约 3.00 GiB |
-| `python/.venv` | 约 2.79 GiB |
-| `electron/node_modules` | 约 731 MiB |
-| `python/CharacterModels` | 约 321 MiB |
-| `electron/dist` | 约 33 MiB |
-| `node-mcp/node_modules` | 约 19 MiB |
-
-这些目录合计超过 7 GiB，但大部分可重建且已被 Git 忽略。清理建议顺序：
-
-1. 使用界面清理 TTS 和运行时临时文件。
-2. 确认无运行进程后删除并重建陈旧 `node_modules`。
-3. 按模型 ID 删除不再使用的缓存，不能整库盲删。
-4. 虚拟环境损坏或跨 Python 版本时删除并重建 `.venv`。
-5. 保留数据库备份后再执行数据库维护。
-
-## 尚缺的资源功能
-
-P0：增加统一资源清单和内容校验；固定 SoulX 与 Hugging Face revision；验证 Sherpa 归档 SHA-256。
-
-P1：设置页展示资源体积、版本、许可证、使用方、最后使用时间，并提供带依赖检查的永久卸载。
-
-P1：为模型缓存设置可选磁盘预算和 LRU 提示，但不自动删除正在使用的模型。
-
-P2：发布构建生成资源 SBOM，将模型、代码依赖和角色素材分开列示。
+- 不清空仓库外的 Hugging Face 缓存。
+- 不保存默认屏幕截图历史。
+- 不删除未归属到受管根目录的文件。
+- 模型、角色和参考音频分别清理。

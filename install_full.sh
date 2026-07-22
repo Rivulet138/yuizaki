@@ -19,7 +19,9 @@ if [[ ! -x "$ROOT/python/.venv/bin/python" ]]; then
 fi
 PYTHON="$ROOT/python/.venv/bin/python"
 "$PYTHON" -m pip install --upgrade pip
-"$PYTHON" -m pip install -r "$ROOT/python/requirements.txt"
+"$PYTHON" -m pip install -r "$ROOT/python/requirements-lock-linux.txt"
+"$PYTHON" -m pip check
+"$PYTHON" "$ROOT/python/scripts/check_installed_lock.py" --lock requirements-lock-linux.txt
 
 if [[ ! -f "$ROOT/python/.env" ]]; then
 	cp "$ROOT/python/.env.example" "$ROOT/python/.env"

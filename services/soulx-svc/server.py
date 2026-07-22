@@ -4,9 +4,9 @@ import asyncio
 import base64
 import os
 import random
+import re
 import shutil
 import sys
-import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +30,12 @@ AUTO_MIX_ACC = os.getenv("SOULX_AUTO_MIX_ACC", "false").strip().lower() in {"1",
 DEFAULT_STEPS = int(os.getenv("SOULX_STEPS", "32"))
 DEFAULT_CFG = float(os.getenv("SOULX_CFG", "3.0"))
 DEFAULT_SEED = int(os.getenv("SOULX_SEED", "0"))
+MAX_UPLOAD_BYTES = max(1, int(os.getenv("SOULX_MAX_UPLOAD_BYTES", str(50 * 1024 * 1024))))
+MAX_STEPS = max(1, int(os.getenv("SOULX_MAX_STEPS", "128")))
+MAX_CFG = max(1.0, float(os.getenv("SOULX_MAX_CFG", "20")))
+MAX_PITCH = max(1, int(os.getenv("SOULX_MAX_PITCH", "24")))
+REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+SPEAKER_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 
 
 def _resolve_model_path() -> Path:
@@ -129,6 +135,8 @@ class SoulXSvcRuntime:
 
     def reference_for(self, speaker_id: str) -> ReferenceAudio:
         normalized = speaker_id.strip() or "0"
+        if not SPEAKER_ID_RE.fullmatch(normalized):
+            raise HTTPException(status_code=400, detail="invalid speaker_id")
         candidates = [
             REFERENCE_DIR / normalized,
             REFERENCE_DIR / f"{normalized}.wav",
@@ -261,12 +269,45 @@ async def convert(
     if runtime is None:
         raise HTTPException(status_code=503, detail="SoulX runtime is not initialized")
 
-    request_id = generation_id.strip() or uuid.uuid4().hex
-    session_dir = WORK_DIR / "requests" / request_id
+    if n_steps < 1 or n_steps > MAX_STEPS:
+        raise HTTPException(status_code=422, detail=f"n_steps must be between 1 and {MAX_STEPS}")
+    if not 0 <= cfg <= MAX_CFG:
+        raise HTTPException(status_code=422, detail=f"cfg must be between 0 and {MAX_CFG}")
+    selected_pitch = int(f0_shift if f0_shift is not None else pitch)
+    if abs(selected_pitch) > MAX_PITCH:
+        raise HTTPException(status_code=422, detail=f"pitch must be between {-MAX_PITCH} and {MAX_PITCH}")
+
+    request_id = generation_id.strip()
+    if not REQUEST_ID_RE.fullmatch(request_id):
+        request_id = uuid.uuid4().hex
+    request_root = (WORK_DIR / "requests").resolve()
+    session_dir = (request_root / request_id).resolve()
+    if not session_dir.is_relative_to(request_root):
+        raise HTTPException(status_code=400, detail="invalid generation_id")
+    request_root.mkdir(parents=True, exist_ok=True)
     session_dir.mkdir(parents=True, exist_ok=True)
     suffix = Path(file.filename or "input.wav").suffix or ".wav"
     target_audio = session_dir / f"target{suffix}"
-    target_audio.write_bytes(await file.read())
+    content_length = file.headers.get("content-length")
+    try:
+        if content_length:
+            try:
+                declared_length = int(content_length)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="invalid content-length") from exc
+            if declared_length > MAX_UPLOAD_BYTES:
+                raise HTTPException(status_code=413, detail=f"uploaded audio exceeds {MAX_UPLOAD_BYTES} bytes")
+        total_bytes = 0
+        with target_audio.open("wb") as handle:
+            while chunk := await file.read(1024 * 1024):
+                total_bytes += len(chunk)
+                if total_bytes > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail=f"uploaded audio exceeds {MAX_UPLOAD_BYTES} bytes")
+                handle.write(chunk)
+    except Exception:
+        if session_dir.exists() and session_dir.is_relative_to(request_root):
+            shutil.rmtree(session_dir, ignore_errors=True)
+        raise
 
     try:
         async with runtime_lock:
@@ -274,7 +315,7 @@ async def convert(
                 runtime.convert,
                 target_audio_path=target_audio,
                 speaker_id=speaker_id,
-                pitch_shift=int(f0_shift if f0_shift is not None else pitch),
+                pitch_shift=selected_pitch,
                 auto_shift=_bool_form(auto_shift, AUTO_SHIFT),
                 prompt_vocal_sep=_bool_form(prompt_vocal_sep, PROMPT_VOCAL_SEP),
                 target_vocal_sep=_bool_form(target_vocal_sep, TARGET_VOCAL_SEP),
@@ -289,7 +330,8 @@ async def convert(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     finally:
-        shutil.rmtree(session_dir, ignore_errors=True)
+        if session_dir.exists() and session_dir.is_relative_to(request_root):
+            shutil.rmtree(session_dir, ignore_errors=True)
 
     if response_format.strip().lower() == "json":
         return JSONResponse({
@@ -297,7 +339,7 @@ async def convert(
             "provider": "soulx-service",
             "audio_base64": base64.b64encode(audio_bytes).decode("ascii"),
             "speaker_id": speaker_id,
-            "pitch": int(f0_shift if f0_shift is not None else pitch),
+            "pitch": selected_pitch,
         })
     return Response(content=audio_bytes, media_type="audio/wav")
 
@@ -305,4 +347,4 @@ async def convert(
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host=os.getenv("SOULX_HOST", "0.0.0.0"), port=int(os.getenv("SOULX_PORT", "7861")))
+    uvicorn.run(app, host=os.getenv("SOULX_HOST", "127.0.0.1"), port=int(os.getenv("SOULX_PORT", "7861")))

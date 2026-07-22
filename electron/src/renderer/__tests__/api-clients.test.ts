@@ -66,6 +66,33 @@ describe('api clients', () => {
     )
   })
 
+  it('uses JSON contracts for resource preparation, cancellation, and permanent removal', async () => {
+    window.sessionStorage.setItem('yuizaki.control.token', 'resource-token')
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ success: true, cancelled: [], removed: [], failed: [], status: {} }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await resourceClient.prepare(['sherpa_online'])
+    await resourceClient.cancel(['sherpa_online'])
+    await resourceClient.remove(['sherpa_online'])
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, `${CONTROL_ORIGIN}/api/system/resources/prepare`, expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ resources: ['sherpa_online'] }),
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, `${CONTROL_ORIGIN}/api/system/resources/cancel`, expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ resources: ['sherpa_online'] }),
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(3, `${CONTROL_ORIGIN}/api/system/resources/remove`, expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ resources: ['sherpa_online'], confirmation: 'PERMANENT_REMOVE' }),
+    }))
+  })
+
   it('sends permanent storage cleanup through the unified backend route', async () => {
     window.sessionStorage.setItem('yuizaki.control.token', 'storage-token')
     const fetchMock = vi.fn().mockResolvedValue({

@@ -201,7 +201,7 @@ const defaultVoiceConfig: Pick<SettingsResponse, 'tts' | 'asr' | 'svc'> = {
     provider: 'genie-tts',
   },
   asr: {
-    provider: 'sensevoice-service',
+    provider: 'sherpa-onnx-online',
     base_url: '',
     api_key: '',
     timeout: 60,

@@ -39,6 +39,7 @@ const state = reactive<SettingsState>({
     vision_api_key: '',
     vision_model: '',
     vision_timeout: 30,
+    vision_detail: 'low' as 'low' | 'high' | 'auto' | 'original',
     profiles: {},
   },
   tts: {
@@ -55,7 +56,7 @@ const state = reactive<SettingsState>({
     provider: 'genie-tts',
   },
   asr: {
-    provider: 'sensevoice-service',
+    provider: 'sherpa-onnx-online',
     base_url: '',
     api_key: '',
     timeout: 60,
@@ -102,6 +103,9 @@ const state = reactive<SettingsState>({
     qdrant_docker_container: 'yuizaki-qdrant',
     qdrant_docker_volume: 'yuizaki-qdrant-storage',
     embedding_model: DEFAULT_EMBEDDING_MODEL,
+    reranker_enabled: false,
+    reranker_model: 'BAAI/bge-reranker-v2-m3',
+    reranker_candidate_count: 32,
   },
   loading: false,
   error: null,

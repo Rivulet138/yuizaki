@@ -37,6 +37,8 @@ class LLMServiceConfig(Protocol):
     def vision_model(self) -> str: ...
     @property
     def vision_timeout(self) -> float: ...
+    @property
+    def vision_detail(self) -> str: ...
 
 
 class TTSServiceConfig(Protocol):
@@ -175,6 +177,7 @@ async def initialize_vision_llm(service_config: ServiceConfig, logger: logging.L
         llm.vision_model,
         llm.vision_timeout,
         provider=llm.vision_provider,
+        image_detail=llm.vision_detail,
     )
     await client.connect()
     logger.info("Vision LLM client initialized (provider=%s, model=%s)", llm.vision_provider, llm.vision_model)
@@ -267,7 +270,7 @@ async def initialize_asr(service_config: ServiceConfig, logger: logging.Logger) 
                 tokens_path=service_config.asr.sherpa_tokens_path,
                 num_threads=service_config.asr.sherpa_num_threads,
                 provider=service_config.asr.sherpa_provider,
-            language=service_config.asr.language,
+                language=service_config.asr.language,
             )
         elif provider == "sherpa-onnx":
             sensevoice_client = SherpaOnnxSenseVoiceClient(
@@ -275,7 +278,7 @@ async def initialize_asr(service_config: ServiceConfig, logger: logging.Logger) 
                 tokens_path=service_config.asr.sherpa_tokens_path,
                 num_threads=service_config.asr.sherpa_num_threads,
                 provider=service_config.asr.sherpa_provider,
-            language=service_config.asr.language,
+                language=service_config.asr.language,
             )
         else:
             sensevoice_client = SenseVoiceClient(

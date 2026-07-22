@@ -3,6 +3,8 @@
 .gitattributes text eol=lf
 .editorconfig text eol=lf
 LICENSE text eol=lf
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
@@ -21,6 +23,7 @@ LICENSE text eol=lf
 *.yaml text eol=lf
 *.toml text eol=lf
 *.ini text eol=lf
+*.txt text eol=lf
 *.example text eol=lf
 *.css text eol=lf
 *.html text eol=lf

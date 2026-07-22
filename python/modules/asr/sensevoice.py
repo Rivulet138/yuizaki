@@ -13,6 +13,7 @@ import io
 import logging
 import os
 import socket
+import threading
 import time
 import wave
 from pathlib import Path
@@ -37,6 +38,16 @@ _DEFAULT_SHERPA_MODEL_PATH = _BACKEND_ROOT / ".cache" / "sherpa-onnx" / "sensevo
 _DEFAULT_SHERPA_TOKENS_PATH = _BACKEND_ROOT / ".cache" / "sherpa-onnx" / "sensevoice" / "tokens.txt"
 _DEFAULT_SHERPA_ONLINE_MODEL_PATH = _BACKEND_ROOT / ".cache" / "sherpa-onnx" / "streaming-zipformer-small-ctc-zh" / "model.int8.onnx"
 _DEFAULT_SHERPA_ONLINE_TOKENS_PATH = _BACKEND_ROOT / ".cache" / "sherpa-onnx" / "streaming-zipformer-small-ctc-zh" / "tokens.txt"
+
+
+def _local_asr_startup_mode() -> str:
+    """Return the local Sherpa startup policy without changing service providers."""
+    mode = os.getenv("ASR_STARTUP_MODE", "lazy").strip().lower()
+    if mode in {"blocking", "eager", "foreground", "sync"}:
+        return "blocking"
+    if mode in {"background", "warmup", "preload"}:
+        return "background"
+    return "lazy"
 
 
 def _resolve_modelscope_cache() -> str:
@@ -473,6 +484,10 @@ class SherpaOnnxOnlineClient:
         self._language = language or "auto"
         self._recognizer: Any = None
         self._streams: dict[str, Any] = {}
+        self._available = False
+        self._startup_mode = _local_asr_startup_mode()
+        self._load_lock = threading.Lock()
+        self._warmup_task: asyncio.Task[None] | None = None
 
     async def connect(self) -> None:
         if not self._model_path.exists() or not self._tokens_path.exists():
@@ -484,20 +499,18 @@ class SherpaOnnxOnlineClient:
             return
         try:
             import sherpa_onnx  # type: ignore[import-untyped]
-
-            self._recognizer = await asyncio.to_thread(
-                sherpa_onnx.OnlineRecognizer.from_zipformer2_ctc,
-                tokens=str(self._tokens_path),
-                model=str(self._model_path),
-                num_threads=self._num_threads,
-                provider=self._provider,
-                enable_endpoint_detection=False,
-            )
+            del sherpa_onnx
+            self._available = True
+            if self._startup_mode == "blocking":
+                await asyncio.to_thread(self._ensure_ready_sync)
+            elif self._startup_mode == "background":
+                self._warmup_task = asyncio.create_task(self._warmup(), name="sherpa-asr-warmup")
             logger.info(
-                "sherpa-onnx online ASR loaded model=%s tokens=%s provider=%s",
+                "sherpa-onnx online ASR registered model=%s tokens=%s provider=%s startup=%s",
                 self._model_path,
                 self._tokens_path,
                 self._provider,
+                self._startup_mode,
             )
         except ImportError:
             logger.warning("sherpa-onnx is not installed; online ASR disabled")
@@ -509,14 +522,54 @@ class SherpaOnnxOnlineClient:
             )
 
     async def disconnect(self) -> None:
+        if self._warmup_task is not None and not self._warmup_task.done():
+            self._warmup_task.cancel()
+        self._warmup_task = None
         self._streams.clear()
         self._recognizer = None
+        self._available = False
 
     @property
     def is_available(self) -> bool:
-        return self._recognizer is not None
+        return self._available
+
+    async def _warmup(self) -> None:
+        await asyncio.to_thread(self._ensure_ready_sync)
+
+    async def _ensure_ready(self) -> None:
+        if self._recognizer is not None:
+            return
+        task = self._warmup_task
+        if task is not None and not task.done():
+            await task
+            return
+        await asyncio.to_thread(self._ensure_ready_sync)
+
+    def _ensure_ready_sync(self) -> bool:
+        if self._recognizer is not None:
+            return True
+        with self._load_lock:
+            if self._recognizer is not None:
+                return True
+            try:
+                import sherpa_onnx  # type: ignore[import-untyped]
+
+                self._recognizer = sherpa_onnx.OnlineRecognizer.from_zipformer2_ctc(
+                    tokens=str(self._tokens_path),
+                    model=str(self._model_path),
+                    num_threads=self._num_threads,
+                    provider=self._provider,
+                    enable_endpoint_detection=False,
+                )
+                logger.info("sherpa-onnx online ASR model loaded on demand")
+                return True
+            except Exception as exc:
+                self._available = False
+                logger.error("sherpa-onnx online ASR init failed: %s", exc)
+                return False
 
     async def start_stream(self, session_id: str, audio: np.ndarray) -> str:
+        await self._ensure_ready()
         if self._recognizer is None:
             raise RuntimeError("sherpa-onnx online ASR not available")
         stream = self._recognizer.create_stream()
@@ -577,6 +630,9 @@ class SherpaOnnxSenseVoiceClient:
         self._recognizer: Any = None
         self._model: Any = None
         self._available = False
+        self._startup_mode = _local_asr_startup_mode()
+        self._load_lock = threading.Lock()
+        self._warmup_task: asyncio.Task[None] | None = None
 
     async def connect(self) -> None:
         if not self._model_path.exists() or not self._tokens_path.exists():
@@ -590,23 +646,19 @@ class SherpaOnnxSenseVoiceClient:
 
         try:
             import sherpa_onnx  # type: ignore[import-untyped]
-
-            self._recognizer = await asyncio.to_thread(
-                sherpa_onnx.OfflineRecognizer.from_sense_voice,
-                model=str(self._model_path),
-                tokens=str(self._tokens_path),
-                num_threads=self._num_threads,
-                provider=self._provider,
-                language=self._language,
-                use_itn=self._use_itn,
-            )
+            del sherpa_onnx
             self._model = self
             self._available = True
+            if self._startup_mode == "blocking":
+                await asyncio.to_thread(self._ensure_ready_sync)
+            elif self._startup_mode == "background":
+                self._warmup_task = asyncio.create_task(self._warmup(), name="sherpa-asr-warmup")
             logger.info(
-                "sherpa-onnx SenseVoice loaded model=%s tokens=%s provider=%s",
+                "sherpa-onnx SenseVoice registered model=%s tokens=%s provider=%s startup=%s",
                 self._model_path,
                 self._tokens_path,
                 self._provider,
+                self._startup_mode,
             )
         except ImportError:
             self._available = False
@@ -616,6 +668,9 @@ class SherpaOnnxSenseVoiceClient:
             logger.error("sherpa-onnx SenseVoice init failed: %s", exc)
 
     async def disconnect(self) -> None:
+        if self._warmup_task is not None and not self._warmup_task.done():
+            self._warmup_task.cancel()
+        self._warmup_task = None
         self._recognizer = None
         self._model = None
         self._available = False
@@ -623,7 +678,43 @@ class SherpaOnnxSenseVoiceClient:
 
     @property
     def is_available(self) -> bool:
-        return self._available and self._recognizer is not None
+        return self._available
+
+    async def _warmup(self) -> None:
+        await asyncio.to_thread(self._ensure_ready_sync)
+
+    async def _ensure_ready(self) -> None:
+        if self._recognizer is not None:
+            return
+        task = self._warmup_task
+        if task is not None and not task.done():
+            await task
+            return
+        await asyncio.to_thread(self._ensure_ready_sync)
+
+    def _ensure_ready_sync(self) -> bool:
+        if self._recognizer is not None:
+            return True
+        with self._load_lock:
+            if self._recognizer is not None:
+                return True
+            try:
+                import sherpa_onnx  # type: ignore[import-untyped]
+
+                self._recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
+                    model=str(self._model_path),
+                    tokens=str(self._tokens_path),
+                    num_threads=self._num_threads,
+                    provider=self._provider,
+                    language=self._language,
+                    use_itn=self._use_itn,
+                )
+                logger.info("sherpa-onnx SenseVoice model loaded on demand")
+                return True
+            except Exception as exc:
+                self._available = False
+                logger.error("sherpa-onnx SenseVoice init failed: %s", exc)
+                return False
 
     def generate(
         self,
@@ -632,14 +723,21 @@ class SherpaOnnxSenseVoiceClient:
         language: str = "auto",
         **_kwargs: object,
     ) -> list[dict[str, object]]:
+        if self._recognizer is None:
+            self._ensure_ready_sync()
         if not self.is_available:
             raise RuntimeError("sherpa-onnx SenseVoice not available")
         if input.size == 0:
             return []
 
-        stream = self._recognizer.create_stream()
+        recognizer = self._recognizer
+        if recognizer is None:
+            self._available = False
+            raise RuntimeError("sherpa-onnx SenseVoice recognizer is not initialized")
+
+        stream = recognizer.create_stream()
         stream.accept_waveform(_SAMPLE_RATE, input.astype(np.float32, copy=False))
-        self._recognizer.decode_stream(stream)
+        recognizer.decode_stream(stream)
         result = getattr(stream, "result", None)
         text = str(getattr(result, "text", "") or "").strip()
         if not text:

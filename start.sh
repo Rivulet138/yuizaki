@@ -40,6 +40,7 @@ require_file "$PYTHON"
 require_file "$ROOT/python/app.py"
 require_file "$ROOT/electron/package.json"
 require_file "$ROOT/electron/node_modules/electron/cli.js"
+echo "[INFO] Python interpreter: $PYTHON ($($PYTHON -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")'))"
 if ((WITH_MCP)); then require_file "$ROOT/node-mcp/node_modules"; fi
 
 if ((CHECK_ONLY)); then

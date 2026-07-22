@@ -20,6 +20,11 @@ jobs:
         with:
           python-version: '3.12'
       - run: python scripts/check_docs.py
+      - name: Validate model resource lock
+        run: python scripts/check_resources.py
+      - name: Validate Python dependency lock matrix
+        working-directory: python
+        run: python scripts/check_requirements_lock.py
 
   electron-build:
     name: Electron Validate & Build (${{ matrix.os }})
@@ -88,7 +93,11 @@ jobs:
       - run: npm test
 
   python-test:
-    name: Python Lint & Test
+    name: Python Lint & Test (3.12 / 3.13)
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.13']
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -98,20 +107,33 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
           cache: 'pip'
-          cache-dependency-path: python/requirements-dev.txt
+          cache-dependency-path: python/requirements-dev-lock-linux.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          pip install -r requirements-dev-lock-linux.txt
+          pip check
+          python scripts/check_installed_lock.py --lock requirements-dev-lock-linux.txt
 
       - name: Check Python runtime errors with ruff
         run: ruff check . --select E9,F63,F7,F82
 
       - name: Type check with pyright
-        run: pyright --pythonversion 3.12
+        run: pyright --pythonversion ${{ matrix.python-version }}
 
       - name: Run tests
         run: pytest -q --tb=short
+
+      - name: Run offline model evaluation smoke suite
+        run: python -m evals --output artifacts/model-evaluation-${{ matrix.python-version }}.json
+
+      - name: Upload model evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-evaluation-${{ matrix.python-version }}
+          path: python/artifacts/model-evaluation-${{ matrix.python-version }}.json
+          if-no-files-found: warn

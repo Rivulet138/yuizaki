@@ -33,6 +33,7 @@ import {
   registerRendererProtocolPrivileges,
 } from './renderer-protocol'
 import { captureDisplayPng } from './desktop-capture'
+import { cancelAllModelResourceTasks } from './resource-manager'
 
 registerRendererProtocolPrivileges()
 
@@ -396,6 +397,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', async () => {
   isQuitting = true
+  cancelAllModelResourceTasks()
   petShortcuts?.unregister()
   petTray?.destroy()
   live2dWindow?.close()

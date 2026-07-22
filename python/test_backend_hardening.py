@@ -37,7 +37,7 @@ def test_local_file_tools_restrict_paths_to_allowed_roots(tmp_path: Path, monkey
     with pytest.raises(LocalToolError, match="outside allowed local tool roots"):
         write_file(str(outside_root / "blocked.txt"), "no")
     with pytest.raises(LocalToolError, match="outside allowed local tool roots"):
-        read_file(str(Path(__file__).resolve().parent.parent / "PRODUCT.md"))
+        read_file(str(Path(__file__).resolve().parent.parent / "README.md"))
 
 
 def test_settings_store_redacts_secret_values_in_debug_logs(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:

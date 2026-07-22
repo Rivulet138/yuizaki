@@ -55,6 +55,62 @@ def test_lmstudio_provider_uses_local_openai_compatible_defaults():
     assert providers.llm_chat_url("", "lmstudio") == "http://localhost:1234/v1/chat/completions"
 
 
+def test_provider_protocols_keep_native_gemini_separate_from_compatibility_gateways():
+    providers = importlib.import_module("modules.llm.providers")
+
+    assert providers.llm_protocol("gemini") == "gemini-generate-content"
+    assert ":generateContent" in providers.llm_request_url("", "gemini", model="gemini-2.5-flash")
+    assert providers.llm_protocol("gemini", "https://gateway.example/v1/openai") == "openai-chat-completions"
+
+
+def test_model_registry_exposes_numeric_limits_without_guessing_unknown_models():
+    capabilities = importlib.import_module("modules.llm.capabilities")
+
+    assert capabilities.get_model_limits("deepseek", "deepseek-v4-flash") == {
+        "context_window_tokens": 1_000_000,
+        "max_output_tokens": 384_000,
+    }
+    assert capabilities.get_model_limits("custom", "local-model") == {}
+
+
+def test_llm_budget_clamp_uses_registered_limit_only():
+    client_module = importlib.import_module("modules.llm.client")
+    config = importlib.import_module("modules.core.config").config
+    original_provider = config.llm.provider
+    original_model = config.llm.model
+    try:
+        config.llm.provider = "deepseek"
+        config.llm.model = "deepseek-v4-flash"
+        assert client_module._effective_model_budget(
+            "deepseek-v4-flash", 1_100_000, 8_192, "context_window_tokens", log_clamp=False
+        ) == 1_000_000
+        assert client_module._effective_model_budget(
+            "local-model", 1_100_000, 8_192, "context_window_tokens", log_clamp=False
+        ) == 1_100_000
+    finally:
+        config.llm.provider = original_provider
+        config.llm.model = original_model
+
+
+def test_gemini_payload_uses_native_contents_and_generation_config():
+    client_module = importlib.import_module("modules.llm.client")
+
+    payload = client_module._messages_to_gemini_payload({
+        "model": "gemini-2.5-flash",
+        "max_tokens": 64,
+        "temperature": 0.2,
+        "messages": [
+            {"role": "system", "content": "You are concise."},
+            {"role": "user", "content": "hello"},
+        ],
+    })
+
+    assert payload["systemInstruction"]["parts"][0]["text"] == "You are concise."
+    assert payload["contents"][0] == {"role": "user", "parts": [{"text": "hello"}]}
+    assert payload["generationConfig"]["maxOutputTokens"] == 64
+    assert payload["generationConfig"]["temperature"] == 0.2
+
+
 def test_lmstudio_provider_aliases_validate_in_runtime_settings_patch():
     validate_runtime_patch = importlib.import_module("modules.system.settings_schema").validate_runtime_patch
 

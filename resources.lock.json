@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "resources": {
+    "sherpa": {
+      "label": "Sherpa SenseVoice",
+      "version": "2025-09-09-int8",
+      "kind": "archive",
+      "license": "FunASR Model License",
+      "licenseUrl": "https://huggingface.co/FunAudioLLM/SenseVoiceSmall",
+      "downloadBytes": 165783878,
+      "sources": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09.tar.bz2",
+          "sha256": "7305f7905bfcf77fa0b39388a313f3da35c68d971661a65475b56fb2162c8e63"
+        }
+      ]
+    },
+    "sherpa_online": {
+      "label": "Sherpa Streaming Zipformer2 CTC",
+      "version": "2025-04-01-int8",
+      "kind": "archive",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://github.com/k2-fsa/icefall/blob/master/LICENSE",
+      "downloadBytes": 21264113,
+      "sources": [
+        {
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01.tar.bz2",
+          "sha256": "b3b309f7ce4a737195fcc6963ea19b0653a7d3401580af5ae0d3e284cbb71f0b"
+        }
+      ]
+    },
+    "embedding": {
+      "label": "Qwen3 Embedding 0.6B",
+      "version": "97b0c614be4d",
+      "kind": "huggingface_snapshot",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B",
+      "downloadBytes": 1207489041,
+      "sources": [
+        {
+          "repo": "Qwen/Qwen3-Embedding-0.6B",
+          "revision": "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3"
+        }
+      ]
+    },
+    "tts": {
+      "label": "Genie TTS",
+      "version": "2.0.2",
+      "kind": "package_managed",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/High-Logic/Genie-TTS/blob/main/LICENSE",
+      "downloadBytes": 409993216,
+      "sources": [
+        {
+          "package": "genie-tts",
+          "version": "2.0.2",
+          "url": "https://pypi.org/project/genie-tts/2.0.2/",
+          "repo": "High-Logic/Genie",
+          "revision": "52b17272e0b7032415e85ad37b551db2386b1810"
+        }
+      ]
+    },
+    "soulx": {
+      "label": "SoulX Singer SVC",
+      "version": "2026-02",
+      "kind": "huggingface_bundle",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://huggingface.co/Soul-AILab/SoulX-Singer/blob/main/LICENSE",
+      "downloadBytes": 9711634599,
+      "sources": [
+        {
+          "repo": "Soul-AILab/SoulX-Singer",
+          "revision": "40493ad90286056c7a9095035164434a79daa8c9"
+        },
+        {
+          "repo": "Soul-AILab/SoulX-Singer-Preprocess",
+          "revision": "83dc50289d22a81b1e9998f5b9e111aef7c1fdcd"
+        },
+        {
+          "repo": "https://github.com/Soul-AILab/SoulX-Singer.git",
+          "revision": "81aeb3ae772c70093c3de74dc23c92d983801ae4"
+        }
+      ]
+    }
+  }
+}

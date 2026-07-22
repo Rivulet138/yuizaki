@@ -45,13 +45,13 @@
 ## 供应链
 
 - npm 使用锁文件和 `npm ci`。
-- Python 仍需增加带 hash 的平台锁文件。
+- Python 已使用 Windows/Linux 分离的直接依赖精确 lock；完整传递依赖 hash lock 仍待补齐。
 - Qdrant 使用固定 tag，不使用可变 `latest`。
 - Hugging Face 模型必须固定 commit revision。
 - 直接下载归档必须校验 SHA-256。
 - 发布前生成代码依赖与模型资源 SBOM。
 
-当前 Sherpa 与 SoulX 资源固定/校验仍未完全完成，因此不应把未校验模型下载视为可信发布制品。
+当前 Sherpa 归档已固定 SHA-256，SoulX 与 Hugging Face 资源已固定 revision。正式发布仍需在目标平台验证下载、许可证和生成制品，并生成代码依赖与模型资源 SBOM。
 
 ## Electron 发布
 

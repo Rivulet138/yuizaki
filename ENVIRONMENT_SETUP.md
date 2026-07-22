@@ -1,5 +1,7 @@
 # 环境与配置
 
+依赖安装由平台 lock 文件控制；模型质量评测使用 `python -m evals`，默认不需要云端凭据或模型下载。
+
 配置优先级从高到低：运行时设置 `python/config/settings.json`、进程环境变量、`python/.env`、代码默认值。安装脚本只在缺少 `.env` 时复制 `.env.example`。
 
 ## LLM
@@ -21,7 +23,7 @@
 | `LLM_PRESENCE_PENALTY` | `0` | 存在惩罚 |
 | `LLM_REPETITION_PENALTY` | `1` | 重复惩罚 |
 
-前端与后端共享默认上下文 `131072`、默认输出 `8192`。模型能力注册表应进一步限制每个模型的真实上限。
+前端与后端共享默认上下文 `131072`、默认输出 `8192`。当模型能力注册表包含明确的上下文/输出上限时，后端会在发送请求前自动裁剪超出值；未知模型不使用猜测性的硬编码上限。
 
 ## 视觉模型
 
@@ -55,8 +57,8 @@
 
 | 变量 | 默认值 | 作用 |
 | --- | --- | --- |
-| `ASR_PROVIDER` | `sensevoice-service` | ASR 提供方 |
-| `ASR_BASE_URL` | `http://127.0.0.1:8899/v1` | 服务地址 |
+| `ASR_PROVIDER` | `sherpa-onnx-online` | ASR 提供方 |
+| `ASR_BASE_URL` | 空 | SenseVoice/FunASR 服务地址；仅服务模式需要 |
 | `ASR_API_KEY` | 空 | 服务密钥 |
 | `ASR_TIMEOUT` | `60` | 超时秒数 |
 | `ASR_LANGUAGE` | `zh` | 语言提示 |
@@ -64,7 +66,7 @@
 | `VAD_MIN_SILENCE_MS` | `300` | 端点静音时间 |
 | `ASR_PARTIAL_EVERY` | `15` | partial 节奏参数 |
 
-Sherpa 使用 `SHERPA_ONNX_MODEL_PATH`、`SHERPA_ONNX_TOKENS_PATH`、`SHERPA_ONNX_NUM_THREADS` 和 `SHERPA_ONNX_PROVIDER`。已删除无效旧字段，不再做名称兼容。
+Sherpa Streaming Zipformer 是默认本地 ASR；SenseVoice/FunASR 服务需要显式选择对应 provider 并配置 `ASR_BASE_URL`。Sherpa 使用 `SHERPA_ONNX_MODEL_PATH`、`SHERPA_ONNX_TOKENS_PATH`、`SHERPA_ONNX_NUM_THREADS` 和 `SHERPA_ONNX_PROVIDER`。已删除无效旧字段，不再做名称兼容。
 
 ## 记忆与 Qdrant
 

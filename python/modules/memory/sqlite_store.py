@@ -18,8 +18,18 @@ class SQLiteMemoryStore(VectorStore):
 
     backend_name = "sqlite"
 
-    def __init__(self, db_path: str | Path, embedding_service: EmbeddingProvider | None = None):
-        super().__init__(embedding_service=embedding_service)
+    def __init__(
+        self,
+        db_path: str | Path,
+        embedding_service: EmbeddingProvider | None = None,
+        reranker: Any | None = None,
+        reranker_candidate_count: int = 32,
+    ):
+        super().__init__(
+            embedding_service=embedding_service,
+            reranker=reranker,
+            reranker_candidate_count=reranker_candidate_count,
+        )
         self.db_path = Path(db_path).expanduser().resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db_lock = threading.RLock()

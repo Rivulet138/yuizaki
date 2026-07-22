@@ -133,6 +133,23 @@ describe('system routes', () => {
     restoreEnv()
   })
 
+  it('requires explicit confirmation before permanent model removal', async () => {
+    const { handleSystemRoutes } = await import('../http/routes/system-routes')
+    const { response, getStatus, getJson } = createJsonResponse()
+
+    const handled = await handleSystemRoutes(
+      createJsonRequest({ resources: ['sherpa'] }),
+      response,
+      'POST',
+      new URL('http://127.0.0.1:38945/api/system/resources/remove'),
+      {} as HttpRouteContext,
+    )
+
+    expect(handled).toBe(true)
+    expect(getStatus()).toBe(400)
+    expect(getJson()).toEqual({ error: 'PERMANENT_REMOVE confirmation is required' })
+  })
+
   it('rejects backup restore paths outside the managed backups directory', async () => {
     const { handleSystemRoutes } = await import('../http/routes/system-routes')
     const { response, getStatus, getJson } = createJsonResponse()

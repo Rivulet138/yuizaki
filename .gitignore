@@ -12,6 +12,7 @@ python/.cache/
 python/__pycache__/
 python/.pytest_cache/
 python/audio_cache/
+python/artifacts/
 python/CharacterModels/
 *.pyc
 *.pyo

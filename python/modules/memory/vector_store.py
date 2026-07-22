@@ -20,6 +20,7 @@ import numpy as np
 from ..core.config import DEFAULT_EMBEDDING_MODEL
 from .backend import MemoryBackendStatus
 from .schema import MemorySearchFilters
+from .reranker import LearnedReranker, lexical_overlap_score, normalize_scores
 
 logger = logging.getLogger(__name__)
 
@@ -235,8 +236,15 @@ class VectorStore:
 
   backend_name = "inmemory"
 
-  def __init__(self, embedding_service: EmbeddingProvider | None = None):
+  def __init__(
+    self,
+    embedding_service: EmbeddingProvider | None = None,
+    reranker: LearnedReranker | None = None,
+    reranker_candidate_count: int = 32,
+  ):
     self._embedding_service = embedding_service or LazyEmbeddingService()
+    self._reranker = reranker
+    self._reranker_candidate_count = max(5, min(100, int(reranker_candidate_count)))
     self._docs: Dict[str, Document] = {}
     self._vectors: Dict[str, np.ndarray] = {}
 
@@ -367,15 +375,26 @@ class VectorStore:
     mats_norm = mats / (np.linalg.norm(mats, axis=1, keepdims=True) + 1e-8)
     q_norm = q / (np.linalg.norm(q) + 1e-8)
     semantic_scores = mats_norm @ q_norm
+    candidate_indices = np.argsort(semantic_scores)[::-1][: max(top_k, self._reranker_candidate_count)]
+    candidate_docs = [self._docs[vector_ids[int(index)]] for index in candidate_indices]
+    learned_scores = np.zeros(len(candidate_docs), dtype=np.float32)
+    learned_enabled = bool(getattr(self._reranker, "enabled", False))
+    if learned_enabled and self._reranker is not None:
+      try:
+        learned_scores = normalize_scores(self._reranker.score(query, [doc.text for doc in candidate_docs]))
+      except Exception as exc:
+        learned_enabled = False
+        logger.warning("Learned memory reranker unavailable; using hybrid scores: %s", exc)
 
-    # Rerank with recency
+    # Blend semantic relevance with lexical precision and business signals.
     from datetime import datetime
     now = datetime.now()
     scored = []
 
-    for i, doc_id in enumerate(vector_ids):
+    for position, index in enumerate(candidate_indices):
+      doc_id = vector_ids[int(index)]
       doc = self._docs[doc_id]
-      semantic_score = float(semantic_scores[i])
+      semantic_score = float(semantic_scores[int(index)])
 
       # Calculate recency score (30-day half-life)
       timestamp_str = doc.metadata.get("timestamp")
@@ -391,8 +410,18 @@ class VectorStore:
 
       quality_score = float(doc.metadata.get("quality_score") or doc.metadata.get("confidence") or 0.6)
       quality_score = max(0.0, min(1.0, quality_score))
-      semantic_weight = max(0.0, 1 - recency_weight - quality_weight)
-      final_score = semantic_score * semantic_weight + recency_score * recency_weight + quality_score * quality_weight
+      lexical_score = lexical_overlap_score(query, doc.text)
+      learned_score = float(learned_scores[position]) if learned_enabled and position < len(learned_scores) else 0.0
+      learned_weight = 0.45 if learned_enabled else 0.0
+      lexical_weight = 0.10
+      semantic_weight = max(0.0, 1 - recency_weight - quality_weight - lexical_weight - learned_weight)
+      final_score = (
+        semantic_score * semantic_weight
+        + lexical_score * lexical_weight
+        + learned_score * learned_weight
+        + recency_score * recency_weight
+        + quality_score * quality_weight
+      )
       scored.append((final_score, doc, semantic_score))
 
     # Sort and return top_k

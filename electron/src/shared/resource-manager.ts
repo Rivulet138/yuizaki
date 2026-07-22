@@ -41,6 +41,18 @@ export interface ManagedResourceSummary {
   state: 'missing' | 'partial' | 'ready'
   message: string
   details: string[]
+  metadata: ManagedResourceMetadata
+}
+
+export interface ManagedResourceMetadata {
+  label: string
+  version: string
+  license: string
+  licenseUrl: string
+  downloadBytes: number
+  source: string
+  integrity: 'sha256' | 'revision' | 'package' | 'package+revision' | 'unverified'
+  inUseBy: string[]
 }
 
 export interface SoulxResourceStatus extends ManagedResourceSummary {
@@ -71,7 +83,28 @@ export interface EmbeddingResourceStatus extends ManagedResourceSummary {
 export interface TtsResourceStatus extends ManagedResourceSummary {
   character: string
   cacheDir: string
-  configuredModelDir: string | null
+  modelDir: string
+}
+
+export type ResourceProgressPhase = 'preparing' | 'downloading' | 'verifying' | 'extracting' | 'installing' | 'cancelling'
+
+export interface ResourceDownloadProgress {
+  resourceId: ManagedModelResourceId
+  phase: ResourceProgressPhase
+  message: string
+  bytesDownloaded: number | null
+  bytesTotal: number | null
+  percent: number | null
+  startedAt: string
+  updatedAt: string
+}
+
+export interface ResumableResourceDownload {
+  resourceId: ManagedModelResourceId
+  bytesDownloaded: number
+  bytesTotal: number | null
+  percent: number | null
+  updatedAt: string
 }
 
 export interface ModelResourceStatusPayload {
@@ -82,15 +115,49 @@ export interface ModelResourceStatusPayload {
   sherpaOnline: SherpaResourceStatus
   embedding: EmbeddingResourceStatus
   tts: TtsResourceStatus
+  activeDownloads: ResourceDownloadProgress[]
+  resumableDownloads: ResumableResourceDownload[]
 }
 
 export type ManagedModelResourceId = 'soulx' | 'sherpa' | 'sherpa_online' | 'embedding' | 'tts'
 
+export type ResourceFailureCode =
+  | 'cancelled'
+  | 'network_timeout'
+  | 'network_unreachable'
+  | 'authentication_required'
+  | 'disk_full'
+  | 'integrity_failed'
+  | 'dependency_failed'
+  | 'unknown'
+
 export interface ResourceCommandResult {
   success: boolean
   message: string
+  errorCode: ResourceFailureCode | null
+  retryable: boolean
   stdout: string[]
   stderr: string[]
+  status: ModelResourceStatusPayload
+}
+
+export interface ResourceCancelResult {
+  success: boolean
+  cancelled: ManagedModelResourceId[]
+  status: ModelResourceStatusPayload
+}
+
+export interface ResourceRemovalFailure {
+  resourceId: ManagedModelResourceId
+  reason: string
+}
+
+export interface ResourceRemovalResult {
+  success: boolean
+  message: string
+  removed: ManagedModelResourceId[]
+  failed: ResourceRemovalFailure[]
+  reclaimedBytes: number
   status: ModelResourceStatusPayload
 }
 

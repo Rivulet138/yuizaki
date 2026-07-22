@@ -37,7 +37,7 @@ describe('LLM model discovery policy', () => {
       'custom',
     ])
     expect(LLM_PROVIDER_BASE_URLS.qwen).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1')
-    expect(LLM_PROVIDER_BASE_URLS.gemini).toBe('https://generativelanguage.googleapis.com/v1beta/openai')
+    expect(LLM_PROVIDER_BASE_URLS.gemini).toBe('https://generativelanguage.googleapis.com/v1beta')
     expect(LLM_PROVIDER_BASE_URLS.grok).toBe('https://api.x.ai/v1')
     expect(LLM_PROVIDER_BASE_URLS.ollama).toBe('http://localhost:11434/v1')
     expect(LLM_PROVIDER_BASE_URLS.lmstudio).toBe('http://localhost:1234/v1')

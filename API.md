@@ -1,6 +1,6 @@
 # API
 
-维护基线：2026-07-19。默认 Python 服务为 `http://127.0.0.1:8001`，Electron 控制服务为 `http://127.0.0.1:38945`。
+默认 Python 服务为 `http://127.0.0.1:8001`，Electron 控制服务为 `http://127.0.0.1:38945`。
 
 ## 认证
 
@@ -21,6 +21,8 @@ Python 的 `/api`、`/memory`、`/vision`、`/svc` 等受保护前缀默认要�
 | GET | `/api/system/agent-trace` | Agent 执行记录 |
 
 ## 对话与模型
+
+LLM 客户端按 provider 选择 wire protocol：Claude 使用 Anthropic Messages，Gemini 默认使用原生 `generateContent`/`streamGenerateContent`，DeepSeek、Qwen、OpenAI、xAI、Ollama、LM Studio 和 custom 使用 OpenAI Chat Completions。内部消息、图片、工具调用和生成参数只在 provider adapter 边界转换。
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
@@ -75,6 +77,8 @@ Python 的 `/api`、`/memory`、`/vision`、`/svc` 等受保护前缀默认要�
 
 实时视觉帧和流式语音通过 Socket.IO 传输，不通过 OCR 路由轮询。
 
+实时视觉事件先将变化关键帧提交给独立 VLM；VLM 不可用、失败或为空时才执行 OCR fallback。普通聊天只接收最新的不可信视觉 evidence，不会把截图历史写入持久数据。
+
 ## 设置
 
 设置路由前缀为 `/api/settings`：
@@ -93,6 +97,8 @@ Python 的 `/api`、`/memory`、`/vision`、`/svc` 等受保护前缀默认要�
 | --- | --- | --- |
 | GET | `/api/system/resources` | 受管模型资源状态 |
 | POST | `/api/system/resources/prepare` | 批量准备资源 |
+| POST | `/api/system/resources/cancel` | 取消资源下载 |
+| POST | `/api/system/resources/remove` | 永久卸载模型资源 |
 | POST | `/api/system/resources/sherpa/download` | 准备离线 Sherpa |
 | POST | `/api/system/resources/sherpa-online/download` | 准备在线 Sherpa |
 | POST | `/api/system/resources/embedding/prefetch` | 预取嵌入模型 |
@@ -103,6 +109,10 @@ Python 的 `/api`、`/memory`、`/vision`、`/svc` 等受保护前缀默认要�
 | GET | `/api/system/backup/targets` | 备份目标 |
 | POST | `/api/system/backup/create` | 创建备份 |
 | POST | `/api/system/backup/restore` | 预览或执行恢复 |
+
+`GET /api/system/resources` 的 `activeDownloads` 返回当前任务的资源 ID、阶段、实际字节、可用时的百分比及更新时间；`resumableDownloads` 返回磁盘中可复用的持久缓存字节、可用时的总量和更新时间。TTS 状态包含 `cacheDir` 和实际生效的 `modelDir`。
+
+资源准备接口返回 `errorCode` 与 `retryable`。错误码：`cancelled`、`network_timeout`、`network_unreachable`、`authentication_required`、`disk_full`、`integrity_failed`、`dependency_failed`、`unknown`。
 
 清理请求必须带 `confirmation: "PERMANENT_CLEAN"`。具体类别见 [RESOURCE_MANAGEMENT.md](RESOURCE_MANAGEMENT.md)。
 

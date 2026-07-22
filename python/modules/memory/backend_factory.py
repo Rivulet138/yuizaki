@@ -6,6 +6,7 @@ from ..core.config import MemoryConfig
 
 from .backend import MemoryBackend
 from .indexed_backend import IndexedMemoryBackend
+from .reranker import LazyCrossEncoderReranker
 from .vector_client import QdrantVectorStore
 from .vector_store import LazyEmbeddingService, VectorStore
 from .sqlite_store import SQLiteMemoryStore
@@ -15,6 +16,10 @@ logger = logging.getLogger(__name__)
 
 def create_memory_backend(config: MemoryConfig) -> MemoryBackend:
     embedding_service = LazyEmbeddingService(model_name=config.embedding_model)
+    reranker = LazyCrossEncoderReranker(
+        config.reranker_model,
+        enabled=config.reranker_enabled,
+    )
     backend = (config.backend or "inmemory").strip().lower()
 
     if backend == "qdrant":
@@ -31,6 +36,8 @@ def create_memory_backend(config: MemoryConfig) -> MemoryBackend:
             collection_name=config.qdrant_collection,
             timeout=config.qdrant_timeout,
             embedding_service=embedding_service,
+            reranker=reranker,
+            reranker_candidate_count=config.reranker_candidate_count,
         )
         return IndexedMemoryBackend(authority=authority, index=index)
 
@@ -39,7 +46,13 @@ def create_memory_backend(config: MemoryConfig) -> MemoryBackend:
         return SQLiteMemoryStore(
             db_path=config.sqlite_path,
             embedding_service=embedding_service,
+            reranker=reranker,
+            reranker_candidate_count=config.reranker_candidate_count,
         )
 
     logger.info("Using in-memory vector backend")
-    return VectorStore(embedding_service=embedding_service)
+    return VectorStore(
+        embedding_service=embedding_service,
+        reranker=reranker,
+        reranker_candidate_count=config.reranker_candidate_count,
+    )

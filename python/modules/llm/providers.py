@@ -8,7 +8,9 @@ OPENAI_COMPATIBLE_PROVIDERS = {"deepseek", "qwen", "gemini", "chatgpt", "grok", 
 DEFAULT_PROVIDER_BASE_URLS: dict[str, str] = {
     "deepseek": "https://api.deepseek.com/v1",
     "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
+    # Gemini uses its native generateContent protocol by default. Users can
+    # still point it at an OpenAI-compatible gateway explicitly.
+    "gemini": "https://generativelanguage.googleapis.com/v1beta",
     "chatgpt": "https://api.openai.com/v1",
     "claude": "https://api.anthropic.com/v1",
     "grok": "https://api.x.ai/v1",
@@ -86,8 +88,39 @@ def llm_chat_url(base_url: str, provider: str = "custom") -> str:
     return f"{normalize_llm_base_url(base_url, normalized_provider)}/chat/completions"
 
 
+def llm_protocol(provider: str, base_url: str = "") -> str:
+    """Return the wire protocol selected for a configured provider."""
+    normalized = normalize_llm_provider(provider, base_url)
+    endpoint = (base_url or "").lower()
+    if normalized == "claude":
+        return "anthropic-messages"
+    if normalized == "gemini" and "/openai" not in endpoint:
+        return "gemini-generate-content"
+    return "openai-chat-completions"
+
+
+def llm_request_url(
+    base_url: str,
+    provider: str = "custom",
+    *,
+    model: str = "",
+    stream: bool = False,
+) -> str:
+    """Build the provider-native generation URL without leaking credentials."""
+    normalized = normalize_llm_provider(provider, base_url)
+    protocol = llm_protocol(normalized, base_url)
+    endpoint = normalize_llm_base_url(base_url, normalized)
+    if protocol == "gemini-generate-content":
+        model = str(model or "").removeprefix("models/")
+        action = "streamGenerateContent" if stream else "generateContent"
+        return f"{endpoint}/models/{model}:{action}"
+    return llm_chat_url(endpoint, normalized)
+
+
 def build_llm_auth_headers(api_key: str, provider: str = "custom") -> dict[str, str]:
     normalized_provider = normalize_llm_provider(provider)
+    if normalized_provider == "gemini":
+        return {"x-goog-api-key": api_key} if api_key else {}
     if normalized_provider == "claude":
         headers = {"anthropic-version": "2023-06-01"}
         if api_key:

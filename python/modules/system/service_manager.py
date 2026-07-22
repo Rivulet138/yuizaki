@@ -1,6 +1,7 @@
 """Service manager - manages service lifecycle and dependencies."""
 
 import logging
+import time
 from collections.abc import Callable
 from typing import Any, Optional
 from enum import Enum
@@ -35,6 +36,7 @@ class ServiceInfo:
         self.status = ServiceStatus.STOPPED
         self.started_at: Optional[datetime] = None
         self.error: Optional[str] = None
+        self.startup_ms: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -43,6 +45,7 @@ class ServiceInfo:
             "status": self.status.value,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "error": self.error,
+            "startup_ms": round(self.startup_ms, 1) if self.startup_ms is not None else None,
         }
 
 
@@ -97,6 +100,7 @@ class ServiceManager:
             True if all services started successfully, False otherwise.
         """
         logger.info("Starting all services...")
+        started_services: list[ServiceInfo] = []
         for service_name in self.startup_order:
             if service_name not in self.services:
                 continue
@@ -104,17 +108,30 @@ class ServiceManager:
             service = self.services[service_name]
             try:
                 service.status = ServiceStatus.STARTING
+                started = time.perf_counter()
                 await service.init_func()
+                service.startup_ms = (time.perf_counter() - started) * 1000
                 service.status = ServiceStatus.RUNNING
                 service.started_at = datetime.now()
+                started_services.append(service)
+                logger.info("Service started: %s (%.1f ms)", service_name, service.startup_ms)
                 logger.info(f"✓ Service started: {service_name}")
             except Exception as e:
                 service.status = ServiceStatus.ERROR
                 service.error = str(e)
-                logger.error(f"✗ Failed to start service {service_name}: {e}")
+                logger.error("Failed to start service %s: %s", service_name, e)
+                for started_service in reversed(started_services):
+                    if not started_service.cleanup_func:
+                        continue
+                    try:
+                        await started_service.cleanup_func()
+                        started_service.status = ServiceStatus.STOPPED
+                    except Exception as cleanup_error:
+                        logger.warning("Startup rollback failed for %s: %s", started_service.name, cleanup_error)
                 return False
 
-        logger.info("All services started successfully")
+        total_ms = sum(service.startup_ms or 0.0 for service in started_services)
+        logger.info("All services started successfully (service_time_ms=%.1f)", total_ms)
         return True
 
     async def stop_all(self) -> None:

@@ -358,6 +358,25 @@ if not exist "%PYTHON_EXE%" (
   call :fail "Python virtual environment not found: %PYTHON_EXE%. Run install_core.bat or install_full.bat first."
   exit /b 1
 )
+set "PYTHON_VERSION_FILE=%TEMP%\yuizaki-python-version-%RANDOM%.txt"
+"%PYTHON_EXE%" -c "import sys; print(sys.version.split()[0])" > "%PYTHON_VERSION_FILE%" 2>nul
+if errorlevel 1 (
+  del /q "%PYTHON_VERSION_FILE%" >nul 2>nul
+  call :fail "Unable to determine Python version from project virtual environment: %PYTHON_EXE%"
+  exit /b 1
+)
+set /p PYTHON_VERSION=<"%PYTHON_VERSION_FILE%"
+del /q "%PYTHON_VERSION_FILE%" >nul 2>nul
+if not defined PYTHON_VERSION (
+  call :fail "Python version probe returned no value: %PYTHON_EXE%"
+  exit /b 1
+)
+call :log_info "Python interpreter: %PYTHON_EXE% (version %PYTHON_VERSION%)"
+"%PYTHON_EXE%" -c "import sys; raise SystemExit(0 if (3, 12) <= sys.version_info[:2] < (3, 14) else 1)" >nul 2>nul
+if errorlevel 1 (
+  call :fail "Python 3.12 or 3.13 is required in the project virtual environment. Current version: %PYTHON_VERSION%"
+  exit /b 1
+)
 
 call :log_info "Checking python app entry..."
 if not exist "%PYTHON_APP_ENTRY%" (

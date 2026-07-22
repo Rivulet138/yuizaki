@@ -588,7 +588,7 @@ const activeWorkspaceId = computed(() => workspaceStore.activeWorkspaceId)
 const defaultVisionSettings: WorkspaceVisionSettings = {
   enabled: true,
   displayIndex: 0,
-  intervalMs: 5000,
+  intervalMs: 2000,
   pauseWhenAppHidden: true,
   captureMode: 'display',
   region: { x: 0, y: 0, width: 1280, height: 720 },

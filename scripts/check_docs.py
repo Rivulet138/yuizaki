@@ -15,12 +15,12 @@ MAINTAINED_DOCS = {
     "DEPENDENCIES.md",
     "ENVIRONMENT_SETUP.md",
     "LINUX.md",
-    "PRODUCT.md",
+    "MODEL_EVALUATION.md",
     "QUICKSTART.md",
     "README.md",
-    "REPOSITORY_AUDIT.md",
     "RESOURCE_MANAGEMENT.md",
     "SECURITY.md",
+    "TECH_STACK.md",
     "THIRD_PARTY_NOTICES.md",
     "python/tests/README.md",
     "services/soulx-svc/README.md",
@@ -43,7 +43,12 @@ def tracked_markdown() -> list[Path]:
         text=True,
         encoding="utf-8",
     )
-    return sorted({ROOT / line for line in result.stdout.splitlines() if line})
+    documents: set[Path] = set()
+    for line in result.stdout.splitlines():
+        path = ROOT / line
+        if line and path.exists():
+            documents.add(path)
+    return sorted(documents)
 
 
 def local_link_target(document: Path, raw_target: str) -> Path | None:

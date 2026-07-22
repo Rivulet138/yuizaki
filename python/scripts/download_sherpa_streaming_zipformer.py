@@ -4,18 +4,16 @@ import argparse
 import json
 import os
 import shutil
-import sys
 import tarfile
-import tempfile
-import urllib.request
 from pathlib import Path
 
+try:
+    from .resource_archive import download_archive, emit_progress, locked_archive, remove_download_artifacts, safe_extract, verify_sha256
+except ImportError:
+    from resource_archive import download_archive, emit_progress, locked_archive, remove_download_artifacts, safe_extract, verify_sha256
 
-MODEL_NAME = "sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01"
-DEFAULT_ASSET_URL = (
-    "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
-    f"{MODEL_NAME}.tar.bz2"
-)
+
+DEFAULT_ASSET_URL, DEFAULT_SHA256 = locked_archive("sherpa_online")
 VALIDATION_FILENAME = ".yuizaki-validation.json"
 
 
@@ -25,20 +23,6 @@ def find_file(root: Path, name: str) -> Path:
         raise FileNotFoundError(f"Could not find {name} inside {root}")
     matches.sort(key=lambda item: len(item.parts))
     return matches[0]
-
-
-def safe_extract(archive: tarfile.TarFile, target: Path) -> None:
-    target = target.resolve()
-    for member in archive.getmembers():
-        destination = (target / member.name).resolve()
-        if not destination.is_relative_to(target):
-            raise ValueError(f"Archive member escapes target directory: {member.name}")
-        if member.issym() or member.islnk():
-            raise ValueError(f"Archive links are not allowed: {member.name}")
-    if sys.version_info >= (3, 12):
-        archive.extractall(target, filter="data")
-    else:
-        archive.extractall(target)
 
 
 def validate_model(model_path: Path, tokens_path: Path) -> None:
@@ -83,6 +67,7 @@ def write_validation_manifest(target_dir: Path, payload: dict[str, object]) -> N
 def main() -> None:
     parser = argparse.ArgumentParser(description="Download and validate Yuizaki's sherpa-onnx streaming ASR model.")
     parser.add_argument("--asset-url", default=DEFAULT_ASSET_URL)
+    parser.add_argument("--sha256", default=DEFAULT_SHA256)
     parser.add_argument("--archive-path", type=Path, help="Use an existing archive instead of downloading it.")
     parser.add_argument(
         "--target-dir",
@@ -94,19 +79,27 @@ def main() -> None:
     target_dir = args.target_dir.resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="yuizaki-sherpa-online-") as tmpdir:
-        temporary_root = Path(tmpdir)
-        if args.archive_path:
-            archive_path = args.archive_path.resolve()
-            if not archive_path.is_file():
-                raise FileNotFoundError(f"Archive not found: {archive_path}")
-            print(f"Using existing archive {archive_path}")
-        else:
-            archive_path = temporary_root / "sherpa-streaming.tar.bz2"
-            print(f"Downloading {args.asset_url}")
-            urllib.request.urlretrieve(args.asset_url, archive_path)
+    download_dir = target_dir / ".download"
+    downloaded_archive = not args.archive_path
+    archive_path = args.archive_path.resolve() if args.archive_path else download_dir / "sherpa-streaming.tar.bz2.part"
+    if args.archive_path and not archive_path.is_file():
+        raise FileNotFoundError(f"Archive not found: {archive_path}")
+    if args.archive_path:
+        print(f"Using existing archive {archive_path}")
+    extract_root = download_dir / "extract"
+    shutil.rmtree(extract_root, ignore_errors=True)
+    try:
+        if downloaded_archive:
+            download_archive(args.asset_url, archive_path)
+        emit_progress("verifying", "Verifying model archive")
+        try:
+            verify_sha256(archive_path, args.sha256)
+        except ValueError:
+            if downloaded_archive:
+                remove_download_artifacts(archive_path)
+            raise
 
-        extract_root = temporary_root / "extract"
+        emit_progress("extracting", "Extracting model archive")
         extract_root.mkdir(parents=True, exist_ok=True)
         with tarfile.open(archive_path, "r:bz2") as archive:
             safe_extract(archive, extract_root)
@@ -121,6 +114,7 @@ def main() -> None:
         staged_model = staging_dir / "model.int8.onnx"
         staged_tokens = staging_dir / "tokens.txt"
         try:
+            emit_progress("installing", "Validating and installing model files")
             shutil.copyfile(source_model, staged_model)
             shutil.copyfile(source_tokens, staged_tokens)
             validate_model(staged_model, staged_tokens)
@@ -129,6 +123,12 @@ def main() -> None:
         finally:
             shutil.rmtree(staging_dir, ignore_errors=True)
         write_validation_manifest(target_dir, validation_payload(model_path, tokens_path, args.asset_url))
+        if downloaded_archive:
+            remove_download_artifacts(archive_path)
+    finally:
+        shutil.rmtree(extract_root, ignore_errors=True)
+        if download_dir.exists() and not any(download_dir.iterdir()):
+            download_dir.rmdir()
 
     print(f"Sherpa streaming Zipformer2 CTC assets validated in {target_dir}")
 

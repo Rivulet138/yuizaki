@@ -14,7 +14,7 @@ call :resolve_python || exit /b 1
 
 echo [1/3] Installing Electron dependencies...
 pushd electron
-call npm install
+call npm ci
 if errorlevel 1 goto :error
 call npm run install:runtime
 if errorlevel 1 goto :error
@@ -22,7 +22,7 @@ popd
 
 echo [2/3] Installing node-mcp dependencies...
 pushd node-mcp
-call npm install
+call npm ci
 if errorlevel 1 goto :error
 popd
 
@@ -36,7 +36,11 @@ if not exist ".venv\Scripts\python.exe" (
 call ".venv\Scripts\python.exe" -m pip install --upgrade pip
 if errorlevel 1 goto :error
 
-call ".venv\Scripts\python.exe" -m pip install "fastapi>=0.136,<1" "uvicorn[standard]>=0.49,<1" "httpx>=0.28,<1" "aiofiles>=25,<26" "numpy>=2.1,<3" "python-multipart>=0.0.32,<1" "python-socketio>=5.16,<6" "sqlalchemy>=2.0.50,<3" "alembic>=1.18,<2" "Pillow>=12,<13" "rapidocr-onnxruntime>=1.2.3,<2"
+call ".venv\Scripts\python.exe" -m pip install -r requirements-core-lock-windows.txt
+if errorlevel 1 goto :error
+call ".venv\Scripts\python.exe" -m pip check
+if errorlevel 1 goto :error
+call ".venv\Scripts\python.exe" scripts\check_installed_lock.py --lock requirements-core-lock-windows.txt
 if errorlevel 1 goto :error
 
 if not exist ".env" (

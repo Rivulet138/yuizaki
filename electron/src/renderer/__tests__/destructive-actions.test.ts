@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { defineComponent, h, ref } from 'vue'
+import { defineComponent, h, nextTick, ref } from 'vue'
 
 import DeployPanel from '../domains/deploy/views/DeployPanel.vue'
 import PetControlPanel from '../domains/pet/views/PetControlPanel.vue'
@@ -41,6 +41,8 @@ const resourceClientMocks = vi.hoisted(() => ({
   storageStatus: vi.fn(),
   cleanupStorage: vi.fn(),
   prepareSherpaOnline: vi.fn(),
+  cancel: vi.fn(),
+  remove: vi.fn(),
 }))
 
 const systemClientMocks = vi.hoisted(() => ({
@@ -400,6 +402,15 @@ describe('destructive action confirmation', () => {
       completed: [],
       status: { categories: [], total_bytes: 0, reclaimable_bytes: 0 },
     })
+    resourceClientMocks.cancel.mockResolvedValue({ success: true, cancelled: [], status: null })
+    resourceClientMocks.remove.mockResolvedValue({
+      success: true,
+      message: 'removed',
+      removed: ['sherpa_online'],
+      failed: [],
+      reclaimedBytes: 1024,
+      status: null,
+    })
     systemClientMocks.pythonHealth.mockResolvedValue({ status: 'ok', healthy: true })
     systemClientMocks.startPython.mockResolvedValue({ success: true })
     systemClientMocks.stopPython.mockResolvedValue({ success: true })
@@ -546,7 +557,22 @@ describe('destructive action confirmation', () => {
   })
 
   it('renders verified streaming ASR resources and uses the dedicated install action', async () => {
-    const summary = { ready: true, state: 'ready', message: 'Ready', details: [] }
+    const summary = {
+      ready: true,
+      state: 'ready',
+      message: 'Ready',
+      details: [],
+      metadata: {
+        label: 'Sherpa Streaming Zipformer2 CTC',
+        version: '2025-04-01',
+        license: 'Apache-2.0',
+        licenseUrl: 'https://example.invalid/license',
+        downloadBytes: 1024,
+        source: 'https://example.invalid/model',
+        integrity: 'verified',
+        inUseBy: ['流式语音识别'],
+      },
+    }
     const status = {
       modelRoots: { live2d: 'C:/models/live2d', vrm: 'C:/models/vrm' },
       localCounts: { live2d: 1, vrm: 0 },
@@ -579,7 +605,14 @@ describe('destructive action confirmation', () => {
         validationPath: 'C:/models/streaming/.yuizaki-validation.json',
       },
       embedding: { ...summary, modelName: 'embedding', cachePath: null, cacheRoot: '' },
-      tts: { ...summary, character: 'feibi', cacheDir: '', configuredModelDir: null },
+      tts: { ...summary, character: 'feibi', cacheDir: '', modelDir: '' },
+      resumableDownloads: [{
+        resourceId: 'sherpa',
+        bytesDownloaded: 256,
+        bytesTotal: 1024,
+        percent: 25,
+        updatedAt: '2026-07-20T00:00:00.000Z',
+      }],
     }
     resourceClientMocks.status.mockResolvedValue(status)
     resourceClientMocks.prepareSherpaOnline.mockResolvedValue({ success: true, message: 'ready', status })
@@ -590,6 +623,7 @@ describe('destructive action confirmation', () => {
     expect(wrapper.text()).toContain('Sherpa Streaming Zipformer2 CTC')
     expect(wrapper.text()).toContain('Zipformer2 CTC verified')
     expect(wrapper.text()).toContain('C:/models/streaming/model.int8.onnx')
+    expect(wrapper.text()).toContain('可续传 256 B / 1.0 KiB')
 
     const installButton = wrapper.findAll('button').find((button) => button.text().includes('(Streaming)'))
     expect(installButton).toBeTruthy()
@@ -597,6 +631,61 @@ describe('destructive action confirmation', () => {
     await flushPromises()
 
     expect(resourceClientMocks.prepareSherpaOnline).toHaveBeenCalledTimes(1)
+
+    let finishPendingDownload: (() => void) | undefined
+    resourceClientMocks.prepareSherpaOnline.mockImplementationOnce(() => new Promise((resolve) => {
+      finishPendingDownload = () => resolve({ success: true, message: 'ready', status })
+    }))
+    await installButton?.trigger('click')
+    await nextTick()
+
+    const cancelDownloadButton = wrapper.findAll('button').find((button) => button.text().includes('取消下载'))
+    expect(cancelDownloadButton).toBeTruthy()
+    await cancelDownloadButton?.trigger('click')
+    await flushPromises()
+
+    expect(resourceClientMocks.cancel).toHaveBeenCalledWith(['sherpa_online'])
+    finishPendingDownload?.()
+    await flushPromises()
+
+    elementPlusMocks.confirm.mockResolvedValueOnce('confirm')
+    const removeButton = wrapper.findAll('button').find((button) => button.text().includes('永久卸载'))
+    expect(removeButton).toBeTruthy()
+    await removeButton?.trigger('click')
+    await flushPromises()
+
+    expect(elementPlusMocks.confirm).toHaveBeenCalledWith(
+      expect.stringContaining('使用中'),
+      '永久卸载模型',
+      expect.objectContaining({ confirmButtonText: '永久卸载' }),
+    )
+    expect(resourceClientMocks.remove).toHaveBeenCalledWith(['sherpa_online'])
+    wrapper.unmount()
+
+    resourceClientMocks.status.mockResolvedValue({
+      ...status,
+      activeDownloads: [{
+        resourceId: 'sherpa_online',
+        phase: 'downloading',
+        message: 'Downloading model archive',
+        bytesDownloaded: 512,
+        bytesTotal: 1024,
+        percent: 50,
+        startedAt: '2026-07-20T00:00:00.000Z',
+        updatedAt: '2026-07-20T00:00:01.000Z',
+      }],
+    })
+    const resumedWrapper = mount(SettingsPanel, { global })
+    await flushPromises()
+
+    expect(resumedWrapper.text()).toContain('流式语音识别')
+    expect(resumedWrapper.text()).toContain('512 B / 1.0 KiB')
+    const resumedCancelButton = resumedWrapper.findAll('button').find((button) => button.text().includes('取消下载'))
+    expect(resumedCancelButton).toBeTruthy()
+    await resumedCancelButton?.trigger('click')
+    await flushPromises()
+    expect(resourceClientMocks.cancel).toHaveBeenLastCalledWith(['sherpa_online'])
+    resumedWrapper.unmount()
   })
 
   it('flushes pending settings autosave before unmount', async () => {

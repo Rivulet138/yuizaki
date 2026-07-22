@@ -1,6 +1,6 @@
 # 第三方组件与素材
 
-本文说明项目级授权边界，不替代各组件许可证。维护日期：2026-07-19。
+本文说明项目级授权边界，不替代各组件许可证。
 
 ## 源代码依赖
 
@@ -10,7 +10,8 @@
 
 - `electron/package-lock.json`
 - `node-mcp/package-lock.json`
-- 发布构建保存的 Python 锁文件或 `pip freeze`
+- `python/requirements-*-lock-*.txt`
+- `resources.lock.json`
 
 项目尚需自动生成 SPDX/CycloneDX SBOM。依赖版本和升级策略见 [DEPENDENCIES.md](DEPENDENCIES.md)。
 
@@ -42,6 +43,8 @@ VRM 文件可能携带模型级许可和人格使用限制。导入功能不会�
 - 许可证/模型卡位置
 - 是否允许再分发和商用
 - 是否包含声音、角色或数据集限制
+
+当前默认模型清单、revision、SHA-256 和许可证入口位于 `resources.lock.json`。
 
 仓库内 `services/soulx-svc/models/` 的 README 属于上游模型卡，保留原文，不作为项目自有授权声明。
 

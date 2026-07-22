@@ -3,6 +3,7 @@ import path from 'node:path'
 import { app } from 'electron'
 import { getRuntimeExceptions } from '../../runtime-diagnostics'
 import {
+  cancelModelResources,
   getModelResourceStatus,
   importSoulxReferenceAudio,
   prepareEmbeddingModel,
@@ -11,6 +12,7 @@ import {
   prepareSherpaSenseVoice,
   prepareSherpaStreamingZipformer,
   prepareSoulxModels,
+  removeModelResources,
 } from '../../resource-manager'
 import type { ManagedModelResourceId } from '../../../shared/resource-manager'
 import type { HttpRouteHandler } from '../types'
@@ -866,6 +868,24 @@ export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, ur
     const body = await parseRequestBody<{ resources?: ManagedModelResourceId[] }>(_req)
     const resources = Array.isArray(body.resources) ? body.resources.slice(0, 5) : []
     sendJson(res, 200, await prepareModelResources(resources, ctx.petModelCatalog))
+    return true
+  }
+
+  if (method === 'POST' && url.pathname === '/api/system/resources/cancel') {
+    const body = await parseRequestBody<{ resources?: ManagedModelResourceId[] }>(_req)
+    const resources = Array.isArray(body.resources) ? body.resources.slice(0, 5) : []
+    sendJson(res, 200, cancelModelResources(resources, ctx.petModelCatalog))
+    return true
+  }
+
+  if (method === 'POST' && url.pathname === '/api/system/resources/remove') {
+    const body = await parseRequestBody<{ resources?: ManagedModelResourceId[]; confirmation?: string }>(_req)
+    if (body.confirmation !== 'PERMANENT_REMOVE') {
+      sendJson(res, 400, { error: 'PERMANENT_REMOVE confirmation is required' })
+      return true
+    }
+    const resources = Array.isArray(body.resources) ? body.resources.slice(0, 5) : []
+    sendJson(res, 200, removeModelResources(resources, ctx.petModelCatalog))
     return true
   }
 

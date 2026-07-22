@@ -11,6 +11,7 @@ from ..core.config import (
     DEFAULT_QDRANT_DOCKER_VOLUME,
     DEFAULT_TTS_LANG,
     config as env_config,
+    normalize_qdrant_docker_image,
 )
 from ..llm.providers import normalize_llm_base_url, normalize_llm_provider
 
@@ -69,6 +70,11 @@ def _normalized_llm_profiles(profiles: dict[str, LLMProviderProfileModel]) -> di
     return normalized
 
 
+def _vision_detail_default() -> Literal["low", "high", "auto", "original"]:
+    value = str(getattr(env_config.llm, "vision_detail", "low") or "low").strip().lower()
+    return value if value in {"low", "high", "auto", "original"} else "low"  # type: ignore[return-value]
+
+
 class LLMSettingsModel(BaseModel):
     provider: LLMProvider = Field(default_factory=lambda: normalize_llm_provider(env_config.llm.provider, env_config.llm.base_url))  # type: ignore[arg-type]
     base_url: str = Field(default_factory=lambda: env_config.llm.base_url)
@@ -90,6 +96,7 @@ class LLMSettingsModel(BaseModel):
     vision_api_key: str = Field(default_factory=lambda: env_config.llm.vision_api_key)
     vision_model: str = Field(default_factory=lambda: env_config.llm.vision_model)
     vision_timeout: float = Field(default_factory=lambda: env_config.llm.vision_timeout, gt=0)
+    vision_detail: Literal["low", "high", "auto", "original"] = Field(default_factory=_vision_detail_default)
     profiles: dict[str, LLMProviderProfileModel] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
@@ -156,7 +163,7 @@ def _tts_device_default() -> TTSDevice:
 
 
 def _asr_provider_default() -> ASRProvider:
-    return _ASR_PROVIDER_OPTIONS.get(env_config.asr.provider.strip().lower(), "sensevoice-service")
+    return _ASR_PROVIDER_OPTIONS.get(env_config.asr.provider.strip().lower(), "sherpa-onnx-online")
 
 
 def _svc_provider_default() -> SVCProvider:
@@ -270,13 +277,16 @@ class MemorySettingsModel(BaseModel):
     qdrant_docker_container: str = Field(default_factory=lambda: env_config.memory.qdrant_docker_container or DEFAULT_QDRANT_DOCKER_CONTAINER)
     qdrant_docker_volume: str = Field(default_factory=lambda: env_config.memory.qdrant_docker_volume or DEFAULT_QDRANT_DOCKER_VOLUME)
     embedding_model: str = Field(default_factory=lambda: env_config.memory.embedding_model)
+    reranker_enabled: bool = Field(default_factory=lambda: env_config.memory.reranker_enabled)
+    reranker_model: str = Field(default_factory=lambda: env_config.memory.reranker_model)
+    reranker_candidate_count: int = Field(default_factory=lambda: env_config.memory.reranker_candidate_count, ge=5, le=100)
 
     model_config = ConfigDict(extra="forbid")
 
     def model_post_init(self, _context: Any) -> None:
         self.qdrant_url = self.qdrant_url.rstrip("/")
         self.qdrant_collection = self.qdrant_collection.strip() or "memories"
-        self.qdrant_docker_image = self.qdrant_docker_image.strip() or DEFAULT_QDRANT_DOCKER_IMAGE
+        self.qdrant_docker_image = normalize_qdrant_docker_image(self.qdrant_docker_image)
         self.qdrant_docker_container = self.qdrant_docker_container.strip() or DEFAULT_QDRANT_DOCKER_CONTAINER
         self.qdrant_docker_volume = self.qdrant_docker_volume.strip() or DEFAULT_QDRANT_DOCKER_VOLUME
 
@@ -302,6 +312,7 @@ class LLMSettingsPatchModel(BaseModel):
     vision_api_key: str | None = None
     vision_model: str | None = None
     vision_timeout: float | None = None
+    vision_detail: Literal["low", "high", "auto", "original"] | None = None
     profiles: dict[str, LLMProviderProfileModel] | None = None
 
     model_config = ConfigDict(extra="forbid")
@@ -422,6 +433,9 @@ class MemorySettingsPatchModel(BaseModel):
     qdrant_docker_container: str | None = None
     qdrant_docker_volume: str | None = None
     embedding_model: str | None = None
+    reranker_enabled: bool | None = None
+    reranker_model: str | None = None
+    reranker_candidate_count: int | None = Field(default=None, ge=5, le=100)
 
     model_config = ConfigDict(extra="forbid")
 

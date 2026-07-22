@@ -16,7 +16,7 @@ export interface LlmProviderEndpoints {
 export const LLM_PROVIDER_BASE_URLS: Record<LlmProviderPreset, string> = {
   deepseek: 'https://api.deepseek.com/v1',
   qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  gemini: 'https://generativelanguage.googleapis.com/v1beta/openai',
+  gemini: 'https://generativelanguage.googleapis.com/v1beta',
   chatgpt: 'https://api.openai.com/v1',
   claude: 'https://api.anthropic.com/v1',
   grok: 'https://api.x.ai/v1',
@@ -28,7 +28,7 @@ export const LLM_PROVIDER_BASE_URLS: Record<LlmProviderPreset, string> = {
 export const LLM_PROVIDER_ENDPOINTS: Record<LlmProviderPreset, LlmProviderEndpoints> = {
   deepseek: { baseUrl: LLM_PROVIDER_BASE_URLS.deepseek, modelsPath: '/models', chatPath: '/chat/completions' },
   qwen: { baseUrl: LLM_PROVIDER_BASE_URLS.qwen, modelsPath: '/models', chatPath: '/chat/completions' },
-  gemini: { baseUrl: LLM_PROVIDER_BASE_URLS.gemini, modelsPath: '/models', chatPath: '/chat/completions' },
+  gemini: { baseUrl: LLM_PROVIDER_BASE_URLS.gemini, modelsPath: '/models', chatPath: '/models/{model}:generateContent' },
   chatgpt: { baseUrl: LLM_PROVIDER_BASE_URLS.chatgpt, modelsPath: '/models', chatPath: '/chat/completions' },
   claude: { baseUrl: LLM_PROVIDER_BASE_URLS.claude, modelsPath: '/models', chatPath: '/messages' },
   grok: { baseUrl: LLM_PROVIDER_BASE_URLS.grok, modelsPath: '/models', chatPath: '/chat/completions' },

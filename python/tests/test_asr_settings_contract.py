@@ -5,6 +5,7 @@ from modules.system.settings_schema import ASRSettingsModel, ASRSettingsPatchMod
 
 
 def test_asr_settings_default_endpoint_matches_runtime_contract():
+    assert ASRSettingsModel().provider == "sherpa-onnx-online"
     assert ASRSettingsModel().vad_min_silence_ms == 300
 
 

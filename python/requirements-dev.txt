@@ -1,4 +1,5 @@
 # Development dependencies.
+# CI and release verification use requirements-dev-lock-linux.txt or requirements-dev-lock-windows.txt.
 # Install from python/: pip install -r requirements-dev.txt
 
 -r requirements.txt

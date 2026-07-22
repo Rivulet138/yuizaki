@@ -54,6 +54,9 @@ export interface SettingsResponse {
     qdrant_docker_container?: string
     qdrant_docker_volume?: string
     embedding_model?: string
+    reranker_enabled?: boolean
+    reranker_model?: string
+    reranker_candidate_count?: number
   }
 }
 
@@ -95,6 +98,7 @@ export interface LlmSettingsResponse {
     vision_api_key?: string
     vision_model?: string
     vision_timeout?: number
+    vision_detail?: 'low' | 'high' | 'auto' | 'original'
     profiles?: Record<string, LlmProviderProfile>
 }
 

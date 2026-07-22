@@ -18,12 +18,15 @@ from ..core.state import Generation, GenerationManager
 from .providers import (
     build_llm_auth_headers,
     is_claude_provider,
+    llm_protocol,
+    llm_request_url,
     llm_chat_url,
     llm_models_url,
     normalize_llm_base_url,
     normalize_llm_provider,
 )
 from .context_window import build_and_truncate_layered_context, message_content_to_text
+from .capabilities import get_model_limits
 from ..pet_control import (
     build_pet_control_response_format,
     extract_pet_control_payload,
@@ -348,6 +351,122 @@ def _message_content_to_claude_content(content: Any) -> str | list[dict[str, Any
     return message_content_to_text(content)
 
 
+def _openai_block_to_gemini_part(block: Mapping[str, Any]) -> dict[str, Any] | None:
+    block_type = block.get("type")
+    if block_type == "text":
+        text = str(block.get("text") or "")
+        return {"text": text} if text else None
+    if block_type not in {"image_url", "input_image"}:
+        return None
+    raw_image = block.get("image_url") or block.get("input_image")
+    url = raw_image.get("url") if isinstance(raw_image, Mapping) else raw_image
+    if not isinstance(url, str):
+        return None
+    match = re.match(r"^data:(image/[A-Za-z0-9.+-]+);base64,(.+)$", url, flags=re.DOTALL)
+    if match:
+        mime_type, data = match.groups()
+        return {"inlineData": {"mimeType": mime_type, "data": data}}
+    if url.startswith(("http://", "https://")):
+        return {"fileData": {"mimeType": "image/*", "fileUri": url}}
+    return None
+
+
+def _message_content_to_gemini_parts(content: Any) -> list[dict[str, Any]]:
+    if not isinstance(content, list):
+        text = message_content_to_text(content)
+        return [{"text": text}] if text else []
+    parts: list[dict[str, Any]] = []
+    for raw_block in content:
+        if isinstance(raw_block, Mapping):
+            part = _openai_block_to_gemini_part(raw_block)
+            if part is not None:
+                parts.append(part)
+    return parts
+
+
+def _messages_to_gemini_payload(body: dict[str, Any]) -> dict[str, Any]:
+    system_parts: list[dict[str, Any]] = []
+    contents: list[dict[str, Any]] = []
+    for message in body.get("messages") or []:
+        if not isinstance(message, Mapping):
+            continue
+        role = str(message.get("role") or "user")
+        parts = _message_content_to_gemini_parts(message.get("content"))
+        if role == "system":
+            system_parts.extend(parts)
+            continue
+        if role == "tool":
+            tool_text = message_content_to_text(message.get("content"))
+            parts = [{"text": tool_text}] if tool_text else []
+            role = "user"
+        if role == "assistant":
+            role = "model"
+        if parts:
+            contents.append({"role": role if role in {"user", "model"} else "user", "parts": parts})
+
+    generation_config: dict[str, Any] = {}
+    for source, target in (
+        ("temperature", "temperature"),
+        ("top_p", "topP"),
+        ("top_k", "topK"),
+        ("max_tokens", "maxOutputTokens"),
+    ):
+        if body.get(source) is not None:
+            generation_config[target] = body[source]
+    payload: dict[str, Any] = {"contents": contents or [{"role": "user", "parts": [{"text": "ping"}]}]}
+    if system_parts:
+        payload["systemInstruction"] = {"parts": system_parts}
+    if generation_config:
+        payload["generationConfig"] = generation_config
+    tools: list[dict[str, Any]] = []
+    for tool in body.get("tools") or []:
+        function = tool.get("function") if isinstance(tool, Mapping) else None
+        if not isinstance(function, Mapping) or not function.get("name"):
+            continue
+        tools.append({
+            "name": str(function["name"]),
+            "description": str(function.get("description") or ""),
+            "parameters": function.get("parameters") or {"type": "object", "properties": {}},
+        })
+    if tools:
+        payload["tools"] = [{"functionDeclarations": tools}]
+    return payload
+
+
+def _gemini_response_to_chat_completion(data: Mapping[str, Any]) -> dict[str, Any]:
+    parts = ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
+    text_parts: list[str] = []
+    tool_calls: list[dict[str, Any]] = []
+    for index, part in enumerate(parts):
+        if not isinstance(part, Mapping):
+            continue
+        if part.get("text"):
+            text_parts.append(str(part["text"]))
+        function_call = part.get("functionCall")
+        if isinstance(function_call, Mapping) and function_call.get("name"):
+            tool_calls.append({
+                "id": f"gemini-call-{index}",
+                "type": "function",
+                "function": {
+                    "name": str(function_call["name"]),
+                    "arguments": json.dumps(function_call.get("args") or {}, ensure_ascii=False),
+                },
+            })
+    return {"choices": [{"message": {"content": "".join(text_parts), "tool_calls": tool_calls}}]}
+
+
+async def _iter_gemini_text_deltas(resp: httpx.Response) -> AsyncIterator[str]:
+    async for raw_line in resp.aiter_lines():
+        data_str = _parse_sse_data(raw_line)
+        if data_str is None:
+            continue
+        data = json.loads(data_str)
+        parts = ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
+        for part in parts:
+            if isinstance(part, Mapping) and part.get("text"):
+                yield str(part["text"])
+
+
 def _messages_to_claude_payload(body: dict[str, Any]) -> dict[str, Any]:
     system_parts: list[str] = []
     claude_messages: list[dict[str, Any]] = []
@@ -559,13 +678,27 @@ async def _rewrite_summary_with_llm(
         "temperature": 0.2,
     }
     claude_provider = is_claude_provider(provider)
+    native_gemini = llm_protocol(provider, base_url) == "gemini-generate-content"
     resp = await http_client.post(
-        llm_chat_url(base_url, provider),
-        json=_messages_to_claude_payload(payload) if claude_provider else payload,
+        llm_request_url(base_url, provider, model=model),
+        json=(
+            _messages_to_claude_payload(payload)
+            if claude_provider
+            else _messages_to_gemini_payload(payload)
+            if native_gemini
+            else payload
+        ),
         headers=headers,
     )
     resp.raise_for_status()
-    data = _claude_response_to_chat_completion(resp.json()) if claude_provider else resp.json()
+    raw_data = resp.json()
+    data = (
+        _claude_response_to_chat_completion(raw_data)
+        if claude_provider
+        else _gemini_response_to_chat_completion(raw_data)
+        if native_gemini
+        else raw_data
+    )
     choices = data.get("choices") or []
     if not choices:
         return ""
@@ -605,13 +738,27 @@ async def _score_summary_with_llm(
         "temperature": 0.0,
     }
     claude_provider = is_claude_provider(provider)
+    native_gemini = llm_protocol(provider, base_url) == "gemini-generate-content"
     resp = await http_client.post(
-        llm_chat_url(base_url, provider),
-        json=_messages_to_claude_payload(payload) if claude_provider else payload,
+        llm_request_url(base_url, provider, model=model),
+        json=(
+            _messages_to_claude_payload(payload)
+            if claude_provider
+            else _messages_to_gemini_payload(payload)
+            if native_gemini
+            else payload
+        ),
         headers=headers,
     )
     resp.raise_for_status()
-    data = _claude_response_to_chat_completion(resp.json()) if claude_provider else resp.json()
+    raw_data = resp.json()
+    data = (
+        _claude_response_to_chat_completion(raw_data)
+        if claude_provider
+        else _gemini_response_to_chat_completion(raw_data)
+        if native_gemini
+        else raw_data
+    )
     choices = data.get("choices") or []
     if not choices:
         return None
@@ -746,6 +893,33 @@ def _apply_config_generation_defaults(body: dict[str, Any]) -> None:
     _apply_optional_generation_number(body, "repetition_penalty", getattr(config.llm, "repetition_penalty", None))
 
 
+def _effective_model_budget(
+    model: str | None,
+    requested: int | None,
+    configured: int,
+    limit_key: str,
+    *,
+    provider: str | None = None,
+    log_clamp: bool = True,
+) -> int:
+    """Clamp a budget only when the selected model has an explicit registry limit."""
+    value = max(1, int(requested if requested is not None else configured))
+    effective_provider = provider or config.llm.provider
+    limit = get_model_limits(effective_provider, model or config.llm.model).get(limit_key)
+    if limit is None:
+        return value
+    if value > limit and log_clamp:
+        logger.warning(
+            "Clamping LLM %s from %d to registry limit %d for provider=%s model=%s",
+            limit_key,
+            value,
+            limit,
+            effective_provider,
+            model or config.llm.model,
+        )
+    return min(value, limit)
+
+
 def _should_retry_empty_reasoning_response(data: dict[str, Any], max_output_tokens: Optional[int]) -> bool:
     if max_output_tokens is None or int(max_output_tokens) >= _EMPTY_REASONING_RETRY_MIN_TOKENS:
         return False
@@ -796,12 +970,15 @@ class LLMClient:
         model: str,
         timeout: float = 60.0,
         provider: str = "custom",
+        image_detail: str = "auto",
     ):
         self.provider = normalize_llm_provider(provider, base_url)
         self.base_url = normalize_llm_base_url(base_url, self.provider)
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
+        normalized_detail = str(image_detail or "auto").strip().lower()
+        self.image_detail = normalized_detail if normalized_detail in {"low", "high", "auto", "original"} else "auto"
         self._http: Optional[httpx.AsyncClient] = None
         self._tool_calls_supported: bool | None = None
         self._preconnect_lock = asyncio.Lock()
@@ -910,10 +1087,29 @@ class LLMClient:
 
     def status_snapshot(self) -> dict[str, object]:
         """Return transport diagnostics without exposing credentials or prompts."""
+        model_limits = get_model_limits(self.provider, self.model)
         return {
             "available": self._http is not None,
             "provider": self.provider,
+            "protocol": llm_protocol(self.provider, self.base_url),
             "model": self.model,
+            "model_limits": model_limits,
+            "effective_context_max_tokens": _effective_model_budget(
+                self.model,
+                None,
+                int(config.llm.context_max_tokens),
+                "context_window_tokens",
+                provider=self.provider,
+                log_clamp=False,
+            ),
+            "effective_default_max_output_tokens": _effective_model_budget(
+                self.model,
+                None,
+                int(config.llm.default_max_output_tokens),
+                "max_output_tokens",
+                provider=self.provider,
+                log_clamp=False,
+            ),
             "preconnect_running": bool(self._preconnect_task and not self._preconnect_task.done()),
             "preconnect_cooldown_seconds": _PRECONNECT_COOLDOWN_SECONDS,
             "preconnect_cooldown_remaining_ms": round(self._preconnect_cooldown_remaining() * 1000, 2),
@@ -981,14 +1177,27 @@ class LLMClient:
             reasoning_effort=reasoning_effort,
             thinking=thinking,
         )
-        if max_output_tokens is not None:
-            body["max_tokens"] = int(max_output_tokens)
+        selected_model = str(model or self.model or "").strip()
+        effective_output_tokens = _effective_model_budget(
+            selected_model,
+            max_output_tokens,
+            int(config.llm.default_max_output_tokens),
+            "max_output_tokens",
+            provider=self.provider,
+        )
+        body["max_tokens"] = effective_output_tokens
         if not is_claude_provider(self.provider):
             _apply_pet_control_response_format(body, pet_control_context)
 
         # Week 2: apply context window governance before request.
-        context_max_tokens = int(config.llm.context_max_tokens)
-        reserve_tokens = int(max_output_tokens or config.llm.default_max_output_tokens)
+        context_max_tokens = _effective_model_budget(
+            selected_model,
+            None,
+            int(config.llm.context_max_tokens),
+            "context_window_tokens",
+            provider=self.provider,
+        )
+        reserve_tokens = effective_output_tokens
         summary_text = mgr.get_summary(sid)
         windowed_messages, stats = build_and_truncate_layered_context(
             messages=messages,
@@ -1122,6 +1331,62 @@ class LLMClient:
                 })
             except (httpx.RequestError, json.JSONDecodeError, RuntimeError) as exc:
                 logger.error("[%s/%s] Claude LLM stream error: %s", sid, gid, exc)
+                await _safe_send(ws, gen, {
+                    "type": "error",
+                    "session_id": sid,
+                    "generation_id": gid,
+                    "error": str(exc),
+                })
+            return
+
+        if llm_protocol(self.provider, self.base_url) == "gemini-generate-content":
+            gen.mark("llm_request")
+            gen.mark("llm_request_started")
+            url = llm_request_url(self.base_url, self.provider, model=body["model"], stream=True)
+            payload = _messages_to_gemini_payload(body)
+            # Gemini's native streaming endpoint uses SSE and returns the same
+            # candidate/parts envelope for every chunk.
+            try:
+                async with self._http.stream(
+                    "POST", f"{url}?alt=sse", json=payload, headers=headers,
+                ) as resp:
+                    resp.raise_for_status()
+                    async for content in _iter_gemini_text_deltas(resp):
+                        if gen.cancel.is_set():
+                            break
+                        await _consume_stream_content(content)
+                if gen.cancel.is_set() or gen.invalidated:
+                    return
+                gen.mark("llm_completed")
+                final_reply, pet_control = extract_pet_control_payload("".join(raw_stream_parts))
+                pet_control = filter_pet_control_payload(pet_control, pet_control_context)
+                await _reconcile_final_reply(final_reply)
+                if final_reply:
+                    gen.tokens = [final_reply]
+                    mgr.append_history(sid, "assistant", final_reply)
+                if pet_control:
+                    setattr(gen, "pet_control", pet_control)
+                    await _safe_send(ws, gen, {
+                        "type": "pet_control",
+                        "session_id": sid,
+                        "generation_id": gid,
+                        "pet_control": pet_control,
+                    })
+                await _safe_send(ws, gen, {
+                    "type": "done",
+                    "session_id": sid,
+                    "generation_id": gid,
+                    "content": final_reply,
+                })
+            except httpx.HTTPStatusError as exc:
+                body_text = _safe_response_excerpt(exc.response, limit=300)
+                await _safe_send(ws, gen, {
+                    "type": "error",
+                    "session_id": sid,
+                    "generation_id": gid,
+                    "error": f"LLM API {exc.response.status_code}: {body_text}",
+                })
+            except (httpx.RequestError, json.JSONDecodeError, RuntimeError) as exc:
                 await _safe_send(ws, gen, {
                     "type": "error",
                     "session_id": sid,
@@ -1266,6 +1531,7 @@ class LLMClient:
 
         headers = build_llm_auth_headers(self.api_key, self.provider)
         claude_provider = is_claude_provider(self.provider)
+        native_gemini = llm_protocol(self.provider, self.base_url) == "gemini-generate-content"
 
         body: dict[str, Any] = {
             "model": self.model,
@@ -1286,23 +1552,36 @@ class LLMClient:
             reasoning_effort=reasoning_effort,
             thinking=thinking,
         )
-        if max_output_tokens is not None:
-            body["max_tokens"] = int(max_output_tokens)
-        if not claude_provider:
+        selected_model = str(model or self.model or "").strip()
+        effective_output_tokens = _effective_model_budget(
+            selected_model,
+            max_output_tokens,
+            int(config.llm.default_max_output_tokens),
+            "max_output_tokens",
+            provider=self.provider,
+        )
+        body["max_tokens"] = effective_output_tokens
+        if not claude_provider and not native_gemini:
             _apply_pet_control_response_format(body, pet_control_context)
         request_tools = bool(tools) and self._tool_calls_supported is not False
         if request_tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
 
-        url = llm_chat_url(self.base_url, self.provider)
+        url = llm_request_url(self.base_url, self.provider, model=str(body.get("model") or self.model))
         sent_body: dict[str, Any] = body
         active_body: dict[str, Any] = body
         compat_retry_attempts = 0
         tool_retry_used = False
         while True:
             try:
-                request_payload = _messages_to_claude_payload(active_body) if claude_provider else active_body
+                request_payload = (
+                    _messages_to_claude_payload(active_body)
+                    if claude_provider
+                    else _messages_to_gemini_payload(active_body)
+                    if native_gemini
+                    else active_body
+                )
                 resp = await self._http.post(url, json=request_payload, headers=headers)
                 resp.raise_for_status()
                 sent_body = active_body
@@ -1312,7 +1591,7 @@ class LLMClient:
             except httpx.HTTPStatusError as exc:
                 body_text = _response_excerpt(exc.response)
                 fallback_body: dict[str, Any] | None = None
-                if compat_retry_attempts < _GENERATION_COMPAT_MAX_RETRIES and exc.response.status_code in {400, 422}:
+                if not native_gemini and compat_retry_attempts < _GENERATION_COMPAT_MAX_RETRIES and exc.response.status_code in {400, 422}:
                     fallback_body = (
                         _structured_output_compat_retry_body(active_body, body_text)
                         or _generation_compat_retry_body(active_body, body_text)
@@ -1340,22 +1619,31 @@ class LLMClient:
                 if fallback_body is None:
                     _raise_llm_http_error(exc, context="LLM chat")
                 active_body = fallback_body
-        data = _claude_response_to_chat_completion(resp.json()) if claude_provider else resp.json()
+        raw_data = resp.json()
+        data = (
+            _claude_response_to_chat_completion(raw_data)
+            if claude_provider
+            else _gemini_response_to_chat_completion(raw_data)
+            if native_gemini
+            else raw_data
+        )
 
-        if not claude_provider and _should_retry_empty_reasoning_response(data, max_output_tokens):
+        if not claude_provider and _should_retry_empty_reasoning_response(data, effective_output_tokens):
             retry_body = dict(sent_body)
             retry_body["max_tokens"] = _EMPTY_REASONING_RETRY_MIN_TOKENS
             logger.info(
                 "LLM returned only reasoning content with max_tokens=%s; retrying with max_tokens=%s",
-                max_output_tokens,
+                effective_output_tokens,
                 _EMPTY_REASONING_RETRY_MIN_TOKENS,
             )
             try:
-                resp = await self._http.post(url, json=retry_body, headers=headers)
+                retry_payload = _messages_to_gemini_payload(retry_body) if native_gemini else retry_body
+                resp = await self._http.post(url, json=retry_payload, headers=headers)
                 resp.raise_for_status()
             except httpx.HTTPStatusError as retry_exc:
                 _raise_llm_http_error(retry_exc, context="LLM empty-reasoning retry chat")
-            data = resp.json()
+            raw_data = resp.json()
+            data = _gemini_response_to_chat_completion(raw_data) if native_gemini else raw_data
 
         choices = data.get("choices") or []
         if not choices:
@@ -1456,6 +1744,7 @@ class LLMClient:
             return {"ok": False, "message": "LLM client not initialized"}
 
         headers = build_llm_auth_headers(self.api_key, self.provider)
+        native_gemini = llm_protocol(self.provider, self.base_url) == "gemini-generate-content"
 
         try:
             # Try OpenAI-compatible models endpoint first, but still verify the
@@ -1477,9 +1766,16 @@ class LLMClient:
                 "stream": False,
                 "max_tokens": 1,
             }
+            request_payload = (
+                _messages_to_claude_payload(payload)
+                if is_claude_provider(self.provider)
+                else _messages_to_gemini_payload(payload)
+                if native_gemini
+                else payload
+            )
             resp = await self._http.post(
-                llm_chat_url(self.base_url, self.provider),
-                json=_messages_to_claude_payload(payload) if is_claude_provider(self.provider) else payload,
+                llm_request_url(self.base_url, self.provider, model=self.model),
+                json=request_payload,
                 headers=headers,
             )
             resp.raise_for_status()

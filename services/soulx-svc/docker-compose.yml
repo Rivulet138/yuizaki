@@ -4,10 +4,10 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        SOULX_REF: main
+        SOULX_REF: 81aeb3ae772c70093c3de74dc23c92d983801ae4
     image: yuizaki/soulx-svc:local
     ports:
-      - "7861:7861"
+      - "127.0.0.1:7861:7861"
     environment:
       SOULX_DEVICE: auto
       SOULX_FP16: "true"
@@ -16,6 +16,8 @@ services:
       SOULX_AUTO_SHIFT: "true"
       SOULX_STEPS: "32"
       SOULX_CFG: "3.0"
+      SOULX_MAX_UPLOAD_BYTES: "52428800"
+      SOULX_MAX_STEPS: "128"
     volumes:
       - ./models/SoulX-Singer:/models/SoulX-Singer:ro
       - ./models/SoulX-Singer-Preprocess:/models/SoulX-Singer-Preprocess:ro

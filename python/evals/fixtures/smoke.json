@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "metadata": {
+    "source": "synthetic-ci-smoke",
+    "models": {
+      "asr": {"provider": "fixture", "model": "exact-match"},
+      "tts": {"provider": "fixture", "model": "latency-sample"},
+      "llm": {"provider": "fixture", "model": "tool-trace"},
+      "embedding": {"provider": "fixture", "model": "ranked-recall"}
+    }
+  },
+  "asr": [
+    {"reference": "你好世界", "hypothesis": "你好世界"},
+    {"reference": "open the settings panel", "hypothesis": "open the settings panel"}
+  ],
+  "tts": [
+    {"audio_duration_s": 2.0, "elapsed_ms": 120.0, "first_audio_ms": 80.0},
+    {"audio_duration_s": 1.0, "elapsed_ms": 180.0, "first_audio_ms": 140.0}
+  ],
+  "llm": [
+    {"expected_tools": ["read_file"], "actual_tools": ["read_file"]},
+    {"expected_tools": ["open_url", "web_search"], "actual_tools": ["open_url", "web_search"]}
+  ],
+  "embedding": [
+    {"relevant_ids": ["memory-1"], "ranked_ids": ["memory-1", "memory-4", "memory-2"], "k": 3},
+    {"relevant_ids": ["memory-2", "memory-3"], "ranked_ids": ["memory-3", "memory-2", "memory-7"], "k": 3}
+  ]
+}

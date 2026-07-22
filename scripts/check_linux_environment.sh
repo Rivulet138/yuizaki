@@ -28,8 +28,10 @@ done
 
 node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 13)) process.exit(1)" ||
 	fail "Node.js 22.13+ is required. Current: $(node -p 'process.versions.node')"
-"$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)' ||
-	fail "Python 3.12+ is required. Current: $("$PYTHON_BIN" --version 2>&1)"
+python_version="$($PYTHON_BIN -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')"
+"$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if (3, 12) <= sys.version_info[:2] < (3, 14) else 1)' ||
+	fail "Python 3.12 or 3.13 is required. Current: $python_version"
+echo "[INFO] Python interpreter: $PYTHON_BIN ($python_version)"
 
 case "$(uname -m)" in
 x86_64 | amd64) hook_arch="x64" ;;

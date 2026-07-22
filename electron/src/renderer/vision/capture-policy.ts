@@ -19,8 +19,8 @@ export function resolveVisualCapturePolicy(activity: VisualCaptureActivity): Vis
   if (activity.assistantSpeaking) {
     return {
       shouldCapture: true,
-      minUploadIntervalMs: Math.max(5000, configuredIntervalMs),
-      forceUploadIntervalMs: Math.max(15_000, configuredIntervalMs * 3),
+      minUploadIntervalMs: Math.max(1500, configuredIntervalMs),
+      forceUploadIntervalMs: Math.max(8000, configuredIntervalMs * 2),
     }
   }
   if (activity.microphoneRecording && !activity.hasPartialTranscript && activity.microphoneLevel < MIN_SPEECH_LEVEL) {
@@ -29,7 +29,7 @@ export function resolveVisualCapturePolicy(activity: VisualCaptureActivity): Vis
   if (activity.microphoneRecording) {
     return {
       shouldCapture: true,
-      minUploadIntervalMs: Math.max(2500, configuredIntervalMs),
+      minUploadIntervalMs: Math.max(1200, configuredIntervalMs),
       forceUploadIntervalMs: Infinity,
     }
   }

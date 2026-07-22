@@ -153,7 +153,7 @@ const ADMIN_MODE_STORAGE_KEY = 'yuizaki.adminMode'
 const activeVisionSettings = computed(() => workspaceStore.activeWorkspace.context.vision ?? {
   enabled: true,
   displayIndex: 0,
-  intervalMs: 5000,
+  intervalMs: 2000,
   pauseWhenAppHidden: true,
   captureMode: 'display' as const,
   region: { x: 0, y: 0, width: 1280, height: 720 },
@@ -184,6 +184,7 @@ const showOfflineBanner = computed(() => (
 
 let heartbeatBehaviorTimer: number | null = null
 let visualFrameTimer: number | null = null
+let visualStartupCaptureTimer: number | null = null
 let visualFrameInFlight = false
 let visualFrameSeq = 0
 let lastVisualFrameSignature: Uint8Array | null = null
@@ -467,6 +468,10 @@ const restartVisualFrameTimer = () => {
     window.clearInterval(visualFrameTimer)
     visualFrameTimer = null
   }
+  if (visualStartupCaptureTimer) {
+    window.clearTimeout(visualStartupCaptureTimer)
+    visualStartupCaptureTimer = null
+  }
   const vision = activeVisionSettings.value
   systemStore.setVisualPerceptionEnabled(vision.enabled)
   lastVisualFrameSignature = null
@@ -479,7 +484,12 @@ const restartVisualFrameTimer = () => {
   visualFrameTimer = window.setInterval(() => {
     void captureRealtimeVisualFrame()
   }, samplingIntervalMs)
-  void captureRealtimeVisualFrame()
+  // Do not contend with Electron window creation and desktop composition on
+  // the first frame. The regular timer starts immediately after this delay.
+  visualStartupCaptureTimer = window.setTimeout(() => {
+    visualStartupCaptureTimer = null
+    void captureRealtimeVisualFrame()
+  }, 3500)
 }
 
 watch(() => chatState.value.isGenerating, (generating) => {
@@ -525,6 +535,7 @@ onUnmounted(() => {
   systemStore.stopHealthCheck()
   if (heartbeatBehaviorTimer) clearInterval(heartbeatBehaviorTimer)
   if (visualFrameTimer) clearInterval(visualFrameTimer)
+  if (visualStartupCaptureTimer) clearTimeout(visualStartupCaptureTimer)
   getSocketClient().off(SocketEvents.SCREENSHOT_RESULT, handleVisualFrameResult)
 })
 

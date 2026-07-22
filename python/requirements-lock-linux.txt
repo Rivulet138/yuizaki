@@ -1,0 +1,20 @@
+# Yuizaki full runtime lock for Linux / Python 3.12-3.13.
+# Direct runtime packages are exact-pinned; run `pip check` after installation.
+fastapi==0.136.3
+pydantic==2.12.5
+uvicorn[standard]==0.49.0
+httpx==0.28.1
+aiofiles==25.1.0
+python-multipart==0.0.32
+python-socketio==5.16.2
+sqlalchemy==2.0.50
+alembic==1.18.4
+numpy==2.4.4
+Pillow==12.2.0
+sherpa-onnx==1.13.2
+rapidocr-onnxruntime==1.2.3
+genie-tts==2.0.2
+huggingface-hub==0.36.2
+qdrant-client==1.18.0
+sentence-transformers==2.7.0
+tiktoken==0.13.0

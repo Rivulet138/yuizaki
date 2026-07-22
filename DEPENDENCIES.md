@@ -1,81 +1,50 @@
-# 依赖治理
+# 依赖维护
 
-维护基线：2026-07-19。
+安装脚本使用平台 lock 文件：Windows 为 `requirements-lock-windows.txt`，Linux 为 `requirements-lock-linux.txt`；核心和开发环境使用对应的 `requirements-core-lock-*` 与 `requirements-dev-lock-*`。模型评测见 [MODEL_EVALUATION.md](MODEL_EVALUATION.md)。
 
-## 运行时基线
+## 基线
 
-| 层 | 当前策略 | 维护意见 |
+| 范围 | 当前基线 | 策略 |
 | --- | --- | --- |
-| Electron | `^42.7.0` | 保持 42 系最新补丁；43 作为独立升级验证 |
-| Node.js | `>=22.13.0` | 新环境优先 Node 24 LTS，Node 22 仅保留兼容 |
-| Python | 3.12 | 原生模型兼容稳定；新增 3.13/3.14 CI 前不宣称支持 |
-| Vue/Vite | 锁文件固定 | 同主版本补丁可批量验证，主版本单独迁移 |
-| Qdrant | `v1.18.3` | 禁止 `latest`，升级时运行记忆读写回归 |
+| Electron | 42.x | 保持当前主版本最新补丁 |
+| Node.js | 22.13+ | 新环境建议 24 LTS |
+| Python | 3.12–3.13 | 项目运行时使用 `python/.venv`；优先保证模型依赖兼容 |
+| Vue/Vite | Vue 3、Vite 8 | 主版本升级单独验证 |
+| Qdrant | 1.18.3 | 使用固定镜像标签 |
 
-Electron 的 `@types/node` 对齐内置 Node 24，不跟随系统 Node 的最新主版本。
+完整组件见 [TECH_STACK.md](TECH_STACK.md)。
 
-## 安装契约
+## 安装
 
-Electron 与 Node MCP 使用提交的 `package-lock.json`：
+Node 项目使用锁文件：
 
 ```bash
 cd electron && npm ci
 cd node-mcp && npm ci
 ```
 
-`npm ci` 是 CI 和干净复现的唯一安装方式；本地 `npm install` 只用于明确升级并提交锁文件。
+Python：
 
-Python 当前由 `requirements.txt` 和 `requirements-dev.txt` 的范围约束安装，尚未提供哈希锁。这是现阶段最大的依赖可复现性缺口。建议增加按平台生成的约束文件：
+Windows 完整安装使用 `requirements-lock-windows.txt`，Linux 完整安装使用 `requirements-lock-linux.txt`；核心安装和开发环境分别使用对应的 `requirements-core-lock-*` 与 `requirements-dev-lock-*`。安装后必须运行 `pip check`。
 
-- `requirements-lock-windows.txt`
-- `requirements-lock-linux.txt`
-- 每项使用精确版本与 `--hash`
-- CPU 与 CUDA 模型依赖拆分，避免一个锁文件覆盖所有硬件组合
+`requirements-core.txt`、`requirements.txt` 和 `requirements-dev.txt` 是版本范围 manifest；六个平台 lock 文件对其直接依赖做精确版本 pin。`python/scripts/check_requirements_lock.py` 会在 CI 中双向检查 manifest 与 lock 的包集合、重复项和显式固定版本漂移；安装后 `python scripts/check_installed_lock.py --lock <lock-file>` 会核对当前 venv 的已安装版本。当前 lock 不是包含所有传递依赖及 hash 的完整供应链锁；若需要离线重建和更强的供应链证明，下一步应生成按平台/架构拆分的 hash lock 并提交 wheelhouse/SBOM。
 
-在锁文件完成前，发布构建必须保存 `python -m pip freeze` 产物和 Python/驱动信息。
+模型和模型敏感运行时使用 `resources.lock.json`。Genie TTS 固定 Python 包与模型 commit；ASR 归档固定 SHA-256；Hugging Face 资源固定 commit。直接调用的 `huggingface-hub` 在 `python/requirements.txt` 显式声明，不依赖传递安装。
 
-## 自动更新
+## 更新规则
 
-`.github/dependabot.yml` 每周检查两个 npm 项目和 Python 依赖，每月检查 Docker 与 GitHub Actions。合并规则：
+- 补丁和同主版本更新：通过测试与构建后合并。
+- Electron、Vue、Vite、TypeScript、Pinia 主版本：独立升级。
+- ASR、TTS、OCR、嵌入依赖：验证模型加载、首段延迟和打断。
+- Qdrant：验证现有记忆、索引和备份。
+- 不使用 `latest` 容器标签。
 
-1. 同主版本补丁：通过 CI、启动检查和资源冒烟后合并。
-2. Electron、Vite、Vue Router、Pinia、TypeScript 主版本：单独 PR，记录迁移影响。
-3. ASR/TTS/嵌入依赖：必须执行模型加载、首段延迟和打断测试。
-4. Qdrant：必须验证现有 collection、备份恢复与重新索引。
+## 发布要求
 
-## 当前审计结果
+- npm 使用提交的 lockfile。
+- Python 生成 Windows/Linux 分离的精确版本锁文件；发布环境逐步补充传递依赖 hash 和 wheelhouse。
+- `python scripts/check_resources.py` 验证模型来源、revision 和 SHA-256。
+- 生成代码依赖和模型资源 SBOM。
+- 保留模型、字体、角色与声音的许可证。
 
-- Electron 和 Node MCP 的 `npm audit`：0 个已知漏洞。
-- Python `pip check`：无破损依赖。
-- Electron 已用 `npm ci` 从锁文件干净重建。`npm ls` 仍把 5 个 WASM helper 标为 extraneous；它们来自 Rolldown/Tailwind 的可选 WASM 包布局，可由干净安装稳定复现，不是未知手工依赖。
-- 安装会提示 `glob@10.5.0` 过时；来源是仅开发使用的 `@vue/test-utils -> js-beautify` 间接依赖，当前 `npm audit` 无漏洞。应等待上游替换，不要用 override 强压不兼容版本。
-- Python 虚拟环境与模型缓存占用大，不能与源代码仓库一起备份或打包。
-
-## 模型与下载依赖
-
-Hugging Face 下载必须固定 `revision` 到提交哈希；直接下载压缩包必须记录 URL、版本、SHA-256、许可证和解压目标。当前 Sherpa 下载尚未具备完整校验清单，SoulX 默认 `main` 也不可复现，均列为 P0 改进项。
-
-建议新增机器可读 `resources.lock.json`，由资源管理器校验后再标记 ready。字段至少包括：
-
-```json
-{
-  "id": "resource-id",
-  "source": "download URL or repository",
-  "revision": "immutable revision",
-  "sha256": "content digest",
-  "license": "SPDX or upstream notice",
-  "target": "managed relative path"
-}
-```
-
-## 发布供应链
-
-后续发布门禁应增加：
-
-- npm 与 Python SBOM
-- GitHub dependency review
-- Python 哈希锁验证
-- 下载模型清单与内容校验
-- Electron 安装包签名和可复现版本元数据
-
-第三方授权边界见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+当前已启用 Dependabot。

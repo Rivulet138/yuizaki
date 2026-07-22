@@ -19,11 +19,9 @@ if [[ ! -x "$ROOT/python/.venv/bin/python" ]]; then
 fi
 PYTHON="$ROOT/python/.venv/bin/python"
 "$PYTHON" -m pip install --upgrade pip
-"$PYTHON" -m pip install \
-	'fastapi>=0.136,<1' 'uvicorn[standard]>=0.49,<1' 'httpx>=0.28,<1' \
-	'aiofiles>=25,<26' 'numpy>=2.1,<3' 'python-multipart>=0.0.32,<1' \
-	'python-socketio>=5.16,<6' 'sqlalchemy>=2.0.50,<3' 'alembic>=1.18,<2' \
-	'Pillow>=12,<13' 'rapidocr-onnxruntime>=1.2.3,<2'
+"$PYTHON" -m pip install -r "$ROOT/python/requirements-core-lock-linux.txt"
+"$PYTHON" -m pip check
+"$PYTHON" "$ROOT/python/scripts/check_installed_lock.py" --lock requirements-core-lock-linux.txt
 
 if [[ ! -f "$ROOT/python/.env" ]]; then
 	cp "$ROOT/python/.env.example" "$ROOT/python/.env"

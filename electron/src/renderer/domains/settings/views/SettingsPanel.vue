@@ -243,6 +243,14 @@
                       <el-form-item label="视觉超时">
                         <el-input-number v-model="form.llm.vision_timeout" :min="5" :max="120" controls-position="right" @change="debouncedSave({ llm: { vision_timeout: $event } })" />
                       </el-form-item>
+                      <el-form-item label="Vision detail">
+                        <el-select v-model="form.llm.vision_detail" class="full-width" @change="debouncedSave({ llm: { vision_detail: $event } })">
+                          <el-option label="Low latency" value="low" />
+                          <el-option label="Auto" value="auto" />
+                          <el-option label="High fidelity" value="high" />
+                          <el-option label="Original" value="original" />
+                        </el-select>
+                      </el-form-item>
                       <el-form-item label="视觉 API 地址（OpenAI 兼容）">
                         <el-input v-model="form.llm.vision_base_url" @change="debouncedSave({ llm: { vision_base_url: $event } })" />
                       </el-form-item>
@@ -539,6 +547,17 @@
                 <el-form-item :label="t('settings.memory.embedding')">
                   <el-input v-model="form.memory.embedding_model" :placeholder="DEFAULT_EMBEDDING_MODEL" @change="debouncedSave({ memory: { embedding_model: $event } })" />
                 </el-form-item>
+                <el-form-item label="Learned reranker">
+                  <el-switch v-model="form.memory.reranker_enabled" @change="debouncedSave({ memory: { reranker_enabled: $event } })" />
+                </el-form-item>
+                <div v-if="form.memory.reranker_enabled" class="form-grid">
+                  <el-form-item label="Reranker model">
+                    <el-input v-model="form.memory.reranker_model" @change="debouncedSave({ memory: { reranker_model: $event } })" />
+                  </el-form-item>
+                  <el-form-item label="Reranker candidates">
+                    <el-input-number v-model="form.memory.reranker_candidate_count" :min="5" :max="100" :step="5" controls-position="right" @change="debouncedSave({ memory: { reranker_candidate_count: $event } })" />
+                  </el-form-item>
+                </div>
                 <div v-if="form.memory.backend === 'qdrant'" class="form-grid">
                   <el-form-item :label="t('settings.memory.qdrantUrl')">
                     <el-input v-model="form.memory.qdrant_url" @change="debouncedSave({ memory: { qdrant_url: $event } })" />
@@ -656,6 +675,32 @@
 
               <div class="button-row">
                 <el-button plain :loading="resourceLoading || storageLoading" @click="refreshResourcePanel">{{ t('settings.resource.refresh') }}</el-button>
+                <el-button
+                  v-if="cancellableResourceIds.length > 0"
+                  type="danger"
+                  plain
+                  :icon="CircleClose"
+                  :loading="resourceCancelLoading"
+                  @click="cancelActiveResourceDownloads"
+                >取消下载</el-button>
+              </div>
+
+              <div v-if="activeDownloadProgress.length" class="resource-progress-list" aria-live="polite">
+                <div v-for="progress in activeDownloadProgress" :key="progress.resourceId" class="resource-progress-row">
+                  <div class="resource-progress-header">
+                    <strong>{{ resourceProgressLabel(progress.resourceId) }}</strong>
+                    <span>{{ resourceProgressPhaseLabel(progress.phase) }}</span>
+                  </div>
+                  <el-progress
+                    :percentage="progress.percent ?? 100"
+                    :indeterminate="progress.percent === null"
+                    :show-text="progress.percent !== null"
+                    :stroke-width="8"
+                  />
+                  <span v-if="progress.bytesDownloaded !== null" class="resource-progress-bytes">
+                    {{ formatStorageBytes(progress.bytesDownloaded) }}<template v-if="progress.bytesTotal !== null"> / {{ formatStorageBytes(progress.bytesTotal) }}</template>
+                  </span>
+                </div>
               </div>
 
               <div v-if="resourceView" class="resource-download-bar">
@@ -666,7 +711,13 @@
                     :value="item.id"
                     :disabled="item.ready"
                   >
-                    {{ item.label }}
+                    <span class="resource-download-label">{{ item.label }}</span>
+                    <el-tag size="small" type="info">{{ item.version }}</el-tag>
+                    <span>{{ formatResourceDownloadBytes(item.downloadBytes) }}</span>
+                    <span>{{ item.license }}</span>
+                    <el-tag v-if="item.resumable" size="small" type="warning">
+                      可续传 {{ formatStorageBytes(item.resumable.bytesDownloaded) }}<template v-if="item.resumable.bytesTotal !== null"> / {{ formatStorageBytes(item.resumable.bytesTotal) }}</template>
+                    </el-tag>
                   </el-checkbox>
                 </el-checkbox-group>
                 <el-button
@@ -795,10 +846,18 @@
                       type="primary"
                       plain
                       :loading="resourceActionLoading('sherpa-online-download')"
-                      @click="runResourceCommand('sherpa-online-download', () => resourceClient.prepareSherpaOnline())"
+                      @click="runResourceCommand('sherpa-online-download', () => resourceClient.prepareSherpaOnline(), ['sherpa_online'])"
                     >
                       {{ t('settings.resource.downloadSherpa') }} (Streaming)
                     </el-button>
+                    <el-button
+                      v-if="resourceView.sherpaOnline.state !== 'missing'"
+                      type="danger"
+                      plain
+                      :icon="Delete"
+                      :loading="resourceActionLoading('remove-sherpa_online')"
+                      @click="removeModelResource('sherpa_online', '流式语音识别', resourceView.sherpaOnline.metadata)"
+                    >永久卸载</el-button>
                   </div>
                 </el-card>
 
@@ -822,6 +881,12 @@
                       <strong>{{ t('settings.resource.referenceDir') }}</strong>
                       <code class="resource-path">{{ resourceView.soulx.referenceDir }}</code>
                     </div>
+                    <div>
+                      <strong>参考音频</strong>
+                      <el-tag :type="resourceView.soulx.hasReferenceAudio ? 'success' : 'info'">
+                        {{ resourceView.soulx.hasReferenceAudio ? '已导入' : '未导入' }}
+                      </el-tag>
+                    </div>
                   </div>
                   <ul v-if="resourceView.soulx.details.length" class="resource-list">
                     <li v-for="detail in resourceView.soulx.details" :key="detail">{{ detail }}</li>
@@ -831,7 +896,7 @@
                       type="primary"
                       plain
                       :loading="resourceActionLoading('soulx-download')"
-                      @click="runResourceCommand('soulx-download', () => resourceClient.prepareSoulx())"
+                      @click="runResourceCommand('soulx-download', () => resourceClient.prepareSoulx(), ['soulx'])"
                     >
                       {{ t('settings.resource.downloadSoulx') }}
                     </el-button>
@@ -842,6 +907,14 @@
                     >
                       {{ t('settings.resource.importReference') }}
                     </el-button>
+                    <el-button
+                      v-if="resourceView.soulx.state !== 'missing'"
+                      type="danger"
+                      plain
+                      :icon="Delete"
+                      :loading="resourceActionLoading('remove-soulx')"
+                      @click="removeModelResource('soulx', 'SoulX 变声', resourceView.soulx.metadata)"
+                    >永久卸载</el-button>
                   </div>
                 </el-card>
 
@@ -870,10 +943,18 @@
                       type="primary"
                       plain
                       :loading="resourceActionLoading('sherpa-download')"
-                      @click="runResourceCommand('sherpa-download', () => resourceClient.prepareSherpa())"
+                      @click="runResourceCommand('sherpa-download', () => resourceClient.prepareSherpa(), ['sherpa'])"
                     >
                       {{ t('settings.resource.downloadSherpa') }}
                     </el-button>
+                    <el-button
+                      v-if="resourceView.sherpa.state !== 'missing'"
+                      type="danger"
+                      plain
+                      :icon="Delete"
+                      :loading="resourceActionLoading('remove-sherpa')"
+                      @click="removeModelResource('sherpa', '离线语音识别', resourceView.sherpa.metadata)"
+                    >永久卸载</el-button>
                   </div>
                 </el-card>
 
@@ -902,10 +983,18 @@
                       type="primary"
                       plain
                       :loading="resourceActionLoading('embedding-prefetch')"
-                      @click="runResourceCommand('embedding-prefetch', () => resourceClient.prepareEmbedding())"
+                      @click="runResourceCommand('embedding-prefetch', () => resourceClient.prepareEmbedding(), ['embedding'])"
                     >
                       {{ t('settings.resource.prefetchEmbedding') }}
                     </el-button>
+                    <el-button
+                      v-if="resourceView.embedding.state !== 'missing'"
+                      type="danger"
+                      plain
+                      :icon="Delete"
+                      :loading="resourceActionLoading('remove-embedding')"
+                      @click="removeModelResource('embedding', '长期记忆嵌入', resourceView.embedding.metadata)"
+                    >永久卸载</el-button>
                   </div>
                 </el-card>
 
@@ -925,9 +1014,9 @@
                       <strong>{{ t('settings.resource.cacheDir') }}</strong>
                       <code class="resource-path">{{ resourceView.tts.cacheDir }}</code>
                     </div>
-                    <div v-if="resourceView.tts.configuredModelDir">
-                      <strong>{{ t('settings.resource.configuredModelDir') }}</strong>
-                      <code class="resource-path">{{ resourceView.tts.configuredModelDir }}</code>
+                    <div>
+                      <strong>{{ t('settings.resource.modelDir') }}</strong>
+                      <code class="resource-path">{{ resourceView.tts.modelDir }}</code>
                     </div>
                   </div>
                   <ul v-if="resourceView.tts.details.length" class="resource-list">
@@ -938,10 +1027,18 @@
                       type="primary"
                       plain
                       :loading="resourceActionLoading('tts-prefetch')"
-                      @click="runResourceCommand('tts-prefetch', () => resourceClient.prepareTts())"
+                      @click="runResourceCommand('tts-prefetch', () => resourceClient.prepareTts(), ['tts'])"
                     >
                       {{ t('settings.resource.prefetchTts') }}
                     </el-button>
+                    <el-button
+                      v-if="resourceView.tts.state !== 'missing'"
+                      type="danger"
+                      plain
+                      :icon="Delete"
+                      :loading="resourceActionLoading('remove-tts')"
+                      @click="removeModelResource('tts', 'Genie TTS', resourceView.tts.metadata)"
+                    >永久卸载</el-button>
                   </div>
                 </el-card>
               </div>
@@ -1116,7 +1213,7 @@ import { useInputBindingsStore } from '@/state/inputBindingsStore'
 import { settingsClient, type BackendTokenMutationResponse, type BackendTokenStatusResponse, type LocalRuntimeCandidate, type LocalRuntimeDiscoveryResponse, type TtsRuntimeStatusResponse } from '@/api/clients/settings-client'
 import { resourceClient } from '@/api/clients/resource-client'
 import { memoryClient } from '@/api/clients/memory-client'
-import type { ManagedModelResourceId, ModelResourceStatusPayload, ResourceCommandResult, StorageCategoryId, StorageStatusPayload } from '@/../shared/resource-manager'
+import type { ManagedModelResourceId, ManagedResourceMetadata, ModelResourceStatusPayload, ResumableResourceDownload, ResourceCommandResult, ResourceDownloadProgress, ResourceProgressPhase, StorageCategoryId, StorageStatusPayload } from '@/../shared/resource-manager'
 import { DEFAULT_VAD_MIN_SILENCE_MS } from '@/../shared/runtime-defaults'
 import { inferModelCapabilities, type ModelCapabilitySupport } from '@/../shared/model-capabilities'
 import type { InputBindingSettingsPatch, KeyboardShortcutAction, MouseSideButton } from '@/../shared/input-bindings'
@@ -1237,6 +1334,7 @@ const form = reactive({
     vision_api_key: '',
     vision_model: '',
     vision_timeout: 30,
+    vision_detail: 'low' as 'low' | 'high' | 'auto' | 'original',
   },
   tts: {
     genie_character: '',
@@ -1252,7 +1350,7 @@ const form = reactive({
     provider: TTS_PROVIDER,
   },
   asr: {
-    provider: 'sensevoice-service',
+    provider: 'sherpa-onnx-online',
     base_url: '',
     api_key: '',
     timeout: 60,
@@ -1295,6 +1393,9 @@ const form = reactive({
     qdrant_docker_container: 'yuizaki-qdrant',
     qdrant_docker_volume: 'yuizaki-qdrant-storage',
     embedding_model: DEFAULT_EMBEDDING_MODEL,
+    reranker_enabled: false,
+    reranker_model: 'BAAI/bge-reranker-v2-m3',
+    reranker_candidate_count: 32,
   },
   system: {
     language: 'zh-CN',
@@ -1345,6 +1446,10 @@ const resourceActionKey = ref('')
 const resourceMessage = ref('')
 const resourceMessageType = ref<AlertType>('info')
 const selectedResourceIds = ref<ManagedModelResourceId[]>([])
+const activeResourceIds = ref<ManagedModelResourceId[]>([])
+const resourceCancelLoading = ref(false)
+let resourceProgressPollTimer: ReturnType<typeof window.setInterval> | null = null
+let resourceProgressPollBusy = false
 const storageStatus = ref<StorageStatusPayload | null>(null)
 const storageLoading = ref(false)
 const storageActionKey = ref('')
@@ -1489,6 +1594,66 @@ const normalizeResourceStatus = (value: unknown): ModelResourceStatusPayload | n
   const sherpaOnline = isPlainRecord(value.sherpaOnline) ? value.sherpaOnline : {}
   const embedding = isPlainRecord(value.embedding) ? value.embedding : {}
   const ttsStatus = isPlainRecord(value.tts) ? value.tts : {}
+  const progressPhases = new Set<ResourceProgressPhase>(['preparing', 'downloading', 'verifying', 'extracting', 'installing', 'cancelling'])
+  const activeDownloads = (Array.isArray(value.activeDownloads) ? value.activeDownloads : [])
+    .filter(isPlainRecord)
+    .flatMap((progress): ResourceDownloadProgress[] => {
+      const resourceId = String(progress.resourceId || '') as ManagedModelResourceId
+      const phase = progress.phase as ResourceProgressPhase
+      if (!['soulx', 'sherpa', 'sherpa_online', 'embedding', 'tts'].includes(resourceId) || !progressPhases.has(phase)) return []
+      const bytesDownloaded = progress.bytesDownloaded === null ? null : Math.max(0, Number(progress.bytesDownloaded || 0))
+      const bytesTotal = progress.bytesTotal === null ? null : Math.max(0, Number(progress.bytesTotal || 0))
+      const percent = progress.percent === null ? null : Math.min(100, Math.max(0, Number(progress.percent || 0)))
+      return [{
+        resourceId,
+        phase,
+        message: String(progress.message || ''),
+        bytesDownloaded,
+        bytesTotal,
+        percent,
+        startedAt: String(progress.startedAt || ''),
+        updatedAt: String(progress.updatedAt || ''),
+      }]
+    })
+  const resumableDownloads = (Array.isArray(value.resumableDownloads) ? value.resumableDownloads : [])
+    .filter(isPlainRecord)
+    .flatMap((download): ResumableResourceDownload[] => {
+      const resourceId = String(download.resourceId || '') as ManagedModelResourceId
+      if (!['soulx', 'sherpa', 'sherpa_online', 'embedding', 'tts'].includes(resourceId)) return []
+      const bytesDownloaded = Math.max(0, Number(download.bytesDownloaded || 0))
+      if (!Number.isFinite(bytesDownloaded) || bytesDownloaded <= 0) return []
+      const rawBytesTotal = download.bytesTotal === null ? null : Number(download.bytesTotal || 0)
+      const bytesTotal = rawBytesTotal !== null && Number.isFinite(rawBytesTotal)
+        ? Math.max(bytesDownloaded, rawBytesTotal)
+        : null
+      const rawPercent = download.percent === null ? null : Number(download.percent || 0)
+      const percent = rawPercent !== null && Number.isFinite(rawPercent)
+        ? Math.min(100, Math.max(0, rawPercent))
+        : null
+      return [{
+        resourceId,
+        bytesDownloaded,
+        bytesTotal,
+        percent,
+        updatedAt: String(download.updatedAt || ''),
+      }]
+    })
+  const metadata = (source: SettingsPatch) => {
+    const raw = isPlainRecord(source.metadata) ? source.metadata : {}
+    const integrity = raw.integrity === 'sha256' || raw.integrity === 'revision' || raw.integrity === 'package' || raw.integrity === 'package+revision'
+      ? raw.integrity
+      : 'unverified'
+    return {
+      label: String(raw.label || ''),
+      version: String(raw.version || ''),
+      license: String(raw.license || ''),
+      licenseUrl: String(raw.licenseUrl || ''),
+      downloadBytes: Math.max(0, Number(raw.downloadBytes || 0)),
+      source: String(raw.source || ''),
+      integrity,
+      inUseBy: Array.isArray(raw.inUseBy) ? raw.inUseBy.map(String) : [],
+    }
+  }
   const summary = (source: SettingsPatch, fallbackMessage: string) => ({
     ...resourceSummaryFallback(String(source.message || fallbackMessage)),
     ...source,
@@ -1496,6 +1661,7 @@ const normalizeResourceStatus = (value: unknown): ModelResourceStatusPayload | n
     state: source.state === 'ready' || source.state === 'partial' ? source.state : 'missing',
     message: String(source.message || fallbackMessage),
     details: Array.isArray(source.details) ? source.details.map(String) : [],
+    metadata: metadata(source),
   })
   return {
     modelRoots: {
@@ -1544,8 +1710,10 @@ const normalizeResourceStatus = (value: unknown): ModelResourceStatusPayload | n
       ...summary(ttsStatus, 'TTS resources unavailable'),
       character: String(ttsStatus.character || ''),
       cacheDir: String(ttsStatus.cacheDir || ''),
-      configuredModelDir: typeof ttsStatus.configuredModelDir === 'string' ? ttsStatus.configuredModelDir : null,
+      modelDir: String(ttsStatus.modelDir || ''),
     },
+    activeDownloads,
+    resumableDownloads,
   }
 }
 
@@ -1999,16 +2167,34 @@ const resourceTagType = (state: 'missing' | 'partial' | 'ready') => {
 }
 
 const resourceView = computed(() => normalizeResourceStatus(resourceStatus.value))
-const resourceDownloadOptions = computed<Array<{ id: ManagedModelResourceId; label: string; ready: boolean }>>(() => {
+const activeDownloadProgress = computed(() => resourceView.value?.activeDownloads ?? [])
+const cancellableResourceIds = computed<ManagedModelResourceId[]>(() => [...new Set([
+  ...activeResourceIds.value,
+  ...activeDownloadProgress.value.map((progress) => progress.resourceId),
+])])
+type ResourceDownloadOption = {
+  id: ManagedModelResourceId
+  label: string
+  ready: boolean
+  version: string
+  license: string
+  downloadBytes: number
+  resumable: ResumableResourceDownload | null
+}
+const resourceDownloadOptions = computed<ResourceDownloadOption[]>(() => {
   const status = resourceView.value
   if (!status) return []
-  return [
-    { id: 'sherpa_online', label: '流式语音识别', ready: status.sherpaOnline.ready },
-    { id: 'sherpa', label: '离线语音识别', ready: status.sherpa.ready },
-    { id: 'tts', label: 'Genie TTS', ready: status.tts.ready },
-    { id: 'embedding', label: '长期记忆嵌入', ready: status.embedding.ready },
-    { id: 'soulx', label: 'SoulX 变声', ready: status.soulx.ready },
+  const options: Array<Omit<ResourceDownloadOption, 'resumable'>> = [
+    { ...status.sherpaOnline.metadata, id: 'sherpa_online', label: '流式语音识别', ready: status.sherpaOnline.ready },
+    { ...status.sherpa.metadata, id: 'sherpa', label: '离线语音识别', ready: status.sherpa.ready },
+    { ...status.tts.metadata, id: 'tts', label: 'Genie TTS', ready: status.tts.ready },
+    { ...status.embedding.metadata, id: 'embedding', label: '长期记忆嵌入', ready: status.embedding.ready },
+    { ...status.soulx.metadata, id: 'soulx', label: 'SoulX 变声', ready: status.soulx.ready },
   ]
+  return options.map((item) => ({
+    ...item,
+    resumable: status.resumableDownloads.find((download) => download.resourceId === item.id) ?? null,
+  }))
 })
 
 const formatStorageBytes = (value: number): string => {
@@ -2018,6 +2204,26 @@ const formatStorageBytes = (value: number): string => {
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`
 }
+
+const formatResourceDownloadBytes = (value: number): string => value > 0 ? formatStorageBytes(value) : '按模型'
+
+const resourceProgressLabels: Record<ManagedModelResourceId, string> = {
+  soulx: 'SoulX 变声',
+  sherpa: '离线语音识别',
+  sherpa_online: '流式语音识别',
+  embedding: '长期记忆嵌入',
+  tts: 'Genie TTS',
+}
+const resourceProgressPhaseLabels: Record<ResourceProgressPhase, string> = {
+  preparing: '准备',
+  downloading: '下载',
+  verifying: '校验',
+  extracting: '解压',
+  installing: '安装',
+  cancelling: '取消中',
+}
+const resourceProgressLabel = (resourceId: ManagedModelResourceId): string => resourceProgressLabels[resourceId]
+const resourceProgressPhaseLabel = (phase: ResourceProgressPhase): string => resourceProgressPhaseLabels[phase]
 
 const storageCategoryLabel = (id: StorageCategoryId): string => t(`settings.storage.category.${id}`)
 
@@ -2314,7 +2520,7 @@ const applyLocalAsrDiscovery = async () => {
     warnNoLocalCandidate('ASR')
     return
   }
-  const provider = String(candidate.provider || 'sensevoice-service')
+  const provider = String(candidate.provider || 'sherpa-onnx-online')
   form.asr.provider = provider
   form.asr.base_url = candidate.base_url
   debouncedSave({ asr: { provider, base_url: candidate.base_url } })
@@ -2837,10 +3043,40 @@ const clearSettingsHistory = async () => {
   }
 }
 
+const stopResourceProgressPolling = () => {
+  if (resourceProgressPollTimer === null) return
+  window.clearInterval(resourceProgressPollTimer)
+  resourceProgressPollTimer = null
+}
+
+const pollResourceStatus = async () => {
+  if (resourceProgressPollBusy) return
+  resourceProgressPollBusy = true
+  try {
+    resourceStatus.value = normalizeResourceStatus(await resourceClient.status())
+  } catch {
+    // The foreground command reports actionable failures; polling stays silent.
+  } finally {
+    resourceProgressPollBusy = false
+    if (!resourceActionKey.value && activeDownloadProgress.value.length === 0) stopResourceProgressPolling()
+  }
+}
+
+const syncResourceProgressPolling = () => {
+  const shouldPoll = Boolean(resourceActionKey.value) || activeDownloadProgress.value.length > 0
+  if (!shouldPoll) {
+    stopResourceProgressPolling()
+    return
+  }
+  if (resourceProgressPollTimer !== null) return
+  resourceProgressPollTimer = window.setInterval(() => void pollResourceStatus(), 500)
+}
+
 const loadResourceStatus = async () => {
   resourceLoading.value = true
   try {
     resourceStatus.value = normalizeResourceStatus(await resourceClient.status())
+    syncResourceProgressPolling()
   } catch (error) {
     const message = error instanceof Error ? error.message : t('settings.resource.statusFailed')
     resourceMessage.value = message
@@ -2851,9 +3087,19 @@ const loadResourceStatus = async () => {
   }
 }
 
-const runResourceCommand = async (key: string, task: () => Promise<ResourceCommandResult>) => {
+const runResourceCommand = async (
+  key: string,
+  task: () => Promise<ResourceCommandResult>,
+  resources: ManagedModelResourceId[] = [],
+) => {
+  if (resourceActionKey.value || activeDownloadProgress.value.length > 0) {
+    ElMessage.warning('已有资源任务正在执行')
+    return
+  }
   resourceActionKey.value = key
+  activeResourceIds.value = [...resources]
   resourceMessage.value = ''
+  syncResourceProgressPolling()
   try {
     const result = await task()
     resourceStatus.value = normalizeResourceStatus(result.status)
@@ -2869,6 +3115,72 @@ const runResourceCommand = async (key: string, task: () => Promise<ResourceComma
     resourceMessage.value = message
     resourceMessageType.value = 'error'
     ElMessage.error(message)
+  } finally {
+    resourceActionKey.value = ''
+    activeResourceIds.value = []
+    syncResourceProgressPolling()
+  }
+}
+
+const cancelActiveResourceDownloads = async () => {
+  const resources = [...cancellableResourceIds.value]
+  if (resources.length === 0 || resourceCancelLoading.value) return
+  resourceCancelLoading.value = true
+  try {
+    const result = await resourceClient.cancel(resources)
+    resourceStatus.value = normalizeResourceStatus(result.status)
+    const message = result.cancelled.length > 0 ? `已取消 ${result.cancelled.length} 个下载任务` : '没有可取消的下载任务'
+    resourceMessage.value = message
+    resourceMessageType.value = result.cancelled.length > 0 ? 'success' : 'info'
+    if (result.cancelled.length > 0) {
+      ElMessage.success(message)
+    } else {
+      ElMessage.info(message)
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : t('settings.resource.taskFailed'))
+  } finally {
+    resourceCancelLoading.value = false
+  }
+}
+
+const removeModelResource = async (
+  resourceId: ManagedModelResourceId,
+  label: string,
+  metadata: ManagedResourceMetadata,
+) => {
+  if (resourceActionKey.value) {
+    ElMessage.warning('请先完成或取消当前资源任务')
+    return
+  }
+  const usage = metadata.inUseBy.length > 0 ? ` · 使用中：${metadata.inUseBy.join(' / ')}` : ''
+  try {
+    await ElMessageBox.confirm(
+      `${label} · ${formatResourceDownloadBytes(metadata.downloadBytes)}${usage}`,
+      '永久卸载模型',
+      {
+        confirmButtonText: '永久卸载',
+        cancelButtonText: t('common.cancel'),
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+
+  resourceActionKey.value = `remove-${resourceId}`
+  try {
+    const result = await resourceClient.remove([resourceId])
+    resourceStatus.value = normalizeResourceStatus(result.status)
+    resourceMessage.value = result.message
+    resourceMessageType.value = result.success ? 'success' : 'warning'
+    if (result.success) {
+      ElMessage.success(`已永久卸载 ${label}，释放 ${formatStorageBytes(result.reclaimedBytes)}`)
+    } else {
+      ElMessage.warning(result.failed.map((item) => item.reason).join('; ') || result.message)
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : t('settings.resource.taskFailed'))
   } finally {
     resourceActionKey.value = ''
   }
@@ -2908,13 +3220,13 @@ const resourceIdsForSettingsPatch = (patch: SettingsPatch): ManagedModelResource
 const prepareResourcesForSettingsPatch = async (patch: SettingsPatch) => {
   const ids = resourceIdsForSettingsPatch(patch)
   if (ids.length === 0) return
-  await runResourceCommand('first-use-download', () => resourceClient.prepare(ids))
+  await runResourceCommand('first-use-download', () => resourceClient.prepare(ids), ids)
 }
 
 const downloadSelectedResources = async () => {
   const ids = [...selectedResourceIds.value]
   if (ids.length === 0) return
-  await runResourceCommand('selected-download', () => resourceClient.prepare(ids))
+  await runResourceCommand('selected-download', () => resourceClient.prepare(ids), ids)
   selectedResourceIds.value = selectedResourceIds.value.filter((id) => {
     const item = resourceDownloadOptions.value.find((option) => option.id === id)
     return item ? !item.ready : false
@@ -3170,6 +3482,7 @@ const hydrateForm = () => {
     form.llm.vision_api_key = s.llm.vision_api_key ?? ''
     form.llm.vision_model = s.llm.vision_model ?? ''
     form.llm.vision_timeout = s.llm.vision_timeout ?? 30
+    form.llm.vision_detail = s.llm.vision_detail ?? 'low'
     llmModelAutoSelected.value = false
   }
 
@@ -3191,7 +3504,7 @@ const hydrateForm = () => {
   }
 
   if (s.asr) {
-    form.asr.provider = s.asr.provider || 'sensevoice-service'
+    form.asr.provider = s.asr.provider || 'sherpa-onnx-online'
     form.asr.base_url = s.asr.base_url ?? ''
     form.asr.api_key = s.asr.api_key || ''
     form.asr.timeout = s.asr.timeout ?? 60
@@ -3237,6 +3550,9 @@ const hydrateForm = () => {
     form.memory.qdrant_docker_container = s.memory.qdrant_docker_container ?? 'yuizaki-qdrant'
     form.memory.qdrant_docker_volume = s.memory.qdrant_docker_volume ?? 'yuizaki-qdrant-storage'
     form.memory.embedding_model = s.memory.embedding_model ?? DEFAULT_EMBEDDING_MODEL
+    form.memory.reranker_enabled = s.memory.reranker_enabled ?? false
+    form.memory.reranker_model = s.memory.reranker_model ?? 'BAAI/bge-reranker-v2-m3'
+    form.memory.reranker_candidate_count = s.memory.reranker_candidate_count ?? 32
   }
 
   if (s.system) {
@@ -3275,6 +3591,7 @@ onUnmounted(() => {
   if (modelDiscoveryTimeout) clearTimeout(modelDiscoveryTimeout)
   saveTimeout = null
   modelDiscoveryTimeout = null
+  stopResourceProgressPolling()
   notifySaveIdle()
 })
 
@@ -3819,6 +4136,17 @@ watch(activeSection, (value) => {
   min-width: 0;
 }
 
+.resource-download-options :deep(.el-checkbox__label) {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.resource-download-label {
+  font-weight: 600;
+}
+
 .storage-maintenance {
   display: grid;
   gap: 10px;
@@ -3849,10 +4177,50 @@ watch(activeSection, (value) => {
   font-size: 12px;
 }
 
+.resource-progress-list {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-card);
+  background: var(--yui-surface-muted);
+}
+
+.resource-progress-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 2fr) auto;
+  min-height: 24px;
+  gap: 12px;
+  align-items: center;
+}
+
+.resource-progress-header {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.resource-progress-header span,
+.resource-progress-bytes {
+  color: var(--yui-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .resource-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+@media (max-width: 860px) {
+  .resource-progress-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
 }
 
 .resource-card {

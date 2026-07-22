@@ -7,6 +7,8 @@ from datetime import datetime
 from typing import Any
 import logging
 
+import numpy as np
+
 from .backend import MemoryBackendStatus
 from .schema import MemorySearchFilters
 from .vector_store import (
@@ -17,6 +19,7 @@ from .vector_store import (
     _embed_query,
     _memory_type_filter_values,
 )
+from .reranker import lexical_overlap_score, normalize_scores
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +36,14 @@ class QdrantVectorStore(VectorStore):
         collection_name: str = "memories",
         timeout: float = 10.0,
         embedding_service: EmbeddingProvider | None = None,
+        reranker: Any | None = None,
+        reranker_candidate_count: int = 32,
     ):
-        super().__init__(embedding_service=embedding_service)
+        super().__init__(
+            embedding_service=embedding_service,
+            reranker=reranker,
+            reranker_candidate_count=reranker_candidate_count,
+        )
         qdrant_client_module = importlib.import_module("qdrant_client")
         qdrant_models_module = importlib.import_module("qdrant_client.models")
         qdrant_client_cls = getattr(qdrant_client_module, "QdrantClient")
@@ -276,15 +285,29 @@ class QdrantVectorStore(VectorStore):
     ) -> list[tuple[Document, float]]:
         from datetime import datetime
 
-        candidates = self.search(query=query, top_k=max(top_k * 3, top_k), filters=filters)
+        candidates = self.search(
+            query=query,
+            top_k=max(top_k * 8, self._reranker_candidate_count if getattr(self._reranker, "enabled", False) else top_k),
+            filters=filters,
+        )
         if not candidates:
             return []
+
+        candidate_docs = [doc for doc, _ in candidates]
+        learned_scores = np.zeros(len(candidate_docs), dtype=np.float32)
+        learned_enabled = bool(getattr(self._reranker, "enabled", False))
+        if learned_enabled and self._reranker is not None:
+            try:
+                learned_scores = normalize_scores(self._reranker.score(query, [doc.text for doc in candidate_docs]))
+            except Exception as exc:
+                learned_enabled = False
+                logger.warning("Learned Qdrant reranker unavailable; using hybrid scores: %s", exc)
 
         now = datetime.now()
         scored: list[tuple[float, Document]] = []
         allowed_types = _memory_type_filter_values(memory_types)
 
-        for doc, semantic_score in candidates:
+        for position, (doc, semantic_score) in enumerate(candidates):
             doc_type = str(doc.metadata.get("type") or "")
             if allowed_types is not None and doc_type not in allowed_types:
                 continue
@@ -304,8 +327,18 @@ class QdrantVectorStore(VectorStore):
 
             quality_score = float(doc.metadata.get("quality_score") or doc.metadata.get("confidence") or 0.6)
             quality_score = max(0.0, min(1.0, quality_score))
-            semantic_weight = max(0.0, 1 - recency_weight - quality_weight)
-            final_score = float(semantic_score) * semantic_weight + recency_score * recency_weight + quality_score * quality_weight
+            lexical_score = lexical_overlap_score(query, doc.text)
+            learned_score = float(learned_scores[position]) if learned_enabled and position < len(learned_scores) else 0.0
+            learned_weight = 0.45 if learned_enabled else 0.0
+            lexical_weight = 0.10
+            semantic_weight = max(0.0, 1 - recency_weight - quality_weight - lexical_weight - learned_weight)
+            final_score = (
+                float(semantic_score) * semantic_weight
+                + lexical_score * lexical_weight
+                + learned_score * learned_weight
+                + recency_score * recency_weight
+                + quality_score * quality_weight
+            )
             scored.append((final_score, doc))
 
         scored.sort(reverse=True, key=lambda item: item[0])

@@ -33,6 +33,7 @@ class LLMRuntimeConfig(Protocol):
     vision_api_key: str
     vision_model: str
     vision_timeout: float
+    vision_detail: str
 
 
 class TTSRuntimeConfig(Protocol):
@@ -101,6 +102,9 @@ class MemoryRuntimeConfig(Protocol):
     qdrant_docker_container: str
     qdrant_docker_volume: str
     embedding_model: str
+    reranker_enabled: bool
+    reranker_model: str
+    reranker_candidate_count: int
 
 
 class RuntimeConfig(Protocol):
@@ -225,6 +229,9 @@ def apply_runtime_config(config: RuntimeConfig, updates: RuntimeUpdates) -> set[
             changed.add("llm")
         if "vision_timeout" in llm_updates and llm_updates["vision_timeout"] is not None:
             config.llm.vision_timeout = _to_float(llm_updates["vision_timeout"])
+        if "vision_detail" in llm_updates and llm_updates["vision_detail"] is not None:
+            detail = str(llm_updates["vision_detail"]).strip().lower()
+            config.llm.vision_detail = detail if detail in {"low", "high", "auto", "original"} else "low"
             changed.add("llm")
 
     tts_updates = _section(updates, "tts")
@@ -266,7 +273,7 @@ def apply_runtime_config(config: RuntimeConfig, updates: RuntimeUpdates) -> set[
     asr_updates = _section(updates, "asr")
     if asr_updates is not None:
         if "provider" in asr_updates and asr_updates["provider"] is not None:
-            provider = str(asr_updates["provider"]).strip().lower() or "sensevoice-service"
+            provider = str(asr_updates["provider"]).strip().lower() or "sherpa-onnx-online"
             config.asr.provider = provider
             changed.add("asr")
         if "base_url" in asr_updates and asr_updates["base_url"] is not None:
@@ -387,6 +394,15 @@ def apply_runtime_config(config: RuntimeConfig, updates: RuntimeUpdates) -> set[
             changed.add("memory")
         if "embedding_model" in memory_updates and memory_updates["embedding_model"] is not None:
             config.memory.embedding_model = str(memory_updates["embedding_model"]).strip() or DEFAULT_EMBEDDING_MODEL
+            changed.add("memory")
+        if "reranker_enabled" in memory_updates and memory_updates["reranker_enabled"] is not None:
+            config.memory.reranker_enabled = bool(memory_updates["reranker_enabled"])
+            changed.add("memory")
+        if "reranker_model" in memory_updates and memory_updates["reranker_model"] is not None:
+            config.memory.reranker_model = str(memory_updates["reranker_model"]).strip() or "BAAI/bge-reranker-v2-m3"
+            changed.add("memory")
+        if "reranker_candidate_count" in memory_updates and memory_updates["reranker_candidate_count"] is not None:
+            config.memory.reranker_candidate_count = max(5, min(100, _to_int(memory_updates["reranker_candidate_count"])))
             changed.add("memory")
 
     return changed

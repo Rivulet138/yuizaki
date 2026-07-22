@@ -17,6 +17,14 @@ DEFAULT_QDRANT_DOCKER_VOLUME = "yuizaki-qdrant-storage"
 DEFAULT_MEMORY_SQLITE_PATH = data_dir_from_env() / "memory.db"
 
 
+def normalize_qdrant_docker_image(value: str | None) -> str:
+    """Reject the mutable Qdrant ``latest`` tag in favor of the pinned baseline."""
+    image = str(value or "").strip()
+    if not image or image.lower() in {"latest", "qdrant/qdrant", "qdrant/qdrant:latest"}:
+        return DEFAULT_QDRANT_DOCKER_IMAGE
+    return image
+
+
 def _env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -53,6 +61,7 @@ class LLMConfig(BaseModel):
     vision_api_key: str = Field(default="")
     vision_model: str = Field(default="")
     vision_timeout: float = Field(default=30.0)
+    vision_detail: str = Field(default="low")
 
 
 class TTSConfig(BaseModel):
@@ -77,7 +86,9 @@ class ASRConfig(BaseModel):
     """ASR (Automatic Speech Recognition) configuration."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    provider: str = Field(default="sensevoice-service")
+    # Streaming Sherpa is the lightweight default. SenseVoice remains an
+    # explicit opt-in provider because its model/service stack is optional.
+    provider: str = Field(default="sherpa-onnx-online")
     base_url: str = Field(default="")
     api_key: str = Field(default="")
     timeout: float = Field(default=60.0)
@@ -141,6 +152,9 @@ class MemoryConfig(BaseModel):
     qdrant_docker_container: str = Field(default=DEFAULT_QDRANT_DOCKER_CONTAINER)
     qdrant_docker_volume: str = Field(default=DEFAULT_QDRANT_DOCKER_VOLUME)
     embedding_model: str = Field(default=DEFAULT_EMBEDDING_MODEL)
+    reranker_enabled: bool = Field(default=False)
+    reranker_model: str = Field(default="BAAI/bge-reranker-v2-m3")
+    reranker_candidate_count: int = Field(default=32)
 
 
 class AppConfig(BaseModel):
@@ -197,6 +211,7 @@ def _load_config_from_env() -> AppConfig:
             vision_api_key=os.getenv("VISION_LLM_API_KEY", ""),
             vision_model=os.getenv("VISION_LLM_MODEL", ""),
             vision_timeout=float(os.getenv("VISION_LLM_TIMEOUT", "30")),
+            vision_detail=os.getenv("VISION_LLM_DETAIL", "low").strip().lower() or "low",
         ),
         tts=TTSConfig(
             genie_character=os.getenv("TTS_GENIE_CHARACTER", ""),
@@ -213,7 +228,7 @@ def _load_config_from_env() -> AppConfig:
             audio_cache_dir=audio_cache_dir_from_env(),
         ),
         asr=ASRConfig(
-            provider=os.getenv("ASR_PROVIDER", "sensevoice-service").strip().lower(),
+            provider=os.getenv("ASR_PROVIDER", "sherpa-onnx-online").strip().lower(),
             base_url=os.getenv("ASR_BASE_URL", "").rstrip("/"),
             api_key=os.getenv("ASR_API_KEY", ""),
             timeout=float(os.getenv("ASR_TIMEOUT", "60")),
@@ -257,10 +272,13 @@ def _load_config_from_env() -> AppConfig:
             qdrant_collection=os.getenv("QDRANT_COLLECTION", "memories").strip() or "memories",
             qdrant_timeout=float(os.getenv("QDRANT_TIMEOUT", "10")),
             qdrant_auto_start=_env_bool("QDRANT_AUTO_START", True),
-            qdrant_docker_image=os.getenv("QDRANT_DOCKER_IMAGE", DEFAULT_QDRANT_DOCKER_IMAGE).strip() or DEFAULT_QDRANT_DOCKER_IMAGE,
+            qdrant_docker_image=normalize_qdrant_docker_image(os.getenv("QDRANT_DOCKER_IMAGE", DEFAULT_QDRANT_DOCKER_IMAGE)),
             qdrant_docker_container=os.getenv("QDRANT_DOCKER_CONTAINER", DEFAULT_QDRANT_DOCKER_CONTAINER).strip() or DEFAULT_QDRANT_DOCKER_CONTAINER,
             qdrant_docker_volume=os.getenv("QDRANT_DOCKER_VOLUME", DEFAULT_QDRANT_DOCKER_VOLUME).strip() or DEFAULT_QDRANT_DOCKER_VOLUME,
             embedding_model=os.getenv("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL).strip() or DEFAULT_EMBEDDING_MODEL,
+            reranker_enabled=_env_bool("MEMORY_RERANKER_ENABLED", False),
+            reranker_model=os.getenv("MEMORY_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3").strip() or "BAAI/bge-reranker-v2-m3",
+            reranker_candidate_count=max(5, min(100, int(os.getenv("MEMORY_RERANKER_CANDIDATES", "32")))),
         ),
     )
 

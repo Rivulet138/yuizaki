@@ -75,7 +75,7 @@ const createDefaultPromptEngineering = (): WorkspacePromptEngineering => ({
 const createDefaultVisionSettings = (): WorkspaceVisionSettings => ({
   enabled: true,
   displayIndex: 0,
-  intervalMs: 5000,
+  intervalMs: 2000,
   pauseWhenAppHidden: true,
   captureMode: 'display',
   region: { x: 0, y: 0, width: 1280, height: 720 },
@@ -136,7 +136,7 @@ const normalizeVisionSettings = (value: Partial<WorkspaceVisionSettings> | undef
   return {
     enabled: value?.enabled !== false,
     displayIndex: Math.max(0, Math.min(15, Math.round(Number(value?.displayIndex) || 0))),
-    intervalMs: [1000, 2000, 5000, 10000].includes(intervalMs) ? intervalMs : 5000,
+    intervalMs: [1000, 2000, 5000, 10000].includes(intervalMs) ? intervalMs : 2000,
     pauseWhenAppHidden: value?.pauseWhenAppHidden !== false,
     captureMode: value?.captureMode === 'region' ? 'region' : 'display',
     region: {

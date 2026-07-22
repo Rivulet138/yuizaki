@@ -12,8 +12,8 @@ describe('realtime visual capture policy', () => {
       assistantSpeaking: true,
     })).toEqual({
       shouldCapture: true,
-      minUploadIntervalMs: 5000,
-      forceUploadIntervalMs: 15_000,
+      minUploadIntervalMs: 1500,
+      forceUploadIntervalMs: 8000,
     })
 
     expect(resolveVisualCapturePolicy({
@@ -34,7 +34,7 @@ describe('realtime visual capture policy', () => {
       assistantSpeaking: false,
     })).toEqual({
       shouldCapture: true,
-      minUploadIntervalMs: 2500,
+      minUploadIntervalMs: 1200,
       forceUploadIntervalMs: Infinity,
     })
   })

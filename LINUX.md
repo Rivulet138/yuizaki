@@ -7,7 +7,7 @@ Linux 与 Windows 使用同一 Electron、Vue 和 Python 代码。当前 CI 在 
 - x86_64 主流发行版
 - X11；Wayland 通过 Electron/XWayland 兼容层运行
 - Node.js 22.13 以上，优先 Node 24 LTS
-- Python 3.12
+- Python 3.12 或 3.13；项目运行时使用 `python/.venv`
 - PulseAudio 或 PipeWire 兼容音频栈
 
 全局鼠标侧键、透明窗口、置顶行为和屏幕捕获受桌面环境及 Wayland 权限影响。功能缺失时应降级为键盘按住说话，不应让桌宠整体无法启动。
@@ -90,6 +90,6 @@ CPU 路径应始终可启动。NVIDIA 加速需要与宿主驱动兼容的 CUDA 
 - 窗口空白：执行 `npm run start:check`，检查 `libgbm`、GTK、NSS 和显示变量。
 - 全局快捷键失效：检查 Wayland 限制，改用键盘绑定或 XWayland。
 - 麦克风无数据：检查 PipeWire/PulseAudio source 和桌面权限。
-- Python 模型轮子缺失：保持 Python 3.12，确认对应平台 wheel 后再升级 Python。
+- Python 模型轮子缺失：优先使用 Python 3.12；升级到 3.13 前确认对应平台 wheel。
 
 跨平台发布仍需在目标发行版做真实桌面测试；Xvfb 只能证明窗口可以创建，不能证明音频、门户和鼠标侧键全部可用。

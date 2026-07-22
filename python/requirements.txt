@@ -1,4 +1,5 @@
 # Yuizaki default runtime dependencies.
+# Release/install scripts use the platform lock files in this directory.
 # Optional model backends such as FunASR/SenseVoice and SoulX-Singer-SVC are
 # not installed by default because their native dependency stacks
 # are version-, CUDA-, and Python-build-sensitive. The default runtime calls
@@ -6,6 +7,7 @@
 
 # Web/API runtime
 fastapi>=0.136,<1
+pydantic>=2.12,<3
 uvicorn[standard]>=0.49,<1
 httpx>=0.28,<1
 aiofiles>=25,<26
@@ -23,7 +25,8 @@ Pillow>=12,<13
 # ASR/OCR/TTS capabilities that are compatible with the current default stack
 sherpa-onnx>=1.13.2,<2
 rapidocr-onnxruntime>=1.2.3,<2
-genie-tts>=2.0,<3
+genie-tts==2.0.2
+huggingface-hub>=0.36,<1
 
 # Vector database and embeddings
 qdrant-client>=1.18,<2
