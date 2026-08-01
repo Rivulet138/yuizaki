@@ -26,9 +26,9 @@ Pillow>=12.3,<13
 sherpa-onnx>=1.13.2,<2
 rapidocr-onnxruntime>=1.2.3,<2
 genie-tts==2.0.2
-huggingface-hub>=0.36,<1
+huggingface-hub>=1.26,<2
 
 # Vector database and embeddings
 qdrant-client>=1.18,<2
-sentence-transformers>=2.7,<3
+sentence-transformers>=5.6.1,<6
 tiktoken>=0.13,<1

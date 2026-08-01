@@ -14,7 +14,7 @@ Pillow==12.3.0
 sherpa-onnx==1.13.2
 rapidocr-onnxruntime==1.2.3
 genie-tts==2.0.2
-huggingface-hub==0.36.2
+huggingface-hub==1.26.0
 qdrant-client==1.18.0
-sentence-transformers==2.7.0
+sentence-transformers==5.6.1
 tiktoken==0.13.0
