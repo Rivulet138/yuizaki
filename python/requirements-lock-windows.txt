@@ -10,7 +10,7 @@ python-socketio==5.16.2
 sqlalchemy==2.0.50
 alembic==1.18.4
 numpy==2.4.4
-Pillow==12.2.0
+Pillow==12.3.0
 sherpa-onnx==1.13.2
 rapidocr-onnxruntime==1.2.3
 genie-tts==2.0.2

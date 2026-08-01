@@ -16,7 +16,7 @@ alembic>=1.18,<2
 
 # Numeric and media foundations
 numpy>=2.1,<3
-Pillow>=12,<13
+Pillow>=12.3,<13
 
 # OCR foundation used by the default core runtime
 rapidocr-onnxruntime>=1.2.3,<2

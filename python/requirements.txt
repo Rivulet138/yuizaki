@@ -20,7 +20,7 @@ alembic>=1.18,<2
 
 # Numeric and media foundations
 numpy>=2.1,<3
-Pillow>=12,<13
+Pillow>=12.3,<13
 
 # ASR/OCR/TTS capabilities that are compatible with the current default stack
 sherpa-onnx>=1.13.2,<2
