@@ -372,9 +372,9 @@ if not defined PYTHON_VERSION (
   exit /b 1
 )
 call :log_info "Python interpreter: %PYTHON_EXE% (version %PYTHON_VERSION%)"
-"%PYTHON_EXE%" -c "import sys; raise SystemExit(0 if (3, 12) <= sys.version_info[:2] < (3, 14) else 1)" >nul 2>nul
+"%PYTHON_EXE%" -c "import sys; raise SystemExit(0 if (3, 11) <= sys.version_info[:2] < (3, 14) else 1)" >nul 2>nul
 if errorlevel 1 (
-  call :fail "Python 3.12 or 3.13 is required in the project virtual environment. Current version: %PYTHON_VERSION%"
+  call :fail "Python 3.11, 3.12, or 3.13 is required in the project virtual environment. Current version: %PYTHON_VERSION%"
   exit /b 1
 )
 

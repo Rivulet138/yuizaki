@@ -1,4 +1,4 @@
-# Yuizaki development lock for Windows / Python 3.12-3.13.
+# Yuizaki development lock for Windows / Python 3.11-3.13.
 -r requirements-lock-windows.txt
 pytest==9.0.3
 pytest-asyncio==1.4.0

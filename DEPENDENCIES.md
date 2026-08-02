@@ -8,9 +8,11 @@
 | --- | --- | --- |
 | Electron | 42.x | 保持当前主版本最新补丁 |
 | Node.js | 22.13+ | 新环境建议 24 LTS |
-| Python | 3.12–3.13 | 项目运行时使用 `python/.venv`；优先保证模型依赖兼容 |
+| Python | 3.11–3.13 | 兼容旧环境；新环境优先 3.12/3.13，并使用 `python/.venv` |
 | Vue/Vite | Vue 3、Vite 8 | 主版本升级单独验证 |
 | Qdrant | 1.18.3 | 使用固定镜像标签 |
+
+Node 22.13 是当前工具链的实际安全下限：Electron 42 的安装工具要求 Node 22.12 以上，ESLint 10 在 Node 22 分支要求 22.13 以上。Node 20 已停止维护，因此不通过回退 Electron 或开发工具来换取 Node 20 兼容。
 
 完整组件见 [TECH_STACK.md](TECH_STACK.md)。
 
@@ -26,6 +28,7 @@ cd node-mcp && npm ci
 Python：
 
 Windows 完整安装使用 `requirements-lock-windows.txt`，Linux 完整安装使用 `requirements-lock-linux.txt`；核心安装和开发环境分别使用对应的 `requirements-core-lock-*` 与 `requirements-dev-lock-*`。安装后必须运行 `pip check`。
+Python 3.11 可使用当前直接依赖版本；完整 TTS 栈中的 `jieba_fast` 仅提供源码包，因此需要 Windows C++ Build Tools 或 Linux `build-essential`。只需要基础后端时可使用 core lock 避开该编译步骤。
 
 `requirements-core.txt`、`requirements.txt` 和 `requirements-dev.txt` 是版本范围 manifest；六个平台 lock 文件对其直接依赖做精确版本 pin。`python/scripts/check_requirements_lock.py` 会在 CI 中双向检查 manifest 与 lock 的包集合、重复项和显式固定版本漂移；安装后 `python scripts/check_installed_lock.py --lock <lock-file>` 会核对当前 venv 的已安装版本。当前 lock 不是包含所有传递依赖及 hash 的完整供应链锁；若需要离线重建和更强的供应链证明，下一步应生成按平台/架构拆分的 hash lock 并提交 wheelhouse/SBOM。
 

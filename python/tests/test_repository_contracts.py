@@ -1,5 +1,9 @@
 import json
+import os
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -7,6 +11,7 @@ ENV_EXAMPLE = REPOSITORY_ROOT / "python" / ".env.example"
 RUNTIME_REQUIREMENTS = REPOSITORY_ROOT / "python" / "requirements.txt"
 RESOURCE_LOCK = REPOSITORY_ROOT / "resources.lock.json"
 PYRIGHT_CONFIG = REPOSITORY_ROOT / "pyrightconfig.json"
+PYTHON_RESOLVER = REPOSITORY_ROOT / "scripts" / "resolve_python.bat"
 
 
 def _read_env_example() -> dict[str, str]:
@@ -41,7 +46,37 @@ def test_python_toolchain_targets_project_venv_and_minimum_supported_version():
 
     assert pyright["venvPath"] == "python"
     assert pyright["venv"] == ".venv"
-    assert pyright["pythonVersion"] == "3.12"
+    assert pyright["pythonVersion"] == "3.11"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows batch resolver contract")
+def test_windows_python_resolver_prefers_newer_launcher_runtime(tmp_path):
+    (tmp_path / "py.cmd").write_text(
+        '@echo off\nif "%~1"=="-3.13" exit /b 0\nexit /b 1\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "python.cmd").write_text("@exit /b 0\n", encoding="utf-8")
+    environment = os.environ.copy()
+    windows_root = Path(environment.get("SystemRoot", environment.get("WINDIR", r"C:\Windows")))
+    environment["PATH"] = f"{tmp_path};{windows_root / 'System32'}"
+    command_shell = environment.get("COMSPEC", str(windows_root / "System32" / "cmd.exe"))
+    runner = tmp_path / "run-resolver.cmd"
+    runner.write_text(
+        f'@echo off\ncall "{PYTHON_RESOLVER}"\nif errorlevel 1 exit /b 1\necho [%PY_CMD%]\n',
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [command_shell, "/d", "/c", runner.name],
+        capture_output=True,
+        check=False,
+        cwd=tmp_path,
+        encoding="utf-8",
+        env=environment,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "[py -3.13]" in result.stdout
 
 
 def test_platform_dependency_lock_matrix_is_present_and_exactly_pinned():

@@ -10,7 +10,7 @@ if errorlevel 1 (
   echo [ERROR] Node.js 22.13+ is required. Current version: %NODE_VERSION%.
   exit /b 1
 )
-call :resolve_python || exit /b 1
+call scripts\resolve_python.bat || exit /b 1
 
 echo [1/3] Installing Electron dependencies...
 pushd electron
@@ -57,18 +57,6 @@ exit /b 0
 where %1 >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] Command not found: %1
-  exit /b 1
-)
-exit /b 0
-
-:resolve_python
-set "PY_CMD="
-where python >nul 2>nul && set "PY_CMD=python"
-if not defined PY_CMD (
-  where py >nul 2>nul && set "PY_CMD=py -3"
-)
-if not defined PY_CMD (
-  echo [ERROR] Python not found in PATH.
   exit /b 1
 )
 exit /b 0

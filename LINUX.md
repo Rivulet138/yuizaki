@@ -7,7 +7,7 @@ Linux 与 Windows 使用同一 Electron、Vue 和 Python 代码。当前 CI 在 
 - x86_64 主流发行版
 - X11；Wayland 通过 Electron/XWayland 兼容层运行
 - Node.js 22.13 以上，优先 Node 24 LTS
-- Python 3.12 或 3.13；项目运行时使用 `python/.venv`
+- Python 3.11、3.12 或 3.13；新环境优先 3.12/3.13，项目运行时使用 `python/.venv`
 - PulseAudio 或 PipeWire 兼容音频栈
 
 全局鼠标侧键、透明窗口、置顶行为和屏幕捕获受桌面环境及 Wayland 权限影响。功能缺失时应降级为键盘按住说话，不应让桌宠整体无法启动。
@@ -20,6 +20,8 @@ Ubuntu/Debian 常见依赖：
 sudo apt-get update
 sudo apt-get install -y python3.12 python3.12-venv build-essential libxtst6 libasound2t64 libnss3 libgtk-3-0 libgbm1
 ```
+
+已有 Python 3.11 或 3.13 环境时，可将上面的 `python3.12` 与 `python3.12-venv` 替换为对应版本包名。
 
 然后：
 

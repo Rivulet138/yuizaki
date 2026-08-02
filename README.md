@@ -10,7 +10,7 @@
   <a href="https://github.com/Rivulet138/yuizaki/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Rivulet138/yuizaki/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-2f6f5e"></a>
   <img alt="Platforms" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-4b5563">
-  <img alt="Python" src="https://img.shields.io/badge/Python-3.12--3.13-3776ab">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.11--3.13-3776ab">
   <img alt="Node.js" src="https://img.shields.io/badge/Node.js-22.13%2B-43853d">
 </p>
 
@@ -70,7 +70,7 @@ Electron 负责窗口、全局输入、屏幕能力和本地进程；Python 服�
 
 - Windows 10/11 或 x86_64 Linux
 - Node.js 22.13 以上，推荐 24 LTS
-- Python 3.12 或 3.13
+- Python 3.11、3.12 或 3.13（新环境优先 3.12/3.13）
 - 最低 8 GiB 内存，推荐 16 GiB
 - Docker 可选，仅 Qdrant、SoulX 等外部服务需要
 
@@ -152,7 +152,7 @@ Python（Windows）：
 ```powershell
 cd python
 .\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\python.exe -m pyright --pythonversion 3.12
+.\.venv\Scripts\python.exe -m pyright --pythonversion 3.11
 .\.venv\Scripts\python.exe -m evals
 ```
 
@@ -164,7 +164,7 @@ python scripts/check_resources.py
 python python/scripts/check_requirements_lock.py
 ```
 
-CI 在 Windows/Ubuntu 验证 Electron，并在 Python 3.12/3.13 上运行依赖、类型、测试和离线模型评测。Python 直接依赖已按平台精确固定；完整传递依赖 hash lock 仍是后续供应链工作。
+CI 在 Windows/Ubuntu 验证 Electron，并在 Python 3.11/3.12/3.13 上运行依赖、类型、测试和离线模型评测。Python 直接依赖已按平台精确固定；完整传递依赖 hash lock 仍是后续供应链工作。
 
 ## 项目目录
 

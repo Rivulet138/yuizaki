@@ -1,4 +1,4 @@
-# Yuizaki core runtime lock for Windows / Python 3.12-3.13.
+# Yuizaki core runtime lock for Windows / Python 3.11-3.13.
 # Keep this file generated/reviewed together with requirements.txt.
 fastapi==0.136.3
 pydantic==2.12.5

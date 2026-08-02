@@ -21,7 +21,7 @@ Python 直接运行依赖使用平台 lock 文件；模型质量回归使用 `py
 
 | 技术 | 用途 |
 | --- | --- |
-| Python 3.12–3.13 | Agent、语音、视觉、记忆和工具服务 |
+| Python 3.11–3.13 | Agent、语音、视觉、记忆和工具服务 |
 | FastAPI | HTTP API |
 | Socket.IO | 实时语音、模型输出、桌宠动作和状态同步 |
 | Pydantic | 配置与协议校验 |

@@ -1,4 +1,4 @@
-# Yuizaki full runtime lock for Linux / Python 3.12-3.13.
+# Yuizaki full runtime lock for Linux / Python 3.11-3.13.
 # Direct runtime packages are exact-pinned; run `pip check` after installation.
 fastapi==0.136.3
 pydantic==2.12.5

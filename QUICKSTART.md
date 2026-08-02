@@ -3,7 +3,7 @@
 ## 要求
 
 - Node.js 22.13 以上
-- Python 3.12 或 3.13（项目运行时使用 `python/.venv`）
+- Python 3.11、3.12 或 3.13（新环境优先 3.12/3.13；项目运行时使用 `python/.venv`）
 - Windows 10/11 或 x86_64 Linux
 - 至少 8 GiB 内存
 

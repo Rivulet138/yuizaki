@@ -29,7 +29,7 @@ python -m pytest -q test_settings_api_router.py
 
 ```bash
 ruff check . --select E9,F63,F7,F82
-pyright --pythonversion 3.12
+pyright --pythonversion 3.11
 ```
 
 ## 测试约定
@@ -40,4 +40,4 @@ pyright --pythonversion 3.12
 - 修改 Socket.IO 事件时同时验证事件名、payload 与取消行为。
 - 修改永久删除或恢复逻辑时覆盖路径逃逸、符号链接和 dry-run。
 
-CI 使用 Python 3.12 和 3.13 矩阵，安装对应平台的 `requirements-dev-lock-*` 后执行 Ruff、Pyright、完整 pytest 和离线模型评测；评测 JSON 会作为 Actions artifact 保存。
+CI 使用 Python 3.11、3.12 和 3.13 矩阵，安装对应平台的 `requirements-dev-lock-*` 后执行 Ruff、Pyright、完整 pytest 和离线模型评测；评测 JSON 会作为 Actions artifact 保存。
