@@ -43,7 +43,11 @@ export const useSystemStore = defineStore('system', () => {
   const visualCaptureReason = ref<string | null>(null)
   const visualAnalysisLatencyMs = ref<number | null>(null)
 
-  let statusTimer: ReturnType<typeof setInterval> | null = null
+  let statusTimer: ReturnType<typeof setTimeout> | null = null
+  let healthCheckGeneration = 0
+  let healthCheckInFlight = false
+  let pendingHealthCheck: (() => void) | null = null
+  let visibilityHandler: (() => void) | null = null
   let checkingControl = false
   let checkingPython = false
 
@@ -81,61 +85,108 @@ export const useSystemStore = defineStore('system', () => {
     }
   }
 
-  const checkControl = async (): Promise<void> => {
+  const checkControl = async (shouldCommit: () => boolean = () => true): Promise<void> => {
     if (checkingControl) return
     checkingControl = true
     try {
       const result = await checkControlByHttp()
-      controlRunning.value = result.healthy
-      controlHealthError.value = result.error
-      if (result.healthy) {
-        controlLastHealthyAt.value = Date.now()
+      if (shouldCommit()) {
+        controlRunning.value = result.healthy
+        controlHealthError.value = result.error
+        if (result.healthy) {
+          controlLastHealthyAt.value = Date.now()
+        }
       }
     } catch {
-      controlRunning.value = false
-      controlHealthError.value = 'Control server health check failed'
+      if (shouldCommit()) {
+        controlRunning.value = false
+        controlHealthError.value = 'Control server health check failed'
+      }
     } finally {
-      statusChecked.value = true
+      if (shouldCommit()) statusChecked.value = true
       checkingControl = false
     }
   }
 
-  const checkPython = async (): Promise<void> => {
+  const checkPython = async (shouldCommit: () => boolean = () => true): Promise<void> => {
     if (checkingPython) return
     checkingPython = true
     try {
       const result = await checkPythonByHttp()
-      pythonRunning.value = result.healthy
-      pythonHealthError.value = result.error
-      if (result.healthy) {
-        pythonLastHealthyAt.value = Date.now()
+      if (shouldCommit()) {
+        pythonRunning.value = result.healthy
+        pythonHealthError.value = result.error
+        if (result.healthy) {
+          pythonLastHealthyAt.value = Date.now()
+        }
       }
     } catch {
-      pythonRunning.value = false
-      pythonHealthError.value = 'Python backend health check failed'
+      if (shouldCommit()) {
+        pythonRunning.value = false
+        pythonHealthError.value = 'Python backend health check failed'
+      }
     } finally {
-      statusChecked.value = true
+      if (shouldCommit()) statusChecked.value = true
       checkingPython = false
     }
   }
 
-  const checkLocalServices = async (): Promise<void> => {
-    await Promise.all([checkControl(), checkPython()])
+  const checkLocalServices = async (shouldCommit: () => boolean = () => true): Promise<void> => {
+    await Promise.all([checkControl(shouldCommit), checkPython(shouldCommit)])
   }
 
   const startHealthCheck = (
     checkWs: () => boolean,
     checkSio: () => boolean,
   ) => {
-    if (statusTimer) clearInterval(statusTimer)
+    healthCheckGeneration += 1
+    const generation = healthCheckGeneration
+    let consecutiveFailures = 0
+    const clearTimer = () => {
+      if (!statusTimer) return
+      clearTimeout(statusTimer)
+      statusTimer = null
+    }
+    clearTimer()
+    if (visibilityHandler) document.removeEventListener('visibilitychange', visibilityHandler)
 
-    void checkLocalServices()
-
-    statusTimer = setInterval(() => {
+    const runHealthCheck = async () => {
+      if (generation !== healthCheckGeneration || document.hidden) return
+      if (healthCheckInFlight) {
+        pendingHealthCheck = () => void runHealthCheck()
+        return
+      }
+      healthCheckInFlight = true
       wsConnected.value = checkWs()
       sioConnected.value = checkSio()
-      void checkLocalServices()
-    }, 1500)
+      try {
+        await checkLocalServices(() => generation === healthCheckGeneration)
+      } finally {
+        healthCheckInFlight = false
+      }
+      const pending = pendingHealthCheck
+      pendingHealthCheck = null
+      if (pending) {
+        pending()
+        return
+      }
+      if (generation !== healthCheckGeneration || document.hidden) return
+      const healthy = controlRunning.value && pythonRunning.value
+      const failureDelays = [5_000, 10_000, 30_000]
+      const delay = healthy ? 30_000 : failureDelays[Math.min(consecutiveFailures, failureDelays.length - 1)]!
+      consecutiveFailures = healthy ? 0 : consecutiveFailures + 1
+      statusTimer = setTimeout(() => {
+        statusTimer = null
+        void runHealthCheck()
+      }, delay)
+    }
+
+    visibilityHandler = () => {
+      clearTimer()
+      if (!document.hidden) void runHealthCheck()
+    }
+    document.addEventListener('visibilitychange', visibilityHandler)
+    void runHealthCheck()
   }
 
   const refreshStatus = async (
@@ -148,9 +199,15 @@ export const useSystemStore = defineStore('system', () => {
   }
 
   const stopHealthCheck = () => {
+    healthCheckGeneration += 1
+    pendingHealthCheck = null
     if (statusTimer) {
-      clearInterval(statusTimer)
+      clearTimeout(statusTimer)
       statusTimer = null
+    }
+    if (visibilityHandler) {
+      document.removeEventListener('visibilitychange', visibilityHandler)
+      visibilityHandler = null
     }
     wsConnected.value = false
     sioConnected.value = false

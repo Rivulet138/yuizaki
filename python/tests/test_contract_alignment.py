@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import base64
-import io
 import asyncio
+import base64
 import importlib
+import io
+import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -13,7 +14,6 @@ import pytest
 from PIL import Image
 
 from modules.ocr.recognizer import OCRClient
-
 
 BuildSnapshot = Callable[..., dict[str, object]]
 
@@ -199,7 +199,9 @@ def test_companion_runtime_isolates_memory_by_active_workspace():
 
 
 class _FakeOcrEngine:
-    def __call__(self, _image: Image.Image):
+    def __call__(self, image: bytes):
+        assert isinstance(image, bytes)
+        assert image.startswith(b"\x89PNG\r\n\x1a\n")
         return (
             [
                 (
@@ -268,3 +270,89 @@ async def test_ocr_client_initializes_once_on_demand_without_blocking_event_loop
     assert initialization_calls == 1
     assert client.initialization_state == "ready"
     assert [result["status"] for result in results] == ["ok", "ok"]
+
+
+@pytest.mark.asyncio
+async def test_ocr_client_offloads_recognition_and_serializes_engine_calls():
+    client = OCRClient()
+    active_calls = 0
+    max_active_calls = 0
+    counter_lock = threading.Lock()
+
+    class SlowOcrEngine:
+        def __call__(self, image: bytes):
+            nonlocal active_calls, max_active_calls
+            assert isinstance(image, bytes)
+            with counter_lock:
+                active_calls += 1
+                max_active_calls = max(max_active_calls, active_calls)
+            time.sleep(0.08)
+            with counter_lock:
+                active_calls -= 1
+            return ([], None)
+
+    client._ocr = SlowOcrEngine()
+    client._available = True
+
+    started = time.perf_counter()
+    requests = asyncio.gather(
+        client.recognize(_tiny_png_data_url()),
+        client.recognize(_tiny_png_data_url()),
+    )
+    await asyncio.sleep(0.01)
+    event_loop_delay_ms = (time.perf_counter() - started) * 1000
+    results = await requests
+
+    assert event_loop_delay_ms < 50
+    assert max_active_calls == 1
+    assert [result["status"] for result in results] == ["ok", "ok"]
+
+
+@pytest.mark.asyncio
+async def test_ocr_disconnect_waits_for_active_recognition():
+    client = OCRClient()
+    recognition_started = threading.Event()
+    allow_recognition_to_finish = threading.Event()
+
+    class BlockingOcrEngine:
+        def __call__(self, image: bytes):
+            assert isinstance(image, bytes)
+            recognition_started.set()
+            assert allow_recognition_to_finish.wait(timeout=2)
+            return ([], None)
+
+    client._ocr = BlockingOcrEngine()
+    client._available = True
+    recognition = asyncio.create_task(client.recognize(_tiny_png_data_url()))
+    assert await asyncio.to_thread(recognition_started.wait, 1)
+
+    disconnect = asyncio.create_task(client.disconnect())
+    await asyncio.sleep(0)
+    assert not disconnect.done()
+
+    allow_recognition_to_finish.set()
+    assert (await recognition)["status"] == "ok"
+    await disconnect
+    assert client.initialization_state == "idle"
+
+
+@pytest.mark.asyncio
+async def test_ocr_client_preserves_engine_error_status():
+    client = OCRClient()
+
+    class FailingOcrEngine:
+        def __call__(self, image: bytes):
+            assert isinstance(image, bytes)
+            raise ValueError("invalid OCR input")
+
+    client._ocr = FailingOcrEngine()
+    client._available = True
+
+    result = await client.recognize(_tiny_png_data_url())
+
+    assert result == {
+        "status": "error",
+        "error": "invalid OCR input",
+        "text": "",
+        "blocks": [],
+    }

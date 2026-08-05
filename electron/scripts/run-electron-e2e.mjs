@@ -26,6 +26,12 @@ const caseArg = process.argv.find((arg) => arg.startsWith('--case='))?.slice('--
 const fixtureOnly = process.argv.includes('--fixture-only')
 const failureProbe = process.argv.find((arg) => arg.startsWith('--failure-probe='))?.slice('--failure-probe='.length)
 const trustedSocketOrigin = 'yuizaki-app://renderer'
+const loopbackNoProxy = [...new Set([
+  ...(process.env['NO_PROXY'] ?? '').split(','),
+  ...(process.env['no_proxy'] ?? '').split(','),
+  '127.0.0.1',
+  'localhost',
+].map((value) => value.trim()).filter(Boolean))].join(',')
 const caseIds = caseArg ? [caseArg] : ['E2E-01', 'E2E-02', 'E2E-03', 'E2E-04', 'E2E-05', 'E2E-05T', 'E2E-06', 'E2E-07', 'E2E-08']
 const ownedResources = createOwnedResourceRegistry()
 let activeRedactor = createE2ERedactor([])
@@ -69,6 +75,8 @@ const runCase = async (caseId) => {
     cwd: repositoryRoot,
     env: {
       ...process.env,
+      NO_PROXY: loopbackNoProxy,
+      no_proxy: loopbackNoProxy,
       YUIZAKI_E2E_BACKEND_TOKEN: identity.backendToken,
       YUIZAKI_E2E_SOCKET_ORIGIN: trustedSocketOrigin,
     },
@@ -99,6 +107,8 @@ const runCase = async (caseId) => {
       cwd: electronRoot,
       env: {
         ...process.env,
+        NO_PROXY: loopbackNoProxy,
+        no_proxy: loopbackNoProxy,
         DESKTOP_PET_SKIP_INTERNAL_PYTHON: '1',
         SERVER_HOST: '127.0.0.1',
         SERVER_PORT: String(startup.port),

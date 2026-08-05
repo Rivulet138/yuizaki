@@ -54,9 +54,9 @@ describe('workspaceStore active workspace switching', () => {
     expect(store.activeWorkspace.context.roleCard).toMatchObject({ enabled: true })
     expect(store.activeWorkspace.context.worldBook).toMatchObject({ enabled: false, entries: [] })
     expect(store.activeWorkspace.context.vision).toEqual({
-      enabled: true,
+      enabled: false,
       displayIndex: 0,
-      intervalMs: 2000,
+      intervalMs: 30_000,
       pauseWhenAppHidden: true,
       captureMode: 'display',
       region: { x: 0, y: 0, width: 1280, height: 720 },
@@ -197,7 +197,7 @@ describe('workspaceStore active workspace switching', () => {
     expect(store.activeWorkspace.context.vision).toEqual({
       enabled: true,
       displayIndex: 1,
-      intervalMs: 2000,
+      intervalMs: 10_000,
       pauseWhenAppHidden: true,
       captureMode: 'region',
       region: { x: 0, y: 40, width: 64, height: 800 },
@@ -206,6 +206,20 @@ describe('workspaceStore active workspace switching', () => {
         { x: 100, y: 200, width: 300, height: 400 },
       ],
     })
+  })
+
+  it('caps oversized realtime vision intervals before scheduling', () => {
+    window.localStorage.setItem('deskpet-workspaces', JSON.stringify([{
+      id: 'default',
+      name: 'Default',
+      createdAt: '',
+      updatedAt: '',
+      context: { vision: { intervalMs: 3_000_000_000 } },
+    }]))
+
+    const store = useWorkspaceStore()
+
+    expect(store.activeWorkspace.context.vision?.intervalMs).toBe(3_600_000)
   })
 
   it('migrates only the legacy default workspace label to desktop pet scene wording', () => {

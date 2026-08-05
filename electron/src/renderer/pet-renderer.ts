@@ -25,6 +25,8 @@ import type {
 import { validatePetControlDirective } from "../shared/pet-control-validator";
 import { logger } from "./logger";
 import {
+	AlphaHitTestScheduler,
+	DEFAULT_ALPHA_HIT_TEST_INTERVAL_MS,
 	resolveContextMenu,
 	resolveDragEnd,
 	resolveMouseDown,
@@ -195,7 +197,34 @@ class PetRenderer {
 	private lastMouseClientPoint: { x: number; y: number } | null = null;
 	private mouseDownOnModel = false;
 	private modelHovering = false;
-	private alphaHitTestSeq = 0;
+	private alphaHitTestReason = "alpha-hit-test";
+	private readonly alphaHitTestScheduler = new AlphaHitTestScheduler({
+		execute: ({ x, y }) =>
+			window.live2dApi?.pet?.hasVisiblePixel?.(x, y) ?? Promise.resolve(true),
+		onResult: (visible, point) => {
+			if (
+				this.config.clickThrough ||
+				this.isDraggingWindow ||
+				!this.lastMouseClientPoint ||
+				Math.abs(this.lastMouseClientPoint.x - point.x) >
+					ALPHA_HIT_TEST_POINTER_TOLERANCE_PX ||
+				Math.abs(this.lastMouseClientPoint.y - point.y) >
+					ALPHA_HIT_TEST_POINTER_TOLERANCE_PX
+			) {
+				return;
+			}
+			this.applyMouseCaptureDecision(
+				visible,
+				`${this.alphaHitTestReason}:alpha`,
+				true,
+			);
+		},
+		onError: (error) => {
+			console.warn("[PetRenderer] alpha hit test failed:", error);
+		},
+		intervalMs: DEFAULT_ALPHA_HIT_TEST_INTERVAL_MS,
+		tolerancePx: ALPHA_HIT_TEST_POINTER_TOLERANCE_PX,
+	});
 
 	private lastClickAt = 0;
 	private singleClickTimer: number | null = null;
@@ -636,6 +665,7 @@ class PetRenderer {
 		if (typeof patch.clickThrough === "boolean") {
 			this.config.clickThrough = patch.clickThrough;
 			if (this.config.clickThrough) {
+				this.alphaHitTestScheduler.invalidate();
 				this.finishWindowDrag();
 				this.requestMousePassthrough(true, "click-through-config", true);
 			}
@@ -995,6 +1025,7 @@ class PetRenderer {
 			};
 
 			this.isDraggingWindow = true;
+			this.alphaHitTestScheduler.invalidate();
 			this.dragLastScreen = screenPoint;
 			this.dragLastClient = fallbackClientPoint;
 			this.testState.lastDragStartAt = Date.now();
@@ -1138,6 +1169,7 @@ class PetRenderer {
 		reason: string,
 	): void {
 		if (this.config.clickThrough) {
+			this.alphaHitTestScheduler.invalidate();
 			this.modelHovering = false;
 			this.requestMousePassthrough(true, reason, true);
 			this.updateCursor(false);
@@ -1146,6 +1178,7 @@ class PetRenderer {
 
 		const point = this.getCanvasPointFromClient(clientX, clientY);
 		if (!point) {
+			this.alphaHitTestScheduler.invalidate();
 			return;
 		}
 
@@ -1160,31 +1193,10 @@ class PetRenderer {
 		this.applyMouseCaptureDecision(hovering, reason);
 
 		if (hovering && window.live2dApi?.pet?.hasVisiblePixel) {
-			const sequence = ++this.alphaHitTestSeq;
-			void window.live2dApi.pet
-				.hasVisiblePixel(clientX, clientY)
-				.then((visible) => {
-					if (sequence !== this.alphaHitTestSeq) {
-						return;
-					}
-					if (
-						!this.lastMouseClientPoint ||
-						Math.abs(this.lastMouseClientPoint.x - clientX) >
-							ALPHA_HIT_TEST_POINTER_TOLERANCE_PX ||
-						Math.abs(this.lastMouseClientPoint.y - clientY) >
-							ALPHA_HIT_TEST_POINTER_TOLERANCE_PX
-					) {
-						return;
-					}
-					this.applyMouseCaptureDecision(
-						Boolean(visible),
-						`${reason}:alpha`,
-						true,
-					);
-				})
-				.catch((error) => {
-					console.warn("[PetRenderer] alpha hit test failed:", error);
-				});
+			this.alphaHitTestReason = reason;
+			this.alphaHitTestScheduler.request({ x: clientX, y: clientY });
+		} else {
+			this.alphaHitTestScheduler.invalidate();
 		}
 	}
 
@@ -1622,6 +1634,7 @@ class PetRenderer {
 	};
 
 	private readonly handleWindowMouseLeave = (): void => {
+		this.alphaHitTestScheduler.invalidate();
 		this.lastMouseClientPoint = null;
 		this.modelHovering = false;
 		this.clearLongPressTimer();
@@ -1877,6 +1890,7 @@ class PetRenderer {
 
 	destroy(): void {
 		this.destroyed = true;
+		this.alphaHitTestScheduler.dispose();
 
 		if (this.singleClickTimer !== null) {
 			window.clearTimeout(this.singleClickTimer);

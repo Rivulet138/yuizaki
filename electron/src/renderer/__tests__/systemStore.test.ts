@@ -1,5 +1,5 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { __test__, useSystemStore } from '../stores/systemStore'
 import { systemClient } from '../api/client'
 
@@ -17,6 +17,11 @@ describe('systemStore health payloads', () => {
     setActivePinia(createPinia())
     vi.resetAllMocks()
     mockedSystemClient.controlHealth.mockResolvedValue({ status: 'ok' })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false })
   })
 
   it('accepts the current control health payload as healthy', () => {
@@ -85,6 +90,103 @@ describe('systemStore health payloads', () => {
     expect(store.controlRunning).toBe(true)
     expect(store.controlHealthError).toBeNull()
     expect(store.controlLastHealthyAt).toEqual(expect.any(Number))
+  })
+
+  it('checks immediately and polls healthy services every 30 seconds', async () => {
+    vi.useFakeTimers()
+    mockedSystemClient.pythonHealth.mockResolvedValue({ ok: true })
+    const store = useSystemStore()
+
+    store.startHealthCheck(() => false, () => true)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mockedSystemClient.pythonHealth).toHaveBeenCalledTimes(1)
+    expect(store.sioConnected).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(29_999)
+    expect(mockedSystemClient.pythonHealth).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(mockedSystemClient.pythonHealth).toHaveBeenCalledTimes(2)
+    store.stopHealthCheck()
+  })
+
+  it('backs off failed health checks from 5 to 10 to 30 seconds', async () => {
+    vi.useFakeTimers()
+    mockedSystemClient.controlHealth.mockResolvedValue({ status: 'down' })
+    mockedSystemClient.pythonHealth.mockResolvedValue({ ok: false })
+    const store = useSystemStore()
+
+    store.startHealthCheck(() => false, () => false)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mockedSystemClient.pythonHealth).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(mockedSystemClient.pythonHealth).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(mockedSystemClient.pythonHealth).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(mockedSystemClient.pythonHealth).toHaveBeenCalledTimes(4)
+    store.stopHealthCheck()
+  })
+
+  it('does not overlap checks and pauses polling while the document is hidden', async () => {
+    vi.useFakeTimers()
+    let resolvePython: ((value: { ok: true }) => void) | null = null
+    mockedSystemClient.pythonHealth.mockImplementation(() => new Promise((resolve) => {
+      resolvePython = resolve
+    }))
+    const store = useSystemStore()
+
+    store.startHealthCheck(() => false, () => false)
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(mockedSystemClient.pythonHealth).toHaveBeenCalledTimes(1)
+
+    resolvePython?.({ ok: true })
+    await vi.advanceTimersByTimeAsync(0)
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(mockedSystemClient.pythonHealth).toHaveBeenCalledTimes(1)
+
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false })
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mockedSystemClient.pythonHealth).toHaveBeenCalledTimes(2)
+    store.stopHealthCheck()
+  })
+
+  it('does not commit stale health results after polling stops or restarts', async () => {
+    vi.useFakeTimers()
+    let resolveControl: ((value: { status: 'ok' }) => void) | null = null
+    let resolvePython: ((value: { ok: true }) => void) | null = null
+    mockedSystemClient.controlHealth.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveControl = resolve
+    })).mockResolvedValue({ status: 'ok' })
+    mockedSystemClient.pythonHealth.mockImplementationOnce(() => new Promise((resolve) => {
+      resolvePython = resolve
+    })).mockResolvedValue({ ok: true })
+    const store = useSystemStore()
+
+    store.startHealthCheck(() => false, () => false)
+    await vi.advanceTimersByTimeAsync(0)
+    store.stopHealthCheck()
+    resolveControl?.({ status: 'ok' })
+    resolvePython?.({ ok: true })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(store.statusChecked).toBe(false)
+    expect(store.controlRunning).toBe(false)
+    expect(store.pythonRunning).toBe(false)
+
+    store.startHealthCheck(() => false, () => true)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(mockedSystemClient.pythonHealth).toHaveBeenCalledTimes(2)
+    expect(store.statusChecked).toBe(true)
+    expect(store.controlRunning).toBe(true)
+    expect(store.pythonRunning).toBe(true)
+    expect(store.sioConnected).toBe(true)
+    store.stopHealthCheck()
   })
 
   it('tracks realtime visual capture acknowledgements and errors', () => {

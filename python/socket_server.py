@@ -1803,6 +1803,8 @@ class DesktopPetSocketServer:
 
             image_b64 = _as_text(data.get("image"))
             mode = (_as_text(data.get("mode"), "observe").strip().lower() or "observe")
+            request_frame_id = _as_text(data.get("frame_id")).strip()
+            correlation = {"frame_id": request_frame_id} if request_frame_id else {}
 
             if mode == "clear":
                 self._clear_visual_context(sid)
@@ -1814,6 +1816,7 @@ class DesktopPetSocketServer:
 
             if not image_b64:
                 await self.sio.emit(ScreenshotEvents.RESULT, {
+                    **correlation,
                     "error": "NO_IMAGE",
                     "message": "image field is required",
                 }, to=sid)
@@ -1823,6 +1826,7 @@ class DesktopPetSocketServer:
             if mode in _VISUAL_FRAME_MODES:
                 if estimated_bytes > _MAX_VISUAL_FRAME_BYTES:
                     await self.sio.emit(ScreenshotEvents.RESULT, {
+                        **correlation,
                         "error": "IMAGE_TOO_LARGE",
                         "message": "image payload exceeds visual frame limit",
                         "max_bytes": _MAX_VISUAL_FRAME_BYTES,
@@ -1858,6 +1862,7 @@ class DesktopPetSocketServer:
 
             if mode != "ocr":
                 await self.sio.emit(ScreenshotEvents.RESULT, {
+                    **correlation,
                     "error": "UNSUPPORTED_MODE",
                     "message": f"mode '{mode}' not implemented",
                 }, to=sid)
@@ -1866,6 +1871,7 @@ class DesktopPetSocketServer:
             try:
                 if estimated_bytes > MAX_OCR_IMAGE_BYTES:
                     await self.sio.emit(ScreenshotEvents.RESULT, {
+                        **correlation,
                         "error": "IMAGE_TOO_LARGE",
                         "message": "image payload exceeds OCR limit",
                         "max_bytes": MAX_OCR_IMAGE_BYTES,
@@ -1875,6 +1881,7 @@ class DesktopPetSocketServer:
                 ocr_client = self.ocr_client
                 if not ocr_client:
                     await self.sio.emit(ScreenshotEvents.RESULT, {
+                        **correlation,
                         "error": "OCR_NOT_AVAILABLE",
                         "message": "OCR client not initialized",
                     }, to=sid)
@@ -1884,6 +1891,7 @@ class DesktopPetSocketServer:
             except Exception as exc:
                 logger.error("[SIO] OCR error: %s", exc)
                 await self.sio.emit(ScreenshotEvents.RESULT, {
+                    **correlation,
                     "error": "OCR_ERROR",
                     "message": "OCR processing failed",
                 }, to=sid)

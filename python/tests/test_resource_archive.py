@@ -15,6 +15,12 @@ import pytest
 from scripts.resource_archive import PROGRESS_PREFIX, download_archive, remove_download_artifacts, safe_extract, verify_sha256
 
 
+@pytest.fixture(autouse=True)
+def bypass_proxy_for_loopback_archive_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
+    monkeypatch.setenv("no_proxy", "127.0.0.1,localhost")
+
+
 class ArchiveHandler(BaseHTTPRequestHandler):
     payload = b""
     ranges: list[str | None] = []

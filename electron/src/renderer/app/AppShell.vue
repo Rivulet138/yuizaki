@@ -112,12 +112,16 @@ import { useSystemStore, type VisualAnalysisStatus } from '@/stores/systemStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useSettingsStore } from '@/state/settingsStore'
 import { useInputBindingsStore } from '@/state/inputBindingsStore'
-import { VisualCaptureEpoch } from '@/visual-capture-epoch'
+import { isTerminalVisualFrameResult, VisualCaptureEpoch } from '@/visual-capture-epoch'
 import { setLocale, syncLocaleFromSettings, t } from '@/i18n'
 import { adminNavigationModules, isPanelKey, primaryNavigationModules, type NavigationModuleId } from '@/navigation/modules'
 import { logger } from '@/logger'
 import { calculateFrameDifference, computeFrameSignature } from '@/vision/frame-signature'
-import { resolveVisualCapturePolicy } from '@/vision/capture-policy'
+import {
+  normalizeVisualCaptureInterval,
+  resolveVisualCaptureBlockReason,
+  resolveVisualCapturePolicy,
+} from '@/vision/capture-policy'
 import { audioCapture } from '@/audio/audio-capture'
 import AppSidebar from './AppSidebar.vue'
 import AppTopbar from './AppTopbar.vue'
@@ -156,9 +160,9 @@ const localMenus = computed(() => primaryNavigationModules())
 const localAdminMenus = computed(() => adminNavigationModules())
 const ADMIN_MODE_STORAGE_KEY = 'yuizaki.adminMode'
 const activeVisionSettings = computed(() => workspaceStore.activeWorkspace.context.vision ?? {
-  enabled: true,
+  enabled: false,
   displayIndex: 0,
-  intervalMs: 2000,
+  intervalMs: 30_000,
   pauseWhenAppHidden: true,
   captureMode: 'display' as const,
   region: { x: 0, y: 0, width: 1280, height: 720 },
@@ -187,7 +191,6 @@ const showOfflineBanner = computed(() => (
 ))
 
 let visualFrameTimer: number | null = null
-let visualStartupCaptureTimer: number | null = null
 let visualFrameInFlight = false
 let visualFrameSeq = 0
 let lastVisualFrameSignature: Uint8Array | null = null
@@ -325,20 +328,28 @@ const handleLocaleChange = async (locale: string) => {
   }
 }
 
-const captureRealtimeVisualFrame = async (requestedFrameId?: string): Promise<string> => {
+const captureRealtimeVisualFrame = async (
+  requestedFrameId?: string,
+  forceEnabled = false,
+): Promise<string> => {
   const vision = activeVisionSettings.value
-  if (!vision.enabled) return 'skipped:disabled'
-  if (vision.pauseWhenAppHidden && document.hidden) return 'skipped:document-hidden'
-  if (!systemStore.controlRunning || !systemStore.pythonRunning) {
+  const socketClient = getSocketClient()
+  const blockReason = resolveVisualCaptureBlockReason({
+    enabled: forceEnabled || vision.enabled,
+    pauseWhenAppHidden: vision.pauseWhenAppHidden,
+    documentHidden: document.hidden,
+    servicesHealthy: systemStore.controlRunning && systemStore.pythonRunning,
+    socketConnected: socketClient.isConnected(),
+  })
+  if (blockReason === 'health-unavailable') {
     return `skipped:health:${systemStore.controlRunning}:${systemStore.pythonRunning}`
   }
+  if (blockReason) return `skipped:${blockReason}`
   const screenApi = petApi?.screen
   if (!screenApi?.capture) {
     systemStore.markVisualPerceptionError('当前环境不支持屏幕采集')
     return 'skipped:capture-api-unavailable'
   }
-  const socketClient = getSocketClient()
-  if (!socketClient.isConnected()) return 'skipped:socket-disconnected'
   if (visualFrameInFlight) return 'skipped:capture-in-flight'
   const capturePolicy = resolveVisualCapturePolicy({
     configuredIntervalMs: vision.intervalMs,
@@ -395,6 +406,7 @@ const captureRealtimeVisualFrame = async (requestedFrameId?: string): Promise<st
     systemStore.markVisualPerceptionCapturing()
     visualFrameSeq += 1
     const frameId = requestedFrameId ?? `renderer-${Date.now()}-${visualFrameSeq}`
+    visualCaptureEpoch.trackFrame(frameId, captureEpoch, forceEnabled)
     socketClient.requestScreenshot(image, {
       displayIndex: vision.displayIndex,
       region: vision.captureMode === 'region' ? { ...vision.region } : undefined,
@@ -423,6 +435,18 @@ const handleVisualFrameResult = (value: unknown) => {
   const payload = value as Record<string, unknown>
   const frameId = typeof payload.frame_id === 'string' ? payload.frame_id : null
   const pending = frameId ? pendingVisualResults.get(frameId) : undefined
+  const terminalResult = isTerminalVisualFrameResult(payload)
+  const accepted = frameId
+    ? visualCaptureEpoch.acceptResult(frameId, activeVisionSettings.value.enabled, terminalResult)
+    : false
+  if (!accepted) {
+    if (frameId && pending) {
+      window.clearTimeout(pending.timeout)
+      pendingVisualResults.delete(frameId)
+      pending.reject(new Error(`Visual frame result was invalidated: ${frameId}`))
+    }
+    return
+  }
   if (typeof payload.error === 'string' && payload.error) {
     if (frameId && pending) {
       window.clearTimeout(pending.timeout)
@@ -461,6 +485,7 @@ const waitForVisualFrameResult = (frameId: string): Promise<Record<string, unkno
   new Promise((resolve, reject) => {
     const timeout = window.setTimeout(() => {
       pendingVisualResults.delete(frameId)
+      visualCaptureEpoch.forgetFrame(frameId)
       reject(new Error(`Visual frame result timed out: ${frameId}`))
     }, 20_000)
     pendingVisualResults.set(frameId, { resolve, reject, timeout })
@@ -472,37 +497,36 @@ const cancelVisualFrameResultWait = (frameId: string) => {
   if (!pending) return
   window.clearTimeout(pending.timeout)
   pendingVisualResults.delete(frameId)
+  visualCaptureEpoch.forgetFrame(frameId)
 }
 
 const restartVisualFrameTimer = () => {
   visualCaptureEpoch.invalidate()
+  const hadUploadedVisualContext = lastVisualFrameSentAt > 0
   if (visualFrameTimer) {
     window.clearInterval(visualFrameTimer)
     visualFrameTimer = null
-  }
-  if (visualStartupCaptureTimer) {
-    window.clearTimeout(visualStartupCaptureTimer)
-    visualStartupCaptureTimer = null
   }
   const vision = activeVisionSettings.value
   systemStore.setVisualPerceptionEnabled(vision.enabled)
   lastVisualFrameSignature = null
   lastVisualFrameSentAt = 0
   if (!vision.enabled) {
-    getSocketClient().clearVisualContext()
+    if (hadUploadedVisualContext) getSocketClient().clearVisualContext()
     return
   }
   if (!visualScheduleEnabled) return
-  const samplingIntervalMs = Math.max(750, Math.min(1500, vision.intervalMs))
+  if (vision.pauseWhenAppHidden && document.hidden) return
+  const samplingIntervalMs = normalizeVisualCaptureInterval(vision.intervalMs)
   visualFrameTimer = window.setInterval(() => {
     void captureRealtimeVisualFrame()
   }, samplingIntervalMs)
-  // Do not contend with Electron window creation and desktop composition on
-  // the first frame. The regular timer starts immediately after this delay.
-  visualStartupCaptureTimer = window.setTimeout(() => {
-    visualStartupCaptureTimer = null
-    void captureRealtimeVisualFrame()
-  }, 3500)
+}
+
+const handleVisibilityChange = () => {
+  if (visualScheduleEnabled && activeVisionSettings.value.pauseWhenAppHidden) {
+    restartVisualFrameTimer()
+  }
 }
 
 const handlePermissionRequest = (data: PermissionRequestPayload) => {
@@ -516,12 +540,11 @@ const stopAppRuntime = () => {
   petApi?.off?.('panel:open-tab', handlePanelOpenTab)
   petApi?.off?.('shortcut:toggle-vision', handleToggleVisionShortcut)
   themeMediaQuery?.removeEventListener('change', applyTheme)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   systemStore.stopHealthCheck()
   companionRuntime.stopCompanionRuntime()
   if (visualFrameTimer) window.clearInterval(visualFrameTimer)
-  if (visualStartupCaptureTimer) window.clearTimeout(visualStartupCaptureTimer)
   visualFrameTimer = null
-  visualStartupCaptureTimer = null
   for (const [frameId, pending] of pendingVisualResults) {
     window.clearTimeout(pending.timeout)
     pending.reject(new Error(`Visual frame result wait cancelled: ${frameId}`))
@@ -583,7 +606,7 @@ if (e2eApi) {
           }
           const frameId = `renderer-e2e-${Date.now()}-${visualFrameSeq + 1}`
           const resultPromise = waitForVisualFrameResult(frameId)
-          const sentFrameId = await captureRealtimeVisualFrame(frameId)
+          const sentFrameId = await captureRealtimeVisualFrame(frameId, true)
           if (sentFrameId !== frameId) {
             cancelVisualFrameResultWait(frameId)
             throw new Error(`Visual frame was not captured: ${sentFrameId}`)
@@ -653,11 +676,13 @@ onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeydown)
   petApi?.on?.('panel:open-tab', handlePanelOpenTab)
   petApi?.on?.('shortcut:toggle-vision', handleToggleVisionShortcut)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 
   const socketClient = getSocketClient()
   if (e2eMode) socketClient.pauseHeartbeat()
   socketClient.connect()
-  if (healthScheduleEnabled) {
+  // E2E drives health checks explicitly so startup ordering remains deterministic.
+  if (healthScheduleEnabled && !e2eMode) {
     systemStore.startHealthCheck(
       () => false,
       () => socketClient.isConnected(),

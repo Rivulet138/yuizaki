@@ -8,6 +8,7 @@ from typing import Any, Protocol, cast
 
 import pytest
 
+import socket_server
 from socket_events import AudioEvents, AgentEvents, LLMEvents, MemoryEvents, ScreenshotEvents, SystemEvents, ToolEvents, TTSEvents
 from socket_server import DesktopPetSocketServer, _parse_socket_allowed_origins, _socket_auth_allowed
 from modules.core.state import GenerationManager
@@ -1326,6 +1327,46 @@ async def test_socket_visual_clear_removes_frame_and_observation(monkeypatch: py
     assert "sid-clear" not in server._latest_visual_frames
     assert "sid-clear" not in server._latest_visual_observations
     assert emitted[-1] == (ScreenshotEvents.RESULT, {"status": "ok", "mode": "clear"}, "sid-clear")
+
+
+@pytest.mark.asyncio
+async def test_socket_visual_errors_echo_request_frame_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    server = DesktopPetSocketServer()
+    emitted: list[tuple[str, object, str | None]] = []
+
+    async def _emit(event: str, data: object = None, to: str | None = None, **_: object) -> None:
+        emitted.append((event, data, to))
+
+    monkeypatch.setattr(server.sio, "emit", _emit)
+    handlers = cast(_SocketServerWithHandlers, cast(object, server.sio)).handlers
+    handler = cast(Callable[[str, dict[str, object]], Awaitable[None]], handlers["/"][ScreenshotEvents.REQUEST])
+
+    await handler("sid-error", {
+        "mode": "observe",
+        "frame_id": "frame-no-image",
+        "image": "",
+    })
+    monkeypatch.setattr(socket_server, "_MAX_VISUAL_FRAME_BYTES", 1)
+    await handler("sid-error", {
+        "mode": "observe",
+        "frame_id": "frame-too-large",
+        "image": "data:image/png;base64,AAAA",
+    })
+
+    assert emitted == [
+        (ScreenshotEvents.RESULT, {
+            "frame_id": "frame-no-image",
+            "error": "NO_IMAGE",
+            "message": "image field is required",
+        }, "sid-error"),
+        (ScreenshotEvents.RESULT, {
+            "frame_id": "frame-too-large",
+            "error": "IMAGE_TOO_LARGE",
+            "message": "image payload exceeds visual frame limit",
+            "max_bytes": 1,
+            "estimated_bytes": 3,
+        }, "sid-error"),
+    ]
 
 
 @pytest.mark.asyncio

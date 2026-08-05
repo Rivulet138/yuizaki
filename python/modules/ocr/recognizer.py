@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
 from importlib import import_module
 from typing import Protocol, Sequence, TypeAlias, cast
-
-from PIL import Image
 
 from .payload import decode_base64_image_payload
 
@@ -20,7 +17,7 @@ OCRResult: TypeAlias = Sequence[OCRLine] | None
 
 
 class OCREngine(Protocol):
-    def __call__(self, image: Image.Image) -> tuple[OCRResult, object]: ...
+    def __call__(self, image: bytes) -> tuple[OCRResult, object]: ...
 
 
 class OCRClient:
@@ -62,11 +59,12 @@ class OCRClient:
         return rapidocr_type()
 
     async def disconnect(self) -> None:
-        async with self._connect_lock:
-            self._ocr = None
-            self._available = False
-            self._initialization_attempted = False
-            self._initialization_error = None
+        async with self._recognize_lock:
+            async with self._connect_lock:
+                self._ocr = None
+                self._available = False
+                self._initialization_attempted = False
+                self._initialization_error = None
         logger.info("OCR engine disconnected")
 
     @property
@@ -80,18 +78,18 @@ class OCRClient:
         return "unavailable" if self._initialization_attempted else "idle"
 
     async def recognize(self, image_base64: str) -> dict[str, object]:
-        await self.connect()
-        if not self.is_available:
-            return {
-                "status": "error",
-                "error": self._initialization_error or "OCR not available",
-                "text": "",
-                "blocks": [],
-            }
-
         try:
             async with self._recognize_lock:
-                return await asyncio.to_thread(self._recognize_sync, image_base64)
+                await self.connect()
+                engine = self._ocr
+                if not self._available or engine is None:
+                    return {
+                        "status": "error",
+                        "error": self._initialization_error or "OCR not available",
+                        "text": "",
+                        "blocks": [],
+                    }
+                return await asyncio.to_thread(self._recognize_sync, image_base64, engine)
         except Exception as exc:
             logger.error("OCR error: %s", exc)
             return {
@@ -101,12 +99,9 @@ class OCRClient:
                 "blocks": [],
             }
 
-    def _recognize_sync(self, image_base64: str) -> dict[str, object]:
-        if self._ocr is None:
-            raise RuntimeError("OCR not available")
+    def _recognize_sync(self, image_base64: str, engine: OCREngine) -> dict[str, object]:
         image_bytes = decode_base64_image_payload(image_base64)
-        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        result, _ = self._ocr(image)
+        result, _ = engine(image_bytes)
 
         texts: list[str] = []
         blocks: list[dict[str, object]] = []

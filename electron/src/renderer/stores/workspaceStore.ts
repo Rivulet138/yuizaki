@@ -13,6 +13,7 @@ import type {
 } from '../../shared/workspace'
 import { workspaceClient, type WorkspacePatchPayload } from '@/api/clients/workspace-client'
 import { useCompanionStore } from './companionStore'
+import { normalizeVisualCaptureInterval } from '@/vision/capture-policy'
 
 const STORAGE_KEY = 'deskpet-workspaces'
 const ACTIVE_KEY = 'deskpet-active-workspace'
@@ -73,9 +74,9 @@ const createDefaultPromptEngineering = (): WorkspacePromptEngineering => ({
 })
 
 const createDefaultVisionSettings = (): WorkspaceVisionSettings => ({
-  enabled: true,
+  enabled: false,
   displayIndex: 0,
-  intervalMs: 2000,
+  intervalMs: 30_000,
   pauseWhenAppHidden: true,
   captureMode: 'display',
   region: { x: 0, y: 0, width: 1280, height: 720 },
@@ -125,7 +126,6 @@ const normalizePromptEngineering = (
 }
 
 const normalizeVisionSettings = (value: Partial<WorkspaceVisionSettings> | undefined): WorkspaceVisionSettings => {
-  const intervalMs = Number(value?.intervalMs)
   const region = value?.region
   const normalizeRegion = (item: Partial<WorkspaceVisionSettings['region']>): WorkspaceVisionSettings['region'] => ({
     x: Math.max(0, Math.min(100000, Math.round(Number(item.x) || 0))),
@@ -134,9 +134,9 @@ const normalizeVisionSettings = (value: Partial<WorkspaceVisionSettings> | undef
     height: Math.max(64, Math.min(100000, Math.round(Number(item.height) || 64))),
   })
   return {
-    enabled: value?.enabled !== false,
+    enabled: value?.enabled === true,
     displayIndex: Math.max(0, Math.min(15, Math.round(Number(value?.displayIndex) || 0))),
-    intervalMs: [1000, 2000, 5000, 10000].includes(intervalMs) ? intervalMs : 2000,
+    intervalMs: normalizeVisualCaptureInterval(value?.intervalMs),
     pauseWhenAppHidden: value?.pauseWhenAppHidden !== false,
     captureMode: value?.captureMode === 'region' ? 'region' : 'display',
     region: {

@@ -1,8 +1,36 @@
 import { describe, expect, it } from 'vitest'
-import { resolveVisualCapturePolicy } from '../vision/capture-policy'
+import {
+  MAX_VISUAL_CAPTURE_INTERVAL_MS,
+  MIN_VISUAL_CAPTURE_INTERVAL_MS,
+  normalizeVisualCaptureInterval,
+  resolveVisualCaptureBlockReason,
+  resolveVisualCapturePolicy,
+} from '../vision/capture-policy'
 
 
 describe('realtime visual capture policy', () => {
+  it('normalizes capture timers within the browser-safe product range', () => {
+    expect(normalizeVisualCaptureInterval(1)).toBe(MIN_VISUAL_CAPTURE_INTERVAL_MS)
+    expect(normalizeVisualCaptureInterval(3_000_000_000)).toBe(MAX_VISUAL_CAPTURE_INTERVAL_MS)
+    expect(normalizeVisualCaptureInterval(Number.POSITIVE_INFINITY)).toBe(30_000)
+  })
+
+  it('blocks capture while hidden or disconnected', () => {
+    const readiness = {
+      enabled: true,
+      pauseWhenAppHidden: true,
+      documentHidden: true,
+      servicesHealthy: true,
+      socketConnected: true,
+    }
+    expect(resolveVisualCaptureBlockReason(readiness)).toBe('document-hidden')
+    expect(resolveVisualCaptureBlockReason({
+      ...readiness,
+      documentHidden: false,
+      socketConnected: false,
+    })).toBe('socket-disconnected')
+  })
+
   it('keeps sparse visual keyframes while the assistant is speaking and pauses a silent microphone', () => {
     expect(resolveVisualCapturePolicy({
       configuredIntervalMs: 1000,
@@ -12,8 +40,8 @@ describe('realtime visual capture policy', () => {
       assistantSpeaking: true,
     })).toEqual({
       shouldCapture: true,
-      minUploadIntervalMs: 1500,
-      forceUploadIntervalMs: 8000,
+      minUploadIntervalMs: 10_000,
+      forceUploadIntervalMs: 20_000,
     })
 
     expect(resolveVisualCapturePolicy({
@@ -34,7 +62,7 @@ describe('realtime visual capture policy', () => {
       assistantSpeaking: false,
     })).toEqual({
       shouldCapture: true,
-      minUploadIntervalMs: 1200,
+      minUploadIntervalMs: 10_000,
       forceUploadIntervalMs: Infinity,
     })
   })
@@ -48,8 +76,18 @@ describe('realtime visual capture policy', () => {
       assistantSpeaking: false,
     })).toEqual({
       shouldCapture: true,
-      minUploadIntervalMs: 5000,
-      forceUploadIntervalMs: 30_000,
+      minUploadIntervalMs: 10_000,
+      forceUploadIntervalMs: 60_000,
     })
+  })
+
+  it('never shortens a configured interval above the minimum', () => {
+    expect(resolveVisualCapturePolicy({
+      configuredIntervalMs: 45_000,
+      microphoneRecording: false,
+      microphoneLevel: 0,
+      hasPartialTranscript: false,
+      assistantSpeaking: false,
+    }).minUploadIntervalMs).toBe(45_000)
   })
 })
