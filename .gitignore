@@ -46,7 +46,6 @@ python/config/settings.json
 python/config/*.bak
 python/config/*.tmp
 electron/userData/
-legacy-root/
 
 # Local reference projects
 external/

@@ -5,7 +5,7 @@
 - Status: Active
 - Last refreshed: 2026-08-04
 - Primary product surfaces: desktop pet window, companion home, conversation, memory, settings and developer administration.
-- Evidence reviewed: `README.md`, `ARCHITECTURE.md`, `TECH_STACK.md`, `electron/src/shared/navigation.ts`, `electron/src/renderer/app/AppShell.vue`, `electron/src/renderer/app/AppSidebar.vue`, `electron/src/renderer/app/WorkspaceDrawer.vue`, the 17 routed panels, current i18n resources, test suites, and screenshots under `.omx/artifacts/`.
+- Evidence reviewed: `README.md`, `docs/ARCHITECTURE.md`, `docs/TECH_STACK.md`, `electron/src/shared/navigation.ts`, `electron/src/renderer/app/AppShell.vue`, `electron/src/renderer/app/AppSidebar.vue`, `electron/src/renderer/app/WorkspaceDrawer.vue`, the 17 routed panels, current i18n resources, test suites, and screenshots under `.omx/artifacts/`.
 - External evidence: AIRI, Open-LLM-VTuber, OpenAvatarChat, Amica, ZcChat, ElizaOS and SillyTavern; Relational Agents, HAI Guidelines, mixed-initiative interaction, interruptibility, Generative Agents, MemGPT, ToolEmu, AgentDojo, OWASP LLM Top 10 and NIST AI RMF.
 - Evidence note: source files are valid UTF-8. Mojibake observed in earlier PowerShell output was a console decoding issue, not a repository defect.
 
@@ -72,7 +72,7 @@
 
 - Supported breakpoints/devices: Windows 10/11 and x86_64 Linux control windows; compact desktop-pet layouts and full management layouts.
 - Layout adaptations: primary navigation remains usable without labels at narrow widths; panels use stable min/max tracks and avoid horizontal overflow; advanced tables gain compact/list fallbacks.
-- Touch/hover differences: hover is enhancement only; all commands have focus/click equivalents and tooltips do not carry required information.
+- Touch/hover differences: hover is enhancement only; all commands have focus/click equivalents, touch-capable targets are at least 44 by 44 pixels, and tooltips do not carry required information.
 
 ## Interaction states
 

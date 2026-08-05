@@ -67,7 +67,6 @@ const buildIpcContext = (): IpcContext => {
       hide: vi.fn(),
       reloadRenderer: vi.fn(),
       requestPetState: vi.fn(),
-      hasVisiblePixelAt: vi.fn(async () => false),
     },
     petWindow: {
       window: null,

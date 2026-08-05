@@ -28,7 +28,7 @@ if not exist "%SERVICE_DIR%\docker-compose.yml" (
 
 if not exist "%PYTHON_EXE%" (
   call :fail "Python venv not found: %PYTHON_EXE%"
-  call :info "Run install_full.bat or start.bat --check first."
+  call :info "Run install.bat full or start.bat --check first."
   exit /b 1
 )
 

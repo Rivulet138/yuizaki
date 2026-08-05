@@ -38,7 +38,7 @@ type ScreenshotOptions = {
   timestamp?: number;
   frameId?: string;
   changeScore?: number;
-  captureReason?: 'initial' | 'change' | 'voice_change' | 'heartbeat' | 'manual';
+  captureReason?: 'initial' | 'change' | 'voice_change' | 'heartbeat' | 'manual' | 'agent_turn';
 };
 
 export class SocketClient {

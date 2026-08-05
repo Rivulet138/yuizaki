@@ -94,13 +94,13 @@ describe('G005 focused presentation boundaries', () => {
 
     syncLocaleFromSettings('en-US')
     await nextTick()
-    expect(wrapper.text()).toContain('Connecting realtime channel')
+    expect(wrapper.text()).toContain('Realtime channel unavailable')
     expect(wrapper.text()).toContain('Web search')
     expect(wrapper.text()).toContain('Standalone chat')
 
     syncLocaleFromSettings('ja-JP')
     await nextTick()
-    expect(wrapper.text()).toContain('リアルタイム接続中')
+    expect(wrapper.text()).toContain('リアルタイム接続を利用できません')
     expect(wrapper.text()).toContain('ウェブ検索')
     expect(wrapper.text()).toContain('単独チャット')
 

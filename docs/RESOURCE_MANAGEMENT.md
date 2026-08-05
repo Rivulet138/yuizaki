@@ -10,7 +10,7 @@
 | 长期记忆 | `python/data/memory.db` | 持久 |
 | 设置 | `python/config/settings.json` | 持久 |
 | TTS 音频 | `python/audio_cache/` | 临时 |
-| 实时视觉帧 | 内存 | 会话级 |
+| 按需视觉帧 | 内存 | 单次 Agent 回合、会话级替换 |
 | Electron 依赖 | `electron/node_modules/` | 可重建 |
 | Python 环境 | `python/.venv/` | 可重建 |
 | 模型缓存 | 受管模型目录 | 可重新下载 |

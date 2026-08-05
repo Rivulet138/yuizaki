@@ -23,6 +23,20 @@ describe('companion runtime production observability', () => {
     })
   })
 
+  it('treats missing browser control authorization as a degraded warning', () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => undefined)
+
+    reportCompanionRuntimeSinkError({ sink: 'behavior', message: '控制服务未授权：请从 Electron 应用入口重新打开界面。' })
+
+    expect(warn).toHaveBeenCalledWith('[CompanionRuntime] sink unavailable without control authorization', {
+      event: 'companion_runtime.sink_failure',
+      sink: 'behavior',
+      message: '控制服务未授权：请从 Electron 应用入口重新打开界面。',
+    })
+    expect(error).not.toHaveBeenCalled()
+  })
+
   it('records partial and failed scheduled deliveries without logging success', () => {
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
     const error = vi.spyOn(logger, 'error').mockImplementation(() => undefined)

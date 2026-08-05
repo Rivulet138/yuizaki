@@ -2,6 +2,17 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
+set "PROFILE=%~1"
+if not defined PROFILE set "PROFILE=core"
+if /I "%PROFILE%"=="core" (
+  set "PY_LOCK=requirements-core-lock-windows.txt"
+) else if /I "%PROFILE%"=="full" (
+  set "PY_LOCK=requirements-lock-windows.txt"
+) else (
+  echo Usage: install.bat [core^|full]
+  exit /b 2
+)
+
 call :require_cmd node || exit /b 1
 call :require_cmd npm || exit /b 1
 node -e "const [major, minor] = process.versions.node.split('.').map(Number); process.exit(major > 22 || (major === 22 && minor >= 13) ? 0 : 1)" >nul 2>nul
@@ -26,7 +37,7 @@ call npm ci
 if errorlevel 1 goto :error
 popd
 
-echo [3/3] Creating Python venv and installing core dependencies...
+echo [3/3] Creating Python venv and installing %PROFILE% dependencies...
 pushd python
 if not exist ".venv\Scripts\python.exe" (
   %PY_CMD% -m venv .venv
@@ -35,12 +46,11 @@ if not exist ".venv\Scripts\python.exe" (
 
 call ".venv\Scripts\python.exe" -m pip install --upgrade pip
 if errorlevel 1 goto :error
-
-call ".venv\Scripts\python.exe" -m pip install -r requirements-core-lock-windows.txt
+call ".venv\Scripts\python.exe" -m pip install -r "%PY_LOCK%"
 if errorlevel 1 goto :error
 call ".venv\Scripts\python.exe" -m pip check
 if errorlevel 1 goto :error
-call ".venv\Scripts\python.exe" scripts\check_installed_lock.py --lock requirements-core-lock-windows.txt
+call ".venv\Scripts\python.exe" scripts\check_installed_lock.py --lock "%PY_LOCK%"
 if errorlevel 1 goto :error
 
 if not exist ".env" (
@@ -49,8 +59,8 @@ if not exist ".env" (
 )
 popd
 
-echo [OK] Core setup finished.
-echo [NEXT] Edit python\.env and set LLM_API_KEY before using chat/TTS.
+echo [OK] %PROFILE% setup finished.
+echo [NEXT] Edit python\.env and set the required model credentials.
 exit /b 0
 
 :require_cmd
@@ -63,5 +73,5 @@ exit /b 0
 
 :error
 popd 2>nul
-echo [ERROR] install_core.bat failed.
+echo [ERROR] install.bat %PROFILE% failed.
 exit /b 1

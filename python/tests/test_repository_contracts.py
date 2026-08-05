@@ -80,13 +80,13 @@ def test_windows_python_resolver_prefers_newer_launcher_runtime(tmp_path):
 
 
 def test_platform_dependency_lock_matrix_is_present_and_exactly_pinned():
-    from scripts.check_requirements_lock import LOCKS, _requirements
+    from scripts.check_requirements_lock import LOCKS, _parse_requirements
 
     assert len(LOCKS) == 6
     for lock in LOCKS:
-        values = _requirements(lock)
+        values = _parse_requirements(lock)
         assert values
-        assert all(version and version[0].isdigit() for version in values.values())
+        assert all(specifier.startswith("==") and specifier[2:3].isdigit() for specifier, _ in values.values())
 
 
 def test_environment_template_does_not_restore_removed_legacy_fields():

@@ -10,16 +10,17 @@
         size="small"
         class="language-select"
         :title="t('language.title')"
+        :aria-label="t('language.title')"
         @change="handleLocaleChange"
       >
         <el-option v-for="option in languageOptions" :key="option.value" :label="option.label" :value="option.value" />
       </el-select>
 
-      <button class="icon-action" type="button" :title="adminMode ? t('topbar.admin.hide') : t('topbar.admin.show')" @click="$emit('toggle-admin-mode')">
+      <button class="icon-action" type="button" :title="adminMode ? t('topbar.admin.hide') : t('topbar.admin.show')" :aria-label="adminMode ? t('topbar.admin.hide') : t('topbar.admin.show')" @click="$emit('toggle-admin-mode')">
         <el-icon><Operation /></el-icon>
       </button>
 
-      <button class="icon-action" type="button" :title="theme === 'dark' ? t('shell.theme.light') : t('shell.theme.dark')" @click="$emit('toggle-theme')">
+      <button class="icon-action" type="button" :title="theme === 'dark' ? t('shell.theme.light') : t('shell.theme.dark')" :aria-label="theme === 'dark' ? t('shell.theme.light') : t('shell.theme.dark')" @click="$emit('toggle-theme')">
         <el-icon>
           <Sunny v-if="theme === 'dark'" />
           <Moon v-else />
@@ -30,21 +31,22 @@
         :model-value="companionId"
         size="small"
         class="top-select"
+        :aria-label="t('topbar.companion')"
         @change="$emit('change-companion', $event)"
       >
         <el-option v-for="companion in companions" :key="companion.id" :label="companion.name" :value="companion.id" />
       </el-select>
 
       <el-badge :value="notificationCount" :hidden="!notificationCount" class="notification-bell">
-        <button class="win-btn" type="button" :title="t('topbar.notifications')" @click="$emit('toggle-notifications')">
+        <button class="win-btn" type="button" :title="t('topbar.notifications')" :aria-label="t('topbar.notifications')" @click="$emit('toggle-notifications')">
           <el-icon><Bell /></el-icon>
         </button>
       </el-badge>
 
       <div v-if="isElectronPanel" class="window-actions">
-        <button class="win-btn" type="button" :title="t('topbar.minimize')" @click="$emit('minimize')"><el-icon><Minus /></el-icon></button>
-        <button class="win-btn" type="button" :title="t('topbar.maximize')" @click="$emit('maximize')"><el-icon><FullScreen /></el-icon></button>
-        <button class="win-btn danger" type="button" :title="t('topbar.close')" @click="$emit('close')"><el-icon><Close /></el-icon></button>
+        <button class="win-btn" type="button" :title="t('topbar.minimize')" :aria-label="t('topbar.minimize')" @click="$emit('minimize')"><el-icon><Minus /></el-icon></button>
+        <button class="win-btn" type="button" :title="t('topbar.maximize')" :aria-label="t('topbar.maximize')" @click="$emit('maximize')"><el-icon><FullScreen /></el-icon></button>
+        <button class="win-btn danger" type="button" :title="t('topbar.close')" :aria-label="t('topbar.close')" @click="$emit('close')"><el-icon><Close /></el-icon></button>
       </div>
     </div>
   </header>
@@ -132,7 +134,7 @@ const handleLocaleChange = (value: string | number | boolean) => {
   color: var(--yui-text);
   font-family: var(--yui-font-display);
   font-size: 16px;
-  font-weight: 800;
+  font-weight: 500;
   letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -155,8 +157,8 @@ const handleLocaleChange = (value: string | number | boolean) => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   border: 1px solid var(--yui-border);
   border-radius: 10px;
   color: var(--yui-muted);
@@ -189,7 +191,7 @@ const handleLocaleChange = (value: string | number | boolean) => {
 
 :deep(.top-select .el-select__wrapper),
 :deep(.language-select .el-select__wrapper) {
-  min-height: 34px;
+  min-height: 40px;
   border-radius: 10px;
   background: var(--yui-surface-raised);
   box-shadow: 0 0 0 1px var(--yui-border) inset;
@@ -233,8 +235,8 @@ const handleLocaleChange = (value: string | number | boolean) => {
 
   .icon-action,
   .win-btn {
-    width: 32px;
-    height: 32px;
+    width: 40px;
+    height: 40px;
   }
 }
 
@@ -255,6 +257,17 @@ const handleLocaleChange = (value: string | number | boolean) => {
 
   .top-actions {
     justify-content: flex-start;
+  }
+
+  .icon-action,
+  .win-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  :deep(.top-select .el-select__wrapper),
+  :deep(.language-select .el-select__wrapper) {
+    min-height: 44px;
   }
 }
 </style>

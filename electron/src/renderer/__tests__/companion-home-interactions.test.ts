@@ -191,8 +191,15 @@ describe('Companion Home interactions', () => {
   it('keeps maintenance ownership and persisted presets outside Home', () => {
     const source = readFileSync('src/renderer/domains/companion/views/CompanionPanel.vue', 'utf8')
 
-    expect(source).not.toMatch(/VisionRegionSelector|saveCompanion|handleDelete|heartbeatLatestBehavior/)
+    expect(source).not.toMatch(/saveCompanion|handleDelete|heartbeatLatestBehavior/)
     expect(source).not.toMatch(/localStorage|setInterval/)
+  })
+
+  it('keeps authorization errors mutually exclusive from the successful empty state', () => {
+    const source = readFileSync('src/renderer/domains/companion/views/CompanionPanel.vue', 'utf8')
+
+    expect(source).toMatch(/<template v-if="companionLoadError">[\s\S]*<template v-else>/)
+    expect(source).toContain("t('companion.home.authorizationRequired')")
   })
 
   it('dispatches mute and interrupt through the existing chat store', async () => {

@@ -42,9 +42,13 @@ export class VisualCaptureEpoch {
   }
 }
 
+export const isVisualFrameResult = (payload: Record<string, unknown>): boolean => (
+  payload.mode === 'observe' || payload.mode === 'frame' || payload.mode === 'vision'
+)
+
 export const isTerminalVisualFrameResult = (payload: Record<string, unknown>): boolean => {
   if (typeof payload.error === 'string' && payload.error) return true
   return payload.status === 'ok'
-    && payload.mode === 'observe'
+    && isVisualFrameResult(payload)
     && payload.analysis_status !== 'pending'
 }

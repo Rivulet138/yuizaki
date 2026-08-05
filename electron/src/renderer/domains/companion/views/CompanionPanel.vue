@@ -6,16 +6,20 @@
       </section>
 
       <section v-else-if="!activeCompanion" class="home-state" aria-live="polite">
-        <el-alert
-          v-if="companionLoadError"
-          type="warning"
-          :title="t('companion.home.loadError')"
-          :description="companionLoadError"
-          :closable="false"
-          show-icon
-        />
-        <el-empty :description="t('companion.home.empty')" />
-        <el-button type="primary" @click="loadCompanionHome">{{ t('shell.retry') }}</el-button>
+        <template v-if="companionLoadError">
+          <el-alert
+            type="warning"
+            :title="t('companion.home.loadError')"
+            :description="companionLoadError"
+            :closable="false"
+            show-icon
+          />
+          <el-button type="primary" @click="loadCompanionHome">{{ t('shell.retry') }}</el-button>
+        </template>
+        <template v-else>
+          <el-empty :description="t('companion.home.empty')" />
+          <el-button type="primary" @click="loadCompanionHome">{{ t('shell.retry') }}</el-button>
+        </template>
       </section>
 
       <template v-else>
@@ -117,6 +121,7 @@ import { petControlClient, systemClient } from '@/api/client'
 import { useI18n } from '@/i18n'
 import type { CompanionRuntimeSnapshot } from '@/../shared/agent'
 import { DEFAULT_PET_CONTROL_STATE, type PetControlState } from '@/../shared/pet-control'
+import { isAuthMissingError } from '@/api/clients/http-client'
 
 type MemoryState = NonNullable<CompanionRuntimeSnapshot['memory_state']>
 type RecentSignal = NonNullable<MemoryState['recent_signals']>[number]
@@ -149,6 +154,9 @@ const petRuntimeState = reactive<PetControlState>({ ...DEFAULT_PET_CONTROL_STATE
 let runtimeLoadSequence = 0
 
 const modulePath = (moduleId: string) => `/w/${activeWorkspaceId.value}/${moduleId}`
+const resolveCompanionLoadError = (error: unknown) => isAuthMissingError(error)
+  ? t('companion.home.authorizationRequired')
+  : error instanceof Error ? error.message : t('companion.home.loadError')
 const muted = computed(() => chatStore.chatOptions.tts_enabled === false)
 const canInterrupt = computed(() =>
   chatStore.state.isGenerating ||
@@ -242,7 +250,7 @@ const loadCompanionHome = async () => {
     await companionStore.loadCompanions()
     if (!e2eMode) await applyActiveCompanionRuntime()
   } catch (error) {
-    companionLoadError.value = error instanceof Error ? error.message : t('companion.home.loadError')
+    companionLoadError.value = resolveCompanionLoadError(error)
   }
   await Promise.all([e2eMode ? undefined : loadRuntime(), refreshPetState()])
 }

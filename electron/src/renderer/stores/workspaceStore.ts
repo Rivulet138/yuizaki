@@ -13,7 +13,6 @@ import type {
 } from '../../shared/workspace'
 import { workspaceClient, type WorkspacePatchPayload } from '@/api/clients/workspace-client'
 import { useCompanionStore } from './companionStore'
-import { normalizeVisualCaptureInterval } from '@/vision/capture-policy'
 
 const STORAGE_KEY = 'deskpet-workspaces'
 const ACTIVE_KEY = 'deskpet-active-workspace'
@@ -76,8 +75,6 @@ const createDefaultPromptEngineering = (): WorkspacePromptEngineering => ({
 const createDefaultVisionSettings = (): WorkspaceVisionSettings => ({
   enabled: false,
   displayIndex: 0,
-  intervalMs: 30_000,
-  pauseWhenAppHidden: true,
   captureMode: 'display',
   region: { x: 0, y: 0, width: 1280, height: 720 },
   privacyMasks: [],
@@ -136,8 +133,6 @@ const normalizeVisionSettings = (value: Partial<WorkspaceVisionSettings> | undef
   return {
     enabled: value?.enabled === true,
     displayIndex: Math.max(0, Math.min(15, Math.round(Number(value?.displayIndex) || 0))),
-    intervalMs: normalizeVisualCaptureInterval(value?.intervalMs),
-    pauseWhenAppHidden: value?.pauseWhenAppHidden !== false,
     captureMode: value?.captureMode === 'region' ? 'region' : 'display',
     region: {
       x: Math.max(0, Math.min(100000, Math.round(Number(region?.x) || 0))),

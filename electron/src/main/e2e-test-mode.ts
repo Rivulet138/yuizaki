@@ -26,9 +26,7 @@ export const E2E_IPC_CHANNELS = [
   'e2e:pause-health-polling',
   'e2e:poll-health-once',
   'e2e:resume-health-polling',
-  'e2e:pause-visual-sampling',
   'e2e:sample-visual-once',
-  'e2e:resume-visual-sampling',
   'e2e:pause-companion-polling',
   'e2e:poll-companion-once',
   'e2e:resume-companion-polling',
@@ -103,9 +101,7 @@ const rendererControlChannels = new Map<E2EIpcChannel, E2ERendererControl>([
   ['e2e:pause-health-polling', 'pauseHealthPolling'],
   ['e2e:poll-health-once', 'pollHealthOnce'],
   ['e2e:resume-health-polling', 'resumeHealthPolling'],
-  ['e2e:pause-visual-sampling', 'pauseVisualSampling'],
   ['e2e:sample-visual-once', 'sampleVisualOnce'],
-  ['e2e:resume-visual-sampling', 'resumeVisualSampling'],
   ['e2e:pause-companion-polling', 'pauseCompanionPolling'],
   ['e2e:poll-companion-once', 'pollCompanionOnce'],
   ['e2e:resume-companion-polling', 'resumeCompanionPolling'],
@@ -1034,7 +1030,6 @@ const runE2E05T = async (options: E2ESuiteOptions): Promise<void> => {
 
 const prepareE2ECase = async (window: BrowserWindow): Promise<unknown> => {
   await invokeRendererControl(window, 'pauseHealthPolling')
-  await invokeRendererControl(window, 'pauseVisualSampling')
   await invokeRendererControl(window, 'pauseCompanionPolling')
   return invokeRendererControl(window, 'pollHealthOnce')
 }

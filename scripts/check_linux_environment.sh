@@ -45,7 +45,7 @@ esac
 
 if [[ "$MODE" != "--install" ]]; then
 	ELECTRON_BIN="$ROOT/electron/node_modules/electron/dist/electron"
-	[[ -x "$ELECTRON_BIN" ]] || fail "Electron runtime missing. Run ./install_core.sh or ./install_full.sh."
+	[[ -x "$ELECTRON_BIN" ]] || fail "Electron runtime missing. Run ./install.sh core or ./install.sh full."
 	CHROME_SANDBOX="$ROOT/electron/node_modules/electron/dist/chrome-sandbox"
 	user_namespace_enabled=0
 	if command -v unshare >/dev/null 2>&1; then

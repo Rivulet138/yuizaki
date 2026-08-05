@@ -133,7 +133,6 @@ export class PythonService {
   private resolvePythonDir(): string {
     const candidates = [
       path.resolve(__dirname, '../../../python'), // dist/main -> yuizaki/python
-      path.resolve(__dirname, '../../python'), // fallback for legacy layout
       path.resolve(process.cwd(), '../python'), // launched from electron/
     ];
 

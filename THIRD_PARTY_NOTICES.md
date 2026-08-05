@@ -13,7 +13,7 @@
 - `python/requirements-*-lock-*.txt`
 - `resources.lock.json`
 
-项目尚需自动生成 SPDX/CycloneDX SBOM。依赖版本和升级策略见 [DEPENDENCIES.md](DEPENDENCIES.md)。
+项目尚需自动生成 SPDX/CycloneDX SBOM。依赖版本和升级策略见 [DEPENDENCIES.md](docs/DEPENDENCIES.md)。
 
 ## Live2D
 

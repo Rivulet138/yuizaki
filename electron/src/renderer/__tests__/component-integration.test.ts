@@ -18,8 +18,13 @@ const systemClientMocks = vi.hoisted(() => ({
 const memoryClientMocks = vi.hoisted(() => ({
 	getIndexStatus: vi.fn(),
 	removeDoc: vi.fn(),
+	removeDocs: vi.fn(),
 	previewMaintenance: vi.fn(),
 	applyMaintenance: vi.fn(),
+}));
+
+const messageBoxMocks = vi.hoisted(() => ({
+	confirm: vi.fn(),
 }));
 
 vi.mock("@/api/client", () => ({
@@ -40,6 +45,7 @@ vi.mock("@/api/clients/memory-client", () => ({
 	memoryClient: {
 		getIndexStatus: memoryClientMocks.getIndexStatus,
 		removeDoc: memoryClientMocks.removeDoc,
+		removeDocs: memoryClientMocks.removeDocs,
 		previewMaintenance: memoryClientMocks.previewMaintenance,
 		applyMaintenance: memoryClientMocks.applyMaintenance,
 	},
@@ -209,7 +215,7 @@ vi.mock("element-plus", () => ({
 		error: vi.fn(),
 	},
 	ElMessageBox: {
-		confirm: vi.fn().mockResolvedValue(undefined),
+		confirm: messageBoxMocks.confirm,
 	},
 }));
 
@@ -242,7 +248,11 @@ const global = {
 		"el-radio-group": { template: "<div><slot /></div>" },
 		"el-radio-button": { template: "<button><slot /></button>" },
 		"el-switch": { template: "<input />" },
-		"el-input": { template: "<input />" },
+		"el-input": {
+			props: ["modelValue", "placeholder"],
+			emits: ["update:modelValue"],
+			template: '<input :value="modelValue" :placeholder="placeholder" @input="$emit(\'update:modelValue\', $event.target.value)" />',
+		},
 		"el-input-number": { template: "<input />" },
 		"el-row": { template: "<div><slot /></div>" },
 		"el-col": { template: "<div><slot /></div>" },
@@ -279,6 +289,11 @@ describe("refactor surface component integration", () => {
 		systemClientMocks.setModelSelection.mockReset();
 		systemClientMocks.updateCompanionIdleProfile.mockReset();
 		systemClientMocks.saveSettings.mockReset();
+		memoryClientMocks.getIndexStatus.mockReset();
+		memoryClientMocks.removeDoc.mockReset();
+		memoryClientMocks.removeDocs.mockReset();
+		memoryClientMocks.previewMaintenance.mockReset();
+		memoryClientMocks.applyMaintenance.mockReset();
 		systemClientMocks.setModelSelection.mockResolvedValue(undefined);
 		systemClientMocks.updateCompanionIdleProfile.mockResolvedValue(undefined);
 		systemClientMocks.saveSettings.mockResolvedValue(undefined);
@@ -377,6 +392,7 @@ describe("refactor surface component integration", () => {
 			},
 		});
 		memoryClientMocks.removeDoc.mockResolvedValue({ ok: true });
+		memoryClientMocks.removeDocs.mockResolvedValue({ ok: true, deleted_count: 1 });
 		memoryClientMocks.previewMaintenance.mockResolvedValue({
 			status: "preview",
 			preview_token: "a".repeat(64),
@@ -391,6 +407,8 @@ describe("refactor surface component integration", () => {
 			],
 		});
 		memoryClientMocks.applyMaintenance.mockResolvedValue({ status: "purged", changed_ids: ["doc-review"], changed_count: 1 });
+		messageBoxMocks.confirm.mockReset();
+		messageBoxMocks.confirm.mockResolvedValue(undefined);
 		docs.value = [
 			{
 				id: "doc-1",
@@ -517,6 +535,57 @@ describe("refactor surface component integration", () => {
 			scope: "workspace",
 			workspace_id: "ws-1",
 		}));
+		expect(messageBoxMocks.confirm).toHaveBeenCalledWith(
+			"将永久清理 1 条记忆，操作不可恢复。",
+			"永久清理记忆",
+			expect.objectContaining({ confirmButtonText: "永久清理", cancelButtonText: "取消", type: "warning" }),
+		);
+	});
+
+	it("does not apply permanent memory maintenance when confirmation is cancelled", async () => {
+		messageBoxMocks.confirm.mockRejectedValueOnce(new Error("cancel"));
+		const wrapper = mount(MemoryPanel, { global });
+		await flushPromises();
+
+		const previewButton = wrapper.findAll("button").find((button) => button.text().includes("预览影响"));
+		await previewButton?.trigger("click");
+		await flushPromises();
+		const applyButton = wrapper.findAll("button").find((button) => button.text().includes("永久清理"));
+		await applyButton?.trigger("click");
+		await flushPromises();
+
+		expect(memoryClientMocks.applyMaintenance).not.toHaveBeenCalled();
+	});
+
+	it("does not delete filtered or selected memories when confirmation is cancelled", async () => {
+		const wrapper = mount(MemoryPanel, { global });
+		await flushPromises();
+
+		await wrapper.get('input[placeholder="搜索内容"]').setValue("remembered");
+		await flushPromises();
+		messageBoxMocks.confirm.mockRejectedValueOnce(new Error("cancel"));
+		const batchDeleteButton = wrapper.findAll("button").find((button) => button.text().includes("永久删除筛选结果"));
+		await batchDeleteButton?.trigger("click");
+		await flushPromises();
+
+		expect(messageBoxMocks.confirm).toHaveBeenCalledWith(
+			"这些记忆将从存储中永久删除。",
+			"永久删除 1 条记忆",
+			expect.objectContaining({ confirmButtonText: "永久删除", cancelButtonText: "取消", type: "warning" }),
+		);
+		expect(memoryClientMocks.removeDocs).not.toHaveBeenCalled();
+
+		await wrapper.get('[data-memory-id="doc-1"]').trigger("click");
+		messageBoxMocks.confirm.mockRejectedValueOnce(new Error("cancel"));
+		await wrapper.get('[data-testid="memory-inspector-delete"]').trigger("click");
+		await flushPromises();
+
+		expect(messageBoxMocks.confirm).toHaveBeenLastCalledWith(
+			"这条记忆将从存储中永久删除。",
+			"永久删除记忆",
+			expect.objectContaining({ confirmButtonText: "永久删除", cancelButtonText: "取消", type: "warning" }),
+		);
+		expect(memoryClientMocks.removeDoc).not.toHaveBeenCalled();
 	});
 
 	it("renders large MemoryPanel document lists in batches", async () => {

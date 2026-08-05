@@ -26,8 +26,6 @@ export interface WorkspaceVisionRegion {
 export interface WorkspaceVisionSettings {
   enabled: boolean
   displayIndex: number
-  intervalMs: number
-  pauseWhenAppHidden: boolean
   captureMode: 'display' | 'region'
   region: WorkspaceVisionRegion
   privacyMasks: WorkspaceVisionRegion[]

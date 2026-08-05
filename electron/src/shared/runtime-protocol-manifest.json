@@ -131,7 +131,7 @@
   "e2e_controls": {
     "activation": { "environment": "YUIZAKI_E2E", "enabled_value": "1", "token_environment": "YUIZAKI_E2E_TOKEN", "unpackaged_only": true },
     "header": "X-Yuizaki-E2E-Token",
-    "ipc": ["voiceSequence", "pauseHealthPolling", "pollHealthOnce", "resumeHealthPolling", "pauseVisualSampling", "sampleVisualOnce", "resumeVisualSampling", "pauseCompanionPolling", "pollCompanionOnce", "resumeCompanionPolling", "advanceCompanionCooldown", "pauseHeartbeat", "emitHeartbeatOnce", "teardownRuntime"],
+    "ipc": ["voiceSequence", "pauseHealthPolling", "pollHealthOnce", "resumeHealthPolling", "sampleVisualOnce", "pauseCompanionPolling", "pollCompanionOnce", "resumeCompanionPolling", "advanceCompanionCooldown", "pauseHeartbeat", "emitHeartbeatOnce", "teardownRuntime"],
     "http": ["POST /__e2e__/case/start", "POST /__e2e__/case/assert", "POST /__e2e__/case/wait-disconnect", "POST /__e2e__/voice-sequence", "POST /__e2e__/proactive-event", "POST /__e2e__/backend-mode"]
   },
   "cases": {

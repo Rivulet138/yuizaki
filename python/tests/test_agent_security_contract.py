@@ -55,6 +55,90 @@ def test_open_url_allows_only_http_https_with_host(monkeypatch):
     assert opened[-1] == "https://example.com/Path"
 
 
+def test_default_local_read_tools_do_not_require_confirmation(tmp_path):
+    default_tools = importlib.import_module("modules.agent.default_tools")
+    policy_module = importlib.import_module("modules.agent.policy_engine")
+    registry_module = importlib.import_module("modules.agent.tool_registry")
+
+    registry = registry_module.ToolRegistry()
+    default_tools.register_default_tools(registry)
+    policy = policy_module.PolicyEngine(store_file=tmp_path / "permissions.json")
+
+    for tool_name in ("open_app", "read_file", "web_search"):
+        tool = registry.get(tool_name)
+        assert tool is not None
+        assert tool.risk_level in {"safe", "low"}
+        assert tool.require_confirm is False
+        decision = policy.evaluate_tool(tool, permission_scope="local:desktop")
+        assert decision.allowed is True
+        assert decision.require_confirm is False
+
+
+def test_force_confirmation_overrides_remembered_allow(tmp_path):
+    policy_module = importlib.import_module("modules.agent.policy_engine")
+    registry_module = importlib.import_module("modules.agent.tool_registry")
+    result_module = importlib.import_module("modules.agent.tool_result")
+    policy = policy_module.PolicyEngine(store_file=tmp_path / "permissions.json")
+    tool = registry_module.ToolDefinition(
+        name="open_url",
+        description="open URL",
+        source="builtin",
+        parameters={"type": "object"},
+        handler=lambda _args: result_module.ToolResultEnvelope(
+            success=True,
+            content="opened",
+            source="builtin",
+            tool_name="open_url",
+        ),
+        risk_level="low",
+        require_confirm=False,
+    )
+    policy._remembered["open_url::socket:test"] = True
+
+    decision = policy.evaluate_tool(
+        tool,
+        permission_scope="socket:test",
+        force_confirm=True,
+    )
+
+    assert decision.allowed is False
+    assert decision.require_confirm is True
+    assert decision.permission_receipt is not None
+    assert decision.permission_receipt.reason_code == "untrusted_mcp_followup_requires_confirmation"
+
+
+def test_force_confirmation_preserves_remembered_deny(tmp_path):
+    policy_module = importlib.import_module("modules.agent.policy_engine")
+    registry_module = importlib.import_module("modules.agent.tool_registry")
+    result_module = importlib.import_module("modules.agent.tool_result")
+    policy = policy_module.PolicyEngine(store_file=tmp_path / "permissions.json")
+    tool = registry_module.ToolDefinition(
+        name="open_url",
+        description="open URL",
+        source="builtin",
+        parameters={"type": "object"},
+        handler=lambda _args: result_module.ToolResultEnvelope(
+            success=True,
+            content="opened",
+            source="builtin",
+            tool_name="open_url",
+        ),
+        risk_level="low",
+        require_confirm=False,
+    )
+    policy._remembered["open_url::socket:test"] = False
+
+    decision = policy.evaluate_tool(
+        tool,
+        permission_scope="socket:test",
+        force_confirm=True,
+    )
+
+    assert decision.allowed is False
+    assert decision.reason == "remembered"
+    assert decision.require_confirm is False
+
+
 def test_permission_receipt_redacts_nested_secrets_and_serializes_tuples():
     receipt_module = importlib.import_module("modules.agent.permission_receipt")
     redacted, paths = receipt_module.redact_permission_parameters({

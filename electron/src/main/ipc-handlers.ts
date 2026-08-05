@@ -62,7 +62,6 @@ export interface IpcContext {
     hide: () => void
     reloadRenderer: () => void
     requestPetState: () => void
-    hasVisiblePixelAt: (x: number, y: number, alphaThreshold?: number) => Promise<boolean>
   }
   petWindow: {
     window: BrowserWindow | null
@@ -664,15 +663,6 @@ function registerPetControlHandlers(ctx: IpcContext): void {
     return result
   })
 
-  ipcMain.handle('pet:alpha-hit-test', async (event, payload: { x?: number; y?: number; alphaThreshold?: number } | undefined) => {
-    assertTrustedIpcSender(event)
-    const x = Number(payload?.x)
-    const y = Number(payload?.y)
-    if (!Number.isFinite(x) || !Number.isFinite(y)) {
-      return false
-    }
-    return ctx.live2dWindow.hasVisiblePixelAt(x, y, payload?.alphaThreshold)
-  })
 }
 
 function registerPetInteractionHandlers(ctx: IpcContext): void {

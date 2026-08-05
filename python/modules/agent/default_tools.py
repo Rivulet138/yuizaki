@@ -35,8 +35,7 @@ def register_default_tools(registry: ToolRegistry) -> None:
             source="builtin",
             tool_name="open_app",
         ),
-        risk_level="medium",
-        require_confirm=True,
+        risk_level="low",
         tags=["desktop", "launch"],
         scopes=["desktop:open_app"],
     ))
@@ -68,8 +67,7 @@ def register_default_tools(registry: ToolRegistry) -> None:
             source="builtin",
             tool_name="read_file",
         ),
-        risk_level="medium",
-        require_confirm=True,
+        risk_level="low",
         tags=["filesystem", "read"],
         scopes=["fs:read"],
     ))

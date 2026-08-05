@@ -463,5 +463,10 @@ const adminMenuGroups = computed(() => {
     margin: 8px 0 8px 8px;
     padding: 10px 7px;
   }
+
+  .menu-item,
+  .admin-toggle {
+    min-height: 44px;
+  }
 }
 </style>

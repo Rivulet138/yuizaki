@@ -38,19 +38,30 @@ describe('application orchestrator workspace lifecycle', () => {
     expect(watcher).not.toContain("sync active workspace")
   })
 
-  it('does not load sessions when the required active-workspace POST rejects', async () => {
-    const loadSessions = vi.fn()
+  it('recovers a failed workspace backend sync before continuing bootstrap in order', async () => {
+    const order: string[] = []
+    const recoveredLabels: string[] = []
+
     await expect(bootstrapAppDomains({
-      initChatStore: vi.fn(),
-      loadCompanions: vi.fn(),
-      syncFromBackend: vi.fn().mockRejectedValue(new Error('active workspace POST failed')),
-      applyActiveCompanionRuntime: vi.fn(),
-      loadSessions,
-      run: async (_label, task) => {
-        try { await task() } catch { /* recover optional domains */ }
+      initChatStore: () => { order.push('chat') },
+      loadCompanions: async () => { order.push('companions') },
+      syncFromBackend: async () => {
+        order.push('workspace-sync')
+        throw new Error('backend offline')
       },
-    })).rejects.toThrow('active workspace POST failed')
-    expect(loadSessions).not.toHaveBeenCalled()
+      applyActiveCompanionRuntime: async () => { order.push('companion-runtime') },
+      loadSessions: async () => { order.push('sessions') },
+      run: async (label, task) => {
+        try {
+          await task()
+        } catch {
+          recoveredLabels.push(label)
+        }
+      },
+    })).resolves.toBeUndefined()
+
+    expect(recoveredLabels).toEqual(['sync workspaces'])
+    expect(order).toEqual(['chat', 'companions', 'workspace-sync', 'companion-runtime', 'sessions'])
   })
 
   it('finishes one manual workspace sync before loading its sessions', async () => {

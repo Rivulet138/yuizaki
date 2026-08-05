@@ -54,10 +54,15 @@ export const advanceCompanionCooldownForE2E = (): number => {
 }
 
 export const reportCompanionRuntimeSinkError = (failure: { sink: CompanionRuntimeSinkName; message: string }) => {
-  logger.error('[CompanionRuntime] sink delivery failed', {
+  const payload = {
     event: 'companion_runtime.sink_failure',
     ...failure,
-  })
+  }
+  if (failure.message.includes('未授权')) {
+    logger.warn('[CompanionRuntime] sink unavailable without control authorization', payload)
+    return
+  }
+  logger.error('[CompanionRuntime] sink delivery failed', payload)
 }
 
 export const reportCompanionRuntimePollResult = (result: ProactivePollResult) => {

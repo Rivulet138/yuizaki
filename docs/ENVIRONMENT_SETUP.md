@@ -36,7 +36,7 @@
 | `VISION_LLM_MODEL` | 空 | 视觉模型名 |
 | `VISION_LLM_TIMEOUT` | `30` | 视觉请求超时秒数 |
 
-实时视觉使用内存中的最新帧和变化检测；普通对话不会无条件附加全屏截图。OCR 使用独立 `/vision/ocr` 路由，只在精确读取文本时调用。
+视觉默认关闭。启用后只在发送 Agent 回合时采集当前单帧并保存在内存中；后台不会持续截图。OCR 使用独立 `/vision/ocr` 路由，只在该视觉回合需要读取文本时调用。
 
 ## TTS
 
@@ -104,4 +104,4 @@ cd python
 .\.venv\Scripts\python.exe -c "from modules.core.config import public_config_snapshot, config; print(public_config_snapshot(config))"
 ```
 
-输出会隐藏密钥。完整模板见 [python/.env.example](python/.env.example)，资源目录见 [RESOURCE_MANAGEMENT.md](RESOURCE_MANAGEMENT.md)。
+输出会隐藏密钥。完整模板见 [python/.env.example](../python/.env.example)，资源目录见 [RESOURCE_MANAGEMENT.md](RESOURCE_MANAGEMENT.md)。

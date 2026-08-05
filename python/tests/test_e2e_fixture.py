@@ -102,7 +102,7 @@ def test_fixture_loads_same_four_part_manifest_and_hash() -> None:
         "e2e_controls",
         "cases",
     ]
-    assert MANIFEST_HASH == "e96adcd57f385aa933d4196b7229f9f91921be961186071d1d9884692b941032"
+    assert MANIFEST_HASH == "e0be0c2d1a1a4b9137bffb688f742a68e7d7bda9c75bb71e60a0b9d29260dd9d"
 
 
 def test_fixture_matcher_keeps_case_variant_below_production_authority() -> None:

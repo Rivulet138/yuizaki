@@ -22,6 +22,8 @@ export interface ProactiveDeliveryResult {
 }
 export type ProactivePollResult = ProactiveSuppressionReason | ProactiveDeliveryResult | 'empty' | 'in_flight' | 'stopped'
 
+const DEFAULT_COMPANION_POLL_INTERVAL_MS = 15_000
+
 export interface CompanionRuntimeEvent {
   source: CompanionRuntimeSource
   sequence: number
@@ -365,7 +367,7 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     timer = setInterval(() => {
       state.reducedMotion = reducedMotionObserver.reduced.value
       void pollOnce().then((result) => dependencies.onPollResult?.(result))
-    }, dependencies.pollIntervalMs ?? 5000)
+    }, dependencies.pollIntervalMs ?? DEFAULT_COMPANION_POLL_INTERVAL_MS)
   }
 
   const stop = () => {

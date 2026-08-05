@@ -25,8 +25,6 @@ import type {
 import { validatePetControlDirective } from "../shared/pet-control-validator";
 import { logger } from "./logger";
 import {
-	AlphaHitTestScheduler,
-	DEFAULT_ALPHA_HIT_TEST_INTERVAL_MS,
 	resolveContextMenu,
 	resolveDragEnd,
 	resolveMouseDown,
@@ -35,6 +33,7 @@ import {
 	resolveMouseUp,
 	resolveWheel,
 } from "./pet-interaction-controller";
+import { PointerMoveCoalescer } from "./pet-pointer-coalescer";
 import {
 	resolveCursor,
 	resolveMouseCapture,
@@ -125,7 +124,6 @@ const MAX_SCALE = 0.6;
 const RENDERER_DPR_CAP = 1.5;
 const PASSTHROUGH_MIN_SWITCH_MS = 140;
 const HOVER_HYSTERESIS_PX = 14;
-const ALPHA_HIT_TEST_POINTER_TOLERANCE_PX = 3;
 const DOUBLE_CLICK_INTERVAL_MS = 280;
 const LONG_PRESS_MENU_MS = 560;
 const LONG_PRESS_MOVE_CANCEL_PX = 10;
@@ -182,6 +180,7 @@ class PetRenderer {
 	private live2dViewport: PIXI.Container | null = null;
 	private readonly container: HTMLElement;
 	private config: PetConfig;
+	private destroyed = false;
 	private interactMode = false;
 
 	private noticeEl: HTMLDivElement | null = null;
@@ -195,36 +194,11 @@ class PetRenderer {
 	private dragLastScreen: { x: number; y: number } | null = null;
 	private dragLastClient: { x: number; y: number } | null = null;
 	private lastMouseClientPoint: { x: number; y: number } | null = null;
+	private readonly hoverMoveCoalescer = new PointerMoveCoalescer({
+		onMove: (point) => this.processHoverMouseMove(point),
+	});
 	private mouseDownOnModel = false;
 	private modelHovering = false;
-	private alphaHitTestReason = "alpha-hit-test";
-	private readonly alphaHitTestScheduler = new AlphaHitTestScheduler({
-		execute: ({ x, y }) =>
-			window.live2dApi?.pet?.hasVisiblePixel?.(x, y) ?? Promise.resolve(true),
-		onResult: (visible, point) => {
-			if (
-				this.config.clickThrough ||
-				this.isDraggingWindow ||
-				!this.lastMouseClientPoint ||
-				Math.abs(this.lastMouseClientPoint.x - point.x) >
-					ALPHA_HIT_TEST_POINTER_TOLERANCE_PX ||
-				Math.abs(this.lastMouseClientPoint.y - point.y) >
-					ALPHA_HIT_TEST_POINTER_TOLERANCE_PX
-			) {
-				return;
-			}
-			this.applyMouseCaptureDecision(
-				visible,
-				`${this.alphaHitTestReason}:alpha`,
-				true,
-			);
-		},
-		onError: (error) => {
-			console.warn("[PetRenderer] alpha hit test failed:", error);
-		},
-		intervalMs: DEFAULT_ALPHA_HIT_TEST_INTERVAL_MS,
-		tolerancePx: ALPHA_HIT_TEST_POINTER_TOLERANCE_PX,
-	});
 
 	private lastClickAt = 0;
 	private singleClickTimer: number | null = null;
@@ -665,7 +639,6 @@ class PetRenderer {
 		if (typeof patch.clickThrough === "boolean") {
 			this.config.clickThrough = patch.clickThrough;
 			if (this.config.clickThrough) {
-				this.alphaHitTestScheduler.invalidate();
 				this.finishWindowDrag();
 				this.requestMousePassthrough(true, "click-through-config", true);
 			}
@@ -1025,7 +998,6 @@ class PetRenderer {
 			};
 
 			this.isDraggingWindow = true;
-			this.alphaHitTestScheduler.invalidate();
 			this.dragLastScreen = screenPoint;
 			this.dragLastClient = fallbackClientPoint;
 			this.testState.lastDragStartAt = Date.now();
@@ -1169,7 +1141,6 @@ class PetRenderer {
 		reason: string,
 	): void {
 		if (this.config.clickThrough) {
-			this.alphaHitTestScheduler.invalidate();
 			this.modelHovering = false;
 			this.requestMousePassthrough(true, reason, true);
 			this.updateCursor(false);
@@ -1178,7 +1149,6 @@ class PetRenderer {
 
 		const point = this.getCanvasPointFromClient(clientX, clientY);
 		if (!point) {
-			this.alphaHitTestScheduler.invalidate();
 			return;
 		}
 
@@ -1191,13 +1161,6 @@ class PetRenderer {
 			buffer,
 		);
 		this.applyMouseCaptureDecision(hovering, reason);
-
-		if (hovering && window.live2dApi?.pet?.hasVisiblePixel) {
-			this.alphaHitTestReason = reason;
-			this.alphaHitTestScheduler.request({ x: clientX, y: clientY });
-		} else {
-			this.alphaHitTestScheduler.invalidate();
-		}
 	}
 
 	private applyMouseCaptureDecision(
@@ -1574,14 +1537,21 @@ class PetRenderer {
 			return;
 		}
 
-		this.syncMouseCaptureFromPoint(event.clientX, event.clientY, "mousemove");
+		this.hoverMoveCoalescer.submit({ x: event.clientX, y: event.clientY });
+	};
+
+	private processHoverMouseMove(point: { x: number; y: number }): void {
+		if (this.destroyed || this.config.clickThrough || this.isDraggingWindow) return;
+
+		this.lastMouseClientPoint = point;
+		this.syncMouseCaptureFromPoint(point.x, point.y, "mousemove");
 		this.setAttentionFromClientPoint(
-			this.lastMouseClientPoint,
+			point,
 			this.modelHovering ? 0.56 : 0.38,
 			820,
 		);
 		this.markActivity("pointer-attention");
-	};
+	}
 
 	private readonly handleWindowMouseUp = (event: MouseEvent): void => {
 		const moved = this.dragMoved;
@@ -1634,7 +1604,7 @@ class PetRenderer {
 	};
 
 	private readonly handleWindowMouseLeave = (): void => {
-		this.alphaHitTestScheduler.invalidate();
+		this.hoverMoveCoalescer.cancel();
 		this.lastMouseClientPoint = null;
 		this.modelHovering = false;
 		this.clearLongPressTimer();
@@ -1890,7 +1860,7 @@ class PetRenderer {
 
 	destroy(): void {
 		this.destroyed = true;
-		this.alphaHitTestScheduler.dispose();
+		this.hoverMoveCoalescer.cancel();
 
 		if (this.singleClickTimer !== null) {
 			window.clearTimeout(this.singleClickTimer);

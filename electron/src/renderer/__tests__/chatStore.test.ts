@@ -193,6 +193,41 @@ describe('chatStore', () => {
     expect(store.state.messages.at(-1)?.role).toBe('user')
   })
 
+  it('waits for Agent turn preparation before sending chat', async () => {
+    mocks.connected = true
+    const store = useChatStore()
+    let finishPreparation: (() => void) | undefined
+    const preparation = new Promise<void>((resolve) => {
+      finishPreparation = resolve
+    })
+    store.setAgentTurnPreparation(() => preparation)
+
+    store.sendChat('look at the screen')
+
+    expect(mocks.sendAgentChat).not.toHaveBeenCalled()
+    finishPreparation?.()
+    await vi.waitFor(() => expect(mocks.sendAgentChat).toHaveBeenCalledTimes(1))
+  })
+
+  it('still sends chat when Agent turn preparation fails', async () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.setAgentTurnPreparation(() => Promise.reject(new Error('capture failed')))
+
+    store.sendChat('continue without vision')
+
+    await vi.waitFor(() => expect(mocks.sendAgentChat).toHaveBeenCalledTimes(1))
+  })
+
+  it('sends chat synchronously without Agent turn preparation', () => {
+    mocks.connected = true
+    const store = useChatStore()
+
+    store.sendChat('plain turn')
+
+    expect(mocks.sendAgentChat).toHaveBeenCalledTimes(1)
+  })
+
   it('uses the active workspace model unless the turn overrides it', () => {
     mocks.connected = true
     const workspaceStore = useWorkspaceStore()

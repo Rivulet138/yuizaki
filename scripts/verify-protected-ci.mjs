@@ -308,7 +308,7 @@ const validatePlatformChecks = (steps) => {
     name: 'Validate Linux launch scripts',
     osLabel: 'Linux',
     workingDirectories: ['.', './', '${{ github.workspace }}'],
-    commands: ['bash -n install_core.sh install_full.sh start.sh start_soulx_svc.sh scripts/check_linux_environment.sh scripts/run_backend_dev.sh scripts/smoke_linux_electron.sh'],
+    commands: ['test -x install.sh && bash -n install.sh start.sh start_soulx_svc.sh scripts/check_linux_environment.sh scripts/run_backend_dev.sh scripts/smoke_linux_electron.sh'],
   })
   const linuxLibraries = validateNamedCommandStep('electron-build', steps, {
     name: 'Install Linux GUI runtime libraries',

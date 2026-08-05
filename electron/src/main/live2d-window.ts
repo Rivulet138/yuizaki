@@ -335,12 +335,6 @@ export class Live2DWindow {
       shouldIgnore ? { forward: shouldForward } : undefined,
     )
 
-    if (shouldIgnore && this.win.isFocused()) {
-      this.win.blur()
-    } else if (!shouldIgnore && !this.win.isFocused()) {
-      this.win.focus()
-    }
-
     this.ignoreMouseEvents = shouldIgnore
     this.ignoreMouseEventsForward = shouldForward
 
@@ -534,28 +528,6 @@ export class Live2DWindow {
 
   requestPetState(): void {
     this.sendToRenderer('pet:request-state')
-  }
-
-  async hasVisiblePixelAt(x: number, y: number, alphaThreshold = 8): Promise<boolean> {
-    if (!this.win || this.win.isDestroyed()) {
-      return false
-    }
-
-    if (!Number.isFinite(x) || !Number.isFinite(y)) {
-      return false
-    }
-
-    const bounds = this.win.getBounds()
-    const localX = clamp(Math.round(x), 0, Math.max(0, bounds.width - 1))
-    const localY = clamp(Math.round(y), 0, Math.max(0, bounds.height - 1))
-
-    try {
-      const image = await this.win.webContents.capturePage({ x: localX, y: localY, width: 1, height: 1 })
-      return hasVisibleAlpha(image.toBitmap(), alphaThreshold)
-    } catch (error) {
-      logger.warn('[Live2DWindow] alpha hit test failed:', error)
-      return true
-    }
   }
 
   async hasVisiblePixels(alphaThreshold = 8): Promise<boolean> {

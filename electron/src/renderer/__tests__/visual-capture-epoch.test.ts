@@ -36,7 +36,7 @@ describe('VisualCaptureEpoch', () => {
 
     const ready = {
       status: 'ok',
-      mode: 'observe',
+      mode: 'vision',
       analysis_status: 'ready',
     }
     expect(epoch.acceptResult('frame-1', true, isTerminalVisualFrameResult(ready))).toBe(true)

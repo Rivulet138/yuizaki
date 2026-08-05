@@ -1267,7 +1267,7 @@ async def test_socket_rag_query_offloads_sync_retrieval_pipeline(monkeypatch: py
 
 
 @pytest.mark.asyncio
-async def test_socket_screenshot_request_falls_back_to_ocr_without_vision_model(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_socket_observe_frame_is_stored_without_automatic_analysis(monkeypatch: pytest.MonkeyPatch) -> None:
     server = DesktopPetSocketServer()
     ocr_client = _FakeOcrClient()
     image = base64.b64encode(b"png").decode("ascii")
@@ -1292,7 +1292,7 @@ async def test_socket_screenshot_request_falls_back_to_ocr_without_vision_model(
         "capture_reason": "change",
     })
 
-    assert ocr_client.payloads == [image]
+    assert ocr_client.payloads == []
     assert emitted[0][0] == ScreenshotEvents.RESULT
     assert emitted[0][2] == "sid-1"
     assert isinstance(emitted[0][1], dict)
@@ -1302,7 +1302,8 @@ async def test_socket_screenshot_request_falls_back_to_ocr_without_vision_model(
     assert emitted[0][1]["caption"] == "user is moving a browser window"
     assert emitted[0][1]["change_score"] == 0.08
     assert emitted[0][1]["capture_reason"] == "change"
-    assert emitted[0][1]["analysis_status"] == "ocr_ready"
+    assert emitted[0][1]["analysis_status"] == "stored"
+    assert emitted[0][1]["analysis_reason"] == "awaiting_agent_turn"
     assert emitted[0][1]["analysis_attempts"] == 0
     assert emitted[0][1]["analysis_skipped"] == 0
     assert server._latest_visual_frames["sid-1"]["image"] == image
@@ -1391,7 +1392,7 @@ async def test_visual_analysis_emits_final_frame_status_and_records_metrics(monk
     handler = cast(Callable[[str, dict[str, object]], Awaitable[None]], handlers["/"][ScreenshotEvents.REQUEST])
     await handler("sid-visual-final", {
         "image": image,
-        "mode": "observe",
+        "mode": "vision",
         "frame_id": "frame-final",
         "change_score": 1.0,
         "capture_reason": "initial",

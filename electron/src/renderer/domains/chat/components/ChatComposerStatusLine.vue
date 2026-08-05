@@ -1,7 +1,7 @@
 <template>
   <div class="composer-meta-line" :aria-label="t('chat.composerStatus.aria')">
     <span class="composer-meta-chip" :class="{ ready: connected }">
-      {{ connected ? t('chat.composerStatus.connected') : t('chat.composerStatus.connecting') }}
+      {{ connected ? t('chat.composerStatus.connected') : t('chat.composerStatus.unavailable') }}
     </span>
     <span v-if="webSearchEnabled" class="composer-meta-chip is-active">{{ t('chat.composerStatus.webSearch') }}</span>
     <span v-if="mcpEnabled" class="composer-meta-chip is-active">MCP</span>
@@ -34,13 +34,21 @@ defineProps<{
 .composer-meta-line {
   display: flex;
   min-width: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px 10px;
   min-height: 16px;
+  overflow-x: auto;
   order: 4;
   color: var(--yui-muted);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 16px;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+
+.composer-meta-line::-webkit-scrollbar {
+  display: none;
 }
 
 .composer-meta-chip {
@@ -61,7 +69,7 @@ defineProps<{
   max-width: 128px;
   overflow: hidden;
   color: var(--yui-text);
-  font-weight: 700;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

@@ -26,15 +26,15 @@ sudo apt-get install -y python3.12 python3.12-venv build-essential libxtst6 liba
 然后：
 
 ```bash
-chmod +x install_core.sh start.sh scripts/*.sh
-./install_core.sh
+chmod +x install.sh start.sh scripts/*.sh
+./install.sh core
 ./start.sh
 ```
 
 完整安装：
 
 ```bash
-./install_full.sh
+./install.sh full
 ```
 
 模型仍遵循按需下载，不要求启动前拥有全部资源。
@@ -43,7 +43,7 @@ chmod +x install_core.sh start.sh scripts/*.sh
 
 ```bash
 ./scripts/check_linux_environment.sh
-bash -n install_core.sh install_full.sh start.sh start_soulx_svc.sh scripts/*.sh
+bash -n install.sh start.sh start_soulx_svc.sh scripts/*.sh
 ```
 
 开发后端：
@@ -84,7 +84,7 @@ pactl list short sinks
 
 ## GPU
 
-CPU 路径应始终可启动。NVIDIA 加速需要与宿主驱动兼容的 CUDA 运行时；不要因为检测到 GPU 就自动安装或替换系统 CUDA。SoulX 容器基于 CUDA 12.1，详见 [services/soulx-svc/README.md](services/soulx-svc/README.md)。
+CPU 路径应始终可启动。NVIDIA 加速需要与宿主驱动兼容的 CUDA 运行时；不要因为检测到 GPU 就自动安装或替换系统 CUDA。SoulX 容器基于 CUDA 12.1，详见 [services/soulx-svc/README.md](../services/soulx-svc/README.md)。
 
 ## 常见故障
 

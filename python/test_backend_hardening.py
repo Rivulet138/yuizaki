@@ -16,7 +16,22 @@ from modules.core.config import AppConfig
 from modules.llm.client import LLMClient, redact_error_text
 from modules.svc.converter import SVCClient
 from modules.system.settings_store import SettingsStore
-from modules.tools.local_tools import LocalToolError, read_file, write_file
+from modules.tools.local_tools import LocalToolError, open_app, read_file, write_file
+
+
+def test_open_app_rejects_shell_syntax(monkeypatch: pytest.MonkeyPatch) -> None:
+    local_tools = __import__("modules.tools.local_tools", fromlist=["local_tools"])
+    launched: list[str] = []
+    if local_tools.os.name == "nt":
+        monkeypatch.setattr(local_tools.os, "startfile", lambda name: launched.append(name))
+
+    for name in ("notepad&calc", "notepad|calc", "../tool", "C:\\Windows\\notepad.exe"):
+        with pytest.raises(LocalToolError, match="application name"):
+            open_app(name)
+
+    if local_tools.os.name == "nt":
+        assert open_app("notepad.exe") == "Launched application: notepad.exe"
+        assert launched == ["notepad.exe"]
 
 
 def test_local_file_tools_restrict_paths_to_allowed_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -38,6 +53,20 @@ def test_local_file_tools_restrict_paths_to_allowed_roots(tmp_path: Path, monkey
         write_file(str(outside_root / "blocked.txt"), "no")
     with pytest.raises(LocalToolError, match="outside allowed local tool roots"):
         read_file(str(Path(__file__).resolve().parent.parent / "README.md"))
+
+
+@pytest.mark.parametrize("relative_path", [".env", "service.env.local", "private.key", "memory.db"])
+def test_local_read_tool_rejects_sensitive_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relative_path: str,
+) -> None:
+    monkeypatch.setenv("YUIZAKI_LOCAL_TOOL_ROOTS", str(tmp_path))
+    sensitive_file = tmp_path / relative_path
+    sensitive_file.write_text("secret", encoding="utf-8")
+
+    with pytest.raises(LocalToolError, match="sensitive local file"):
+        read_file(str(sensitive_file))
 
 
 def test_settings_store_redacts_secret_values_in_debug_logs(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:

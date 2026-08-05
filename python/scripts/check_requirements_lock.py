@@ -70,13 +70,6 @@ def _parse_requirements(path: Path, _seen: set[Path] | None = None) -> dict[str,
     return values
 
 
-def _requirements(path: Path, _seen: set[Path] | None = None) -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]
-    """Backward-compatible view returning only the pinned version string."""
-
-    parsed = _parse_requirements(path, _seen)
-    return {name: specifier.removeprefix("==").strip() for name, (specifier, _) in parsed.items()}
-
-
 def _validate_lock(lock: Path, manifest: Path) -> None:
     declared = _parse_requirements(manifest)
     locked = _parse_requirements(lock)

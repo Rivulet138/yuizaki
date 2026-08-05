@@ -100,7 +100,7 @@ jobs:
       - name: Validate Linux launch scripts
         if: runner.os == 'Linux'
         working-directory: ${{ github.workspace }}
-        run: bash -n install_core.sh install_full.sh start.sh start_soulx_svc.sh scripts/check_linux_environment.sh scripts/run_backend_dev.sh scripts/smoke_linux_electron.sh
+        run: test -x install.sh && bash -n install.sh start.sh start_soulx_svc.sh scripts/check_linux_environment.sh scripts/run_backend_dev.sh scripts/smoke_linux_electron.sh
       - name: Install Linux GUI runtime libraries
         if: runner.os == 'Linux'
         working-directory: ${{ github.workspace }}

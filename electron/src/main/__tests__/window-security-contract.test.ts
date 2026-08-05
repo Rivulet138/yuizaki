@@ -16,4 +16,11 @@ describe('renderer window security contract', () => {
     expect(panelWindow).not.toContain('.loadFile(')
     expect(petWindow).not.toContain('.loadFile(')
   })
+
+  it('does not refocus or blur the pet while toggling mouse passthrough', () => {
+    const petWindow = readFileSync(resolve(process.cwd(), 'src/main/live2d-window.ts'), 'utf8')
+
+    expect(petWindow).not.toContain('this.win.blur()')
+    expect(petWindow).not.toContain('this.win.focus()')
+  })
 })

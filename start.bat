@@ -355,7 +355,7 @@ if errorlevel 1 (
 
 call :log_info "Checking Python virtual environment..."
 if not exist "%PYTHON_EXE%" (
-  call :fail "Python virtual environment not found: %PYTHON_EXE%. Run install_core.bat or install_full.bat first."
+  call :fail "Python virtual environment not found: %PYTHON_EXE%. Run install.bat core or install.bat full first."
   exit /b 1
 )
 set "PYTHON_VERSION_FILE=%TEMP%\yuizaki-python-version-%RANDOM%.txt"
@@ -468,7 +468,7 @@ if not exist "%ELECTRON_NODE_MODULES%\wait-on\package.json" (
 call :log_info "Checking Python runtime dependencies..."
 "%PYTHON_EXE%" -c "import fastapi, uvicorn" >nul 2>nul
 if errorlevel 1 (
-  call :fail "Python runtime dependencies are not importable (fastapi/uvicorn). Run install_full.bat"
+  call :fail "Python runtime dependencies are not importable (fastapi/uvicorn). Run install.bat full"
   exit /b 1
 )
 call :log_info "Core runtime import check passed"
@@ -1170,7 +1170,7 @@ if defined LAST_ERROR (
 echo ============================================================
 echo.
 call :log_info "Troubleshooting:"
-call :log_info "  1. Run install_full.bat to reinstall dependencies"
+call :log_info "  1. Run install.bat full to reinstall dependencies"
 call :log_info "  2. Check python\.env for API key configuration"
 call :log_info "  3. Verify ports %SERVER_PORT% and %CONTROL_SERVER_PORT% are free"
 call :log_info "  4. Check logs: %LOG_DIR%"

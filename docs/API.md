@@ -75,9 +75,9 @@ LLM 客户端按 provider 选择 wire protocol：Claude 使用 Anthropic Message
 | POST | `/api/settings/tts/warmup` | TTS 预热 |
 | GET | `/api/settings/tts/status` | TTS 状态 |
 
-实时视觉帧和流式语音通过 Socket.IO 传输，不通过 OCR 路由轮询。
+按需视觉帧和流式语音通过 Socket.IO 传输，不通过 OCR 路由轮询。
 
-实时视觉事件先将变化关键帧提交给独立 VLM；VLM 不可用、失败或为空时才执行 OCR fallback。普通聊天只接收最新的不可信视觉 evidence，不会把截图历史写入持久数据。
+视觉默认关闭。用户启用视觉并发起 Agent 回合时，Electron 只采集当前单帧；后端在该回合显式处理最新帧，优先提交独立 VLM，VLM 不可用、失败或为空时才执行 OCR fallback。后台不会持续截图，普通聊天也不会把截图历史写入持久数据。
 
 ## 设置
 

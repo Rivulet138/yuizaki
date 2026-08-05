@@ -12,7 +12,7 @@
         <div class="wallpaper-layer" :style="{ backgroundImage: `url(${currentWallpaper})` }"></div>
         <div class="wallpaper-blur" :style="{ backgroundImage: `url(${currentWallpaper})` }"></div>
         <div class="wallpaper-mask"></div>
-        <div v-if="showOfflineBanner" class="offline-banner">
+        <div v-if="showOfflineBanner" class="offline-banner" role="status" aria-live="polite">
           <span>{{ t('shell.offline') }}</span>
           <button type="button" @click="retryConnection">{{ t('shell.retry') }}</button>
         </div>
@@ -112,17 +112,10 @@ import { useSystemStore, type VisualAnalysisStatus } from '@/stores/systemStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useSettingsStore } from '@/state/settingsStore'
 import { useInputBindingsStore } from '@/state/inputBindingsStore'
-import { isTerminalVisualFrameResult, VisualCaptureEpoch } from '@/visual-capture-epoch'
+import { isTerminalVisualFrameResult, isVisualFrameResult, VisualCaptureEpoch } from '@/visual-capture-epoch'
 import { setLocale, syncLocaleFromSettings, t } from '@/i18n'
 import { adminNavigationModules, isPanelKey, primaryNavigationModules, type NavigationModuleId } from '@/navigation/modules'
 import { logger } from '@/logger'
-import { calculateFrameDifference, computeFrameSignature } from '@/vision/frame-signature'
-import {
-  normalizeVisualCaptureInterval,
-  resolveVisualCaptureBlockReason,
-  resolveVisualCapturePolicy,
-} from '@/vision/capture-policy'
-import { audioCapture } from '@/audio/audio-capture'
 import AppSidebar from './AppSidebar.vue'
 import AppTopbar from './AppTopbar.vue'
 import GlobalDialogs from './components/dialogs/GlobalDialogs.vue'
@@ -162,8 +155,6 @@ const ADMIN_MODE_STORAGE_KEY = 'yuizaki.adminMode'
 const activeVisionSettings = computed(() => workspaceStore.activeWorkspace.context.vision ?? {
   enabled: false,
   displayIndex: 0,
-  intervalMs: 30_000,
-  pauseWhenAppHidden: true,
   captureMode: 'display' as const,
   region: { x: 0, y: 0, width: 1280, height: 720 },
   privacyMasks: [],
@@ -172,7 +163,6 @@ const adminMode = ref(
   typeof window !== 'undefined' && window.localStorage.getItem(ADMIN_MODE_STORAGE_KEY) === 'true',
 )
 const chatState = computed(() => chatStore.state)
-const audioCaptureState = audioCapture.getStatus()
 const showShortcuts = ref(false)
 const showNotifPanel = ref(false)
 const notifications = computed(() => chatStore.notifications || [])
@@ -190,11 +180,8 @@ const showOfflineBanner = computed(() => (
   !systemStore.sioConnected
 ))
 
-let visualFrameTimer: number | null = null
 let visualFrameInFlight = false
 let visualFrameSeq = 0
-let lastVisualFrameSignature: Uint8Array | null = null
-let lastVisualFrameSentAt = 0
 const pendingVisualResults = new Map<string, {
   resolve: (payload: Record<string, unknown>) => void
   reject: (error: Error) => void
@@ -203,12 +190,11 @@ const pendingVisualResults = new Map<string, {
 const visualCaptureEpoch = new VisualCaptureEpoch()
 let themeMediaQuery: MediaQueryList | null = null
 let healthScheduleEnabled = !e2eMode
-let visualScheduleEnabled = !e2eMode
 let companionScheduleEnabled = !e2eMode
 let disposeE2EControls: (() => void) | null = null
 let e2eInitialHealthChecked = false
+let visualContextEnabled = activeVisionSettings.value.enabled
 
-const VISUAL_CHANGE_THRESHOLD = 0.035
 const VISUAL_CAPTURE_ENCODING = {
   maxWidth: 1280,
   maxHeight: 720,
@@ -334,34 +320,22 @@ const captureRealtimeVisualFrame = async (
 ): Promise<string> => {
   const vision = activeVisionSettings.value
   const socketClient = getSocketClient()
-  const blockReason = resolveVisualCaptureBlockReason({
-    enabled: forceEnabled || vision.enabled,
-    pauseWhenAppHidden: vision.pauseWhenAppHidden,
-    documentHidden: document.hidden,
-    servicesHealthy: systemStore.controlRunning && systemStore.pythonRunning,
-    socketConnected: socketClient.isConnected(),
-  })
-  if (blockReason === 'health-unavailable') {
+  if (!forceEnabled && !vision.enabled) return 'skipped:disabled'
+  if (!forceEnabled && document.hidden) return 'skipped:document-hidden'
+  if (!systemStore.controlRunning || !systemStore.pythonRunning) {
     return `skipped:health:${systemStore.controlRunning}:${systemStore.pythonRunning}`
   }
-  if (blockReason) return `skipped:${blockReason}`
+  if (!socketClient.isConnected()) return 'skipped:socket-disconnected'
   const screenApi = petApi?.screen
   if (!screenApi?.capture) {
     systemStore.markVisualPerceptionError('当前环境不支持屏幕采集')
     return 'skipped:capture-api-unavailable'
   }
   if (visualFrameInFlight) return 'skipped:capture-in-flight'
-  const capturePolicy = resolveVisualCapturePolicy({
-    configuredIntervalMs: vision.intervalMs,
-    microphoneRecording: audioCaptureState.isRecording,
-    microphoneLevel: audioCaptureState.level,
-    hasPartialTranscript: Boolean(chatState.value.asrPartialText),
-    assistantSpeaking: chatState.value.isTTSPlaying || chatState.value.isSpeaking,
-  })
-  if (!capturePolicy.shouldCapture) return 'skipped:capture-policy'
 
   const captureEpoch = visualCaptureEpoch.current()
   visualFrameInFlight = true
+  systemStore.markVisualPerceptionCapturing()
   try {
     const captureOptions = {
       ...VISUAL_CAPTURE_ENCODING,
@@ -382,43 +356,19 @@ const captureRealtimeVisualFrame = async (
       systemStore.markVisualPerceptionError('没有捕获到可用画面')
       return 'skipped:invalid-image'
     }
-    const signature = await computeFrameSignature(image)
-    if (!visualCaptureEpoch.isCurrent(captureEpoch)) return 'skipped:signature-invalidated'
-    const now = Date.now()
-    const initialFrame = lastVisualFrameSignature === null
-    const changeScore = initialFrame
-      ? 1
-      : calculateFrameDifference(lastVisualFrameSignature, signature)
-    const intervalElapsed = now - lastVisualFrameSentAt >= capturePolicy.minUploadIntervalMs
-    const changed = initialFrame || changeScore >= VISUAL_CHANGE_THRESHOLD
-    const forceFrame = Number.isFinite(capturePolicy.forceUploadIntervalMs)
-      && now - lastVisualFrameSentAt >= capturePolicy.forceUploadIntervalMs
-    if ((!changed || !intervalElapsed) && !forceFrame) return 'skipped:unchanged'
-
-    const captureReason = initialFrame
-      ? 'initial'
-      : audioCaptureState.isRecording
-        ? 'voice_change'
-        : changed
-          ? 'change'
-          : 'heartbeat'
-
-    systemStore.markVisualPerceptionCapturing()
     visualFrameSeq += 1
     const frameId = requestedFrameId ?? `renderer-${Date.now()}-${visualFrameSeq}`
     visualCaptureEpoch.trackFrame(frameId, captureEpoch, forceEnabled)
     socketClient.requestScreenshot(image, {
       displayIndex: vision.displayIndex,
       region: vision.captureMode === 'region' ? { ...vision.region } : undefined,
-      mode: 'observe',
+      mode: 'vision',
       source: vision.captureMode === 'region' ? 'desktop_region' : 'desktop',
       timestamp: Date.now(),
       frameId,
-      changeScore,
-      captureReason,
+      changeScore: 1,
+      captureReason: forceEnabled ? 'manual' : 'agent_turn',
     })
-    lastVisualFrameSignature = signature
-    lastVisualFrameSentAt = now
     return frameId
   } catch (error) {
     if (!visualCaptureEpoch.isCurrent(captureEpoch)) return 'skipped:capture-error-invalidated'
@@ -458,7 +408,7 @@ const handleVisualFrameResult = (value: unknown) => {
     )
     return
   }
-  if (payload.status !== 'ok' || payload.mode !== 'observe') return
+  if (payload.status !== 'ok' || !isVisualFrameResult(payload)) return
   if (frameId && pending) {
     window.clearTimeout(pending.timeout)
     pendingVisualResults.delete(frameId)
@@ -500,32 +450,21 @@ const cancelVisualFrameResultWait = (frameId: string) => {
   visualCaptureEpoch.forgetFrame(frameId)
 }
 
-const restartVisualFrameTimer = () => {
-  visualCaptureEpoch.invalidate()
-  const hadUploadedVisualContext = lastVisualFrameSentAt > 0
-  if (visualFrameTimer) {
-    window.clearInterval(visualFrameTimer)
-    visualFrameTimer = null
+const prepareAgentVisualContext = async () => {
+  if (!activeVisionSettings.value.enabled) return
+  const frameId = `renderer-agent-${Date.now()}-${visualFrameSeq + 1}`
+  const resultPromise = waitForVisualFrameResult(frameId)
+  const sentFrameId = await captureRealtimeVisualFrame(frameId)
+  if (sentFrameId !== frameId) {
+    cancelVisualFrameResultWait(frameId)
+    getSocketClient().clearVisualContext()
+    throw new Error(`Visual frame was not captured: ${sentFrameId}`)
   }
-  const vision = activeVisionSettings.value
-  systemStore.setVisualPerceptionEnabled(vision.enabled)
-  lastVisualFrameSignature = null
-  lastVisualFrameSentAt = 0
-  if (!vision.enabled) {
-    if (hadUploadedVisualContext) getSocketClient().clearVisualContext()
-    return
-  }
-  if (!visualScheduleEnabled) return
-  if (vision.pauseWhenAppHidden && document.hidden) return
-  const samplingIntervalMs = normalizeVisualCaptureInterval(vision.intervalMs)
-  visualFrameTimer = window.setInterval(() => {
-    void captureRealtimeVisualFrame()
-  }, samplingIntervalMs)
-}
-
-const handleVisibilityChange = () => {
-  if (visualScheduleEnabled && activeVisionSettings.value.pauseWhenAppHidden) {
-    restartVisualFrameTimer()
+  try {
+    await resultPromise
+  } catch (error) {
+    getSocketClient().clearVisualContext()
+    throw error
   }
 }
 
@@ -536,15 +475,13 @@ const handlePermissionRequest = (data: PermissionRequestPayload) => {
 
 const stopAppRuntime = () => {
   visualCaptureEpoch.invalidate()
+  chatStore.setAgentTurnPreparation(null)
   window.removeEventListener('keydown', handleGlobalKeydown)
   petApi?.off?.('panel:open-tab', handlePanelOpenTab)
   petApi?.off?.('shortcut:toggle-vision', handleToggleVisionShortcut)
   themeMediaQuery?.removeEventListener('change', applyTheme)
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
   systemStore.stopHealthCheck()
   companionRuntime.stopCompanionRuntime()
-  if (visualFrameTimer) window.clearInterval(visualFrameTimer)
-  visualFrameTimer = null
   for (const [frameId, pending] of pendingVisualResults) {
     window.clearTimeout(pending.timeout)
     pending.reject(new Error(`Visual frame result wait cancelled: ${frameId}`))
@@ -593,10 +530,6 @@ if (e2eApi) {
         systemStore.startHealthCheck(() => false, () => socketClient.isConnected())
         while (!systemStore.statusChecked) await new Promise(resolve => window.setTimeout(resolve, 25))
         return { resumed: true, checked: true }
-      case 'pauseVisualSampling':
-        visualScheduleEnabled = false
-        restartVisualFrameTimer()
-        return { paused: true }
       case 'sampleVisualOnce':
         {
           const socketDeadline = Date.now() + 5_000
@@ -614,10 +547,6 @@ if (e2eApi) {
           const result = await resultPromise
           return { sampled: true, frameId, status: result['status'] }
         }
-      case 'resumeVisualSampling':
-        visualScheduleEnabled = true
-        restartVisualFrameTimer()
-        return { resumed: true }
       case 'pauseCompanionPolling':
         companionScheduleEnabled = false
         companionRuntime.stopCompanionRuntime()
@@ -676,7 +605,6 @@ onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeydown)
   petApi?.on?.('panel:open-tab', handlePanelOpenTab)
   petApi?.on?.('shortcut:toggle-vision', handleToggleVisionShortcut)
-  document.addEventListener('visibilitychange', handleVisibilityChange)
 
   const socketClient = getSocketClient()
   if (e2eMode) socketClient.pauseHeartbeat()
@@ -690,12 +618,12 @@ onMounted(() => {
   }
   socketClient.on(SocketEvents.PERMISSION_REQUEST, handlePermissionRequest)
   socketClient.on(SocketEvents.SCREENSHOT_RESULT, handleVisualFrameResult)
+  chatStore.setAgentTurnPreparation(prepareAgentVisualContext)
+  systemStore.setVisualPerceptionEnabled(activeVisionSettings.value.enabled)
 
   if (companionScheduleEnabled) {
     companionRuntime.startCompanionRuntime(() => systemStore.controlRunning && systemStore.pythonRunning)
   }
-  if (visualScheduleEnabled) restartVisualFrameTimer()
-
   const restoredTab = activeWorkspace.value.context.activeTab
   if (activeTab.value === 'companion' && restoredTab && isPanelKey(restoredTab) && restoredTab !== 'companion') {
     void router.replace(`/w/${encodeURIComponent(activeWorkspace.value.id)}/${restoredTab}`)
@@ -714,7 +642,11 @@ watch(activeTab, (tab) => {
   workspaceStore.updateWorkspaceContext(activeWorkspace.value.id, { activeTab: tab, recentTabs })
 })
 watch(activeVisionSettings, () => {
-  if (visualScheduleEnabled) restartVisualFrameTimer()
+  const wasEnabled = visualContextEnabled
+  visualContextEnabled = activeVisionSettings.value.enabled
+  visualCaptureEpoch.invalidate()
+  systemStore.setVisualPerceptionEnabled(visualContextEnabled)
+  if (wasEnabled && !visualContextEnabled) getSocketClient().clearVisualContext()
 }, { deep: true })
 watch(
   () => [systemStore.statusChecked, systemStore.controlRunning, systemStore.pythonRunning] as const,
@@ -948,6 +880,9 @@ watch(
   align-items: center;
   gap: 10px;
   transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 32px);
+  box-sizing: border-box;
   padding: 6px 16px;
   border: 1px solid #fecaca;
   border-radius: 10px;
@@ -965,6 +900,11 @@ watch(
   padding: 4px 12px;
   font-size: 13px;
   cursor: pointer;
+}
+
+.content-frame.has-offline-banner {
+  box-sizing: border-box;
+  padding-top: 48px;
 }
 
 .shortcuts-overlay {
@@ -1073,14 +1013,22 @@ watch(
   }
 
   .offline-banner {
-    top: 10px;
-    max-width: calc(100vw - 32px);
-    white-space: nowrap;
+    top: 8px;
+    left: 16px;
+    right: 16px;
+    justify-content: space-between;
+    width: auto;
+    max-width: none;
+    transform: none;
   }
 
   .content-frame.has-offline-banner {
-    box-sizing: border-box;
-    padding-top: 54px;
+    padding-top: 72px;
+  }
+
+  .offline-banner button {
+    min-width: 44px;
+    min-height: 44px;
   }
 }
 </style>
@@ -1111,8 +1059,8 @@ watch(
   --yui-warning-soft: #fffbeb;
   --yui-danger-soft: #fff1f2;
   --yui-chat-page-bg: #f8fafc;
-  --yui-chat-wallpaper-opacity: 0.82;
-  --yui-chat-wallpaper-mask: rgba(248, 250, 252, 0.34);
+  --yui-chat-wallpaper-opacity: 0.55;
+  --yui-chat-wallpaper-mask: rgba(248, 250, 252, 0.58);
   --yui-text: #172033;
   --yui-muted: #64748b;
 }
@@ -1141,8 +1089,8 @@ watch(
   --yui-warning-soft: rgba(245, 158, 11, 0.14);
   --yui-danger-soft: rgba(244, 63, 94, 0.14);
   --yui-chat-page-bg: #0f172a;
-  --yui-chat-wallpaper-opacity: 0.56;
-  --yui-chat-wallpaper-mask: rgba(15, 23, 42, 0.48);
+  --yui-chat-wallpaper-opacity: 0.42;
+  --yui-chat-wallpaper-mask: rgba(15, 23, 42, 0.64);
   --yui-text: #e5e7eb;
   --yui-muted: #94a3b8;
 }

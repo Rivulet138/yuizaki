@@ -10,6 +10,7 @@ import type { ChatMessage, ChatOptions, ChatPromptMode, ChatPromptProfile, PetCo
 import { SocketEvents } from '../net/socketClient'
 import { normalizeSentenceEmotionCues } from '../pet-sentence-emotion-scheduler'
 import { useWorkspaceStore } from './workspaceStore'
+import { logger } from '@/logger'
 import {
   getCompanionInterruptionEpoch,
   publishCompanionInterrupt,
@@ -56,6 +57,7 @@ type SendChatOptions = {
   appendUser?: boolean
   chatOptions?: Partial<ChatOptions>
 }
+type AgentTurnPreparation = () => Promise<void>
 type ChatHistoryRecord = {
   id?: number | string | null
   role: 'user' | 'assistant' | 'system'
@@ -411,6 +413,7 @@ export const useChatStore = defineStore('chat', () => {
   const pendingInterrupts = new Map<string, { startedAt: number; sessionId: string; timeoutId: number }>()
   let currentRuntimeRequest: { requestId: string; interruptionEpoch: number } | null = null
   let currentRealtimeRuntimeRequest: { requestId: string; interruptionEpoch: number } | null = null
+  let agentTurnPreparation: AgentTurnPreparation | null = null
   const blockedTtsGenerations = new Set<string>()
   const reportedPlaybackGenerations = new Set<string>()
 
@@ -780,6 +783,10 @@ export const useChatStore = defineStore('chat', () => {
     clearPendingUserMessage()
   }
 
+  const setAgentTurnPreparation = (callback: AgentTurnPreparation | null) => {
+    agentTurnPreparation = callback
+  }
+
   const sendChat = (text: string, options: SendChatOptions = {}) => {
     const trimmed = text.trim()
     if (!trimmed) return
@@ -829,7 +836,19 @@ export const useChatStore = defineStore('chat', () => {
 
     const contextMessages = activeContextMessages()
     const petContext = isPetLinkEnabled() ? petControlContext.value || undefined : undefined
-    socketClient.sendAgentChat(contextMessages, state.currentSessionId, petContext, requestId, state.currentWorkspaceId, requestChatOptions(options.chatOptions))
+    const dispatchAgentChat = () => {
+      if (currentRuntimeRequest?.requestId !== requestId || !state.isGenerating) return
+      socketClient.sendAgentChat(contextMessages, state.currentSessionId, petContext, requestId, state.currentWorkspaceId, requestChatOptions(options.chatOptions))
+    }
+    const prepareTurn = agentTurnPreparation
+    if (!prepareTurn) {
+      dispatchAgentChat()
+      return
+    }
+    void Promise.resolve()
+      .then(prepareTurn)
+      .catch((error) => logger.warn('Agent turn preparation failed; continuing without it:', error))
+      .finally(dispatchAgentChat)
   }
 
   const applyRealtimeInputPartial = (text: string) => {
@@ -1219,6 +1238,7 @@ export const useChatStore = defineStore('chat', () => {
     setTtsEnabled,
     activeContextMessages,
     setContextStartIndex,
+    setAgentTurnPreparation,
     interrupt,
     setPetControlContext,
     setCompanionPersonaPrompt,

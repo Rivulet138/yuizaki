@@ -27,6 +27,9 @@ from urllib.request import Request, urlopen
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 LOCAL_TOOL_ROOTS_ENV = "YUIZAKI_LOCAL_TOOL_ROOTS"
+SENSITIVE_FILE_SUFFIXES = {".db", ".key", ".p12", ".pem", ".pfx", ".sqlite", ".sqlite3"}
+SENSITIVE_FILE_NAMES = {"credentials.json", "permissions.json", "secrets.json", "settings.json"}
+SENSITIVE_DIRECTORY_NAMES = {".aws", ".azure", ".git", ".gnupg", ".ssh", "userdata"}
 
 
 class LocalToolError(Exception):
@@ -111,27 +114,51 @@ def _resolve_local_file_path(path: str) -> Path:
     return resolved
 
 
+def _is_sensitive_local_file(path: Path) -> bool:
+    name = path.name.lower()
+    if name == ".env" or name.endswith(".env") or ".env." in name:
+        return True
+    if name in SENSITIVE_FILE_NAMES or path.suffix.lower() in SENSITIVE_FILE_SUFFIXES:
+        return True
+    return any(part.lower() in SENSITIVE_DIRECTORY_NAMES for part in path.parts)
+
+
+def _normalize_app_name(name: str) -> str:
+    clean_name = str(name or "").strip()
+    if (
+        not clean_name
+        or len(clean_name) > 128
+        or any(ord(char) < 32 or ord(char) == 127 for char in clean_name)
+        or re.fullmatch(r"[\w .()+-]+", clean_name) is None
+    ):
+        raise LocalToolError("A plain application name is required")
+    return clean_name
+
+
 def open_app(name: str) -> str:
     """Open a desktop application by name.
 
     NOTE: Implementation is OS-specific and intentionally minimal.
     """
 
+    clean_name = _normalize_app_name(name)
     if os.name == "nt":  # Windows
         try:
-            # Use 'start' via cmd to let Windows resolve the app
-            subprocess.Popen(["cmd", "/c", "start", "", name], shell=False)
-            return f"Launched application: {name}"
+            startfile = getattr(os, "startfile", None)
+            if startfile is None:
+                raise OSError("Windows ShellExecute is unavailable")
+            startfile(clean_name)
+            return f"Launched application: {clean_name}"
         except OSError as exc:
             raise LocalToolError(str(exc))
     else:
         # On non-Windows platforms, fall back to 'open' / 'xdg-open'
         try:
             if sys.platform == "darwin":  # type: ignore[name-defined]
-                subprocess.Popen(["open", "-a", name])
+                subprocess.Popen(["open", "-a", clean_name])
             else:
-                subprocess.Popen(["xdg-open", name])
-            return f"Launched application: {name}"
+                subprocess.Popen(["xdg-open", clean_name])
+            return f"Launched application: {clean_name}"
         except OSError as exc:  # pragma: no cover - platform dependent
             raise LocalToolError(str(exc))
 
@@ -242,6 +269,8 @@ def read_file(path: str) -> str:
     """
 
     p = _resolve_local_file_path(path)
+    if _is_sensitive_local_file(p):
+        raise LocalToolError("Reading this sensitive local file is not allowed")
     if not p.exists() or not p.is_file():
         raise LocalToolError(f"File not found: {p}")
     try:

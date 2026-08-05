@@ -35,7 +35,7 @@ Python 直接运行依赖使用平台 lock 文件；模型质量回归使用 `py
 | --- | --- |
 | 文本模型 | OpenAI 兼容 API，可接云端或本地服务 |
 | 视觉模型 | 独立 OpenAI 兼容视觉端点 |
-| 实时视觉 | 屏幕关键帧、变化检测、VLM 优先、OCR fallback、会话级最新帧 |
+| 按需视觉 | 默认关闭；Agent 回合单帧采集、VLM 优先、OCR fallback |
 | OCR | RapidOCR ONNX Runtime |
 | 流式 ASR | Sherpa ONNX |
 | 流式 ASR 模型 | Sherpa Streaming Zipformer2 CTC INT8（默认，约 20 MiB） |
@@ -58,7 +58,7 @@ LLM wire protocol is selected per provider: Claude uses Anthropic Messages, Gemi
 | 模型缓存 | 按需下载到受管目录 |
 | 模型锁定 | `resources.lock.json` |
 | 临时音频 | 定时清理 |
-| 实时视觉帧 | 内存，不建立默认截图历史 |
+| 按需视觉帧 | 内存、会话级替换，不建立默认截图历史 |
 
 启动性能：核心服务先完成轻量注册，Genie TTS 默认后台加载并预热，不阻塞主启动链；低资源设备可切换为 lazy load。服务管理器会记录每个初始化阶段耗时，并在失败时回滚已启动服务。
 

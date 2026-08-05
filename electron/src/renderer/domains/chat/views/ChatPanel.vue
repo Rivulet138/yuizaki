@@ -3876,8 +3876,10 @@ onUnmounted(() => {
   display: flex;
   min-width: 0;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .composer-tools-left {
@@ -3887,6 +3889,10 @@ onUnmounted(() => {
 }
 
 .composer-tools-left::-webkit-scrollbar {
+  display: none;
+}
+
+.composer-tools-right::-webkit-scrollbar {
   display: none;
 }
 
@@ -4055,19 +4061,29 @@ onUnmounted(() => {
   }
 
   .composer-toolbar {
-    align-items: stretch;
-    flex-direction: column;
+    align-items: center;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+
+  .composer-tools-left,
+  .composer-tools-right {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    overscroll-behavior-inline: contain;
   }
 
   .composer-tools-left {
-    width: 100%;
+    flex: 0 1 36%;
+    width: auto;
   }
 
   .composer-tools-right {
-    width: 100%;
+    flex: 1 1 64%;
+    width: auto;
     justify-content: flex-start;
-    overflow-x: auto;
-    scrollbar-width: none;
   }
 
   .model-select {
@@ -4080,6 +4096,14 @@ onUnmounted(() => {
 
   .composer-tools-right::-webkit-scrollbar {
     display: none;
+  }
+
+  .top-icon-button,
+  .tool-button,
+  .send-button,
+  .search-nav-button {
+    width: 44px;
+    height: 44px;
   }
 }
 </style>

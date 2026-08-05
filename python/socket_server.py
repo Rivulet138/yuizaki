@@ -1838,12 +1838,16 @@ class DesktopPetSocketServer:
                 stored_frame = self._latest_visual_frames.get(sid)
                 if stored_frame is not None:
                     explicit_vision = mode == "vision" or _optional_bool(data.get("vision_requested")) is True
-                    if self.vision_llm_client is not None:
+                    if not explicit_vision:
+                        analysis_status = "stored"
+                        stored_frame["analysis_status"] = analysis_status
+                        stored_frame["analysis_reason"] = "awaiting_agent_turn"
+                    elif self.vision_llm_client is not None:
                         analysis_status = self._schedule_visual_frame_analysis(
                             sid,
                             dict(stored_frame),
-                            force=explicit_vision,
-                            force_reason="explicit_vision_request" if explicit_vision else "vision_primary",
+                            force=True,
+                            force_reason="explicit_vision_request",
                         )
                     else:
                         await self._run_visual_ocr(sid, stored_frame)

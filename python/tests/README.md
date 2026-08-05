@@ -36,7 +36,7 @@ pyright --pythonversion 3.11
 
 - 文件系统测试使用临时目录，不写真实 `python/data`。
 - 外部模型、Docker、网络和音频设备必须 mock 或显式标记为集成测试。
-- 新增环境变量时同步更新 `.env.example`、`ENVIRONMENT_SETUP.md` 和仓库契约测试。
+- 新增环境变量时同步更新 `.env.example`、[`ENVIRONMENT_SETUP.md`](../../docs/ENVIRONMENT_SETUP.md) 和仓库契约测试。
 - 修改 Socket.IO 事件时同时验证事件名、payload 与取消行为。
 - 修改永久删除或恢复逻辑时覆盖路径逃逸、符号链接和 dry-run。
 

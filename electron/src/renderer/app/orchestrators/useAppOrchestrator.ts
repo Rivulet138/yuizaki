@@ -30,7 +30,7 @@ export const bootstrapAppDomains = async (dependencies: AppDomainBootstrapDepend
   const run = dependencies.run ?? (async (_label, task) => { await task() })
   dependencies.initChatStore()
   await run('load companions', dependencies.loadCompanions)
-  await dependencies.syncFromBackend()
+  await run('sync workspaces', dependencies.syncFromBackend)
   dependencies.resolveActiveCompanion?.()
   await run('apply active companion runtime', dependencies.applyActiveCompanionRuntime)
   await run('load sessions', dependencies.loadSessions)

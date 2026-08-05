@@ -156,7 +156,7 @@ class PolicyEngine:
 
         scope_key = self._build_scope_key(tool.name, permission_scope)
         remembered = self._remembered.get(scope_key)
-        if remembered is not None:
+        if remembered is not None and (not force_confirm or remembered is False):
             self._append_audit(PermissionAuditRecord(
                 timestamp=datetime.now().isoformat(),
                 tool_name=tool.name,

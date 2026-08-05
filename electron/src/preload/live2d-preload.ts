@@ -24,8 +24,6 @@ const live2dApi = {
       ipcRenderer.invoke('pet:set-locked', locked),
     setClickThrough: (clickThrough: boolean) =>
       ipcRenderer.invoke('pet:set-click-through', clickThrough),
-    hasVisiblePixel: (x: number, y: number, alphaThreshold = 8) =>
-      ipcRenderer.invoke('pet:alpha-hit-test', { x, y, alphaThreshold }) as Promise<boolean>,
     snapBottomRight: () => ipcRenderer.invoke('pet:snap-bottom-right'),
     reloadRenderer: () => ipcRenderer.invoke('pet:reload-renderer'),
     savePosition: (x: number, y: number) =>

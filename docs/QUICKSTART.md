@@ -12,23 +12,23 @@
 Windows：
 
 ```powershell
-.\install_core.bat
+.\install.bat core
 ```
 
 Linux：
 
 ```bash
-./install_core.sh
+./install.sh core
 ```
 
 完整本地模型环境：
 
 ```powershell
-.\install_full.bat
+.\install.bat full
 ```
 
 ```bash
-./install_full.sh
+./install.sh full
 ```
 
 建议先使用核心安装，模型在首次使用或设置页手动选择时下载。
@@ -59,7 +59,7 @@ VISION_LLM_MODEL=your-vision-model
 VISION_LLM_DETAIL=low
 ```
 
-视觉链路会先做变化检测并异步发送关键帧给独立 VLM；VLM 不可用、失败或返回空结果时才回退到本地 OCR。`VISION_LLM_DETAIL=low` 是低延迟默认值，需要空间细节时再改为 `high` 或 `original`。
+视觉默认关闭。启用后只在发送 Agent 回合时采集当前单帧并提交独立 VLM；VLM 不可用、失败或返回空结果时才回退到本地 OCR。后台不会持续截图。`VISION_LLM_DETAIL=low` 是低延迟默认值，需要空间细节时再改为 `high` 或 `original`。
 
 ## 启动
 
