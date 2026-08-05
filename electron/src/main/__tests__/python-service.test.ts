@@ -68,7 +68,7 @@ describe('PythonService', () => {
         env: expect.objectContaining({ YUIZAKI_BACKEND_API_TOKEN: 'backend-token' }),
       }),
     )
-    expect(axiosGetMock).toHaveBeenCalledWith('http://127.0.0.1:8123/health', expect.any(Object))
+    expect(axiosGetMock).toHaveBeenCalledWith('http://127.0.0.1:8123/api/ping', expect.any(Object))
   })
 
   it('normalizes explicit backend health URLs before deriving uvicorn args', async () => {
@@ -85,6 +85,41 @@ describe('PythonService', () => {
       expect.arrayContaining(['--host', '127.0.0.1', '--port', '8234']),
       expect.any(Object),
     )
-    expect(axiosGetMock).toHaveBeenCalledWith('http://127.0.0.1:8234/health', expect.any(Object))
+    expect(axiosGetMock).toHaveBeenCalledWith('http://127.0.0.1:8234/api/ping', expect.any(Object))
+  })
+
+  it('uses the liveness endpoint when an externally managed backend may be degraded', async () => {
+    process.env['DESKTOP_PET_BACKEND_URL'] = 'http://127.0.0.1:8333'
+    process.env['DESKTOP_PET_SKIP_INTERNAL_PYTHON'] = '1'
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    axiosGetMock.mockResolvedValue({ data: { ok: true } })
+
+    const { PythonService } = await import('../python')
+    await new PythonService().start()
+
+    expect(spawnMock).not.toHaveBeenCalled()
+    expect(axiosGetMock).toHaveBeenCalledTimes(1)
+    expect(axiosGetMock).toHaveBeenCalledWith('http://127.0.0.1:8333/api/ping', expect.any(Object))
+  })
+
+  it.each([
+    ['an explicit negative response', { data: { ok: false } }],
+    ['a malformed response', { data: { status: 'degraded' } }],
+  ])('rejects %s from the liveness endpoint', async (_label, response) => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    axiosGetMock.mockResolvedValue(response)
+
+    const { PythonService } = await import('../python')
+
+    await expect(new PythonService().health()).resolves.toBe(false)
+  })
+
+  it('rejects an unreachable liveness endpoint', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    axiosGetMock.mockRejectedValue(new Error('connection refused'))
+
+    const { PythonService } = await import('../python')
+
+    await expect(new PythonService().health()).resolves.toBe(false)
   })
 })

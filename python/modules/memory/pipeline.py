@@ -4,8 +4,9 @@ from dataclasses import asdict
 from time import perf_counter
 from typing import Any
 
-from .backend import MemoryBackend
+from .backend import MemoryBackend, MemorySearchIncompleteError
 from .schema import MemorySearchFilters, RetrievalRequest, RetrievalTrace
+from .expiry import is_memory_expired
 from .vector_store import Document
 
 
@@ -26,20 +27,47 @@ class RetrievalPipeline:
             workspace_id=request.workspace_id,
             layers=request.layers,
         )
-        raw_results = self.store.search_with_rerank(
-            query=request.query,
-            top_k=candidate_limit,
-            memory_types=request.memory_types,
-            recency_weight=request.recency_weight,
-            quality_weight=request.quality_weight,
-            filters=filters,
-        )
+        try:
+            raw_results = self.store.search_with_rerank(
+                query=request.query,
+                top_k=candidate_limit,
+                memory_types=request.memory_types,
+                recency_weight=request.recency_weight,
+                quality_weight=request.quality_weight,
+                filters=filters,
+            )
+        except MemorySearchIncompleteError as exc:
+            trace = RetrievalTrace(
+                query=request.query,
+                scope=request.scope,
+                session_id=request.session_id,
+                workspace_id=request.workspace_id,
+                layers=request.layers,
+                recall_count=exc.returned_count,
+                selected_ids=exc.selected_ids,
+                candidate_limit=exc.scan_limit,
+                candidate_count=exc.scanned_count,
+                filtered_count=exc.returned_count,
+                filtered_out_count=exc.rejected_count,
+                filter_reasons={"expired_or_filtered": exc.rejected_count},
+                latency_ms=round((perf_counter() - started) * 1000, 3),
+                backend_filter_downpushed=False,
+                complete=False,
+                error_code=exc.code,
+                scan_limit_reached=True,
+            )
+            trace_dict = asdict(trace)
+            self.last_trace = trace_dict
+            exc.trace = trace_dict
+            raise
 
         eligible: list[tuple[Document, float]] = []
         filter_reasons: dict[str, int] = {}
 
         def _reject_reason(doc: Document) -> str | None:
             metadata = doc.metadata or {}
+            if is_memory_expired(metadata):
+                return 'expired'
             layer = str(metadata.get('layer', 'semantic'))
             scope = str(metadata.get('scope', 'workspace'))
             if layer not in request.layers:

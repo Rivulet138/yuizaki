@@ -91,7 +91,7 @@ export const enabledNavigationModules = (): NavigationModule[] =>
     .map(localizeNavigationModule)
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
-const primaryMenuOrder: NavigationModuleId[] = ['companion', 'chat', 'memory', 'tool']
+const primaryMenuOrder: NavigationModuleId[] = ['companion', 'chat', 'memory']
 
 export const primaryNavigationModules = (): NavigationModule[] =>
   enabledNavigationModules()

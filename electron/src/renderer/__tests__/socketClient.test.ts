@@ -11,7 +11,9 @@ const socketIoMock = vi.hoisted(() => ({
     once: vi.fn(),
     off: vi.fn(),
     emit: vi.fn(),
+    connect: vi.fn(),
     disconnect: vi.fn(),
+    auth: undefined as { token: string } | undefined,
   },
 }))
 
@@ -20,6 +22,21 @@ vi.mock('socket.io-client', () => ({
 }))
 
 describe('SocketClient contract helpers', () => {
+  const createConnectedClient = () => {
+    const socket = {
+      ...socketIoMock.socket,
+      connected: true,
+      id: 'sid-test',
+      on: vi.fn(),
+      off: vi.fn(),
+      emit: vi.fn(),
+    }
+    const client = new SocketClient()
+    ;(client as unknown as { socket: typeof socket }).socket = socket
+    client.connected.value = true
+    return { client, socket }
+  }
+
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.clearAllMocks()
@@ -63,6 +80,62 @@ describe('SocketClient contract helpers', () => {
       generation_id: 'generation-1',
       elapsed_ms: 48.25,
     })
+  })
+
+  it('waits for one exact heartbeat echo and returns a redacted audit', async () => {
+    const { client, socket } = createConnectedClient()
+    const correlation = { timestamp: 123, request_id: 'request-1', client_id: 'sid-test' }
+    socket.emit.mockImplementation((_event, payload) => {
+      const handler = socket.on.mock.calls.find(([event]) => event === SocketEvents.HEARTBEAT)?.[1]
+      queueMicrotask(() => handler(payload))
+    })
+
+    await expect(client.emitHeartbeatOnceAndWaitForEcho({ correlation, duplicateWindowMs: 1 })).resolves.toEqual({
+      emitted: true,
+      echoed: true,
+      echo_count: 1,
+      correlation: { timestamp: 123, request_id: '[verified]', client_id: '[verified]' },
+    })
+    expect(socket.off).toHaveBeenCalledWith(SocketEvents.HEARTBEAT, expect.any(Function))
+  })
+
+  it('fails heartbeat verification when no echo arrives', async () => {
+    const { client, socket } = createConnectedClient()
+
+    await expect(client.emitHeartbeatOnceAndWaitForEcho({ timeoutMs: 5 })).rejects.toThrow(/timed out/i)
+    expect(socket.off).toHaveBeenCalledWith(SocketEvents.HEARTBEAT, expect.any(Function))
+  })
+
+  it('rejects heartbeat echoes with the wrong timestamp or request id', async () => {
+    for (const wrong of [
+      { timestamp: 124, request_id: 'request-1', client_id: 'sid-test' },
+      { timestamp: 123, request_id: 'wrong', client_id: 'sid-test' },
+    ]) {
+      const { client, socket } = createConnectedClient()
+      socket.emit.mockImplementation(() => {
+        const handler = socket.on.mock.calls.find(([event]) => event === SocketEvents.HEARTBEAT)?.[1]
+        queueMicrotask(() => handler(wrong))
+      })
+      await expect(client.emitHeartbeatOnceAndWaitForEcho({
+        correlation: { timestamp: 123, request_id: 'request-1', client_id: 'sid-test' },
+        timeoutMs: 20,
+      })).rejects.toThrow(/did not match/i)
+    }
+  })
+
+  it('rejects duplicate exact heartbeat echoes', async () => {
+    const { client, socket } = createConnectedClient()
+    const correlation = { timestamp: 123, request_id: 'request-1', client_id: 'sid-test' }
+    socket.emit.mockImplementation((_event, payload) => {
+      const handler = socket.on.mock.calls.find(([event]) => event === SocketEvents.HEARTBEAT)?.[1]
+      queueMicrotask(() => {
+        handler(payload)
+        handler(payload)
+      })
+    })
+
+    await expect(client.emitHeartbeatOnceAndWaitForEcho({ correlation, duplicateWindowMs: 10 })).rejects.toThrow(/duplicated/i)
+    expect(socket.off).toHaveBeenCalledWith(SocketEvents.HEARTBEAT, expect.any(Function))
   })
 
   it('includes workspace context in direct LLM socket requests', () => {
@@ -198,5 +271,72 @@ describe('SocketClient contract helpers', () => {
       path: '/socket.io',
       auth: { token: 'backend-token' },
     }))
+  })
+
+  it('invalidates an in-flight bootstrap across disconnect and remount', async () => {
+    window.sessionStorage.setItem('yuizaki.control.token', 'backend-token')
+    let resolveFirst!: (value: unknown) => void
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    socketIoMock.io.mockReturnValue(socketIoMock.socket)
+    const client = new SocketClient()
+
+    client.connect()
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    client.disconnect()
+    client.connect()
+    resolveFirst({
+      ok: true,
+      status: 200,
+      json: async () => ({ pythonApiOrigin: 'http://localhost:8011' }),
+    })
+    await vi.waitFor(() => expect(socketIoMock.io).toHaveBeenCalledTimes(1))
+    expect(socketIoMock.io).toHaveBeenCalledWith('http://localhost:8011', expect.any(Object))
+    expect(socketIoMock.io).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not let an old rejected socket retry mutate a remounted socket', async () => {
+    window.history.replaceState({}, '', `/?control_origin=${encodeURIComponent(CONTROL_ORIGIN)}`)
+    window.sessionStorage.setItem('yuizaki.control.token', 'backend-token')
+    let resolveRefresh!: (value: unknown) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { resolveRefresh = resolve })))
+    const createSocket = () => ({
+      connected: false,
+      id: 'socket-test',
+      on: vi.fn(),
+      once: vi.fn(),
+      off: vi.fn(),
+      emit: vi.fn(),
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      auth: undefined as { token: string } | undefined,
+    })
+    const oldSocket = createSocket()
+    const remountedSocket = createSocket()
+    socketIoMock.io.mockReturnValueOnce(oldSocket as never).mockReturnValueOnce(remountedSocket as never)
+    const client = new SocketClient('http://127.0.0.1:8001')
+
+    client.connect()
+    await vi.waitFor(() => expect(socketIoMock.io).toHaveBeenCalledTimes(1))
+    const oldConnectError = oldSocket.on.mock.calls.find(([event]) => event === 'connect_error')?.[1] as ((error: Error) => void)
+    oldConnectError(new Error('authentication rejected'))
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+
+    client.disconnect()
+    client.connect()
+    await vi.waitFor(() => expect(socketIoMock.io).toHaveBeenCalledTimes(2))
+    resolveRefresh({
+      ok: true,
+      text: async () => '<meta name="yuizaki-control-token" content="fresh-token">',
+    })
+    await vi.waitFor(() => {
+      expect(window.sessionStorage.getItem('yuizaki.control.token')).toBe('fresh-token')
+    })
+
+    expect(oldSocket.connect).not.toHaveBeenCalled()
+    expect(remountedSocket.connect).not.toHaveBeenCalled()
+    expect(remountedSocket.auth).toBeUndefined()
+    client.disconnect()
   })
 })

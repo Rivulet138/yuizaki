@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { adminNavigationModules, primaryNavigationModules } from '../navigation/modules'
+import { staticNavigationModuleRecords } from '../../shared/navigation'
+import { router } from '../router'
 
 const appShell = readFileSync(resolve(process.cwd(), 'src/renderer/app/AppShell.vue'), 'utf8')
 const navigationModules = readFileSync(resolve(process.cwd(), 'src/renderer/navigation/modules.ts'), 'utf8')
@@ -27,13 +29,26 @@ describe('navigation view host', () => {
       'companion',
       'chat',
       'memory',
-      'tool',
     ])
     expect(adminNavigationModules().map((module) => module.id)).toEqual(expect.arrayContaining([
+      'tool',
       'prompt',
       'pet',
       'agent-trace',
       'settings',
     ]))
+    expect(staticNavigationModuleRecords).toHaveLength(17)
+    expect(new Set(staticNavigationModuleRecords.map((module) => module.id)).size).toBe(17)
+  })
+
+  it('preserves every advanced route as a deep link', () => {
+    for (const module of staticNavigationModuleRecords) {
+      const resolved = router.resolve(`/w/default/${module.id}`)
+      expect(resolved.name).toBe(module.id)
+    }
+    expect(router.resolve('/w/default').redirectedFrom).toBeUndefined()
+    expect(router.resolve('/w/default/tool').name).toBe('tool')
+    expect(router.resolve('/w/default/settings').name).toBe('settings')
+    expect(router.resolve('/w/default/agent-trace').name).toBe('agent-trace')
   })
 })

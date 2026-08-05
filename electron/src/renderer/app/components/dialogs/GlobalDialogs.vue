@@ -1,18 +1,24 @@
 <template>
   <!-- Permission Dialog -->
-  <el-dialog v-model="dialogStore.permissionDialogVisible" title="工具权限确认" width="480px">
+  <el-dialog
+    v-model="dialogStore.permissionDialogVisible"
+    :title="t('dialogs.permission.title')"
+    width="480px"
+    :before-close="dismissPermissionRequest"
+    @closed="handlePermissionDialogClosed"
+  >
     <div v-if="dialogStore.permissionRequest">
-      <p><strong>工具：</strong>{{ dialogStore.permissionRequest.tool_name }}</p>
+      <p><strong>{{ t('dialogs.permission.tool') }}：</strong>{{ dialogStore.permissionRequest.tool_name }}</p>
       <p v-if="dialogStore.permissionRequest.capability_id"><strong>Capability：</strong>{{ dialogStore.permissionRequest.capability_id }}</p>
-      <p v-if="dialogStore.permissionRequest.capability_kind"><strong>类别：</strong>{{ dialogStore.permissionRequest.capability_type }} / {{ dialogStore.permissionRequest.capability_kind }}</p>
-      <p><strong>风险等级：</strong>{{ dialogStore.permissionRequest.risk_level }}</p>
-      <p><strong>原因：</strong>{{ dialogStore.permissionRequest.reason }}</p>
-      <pre class="permission-args">{{ JSON.stringify(dialogStore.permissionRequest.args || {}, null, 2) }}</pre>
-      <el-checkbox v-model="rememberPermissionDecision">记住本次选择</el-checkbox>
+      <p v-if="dialogStore.permissionRequest.capability_kind"><strong>{{ t('dialogs.permission.category') }}：</strong>{{ dialogStore.permissionRequest.capability_type }} / {{ dialogStore.permissionRequest.capability_kind }}</p>
+      <p><strong>{{ t('dialogs.permission.risk') }}：</strong>{{ dialogStore.permissionRequest.risk_level }}</p>
+      <p><strong>{{ t('dialogs.permission.reason') }}：</strong>{{ dialogStore.permissionRequest.reason }}</p>
+      <pre class="permission-args" :aria-label="t('dialogs.permission.arguments')">{{ JSON.stringify(dialogStore.permissionRequest.args || {}, null, 2) }}</pre>
+      <el-checkbox v-model="rememberPermissionDecision">{{ t('dialogs.permission.remember') }}</el-checkbox>
     </div>
     <template #footer>
-      <el-button @click="respondPermission(false)">拒绝</el-button>
-      <el-button type="primary" @click="respondPermission(true)">允许</el-button>
+      <el-button data-testid="permission-deny" @click="respondPermission(false)">{{ t('dialogs.permission.deny') }}</el-button>
+      <el-button data-testid="permission-allow" type="primary" @click="respondPermission(true)">{{ t('dialogs.permission.allow') }}</el-button>
     </template>
   </el-dialog>
 
@@ -22,72 +28,104 @@
     :workspace="workspaceStore.activeWorkspace"
     :companions="companionStore.companions"
     :active-companion="companionStore.activeCompanion"
+    :muted="muted"
+    :do-not-disturb="doNotDisturb"
+    :dnd-loading="dndLoading"
+    :proactivity-preset="proactivityPreset"
     @update:visible="dialogStore.workspaceDrawerVisible = $event"
     @update-field="handleWorkspaceFieldUpdate"
-    @create-companion="createCompanionProfile"
-    @edit-companion="dialogStore.openEditCompanion"
-    @delete-companion="deleteCompanionProfile"
+    @set-muted="setMuted"
+    @set-dnd="setDrawerDoNotDisturb"
+    @set-proactivity="setDrawerProactivity"
   />
 
   <!-- Edit desktop pet profile dialog -->
-  <el-dialog v-model="dialogStore.editCompanionDialogVisible" title="编辑桌宠档案" width="560px" @open="initEditCompanionForm">
+  <el-dialog v-model="dialogStore.editCompanionDialogVisible" :title="t('dialogs.profile.title')" width="560px" @open="initEditCompanionForm">
     <el-form label-position="top" size="small">
-      <el-form-item label="名称"><el-input v-model="editCompanionForm.name" /></el-form-item>
-      <el-form-item label="模型类型"><el-select v-model="editCompanionForm.model_type" style="width:100%"><el-option label="Live2D" value="live2d" /><el-option label="VRM" value="vrm" /></el-select></el-form-item>
-      <el-form-item label="模型 ID"><el-input v-model="editCompanionForm.model_id" /></el-form-item>
-      <el-form-item label="气质"><el-select v-model="editCompanionForm.temperament" style="width:100%"><el-option label="温暖" value="warm" /><el-option label="活泼" value="playful" /><el-option label="克制" value="reserved" /></el-select></el-form-item>
-      <el-form-item label="依恋类型"><el-select v-model="editCompanionForm.attachment_style" style="width:100%"><el-option label="安全型" value="secure" /><el-option label="独立型" value="independent" /><el-option label="贴近型" value="attached" /></el-select></el-form-item>
-      <el-form-item label="支持风格"><el-select v-model="editCompanionForm.support_style" style="width:100%"><el-option label="温柔" value="gentle" /><el-option label="分析型" value="analytical" /><el-option label="明朗型" value="cheerful" /></el-select></el-form-item>
+      <el-form-item :label="t('dialogs.profile.name')"><el-input v-model="editCompanionForm.name" /></el-form-item>
+      <el-form-item :label="t('dialogs.profile.modelType')"><el-select v-model="editCompanionForm.model_type" style="width:100%"><el-option label="Live2D" value="live2d" /><el-option label="VRM" value="vrm" /></el-select></el-form-item>
+      <el-form-item :label="t('dialogs.profile.modelId')"><el-input v-model="editCompanionForm.model_id" /></el-form-item>
+      <el-form-item :label="t('dialogs.profile.temperament')"><el-select v-model="editCompanionForm.temperament" style="width:100%"><el-option :label="t('dialogs.profile.temperament.warm')" value="warm" /><el-option :label="t('dialogs.profile.temperament.playful')" value="playful" /><el-option :label="t('dialogs.profile.temperament.reserved')" value="reserved" /></el-select></el-form-item>
+      <el-form-item :label="t('dialogs.profile.attachment')"><el-select v-model="editCompanionForm.attachment_style" style="width:100%"><el-option :label="t('dialogs.profile.attachment.secure')" value="secure" /><el-option :label="t('dialogs.profile.attachment.independent')" value="independent" /><el-option :label="t('dialogs.profile.attachment.attached')" value="attached" /></el-select></el-form-item>
+      <el-form-item :label="t('dialogs.profile.support')"><el-select v-model="editCompanionForm.support_style" style="width:100%"><el-option :label="t('dialogs.profile.support.gentle')" value="gentle" /><el-option :label="t('dialogs.profile.support.analytical')" value="analytical" /><el-option :label="t('dialogs.profile.support.cheerful')" value="cheerful" /></el-select></el-form-item>
       <el-form-item label="TTS Base URL"><el-input v-model="editCompanionForm.voice_profile.base_url" /></el-form-item>
-      <el-form-item label="参考音频路径"><el-input v-model="editCompanionForm.voice_profile.ref_audio" /></el-form-item>
-      <el-form-item label="参考文本"><el-input v-model="editCompanionForm.voice_profile.ref_text" type="textarea" :rows="2" /></el-form-item>
-      <el-form-item label="语音语言"><el-input v-model="editCompanionForm.voice_profile.lang" /></el-form-item>
-      <el-form-item label="情绪状态"><el-input v-model="editCompanionForm.emotion_state" /></el-form-item>
-      <el-form-item label="亲密度"><el-input v-model="editCompanionForm.affinity_state" type="number" /></el-form-item>
-      <el-form-item label="能量"><el-input v-model="editCompanionForm.energy_state" type="number" /></el-form-item>
-      <el-form-item label="信任度"><el-input v-model="editCompanionForm.trust_state" type="number" /></el-form-item>
-      <el-form-item label="亲密深度"><el-input v-model="editCompanionForm.intimacy_state" type="number" /></el-form-item>
-      <el-form-item label="可打断性"><el-input v-model="editCompanionForm.interruptibility_state" type="number" /></el-form-item>
-      <el-form-item label="疲劳度"><el-input v-model="editCompanionForm.fatigue_state" type="number" /></el-form-item>
+      <el-form-item :label="t('dialogs.profile.referenceAudio')"><el-input v-model="editCompanionForm.voice_profile.ref_audio" /></el-form-item>
+      <el-form-item :label="t('dialogs.profile.referenceText')"><el-input v-model="editCompanionForm.voice_profile.ref_text" type="textarea" :rows="2" /></el-form-item>
+      <el-form-item :label="t('dialogs.profile.voiceLanguage')"><el-input v-model="editCompanionForm.voice_profile.lang" /></el-form-item>
+      <el-form-item :label="t('dialogs.profile.emotion')"><el-input v-model="editCompanionForm.emotion_state" /></el-form-item>
+      <el-form-item :label="t('dialogs.profile.affinity')"><el-input v-model="editCompanionForm.affinity_state" type="number" /></el-form-item>
+      <el-form-item :label="t('dialogs.profile.energy')"><el-input v-model="editCompanionForm.energy_state" type="number" /></el-form-item>
+      <el-form-item :label="t('dialogs.profile.trust')"><el-input v-model="editCompanionForm.trust_state" type="number" /></el-form-item>
+      <el-form-item :label="t('dialogs.profile.intimacy')"><el-input v-model="editCompanionForm.intimacy_state" type="number" /></el-form-item>
+      <el-form-item :label="t('dialogs.profile.interruptibility')"><el-input v-model="editCompanionForm.interruptibility_state" type="number" /></el-form-item>
+      <el-form-item :label="t('dialogs.profile.fatigue')"><el-input v-model="editCompanionForm.fatigue_state" type="number" /></el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="dialogStore.editCompanionDialogVisible = false">取消</el-button>
-      <el-button type="primary" @click="submitEditCompanion">保存</el-button>
+      <el-button @click="dialogStore.editCompanionDialogVisible = false">{{ t('common.cancel') }}</el-button>
+      <el-button type="primary" @click="submitEditCompanion">{{ t('common.save') }}</el-button>
     </template>
   </el-dialog>
 
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { computed, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useDialogStore } from '@/stores/dialogStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useCompanionStore } from '@/stores/companionStore'
 import { useCompanionRuntimeBridge } from '../../composables/useCompanionRuntimeBridge'
 import WorkspaceDrawer from '../../WorkspaceDrawer.vue'
 import { getSocketClient } from '@/net/socketClient'
+import { publishCompanionRuntimeEvent } from '../../runtime/companionRuntime'
+import { useChatStore } from '@/stores/chatStore'
+import { useI18n } from '@/i18n'
 
 const dialogStore = useDialogStore()
 const workspaceStore = useWorkspaceStore()
 const companionStore = useCompanionStore()
-const { applyActiveCompanionRuntime, handleCompanionChange } = useCompanionRuntimeBridge()
+const chatStore = useChatStore()
+const { t } = useI18n()
+const {
+  applyActiveCompanionRuntime,
+  doNotDisturb,
+  proactivityPreset,
+  setDoNotDisturb,
+  setProactivityPreset,
+} = useCompanionRuntimeBridge()
+const muted = computed(() => chatStore.chatOptions.tts_enabled === false)
+const dndLoading = ref(false)
 
 const rememberPermissionDecision = ref(false)
+const respondingPermissionIds = new Set<string>()
 
-const errorMessage = (error: unknown) => error instanceof Error ? error.message : '未知错误'
+const errorMessage = (error: unknown) => error instanceof Error ? error.message : t('common.error.unknown')
 
 const respondPermission = async (allow: boolean) => {
   const req = dialogStore.permissionRequest
-  if (!req) return
+  if (!req || respondingPermissionIds.has(req.request_id)) return
+  respondingPermissionIds.add(req.request_id)
   try {
     getSocketClient().sendPermissionResponse(req.request_id, allow, rememberPermissionDecision.value)
-    ElMessage.success(allow ? '已允许执行' : '已拒绝执行')
+    ElMessage.success(allow ? t('dialogs.permission.allowed') : t('dialogs.permission.denied'))
   } catch (error) {
-    ElMessage.error(`响应权限失败: ${errorMessage(error)}`)
+    ElMessage.error(t('dialogs.permission.responseFailed', { message: errorMessage(error) }))
+  } finally {
+    if (dialogStore.permissionRequest?.request_id === req.request_id) {
+      dialogStore.permissionDialogVisible = false
+      dialogStore.permissionRequest = null
+    }
+    void publishCompanionRuntimeEvent({ source: 'permission', permission: 'none', requestId: req.request_id })
+    respondingPermissionIds.delete(req.request_id)
   }
-  dialogStore.permissionDialogVisible = false
-  dialogStore.permissionRequest = null
+}
+
+const dismissPermissionRequest = (done: () => void) => {
+  void respondPermission(false).finally(done)
+}
+
+const handlePermissionDialogClosed = () => {
+  if (dialogStore.permissionRequest) void respondPermission(false)
 }
 
 const handleWorkspaceFieldUpdate = async (field: string, value: string) => {
@@ -95,10 +133,33 @@ const handleWorkspaceFieldUpdate = async (field: string, value: string) => {
   const patch: Record<string, string> = { [field]: value }
   try {
     await workspaceStore.updateWorkspaceRemote(workspaceId, patch)
-    ElMessage.success('场景设置已保存')
+    ElMessage.success(t('dialogs.workspace.saved'))
   } catch {
-    ElMessage.error('保存场景设置失败')
+    ElMessage.error(t('dialogs.workspace.saveFailed'))
   }
+}
+
+const setMuted = (value: boolean) => {
+  chatStore.setTtsEnabled(!value)
+  ElMessage.success(value ? t('companion.home.muted') : t('companion.home.unmuted'))
+}
+
+const setDrawerDoNotDisturb = async (enabled: boolean) => {
+  if (dndLoading.value) return
+  dndLoading.value = true
+  try {
+    await setDoNotDisturb(enabled)
+    ElMessage.success(enabled ? t('companion.home.dndEnabled') : t('companion.home.dndDisabled'))
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : t('companion.home.petActionError'))
+  } finally {
+    dndLoading.value = false
+  }
+}
+
+const setDrawerProactivity = (value: 'conservative' | 'standard') => {
+  if (setProactivityPreset(value)) ElMessage.success(t(`companion.home.proactivitySet.${value}`))
+  else ElMessage.error(t('companion.home.proactivityError'))
 }
 
 const editCompanionForm = ref({
@@ -176,39 +237,7 @@ const submitEditCompanion = async () => {
   })
   dialogStore.editCompanionDialogVisible = false
   await applyActiveCompanionRuntime()
-  ElMessage.success('桌宠档案已保存')
+  ElMessage.success(t('dialogs.profile.saved'))
 }
 
-const createCompanionProfile = async () => {
-  try {
-    const { value } = await ElMessageBox.prompt('输入新的桌宠名称', '新建桌宠档案', {
-      confirmButtonText: '创建',
-      cancelButtonText: '取消',
-      inputPattern: /\S+/,
-      inputErrorMessage: '名称不能为空',
-    })
-    const companion = await companionStore.createCompanion({ name: value.trim(), model_type: workspaceStore.activeWorkspace.context?.modelType, model_id: workspaceStore.activeWorkspace.context?.modelId || undefined })
-    await handleCompanionChange(companion.id)
-  } catch (error) {
-    console.debug('[GlobalDialogs] create companion cancelled or failed:', error)
-  }
-}
-
-const deleteCompanionProfile = async (companionId: string) => {
-  if (companionId === 'default') {
-    ElMessage.warning('默认桌宠档案不能删除')
-    return
-  }
-  try {
-    await ElMessageBox.confirm('确认删除当前桌宠档案？绑定到该档案的工作区会回退到默认桌宠档案。', '删除桌宠档案', {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-    })
-    await companionStore.deleteCompanion(companionId)
-    await handleCompanionChange('default')
-  } catch (error) {
-    console.debug('[GlobalDialogs] delete companion cancelled or failed:', error)
-  }
-}
 </script>

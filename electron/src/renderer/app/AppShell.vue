@@ -114,7 +114,6 @@ import { useSettingsStore } from '@/state/settingsStore'
 import { useInputBindingsStore } from '@/state/inputBindingsStore'
 import { VisualCaptureEpoch } from '@/visual-capture-epoch'
 import { setLocale, syncLocaleFromSettings, t } from '@/i18n'
-import { petControlClient, systemClient } from '@/api/client'
 import { adminNavigationModules, isPanelKey, primaryNavigationModules, type NavigationModuleId } from '@/navigation/modules'
 import { logger } from '@/logger'
 import { calculateFrameDifference, computeFrameSignature } from '@/vision/frame-signature'
@@ -125,6 +124,9 @@ import AppTopbar from './AppTopbar.vue'
 import GlobalDialogs from './components/dialogs/GlobalDialogs.vue'
 import { useAppOrchestrator } from './orchestrators/useAppOrchestrator'
 import { useVoiceConversationBridge } from './composables/useVoiceConversationBridge'
+import { advanceCompanionCooldownForE2E, useCompanionRuntimeBridge } from './composables/useCompanionRuntimeBridge'
+import { publishCompanionRuntimeEvent } from './runtime/companionRuntime'
+import { createAppRuntimeTeardown } from './runtime/appRuntimeTeardown'
 
 const systemStore = useSystemStore()
 const workspaceStore = useWorkspaceStore()
@@ -134,10 +136,13 @@ const settingsStore = useSettingsStore()
 const inputBindingsStore = useInputBindingsStore()
 const chatStore = useChatStore()
 const orchestrator = useAppOrchestrator()
+const companionRuntime = useCompanionRuntimeBridge()
 useVoiceConversationBridge()
 const route = useRoute()
 const router = useRouter()
 const petApi = window.petApi
+const e2eApi = petApi?.e2e
+const e2eMode = Boolean(e2eApi)
 
 const activeTab = computed<NavigationModuleId>(() => {
   const segments = route.path.replace(/^\//, '').split('/')
@@ -162,7 +167,6 @@ const activeVisionSettings = computed(() => workspaceStore.activeWorkspace.conte
 const adminMode = ref(
   typeof window !== 'undefined' && window.localStorage.getItem(ADMIN_MODE_STORAGE_KEY) === 'true',
 )
-const lastBehaviorTick = ref<number | null>(null)
 const chatState = computed(() => chatStore.state)
 const audioCaptureState = audioCapture.getStatus()
 const showShortcuts = ref(false)
@@ -182,15 +186,24 @@ const showOfflineBanner = computed(() => (
   !systemStore.sioConnected
 ))
 
-let heartbeatBehaviorTimer: number | null = null
 let visualFrameTimer: number | null = null
 let visualStartupCaptureTimer: number | null = null
 let visualFrameInFlight = false
 let visualFrameSeq = 0
 let lastVisualFrameSignature: Uint8Array | null = null
 let lastVisualFrameSentAt = 0
+const pendingVisualResults = new Map<string, {
+  resolve: (payload: Record<string, unknown>) => void
+  reject: (error: Error) => void
+  timeout: number
+}>()
 const visualCaptureEpoch = new VisualCaptureEpoch()
 let themeMediaQuery: MediaQueryList | null = null
+let healthScheduleEnabled = !e2eMode
+let visualScheduleEnabled = !e2eMode
+let companionScheduleEnabled = !e2eMode
+let disposeE2EControls: (() => void) | null = null
+let e2eInitialHealthChecked = false
 
 const VISUAL_CHANGE_THRESHOLD = 0.035
 const VISUAL_CAPTURE_ENCODING = {
@@ -312,54 +325,21 @@ const handleLocaleChange = async (locale: string) => {
   }
 }
 
-const consumeBehaviorHeartbeat = async () => {
-  if (!systemStore.controlRunning || !systemStore.pythonRunning) return
-
-  try {
-    const runtime = await systemClient.companionRuntime(8)
-    const events = Array.isArray(runtime.heartbeat?.behavior_events) ? runtime.heartbeat.behavior_events : []
-    const latest = events.length > 0 ? events[events.length - 1] : null
-    if (!latest || typeof latest.tick !== 'number') return
-    if (lastBehaviorTick.value === latest.tick) return
-    lastBehaviorTick.value = latest.tick
-
-    if (latest.emotion_id) {
-      try {
-        await petControlClient.triggerEmotion(latest.emotion_id, { source: 'automation' })
-      } catch (error) {
-        logger.warn('Failed to auto trigger behavior emotion:', error)
-      }
-    }
-
-    if (latest.motion_group) {
-      try {
-        await petControlClient.triggerMotion(latest.motion_group, 0, { source: 'automation' })
-      } catch (error) {
-        logger.warn('Failed to auto trigger behavior motion:', error)
-      }
-    }
-
-    if (latest.message) {
-      chatStore.appendLocalAdvice(latest.message, 'heartbeat')
-      chatStore.addNotification(latest.message)
-    }
-  } catch (error) {
-    logger.warn('Failed to consume heartbeat behavior events:', error)
-  }
-}
-
-const captureRealtimeVisualFrame = async () => {
+const captureRealtimeVisualFrame = async (requestedFrameId?: string): Promise<string> => {
   const vision = activeVisionSettings.value
-  if (!vision.enabled) return
-  if (vision.pauseWhenAppHidden && document.hidden) return
-  if (!systemStore.controlRunning || !systemStore.pythonRunning) return
+  if (!vision.enabled) return 'skipped:disabled'
+  if (vision.pauseWhenAppHidden && document.hidden) return 'skipped:document-hidden'
+  if (!systemStore.controlRunning || !systemStore.pythonRunning) {
+    return `skipped:health:${systemStore.controlRunning}:${systemStore.pythonRunning}`
+  }
   const screenApi = petApi?.screen
   if (!screenApi?.capture) {
     systemStore.markVisualPerceptionError('当前环境不支持屏幕采集')
-    return
+    return 'skipped:capture-api-unavailable'
   }
   const socketClient = getSocketClient()
-  if (!socketClient.isConnected() || visualFrameInFlight) return
+  if (!socketClient.isConnected()) return 'skipped:socket-disconnected'
+  if (visualFrameInFlight) return 'skipped:capture-in-flight'
   const capturePolicy = resolveVisualCapturePolicy({
     configuredIntervalMs: vision.intervalMs,
     microphoneRecording: audioCaptureState.isRecording,
@@ -367,7 +347,7 @@ const captureRealtimeVisualFrame = async () => {
     hasPartialTranscript: Boolean(chatState.value.asrPartialText),
     assistantSpeaking: chatState.value.isTTSPlaying || chatState.value.isSpeaking,
   })
-  if (!capturePolicy.shouldCapture) return
+  if (!capturePolicy.shouldCapture) return 'skipped:capture-policy'
 
   const captureEpoch = visualCaptureEpoch.current()
   visualFrameInFlight = true
@@ -386,13 +366,13 @@ const captureRealtimeVisualFrame = async () => {
           captureOptions,
         )
       : await screenApi.capture(vision.displayIndex, captureOptions)
-    if (!visualCaptureEpoch.isCurrent(captureEpoch)) return
+    if (!visualCaptureEpoch.isCurrent(captureEpoch)) return 'skipped:capture-invalidated'
     if (typeof image !== 'string' || !image.startsWith('data:image/')) {
       systemStore.markVisualPerceptionError('没有捕获到可用画面')
-      return
+      return 'skipped:invalid-image'
     }
     const signature = await computeFrameSignature(image)
-    if (!visualCaptureEpoch.isCurrent(captureEpoch)) return
+    if (!visualCaptureEpoch.isCurrent(captureEpoch)) return 'skipped:signature-invalidated'
     const now = Date.now()
     const initialFrame = lastVisualFrameSignature === null
     const changeScore = initialFrame
@@ -402,7 +382,7 @@ const captureRealtimeVisualFrame = async () => {
     const changed = initialFrame || changeScore >= VISUAL_CHANGE_THRESHOLD
     const forceFrame = Number.isFinite(capturePolicy.forceUploadIntervalMs)
       && now - lastVisualFrameSentAt >= capturePolicy.forceUploadIntervalMs
-    if ((!changed || !intervalElapsed) && !forceFrame) return
+    if ((!changed || !intervalElapsed) && !forceFrame) return 'skipped:unchanged'
 
     const captureReason = initialFrame
       ? 'initial'
@@ -414,22 +394,25 @@ const captureRealtimeVisualFrame = async () => {
 
     systemStore.markVisualPerceptionCapturing()
     visualFrameSeq += 1
+    const frameId = requestedFrameId ?? `renderer-${Date.now()}-${visualFrameSeq}`
     socketClient.requestScreenshot(image, {
       displayIndex: vision.displayIndex,
       region: vision.captureMode === 'region' ? { ...vision.region } : undefined,
       mode: 'observe',
       source: vision.captureMode === 'region' ? 'desktop_region' : 'desktop',
       timestamp: Date.now(),
-      frameId: `renderer-${Date.now()}-${visualFrameSeq}`,
+      frameId,
       changeScore,
       captureReason,
     })
     lastVisualFrameSignature = signature
     lastVisualFrameSentAt = now
+    return frameId
   } catch (error) {
-    if (!visualCaptureEpoch.isCurrent(captureEpoch)) return
+    if (!visualCaptureEpoch.isCurrent(captureEpoch)) return 'skipped:capture-error-invalidated'
     logger.warn('Failed to capture realtime visual frame:', error)
     systemStore.markVisualPerceptionError(error instanceof Error ? error.message : '实时视觉采集失败')
+    return `skipped:capture-error:${error instanceof Error ? error.message : String(error)}`
   } finally {
     visualFrameInFlight = false
   }
@@ -438,13 +421,25 @@ const captureRealtimeVisualFrame = async () => {
 const handleVisualFrameResult = (value: unknown) => {
   if (!value || typeof value !== 'object') return
   const payload = value as Record<string, unknown>
+  const frameId = typeof payload.frame_id === 'string' ? payload.frame_id : null
+  const pending = frameId ? pendingVisualResults.get(frameId) : undefined
   if (typeof payload.error === 'string' && payload.error) {
+    if (frameId && pending) {
+      window.clearTimeout(pending.timeout)
+      pendingVisualResults.delete(frameId)
+      pending.reject(new Error(payload.error))
+    }
     systemStore.markVisualPerceptionError(
       typeof payload.message === 'string' && payload.message ? payload.message : payload.error,
     )
     return
   }
   if (payload.status !== 'ok' || payload.mode !== 'observe') return
+  if (frameId && pending) {
+    window.clearTimeout(pending.timeout)
+    pendingVisualResults.delete(frameId)
+    pending.resolve(payload)
+  }
   systemStore.markVisualPerceptionReady(
     typeof payload.frame_id === 'string' ? payload.frame_id : null,
     typeof payload.received_at === 'number' ? payload.received_at : null,
@@ -460,6 +455,23 @@ const handleVisualFrameResult = (value: unknown) => {
       analysisLatencyMs: typeof payload.analysis_latency_ms === 'number' ? payload.analysis_latency_ms : null,
     },
   )
+}
+
+const waitForVisualFrameResult = (frameId: string): Promise<Record<string, unknown>> => (
+  new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      pendingVisualResults.delete(frameId)
+      reject(new Error(`Visual frame result timed out: ${frameId}`))
+    }, 20_000)
+    pendingVisualResults.set(frameId, { resolve, reject, timeout })
+  })
+)
+
+const cancelVisualFrameResultWait = (frameId: string) => {
+  const pending = pendingVisualResults.get(frameId)
+  if (!pending) return
+  window.clearTimeout(pending.timeout)
+  pendingVisualResults.delete(frameId)
 }
 
 const restartVisualFrameTimer = () => {
@@ -480,6 +492,7 @@ const restartVisualFrameTimer = () => {
     getSocketClient().clearVisualContext()
     return
   }
+  if (!visualScheduleEnabled) return
   const samplingIntervalMs = Math.max(750, Math.min(1500, vision.intervalMs))
   visualFrameTimer = window.setInterval(() => {
     void captureRealtimeVisualFrame()
@@ -490,6 +503,136 @@ const restartVisualFrameTimer = () => {
     visualStartupCaptureTimer = null
     void captureRealtimeVisualFrame()
   }, 3500)
+}
+
+const handlePermissionRequest = (data: PermissionRequestPayload) => {
+  void publishCompanionRuntimeEvent({ source: 'permission', permission: 'waiting', requestId: data.request_id })
+  dialogStore.openPermissionRequest(data)
+}
+
+const stopAppRuntime = () => {
+  visualCaptureEpoch.invalidate()
+  window.removeEventListener('keydown', handleGlobalKeydown)
+  petApi?.off?.('panel:open-tab', handlePanelOpenTab)
+  petApi?.off?.('shortcut:toggle-vision', handleToggleVisionShortcut)
+  themeMediaQuery?.removeEventListener('change', applyTheme)
+  systemStore.stopHealthCheck()
+  companionRuntime.stopCompanionRuntime()
+  if (visualFrameTimer) window.clearInterval(visualFrameTimer)
+  if (visualStartupCaptureTimer) window.clearTimeout(visualStartupCaptureTimer)
+  visualFrameTimer = null
+  visualStartupCaptureTimer = null
+  for (const [frameId, pending] of pendingVisualResults) {
+    window.clearTimeout(pending.timeout)
+    pending.reject(new Error(`Visual frame result wait cancelled: ${frameId}`))
+  }
+  pendingVisualResults.clear()
+  const socketClient = getSocketClient()
+  socketClient.off(SocketEvents.PERMISSION_REQUEST, handlePermissionRequest)
+  socketClient.off(SocketEvents.SCREENSHOT_RESULT, handleVisualFrameResult)
+  disposeE2EControls?.()
+  disposeE2EControls = null
+}
+
+const appRuntimeTeardown = createAppRuntimeTeardown({
+  stop: stopAppRuntime,
+  disconnect: () => getSocketClient().disconnect(),
+})
+const teardownAppRuntime = () => appRuntimeTeardown.run()
+defineExpose({ teardownAppRuntime })
+
+if (e2eApi) {
+  disposeE2EControls = e2eApi.onControl(async ({ control }) => {
+    const socketClient = getSocketClient()
+    switch (control) {
+      case 'pauseHealthPolling':
+        healthScheduleEnabled = false
+        systemStore.stopHealthCheck()
+        return { paused: true }
+      case 'pollHealthOnce':
+        if (!e2eInitialHealthChecked) {
+          const socketDeadline = Date.now() + 5_000
+          while (!socketClient.isConnected()) {
+            if (Date.now() >= socketDeadline) throw new Error('Initial E2E Socket connection timed out')
+            await new Promise(resolve => window.setTimeout(resolve, 25))
+          }
+          e2eInitialHealthChecked = true
+        }
+        await systemStore.refreshStatus(() => false, () => socketClient.isConnected())
+        return {
+          checked: systemStore.statusChecked,
+          controlRunning: systemStore.controlRunning,
+          pythonRunning: systemStore.pythonRunning,
+          sioConnected: systemStore.sioConnected,
+        }
+      case 'resumeHealthPolling':
+        healthScheduleEnabled = true
+        systemStore.startHealthCheck(() => false, () => socketClient.isConnected())
+        while (!systemStore.statusChecked) await new Promise(resolve => window.setTimeout(resolve, 25))
+        return { resumed: true, checked: true }
+      case 'pauseVisualSampling':
+        visualScheduleEnabled = false
+        restartVisualFrameTimer()
+        return { paused: true }
+      case 'sampleVisualOnce':
+        {
+          const socketDeadline = Date.now() + 5_000
+          while (!socketClient.isConnected()) {
+            if (Date.now() >= socketDeadline) throw new Error('Visual sample Socket connection timed out')
+            await new Promise(resolve => window.setTimeout(resolve, 25))
+          }
+          const frameId = `renderer-e2e-${Date.now()}-${visualFrameSeq + 1}`
+          const resultPromise = waitForVisualFrameResult(frameId)
+          const sentFrameId = await captureRealtimeVisualFrame(frameId)
+          if (sentFrameId !== frameId) {
+            cancelVisualFrameResultWait(frameId)
+            throw new Error(`Visual frame was not captured: ${sentFrameId}`)
+          }
+          const result = await resultPromise
+          return { sampled: true, frameId, status: result['status'] }
+        }
+      case 'resumeVisualSampling':
+        visualScheduleEnabled = true
+        restartVisualFrameTimer()
+        return { resumed: true }
+      case 'pauseCompanionPolling':
+        companionScheduleEnabled = false
+        companionRuntime.stopCompanionRuntime()
+        return { paused: true }
+      case 'pollCompanionOnce':
+        return companionRuntime.pollCompanionOnce()
+      case 'resumeCompanionPolling':
+        {
+          companionScheduleEnabled = true
+          const previous = companionRuntime.runtimeSnapshot.value
+          const nextSnapshot = new Promise<void>((resolve, reject) => {
+            const timeout = window.setTimeout(() => {
+              stopWatching()
+              reject(new Error('Scheduled companion poll timed out'))
+            }, 4_000)
+            const stopWatching = watch(companionRuntime.runtimeSnapshot, (snapshot) => {
+              if (!snapshot || snapshot === previous) return
+              window.clearTimeout(timeout)
+              stopWatching()
+              resolve()
+            })
+          })
+          companionRuntime.startCompanionRuntime(() => systemStore.controlRunning && systemStore.pythonRunning)
+          await nextSnapshot
+          return { resumed: true, polled: true }
+        }
+      case 'advanceCompanionCooldown':
+        return { advancedMs: advanceCompanionCooldownForE2E() }
+      case 'pauseHeartbeat':
+        socketClient.pauseHeartbeat()
+        return { paused: true }
+      case 'emitHeartbeatOnce':
+        return socketClient.emitHeartbeatOnceAndWaitForEcho()
+      case 'teardownRuntime':
+        await teardownAppRuntime()
+        return { tornDown: true }
+    }
+  })
 }
 
 watch(() => chatState.value.isGenerating, (generating) => {
@@ -512,36 +655,50 @@ onMounted(() => {
   petApi?.on?.('shortcut:toggle-vision', handleToggleVisionShortcut)
 
   const socketClient = getSocketClient()
+  if (e2eMode) socketClient.pauseHeartbeat()
   socketClient.connect()
-  systemStore.startHealthCheck(
-    () => false,
-    () => socketClient.isConnected(),
-  )
-  socketClient.on(SocketEvents.PERMISSION_REQUEST, (data: PermissionRequestPayload) => {
-    dialogStore.openPermissionRequest(data)
-  })
+  if (healthScheduleEnabled) {
+    systemStore.startHealthCheck(
+      () => false,
+      () => socketClient.isConnected(),
+    )
+  }
+  socketClient.on(SocketEvents.PERMISSION_REQUEST, handlePermissionRequest)
   socketClient.on(SocketEvents.SCREENSHOT_RESULT, handleVisualFrameResult)
 
-  heartbeatBehaviorTimer = window.setInterval(consumeBehaviorHeartbeat, 5000)
-  restartVisualFrameTimer()
+  if (companionScheduleEnabled) {
+    companionRuntime.startCompanionRuntime(() => systemStore.controlRunning && systemStore.pythonRunning)
+  }
+  if (visualScheduleEnabled) restartVisualFrameTimer()
+
+  const restoredTab = activeWorkspace.value.context.activeTab
+  if (activeTab.value === 'companion' && restoredTab && isPanelKey(restoredTab) && restoredTab !== 'companion') {
+    void router.replace(`/w/${encodeURIComponent(activeWorkspace.value.id)}/${restoredTab}`)
+  }
 })
 
 onUnmounted(() => {
-  visualCaptureEpoch.invalidate()
-  window.removeEventListener('keydown', handleGlobalKeydown)
-  petApi?.off?.('panel:open-tab', handlePanelOpenTab)
-  petApi?.off?.('shortcut:toggle-vision', handleToggleVisionShortcut)
-  themeMediaQuery?.removeEventListener('change', applyTheme)
-  systemStore.stopHealthCheck()
-  if (heartbeatBehaviorTimer) clearInterval(heartbeatBehaviorTimer)
-  if (visualFrameTimer) clearInterval(visualFrameTimer)
-  if (visualStartupCaptureTimer) clearTimeout(visualStartupCaptureTimer)
-  getSocketClient().off(SocketEvents.SCREENSHOT_RESULT, handleVisualFrameResult)
+  void teardownAppRuntime()
 })
 
 watch(() => settingsStore.state.system.theme, applyTheme)
 watch(() => settingsStore.state.system.language, (language) => syncLocaleFromSettings(language))
-watch(activeVisionSettings, restartVisualFrameTimer, { deep: true })
+watch(activeTab, (tab) => {
+  const context = activeWorkspace.value.context
+  const recentTabs = [tab, ...(context.recentTabs ?? []).filter((item) => item !== tab)].slice(0, 8)
+  workspaceStore.updateWorkspaceContext(activeWorkspace.value.id, { activeTab: tab, recentTabs })
+})
+watch(activeVisionSettings, () => {
+  if (visualScheduleEnabled) restartVisualFrameTimer()
+}, { deep: true })
+watch(
+  () => [systemStore.statusChecked, systemStore.controlRunning, systemStore.pythonRunning] as const,
+  ([checked, controlRunning, pythonRunning]) => {
+    const availability = !checked ? 'degraded' : controlRunning && pythonRunning ? 'online' : 'offline'
+    void publishCompanionRuntimeEvent({ source: 'health', availability })
+  },
+  { immediate: true },
+)
 </script>
 
 <style scoped>
@@ -587,8 +744,7 @@ watch(activeVisionSettings, restartVisualFrameTimer, { deep: true })
   background-size: cover;
   filter: saturate(1.22) contrast(1.08);
   opacity: 0.98;
-  transform: scale(1.015);
-  transition: opacity 0.3s ease, transform 0.6s ease;
+  transition: opacity 0.3s ease;
 }
 
 .wallpaper-blur {
@@ -597,7 +753,6 @@ watch(activeVisionSettings, restartVisualFrameTimer, { deep: true })
   background-size: cover;
   filter: blur(24px) saturate(1.18);
   opacity: 0;
-  transform: scale(1.12);
 }
 
 .wallpaper-mask {
@@ -607,7 +762,6 @@ watch(activeVisionSettings, restartVisualFrameTimer, { deep: true })
 
 .wallpaper-on .wallpaper-layer {
   opacity: 1;
-  transform: scale(1.025);
 }
 
 .content-frame {

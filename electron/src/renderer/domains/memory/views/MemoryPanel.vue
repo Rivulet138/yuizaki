@@ -24,12 +24,13 @@
             circle
             :icon="Tools"
             :type="advancedToolsVisible ? 'primary' : 'default'"
-            :title="advancedToolsVisible ? '收起高级工具' : '高级工具'"
-            :aria-label="advancedToolsVisible ? '收起高级工具' : '高级工具'"
+            :title="advancedToolsVisible ? t('memory.advanced.collapse') : t('memory.advanced.expand')"
+            :aria-label="advancedToolsVisible ? t('memory.advanced.collapse') : t('memory.advanced.expand')"
+            :aria-expanded="advancedToolsVisible"
             @click="advancedToolsVisible = !advancedToolsVisible"
           />
-          <el-button plain :loading="rebuildIndexLoading" @click="rebuildMemoryIndex">重建索引</el-button>
-          <el-button type="primary" plain :loading="docsRequest.loading" @click="refreshMemoryState">刷新她的记忆</el-button>
+          <el-button v-if="advancedToolsVisible" plain :loading="rebuildIndexLoading" @click="rebuildMemoryIndex">{{ t('memory.actions.rebuildIndex') }}</el-button>
+          <el-button data-testid="memory-refresh" type="primary" plain :loading="docsRequest.loading" @click="refreshMemoryState">{{ t('memory.actions.refresh') }}</el-button>
         </div>
       </div>
 
@@ -209,7 +210,7 @@
             </div>
             <div class="button-row with-margin">
               <el-button plain :loading="maintenanceSaving" @click="saveMemoryPolicy">保存整理规则</el-button>
-              <el-button type="primary" plain :loading="maintenancePreviewLoading" @click="previewMemoryMaintenance">预览影响</el-button>
+              <el-button data-testid="memory-maintenance-preview" type="primary" plain :loading="maintenancePreviewLoading" @click="previewMemoryMaintenance">{{ t('memory.actions.previewImpact') }}</el-button>
               <el-button
                 type="danger"
                 :loading="maintenanceApplyLoading"
@@ -240,13 +241,13 @@
                 <el-input v-model="docForm.id" />
               </el-form-item>
               <el-form-item label="文档内容">
-                <el-input v-model="docForm.text" type="textarea" :rows="4" placeholder="粘贴文档片段、设定、背景资料或长期事实" />
+                <el-input data-testid="memory-document-text" v-model="docForm.text" type="textarea" :rows="4" :placeholder="t('memory.document.textPlaceholder')" />
               </el-form-item>
               <el-form-item label="元数据 JSON">
-                <el-input v-model="docForm.metadataJson" type="textarea" :rows="3" placeholder='例如 {"source":"manual","layer":"semantic"}' />
+                <el-input data-testid="memory-document-metadata" v-model="docForm.metadataJson" type="textarea" :rows="3" :placeholder="t('memory.document.metadataPlaceholder')" />
               </el-form-item>
               <div class="button-row">
-                <el-button type="primary" plain :loading="docWriteLoading" :disabled="!docForm.text.trim()" @click="submitDocument">写入文档</el-button>
+                <el-button data-testid="memory-document-submit" type="primary" plain :loading="docWriteLoading" :disabled="!docForm.text.trim()" @click="submitDocument">{{ t('memory.actions.writeDocument') }}</el-button>
                 <el-tag type="info">原始文档</el-tag>
               </div>
             </el-form>
@@ -263,7 +264,7 @@
             </template>
             <el-form label-position="top" @submit.prevent>
               <el-form-item label="检索问题">
-                <el-input v-model="queryForm.query" placeholder="输入检索问题..." @keyup.enter="submitQuery" />
+                <el-input data-testid="memory-query-input" v-model="queryForm.query" :placeholder="t('memory.query.placeholder')" @keyup.enter="submitQuery" />
               </el-form-item>
               <div class="form-grid">
                 <el-form-item label="作用域">
@@ -278,7 +279,7 @@
                 </el-form-item>
               </div>
               <div class="button-row">
-                <el-button type="primary" :loading="queryRequest.loading" :disabled="!queryForm.query.trim()" @click="submitQuery">分层检索</el-button>
+                <el-button data-testid="memory-query-submit" type="primary" :loading="queryRequest.loading" :disabled="!queryForm.query.trim()" @click="submitQuery">{{ t('memory.actions.layeredQuery') }}</el-button>
                 <el-button plain :loading="rawQueryRequest.loading" :disabled="!queryForm.query.trim()" @click="submitRawQuery">原始检索</el-button>
                 <el-tag type="info">平均得分：{{ averageQueryScore }}</el-tag>
               </div>
@@ -392,6 +393,7 @@
                     v-for="row in visibleDocs"
                     :key="row.id"
                     class="memory-doc-card"
+                    :data-memory-id="row.id"
                     :class="{ active: selectedDoc?.id === row.id, hit: isQueryHit(row) }"
                     role="button"
                     tabindex="0"
@@ -412,6 +414,9 @@
                         <span :class="importanceColorClass(row.importance)">重要度 {{ Number(row.importance ?? 0).toFixed(2) }}</span>
                         <span>质量 {{ formatScore(row.quality_score) }}</span>
                         <span>置信 {{ formatScore(row.confidence) }}</span>
+                        <span>{{ docSourceLabel(row) }}</span>
+                        <span>{{ docScopeLabel(row) }}</span>
+                        <span>{{ docExpiryLabel(row) }}</span>
                         <span>{{ docUpdatedLabel(row) }}</span>
                       </div>
                     </div>
@@ -437,7 +442,7 @@
                     <div class="inspector-editor">
                       <label class="editor-field editor-field-full">
                         <span>内容</span>
-                        <el-input v-model="inspectorDraft.text" type="textarea" :rows="4" resize="none" />
+                        <el-input data-testid="memory-inspector-text" v-model="inspectorDraft.text" type="textarea" :rows="4" resize="none" />
                       </label>
                       <div class="editor-grid">
                         <label class="editor-field">
@@ -467,6 +472,7 @@
                       </div>
                       <div class="button-row">
                         <el-button
+                          data-testid="memory-inspector-save"
                           size="small"
                           type="primary"
                           :loading="inspectorDraftSaving"
@@ -499,7 +505,8 @@
                     <div class="inspector-actions">
                       <el-button size="small" type="primary" plain @click="openEditDoc(selectedDoc)">完整编辑</el-button>
                       <el-button size="small" plain @click="boostDocImportance(selectedDoc)">提高重要度</el-button>
-                      <el-button
+                        <el-button
+                          data-testid="memory-inspector-delete"
                         size="small"
                         type="danger"
                         plain
@@ -590,6 +597,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useI18n } from '@/i18n'
 import { Tools } from '@element-plus/icons-vue'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
@@ -609,6 +617,8 @@ type DocSortMode = 'updated' | 'importance' | 'quality' | 'confidence'
 type MemoryScope = 'global' | 'workspace' | 'session'
 
 const { docs, queryResult, docsRequest, addRequest, updateRequest, queryRequest, rawQueryRequest, loadDocs, addMemory, updateDoc, queryMemory, queryRawRag } = useMemoryDomain()
+const { t } = useI18n()
+const e2eMode = Boolean(window.petApi?.e2e)
 const sessionStore = useSessionStore()
 const workspaceStore = useWorkspaceStore()
 const activeWorkspace = computed(() => workspaceStore.activeWorkspace)
@@ -744,6 +754,13 @@ const docUpdatedLabel = (doc: MemoryDoc) => {
   const raw = doc.updated_at || (typeof doc.metadata?.timestamp === 'string' ? doc.metadata.timestamp : '')
   if (!raw) return '未记录时间'
   return String(raw).replace('T', ' ').slice(0, 16)
+}
+
+const docExpiryLabel = (doc: MemoryDoc) => {
+  const raw = doc.expires_at || (typeof doc.metadata?.expires_at === 'string' ? doc.metadata.expires_at : '')
+  return raw
+    ? t('memory.expiry.until', { value: raw.replace('T', ' ').slice(0, 16) })
+    : t('memory.expiry.permanent')
 }
 
 const stringMeta = (doc: MemoryDoc, key: string) => {
@@ -1102,6 +1119,7 @@ const refreshIndexStatus = async () => {
 
 const refreshMemoryState = async () => {
   await loadScopedDocs()
+  if (e2eMode) return
   try {
     await refreshIndexStatus()
   } catch (error) {
@@ -1165,6 +1183,7 @@ const submitDocument = async () => {
   docWriteLoading.value = true
   duplicateCandidates.value = []
   try {
+    const documentText = docForm.text.trim()
     const metadata = parseMetadata()
     const scopedMetadata = {
       layer: 'semantic',
@@ -1175,7 +1194,7 @@ const submitDocument = async () => {
     }
     const result = await memoryClient.addDoc({
       id: docForm.id.trim() || undefined,
-      text: docForm.text.trim(),
+      text: documentText,
       metadata: scopedMetadata,
       scope: currentMemoryScope.value,
       workspace_id: currentMemoryScope.value === 'global' ? undefined : activeWorkspace.value?.id,
@@ -1191,7 +1210,25 @@ const submitDocument = async () => {
     docForm.id = ''
     docForm.text = ''
     docForm.metadataJson = ''
-    void refreshMemoryState()
+    if (e2eMode) {
+      const createdMetadata = scopedMetadata as Record<string, unknown>
+      docs.value = [{
+        id: result.id,
+        text: documentText,
+        type: typeof createdMetadata.type === 'string' ? createdMetadata.type : 'fact',
+        layer: typeof createdMetadata.layer === 'string' ? createdMetadata.layer : 'semantic',
+        importance: Number.isFinite(Number(createdMetadata.importance)) ? Number(createdMetadata.importance) : undefined,
+        confidence: Number.isFinite(Number(createdMetadata.confidence)) ? Number(createdMetadata.confidence) : undefined,
+        updated_at: typeof createdMetadata.updated_at === 'string' ? createdMetadata.updated_at : undefined,
+        source: typeof createdMetadata.source === 'string' ? createdMetadata.source : undefined,
+        scope: typeof createdMetadata.scope === 'string' ? createdMetadata.scope : currentMemoryScope.value,
+        expires_at: typeof createdMetadata.expires_at === 'string' ? createdMetadata.expires_at : undefined,
+        metadata: createdMetadata,
+      }, ...docs.value.filter(doc => doc.id !== result.id)]
+      selectedDocId.value = result.id
+    } else {
+      void refreshMemoryState()
+    }
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '写入文档失败')
   } finally {
@@ -1201,12 +1238,24 @@ const submitDocument = async () => {
 
 const submitQuery = async () => {
   if (!queryForm.query.trim()) return
-  await queryMemory({ query: queryForm.query.trim(), top_k: queryForm.top_k, session_id: sessionStore.activeSession?.id, scope: queryForm.scope, layers: effectiveQueryLayers.value })
+  await queryMemory({
+    query: queryForm.query.trim(),
+    top_k: queryForm.top_k,
+    session_id: queryForm.scope === 'session' ? sessionStore.activeSession?.id : undefined,
+    scope: queryForm.scope,
+    layers: selectedQueryLayers.value.length ? effectiveQueryLayers.value : undefined,
+  })
 }
 
 const submitRawQuery = async () => {
   if (!queryForm.query.trim()) return
-  await queryRawRag({ query: queryForm.query.trim(), top_k: queryForm.top_k, session_id: sessionStore.activeSession?.id, scope: queryForm.scope, layers: effectiveQueryLayers.value })
+  await queryRawRag({
+    query: queryForm.query.trim(),
+    top_k: queryForm.top_k,
+    session_id: queryForm.scope === 'session' ? sessionStore.activeSession?.id : undefined,
+    scope: queryForm.scope,
+    layers: effectiveQueryLayers.value,
+  })
 }
 
 const openEditDoc = (doc: MemoryDoc) => {
@@ -1604,6 +1653,7 @@ watch(
 onMounted(async () => {
   queryForm.scope = currentMemoryScope.value
   void loadScopedDocs()
+  if (e2eMode) return
   try {
     await refreshIndexStatus()
   } catch (error) {

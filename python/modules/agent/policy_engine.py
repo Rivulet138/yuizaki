@@ -4,11 +4,17 @@ from dataclasses import dataclass
 import asyncio
 import uuid
 import json
+import threading
 from datetime import datetime
 from pathlib import Path
 
 from ..core.paths import data_dir_from_env
 from .models import PermissionAuditRecord
+from .permission_receipt import (
+    PermissionDecision,
+    PermissionReceipt,
+    build_permission_receipt,
+)
 from .tool_registry import ToolDefinition
 
 
@@ -18,6 +24,7 @@ class PolicyDecision:
     reason: str = "ok"
     request_id: str | None = None
     require_confirm: bool = False
+    permission_receipt: PermissionReceipt | None = None
 
 
 class PolicyEngine:
@@ -30,10 +37,12 @@ class PolicyEngine:
 
     def __init__(self, store_file: str | Path | None = None) -> None:
         self._pending: dict[str, asyncio.Future[bool]] = {}
+        self._permission_metadata: dict[str, dict[str, str]] = {}
         self._remembered: dict[str, bool] = {}
         self._audit: list[dict[str, object]] = []
         self._audit_max_entries = 500
         self._store_file = Path(store_file) if store_file is not None else data_dir_from_env() / "permissions.json"
+        self._store_lock = threading.RLock()
         self._load_store()
 
     def _load_store(self) -> None:
@@ -52,24 +61,26 @@ class PolicyEngine:
             self._audit = []
 
     def _save_store(self) -> None:
-        self._store_file.parent.mkdir(parents=True, exist_ok=True)
-        self._store_file.write_text(
-            json.dumps(
-                {
-                    "remembered": self._remembered,
-                    "audit": self._audit[-self._audit_max_entries:],
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
+        with self._store_lock:
+            self._store_file.parent.mkdir(parents=True, exist_ok=True)
+            self._store_file.write_text(
+                json.dumps(
+                    {
+                        "remembered": self._remembered,
+                        "audit": self._audit[-self._audit_max_entries:],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
 
     def _append_audit(self, entry: dict[str, object]) -> None:
-        self._audit.append(entry)
-        if len(self._audit) > self._audit_max_entries:
-            self._audit = self._audit[-self._audit_max_entries:]
-        self._save_store()
+        with self._store_lock:
+            self._audit.append(entry)
+            if len(self._audit) > self._audit_max_entries:
+                self._audit = self._audit[-self._audit_max_entries:]
+            self._save_store()
 
     def get_remembered_decisions(self) -> dict[str, bool]:
         return dict(self._remembered)
@@ -114,7 +125,35 @@ class PolicyEngine:
         self._save_store()
         return count
 
-    def evaluate_tool(self, tool: ToolDefinition, request_id: str | None = None, permission_scope: str | None = None) -> PolicyDecision:
+    def evaluate_tool(
+        self,
+        tool: ToolDefinition,
+        request_id: str | None = None,
+        permission_scope: str | None = None,
+        parameters: object | None = None,
+        force_confirm: bool = False,
+    ) -> PolicyDecision:
+        agent_request_id = str(request_id or f"agent_{uuid.uuid4().hex[:12]}")
+        scope = (permission_scope or "default").strip() or "default"
+        permission_request_id = f"perm_{uuid.uuid4().hex[:12]}"
+        capability_call_id = f"call_{uuid.uuid4().hex[:12]}"
+
+        def receipt(decision: PermissionDecision, reason_code: str, *, retryable: bool) -> PermissionReceipt:
+            return build_permission_receipt(
+                agent_request_id=agent_request_id,
+                permission_request_id=permission_request_id,
+                capability_call_id=capability_call_id,
+                decision=decision,
+                reason_code=reason_code,
+                retryable=retryable,
+                permission_scope=scope,
+                capability_id=tool.name,
+                capability_type="tool",
+                capability_kind=f"{tool.source}-tool",
+                risk_level=tool.risk_level,
+                parameters=parameters or {},
+            )
+
         scope_key = self._build_scope_key(tool.name, permission_scope)
         remembered = self._remembered.get(scope_key)
         if remembered is not None:
@@ -129,18 +168,54 @@ class PolicyEngine:
                 risk_level=tool.risk_level,
                 request_id=request_id,
                 requires_approval=bool(tool.require_confirm),
+                agent_request_id=agent_request_id,
+                permission_request_id=permission_request_id,
+                capability_call_id=capability_call_id,
+                permission_scope=scope,
             ).to_dict())
-            return PolicyDecision(allowed=remembered, reason="remembered")
+            return PolicyDecision(
+                allowed=remembered,
+                reason="remembered",
+                permission_receipt=receipt(
+                    "allowed" if remembered else "denied",
+                    "remembered_allow" if remembered else "remembered_deny",
+                    retryable=bool(remembered),
+                ),
+            )
 
-        if tool.require_confirm and tool.risk_level in {"medium", "high", "critical"}:
+        if force_confirm or (tool.require_confirm and tool.risk_level in {"medium", "high", "critical"}):
+            reason_code = "untrusted_mcp_followup_requires_confirmation" if force_confirm else "permission_required"
+            with self._store_lock:
+                self._permission_metadata[permission_request_id] = {
+                    "agent_request_id": agent_request_id,
+                    "capability_call_id": capability_call_id,
+                    "permission_scope": scope,
+                }
+            self._append_audit(PermissionAuditRecord(
+                timestamp=datetime.now().isoformat(),
+                tool_name=tool.name,
+                capability_id=tool.name,
+                capability_type="tool",
+                capability_kind=f"{tool.source}-tool",
+                remember_scope=scope,
+                decision="required",
+                risk_level=tool.risk_level,
+                request_id=request_id,
+                requires_approval=True,
+                agent_request_id=agent_request_id,
+                permission_request_id=permission_request_id,
+                capability_call_id=capability_call_id,
+                permission_scope=scope,
+            ).to_dict())
             return PolicyDecision(
                 allowed=False,
                 reason=(
                     f"Tool '{tool.name}' requires user confirmation "
                     f"(risk={tool.risk_level}) before execution"
                 ),
-                request_id=f"perm_{uuid.uuid4().hex[:12]}",
+                request_id=permission_request_id,
                 require_confirm=True,
+                permission_receipt=receipt("required", reason_code, retryable=False),
             )
 
         self._append_audit(PermissionAuditRecord(
@@ -154,8 +229,15 @@ class PolicyEngine:
             risk_level=tool.risk_level,
             request_id=request_id,
             requires_approval=bool(tool.require_confirm),
+            agent_request_id=agent_request_id,
+            permission_request_id=permission_request_id,
+            capability_call_id=capability_call_id,
+            permission_scope=scope,
         ).to_dict())
-        return PolicyDecision(allowed=True)
+        return PolicyDecision(
+            allowed=True,
+            permission_receipt=receipt("allowed", "policy_auto_allow", retryable=True),
+        )
 
     def register_pending(self, request_id: str) -> asyncio.Future[bool]:
         loop = asyncio.get_running_loop()
@@ -163,8 +245,14 @@ class PolicyEngine:
         self._pending[request_id] = future
         return future
 
+    def discard_permission(self, request_id: str) -> None:
+        with self._store_lock:
+            self._permission_metadata.pop(request_id, None)
+
     def resolve_pending(self, request_id: str, allowed: bool, remember: bool = False, tool_name: str | None = None, permission_scope: str | None = None) -> None:
         future = self._pending.pop(request_id, None)
+        with self._store_lock:
+            metadata = self._permission_metadata.pop(request_id, {})
         if future and not future.done():
             future.set_result(allowed)
         if remember and tool_name:
@@ -179,6 +267,10 @@ class PolicyEngine:
             remember_scope=(permission_scope or "default").strip() or "default",
             decision="allowed" if allowed else "denied",
             remember=remember,
+            agent_request_id=metadata.get("agent_request_id"),
+            permission_request_id=request_id,
+            capability_call_id=metadata.get("capability_call_id"),
+            permission_scope=metadata.get("permission_scope") or permission_scope,
         ).to_dict())
         if remember and tool_name:
             self._save_store()

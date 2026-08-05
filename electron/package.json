@@ -25,7 +25,11 @@
     "type-check": "tsc --noEmit",
     "lint": "eslint src",
     "format": "prettier --write \"src/**/*.{ts,tsx,vue,js,json}\"",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e:unit": "node --test scripts/__tests__/e2e-supervisor.test.mjs scripts/__tests__/e2e-lifecycle.test.mjs",
+    "test:e2e:redaction": "npm run build && node --test scripts/__tests__/e2e-redaction-artifacts.test.mjs",
+    "test:ci-contract": "node --test ../scripts/__tests__/verify-protected-ci.test.mjs && node ../scripts/verify-protected-ci.mjs",
+    "test:e2e": "npm run build && node scripts/run-electron-e2e.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",

@@ -8,9 +8,9 @@ import inspect
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
-from modules.system.api_security import require_bearer_token
+from modules.system.api_security import require_bearer_token, resolve_admin_authorization
 
 
 def _custom_stdio_mcp_enabled() -> bool:
@@ -213,7 +213,7 @@ def create_system_router(
 
     if permissions_handler is not None:
         @router.get("/api/system/permissions")
-        async def permissions_state(authorization: str | None = Header(default=None)):
+        async def permissions_state(authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -221,7 +221,7 @@ def create_system_router(
 
     if revoke_permission_handler is not None:
         @router.delete("/api/system/permissions/{tool_name:path}")
-        async def revoke_permission(tool_name: str, authorization: str | None = Header(default=None)):
+        async def revoke_permission(tool_name: str, authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -229,7 +229,7 @@ def create_system_router(
 
     if clear_permissions_handler is not None:
         @router.delete("/api/system/permissions")
-        async def clear_permissions(authorization: str | None = Header(default=None)):
+        async def clear_permissions(authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -237,7 +237,7 @@ def create_system_router(
 
     if schedules_handler is not None:
         @router.get("/api/system/schedules")
-        async def schedules_state(authorization: str | None = Header(default=None)):
+        async def schedules_state(authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -245,7 +245,7 @@ def create_system_router(
 
     if create_once_schedule_handler is not None:
         @router.post("/api/system/schedules/once")
-        async def create_once_schedule(payload: dict[str, Any], authorization: str | None = Header(default=None)):
+        async def create_once_schedule(payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -254,7 +254,7 @@ def create_system_router(
 
     if create_interval_schedule_handler is not None:
         @router.post("/api/system/schedules/interval")
-        async def create_interval_schedule(payload: dict[str, Any], authorization: str | None = Header(default=None)):
+        async def create_interval_schedule(payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -263,7 +263,7 @@ def create_system_router(
 
     if remove_schedule_handler is not None:
         @router.delete("/api/system/schedules/{task_id:path}")
-        async def remove_schedule(task_id: str, authorization: str | None = Header(default=None)):
+        async def remove_schedule(task_id: str, authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -271,7 +271,7 @@ def create_system_router(
 
     if toggle_schedule_handler is not None:
         @router.post("/api/system/schedules/{task_id:path}/toggle")
-        async def toggle_schedule(task_id: str, payload: dict[str, Any], authorization: str | None = Header(default=None)):
+        async def toggle_schedule(task_id: str, payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -279,7 +279,7 @@ def create_system_router(
 
     if run_schedule_now_handler is not None:
         @router.post("/api/system/schedules/{task_id:path}/run")
-        async def run_schedule_now(task_id: str, authorization: str | None = Header(default=None)):
+        async def run_schedule_now(task_id: str, authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -287,7 +287,7 @@ def create_system_router(
 
     if agent_trace_handler is not None:
         @router.get("/api/system/agent-trace")
-        async def agent_trace_state(authorization: str | None = Header(default=None)):
+        async def agent_trace_state(authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -295,7 +295,7 @@ def create_system_router(
 
     if experience_metrics_handler is not None:
         @router.get("/api/system/experience-metrics")
-        async def experience_metrics_state(authorization: str | None = Header(default=None)):
+        async def experience_metrics_state(authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -303,7 +303,7 @@ def create_system_router(
 
     if mcp_state_handler is not None:
         @router.get("/api/system/mcp")
-        async def mcp_state(authorization: str | None = Header(default=None)):
+        async def mcp_state(authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -311,7 +311,7 @@ def create_system_router(
 
     if toggle_mcp_handler is not None:
         @router.post("/api/system/mcp/{server_name:path}/toggle")
-        async def toggle_mcp(server_name: str, payload: dict[str, Any], authorization: str | None = Header(default=None)):
+        async def toggle_mcp(server_name: str, payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -319,7 +319,7 @@ def create_system_router(
 
     if add_mcp_handler is not None:
         @router.post("/api/system/mcp")
-        async def add_mcp(payload: dict[str, Any], authorization: str | None = Header(default=None)):
+        async def add_mcp(payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -330,7 +330,7 @@ def create_system_router(
 
     if install_mcp_preset_handler is not None:
         @router.post("/api/system/mcp/presets/{preset_id:path}/install")
-        async def install_mcp_preset(preset_id: str, authorization: str | None = Header(default=None)):
+        async def install_mcp_preset(preset_id: str, authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -338,7 +338,7 @@ def create_system_router(
 
     if remove_mcp_handler is not None:
         @router.delete("/api/system/mcp/{server_name:path}")
-        async def remove_mcp(server_name: str, authorization: str | None = Header(default=None)):
+        async def remove_mcp(server_name: str, authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -346,7 +346,7 @@ def create_system_router(
 
     if refresh_mcp_handler is not None:
         @router.post("/api/system/mcp/{server_name:path}/refresh")
-        async def refresh_mcp(server_name: str, authorization: str | None = Header(default=None)):
+        async def refresh_mcp(server_name: str, authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -354,7 +354,7 @@ def create_system_router(
 
     if agent_plugin_state_handler is not None:
         @router.get("/api/system/agent-plugins")
-        async def agent_plugin_state(authorization: str | None = Header(default=None)):
+        async def agent_plugin_state(authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -362,7 +362,7 @@ def create_system_router(
 
     if toggle_agent_plugin_handler is not None:
         @router.post("/api/system/agent-plugins/{plugin_id:path}/toggle")
-        async def toggle_agent_plugin(plugin_id: str, payload: dict[str, Any], authorization: str | None = Header(default=None)):
+        async def toggle_agent_plugin(plugin_id: str, payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -370,7 +370,7 @@ def create_system_router(
 
     if update_agent_plugin_config_handler is not None:
         @router.post("/api/system/agent-plugins/{plugin_id:path}/config")
-        async def update_agent_plugin_config(plugin_id: str, payload: dict[str, Any], authorization: str | None = Header(default=None)):
+        async def update_agent_plugin_config(plugin_id: str, payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -378,7 +378,7 @@ def create_system_router(
 
     if imported_skills_state_handler is not None:
         @router.get("/api/system/skills/imported")
-        async def imported_skills_state(authorization: str | None = Header(default=None)):
+        async def imported_skills_state(authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -386,7 +386,7 @@ def create_system_router(
 
     if save_imported_skills_handler is not None:
         @router.put("/api/system/skills/imported")
-        async def save_imported_skills(payload: dict[str, Any], authorization: str | None = Header(default=None)):
+        async def save_imported_skills(payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error
@@ -395,7 +395,7 @@ def create_system_router(
 
     if remove_imported_skills_handler is not None:
         @router.delete("/api/system/skills/imported")
-        async def remove_imported_skills(payload: dict[str, Any], authorization: str | None = Header(default=None)):
+        async def remove_imported_skills(payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
             auth_error = _require_admin(authorization)
             if auth_error is not None:
                 return auth_error

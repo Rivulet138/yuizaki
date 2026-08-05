@@ -480,6 +480,64 @@ async def test_agent_chat_reads_autonomy_mode_from_socket_payload(monkeypatch: p
 
 
 @pytest.mark.asyncio
+async def test_agent_chat_silent_mode_completes_with_zero_runtime_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
+    server = DesktopPetSocketServer()
+    emitted: list[tuple[str, object, str | None]] = []
+    generation_starts: list[str] = []
+
+    class ForbiddenGenerationManager:
+        def start(self, session_id: str) -> None:
+            generation_starts.append(session_id)
+            raise AssertionError("silent mode must not start a generation")
+
+    class ForbiddenPipeline:
+        def take_speculative_context_prefetch(self, **_kwargs: object) -> None:
+            raise AssertionError("silent mode must not read speculative context")
+
+        async def run_streaming(self, *_args: object, **_kwargs: object) -> None:
+            raise AssertionError("silent mode must not invoke the planner/pipeline")
+
+    async def _emit(event: str, data: object = None, to: str | None = None, **_: object) -> None:
+        emitted.append((event, data, to))
+
+    monkeypatch.setattr(server, "llm_client", None)
+    monkeypatch.setattr(server, "generation_mgr", ForbiddenGenerationManager())
+    monkeypatch.setattr(server, "agent_pipeline", ForbiddenPipeline())
+    monkeypatch.setattr(server, "tts_client", object())
+    monkeypatch.setattr(server.sio, "emit", _emit)
+    monkeypatch.setattr(
+        server,
+        "_with_ready_visual_context",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("visual context must not run")),
+    )
+    server.inject_runtime_context(
+        db_repo=cast(Any, object()),
+        relationship_event_writer=lambda _event: (_ for _ in ()).throw(AssertionError("relationship write must not run")),
+        relationship_history_provider=lambda: (_ for _ in ()).throw(AssertionError("relationship read must not run")),
+        relationship_summary_provider=lambda: (_ for _ in ()).throw(AssertionError("relationship read must not run")),
+    )
+
+    handlers = cast(_SocketServerWithHandlers, cast(object, server.sio)).handlers
+    handler = cast(Callable[[str, dict[str, object]], Awaitable[None]], handlers["/"][AgentEvents.CHAT])
+    await handler("sid-silent", {
+        "messages": [{"role": "user", "content": "write, schedule, inspect screen and speak"}],
+        "session_id": "session-silent",
+        "request_id": "agent-silent-socket",
+        "autonomy_mode": "silent",
+        "chat_options": {"tts_enabled": True},
+    })
+
+    assert generation_starts == []
+    assert [event for event, _, _ in emitted] == [LLMEvents.FINAL, AgentEvents.RESULT]
+    assert emitted[0] == (
+        LLMEvents.FINAL,
+        {"text": "", "session_id": "session-silent", "total_tokens": 0, "finish_reason": "stop"},
+        "sid-silent",
+    )
+    assert "silent_autonomy_mode" in str(emitted[1][1])
+
+
+@pytest.mark.asyncio
 async def test_agent_chat_includes_latest_visual_frame_context_without_persisting_it(monkeypatch: pytest.MonkeyPatch) -> None:
     server = DesktopPetSocketServer()
     generation_mgr = _FakeGenerationManager()

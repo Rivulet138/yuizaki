@@ -52,11 +52,51 @@ jobs:
 
       - run: npm ci
       - run: npm run install:runtime
-      - run: npm run start:check
+      - run: npm run test:ci-contract
       - run: npm run type-check
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - run: npm run start:check
+      # YUIZAKI_E2E_WINDOWS_BLOCK_START
+      - name: Set up Python for Electron E2E (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: python/requirements-core-lock-windows.txt
+      - name: Prepare Python fixture for Electron E2E (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          python -m venv python/.venv
+          python/.venv/Scripts/python.exe -m pip install --upgrade pip
+          python/.venv/Scripts/python.exe -m pip install -r python/requirements-core-lock-windows.txt
+          python/.venv/Scripts/python.exe -m pip check
+      - name: Run Electron E2E Unit Tests (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ${{ github.workspace }}/electron
+        run: npm run test:e2e:unit
+      - name: Run Electron E2E Redaction Test (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ${{ github.workspace }}/electron
+        run: npm run test:e2e:redaction
+      - name: Run Electron E2E (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ${{ github.workspace }}/electron
+        run: npm run test:e2e
+      # YUIZAKI_E2E_WINDOWS_BLOCK_END
+      - uses: actions/setup-go@v6
+        if: runner.os == 'Windows'
+        with:
+          go-version: '1.22.x'
+          cache: false
+      - name: Test Windows launcher
+        if: runner.os == 'Windows'
+        working-directory: ${{ github.workspace }}/tools/yuizaki-launcher
+        run: go test ./...
       - name: Validate Linux launch scripts
         if: runner.os == 'Linux'
         working-directory: ${{ github.workspace }}
@@ -69,6 +109,36 @@ jobs:
           sudo apt-get install -y libxtst6 xvfb xauth
           sudo chown root electron/node_modules/electron/dist/chrome-sandbox
           sudo chmod 4755 electron/node_modules/electron/dist/chrome-sandbox
+      # YUIZAKI_E2E_LINUX_BLOCK_START
+      - name: Set up Python for Electron E2E (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: python/requirements-core-lock-linux.txt
+      - name: Prepare Python fixture for Electron E2E (Linux)
+        if: runner.os == 'Linux'
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          python -m venv python/.venv
+          python/.venv/bin/python -m pip install --upgrade pip
+          python/.venv/bin/python -m pip install -r python/requirements-core-lock-linux.txt
+          python/.venv/bin/python -m pip check
+      - name: Run Electron E2E Unit Tests (Linux)
+        if: runner.os == 'Linux'
+        working-directory: ${{ github.workspace }}/electron
+        run: npm run test:e2e:unit
+      - name: Run Electron E2E Redaction Test (Linux)
+        if: runner.os == 'Linux'
+        working-directory: ${{ github.workspace }}/electron
+        run: xvfb-run -a npm run test:e2e:redaction
+      - name: Run Electron E2E (Linux)
+        if: runner.os == 'Linux'
+        working-directory: ${{ github.workspace }}/electron
+        run: xvfb-run -a npm run test:e2e
+      # YUIZAKI_E2E_LINUX_BLOCK_END
       - name: Smoke test Linux Electron GUI
         if: runner.os == 'Linux'
         working-directory: ${{ github.workspace }}

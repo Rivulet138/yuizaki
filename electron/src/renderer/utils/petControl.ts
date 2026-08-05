@@ -23,6 +23,11 @@ import {
   refreshControlTokenFromServer,
 } from '../api/clients/http-client'
 
+type PetControlAutomationOptions = PetControlTriggerOptions & {
+  signal?: AbortSignal
+  eventVersion?: string
+}
+
 const getControlOrigin = (): string => {
   const configuredOrigin = CONTROL_ORIGIN.replace(/\/$/, '')
   if (window.location.origin === configuredOrigin) {
@@ -256,7 +261,7 @@ export const petControl = {
     })
   },
 
-  async triggerEmotion(emotionId: string, options: PetControlTriggerOptions = {}): Promise<void> {
+  async triggerEmotion(emotionId: string, options: PetControlAutomationOptions = {}): Promise<void> {
     if (window.petApi?.pet?.triggerEmotion && options.source !== 'automation') {
       const result = await window.petApi.pet.triggerEmotion(emotionId)
       if (!result?.success) {
@@ -268,6 +273,7 @@ export const petControl = {
     await requestJson<{ success: true }>('/api/pet/emotion', {
       method: 'POST',
       body: JSON.stringify({ emotionId, source: options.source }),
+      signal: options.signal,
     })
   },
 
@@ -339,7 +345,7 @@ export const petControl = {
     })
   },
 
-  async triggerMotion(group: string, index: number = 0, options: PetControlTriggerOptions = {}): Promise<void> {
+  async triggerMotion(group: string, index: number = 0, options: PetControlAutomationOptions = {}): Promise<void> {
     if (window.petApi?.live2d?.triggerMotion && options.source !== 'automation') {
       window.petApi.live2d.triggerMotion(group, index)
       return
@@ -348,6 +354,7 @@ export const petControl = {
     await requestJson<{ success: true }>('/api/pet/animation', {
       method: 'POST',
       body: JSON.stringify({ group, index, source: options.source }),
+      signal: options.signal,
     })
   },
 

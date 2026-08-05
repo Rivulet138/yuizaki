@@ -5,6 +5,52 @@
 /* biome-ignore lint/suspicious/noUnknownAtRules: Tailwind CSS entrypoint */
 @tailwind utilities;
 
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .animate-fade-in,
+  .cursor-blink,
+  .status-dot.active,
+  .stream-caret,
+  .wave-bar,
+  .pending-dot,
+  .async-state__pulse,
+  .skeleton-line {
+    animation: none !important;
+  }
+
+  .panel-card,
+  .wallpaper-layer,
+  .view-component,
+  .chat-workspace,
+  .chat-workspace *,
+  .async-state,
+  .async-error,
+  .retry-btn {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+html[data-reduced-motion] .stream-caret,
+html[data-reduced-motion] .wave-bar,
+html[data-reduced-motion] .pending-dot,
+html[data-reduced-motion] .async-state__pulse,
+html[data-reduced-motion] .skeleton-line {
+  animation: none !important;
+}
+
 @layer components {
   .panel-card {
     border-radius: min(var(--yui-radius-card, 12px), 10px);

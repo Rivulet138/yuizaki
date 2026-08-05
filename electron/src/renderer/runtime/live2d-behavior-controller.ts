@@ -564,6 +564,17 @@ export class Live2DBehaviorController {
     const base = state === 'idle'
       ? this.applyCompanionIdleBias(BEHAVIOR_PROFILES.idle)
       : BEHAVIOR_PROFILES[state]
+    const reducedMotion = state === 'idle' && typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+    if (reducedMotion) {
+      return {
+        breathSpeed: base.breathSpeed,
+        breathAmplitude: 0,
+        swayAmplitude: 0,
+        gazeAmplitude: 0,
+        blinkIntervalMs: 6500,
+      }
+    }
     const { arousal, focus, valence } = affect
     return {
       breathSpeed: clamp(base.breathSpeed + arousal * 0.22 + focus * 0.06, 0.18, 1.05),

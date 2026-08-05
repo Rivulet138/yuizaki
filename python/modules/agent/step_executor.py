@@ -35,6 +35,18 @@ class StepExecutor:
     max_tool_retries = 1
     success_statuses = {"ok", "created"}
 
+    @staticmethod
+    def _outcome_status(outcome: ToolResultEnvelope) -> str:
+        receipt = outcome.permission_receipt
+        if receipt is not None and receipt.decision in {"required", "denied"}:
+            return f"permission_{receipt.decision}"
+        return "ok" if outcome.success else "error"
+
+    @staticmethod
+    def _is_terminal_permission(outcome: ToolResultEnvelope | None) -> bool:
+        receipt = outcome.permission_receipt if outcome is not None else None
+        return bool(receipt is not None and receipt.retryable is False)
+
     def _execution_summary(
         self,
         ordered_steps: list[PlanStep],
@@ -49,7 +61,7 @@ class StepExecutor:
             if step.id not in executed_step_ids
         ]
         completed = [item for item in results if item.status in self.success_statuses or item.success is True]
-        failed = [item for item in results if item.status == "error"]
+        failed = [item for item in results if item.status in {"error", "permission_required", "permission_denied"}]
         condition_skipped = [item for item in results if item.status == "skipped" and item.error == "condition_not_met"]
         other_skipped = [item for item in results if item.status == "skipped" and item.error != "condition_not_met"]
 
@@ -332,24 +344,30 @@ class StepExecutor:
                 ctx=ctx,
             )
             retry_count = attempt
-            if outcome.success or attempt >= self.max_tool_retries:
+            if outcome.success or self._is_terminal_permission(outcome) or attempt >= self.max_tool_retries:
                 break
         success = bool(outcome.success) if outcome is not None else False
         error = outcome.error if outcome is not None else "tool_executor_returned_none"
+        safe_args = (
+            outcome.permission_receipt.parameters
+            if outcome is not None and outcome.permission_receipt is not None
+            else args
+        )
         if ctx.trace_store:
             ctx.trace_store.append("steps", self._step_trace_record(
                 ctx,
                 step,
-                status="ok" if success else "error",
+                status=self._outcome_status(outcome) if outcome is not None else "error",
                 condition=condition,
                 tool=tool_name,
-                args=args,
+                args=safe_args,
                 success=success,
                 error=error,
                 retry_count=retry_count,
                 capability_id=tool_name,
                 capability_type="tool",
                 capability_kind=f"{outcome.source}-tool" if outcome is not None else None,
+                permission_receipt=outcome.permission_receipt if outcome is not None else None,
             ).to_dict())
         if outcome is None:
             outcome = ToolResultEnvelope(
@@ -364,12 +382,12 @@ class StepExecutor:
             step_id=step.id,
             title=step.title,
             kind="tool",
-            status="ok" if outcome.success else "error",
+            status=self._outcome_status(outcome),
             description=step.description,
             depends_on=list(step.depends_on),
             condition=condition,
             tool=tool_name,
-            args=args,
+            args=safe_args,
             success=outcome.success,
             content=outcome.content,
             error=outcome.error,
@@ -380,6 +398,7 @@ class StepExecutor:
             capability_id=tool_name,
             capability_type="tool",
             capability_kind=f"{outcome.source}-tool",
+            permission_receipt=outcome.permission_receipt,
         )
 
     async def _execute_agent_step(
@@ -457,11 +476,14 @@ class StepExecutor:
             reasoning_effort=ctx.reasoning_effort,
             thinking=ctx.thinking_mode,
         )
+        permission_receipt = result.get("permission_receipt")
+        status = str(result.get("stopped_reason") or "ok")
+        success = permission_receipt is None
         agent_result = StepResultRecord(
             step_id=step.id,
             title=step.title,
             kind="agent",
-            status="ok",
+            status=status,
             description=step.description,
             depends_on=list(step.depends_on),
             condition=self._condition_record(step),
@@ -469,27 +491,29 @@ class StepExecutor:
             reply_preview=str(result.get("reply") or "")[:120],
             tool_calls_count=len(result.get("tool_calls") or []),
             has_pet_control=bool(result.get("pet_control")),
-            success=True,
+            success=success,
             owner_agent_id=step.owner_agent_id,
             owner_agent_role=step.owner_agent_role,
             route_reason=step.route_reason,
+            permission_receipt=permission_receipt,
         )
         if ctx.trace_store:
             ctx.trace_store.append("steps", self._step_trace_record(
                 ctx,
                 step,
-                status="ok",
+                status=status,
                 condition=self._condition_record(step),
                 reply_preview=str(result.get("reply") or "")[:120],
                 tool_calls_count=len(result.get("tool_calls") or []),
                 has_pet_control=bool(result.get("pet_control")),
+                permission_receipt=permission_receipt,
             ).to_dict())
         return result, agent_result
 
     async def execute_schedule_steps(self, ctx: AgentRequestContext, steps: list[PlanStep]) -> list[StepResultRecord]:
         results: list[StepResultRecord] = []
         result_map: dict[str, StepResultRecord] = {}
-        if not ctx.scheduler:
+        if ctx.autonomy_mode == "silent" or not ctx.scheduler:
             return results
 
         for step in self._order_steps(steps):
@@ -626,24 +650,30 @@ class StepExecutor:
                     ctx=ctx,
                 )
                 retry_count = attempt
-                if outcome.success or attempt >= self.max_tool_retries:
+                if outcome.success or self._is_terminal_permission(outcome) or attempt >= self.max_tool_retries:
                     break
             success = bool(outcome.success) if outcome is not None else False
             error = outcome.error if outcome is not None else "tool_executor_returned_none"
+            safe_args = (
+                outcome.permission_receipt.parameters
+                if outcome is not None and outcome.permission_receipt is not None
+                else args
+            )
             if ctx.trace_store:
                 ctx.trace_store.append("steps", self._step_trace_record(
                     ctx,
                     step,
-                    status="ok" if success else "error",
+                    status=self._outcome_status(outcome) if outcome is not None else "error",
                     condition=condition,
                     tool=tool_name,
-                    args=args,
+                    args=safe_args,
                     success=success,
                     error=error,
                     retry_count=retry_count,
                     capability_id=tool_name,
                     capability_type="tool",
                     capability_kind=f"{outcome.source}-tool" if outcome is not None else None,
+                    permission_receipt=outcome.permission_receipt if outcome is not None else None,
                 ).to_dict())
             if outcome is None:
                 outcome = ToolResultEnvelope(
@@ -657,12 +687,12 @@ class StepExecutor:
                 step_id=step.id,
                 title=step.title,
                 kind="tool",
-                status="ok" if outcome.success else "error",
+                status=self._outcome_status(outcome),
                 description=step.description,
                 depends_on=list(step.depends_on),
                 condition=condition,
                 tool=tool_name,
-                args=args,
+                args=safe_args,
                 success=outcome.success,
                 content=outcome.content,
                 error=outcome.error,
@@ -673,6 +703,7 @@ class StepExecutor:
                 capability_id=tool_name,
                 capability_type="tool",
                 capability_kind=f"{outcome.source}-tool",
+                permission_receipt=outcome.permission_receipt,
             ))
             result_map[step.id] = results[-1]
 
@@ -696,7 +727,7 @@ class StepExecutor:
             return _missing_agent_result("tool_registry")
         if ctx.tool_executor is None:
             return _missing_agent_result("tool_executor")
-        if ctx.extra.get("autonomy_mode") == "silent":
+        if ctx.autonomy_mode == "silent":
             prior_results = list(tool_results or [])
             return {
                 "reply": "",
@@ -714,6 +745,16 @@ class StepExecutor:
         return result
 
     async def execute_immediate_steps(self, ctx: AgentRequestContext, steps: list[PlanStep]) -> dict[str, Any]:
+        if ctx.autonomy_mode == "silent":
+            return {
+                "reply": "",
+                "tool_calls": [],
+                "pet_control": None,
+                "step_results": [],
+                "execution_summary": self._execution_summary(
+                    self._order_steps(steps), [], stopped_reason="silent_autonomy_mode"
+                ),
+            }
         if not steps:
             return {
                 "reply": "",
@@ -761,8 +802,8 @@ class StepExecutor:
                 result = await self._execute_tool_step(ctx, step)
                 results.append(result)
                 result_map[step.id] = result
-                if result.status == "error" and not self._has_result_handler(step.id, result, ordered_steps[index + 1:], result_map):
-                    stopped_reason = f"unhandled_step_error:{step.id}"
+                if result.status in {"error", "permission_required", "permission_denied"} and not self._has_result_handler(step.id, result, ordered_steps[index + 1:], result_map):
+                    stopped_reason = result.status if result.status.startswith("permission_") else f"unhandled_step_error:{step.id}"
                     break
                 continue
 
@@ -772,17 +813,21 @@ class StepExecutor:
             if ctx.tool_executor is None:
                 stopped_reason = "tool_executor_not_available"
                 break
-            if ctx.extra.get("autonomy_mode") == "silent":
-                continue
-
             agent_response, agent_result = await self._execute_agent_step(ctx, step, results)
             results.append(agent_result)
             result_map[step.id] = agent_result
             reply = str(agent_response.get("reply") or reply)
             pet_control = agent_response.get("pet_control") if isinstance(agent_response.get("pet_control"), dict) else pet_control
             generated_tool_calls.extend([item for item in list(agent_response.get("tool_calls") or []) if isinstance(item, dict)])
+            if agent_result.status in {"permission_required", "permission_denied"}:
+                stopped_reason = agent_result.status
+                break
 
-        if not reply and any(item.kind == "tool" for item in results):
+        if (
+            not reply
+            and any(item.kind == "tool" for item in results)
+            and not any(item.status.startswith("permission_") for item in results)
+        ):
             reply = "已执行工具步骤。"
         return {
             "reply": reply,

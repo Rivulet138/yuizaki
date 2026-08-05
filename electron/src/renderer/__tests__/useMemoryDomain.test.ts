@@ -67,12 +67,25 @@ describe('useMemoryDomain scoped workspace defaults', () => {
       workspace_id: 'ws-1',
     }))
     expect(memoryClientMocks.queryPipeline).toHaveBeenCalledWith('workspace memory', expect.objectContaining({
-      scope: 'workspace',
       workspaceId: 'ws-1',
     }))
     expect(memoryClientMocks.queryRag).toHaveBeenCalledWith(expect.objectContaining({
       scope: 'workspace',
       workspace_id: 'ws-1',
+    }))
+  })
+
+  it('preserves an explicit null expiry when updating a document', async () => {
+    const domain = useMemoryDomain()
+
+    await domain.updateDoc('doc-expiry', {
+      text: 'keep forever',
+      scope: 'workspace',
+      metadata: { expires_at: null, extension_field: 'preserved' },
+    })
+
+    expect(memoryClientMocks.updateDoc).toHaveBeenCalledWith('doc-expiry', expect.objectContaining({
+      metadata: { expires_at: null, extension_field: 'preserved' },
     }))
   })
 })

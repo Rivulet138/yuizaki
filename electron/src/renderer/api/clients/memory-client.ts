@@ -9,6 +9,24 @@ export interface MemoryDocListOptions {
   layer?: string
 }
 
+export interface MemoryMetadata extends Record<string, unknown> {
+  expires_at?: string | null
+}
+
+export interface MemoryDocWritePayload {
+  id?: string
+  text: string
+  metadata?: MemoryMetadata
+  scope?: string
+  workspace_id?: string
+  session_id?: string
+  layer?: string
+  type?: string
+  importance?: number
+  confidence?: number
+  confidence_source?: string
+}
+
 export interface MemoryMaintenancePolicyPayload {
   scope?: string
   workspace_id?: string
@@ -65,13 +83,13 @@ const buildDocsUrl = (options?: MemoryDocListOptions) => {
 
 export const memoryClient = {
   getDocs: async (options?: MemoryDocListOptions) => requestJson<{ docs: unknown[] }>(buildDocsUrl(options)),
-  addDoc: async (payload: { id?: string; text: string; metadata?: Record<string, unknown>; scope?: string; workspace_id?: string; session_id?: string; layer?: string; type?: string; importance?: number; confidence?: number; confidence_source?: string }) =>
+  addDoc: async (payload: MemoryDocWritePayload) =>
     requestJson<{ status: string; id: string; skipped?: boolean; reason?: string; duplicate_candidates?: unknown[] }>(`${CONTROL_ORIGIN}/memory/docs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
-  updateDoc: async (id: string, payload: { text: string; metadata?: Record<string, unknown>; scope?: string; workspace_id?: string; session_id?: string; layer?: string; type?: string; importance?: number; confidence?: number; confidence_source?: string; edit_reason?: string }) =>
+  updateDoc: async (id: string, payload: MemoryDocWritePayload & { edit_reason?: string }) =>
     requestJson<{ status: string; id: string; layer?: string; scope?: string; importance?: number }>(`${CONTROL_ORIGIN}/memory/docs/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },

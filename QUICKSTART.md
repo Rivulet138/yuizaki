@@ -69,6 +69,15 @@ Windows：
 .\start.bat
 ```
 
+也可以构建并使用 Windows 监督启动器：
+
+```powershell
+.\scripts\build_yuizaki_launcher.bat
+.\YuizakiLauncher.exe
+```
+
+启动器使用 `/api/ping` 判断后端进程是否可用；ASR、TTS 等可选服务处于降级状态时不会阻塞桌面端启动。
+
 Linux：
 
 ```bash

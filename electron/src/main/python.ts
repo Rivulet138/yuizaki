@@ -13,7 +13,7 @@ export class PythonService {
   private readonly pythonEnvFile = path.join(this.pythonDir, '.env');
   private readonly backendOrigin = resolvePythonApiOrigin();
   private readonly backendEndpoint = this.resolveBackendEndpoint();
-  private readonly healthCheckUrl = `${this.backendOrigin}/health`;
+  private readonly livenessCheckUrl = `${this.backendOrigin}/api/ping`;
   private readonly maxRetries = 120;
   private readonly retryDelayMs = 1000;
   private readonly guardedStreams = new WeakSet<NodeJS.WriteStream>();
@@ -31,7 +31,7 @@ export class PythonService {
     }
 
     if (this.managedExternally) {
-      this.safeConsole('log', 'Python service is managed externally; waiting for health endpoint %s', this.healthCheckUrl);
+      this.safeConsole('log', 'Python service is managed externally; waiting for liveness endpoint %s', this.livenessCheckUrl);
       await this.waitForHealth();
       return;
     }
@@ -105,7 +105,7 @@ export class PythonService {
 
   async health(): Promise<boolean> {
     try {
-      const response = await axios.get(this.healthCheckUrl, { timeout: 2000 });
+      const response = await axios.get(this.livenessCheckUrl, { timeout: 2000 });
       const status = response.data?.status;
       return status === 'healthy' || status === 'ok' || response.data?.healthy === true || response.data?.ok === true;
     } catch {
@@ -115,13 +115,9 @@ export class PythonService {
 
   private async waitForHealth(): Promise<void> {
     for (let i = 0; i < this.maxRetries; i++) {
-      try {
-        if (await this.health()) {
-          this.safeConsole('log', 'Python service is healthy');
-          return;
-        }
-      } catch {
-        // 继续重试
+      if (await this.health()) {
+        this.safeConsole('log', 'Python service is healthy');
+        return;
       }
 
       await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs));

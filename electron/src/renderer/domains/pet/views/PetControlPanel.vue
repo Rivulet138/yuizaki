@@ -114,6 +114,8 @@
           <el-slider v-model="opacityDraft" :min="0.1" :max="1" :step="0.05" @change="applyOpacity" />
         </el-card>
 
+        <details class="pet-advanced-controls">
+          <summary>{{ t('pet.advanced.modelAndLipSync') }}</summary>
         <el-card class="control-card lipsync-card" shadow="never">
           <template #header>
             <div class="card-heading">
@@ -211,6 +213,7 @@
             <el-button plain :disabled="!selectedParameterId" @click="previewParameterOverride">预览</el-button>
           </div>
         </el-card>
+        </details>
 
         <el-card class="control-card motion-card" shadow="never">
           <template #header>
@@ -262,6 +265,8 @@
           </div>
         </el-card>
 
+        <details class="pet-advanced-controls">
+          <summary>{{ t('pet.advanced.behaviorAndRecovery') }}</summary>
         <el-card class="control-card behavior-card" shadow="never">
           <template #header>
             <div class="card-heading">
@@ -315,6 +320,7 @@
             <el-button plain @click="stopLipSync">停止口型同步</el-button>
           </div>
         </el-card>
+        </details>
       </section>
     </div>
   </PanelShell>
@@ -325,6 +331,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Upload } from '@element-plus/icons-vue'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
+import { useI18n } from '@/i18n'
 import { petControl, type PetBehaviorState } from '@/utils/petControl'
 import { CONTROL_AUTH_MISSING_MESSAGE, isAuthMissingError } from '@/api/clients/http-client'
 import {
@@ -343,6 +350,7 @@ import type { PetImportableModelType, PetModelImportMode } from '../../../../sha
 
 type PlacementPreset = Exclude<PetPlacement, 'free'>
 
+const { t } = useI18n()
 const state = reactive<PetControlState>({ ...DEFAULT_PET_CONTROL_STATE })
 const catalog = reactive<PetModelCatalogPayload>({ activeModelId: null, models: [] })
 const displays = reactive<{ activeDisplayId: number | null; items: PetDisplayInfo[] }>({ activeDisplayId: null, items: [] })
@@ -1127,6 +1135,28 @@ onBeforeUnmount(() => {
   background: var(--yui-surface-raised);
   box-shadow: var(--yui-shadow-card);
   transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.pet-advanced-controls {
+  min-width: 0;
+}
+
+.pet-advanced-controls > summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-card);
+  background: var(--yui-surface-raised);
+  color: var(--yui-text);
+  font-weight: 760;
+}
+
+.pet-advanced-controls[open] > summary {
+  margin-bottom: 10px;
+}
+
+.pet-advanced-controls > .control-card + .control-card {
+  margin-top: 10px;
 }
 
 .control-card :deep(.el-card__header) {

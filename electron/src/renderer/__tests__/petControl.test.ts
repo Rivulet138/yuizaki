@@ -107,6 +107,45 @@ describe('petControl', () => {
     }))
   })
 
+  it.each(['emotion', 'motion'] as const)('forwards proactive %s cancellation to the HTTP transport', async (kind) => {
+    setControlToken()
+    const controller = new AbortController()
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const pending = kind === 'emotion'
+      ? petControl.triggerEmotion('calm', { source: 'automation', signal: controller.signal })
+      : petControl.triggerMotion('Idle', 0, { source: 'automation', signal: controller.signal })
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBe(controller.signal)
+
+    controller.abort()
+    await expect(pending).rejects.toThrow()
+  })
+
+  it('keeps explicit user emotion and motion actions on the existing IPC path', async () => {
+    const triggerEmotion = vi.fn().mockResolvedValue({ success: true })
+    const triggerMotion = vi.fn()
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    Object.defineProperty(window, 'petApi', {
+      configurable: true,
+      value: {
+        pet: { triggerEmotion },
+        live2d: { triggerMotion },
+      },
+    })
+
+    await petControl.triggerEmotion('calm')
+    await petControl.triggerMotion('TapBody', 2)
+
+    expect(triggerEmotion).toHaveBeenCalledWith('calm')
+    expect(triggerMotion).toHaveBeenCalledWith('TapBody', 2)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('marks interrupted lip sync stops without changing ordinary stops', async () => {
     setControlToken()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({

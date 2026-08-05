@@ -99,6 +99,75 @@ describe('workspaceStore active workspace switching', () => {
     )
   })
 
+  it('awaits exactly one active-workspace sync after resolving an empty local state', async () => {
+    window.localStorage.clear()
+    const order: string[] = []
+    vi.stubGlobal('fetch', vi.fn()
+      .mockImplementationOnce(async () => {
+        order.push('workspaces')
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            workspaces: [{ id: 'backend-default', name: 'Backend', created_at: '', updated_at: '' }],
+          }),
+        }
+      })
+      .mockImplementationOnce(async (_url: string, init?: RequestInit) => {
+        order.push(`active:${String(init?.body)}`)
+        return { ok: true, status: 200, json: async () => ({ ok: true }) }
+      }))
+
+    const store = useWorkspaceStore()
+    await store.syncFromBackend()
+
+    expect(store.activeWorkspaceId).toBe('backend-default')
+    expect(order).toEqual([
+      'workspaces',
+      'active:{"workspace_id":"backend-default"}',
+    ])
+  })
+
+  it('posts only the backend-corrected workspace id', async () => {
+    window.localStorage.setItem('deskpet-active-workspace', 'stale')
+    window.localStorage.setItem('deskpet-workspaces', JSON.stringify([{
+      id: 'stale', name: 'Stale', createdAt: '', updatedAt: '', context: {},
+    }]))
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ workspaces: [{ id: 'corrected', name: 'Corrected', created_at: '', updated_at: '' }] }),
+      })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true }) }))
+
+    const store = useWorkspaceStore()
+    await store.syncFromBackend()
+
+    const postBodies = vi.mocked(fetch).mock.calls
+      .filter(([, init]) => init?.method === 'POST')
+      .map(([, init]) => init?.body)
+    expect(postBodies).toEqual([JSON.stringify({ workspace_id: 'corrected' })])
+  })
+
+  it('propagates active-workspace POST rejection after a successful list refresh', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ workspaces: [{ id: 'default', name: 'Default', created_at: '', updated_at: '' }] }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        text: async () => 'unavailable',
+      }))
+    const store = useWorkspaceStore()
+
+    await expect(store.syncFromBackend()).rejects.toThrow()
+    expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
+  })
+
   it('normalizes realtime vision region settings into safe capture bounds', () => {
     window.localStorage.setItem('deskpet-workspaces', JSON.stringify([{
       id: 'default',

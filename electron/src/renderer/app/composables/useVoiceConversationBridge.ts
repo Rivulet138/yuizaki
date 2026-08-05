@@ -10,6 +10,7 @@ import {
 import { useChatStore } from '@/stores/chatStore'
 import { petControl } from '@/utils/petControl'
 import { chatClient, shortcutClient } from '@/api/client'
+import { getCompanionInterruptionEpoch, publishCompanionRuntimeEvent } from '../runtime/companionRuntime'
 
 interface PetControlPayload {
   emotion_id?: string
@@ -54,6 +55,7 @@ export function useVoiceConversationBridge() {
   const sentenceEmotionScheduler = new PetSentenceEmotionScheduler()
   const audioCaptureState = audioCapture.getStatus()
   let activeVoiceTransport: 'pipeline' | 'realtime' | null = null
+  let voiceRuntimeEpoch = getCompanionInterruptionEpoch()
   let realtimeLipSyncForwardingActive = false
   const realtimeUnsubscribers: Array<() => void> = []
 
@@ -203,6 +205,7 @@ export function useVoiceConversationBridge() {
     ) {
       chatStore.interrupt()
     }
+    voiceRuntimeEpoch = getCompanionInterruptionEpoch()
 
     if (
       chatStore.chatOptions.response_mode === 'instant'
@@ -219,9 +222,7 @@ export function useVoiceConversationBridge() {
         activeVoiceTransport = 'realtime'
         chatStore.setRealtimeRecording(true)
         if (chatStore.chatOptions.pet_link_enabled !== false) {
-          void petControl.setBehaviorState('listening').catch((error) => {
-            console.debug('[VoiceBridge] failed to set realtime listening state:', error)
-          })
+          void publishCompanionRuntimeEvent({ source: 'voice', activity: 'listening', interruptionEpoch: voiceRuntimeEpoch })
         }
         return
       } catch (error) {
@@ -263,15 +264,16 @@ export function useVoiceConversationBridge() {
         if (status === 'responding') {
           chatState.isGenerating = true
           if (chatStore.chatOptions.pet_link_enabled !== false) {
-            void petControl.setBehaviorState('thinking').catch((error) => {
-              console.debug('[VoiceBridge] failed to set realtime thinking state:', error)
-            })
+            void publishCompanionRuntimeEvent({ source: 'voice', activity: 'thinking', interruptionEpoch: voiceRuntimeEpoch })
           }
           return
         }
         if (status === 'ready') {
           chatStore.setRealtimeRecording(false)
           chatState.isGenerating = false
+          if (chatStore.chatOptions.pet_link_enabled !== false) {
+            void publishCompanionRuntimeEvent({ source: 'voice', activity: 'idle', interruptionEpoch: voiceRuntimeEpoch })
+          }
           return
         }
         if (status === 'error' || status === 'closed') {

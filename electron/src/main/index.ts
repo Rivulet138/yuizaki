@@ -1,4 +1,4 @@
-import { app, desktopCapturer } from 'electron'
+import { app, desktopCapturer, ipcMain } from 'electron'
 import path from 'path'
 import { ControlServer } from './control-server'
 import { Live2DWindow } from './live2d-window'
@@ -34,6 +34,13 @@ import {
 } from './renderer-protocol'
 import { captureDisplayPng } from './desktop-capture'
 import { cancelAllModelResourceTasks } from './resource-manager'
+import {
+  buildE2EActivation,
+  registerE2EActivationHandshake,
+  registerE2ERendererControlHandlers,
+  registerE2EVoiceHandler,
+  runE2ESuite,
+} from './e2e-test-mode'
 
 registerRendererProtocolPrivileges()
 
@@ -58,6 +65,10 @@ let inputBindingStatus: InputBindingRegistrationStatus = {
 }
 let ipcReady = false
 let isQuitting = false
+let disposeE2EHandlers: (() => void) | null = null
+
+const e2eActivation = buildE2EActivation(process.env, app.isPackaged)
+if (e2eActivation.active) app.commandLine.appendSwitch('force-prefers-reduced-motion')
 
 const togglePetLock = () => {
   const nextState = petStateStore.applyConfigPatch({ locked: !petStateStore.getState().locked })
@@ -100,6 +111,7 @@ function buildPanelRuntimeOptions(tab?: string): PetWindowRuntimeOptions {
     controlOrigin: controlServer.panelUrl.replace(/\/$/, ''),
     apiOrigin: resolvePythonApiOrigin(),
     controlToken: controlServer.getControlToken(),
+    ...(e2eActivation.active ? { e2eToken: e2eActivation.token } : {}),
     ...(tab ? { tab } : {}),
   }
 }
@@ -215,7 +227,23 @@ async function createApp(): Promise<void> {
   setPetVisible(petStateStore.getState().visible)
 
   await controlServer.start()
-  petWindow.create(buildPanelRuntimeOptions())
+  petWindow.create(buildPanelRuntimeOptions(), e2eActivation.active ? (window) => {
+    const e2eContext = {
+      ipcMain,
+      activation: e2eActivation,
+      expectedSender: window.webContents,
+      apiOrigin: resolvePythonApiOrigin(),
+      activationProof: { value: null },
+    }
+    const disposeActivation = registerE2EActivationHandshake(e2eContext)
+    const disposeVoice = registerE2EVoiceHandler(e2eContext)
+    const disposeControls = registerE2ERendererControlHandlers(e2eContext)
+    disposeE2EHandlers = () => {
+      disposeControls()
+      disposeVoice()
+      disposeActivation()
+    }
+  } : undefined)
 
   const inputSettings = inputBindingStore.get()
   inputBindingStatus = petShortcuts.register(inputSettings)
@@ -236,6 +264,22 @@ async function createApp(): Promise<void> {
       available: inputBindingStatus.pushToTalkActive,
     },
   )
+
+  if (e2eActivation.active && petWindow.window && live2dWindow.window) {
+    await runE2ESuite({
+      activation: e2eActivation,
+      caseId: process.env['YUIZAKI_E2E_CASE'] ?? '',
+      runId: process.env['YUIZAKI_E2E_RUN_ID'] ?? '',
+      tokenHash: process.env['YUIZAKI_E2E_TOKEN_HASH'] ?? '',
+      backendToken: controlServer.getControlToken(),
+      artifactDir: process.env['YUIZAKI_E2E_ARTIFACT_DIR'] ?? app.getPath('temp'),
+      apiOrigin: resolvePythonApiOrigin(),
+      panelWindow: petWindow.window,
+      live2dWindow: live2dWindow.window,
+      failureProbe: process.env['YUIZAKI_E2E_FAILURE_PROBE'],
+    })
+    app.quit()
+  }
 }
 
 function restorePersistedPetModelSelection(): void {
@@ -398,6 +442,8 @@ app.on('window-all-closed', () => {
 app.on('before-quit', async () => {
   isQuitting = true
   cancelAllModelResourceTasks()
+  disposeE2EHandlers?.()
+  disposeE2EHandlers = null
   petShortcuts?.unregister()
   petTray?.destroy()
   live2dWindow?.close()

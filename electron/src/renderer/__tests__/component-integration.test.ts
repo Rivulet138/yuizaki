@@ -420,22 +420,15 @@ describe("refactor surface component integration", () => {
 		await flushPromises();
 
 		expect(wrapper.text()).toContain("gentle-support");
-		expect(wrapper.text()).toContain("语气");
-		expect(wrapper.text()).toContain("soft");
-		expect(wrapper.text()).toContain("support_request × 1");
-		expect(wrapper.text()).toContain("Agent 联动");
+		expect(wrapper.text()).toContain("随时可以陪你");
+		expect(wrapper.text()).toContain("support_request");
+		expect(wrapper.text()).toContain("打开当前任务");
+		expect(wrapper.text()).toContain("查看权限回执");
+		expect(wrapper.text()).not.toContain("soft");
 	});
 
-	it("re-applies CompanionPanel profile changes to the chat and pet runtime bridge", async () => {
-		const wrapper = mount(CompanionPanel, { global });
-		await flushPromises();
-		systemClientMocks.setModelSelection.mockClear();
-
-		const saveButton = wrapper
-			.findAll("button")
-			.find((button) => button.text().includes("保存修改"));
-		expect(saveButton).toBeTruthy();
-		await saveButton?.trigger("click");
+	it("applies the active CompanionPanel profile through the existing runtime bridge", async () => {
+		mount(CompanionPanel, { global });
 		await flushPromises();
 
 		expect(systemClientMocks.setModelSelection).toHaveBeenCalledWith("yuizaki-live2d", "live2d");

@@ -66,13 +66,16 @@ def verify_backend_api_authorization(
         if unauthenticated_local_dev_allowed(client_host):
             return True, ""
         return False, "Backend API token is not configured"
-    header_token = (backend_token_header or "").strip()
-    if header_token and secrets.compare_digest(header_token, token):
-        return True, ""
-    header = (authorization or "").strip()
-    if not header.startswith("Bearer "):
+    credentials: list[str] = []
+    if backend_token_header is not None:
+        credentials.append(backend_token_header.strip())
+    if authorization is not None:
+        header = authorization.strip()
+        if not header.startswith("Bearer "):
+            return False, "Invalid backend API token"
+        credentials.append(header[7:].strip())
+    if not credentials:
         return False, "Missing backend API token"
-    provided_token = header[7:].strip()
-    if not provided_token or not secrets.compare_digest(provided_token, token):
+    if any(not provided or not secrets.compare_digest(provided, token) for provided in credentials):
         return False, "Invalid backend API token"
     return True, ""

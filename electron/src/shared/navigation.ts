@@ -100,9 +100,9 @@ export const staticNavigationModuleRecords = [
     order: 5,
     enabled: true,
     capabilities: { plugins: true, tasks: true },
-    slot: 'secondary',
-    audience: 'core',
-    primary: true,
+    slot: 'admin',
+    audience: 'admin',
+    primary: false,
   },
   {
     id: 'plugins',

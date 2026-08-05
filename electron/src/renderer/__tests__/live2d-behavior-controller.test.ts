@@ -202,6 +202,22 @@ describe('Live2DBehaviorController Phase 2 arbitration', () => {
     expect(flatProfile.blinkIntervalMs).toBeGreaterThan(steadyProfile.blinkIntervalMs)
   })
 
+  it('suppresses only nonessential idle motion when reduced motion is requested', () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })))
+    const { controller } = createController()
+
+    expect(controller.getDebugSnapshot().effectiveProfile).toMatchObject({
+      breathAmplitude: 0,
+      swayAmplitude: 0,
+      gazeAmplitude: 0,
+    })
+    controller.setState('thinking')
+    const thinkingProfile = controller.getDebugSnapshot().effectiveProfile
+    expect(thinkingProfile.swayAmplitude).toBeGreaterThan(0)
+    expect(controller.getDebugSnapshot().resolvedState).toBe('thinking')
+    vi.unstubAllGlobals()
+  })
+
   it('maps affect into subtle facial micro-expressions', () => {
     vi.useFakeTimers()
     const { controller, ticker, coreModel } = createController()

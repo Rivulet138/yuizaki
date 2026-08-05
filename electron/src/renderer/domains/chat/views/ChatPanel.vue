@@ -529,68 +529,40 @@
                 </button>
               </div>
             </div>
-            <div class="composer-meta-line">
-              <span class="composer-meta-chip" :class="{ ready: socketDomain.isConnected.value }">
-                {{ socketDomain.isConnected.value ? '实时通道已连接' : '实时通道连接中' }}
-              </span>
-              <span v-if="chatOptions.web_search_enabled" class="composer-meta-chip is-active">联网搜索</span>
-              <span v-if="chatOptions.mcp_enabled" class="composer-meta-chip is-active">MCP</span>
-              <span class="composer-meta-value">{{ effectiveModelLabel }}</span>
-              <span>{{ chatOptions.pet_link_enabled ? '桌宠联动' : '独立对话' }}</span>
-              <span class="composer-meta-chip" :class="{ 'is-active': chatOptions.tts_enabled }">{{ chatOptions.tts_enabled ? 'TTS' : '静音' }}</span>
-              <span>{{ voicePermissionText }}</span>
-              <span>{{ estimatedInputTokens }} tokens</span>
-            </div>
+            <ChatComposerStatusLine
+              :connected="socketDomain.isConnected.value"
+              :web-search-enabled="chatOptions.web_search_enabled"
+              :mcp-enabled="chatOptions.mcp_enabled"
+              :model-label="effectiveModelLabel"
+              :pet-link-enabled="chatOptions.pet_link_enabled"
+              :tts-enabled="chatOptions.tts_enabled"
+              :voice-permission-text="voicePermissionText"
+              :input-tokens="estimatedInputTokens"
+            />
 
-            <div v-if="toolsExpanded" class="voice-console">
-              <div class="voice-console__main">
-                <div class="voice-status-badge" :class="voiceStatusClass">
-                  <el-icon><Headset /></el-icon>
-                </div>
-                <div class="voice-status-stack">
-                  <div class="voice-status-line">
-                    <strong>{{ voiceStatusText }}</strong>
-                    <small>{{ voicePipelineText }}</small>
-                    <small v-if="isRecording && voiceProcessingText">{{ voiceProcessingText }}</small>
-                    <small v-if="voiceLatencySummary" class="voice-latency-summary">{{ voiceLatencySummary }}</small>
-                  </div>
-                  <div class="voice-meter" aria-label="麦克风电平">
-                    <span
-                      v-for="level in voiceMeterBars"
-                      :key="level"
-                      :class="{ active: voiceLevelPercent >= level }"
-                    ></span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="voice-console__controls">
-                <el-segmented v-model="voiceMode" :options="voiceModeOptions" size="small" />
-                <button
-                  v-if="voiceMode === 'hold'"
-                  type="button"
-                  class="hold-to-talk"
-                  :class="{ active: isHoldActive || isRecording }"
-                  :disabled="!socketDomain.isConnected.value"
-                  :title="pushToTalkShortcutTitle"
-                  @pointerdown.prevent="handleHoldPointerDown"
-                  @pointerup.prevent="handleHoldPointerUp"
-                  @pointercancel.prevent="handleHoldPointerUp"
-                  @keydown.space.prevent="beginHoldToTalk"
-                  @keyup.space.prevent="endHoldToTalk"
-                >
-                  <el-icon><Microphone /></el-icon>
-                  <span>{{ isRecording ? '松开发送' : '按住说话' }}</span>
-                </button>
-                <button v-else type="button" class="hold-to-talk" :class="{ active: isRecording }" :disabled="!socketDomain.isConnected.value" :title="pushToTalkShortcutTitle" @click="toggleMic">
-                  <el-icon><Microphone /></el-icon>
-                  <span>{{ isRecording ? '结束录音' : '语音输入' }}</span>
-                </button>
-                <button class="tool-button" type="button" :disabled="!chatState.isTTSPlaying" @click="handleInterrupt">
-                  <el-icon><Mute /></el-icon>
-                </button>
-              </div>
-            </div>
+            <ChatVoiceStatus
+              v-if="toolsExpanded"
+              v-model:mode="voiceMode"
+              :status-class="voiceStatusClass"
+              :status-text="voiceStatusText"
+              :pipeline-text="voicePipelineText"
+              :processing-text="voiceProcessingText"
+              :latency-summary="voiceLatencySummary"
+              :recording="isRecording"
+              :meter-bars="voiceMeterBars"
+              :level-percent="voiceLevelPercent"
+              :mode-options="voiceModeOptions"
+              :hold-active="isHoldActive"
+              :connected="socketDomain.isConnected.value"
+              :shortcut-title="pushToTalkShortcutTitle"
+              :tts-playing="chatState.isTTSPlaying"
+              @hold-pointer-down="handleHoldPointerDown"
+              @hold-pointer-up="handleHoldPointerUp"
+              @begin-hold="beginHoldToTalk"
+              @end-hold="endHoldToTalk"
+              @toggle-mic="toggleMic"
+              @interrupt="handleInterrupt"
+            />
           </div>
         </div>
       </div>
@@ -665,7 +637,6 @@ import {
   Fold,
   MagicStick,
   Microphone,
-  Mute,
   MoreFilled,
   Moon,
   Plus,
@@ -684,6 +655,8 @@ import { getSocketClient } from '@/net/socketClient'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import { useChatDomain } from '../composables/useChatDomain'
 import SessionRail from '../components/SessionRail.vue'
+import ChatComposerStatusLine from '../components/ChatComposerStatusLine.vue'
+import ChatVoiceStatus from '../components/ChatVoiceStatus.vue'
 import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { DEFAULT_DAILY_PROMPT, DEFAULT_WORK_PROMPT, useWorkspaceStore } from '@/stores/workspaceStore'
@@ -777,6 +750,7 @@ const {
   handleInterrupt,
 } = useChatDomain()
 const chatStore = useChatStore()
+const e2eMode = Boolean(window.petApi?.e2e)
 const sessionStore = useSessionStore()
 const dialogStore = useDialogStore()
 const settingsStore = useSettingsStore()
@@ -2255,9 +2229,11 @@ onMounted(() => {
   window.addEventListener('click', closeQuickPanel)
   window.addEventListener('keydown', handleGlobalKeydown)
   scrollToBottom()
-  void settingsStore.fetchSettings().then(refreshModelOptions)
-  void settingsClient.warmupTts().catch(() => undefined)
-  void refreshMcpSummary()
+  if (!e2eMode) {
+    void settingsStore.fetchSettings().then(refreshModelOptions)
+    void settingsClient.warmupTts().catch(() => undefined)
+    void refreshMcpSummary()
+  }
 })
 onUnmounted(() => {
   messagesContainer.value?.removeEventListener('scroll', checkScrollPosition)
@@ -2927,134 +2903,6 @@ onUnmounted(() => {
   display: none;
 }
 
-.voice-console {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border: 1px solid rgba(226, 232, 240, 0.72);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.68);
-  padding: 10px 12px;
-  color: #475569;
-  backdrop-filter: none;
-}
-
-.voice-console__main {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  align-items: center;
-  gap: 10px;
-}
-
-.voice-status-badge {
-  display: inline-flex;
-  width: 34px;
-  height: 34px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  border-radius: 10px;
-  background: rgba(220, 252, 231, 0.78);
-  color: #16a34a;
-}
-
-.voice-status-badge.recording {
-  background: rgba(254, 226, 226, 0.8);
-  color: #dc2626;
-}
-
-.voice-status-badge.speaking {
-  background: rgba(237, 233, 254, 0.82);
-  color: #7c3aed;
-}
-
-.voice-status-badge.offline,
-.voice-status-badge.error {
-  background: rgba(241, 245, 249, 0.8);
-  color: #64748b;
-}
-
-.voice-status-stack {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.voice-status-line {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.voice-status-line strong {
-  color: #334155;
-  font-size: 13px;
-}
-
-.voice-status-line small {
-  color: #64748b;
-  font-size: 11px;
-}
-
-.voice-meter {
-  display: grid;
-  width: min(260px, 100%);
-  grid-template-columns: repeat(10, minmax(0, 1fr));
-  gap: 3px;
-}
-
-.voice-meter span {
-  height: 5px;
-  border-radius: 999px;
-  background: rgba(203, 213, 225, 0.72);
-}
-
-.voice-meter span.active {
-  background: linear-gradient(90deg, #38bdf8, #22c55e);
-}
-
-.voice-console__controls {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  gap: 8px;
-}
-
-.hold-to-talk {
-  display: inline-flex;
-  min-width: 112px;
-  height: 32px;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 1px solid rgba(37, 99, 235, 0.3);
-  border-radius: 8px;
-  background: rgba(219, 234, 254, 0.72);
-  color: #1d4ed8;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
-  user-select: none;
-}
-
-.hold-to-talk.active {
-  border-color: rgba(220, 38, 38, 0.36);
-  background: rgba(254, 226, 226, 0.82);
-  color: #dc2626;
-}
-
-.hold-to-talk:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
 .tts-indicator {
   display: flex;
   align-items: center;
@@ -3260,43 +3108,6 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 8px;
   order: 3;
-}
-
-.composer-meta-line {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  color: #64748b;
-  font-size: 11px;
-  order: 4;
-}
-
-.composer-meta-line span + span::before {
-  content: '·';
-  margin-right: 6px;
-  color: #cbd5e1;
-}
-
-.composer-meta-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(241, 245, 249, 0.92);
-  color: #475569;
-  font-weight: 600;
-}
-
-.composer-meta-chip.ready {
-  background: rgba(220, 252, 231, 0.92);
-  color: #047857;
-}
-
-.composer-meta-line--tools {
-  color: #94a3b8;
-  order: 5;
 }
 
 .chat-input {
@@ -3639,14 +3450,12 @@ onUnmounted(() => {
     flex-basis: auto;
   }
 
-  .voice-console,
   .chat-command-bar,
   .composer-footer {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .voice-console__controls,
   .composer-left-actions,
   .chat-command-actions,
   .composer-actions,
@@ -4129,61 +3938,6 @@ onUnmounted(() => {
   background: #f59e0b;
 }
 
-.composer-meta-line {
-  gap: 6px;
-  flex-wrap: wrap;
-  min-height: 16px;
-  color: #64748b;
-  font-size: 10.5px;
-  line-height: 1.35;
-}
-
-.composer-meta-line span + span::before {
-  content: none;
-}
-
-.composer-meta-chip {
-  border: 1px solid rgba(226, 232, 240, 0.78);
-  background: #f8fafc;
-  color: #64748b;
-  font-weight: 600;
-}
-
-.composer-meta-value {
-  display: inline-block;
-  max-width: 128px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: bottom;
-}
-
-.composer-meta-chip.ready,
-.composer-meta-chip.is-active {
-  border-color: rgba(16, 185, 129, 0.18);
-  background: rgba(16, 185, 129, 0.1);
-  color: #047857;
-}
-
-.voice-console {
-  border: 1px solid rgba(226, 232, 240, 0.9);
-  border-radius: 14px;
-  background: #f8fafc;
-  box-shadow: none;
-  padding: 10px 12px;
-}
-
-.voice-status-badge {
-  border-radius: 10px;
-}
-
-.hold-to-talk {
-  height: 30px;
-  min-width: 102px;
-  border-radius: 10px;
-  background: #fff;
-}
-
 .tts-indicator,
 .attachment-chip,
 .permission-card,
@@ -4249,24 +4003,6 @@ onUnmounted(() => {
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
 }
 
-:global([data-theme='dark']) .composer-meta-line {
-  color: #64748b;
-}
-
-:global([data-theme='dark']) .composer-meta-chip {
-  border-color: rgba(226, 232, 240, 0.78);
-  background: #f8fafc;
-  color: #64748b;
-}
-
-:global([data-theme='dark']) .composer-meta-chip.ready,
-:global([data-theme='dark']) .composer-meta-chip.is-active {
-  border-color: rgba(16, 185, 129, 0.18);
-  background: rgba(16, 185, 129, 0.1);
-  color: #047857;
-}
-
-:global([data-theme='dark']) .voice-console,
 :global([data-theme='dark']) .model-select :deep(.el-select__wrapper),
 :global([data-theme='dark']) .reasoning-select :deep(.el-select__wrapper) {
   background: #f8fafc;
@@ -4318,8 +4054,7 @@ onUnmounted(() => {
     padding: 0 10px 10px;
   }
 
-  .composer-toolbar,
-  .voice-console {
+  .composer-toolbar {
     align-items: stretch;
     flex-direction: column;
   }

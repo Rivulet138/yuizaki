@@ -414,7 +414,7 @@ const refreshAll = async () => {
 }
 
 onMounted(() => {
-  void refreshAll()
+  if (!window.petApi?.e2e) void refreshAll()
 })
 </script>
 

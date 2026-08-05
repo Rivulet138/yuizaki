@@ -1,6 +1,6 @@
 import { ElMessage } from 'element-plus'
 import { defineStore } from 'pinia'
-import { reactive, ref, watch } from 'vue'
+import { onScopeDispose, reactive, ref, watch } from 'vue'
 import { petControl } from '@/utils/petControl'
 import { chatClient } from '@/api/client'
 import { API_ORIGIN, CONTROL_ORIGIN, requestJson } from '@/api/clients/http-client'
@@ -10,6 +10,11 @@ import type { ChatMessage, ChatOptions, ChatPromptMode, ChatPromptProfile, PetCo
 import { SocketEvents } from '../net/socketClient'
 import { normalizeSentenceEmotionCues } from '../pet-sentence-emotion-scheduler'
 import { useWorkspaceStore } from './workspaceStore'
+import {
+  getCompanionInterruptionEpoch,
+  publishCompanionInterrupt,
+  publishCompanionRuntimeEvent,
+} from '@/app/runtime/companionRuntime'
 
 export interface ChatStoreState {
   messages: ChatMessage[]
@@ -404,6 +409,8 @@ export const useChatStore = defineStore('chat', () => {
   let initialized = false
   let pendingUserMessage: { sessionId: string; content: string; index: number } | null = null
   const pendingInterrupts = new Map<string, { startedAt: number; sessionId: string; timeoutId: number }>()
+  let currentRuntimeRequest: { requestId: string; interruptionEpoch: number } | null = null
+  let currentRealtimeRuntimeRequest: { requestId: string; interruptionEpoch: number } | null = null
   const blockedTtsGenerations = new Set<string>()
   const reportedPlaybackGenerations = new Set<string>()
 
@@ -422,6 +429,38 @@ export const useChatStore = defineStore('chat', () => {
   const stopTtsPlaybackState = () => {
     state.isSpeaking = false
     state.isTTSPlaying = false
+    if (isPetLinkEnabled()) {
+      void publishCompanionRuntimeEvent({
+        source: 'chat',
+        activity: 'idle',
+        requestId: currentRuntimeRequest?.requestId,
+        interruptionEpoch: currentRuntimeRequest?.interruptionEpoch,
+      })
+    }
+  }
+
+  const handleAudioStarted = (event: Event) => {
+    if (!isTtsEnabled()) {
+      stopTtsPlaybackState()
+      window.dispatchEvent(createTtsStopEvent())
+      return
+    }
+    state.isSpeaking = true
+    state.isTTSPlaying = true
+    const detail = (event as CustomEvent<UnknownRecord>).detail
+    const generationId = readString(detail, 'generationId')
+    const sequence = readNumber(detail, 'sequence')
+    if (generationId && (sequence === undefined || sequence === 0) && !reportedPlaybackGenerations.has(generationId)) {
+      reportedPlaybackGenerations.add(generationId)
+      if (reportedPlaybackGenerations.size > 64) {
+        const oldest = reportedPlaybackGenerations.values().next().value
+        if (oldest) reportedPlaybackGenerations.delete(oldest)
+      }
+      chatClient.getSocketClient().sendClientTiming('playback_start', {
+        sessionId: state.currentSessionId,
+        generationId,
+      })
+    }
   }
 
   const clearPendingUserMessage = () => {
@@ -534,8 +573,16 @@ export const useChatStore = defineStore('chat', () => {
       state.isGenerating = false
       state.lastError = null
       if (isPetLinkEnabled()) {
-        void petControl.setBehaviorState('idle', 800).catch((error) => {
-          console.debug('[ChatStore] failed to set pet idle state:', error)
+        const responseRequestId = readString(data, 'request_id')
+        const runtimeRequest = !responseRequestId || responseRequestId === currentRuntimeRequest?.requestId
+          ? currentRuntimeRequest
+          : null
+        void publishCompanionRuntimeEvent({
+          source: 'chat',
+          activity: 'idle',
+          durationMs: 800,
+          requestId: responseRequestId || runtimeRequest?.requestId,
+          interruptionEpoch: runtimeRequest?.interruptionEpoch,
         })
       }
     })
@@ -569,8 +616,12 @@ export const useChatStore = defineStore('chat', () => {
           : null
       if (!payload) return
       pendingSentenceEmotionCues = normalizeSentenceEmotionCues(payload.sentence_emotions)
-      void petControl.setBehaviorState('reacting', 2200).catch((error) => {
-        console.debug('[ChatStore] failed to set pet reacting state:', error)
+      void publishCompanionRuntimeEvent({
+        source: 'chat',
+        activity: 'executing',
+        durationMs: 2200,
+        requestId: currentRuntimeRequest?.requestId,
+        interruptionEpoch: currentRuntimeRequest?.interruptionEpoch,
       })
       window.dispatchEvent(
         new CustomEvent('pet:llm-control', {
@@ -610,6 +661,14 @@ export const useChatStore = defineStore('chat', () => {
       const isFinal = hasFinalField ? data.is_final as boolean : finalEvent
       state.isTTSPlaying = true
       state.isSpeaking = true
+      if (petLinkEnabled) {
+        void publishCompanionRuntimeEvent({
+          source: 'chat',
+          activity: 'speaking',
+          requestId: currentRuntimeRequest?.requestId,
+          interruptionEpoch: currentRuntimeRequest?.interruptionEpoch,
+        })
+      }
       const eventDetail: { text?: string; sentenceEmotionCues?: PetSentenceEmotionCue[]; visemeCues?: PetVisemeCue[]; petLinkEnabled?: boolean; generationId?: string; sequence?: number; isFinal?: boolean } = {}
       if (hasFinalField) eventDetail.isFinal = isFinal
       if (generationId) eventDetail.generationId = generationId
@@ -664,33 +723,18 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     if (typeof window !== 'undefined') {
-      window.addEventListener('pet:audio-started', (event: Event) => {
-        if (!isTtsEnabled()) {
-          stopTtsPlaybackState()
-          window.dispatchEvent(createTtsStopEvent())
-          return
-        }
-        state.isSpeaking = true
-        state.isTTSPlaying = true
-        const detail = (event as CustomEvent<UnknownRecord>).detail
-        const generationId = readString(detail, 'generationId')
-        const sequence = readNumber(detail, 'sequence')
-        if (generationId && (sequence === undefined || sequence === 0) && !reportedPlaybackGenerations.has(generationId)) {
-          reportedPlaybackGenerations.add(generationId)
-          if (reportedPlaybackGenerations.size > 64) {
-            const oldest = reportedPlaybackGenerations.values().next().value
-            if (oldest) reportedPlaybackGenerations.delete(oldest)
-          }
-          socketClient.sendClientTiming('playback_start', {
-            sessionId: state.currentSessionId,
-            generationId,
-          })
-        }
-      })
+      window.addEventListener('pet:audio-started', handleAudioStarted)
       window.addEventListener('pet:audio-ended', stopTtsPlaybackState)
       window.addEventListener('pet:tts-stop', stopTtsPlaybackState)
     }
   }
+
+  onScopeDispose(() => {
+    if (typeof window === 'undefined') return
+    window.removeEventListener('pet:audio-started', handleAudioStarted)
+    window.removeEventListener('pet:audio-ended', stopTtsPlaybackState)
+    window.removeEventListener('pet:tts-stop', stopTtsPlaybackState)
+  })
 
   const setChatOptions = (patch: Partial<ChatOptions>) => {
     Object.assign(chatOptions, normalizeChatOptions({ ...chatOptions, ...patch }))
@@ -767,18 +811,22 @@ export const useChatStore = defineStore('chat', () => {
       }
     }
 
+    const requestId = createRequestId()
+    currentRuntimeRequest = { requestId, interruptionEpoch: getCompanionInterruptionEpoch() }
     state.currentText = ''
     state.isGenerating = true
     state.lastError = null
     pendingSentenceEmotionCues = []
     lastAssistantText = ''
     if (isPetLinkEnabled()) {
-      void petControl.setBehaviorState('thinking').catch((error) => {
-        console.debug('[ChatStore] failed to set pet thinking state:', error)
+      void publishCompanionRuntimeEvent({
+        source: 'chat',
+        activity: 'thinking',
+        requestId,
+        interruptionEpoch: currentRuntimeRequest.interruptionEpoch,
       })
     }
 
-    const requestId = createRequestId()
     const contextMessages = activeContextMessages()
     const petContext = isPetLinkEnabled() ? petControlContext.value || undefined : undefined
     socketClient.sendAgentChat(contextMessages, state.currentSessionId, petContext, requestId, state.currentWorkspaceId, requestChatOptions(options.chatOptions))
@@ -799,6 +847,10 @@ export const useChatStore = defineStore('chat', () => {
   const setRealtimeRecording = (recording: boolean) => {
     state.isRecording = recording
     if (recording) {
+      currentRealtimeRuntimeRequest = {
+        requestId: `realtime_${createRequestId()}`,
+        interruptionEpoch: getCompanionInterruptionEpoch(),
+      }
       state.asrPartialText = ''
       state.currentText = ''
       state.lastError = null
@@ -808,9 +860,12 @@ export const useChatStore = defineStore('chat', () => {
   const setRealtimePlayback = (playing: boolean) => {
     state.isSpeaking = playing
     state.isTTSPlaying = playing
-    if (playing && isPetLinkEnabled()) {
-      void petControl.setBehaviorState('speaking').catch((error) => {
-        console.debug('[ChatStore] failed to set realtime speaking state:', error)
+    if (isPetLinkEnabled()) {
+      void publishCompanionRuntimeEvent({
+        source: 'chat',
+        activity: playing ? 'speaking' : 'idle',
+        requestId: currentRealtimeRuntimeRequest?.requestId,
+        interruptionEpoch: currentRealtimeRuntimeRequest?.interruptionEpoch,
       })
     }
   }
@@ -837,8 +892,12 @@ export const useChatStore = defineStore('chat', () => {
     state.isGenerating = false
     state.lastError = null
     if (isPetLinkEnabled()) {
-      void petControl.setBehaviorState('idle', 800).catch((error) => {
-        console.debug('[ChatStore] failed to set realtime idle state:', error)
+      void publishCompanionRuntimeEvent({
+        source: 'chat',
+        activity: 'idle',
+        durationMs: 800,
+        requestId: currentRealtimeRuntimeRequest?.requestId,
+        interruptionEpoch: currentRealtimeRuntimeRequest?.interruptionEpoch,
       })
     }
 
@@ -879,6 +938,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   const interrupt = (source: 'manual' | 'voice' = 'manual') => {
+    void publishCompanionInterrupt('chat')
     window.dispatchEvent(new CustomEvent('pet:realtime-interrupt', { detail: { source } }))
     const socketClient = chatClient.getSocketClient()
     if (socketClient.isConnected()) {

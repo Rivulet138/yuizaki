@@ -149,6 +149,32 @@ def _force_agent_tool_loop(ctx: AgentRequestContext, plan: Any) -> None:
 
 
 class AgentPipeline:
+
+    @staticmethod
+    def _silent_result(ctx: AgentRequestContext) -> AgentPipelineResult:
+        execution_summary = {
+            "status": "stopped",
+            "total_steps": 0,
+            "completed_steps": 0,
+            "failed_steps": 0,
+            "skipped_steps": 0,
+            "pending_steps": [],
+            "stopped_reason": "silent_autonomy_mode",
+        }
+        return AgentPipelineResult(
+            reply="",
+            pet_control=None,
+            tool_calls=[],
+            action_envelope=compile_action_envelope(
+                reply="",
+                pet_control=None,
+                tool_calls=_execution_trace_payload(
+                    [], execution_summary, {"stop_on_failure": True, "tool_retry_limit": 0}
+                ),
+                source="agent",
+                request_id=ctx.request_id,
+            ),
+        )
     def __init__(self, retrieval_pipeline: RetrievalPipeline | None = None) -> None:
         self.planner = Planner()
         self.retrieval_pipeline = retrieval_pipeline
@@ -711,6 +737,8 @@ class AgentPipeline:
         return ctx
 
     async def run(self, ctx: AgentRequestContext) -> AgentPipelineResult:
+        if ctx.autonomy_mode == "silent":
+            return self._silent_result(ctx)
         ctx, plan = await self.prepare_context(ctx)
         autonomy_mode = getattr(ctx, "autonomy_mode", "companion")
 
@@ -831,6 +859,9 @@ class AgentPipeline:
         return await self.finalize_result(ctx, result_obj)
 
     async def run_streaming(self, ctx: AgentRequestContext, ws_adapter: Any, generation: Generation) -> AgentPipelineResult:
+        if ctx.autonomy_mode == "silent":
+            generation.tokens = []
+            return self._silent_result(ctx)
         ctx, plan = await self.prepare_context(ctx)
 
         if plan.scheduled_steps and ctx.scheduler and ctx.step_executor:

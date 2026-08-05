@@ -5,7 +5,7 @@ import { useChatStore } from '@/stores/chatStore'
 import { useCompanionStore } from '@/stores/companionStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { petControlClient, systemClient } from '@/api/client'
+import { petControlClient } from '@/api/client'
 import { isPanelKey } from '@/navigation/modules'
 import { useCompanionRuntimeBridge } from '../composables/useCompanionRuntimeBridge'
 
@@ -16,6 +16,35 @@ const moduleRoute = (workspaceId: string, tab: string, sessionId?: string | null
     ? `/w/${encodeRouteParam(workspaceId)}/${tab}/${encodeRouteParam(sessionId)}`
     : `/w/${encodeRouteParam(workspaceId)}/${tab}`
 
+interface AppDomainBootstrapDependencies {
+  initChatStore: () => void
+  loadCompanions: () => Promise<unknown> | unknown
+  syncFromBackend: () => Promise<unknown> | unknown
+  resolveActiveCompanion?: () => void
+  applyActiveCompanionRuntime: () => Promise<unknown> | unknown
+  loadSessions: () => Promise<unknown> | unknown
+  run?: (label: string, task: () => Promise<unknown> | unknown) => Promise<void>
+}
+
+export const bootstrapAppDomains = async (dependencies: AppDomainBootstrapDependencies) => {
+  const run = dependencies.run ?? (async (_label, task) => { await task() })
+  dependencies.initChatStore()
+  await run('load companions', dependencies.loadCompanions)
+  await dependencies.syncFromBackend()
+  dependencies.resolveActiveCompanion?.()
+  await run('apply active companion runtime', dependencies.applyActiveCompanionRuntime)
+  await run('load sessions', dependencies.loadSessions)
+}
+
+export const switchWorkspaceAndLoadSessions = async (
+  workspaceId: string,
+  setActiveWorkspaceSynced: (id: string) => Promise<unknown>,
+  loadSessions: () => Promise<unknown> | unknown,
+) => {
+  await setActiveWorkspaceSynced(workspaceId)
+  await loadSessions()
+}
+
 export function useAppOrchestrator() {
   const router = useRouter()
   const route = useRoute()
@@ -24,6 +53,7 @@ export function useAppOrchestrator() {
   const companionStore = useCompanionStore()
   const chatStore = useChatStore()
   const { applyActiveCompanionRuntime, handleCompanionChange } = useCompanionRuntimeBridge()
+  const e2eMode = Boolean(window.petApi?.e2e)
 
   const runRecoverableTask = async (label: string, task: () => Promise<unknown> | unknown) => {
     try {
@@ -34,8 +64,11 @@ export function useAppOrchestrator() {
   }
 
   const changeWorkspace = async (workspaceId: string) => {
-    await workspaceStore.setActiveWorkspaceSynced(workspaceId)
-    await runRecoverableTask('load sessions after workspace change', () => sessionStore.loadSessions())
+    await switchWorkspaceAndLoadSessions(
+      workspaceId,
+      workspaceStore.setActiveWorkspaceSynced,
+      () => runRecoverableTask('load sessions after workspace change', () => sessionStore.loadSessions()),
+    )
     const workspace = workspaceStore.activeWorkspace
     if (workspace.context?.activeTab && isPanelKey(workspace.context.activeTab)) {
       const tab = workspace.context.activeTab
@@ -80,16 +113,20 @@ export function useAppOrchestrator() {
   }
 
   onMounted(async () => {
-    chatStore.initChatStore()
     const initialTab = resolveInitialTab()
-    await runRecoverableTask('load companions', () => companionStore.loadCompanions())
-    await runRecoverableTask('sync workspaces', () => workspaceStore.syncFromBackend())
-
-    if (workspaceStore.activeWorkspace.companion_profile_id) {
-      companionStore.setActiveCompanion(workspaceStore.activeWorkspace.companion_profile_id)
-    }
-    await runRecoverableTask('apply active companion runtime', applyActiveCompanionRuntime)
-    await runRecoverableTask('load sessions', () => sessionStore.loadSessions())
+    await bootstrapAppDomains({
+      initChatStore: chatStore.initChatStore,
+      loadCompanions: companionStore.loadCompanions,
+      syncFromBackend: workspaceStore.syncFromBackend,
+      resolveActiveCompanion: () => {
+        if (workspaceStore.activeWorkspace.companion_profile_id) {
+          companionStore.setActiveCompanion(workspaceStore.activeWorkspace.companion_profile_id)
+        }
+      },
+      applyActiveCompanionRuntime: () => e2eMode ? undefined : applyActiveCompanionRuntime(),
+      loadSessions: sessionStore.loadSessions,
+      run: runRecoverableTask,
+    })
 
     const activeSessionId = sessionStore.activeSession?.id
     if (activeSessionId) {
@@ -103,13 +140,13 @@ export function useAppOrchestrator() {
         router.replace(moduleRoute(workspaceStore.activeWorkspaceId, tab, session?.id)),
       )
     }
+    document.documentElement.dataset['yuizakiAppReady'] = 'true'
   })
 
   watch(
     () => [workspaceStore.activeWorkspaceId, sessionStore.activeSessionId],
-    async ([workspaceId, sessionId]) => {
+    ([workspaceId, sessionId]) => {
       chatStore.setWorkspaceContext(String(workspaceId || 'default'), String(sessionId || 'default'))
-      await runRecoverableTask('sync active workspace', () => systemClient.setActiveWorkspace(String(workspaceId || 'default')))
     },
     { immediate: true },
   )

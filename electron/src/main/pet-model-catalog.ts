@@ -246,7 +246,9 @@ export class PetModelCatalog {
   }
 
   getDefaultModelId(): string | null {
-    return this.models[0]?.id ?? null
+    return this.models.find((model) => model.source === 'bundled')?.id
+      ?? this.models.find((model) => model.source === 'local')?.id
+      ?? null
   }
 
   getUserLive2dRootDir(): string {

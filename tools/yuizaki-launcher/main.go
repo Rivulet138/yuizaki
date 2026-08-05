@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -80,6 +82,11 @@ type logHub struct {
 	mu    sync.Mutex
 	file  *os.File
 	files map[string]*os.File
+}
+
+type electronBuildState struct {
+	InputFingerprint  string `json:"inputFingerprint"`
+	OutputFingerprint string `json:"outputFingerprint"`
 }
 
 func main() {
@@ -379,8 +386,143 @@ func (r *commandRunner) buildElectron(ctx context.Context) error {
 	script := "npm run build:electron"
 	if !r.cfg.devRenderer {
 		script = "npm run build"
+		return r.runLogged(ctx, "build", r.cfg.electronDir, "cmd.exe", "/d", "/c", script)
 	}
-	return r.runLogged(ctx, "build", r.cfg.electronDir, "cmd.exe", "/d", "/c", script)
+
+	outputPath := filepath.Join(r.cfg.electronDir, "dist", "main", "index.js")
+	outputs := []string{
+		filepath.Join(r.cfg.electronDir, "dist", "main"),
+		filepath.Join(r.cfg.electronDir, "dist", "preload"),
+		filepath.Join(r.cfg.electronDir, "dist", "shared"),
+	}
+	statePath := filepath.Join(r.cfg.electronDir, "dist", ".launcher-main-build.json")
+	inputs := []string{
+		filepath.Join(r.cfg.electronDir, "src", "main"),
+		filepath.Join(r.cfg.electronDir, "src", "preload"),
+		filepath.Join(r.cfg.electronDir, "src", "shared"),
+		filepath.Join(r.cfg.electronDir, "package.json"),
+		filepath.Join(r.cfg.electronDir, "package-lock.json"),
+		filepath.Join(r.cfg.electronDir, "tsconfig.json"),
+	}
+	if buildIsCurrent(outputPath, statePath, inputs, outputs) {
+		r.cfg.logger.Log("build", "Electron main build is current; skipping TypeScript compilation")
+		return nil
+	}
+
+	if err := r.runLogged(ctx, "build", r.cfg.electronDir, "cmd.exe", "/d", "/c", script); err != nil {
+		return err
+	}
+	inputFingerprint, inputErr := buildFingerprint(inputs)
+	outputFingerprint, outputErr := buildFingerprint(outputs)
+	if inputErr == nil && outputErr == nil {
+		if err := writeBuildState(statePath, inputFingerprint, outputFingerprint); err != nil {
+			r.cfg.logger.Log("build", "build-state warning: "+err.Error())
+		}
+	} else {
+		r.cfg.logger.Log("build", "build-state warning: unable to fingerprint build inputs or outputs")
+	}
+	return nil
+}
+
+func buildIsCurrent(outputPath, statePath string, inputs, outputs []string) bool {
+	if buildRequired(outputPath, inputs) {
+		return false
+	}
+	inputFingerprint, inputErr := buildFingerprint(inputs)
+	outputFingerprint, outputErr := buildFingerprint(outputs)
+	return inputErr == nil && outputErr == nil && buildStateMatches(statePath, inputFingerprint, outputFingerprint)
+}
+
+func buildRequired(outputPath string, inputs []string) bool {
+	outputInfo, err := os.Stat(outputPath)
+	if err != nil {
+		return true
+	}
+	for _, input := range inputs {
+		err := filepath.WalkDir(input, func(_ string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			info, infoErr := entry.Info()
+			if infoErr != nil {
+				return infoErr
+			}
+			if !info.ModTime().Before(outputInfo.ModTime()) {
+				return errors.New("build input is newer than output")
+			}
+			return nil
+		})
+		if err != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func buildFingerprint(inputs []string) (string, error) {
+	files := make([]string, 0)
+	for _, input := range inputs {
+		err := filepath.WalkDir(input, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if !entry.IsDir() {
+				files = append(files, path)
+			}
+			return nil
+		})
+		if err != nil {
+			return "", err
+		}
+	}
+	sort.Strings(files)
+	hash := sha256.New()
+	for _, path := range files {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return "", err
+		}
+		_, _ = io.WriteString(hash, filepath.ToSlash(path))
+		_, _ = hash.Write([]byte{0})
+		_, _ = hash.Write(content)
+		_, _ = hash.Write([]byte{0})
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func buildStateMatches(statePath, inputFingerprint, outputFingerprint string) bool {
+	content, err := os.ReadFile(statePath)
+	if err != nil {
+		return false
+	}
+	var state electronBuildState
+	return json.Unmarshal(content, &state) == nil &&
+		state.InputFingerprint == inputFingerprint &&
+		state.OutputFingerprint == outputFingerprint
+}
+
+func writeBuildState(statePath, inputFingerprint, outputFingerprint string) error {
+	content, err := json.Marshal(electronBuildState{
+		InputFingerprint:  inputFingerprint,
+		OutputFingerprint: outputFingerprint,
+	})
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
+		return err
+	}
+	temporaryPath := statePath + ".tmp"
+	if err := os.WriteFile(temporaryPath, append(content, '\n'), 0o644); err != nil {
+		return err
+	}
+	if err := os.Remove(statePath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return os.Rename(temporaryPath, statePath)
 }
 
 func (r *commandRunner) prepareModelCaches() {

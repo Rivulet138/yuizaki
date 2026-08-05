@@ -768,9 +768,14 @@ def test_settings_router_requires_admin_token_when_configured():
 
         unauthorized = client.get("/api/settings/")
         authorized = client.get("/api/settings/", headers={"Authorization": "Bearer secret"})
+        authorized_with_dedicated_header = client.get(
+            "/api/settings/",
+            headers={"x-yuizaki-admin-token": "secret"},
+        )
 
         assert unauthorized.status_code == 401
         assert authorized.status_code == 200
+        assert authorized_with_dedicated_header.status_code == 200
 
 
 def test_template_admin_token_placeholder_is_treated_as_unset():

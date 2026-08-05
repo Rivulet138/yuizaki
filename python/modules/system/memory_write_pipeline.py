@@ -5,6 +5,7 @@ from typing import Any, Callable, cast
 from uuid import uuid4
 
 from ..memory.routes import route_memory_write
+from ..memory.expiry import normalize_memory_expiry
 from ..memory.vector_store import Document
 
 
@@ -129,7 +130,7 @@ def normalize_relationship_memory_payload(
         tool_name = str(payload.get("tool_name") or "")
         text = f"結崎关系事件：kind={event_kind}" + (f", tool={tool_name}" if tool_name else "")
 
-    metadata = {
+    metadata = normalize_memory_expiry({
         **routing["metadata"],
         "scope": scope,
         "importance": importance,
@@ -142,7 +143,7 @@ def normalize_relationship_memory_payload(
             "kind": event_kind,
             **{k: v for k, v in payload.items() if k not in {"text", "type", "layer", "importance", "session_id", "workspace_id", "metadata"}},
         },
-    }
+    }, reject_expired=True)
     return {
         "doc_id": str(uuid4()),
         "text": text,
@@ -154,7 +155,8 @@ def normalize_relationship_memory_payload(
 
 
 def persist_relationship_memory(payload: dict[str, Any], *, memory_store) -> dict[str, Any]:
-    doc = Document(id=str(payload["doc_id"]), text=str(payload["text"]), metadata=payload["metadata"])
+    metadata = normalize_memory_expiry(payload["metadata"], reject_expired=True)
+    doc = Document(id=str(payload["doc_id"]), text=str(payload["text"]), metadata=metadata)
     add_metadata_document = getattr(memory_store, "add_metadata_document", None)
     if callable(add_metadata_document):
         add_metadata_document(doc)

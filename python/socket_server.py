@@ -21,7 +21,7 @@ from starlette.types import ASGIApp
 
 from modules.agent import AgentRuntime, create_agent_runtime, fetch_plugin_snapshot, register_plugin_tools
 from modules.agent.agent_trace_store import AgentTraceStore
-from modules.agent.context import AgentRequestContext, AutonomyMode
+from modules.agent.context import AgentRequestContext, AutonomyMode, coerce_autonomy_mode
 from modules.agent.mcp_manager import MCPManager
 from modules.agent.pipeline import AgentPipeline, visual_context_requested
 from modules.agent.policy_engine import PolicyEngine
@@ -70,7 +70,6 @@ RelationshipSummaryProvider = Callable[[], JsonDict]
 ActiveWorkspaceProvider = Callable[[], str]
 _SocketHandlerT = TypeVar("_SocketHandlerT", bound=Callable[..., Awaitable[None]])
 
-_VALID_AUTONOMY_MODES: set[AutonomyMode] = {"companion", "assistant", "executor", "reflector", "silent"}
 _DEFAULT_RAG_LAYERS = ['profile', 'working', 'episodic', 'relationship', 'reflective', 'semantic']
 _VISUAL_FRAME_MODES = {"observe", "frame", "vision"}
 _VISUAL_CONTEXT_TTL_SECONDS = 60.0
@@ -178,10 +177,7 @@ socketio = cast(SocketIOModule, cast(object, import_module("socketio")))
 
 
 def _coerce_autonomy_mode(value: object) -> AutonomyMode:
-    mode = str(value or "companion")
-    if mode in _VALID_AUTONOMY_MODES:
-        return mode
-    return "companion"
+    return coerce_autonomy_mode(value)
 
 
 def _as_text(value: object, default: str = "") -> str:
@@ -1958,6 +1954,27 @@ class DesktopPetSocketServer:
             """Agent 对话：走统一 Tool Loop，再返回最终文本与 pet_control。"""
             logger.info("[SIO] agent:chat from %s", sid)
 
+            autonomy_mode = _coerce_autonomy_mode(data.get("autonomy_mode"))
+            if autonomy_mode == "silent":
+                session_id = _as_text(data.get("session_id")).strip() or sid
+                request_id = _as_text(data.get("request_id")).strip() or f"agent_{uuid.uuid4().hex[:12]}"
+                ctx = AgentRequestContext(
+                    sid=sid,
+                    session_id=session_id,
+                    request_id=request_id,
+                    messages=_as_messages(data.get("messages")),
+                    autonomy_mode=autonomy_mode,
+                    permission_scope=f"socket:{sid}",
+                )
+                result = AgentPipeline._silent_result(ctx)
+                await self.sio.emit(LLMEvents.FINAL, _event_payload(LLMFinalData(
+                    text="",
+                    session_id=session_id,
+                )), to=sid)
+                if result.action_envelope:
+                    await self.sio.emit(AgentEvents.RESULT, result.action_envelope, to=sid)
+                return
+
             llm_client = self.llm_client
             generation_mgr = self.generation_mgr
             if llm_client is None or generation_mgr is None:
@@ -2108,7 +2125,7 @@ class DesktopPetSocketServer:
                     plugin_manager=self.plugin_manager,
                     permission_request_cb=_permission_request_cb,
                     permission_scope=f"socket:{sid}",
-                    autonomy_mode=_coerce_autonomy_mode(data.get("autonomy_mode")),
+                    autonomy_mode=autonomy_mode,
                 )
                 include_visual = not isinstance(voice_prefetch, dict) or final_visual_request
                 self._bind_ctx_runtime(ctx, include_visual=include_visual)

@@ -7,6 +7,9 @@ import { io, type Socket } from 'socket.io-client';
 import { type Ref, ref } from 'vue';
 import { logger } from '../logger';
 import type { ChatOptions } from '../../shared/types';
+import { SocketEvents } from '../../shared/runtimeProtocol';
+export { SocketEvents } from '../../shared/runtimeProtocol';
+export type { SocketEventName } from '../../shared/runtimeProtocol';
 import {
   API_ORIGIN,
   getBackendAuthToken,
@@ -15,59 +18,16 @@ import {
 } from '../api/clients/http-client';
 
 /** Socket.IO 事件名（与 backend/socket_events.py 对齐） */
-export const SocketEvents = {
-  // 音频
-  AUDIO_CHUNK: 'audio:chunk',
-  ASR_VAD_START: 'asr:vad-start',
-  ASR_SPEECH_START: 'asr:speech-start',
-  ASR_PARTIAL: 'asr:partial',
-  ASR_FINAL: 'asr:final',
-  // LLM
-  LLM_REQUEST: 'llm:request',
-  LLM_DELTA: 'llm:delta',
-  LLM_FINAL: 'llm:final',
-  // TTS
-  TTS_CHUNK: 'tts:chunk',
-  TTS_DONE: 'tts:done',
-  // SVC
-  SVC_CONVERT: 'svc:convert',
-  SVC_DONE: 'svc:done',
-  // 工具
-  TOOL_CALL: 'tool:call',
-  TOOL_RESULT: 'tool:result',
-  TOOL_ERROR: 'tool:error',
-  // Agent
-  AGENT_CHAT: 'agent:chat',
-  AGENT_UPDATE: 'agent:update',
-  AGENT_RESULT: 'agent:result',
-  // 记忆
-  MEMORY_STATUS: 'memory:status',
-  RAG_QUERY: 'rag:query',
-  RAG_RESULT: 'rag:result',
-  SCREENSHOT_REQUEST: 'screenshot:request',
-  SCREENSHOT_RESULT: 'screenshot:result',
-  // 截图
-  // Pet
-  PET_STATE: 'pet:state',
-  PET_INTERACT: 'pet:interact',
-  PET_CONTROL: 'pet:control',
-  // 系统
-  CONNECT: 'connect',
-  DISCONNECT: 'disconnect',
-  HEARTBEAT: 'heartbeat',
-  INTERRUPT: 'interrupt',
-  INTERRUPT_ACK: 'interrupt:ack',
-  LATENCY: 'system:latency',
-  CLIENT_TIMING: 'system:client-timing',
-  PERMISSION_REQUEST: 'permission:request',
-  PERMISSION_RESPONSE: 'permission:response',
-  ERROR: 'error',
-} as const;
-
-export type SocketEventName = typeof SocketEvents[keyof typeof SocketEvents];
 
 /** 事件处理器类型 */
 type EventHandler = (data: unknown) => void;
+type HeartbeatCorrelation = { timestamp: number; request_id: string; client_id: string };
+export type HeartbeatCorrelationAudit = {
+  emitted: true;
+  echoed: true;
+  echo_count: 1;
+  correlation: { timestamp: number; request_id: '[verified]'; client_id: '[verified]' };
+};
 type ScreenshotMode = 'observe' | 'frame' | 'vision' | 'ocr';
 type ScreenshotOptions = {
   displayIndex?: number;
@@ -88,6 +48,8 @@ export class SocketClient {
   private handlers: Map<string, Set<EventHandler>> = new Map();
   private opening = false;
   private authRetryInFlight = false;
+  private authRetryOperation = 0;
+  private connectionEpoch = 0;
 
   /** 响应式连接状态 */
   public connected: Ref<boolean> = ref(false);
@@ -105,7 +67,8 @@ export class SocketClient {
     if (this.socket?.connected || this.opening) return;
 
     this.opening = true;
-    void this.bootstrapAndOpenSocket();
+    const epoch = ++this.connectionEpoch;
+    void this.bootstrapAndOpenSocket(epoch);
   }
 
   private shouldUseRuntimeApiOrigin(): boolean {
@@ -124,24 +87,27 @@ export class SocketClient {
     return refreshRuntimeApiOrigin(headers);
   }
 
-  private async bootstrapAndOpenSocket(): Promise<void> {
+  private async bootstrapAndOpenSocket(epoch: number): Promise<void> {
     try {
       let authToken = getBackendAuthToken();
       if (!authToken) {
         try {
           authToken = await refreshControlTokenFromServer();
+          if (epoch !== this.connectionEpoch) return;
         } catch (error) {
           logger.warn('[SocketIO] Control token bootstrap failed before connect:', error);
         }
       }
+      if (epoch !== this.connectionEpoch) return;
       if (!authToken) {
         logger.warn('[SocketIO] Backend auth token missing; skip connection until the Electron control page provides authorization.');
         return;
       }
       this.url = await this.resolveSocketUrl(authToken || '');
+      if (epoch !== this.connectionEpoch) return;
       this.openSocket(authToken);
     } finally {
-      this.opening = false;
+      if (epoch === this.connectionEpoch) this.opening = false;
     }
   }
 
@@ -151,7 +117,7 @@ export class SocketClient {
       this.socket.disconnect();
       this.socket = null;
     }
-    this.socket = io(this.url, {
+    const socket = io(this.url, {
       path: '/socket.io',
       transports: ['websocket', 'polling'],
       auth: authToken ? { token: authToken } : undefined,
@@ -161,31 +127,35 @@ export class SocketClient {
       reconnectionDelayMax: 5000,
       timeout: 10000,
     });
+    this.socket = socket;
 
     // 连接生命周期
-    this.socket.on(SocketEvents.CONNECT, () => {
-      logger.info('[SocketIO] Connected:', this.socket?.id);
+    socket.on(SocketEvents.CONNECT, () => {
+      if (this.socket !== socket) return;
+      logger.info('[SocketIO] Connected:', socket.id);
       this.connected.value = true;
       this.reconnectAttempts.value = 0;
     });
 
-    this.socket.on(SocketEvents.DISCONNECT, (reason: string) => {
+    socket.on(SocketEvents.DISCONNECT, (reason: string) => {
+      if (this.socket !== socket) return;
       logger.info('[SocketIO] Disconnected:', reason);
       this.connected.value = false;
     });
 
-    this.socket.on('connect_error', (err: Error) => {
+    socket.on('connect_error', (err: Error) => {
+      if (this.socket !== socket) return;
       logger.error('[SocketIO] Connection error:', err.message);
       this.reconnectAttempts.value++;
       if (err.message.toLowerCase().includes('reject')) {
-        this.retryWithFreshAuthToken();
+        this.retryWithFreshAuthToken(socket);
       }
     });
 
     // 注册已有的事件处理器
     for (const [event, handlerSet] of this.handlers.entries()) {
       for (const handler of handlerSet) {
-        this.socket.on(event, handler);
+        socket.on(event, handler);
       }
     }
 
@@ -193,26 +163,39 @@ export class SocketClient {
     this.startHeartbeat();
   }
 
-  private retryWithFreshAuthToken(): void {
-    if (!this.socket || this.authRetryInFlight) return;
+  private retryWithFreshAuthToken(retrySocket: Socket): void {
+    if (this.socket !== retrySocket || this.authRetryInFlight) return;
+    const epoch = this.connectionEpoch;
+    const operation = ++this.authRetryOperation;
+    const isCurrent = () => (
+      operation === this.authRetryOperation
+      && epoch === this.connectionEpoch
+      && this.socket === retrySocket
+    );
     this.authRetryInFlight = true;
     void refreshControlTokenFromServer()
       .then(async (token) => {
-        if (!token || !this.socket || this.socket.connected) return;
-        this.url = await this.resolveSocketUrl(token);
-        this.socket.auth = { token };
-        this.socket.connect();
+        if (!token || !isCurrent() || retrySocket.connected) return;
+        const url = await this.resolveSocketUrl(token);
+        if (!isCurrent() || retrySocket.connected) return;
+        this.url = url;
+        retrySocket.auth = { token };
+        retrySocket.connect();
       })
       .catch((error) => {
         logger.warn('[SocketIO] Control token refresh failed after rejected connection:', error);
       })
       .finally(() => {
-        this.authRetryInFlight = false;
+        if (operation === this.authRetryOperation) this.authRetryInFlight = false;
       });
   }
 
   /** 断开连接 */
   disconnect(): void {
+    this.connectionEpoch += 1;
+    this.authRetryOperation += 1;
+    this.opening = false;
+    this.authRetryInFlight = false;
     if (this.socket) {
       this.stopHeartbeat();
       this.socket.disconnect();
@@ -391,15 +374,83 @@ export class SocketClient {
   // ─── 心跳 ──────────────────────────────────
 
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  private heartbeatPaused = false;
+
+  private emitHeartbeat(): void {
+    if (this.socket?.connected) {
+      this.emit(SocketEvents.HEARTBEAT, { timestamp: Date.now() });
+    }
+  }
+
+  pauseHeartbeat(): void {
+    this.heartbeatPaused = true;
+    this.stopHeartbeat();
+  }
+
+  async emitHeartbeatOnceAndWaitForEcho(options: {
+    timeoutMs?: number;
+    duplicateWindowMs?: number;
+    correlation?: HeartbeatCorrelation;
+  } = {}): Promise<HeartbeatCorrelationAudit> {
+    const clientId = this.socket?.id || '';
+    if (!this.socket?.connected || !clientId) throw new Error('Socket did not connect for isolated heartbeat');
+    const correlation = options.correlation ?? {
+      timestamp: Date.now(),
+      request_id: `heartbeat-${crypto.randomUUID()}`,
+      client_id: clientId,
+    };
+    const timeoutMs = options.timeoutMs ?? 2_000;
+    const duplicateWindowMs = options.duplicateWindowMs ?? 100;
+    let handler: EventHandler | undefined;
+    try {
+      return await new Promise<HeartbeatCorrelationAudit>((resolve, reject) => {
+        let echoCount = 0;
+        let settleTimer: ReturnType<typeof setTimeout> | undefined;
+        const timeout = setTimeout(() => reject(new Error('Heartbeat echo timed out')), timeoutMs);
+        const fail = (message: string) => {
+          clearTimeout(timeout);
+          if (settleTimer) clearTimeout(settleTimer);
+          reject(new Error(message));
+        };
+        handler = (value) => {
+          if (!value || typeof value !== 'object') return fail('Heartbeat echo correlation did not match');
+          const payload = value as Record<string, unknown>;
+          const keys = Object.keys(payload).sort();
+          if (
+            keys.join(',') !== 'client_id,request_id,timestamp'
+            || payload['timestamp'] !== correlation.timestamp
+            || payload['request_id'] !== correlation.request_id
+            || payload['client_id'] !== correlation.client_id
+          ) {
+            return fail('Heartbeat echo correlation did not match');
+          }
+          echoCount += 1;
+          if (echoCount > 1) return fail('Heartbeat echo was duplicated');
+          clearTimeout(timeout);
+          settleTimer = setTimeout(() => resolve({
+            emitted: true,
+            echoed: true,
+            echo_count: 1,
+            correlation: {
+              timestamp: correlation.timestamp,
+              request_id: '[verified]',
+              client_id: '[verified]',
+            },
+          }), duplicateWindowMs);
+        };
+        this.on(SocketEvents.HEARTBEAT, handler);
+        this.emit(SocketEvents.HEARTBEAT, correlation);
+      });
+    } finally {
+      if (handler) this.off(SocketEvents.HEARTBEAT, handler);
+    }
+  }
 
   private startHeartbeat(): void {
     this.stopHeartbeat();
+    if (this.heartbeatPaused) return;
     this.heartbeatInterval = setInterval(() => {
-      if (this.socket?.connected) {
-        this.emit(SocketEvents.HEARTBEAT, {
-          timestamp: Date.now(),
-        });
-      }
+      this.emitHeartbeat();
     }, 30000); // 30秒心跳
   }
 

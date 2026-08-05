@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, Callable
 
@@ -12,6 +13,7 @@ from ..system.memory_write_pipeline import build_tool_success_event
 from .tool_registry import ToolRegistry
 from .tool_result import ToolResultEnvelope
 from .models import RuntimeLoopRecord
+from .permission_receipt import build_permission_receipt
 from .route_policy import memory_reflector_route
 
 
@@ -41,7 +43,43 @@ class ToolExecutor:
         except Exception:
             pass
 
-    async def execute(self, tool_name: str, args: dict[str, Any], permission_request_cb: PermissionRequestCallback | None = None, plugin_manager: Any = None, ctx: Any = None) -> ToolResultEnvelope:
+    def _evaluate_policy(
+        self,
+        tool: Any,
+        *,
+        request_id: str | None,
+        permission_scope: str | None,
+        parameters: dict[str, Any],
+        force_confirm: bool,
+    ) -> Any:
+        evaluator = self.policy_engine.evaluate_tool
+        signature = inspect.signature(evaluator)
+        accepts_kwargs = any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        )
+        candidates = {
+            "request_id": request_id,
+            "permission_scope": permission_scope,
+            "parameters": parameters,
+            "force_confirm": force_confirm,
+        }
+        kwargs = {
+            key: value
+            for key, value in candidates.items()
+            if accepts_kwargs or key in signature.parameters
+        }
+        return evaluator(tool, **kwargs)
+
+    async def execute(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        permission_request_cb: PermissionRequestCallback | None = None,
+        plugin_manager: Any = None,
+        ctx: Any = None,
+        force_confirmation: bool = False,
+    ) -> ToolResultEnvelope:
         tool = self.registry.get(tool_name)
         if tool is None:
             return self._finish(ToolResultEnvelope(
@@ -52,43 +90,89 @@ class ToolExecutor:
                 error=f"Unknown tool: {tool_name}",
             ))
 
+        if plugin_manager is not None:
+            args = await plugin_manager.before_tool(tool.name, args, ctx)
+
         request_id = getattr(ctx, 'request_id', None) if ctx is not None else None
         permission_scope = getattr(ctx, 'permission_scope', None) if ctx is not None else None
         decision = await asyncio.to_thread(
-            self.policy_engine.evaluate_tool,
+            self._evaluate_policy,
             tool,
             request_id=request_id,
             permission_scope=permission_scope,
+            parameters=args,
+            force_confirm=force_confirmation,
         )
-        if decision.require_confirm and decision.request_id:
+        allowed_by_policy = bool(getattr(decision, "allowed", False))
+        require_confirm = bool(getattr(decision, "require_confirm", False))
+        decision_request_id = getattr(decision, "request_id", None)
+        decision_reason = str(getattr(decision, "reason", "permission_denied"))
+        receipt = getattr(decision, "permission_receipt", None)
+        if receipt is None:
+            synthesized_decision = "required" if require_confirm else ("allowed" if allowed_by_policy else "denied")
+            receipt = build_permission_receipt(
+                agent_request_id=str(request_id or f"agent_{datetime.now().timestamp():.6f}"),
+                permission_request_id=decision_request_id,
+                decision=synthesized_decision,
+                reason_code=(
+                    "legacy_policy_permission_required" if require_confirm
+                    else "legacy_policy_allowed" if allowed_by_policy
+                    else "legacy_policy_denied"
+                ),
+                retryable=allowed_by_policy and not require_confirm,
+                permission_scope=str(permission_scope or "default"),
+                capability_id=tool.name,
+                capability_type="tool",
+                capability_kind=f"{tool.source}-tool",
+                risk_level=tool.risk_level,
+                parameters=args,
+            )
+        if require_confirm and not decision_request_id:
+            decision_request_id = receipt.permission_request_id
+        if force_confirmation and not require_confirm and allowed_by_policy:
+            require_confirm = True
+            allowed_by_policy = False
+            decision_request_id = receipt.permission_request_id
+            decision_reason = "Untrusted MCP output cannot authorize a follow-up side effect"
+            receipt = replace(
+                receipt,
+                decision="required",
+                reason_code="untrusted_mcp_followup_requires_confirmation",
+                retryable=False,
+            )
+        redacted_args = receipt.parameters if receipt is not None else args
+        if require_confirm and decision_request_id:
             if permission_request_cb is None:
+                discard_permission = getattr(self.policy_engine, "discard_permission", None)
+                if callable(discard_permission):
+                    discard_permission(decision_request_id)
                 return self._finish(ToolResultEnvelope(
                     success=False,
                     content="",
                     source=tool.source,
                     tool_name=tool.name,
-                    error=decision.reason,
-                    data={
-                        "request_id": decision.request_id,
-                        "require_confirm": True,
-                        "capability_id": tool.name,
-                        "capability_type": "tool",
-                        "capability_kind": f"{tool.source}-tool",
-                        "risk_level": tool.risk_level,
-                    },
+                    error=decision_reason,
+                    permission_receipt=replace(
+                        receipt,
+                        reason_code=(
+                            receipt.reason_code
+                            if receipt.reason_code == "untrusted_mcp_followup_requires_confirmation"
+                            else "interactive_permission_unavailable"
+                        ),
+                    ) if receipt is not None else None,
                 ))
 
-            future = self.policy_engine.register_pending(decision.request_id)
+            future = self.policy_engine.register_pending(decision_request_id)
             await permission_request_cb(
-                request_id=decision.request_id,
+                request_id=decision_request_id,
                 tool_name=tool.name,
                 capability_id=tool.name,
                 capability_type="tool",
                 capability_kind=f"{tool.source}-tool",
                 permission_scope=permission_scope,
                 risk_level=tool.risk_level,
-                reason=decision.reason,
-                args=args,
+                reason=decision_reason,
+                args=redacted_args,
             )
             allowed = await future
             if not allowed:
@@ -98,15 +182,30 @@ class ToolExecutor:
                     source=tool.source,
                     tool_name=tool.name,
                     error=f"Tool '{tool.name}' was denied by user",
+                    permission_receipt=replace(
+                        receipt,
+                        decision="denied",
+                        reason_code="user_denied",
+                        retryable=False,
+                        decided_at=datetime.now().isoformat(),
+                    ) if receipt is not None else None,
                 ))
+            receipt = replace(
+                receipt,
+                decision="allowed",
+                reason_code="user_allowed",
+                retryable=True,
+                decided_at=datetime.now().isoformat(),
+            ) if receipt is not None else None
 
-        if not decision.allowed:
+        if not allowed_by_policy and not (require_confirm and receipt and receipt.decision == "allowed"):
             return self._finish(ToolResultEnvelope(
                 success=False,
                 content="",
                 source=tool.source,
                 tool_name=tool.name,
-                error=decision.reason,
+                error=decision_reason,
+                permission_receipt=receipt,
             ))
 
         if ctx is not None and getattr(ctx, 'trace_store', None) is not None:
@@ -133,9 +232,6 @@ class ToolExecutor:
                 ).to_dict(),
             )
 
-        if plugin_manager is not None:
-            args = await plugin_manager.before_tool(tool.name, args, ctx)
-
         try:
             if inspect.iscoroutinefunction(tool.handler):
                 result = await tool.handler(args)
@@ -148,6 +244,7 @@ class ToolExecutor:
         except Exception:
             self._observe(False)
             raise
+        result.permission_receipt = receipt
         bindings = get_runtime_bindings(ctx) if ctx is not None else None
         relationship_writer = bindings.relationship_event_writer if bindings is not None else None
         if relationship_writer is None and ctx is not None:
@@ -190,7 +287,7 @@ class ToolExecutor:
                     relationship_writer,
                     build_tool_success_event(
                         tool_name=tool.name,
-                        args=args,
+                        args=redacted_args,
                         text=text,
                         importance=importance,
                         owner_agent_id=reflector_route.owner_agent_id,

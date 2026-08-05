@@ -1,5 +1,5 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SocketEvents } from '../net/socketClient'
 import { useChatStore } from '../stores/chatStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
@@ -17,6 +17,15 @@ const mocks = vi.hoisted(() => ({
   requestJson: vi.fn(),
   petSetBehaviorState: vi.fn(() => Promise.resolve()),
   petStopLipSync: vi.fn(() => Promise.resolve()),
+  publishRuntime: vi.fn(() => Promise.resolve(true)),
+  publishInterrupt: vi.fn(() => Promise.resolve(true)),
+  interruptionEpoch: 0,
+}))
+
+vi.mock('@/app/runtime/companionRuntime', () => ({
+  getCompanionInterruptionEpoch: () => mocks.interruptionEpoch,
+  publishCompanionInterrupt: mocks.publishInterrupt,
+  publishCompanionRuntimeEvent: mocks.publishRuntime,
 }))
 
 vi.mock('element-plus', () => ({
@@ -58,6 +67,8 @@ vi.mock('@/utils/petControl', () => ({
 }))
 
 describe('chatStore', () => {
+  let activeStore: ReturnType<typeof useChatStore>
+
   beforeEach(() => {
     mocks.handlers.clear()
     mocks.sendAgentChat.mockReset()
@@ -69,6 +80,9 @@ describe('chatStore', () => {
     mocks.requestJson.mockReset()
     mocks.petSetBehaviorState.mockClear()
     mocks.petStopLipSync.mockClear()
+    mocks.publishRuntime.mockClear()
+    mocks.publishInterrupt.mockClear()
+    mocks.interruptionEpoch = 0
     window.localStorage.clear()
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -77,8 +91,12 @@ describe('chatStore', () => {
       },
     })
     setActivePinia(createPinia())
-    const store = useChatStore()
-    store.initChatStore()
+    activeStore = useChatStore()
+    activeStore.initChatStore()
+  })
+
+  afterEach(() => {
+    activeStore.$dispose()
   })
 
   it('preserves action envelope schema and source metadata', () => {
@@ -109,6 +127,61 @@ describe('chatStore', () => {
         }),
       ],
     }))
+  })
+
+  it('publishes pipeline pet control and TTS lifecycle with the originating interruption epoch', async () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.sendChat('hello')
+    const thinking = mocks.publishRuntime.mock.calls.find(([payload]) => payload.activity === 'thinking')?.[0]
+    expect(thinking).toMatchObject({ source: 'chat', activity: 'thinking', interruptionEpoch: 0 })
+
+    mocks.handlers.get(SocketEvents.LLM_FINAL)?.({ text: 'done', request_id: thinking.requestId })
+    mocks.handlers.get(SocketEvents.PET_CONTROL)?.({ pet_control: { emotion_id: 'calm' } })
+    mocks.handlers.get(SocketEvents.TTS_CHUNK)?.({ audio_url: 'file:///tmp/reply.wav' })
+    window.dispatchEvent(new CustomEvent('pet:audio-ended'))
+    await Promise.resolve()
+
+    expect(mocks.publishRuntime.mock.calls.map(([payload]) => payload.activity).slice(0, 5)).toEqual([
+      'thinking', 'idle', 'executing', 'speaking', 'idle',
+    ])
+    for (const [payload] of mocks.publishRuntime.mock.calls) {
+      expect(payload.interruptionEpoch).toBe(0)
+    }
+  })
+
+  it('does not stack playback listeners when the store is initialized twice', () => {
+    activeStore.initChatStore()
+    mocks.publishRuntime.mockClear()
+
+    window.dispatchEvent(new CustomEvent('pet:audio-ended'))
+
+    expect(mocks.publishRuntime).toHaveBeenCalledTimes(1)
+    expect(mocks.publishRuntime).toHaveBeenCalledWith(expect.objectContaining({ activity: 'idle' }))
+  })
+
+  it('keeps one captured realtime identity through playback end and turn completion', async () => {
+    mocks.interruptionEpoch = 4
+    mocks.requestJson.mockResolvedValue({ status: 'ok' })
+    const store = useChatStore()
+
+    store.setRealtimeRecording(true)
+    store.setRealtimePlayback(true)
+    mocks.interruptionEpoch = 5
+    store.setRealtimePlayback(false)
+    await store.completeRealtimeTurn({
+      turnId: 'turn-1',
+      userText: 'hello',
+      assistantText: 'hi',
+      model: 'realtime',
+      workspaceId: 'default',
+      sessionId: 'default',
+    })
+
+    const lifecycle = mocks.publishRuntime.mock.calls.map(([payload]) => payload)
+    expect(lifecycle.map((payload) => payload.activity)).toEqual(['speaking', 'idle', 'idle'])
+    expect(new Set(lifecycle.map((payload) => payload.requestId)).size).toBe(1)
+    expect(lifecycle.every((payload) => payload.interruptionEpoch === 4)).toBe(true)
   })
 
   it('should append user message when sendChat is called', () => {

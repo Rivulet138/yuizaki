@@ -416,98 +416,13 @@
           </el-tab-pane>
 
           <el-tab-pane :label="t('settings.tabs.asr')" name="asr">
-            <el-card shadow="never">
-              <template #header>
-                <div class="card-header">
-                  <span>{{ t('settings.asr.title') }}</span>
-                  <el-button plain :loading="localDiscoveryRequest.loading" @click="applyLocalAsrDiscovery">
-                    <el-icon><Connection /></el-icon>
-                    {{ t('settings.discovery.detectLocal') }}
-                  </el-button>
-                </div>
-              </template>
-              <el-form label-position="top" @submit.prevent>
-                <div class="form-grid">
-                  <el-form-item :label="t('settings.asr.provider')">
-                    <el-select v-model="form.asr.provider" class="full-width" @change="debouncedSave({ asr: { provider: $event } })">
-                      <el-option label="SenseVoice Service" value="sensevoice-service" />
-                      <el-option label="FunASR Service" value="funasr-service" />
-                      <el-option label="OpenAI Compatible" value="openai-compatible" />
-                      <el-option label="Sherpa ONNX" value="sherpa-onnx" />
-                      <el-option label="Sherpa ONNX Streaming" value="sherpa-onnx-online" />
-                      <el-option label="SenseVoice Local" value="sensevoice-local" />
-                      <el-option :label="t('common.disabled')" value="disabled" />
-                    </el-select>
-                  </el-form-item>
-                  <el-form-item v-if="asrUsesService" :label="t('settings.asr.baseUrl')">
-                    <el-input v-model="form.asr.base_url" @change="debouncedSave({ asr: { base_url: $event } })" />
-                  </el-form-item>
-                  <el-form-item v-if="form.asr.provider === 'openai-compatible'" :label="t('settings.asr.apiKey')">
-                    <el-input v-model="form.asr.api_key" type="password" show-password @change="debouncedSave({ asr: { api_key: $event } })" />
-                  </el-form-item>
-                </div>
-                <div v-if="asrUsesService || asrUsesLocalSenseVoice" class="form-grid three">
-                  <el-form-item :label="t('settings.asr.sensevoiceModel')">
-                    <el-input v-model="form.asr.sensevoice_model" placeholder="iic/SenseVoiceSmall" @change="debouncedSave({ asr: { sensevoice_model: $event } })" />
-                  </el-form-item>
-                  <el-form-item v-if="asrUsesLocalSenseVoice" :label="t('settings.asr.sensevoiceDevice')">
-                    <el-select v-model="form.asr.sensevoice_device" class="full-width" @change="debouncedSave({ asr: { sensevoice_device: $event } })">
-                      <el-option label="CPU" value="cpu" />
-                      <el-option label="CUDA" value="cuda" />
-                    </el-select>
-                  </el-form-item>
-                  <el-form-item v-if="asrUsesService" :label="t('settings.asr.timeout')">
-                    <el-input-number v-model="form.asr.timeout" :min="5" :max="300" controls-position="right" @change="debouncedSave({ asr: { timeout: $event } })" />
-                  </el-form-item>
-                </div>
-                <div v-if="form.asr.provider === 'sherpa-onnx' || form.asr.provider === 'sherpa-onnx-online'" class="form-grid two">
-                  <el-form-item :label="t('settings.asr.sherpaModel')">
-                    <el-input
-                      v-model="form.asr.sherpa_model_path"
-                      :placeholder="form.asr.provider === 'sherpa-onnx-online'
-                        ? './.cache/sherpa-onnx/streaming-zipformer-small-ctc-zh/model.int8.onnx'
-                        : './.cache/sherpa-onnx/sensevoice/model.int8.onnx'"
-                      @change="debouncedSave({ asr: { sherpa_model_path: $event } })"
-                    />
-                  </el-form-item>
-                  <el-form-item :label="t('settings.asr.sherpaTokens')">
-                    <el-input
-                      v-model="form.asr.sherpa_tokens_path"
-                      :placeholder="form.asr.provider === 'sherpa-onnx-online'
-                        ? './.cache/sherpa-onnx/streaming-zipformer-small-ctc-zh/tokens.txt'
-                        : './.cache/sherpa-onnx/sensevoice/tokens.txt'"
-                      @change="debouncedSave({ asr: { sherpa_tokens_path: $event } })"
-                    />
-                  </el-form-item>
-                  <el-form-item :label="t('settings.asr.sherpaThreads')">
-                    <el-input-number v-model="form.asr.sherpa_num_threads" :min="1" :max="16" controls-position="right" @change="debouncedSave({ asr: { sherpa_num_threads: $event } })" />
-                  </el-form-item>
-                  <el-form-item :label="t('settings.asr.sherpaProvider')">
-                    <el-select v-model="form.asr.sherpa_provider" class="full-width" @change="debouncedSave({ asr: { sherpa_provider: $event } })">
-                      <el-option label="CPU" value="cpu" />
-                      <el-option label="CUDA" value="cuda" />
-                      <el-option label="Core ML" value="coreml" />
-                    </el-select>
-                  </el-form-item>
-                </div>
-                <div v-if="asrEnabled" class="form-grid two">
-                  <el-form-item :label="t('settings.asr.languageHint')">
-                    <el-input v-model="form.asr.language" placeholder="zh" @change="debouncedSave({ asr: { language: $event } })" />
-                  </el-form-item>
-                  <el-form-item v-if="form.asr.provider !== 'sherpa-onnx-online'" :label="t('settings.asr.partialInterval')">
-                    <el-input-number v-model="form.asr.asr_partial_every" :min="1" :max="30" controls-position="right" @change="debouncedSave({ asr: { asr_partial_every: $event } })" />
-                  </el-form-item>
-                </div>
-                <div v-if="asrEnabled" class="form-grid">
-                  <el-form-item :label="t('settings.asr.vadThreshold', { value: form.asr.vad_threshold.toFixed(2) })">
-                    <el-slider v-model="form.asr.vad_threshold" :min="0.1" :max="0.9" :step="0.1" @change="debouncedSave({ asr: { vad_threshold: $event } })" />
-                  </el-form-item>
-                  <el-form-item :label="t('settings.asr.endpointSilenceCap', { value: form.asr.vad_min_silence_ms })">
-                    <el-slider v-model="form.asr.vad_min_silence_ms" :min="160" :max="1200" :step="32" @change="debouncedSave({ asr: { vad_min_silence_ms: $event } })" />
-                  </el-form-item>
-                </div>
-              </el-form>
-            </el-card>
+            <SettingsAsrSection
+              :model-value="form.asr"
+              :discovery-loading="localDiscoveryRequest.loading"
+              :discovery-error="localDiscoveryRequest.error"
+              @discover-local="applyLocalAsrDiscovery"
+              @update-field="saveAsrField"
+            />
           </el-tab-pane>
 
           <el-tab-pane :label="t('settings.tabs.memory')" name="memory">
@@ -1218,6 +1133,7 @@ import { DEFAULT_VAD_MIN_SILENCE_MS } from '@/../shared/runtime-defaults'
 import { inferModelCapabilities, type ModelCapabilitySupport } from '@/../shared/model-capabilities'
 import type { InputBindingSettingsPatch, KeyboardShortcutAction, MouseSideButton } from '@/../shared/input-bindings'
 import { useSettingsDomain } from '../composables/useSettingsDomain'
+import SettingsAsrSection, { type AsrSettings } from '../components/SettingsAsrSection.vue'
 import { isLocalLlmEndpoint, normalizeOpenAiBaseUrl, shouldAutoDiscoverLlmModels } from '../llmDiscovery'
 import { LLM_PROVIDER_BASE_URLS, LLM_PROVIDER_ENDPOINTS, choosePreferredLlmModel, getLlmProviderOptions, inferLlmProviderPreset } from '../llmProviders'
 import type { LlmProviderPreset } from '../llmProviders'
@@ -1467,9 +1383,10 @@ const llmApiKeyTagLabel = computed(() => {
   return form.llm.api_key.trim() ? t('settings.llm.apiKeySavedTag') : t('settings.llm.apiKeyMissing')
 })
 
-const asrUsesService = computed(() => ['sensevoice-service', 'funasr-service', 'openai-compatible'].includes(form.asr.provider))
-const asrUsesLocalSenseVoice = computed(() => form.asr.provider === 'sensevoice-local')
-const asrEnabled = computed(() => form.asr.provider !== 'disabled')
+const saveAsrField = (field: keyof AsrSettings, value: string | number) => {
+  Object.assign(form.asr, { [field]: value })
+  debouncedSave({ asr: { [field]: value } })
+}
 const activeTtsProviderLabel = computed(() => t('settings.tts.genieProvider'))
 const formatTtsDuration = (value?: number | null): string => {
   const numericValue = Number(value)

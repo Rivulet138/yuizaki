@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from ..pet_control import filter_pet_control_payload
 from .models import ActionEnvelope, CharacterAction
+from .permission_receipt import serialize_permission_payload
 
 
 def compile_action_envelope(
@@ -37,7 +38,7 @@ def compile_action_envelope(
     if tool_calls:
         actions.append(CharacterAction(
             type="tool_trace",
-            payload=tool_calls,
+            payload=serialize_permission_payload(tool_calls),
             schema_version="yuizaki.tool-trace.v1",
             source="agent_runtime",
         ))

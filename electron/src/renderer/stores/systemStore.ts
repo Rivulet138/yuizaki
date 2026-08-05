@@ -119,9 +119,8 @@ export const useSystemStore = defineStore('system', () => {
     }
   }
 
-  const checkLocalServices = (): void => {
-    void checkControl()
-    void checkPython()
+  const checkLocalServices = async (): Promise<void> => {
+    await Promise.all([checkControl(), checkPython()])
   }
 
   const startHealthCheck = (
@@ -130,22 +129,22 @@ export const useSystemStore = defineStore('system', () => {
   ) => {
     if (statusTimer) clearInterval(statusTimer)
 
-    checkLocalServices()
+    void checkLocalServices()
 
     statusTimer = setInterval(() => {
       wsConnected.value = checkWs()
       sioConnected.value = checkSio()
-      checkLocalServices()
+      void checkLocalServices()
     }, 1500)
   }
 
-  const refreshStatus = (
+  const refreshStatus = async (
     checkWs: () => boolean,
     checkSio: () => boolean,
   ) => {
     wsConnected.value = checkWs()
     sioConnected.value = checkSio()
-    checkLocalServices()
+    await checkLocalServices()
   }
 
   const stopHealthCheck = () => {

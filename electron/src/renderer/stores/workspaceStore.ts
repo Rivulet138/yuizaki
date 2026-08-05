@@ -354,11 +354,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           state.value.activeWorkspaceId = backendWorkspaces[0]?.id || 'default'
         }
         persist()
-        syncActiveWorkspaceInBackground(state.value.activeWorkspaceId)
       }
     } catch {
       // fallback to local-only state
     }
+    await syncActiveWorkspaceToBackend(state.value.activeWorkspaceId)
   }
 
   const createWorkspaceRemote = async (name?: string) => {
@@ -398,20 +398,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const updateWorkspaceRemote = async (workspaceId: string, patch: WorkspacePatchPayload) => {
     const updated = await workspaceClient.update(workspaceId, patch)
+    const responsePatch: Partial<WorkspaceRecord> = {}
+    if (updated.name !== undefined) responsePatch.name = updated.name
+    if (updated.description !== undefined) responsePatch.description = updated.description
+    if (updated.icon !== undefined) responsePatch.icon = updated.icon
+    if (updated.color !== undefined) responsePatch.color = updated.color
+    if (updated.companion_profile_id !== undefined) responsePatch.companion_profile_id = updated.companion_profile_id
+    if (updated.default_model !== undefined) responsePatch.default_model = updated.default_model
+    if (updated.system_prompt !== undefined) responsePatch.system_prompt = updated.system_prompt
+    if (updated.tool_preset !== undefined) responsePatch.tool_preset = updated.tool_preset
+    if (updated.memory_scope !== undefined) responsePatch.memory_scope = updated.memory_scope
+    if (updated.mcp_preset_id !== undefined) responsePatch.mcp_preset_id = updated.mcp_preset_id
     state.value.workspaces = state.value.workspaces.map((workspace) =>
       workspace.id === workspaceId
         ? {
             ...workspace,
-            name: updated.name,
-            description: updated.description,
-            icon: updated.icon,
-            color: updated.color,
-            companion_profile_id: updated.companion_profile_id,
-            default_model: updated.default_model,
-            system_prompt: updated.system_prompt,
-            tool_preset: updated.tool_preset,
-            memory_scope: updated.memory_scope,
-            mcp_preset_id: updated.mcp_preset_id,
+            ...responsePatch,
             updatedAt: updated.updated_at || new Date().toISOString(),
           }
         : workspace

@@ -38,6 +38,7 @@ const normalizePlaybackUrl = async (audioUrl: string): Promise<string> => {
   if (!trimmed) return ''
   if (/^https?:\/\//i.test(trimmed)) return trimmed
   if (/^blob:/i.test(trimmed)) return trimmed
+  if (/^data:audio\//i.test(trimmed)) return trimmed
   if (/^file:\/\//i.test(trimmed)) return ''
   return resolveBackendUrl(trimmed)
 }

@@ -9,7 +9,7 @@ import logging
 
 import numpy as np
 
-from .backend import MemoryBackendStatus
+from .backend import MemoryBackendStatus, MemorySearchIncompleteError
 from .schema import MemorySearchFilters
 from .vector_store import (
     Document,
@@ -22,6 +22,7 @@ from .vector_store import (
 from .reranker import lexical_overlap_score, normalize_scores
 
 logger = logging.getLogger(__name__)
+QDRANT_SEARCH_SCAN_LIMIT = 4096
 
 
 class QdrantVectorStore(VectorStore):
@@ -229,34 +230,67 @@ class QdrantVectorStore(VectorStore):
             return []
         vector = _embed_query(self._embedding_service, query).astype("float32").tolist()
         query_filter = self._build_query_filter(filters=filters)
-        limit = max(top_k, min(256, top_k * 8 if filters else top_k))
         query_points = getattr(self.client, "query_points", None)
-        if query_points is not None:
-            results = query_points(
-                collection_name=self.collection_name,
-                query=vector,
-                query_filter=query_filter,
-                limit=limit,
-                with_payload=True,
-            ).points
-        else:
-            search_method = getattr(self.client, "search")
-            results = search_method(
-                collection_name=self.collection_name,
-                query_vector=vector,
-                query_filter=query_filter,
-                limit=limit,
-                with_payload=True,
-            )
         filtered_results: list[tuple[Document, float]] = []
-        for result in results:
-            payload = result.payload or {}
-            doc = self._deserialize_doc(result.id, payload)
-            if not self._doc_matches_filters(doc, filters=filters):
-                continue
-            filtered_results.append((doc, float(result.score)))
-            if len(filtered_results) >= top_k:
+        offset = 0
+        scanned_count = 0
+        rejected_count = 0
+        page_size = max(8, min(256, top_k * 8))
+
+        while len(filtered_results) < top_k and scanned_count < QDRANT_SEARCH_SCAN_LIMIT:
+            page_limit = min(page_size, QDRANT_SEARCH_SCAN_LIMIT - scanned_count)
+            if query_points is not None:
+                results = query_points(
+                    collection_name=self.collection_name,
+                    query=vector,
+                    query_filter=query_filter,
+                    limit=page_limit,
+                    offset=offset,
+                    with_payload=True,
+                ).points
+            else:
+                search_method = getattr(self.client, "search")
+                results = search_method(
+                    collection_name=self.collection_name,
+                    query_vector=vector,
+                    query_filter=query_filter,
+                    limit=page_limit,
+                    offset=offset,
+                    with_payload=True,
+                )
+
+            if not results:
                 break
+            scanned_count += len(results)
+            offset += len(results)
+            for result in results:
+                payload = result.payload or {}
+                doc = self._deserialize_doc(result.id, payload)
+                if not self._doc_matches_filters(doc, filters=filters):
+                    rejected_count += 1
+                    continue
+                filtered_results.append((doc, float(result.score)))
+                if len(filtered_results) >= top_k:
+                    break
+            if len(results) < page_limit:
+                break
+            page_size = min(256, page_size * 2)
+
+        if len(filtered_results) < top_k and scanned_count >= QDRANT_SEARCH_SCAN_LIMIT:
+            logger.warning(
+                "Qdrant memory search scan limit reached: requested=%s returned=%s scanned=%s rejected=%s",
+                top_k,
+                len(filtered_results),
+                scanned_count,
+                rejected_count,
+            )
+            raise MemorySearchIncompleteError(
+                requested_count=top_k,
+                selected_ids=[doc.id for doc, _score in filtered_results],
+                scanned_count=scanned_count,
+                rejected_count=rejected_count,
+                scan_limit=QDRANT_SEARCH_SCAN_LIMIT,
+            )
         return filtered_results
 
     def _collection_vector_size(self, info: Any) -> int | None:

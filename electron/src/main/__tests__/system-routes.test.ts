@@ -379,12 +379,14 @@ describe('system routes', () => {
       `${expectedBackendOrigin()}/api/summary/session-1/rewrite`,
       expect.objectContaining({
         headers: expect.objectContaining({
-          Authorization: 'Bearer summary-admin-token',
+          'x-yuizaki-admin-token': 'summary-admin-token',
           'x-yuizaki-backend-token': 'backend-token',
           'x-trace-id': 'trace-system-test',
         }),
       }),
     )
+    const [, requestInit] = vi.mocked(fetch).mock.calls[0]
+    expect(requestInit?.headers).not.toHaveProperty('Authorization')
   })
 
   it('returns backend API token status from the local token store', async () => {
@@ -668,6 +670,8 @@ describe('system routes', () => {
       '/memory/index/status',
       '/memory/memory/add',
       '/memory/rag/query',
+      '/memory/maintenance/preview',
+      '/memory/maintenance/apply',
       '/api/memory/pipeline/query?query=hello',
       '/api/companions',
       '/api/companions/default',

@@ -15,6 +15,16 @@ if TYPE_CHECKING:
 
 
 AutonomyMode = Literal["companion", "assistant", "executor", "reflector", "silent"]
+VALID_AUTONOMY_MODES: tuple[AutonomyMode, ...] = (
+    "companion", "assistant", "executor", "reflector", "silent",
+)
+
+
+def coerce_autonomy_mode(value: object) -> AutonomyMode:
+    mode = str(value or "companion")
+    if mode in VALID_AUTONOMY_MODES:
+        return mode  # type: ignore[return-value]
+    return "companion"
 
 
 @dataclass
@@ -99,8 +109,15 @@ class AgentRequestContext:
     plugin_manager: 'PluginManager | None' = None
     permission_request_cb: Callable[..., Any] | None = None
     permission_scope: str | None = None
-    autonomy_mode: AutonomyMode = "companion"
+    autonomy_mode: AutonomyMode | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        mode = coerce_autonomy_mode(
+            self.autonomy_mode if self.autonomy_mode is not None else self.extra.get("autonomy_mode")
+        )
+        self.autonomy_mode = mode
+        self.extra.pop("autonomy_mode", None)
 
 
 @dataclass

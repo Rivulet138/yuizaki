@@ -177,6 +177,7 @@ class ChatCompletionRequest(BaseModel):
     mcp_enabled: Optional[bool] = None
     web_search_enabled: Optional[bool] = None
     pet_control_context: Optional[PetControlContext] = None
+    autonomy_mode: Literal["companion", "assistant", "executor", "reflector", "silent"] = "companion"
 
 
 class SVCConvertResponse(BaseModel):

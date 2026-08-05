@@ -55,6 +55,21 @@
           <el-icon class="menu-icon"><component :is="menu.icon" /></el-icon>
           <span class="menu-label">{{ menu.title }}</span>
         </router-link>
+        <details v-if="group.relatedItems.length" class="related-routes">
+          <summary>{{ t('sidebar.related') }}</summary>
+          <router-link
+            v-for="menu in group.relatedItems"
+            :key="`related-${menu.id}`"
+            :to="`/w/${activeWorkspaceId}/${menu.id}`"
+            class="menu-item admin related"
+            active-class="active"
+            :aria-label="menu.title"
+            :title="menu.title"
+          >
+            <el-icon class="menu-icon"><component :is="menu.icon" /></el-icon>
+            <span class="menu-label">{{ menu.title }}</span>
+          </router-link>
+        </details>
       </section>
     </nav>
 
@@ -64,6 +79,7 @@
         type="button"
         title="桌宠场景设置"
         aria-label="桌宠场景设置"
+        data-testid="workspace-settings"
         @click="$emit('open-workspace-settings')"
       >
         <el-icon class="menu-icon"><Setting /></el-icon>
@@ -93,26 +109,39 @@ defineEmits<{
 const adminExpanded = ref(false)
 
 const adminGroupDefinitions = [
-  { id: 'runtime', label: '运行', ids: ['overview', 'infrastructure', 'svc'] },
-  { id: 'extension', label: '扩展', ids: ['plugins', 'agent-governance', 'agent-trace-admin'] },
-  { id: 'debug', label: '调试', ids: ['persona-memory', 'i18n', 'deploy'] },
+  { id: 'permissions', labelKey: 'sidebar.groups.skillsConnectionsPermissions', canonicalIds: ['tool'], relatedIds: ['plugins', 'agent-governance'] },
+  { id: 'tasks', labelKey: 'sidebar.groups.audit', canonicalIds: ['agent-trace'], relatedIds: ['agent-trace-admin'] },
+  { id: 'system', labelKey: 'sidebar.groups.runtime', canonicalIds: ['overview', 'infrastructure'], relatedIds: ['deploy'] },
+  { id: 'developer', labelKey: 'sidebar.groups.debug', canonicalIds: ['settings', 'pet'], relatedIds: ['prompt', 'persona-memory', 'svc', 'i18n'] },
 ]
 
 const adminMenuGroups = computed(() => {
   const remaining = new Set(props.adminMenus.map((menu) => menu.id))
   const groups = adminGroupDefinitions
     .map((group) => {
-      const items = group.ids
+      const items = group.canonicalIds
+        .map((id) => props.adminMenus.find((menu) => menu.id === id))
+        .filter((menu): menu is SidebarMenu => Boolean(menu))
+      const relatedItems = group.relatedIds
         .map((id) => props.adminMenus.find((menu) => menu.id === id))
         .filter((menu): menu is SidebarMenu => Boolean(menu))
       items.forEach((menu) => remaining.delete(menu.id))
-      return { ...group, items }
+      relatedItems.forEach((menu) => remaining.delete(menu.id))
+      return { ...group, label: t(group.labelKey), items, relatedItems }
     })
-    .filter((group) => group.items.length > 0)
+    .filter((group) => group.items.length > 0 || group.relatedItems.length > 0)
 
   const otherItems = props.adminMenus.filter((menu) => remaining.has(menu.id))
   if (otherItems.length) {
-    groups.push({ id: 'other', label: '其他', ids: otherItems.map((item) => item.id), items: otherItems })
+    groups.push({
+      id: 'other',
+      labelKey: 'sidebar.groups.other',
+      label: t('sidebar.groups.other'),
+      canonicalIds: otherItems.map((item) => item.id),
+      relatedIds: [],
+      items: otherItems,
+      relatedItems: [],
+    })
   }
   return groups
 })
@@ -343,6 +372,28 @@ const adminMenuGroups = computed(() => {
   font-weight: 800;
   line-height: 1;
   padding: 0 10px 2px;
+}
+
+.related-routes {
+  display: grid;
+  gap: 5px;
+}
+
+.related-routes summary {
+  padding: 5px 10px;
+  color: var(--yui-muted);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.related-routes summary:focus-visible {
+  outline: 3px solid var(--yui-accent);
+  outline-offset: 1px;
+}
+
+.menu-item.related {
+  margin-top: 4px;
 }
 
 @media (max-width: 980px) {

@@ -30,6 +30,7 @@ const DEFAULT_API_ALLOWED_ORIGINS = [
   `http://localhost:${DEFAULT_PORT}`,
   `http://127.0.0.1:${DEFAULT_RENDERER_DEV_PORT}`,
   `http://localhost:${DEFAULT_RENDERER_DEV_PORT}`,
+  'yuizaki-app://renderer',
 ]
 const CONTROL_CORS_METHODS = 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
 

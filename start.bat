@@ -466,24 +466,31 @@ if not exist "%ELECTRON_NODE_MODULES%\wait-on\package.json" (
 )
 
 call :log_info "Checking Python runtime dependencies..."
-"%PYTHON_EXE%" -c "import fastapi, uvicorn, sentence_transformers; print('all-ok')" >nul 2>nul
+"%PYTHON_EXE%" -c "import fastapi, uvicorn" >nul 2>nul
 if errorlevel 1 (
-  call :fail "Python dependencies incomplete (fastapi/uvicorn/sentence_transformers). Run install_full.bat"
+  call :fail "Python runtime dependencies are not importable (fastapi/uvicorn). Run install_full.bat"
   exit /b 1
 )
-call :log_info "Core dependency check passed"
+call :log_info "Core runtime import check passed"
+
+"%PYTHON_EXE%" -c "import importlib.util; raise SystemExit(0 if importlib.util.find_spec('sentence_transformers') else 1)" >nul 2>nul
+if errorlevel 1 (
+  call :warn "sentence-transformers is not installed. Semantic memory features will be unavailable."
+) else (
+  call :log_info "sentence-transformers package detected; heavyweight import is deferred to the backend"
+)
 
 call :log_info "Checking backend ASR stack..."
-"%PYTHON_EXE%" -c "import sherpa_onnx; print('sherpa-ok')" >nul 2>nul
+"%PYTHON_EXE%" -c "import importlib.util; raise SystemExit(0 if importlib.util.find_spec('sherpa_onnx') else 1)" >nul 2>nul
 if errorlevel 1 (
-  call :warn "sherpa-onnx is not importable. Local ONNX ASR provider will be unavailable."
+  call :warn "sherpa-onnx is not installed. Local ONNX ASR provider will be unavailable."
 ) else (
-  call :log_info "ASR dependency sherpa-onnx detected"
+  call :log_info "ASR package sherpa-onnx detected; native import is deferred to the backend"
 )
 call :log_info "FunASR/SenseVoice service mode uses ASR_BASE_URL and is not installed into the main venv."
 
 call :log_info "Checking backend TTS stack (Genie-TTS)..."
-"%PYTHON_EXE%" -m pip show genie-tts >nul 2>nul
+"%PYTHON_EXE%" -c "import importlib.metadata; importlib.metadata.version('genie-tts')" >nul 2>nul
 if errorlevel 1 (
   if "%NO_OPTIONAL_INSTALL%"=="1" (
     call :warn "genie-tts not installed. TTS voice output may be disabled."
@@ -497,19 +504,19 @@ if errorlevel 1 (
     )
   )
 ) else (
-  call :log_info "TTS dependency genie-tts detected"
+  call :log_info "TTS package genie-tts detected; heavyweight import is deferred to the backend"
 )
 
 call :log_info "Checking backend SVC stack..."
 call :log_info "SoulX-Singer-SVC runs as an external Docker service via SVC_BASE_URL and is not installed into the main venv."
 
-call :ok "Dependency integrity check passed"
+call :ok "Dependency availability check passed"
 exit /b 0
 
 :validate_startup_paths
 call :log_info "Validating startup script paths..."
 for %%L in (select_control_port select_backend_port check_backend_port start_backend start_renderer start_electron wait_for_control_server) do (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "$lines=Get-Content -LiteralPath '%~f0'; if($lines -contains ':%%L'){ exit 0 }; Write-Error 'missing batch label :%%L'; exit 1" >nul 2>nul
+  findstr /b /l /c:":%%L" "%~f0" >nul 2>nul
   if errorlevel 1 (
     call :fail "Startup script is incomplete: missing batch label :%%L in %~f0. Close old terminals and rerun the current start.bat."
     exit /b 1

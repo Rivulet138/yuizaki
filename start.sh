@@ -74,7 +74,7 @@ deadline = time.monotonic() + timeout
 while time.monotonic() < deadline:
     try:
         with urllib.request.urlopen(url, timeout=2) as response:
-            if 200 <= response.status < 500:
+            if 200 <= response.status < 300:
                 raise SystemExit(0)
     except Exception:
         time.sleep(0.5)

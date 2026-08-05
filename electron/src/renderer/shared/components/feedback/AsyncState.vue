@@ -1,5 +1,11 @@
 <template>
-  <div v-if="loading" class="async-state async-state--loading" role="status" aria-live="polite">
+  <div
+    v-if="loading"
+    class="async-state async-state--loading"
+    role="status"
+    aria-live="polite"
+    :data-reduced-motion="reducedMotion.reduced.value ? 'true' : 'false'"
+  >
     <div class="async-state__header">
       <span class="async-state__pulse"></span>
       <span>{{ loadingText || '正在加载数据…' }}</span>
@@ -30,6 +36,9 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted, onUnmounted } from 'vue'
+import { createReducedMotionObserver } from '@/app/runtime/reducedMotion'
+
 defineProps<{
   loading?: boolean
   error?: string
@@ -41,6 +50,10 @@ defineProps<{
 }>()
 
 defineEmits<{ (e: 'retry'): void }>()
+
+const reducedMotion = createReducedMotionObserver()
+onMounted(reducedMotion.start)
+onUnmounted(reducedMotion.stop)
 </script>
 
 <style scoped>
@@ -118,5 +131,12 @@ defineEmits<{ (e: 'retry'): void }>()
   color: #dc2626;
   cursor: pointer;
   font-size: 13px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .async-state__pulse,
+  .skeleton-line {
+    animation: none;
+  }
 }
 </style>

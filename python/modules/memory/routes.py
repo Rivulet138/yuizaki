@@ -21,10 +21,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 
-from .backend import MemoryBackend
+from .backend import MemoryBackend, MemorySearchIncompleteError
 from .vector_store import Document, MemoryType
 from .pipeline import RetrievalPipeline
 from .schema import MemorySearchFilters, RetrievalRequest, RetrievalTrace
+from .expiry import is_memory_expired, normalize_memory_expiry
 
 
 VALID_MEMORY_LAYERS = {'profile', 'working', 'episodic', 'relationship', 'reflective', 'semantic', 'session'}
@@ -516,11 +517,20 @@ def create_memory_router(state: MemoryState, get_active_workspace_id: Callable[[
       )
 
   async def _run_store_call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-    async with state.io_lock:
-      return await run_in_threadpool(lambda: fn(*args, **kwargs))
+    try:
+      async with state.io_lock:
+        return await run_in_threadpool(lambda: fn(*args, **kwargs))
+    except MemorySearchIncompleteError as exc:
+      raise HTTPException(status_code=503, detail=exc.to_detail()) from exc
+
+  def _normalize_expiry_for_write(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+      return normalize_memory_expiry(metadata, reject_expired=True)
+    except ValueError as exc:
+      raise HTTPException(status_code=400, detail=str(exc)) from exc
 
   async def _write_memory_document(doc: Document) -> None:
-    metadata = dict(doc.metadata or {})
+    metadata = _normalize_expiry_for_write(dict(doc.metadata or {}))
     retired_fields = {'state', 'deleted_at', 'archived_at', 'superseded_at', 'maintenance_reasons'}
     rejected_fields = sorted(retired_fields.intersection(metadata))
     if rejected_fields:
@@ -610,6 +620,10 @@ def create_memory_router(state: MemoryState, get_active_workspace_id: Callable[[
         candidates[doc.id] = existing
       if reason not in existing['reasons']:
         existing['reasons'].append(reason)
+
+    for doc in scoped_docs:
+      if is_memory_expired(doc.metadata):
+        _add_candidate(doc, 'expired')
 
     if payload.include_stale_working or payload.include_low_quality:
       for doc in scoped_docs:
@@ -727,6 +741,7 @@ def create_memory_router(state: MemoryState, get_active_workspace_id: Callable[[
           session_id=session_id,
           layer=resolved_layer,
         )
+        and not is_memory_expired(doc.metadata)
       ]
     }
 
@@ -792,7 +807,7 @@ def create_memory_router(state: MemoryState, get_active_workspace_id: Callable[[
     payload_dict = _payload_dict(payload)
     doc_id = str(payload_dict.get("id") or f"doc_{uuid4().hex}")
     text = str(payload_dict.get("text") or "")
-    metadata = dict(payload_dict.get("metadata") or {})
+    metadata = _normalize_expiry_for_write(dict(payload_dict.get("metadata") or {}))
     memory_type = _memory_type_value(payload_dict.get("type") or metadata.get("type") or MemoryType.FACT)
     importance = _coerce_importance(payload_dict.get("importance", metadata.get("importance", 0.5)))
     routing_payload = {
@@ -963,6 +978,7 @@ def create_memory_router(state: MemoryState, get_active_workspace_id: Callable[[
     layer = routing['layer']
     scope = routing['scope']
     metadata = routing['metadata']
+    metadata = _normalize_expiry_for_write(metadata)
     _append_audit(metadata, action='create')
     if payload.dedupe:
       candidates = await _run_store_call(
@@ -1080,7 +1096,10 @@ def create_memory_router(state: MemoryState, get_active_workspace_id: Callable[[
           memory_types=memory_types,
           recency_weight=recency_weight,
         )
-      result = await run_in_threadpool(state.pipeline.recall, request)
+      try:
+        result = await run_in_threadpool(state.pipeline.recall, request)
+      except MemorySearchIncompleteError as exc:
+        raise HTTPException(status_code=503, detail=exc.to_detail()) from exc
       result["query"] = query
       return result
 
@@ -1164,14 +1183,17 @@ def create_memory_pipeline_router(query_handler, get_active_workspace_id: Callab
   ):
     resolved_scope = scope or 'workspace'
     resolved_workspace_id = _resolve_query_workspace_id(workspace_id, resolved_scope)
-    return await run_in_threadpool(
-      query_handler,
-      query=query,
-      session_id=session_id,
-      workspace_id=resolved_workspace_id,
-      scope=resolved_scope,
-      layers=layers,
-      top_k=top_k,
-    )
+    try:
+      return await run_in_threadpool(
+        query_handler,
+        query=query,
+        session_id=session_id,
+        workspace_id=resolved_workspace_id,
+        scope=resolved_scope,
+        layers=layers,
+        top_k=top_k,
+      )
+    except MemorySearchIncompleteError as exc:
+      raise HTTPException(status_code=503, detail=exc.to_detail()) from exc
 
   return router

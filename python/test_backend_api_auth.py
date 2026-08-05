@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from modules.system.backend_api_auth import backend_api_auth_required, verify_backend_api_authorization
+from modules.system.api_security import require_bearer_token, resolve_admin_authorization
 
 
 def _build_client(token: str) -> TestClient:
@@ -31,6 +32,11 @@ def _build_client(token: str) -> TestClient:
     @app.get("/api/workspaces")
     async def workspaces():
         return {"workspaces": []}
+
+    @app.post("/api/admin-action")
+    async def admin_action(authorization: str | None = Depends(resolve_admin_authorization)):
+        auth_error = require_bearer_token(authorization, "summary-admin-token")
+        return auth_error or {"ok": True}
 
     @app.get("/memory/docs")
     async def memory_docs():
@@ -100,7 +106,7 @@ def test_backend_api_auth_protects_vision_routes():
     assert valid.status_code == 200
 
 
-def test_backend_api_auth_allows_dedicated_backend_token_header_alongside_business_auth():
+def test_backend_api_auth_rejects_mismatched_bearer_even_with_valid_dedicated_header():
     client = _build_client("secret-token")
 
     response = client.get(
@@ -111,7 +117,51 @@ def test_backend_api_auth_allows_dedicated_backend_token_header_alongside_busine
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 401
+
+
+def test_backend_api_auth_requires_every_provided_identity_header_to_match():
+    client = _build_client("secret-token")
+
+    wrong_dedicated = client.get(
+        "/api/workspaces",
+        headers={
+            "Authorization": "Bearer secret-token",
+            "x-yuizaki-backend-token": "wrong-token",
+        },
+    )
+    both_valid = client.get(
+        "/api/workspaces",
+        headers={
+            "Authorization": "Bearer secret-token",
+            "x-yuizaki-backend-token": "secret-token",
+        },
+    )
+
+    assert wrong_dedicated.status_code == 401
+    assert both_valid.status_code == 200
+
+
+def test_backend_and_admin_credentials_are_independent_on_protected_routes():
+    client = _build_client("secret-token")
+
+    valid = client.post(
+        "/api/admin-action",
+        headers={
+            "x-yuizaki-backend-token": "secret-token",
+            "x-yuizaki-admin-token": "summary-admin-token",
+        },
+    )
+    wrong_admin = client.post(
+        "/api/admin-action",
+        headers={
+            "x-yuizaki-backend-token": "secret-token",
+            "x-yuizaki-admin-token": "wrong-token",
+        },
+    )
+
+    assert valid.status_code == 200
+    assert wrong_admin.status_code == 401
 
 
 def test_backend_api_auth_keeps_health_audio_and_socket_public():

@@ -128,6 +128,36 @@ def test_summary_alert_mutations_require_admin_token_when_configured() -> None:
     assert alert_state == {}
 
 
+def test_summary_admin_token_header_is_independent_from_backend_authorization() -> None:
+    client, alert_state = _build_client("summary-secret")
+
+    authorized = client.post(
+        "/api/summary/alerts/clear",
+        headers={
+            "Authorization": "Bearer backend-secret",
+            "x-yuizaki-admin-token": "summary-secret",
+        },
+    )
+
+    assert authorized.status_code == 200
+    assert alert_state == {}
+
+
+def test_summary_admin_token_header_takes_precedence_over_legacy_bearer() -> None:
+    client, alert_state = _build_client("summary-secret")
+
+    rejected = client.post(
+        "/api/summary/alerts/clear",
+        headers={
+            "Authorization": "Bearer summary-secret",
+            "x-yuizaki-admin-token": "wrong-secret",
+        },
+    )
+
+    assert rejected.status_code == 401
+    assert alert_state == {"demo": {"acked": False}}
+
+
 def test_summary_audit_static_route_is_not_captured_by_session_detail() -> None:
     client, _alert_state = _build_client(
         "secret",

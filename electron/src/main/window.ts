@@ -12,6 +12,7 @@ export interface PetWindowRuntimeOptions {
   apiOrigin: string
   controlToken: string
   tab?: string
+  e2eToken?: string
 }
 
 interface PendingRendererMessage {
@@ -25,7 +26,7 @@ export class PetWindow {
   private rendererReady = false
   private pendingRendererMessages: PendingRendererMessage[] = []
 
-  create(runtime?: PetWindowRuntimeOptions): BrowserWindow {
+  create(runtime?: PetWindowRuntimeOptions, beforeLoad?: (window: BrowserWindow) => void): BrowserWindow {
     if (this.mainWindow) {
       return this.mainWindow
     }
@@ -46,6 +47,7 @@ export class PetWindow {
         nodeIntegration: false,
         contextIsolation: true,
         sandbox: true,
+        ...(runtime?.e2eToken ? { additionalArguments: [`--yuizaki-e2e-token=${runtime.e2eToken}`] } : {}),
       },
       transparent: true,
       frame: false,
@@ -55,6 +57,7 @@ export class PetWindow {
     })
 
     configureTrustedNavigation(this.mainWindow.webContents)
+    beforeLoad?.(this.mainWindow)
 
     this.rendererReady = false
     this.mainWindow.webContents.on('did-finish-load', () => {

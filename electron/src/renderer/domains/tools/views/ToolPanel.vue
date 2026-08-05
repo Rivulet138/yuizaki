@@ -4,6 +4,11 @@
     tone="tool"
   >
     <div class="tool-panel">
+      <nav class="canonical-links" :aria-label="t('canonical.capabilities.aria')">
+        <span>{{ t('canonical.capabilities.label') }}</span>
+        <router-link :to="canonicalPath('plugins')">{{ t('canonical.capabilities.plugins') }}</router-link>
+        <router-link :to="canonicalPath('agent-governance')">{{ t('canonical.capabilities.governance') }}</router-link>
+      </nav>
       <section class="overview-band">
         <article v-for="item in summaryCards" :key="item.label" class="summary-card" :class="`tone-${item.tone}`">
           <span>{{ item.label }}</span>
@@ -389,6 +394,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Check, Close, Delete, Refresh, Search, Upload } from '@element-plus/icons-vue'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import { pluginClient, systemClient } from '@/api/client'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { useI18n } from '@/i18n'
 import { curatedSkillRecommendations } from '../skillRecommendations'
 import type { PluginLoadFailure, PluginRuntimeState, PluginToolCapabilityContribution } from '../../../../shared/plugin'
 import type { CapabilityDescriptor, CapabilityKind, CapabilityRiskLevel, SkillCatalogItem } from '../../../../shared/capability'
@@ -407,6 +414,9 @@ type MCPFilter = 'all' | 'connected' | 'error' | 'disabled'
 const IMPORTED_SKILLS_STORAGE_KEY = 'yuizaki.importedSkills'
 const IMPORTED_SKILLS_MIGRATION_KEY = 'yuizaki.importedSkills.backendMigrated'
 const IMPORTED_SKILLS_DIRTY_KEY = 'yuizaki.importedSkills.localDirty'
+const workspaceStore = useWorkspaceStore()
+const { t } = useI18n()
+const canonicalPath = (moduleId: string) => `/w/${workspaceStore.activeWorkspaceId}/${moduleId}`
 
 interface SourceCard {
   kind: CapabilityKindFilter
@@ -2320,6 +2330,33 @@ onMounted(async () => {
 :deep(.el-input__wrapper),
 :deep(.el-select__wrapper) {
   border-radius: 10px;
+}
+
+.canonical-links {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 14px;
+  color: var(--yui-muted);
+  font-size: 12px;
+}
+
+.canonical-links span {
+  font-weight: 700;
+}
+
+.canonical-links a {
+  color: var(--yui-accent);
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
+
+.canonical-links a:focus-visible {
+  border-radius: 4px;
+  outline: 3px solid var(--yui-accent);
+  outline-offset: 2px;
 }
 
 @media (max-width: 1180px) {

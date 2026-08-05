@@ -45,12 +45,12 @@ const resolveElectronRoot = (): string => {
 const resolveProjectRoot = (): string => path.resolve(resolveElectronRoot(), '..')
 
 const buildProxyHeaders = (ctx: Parameters<HttpRouteHandler>[4], bodyIncluded: boolean, traceId: string | null) => {
-  const headers: { Authorization?: string; Connection: string; 'Content-Type'?: string; 'x-trace-id'?: string; 'x-yuizaki-backend-token'?: string } = {
+  const headers: { Connection: string; 'Content-Type'?: string; 'x-trace-id'?: string; 'x-yuizaki-admin-token'?: string; 'x-yuizaki-backend-token'?: string } = {
     Connection: 'close',
   }
   const token = ctx.adminTokenStore.getSummaryAdminToken().trim()
   if (token) {
-    headers.Authorization = `Bearer ${token}`
+    headers['x-yuizaki-admin-token'] = token
   }
   if (ctx.backendApiToken) {
     headers['x-yuizaki-backend-token'] = ctx.backendApiToken
@@ -628,6 +628,8 @@ const PYTHON_JSON_PROXY_PATHS = new Set([
   '/memory/index/rebuild',
   '/memory/memory/add',
   '/memory/rag/query',
+  '/memory/maintenance/preview',
+  '/memory/maintenance/apply',
   '/api/memory/pipeline/query',
   '/api/companions',
   '/api/chat/translate',

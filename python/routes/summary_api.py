@@ -9,13 +9,13 @@ import time
 from datetime import datetime
 from typing import Any, Callable
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from database.repository import DatabaseError, NotFoundError
 from modules.system.api_response import error_response
-from modules.system.api_security import require_bearer_token
+from modules.system.api_security import require_bearer_token, resolve_admin_authorization
 
 
 def create_summary_router(
@@ -333,7 +333,7 @@ def create_summary_router(
         }
 
     @router.post("/api/summary/alerts/ack")
-    async def ack_governance_alert(key: str, authorization: str | None = Header(default=None)):
+    async def ack_governance_alert(key: str, authorization: str | None = Depends(resolve_admin_authorization)):
         auth_error = _require_summary_admin(authorization)
         if auth_error is not None:
             return auth_error
@@ -347,7 +347,7 @@ def create_summary_router(
         return {"status": "ok", "key": key, "acked": True}
 
     @router.post("/api/summary/alerts/snooze")
-    async def snooze_governance_alert(key: str, minutes: int = 60, authorization: str | None = Header(default=None)):
+    async def snooze_governance_alert(key: str, minutes: int = 60, authorization: str | None = Depends(resolve_admin_authorization)):
         auth_error = _require_summary_admin(authorization)
         if auth_error is not None:
             return auth_error
@@ -362,7 +362,7 @@ def create_summary_router(
         return {"status": "ok", "key": key, "snooze_minutes": mins}
 
     @router.post("/api/summary/alerts/clear")
-    async def clear_governance_alert_state(authorization: str | None = Header(default=None)):
+    async def clear_governance_alert_state(authorization: str | None = Depends(resolve_admin_authorization)):
         auth_error = _require_summary_admin(authorization)
         if auth_error is not None:
             return auth_error
@@ -446,7 +446,7 @@ def create_summary_router(
         )
 
     @router.post("/api/summary/{session_id:path}/rewrite")
-    async def rewrite_session_summary(session_id: str, authorization: str | None = Header(default=None)):
+    async def rewrite_session_summary(session_id: str, authorization: str | None = Depends(resolve_admin_authorization)):
         limit = get_summary_rewrite_limiter().check(f"summary_rewrite:{session_id}")
         if not limit.allowed:
             return JSONResponse(

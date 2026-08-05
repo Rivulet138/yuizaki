@@ -122,6 +122,7 @@ const handleLocaleChange = (value: string | number | boolean) => {
 .topbar-left {
   display: flex;
   align-items: center;
+  flex: 1 1 0;
   min-width: 0;
 }
 
@@ -140,7 +141,11 @@ const handleLocaleChange = (value: string | number | boolean) => {
 .top-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
   gap: 7px;
+  max-width: 100%;
   min-width: 0;
   -webkit-app-region: no-drag;
 }
@@ -215,8 +220,6 @@ const handleLocaleChange = (value: string | number | boolean) => {
   }
 
   .top-actions {
-    justify-content: flex-end;
-    flex-wrap: wrap;
     gap: 6px;
   }
 

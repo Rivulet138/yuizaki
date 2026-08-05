@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { PetModelCatalog } from '../pet-model-catalog'
 import { DEFAULT_PET_CONTROL_STATE } from '../../shared/pet-control'
+import type { PluginRegistry } from '../plugin-registry'
 
 const mockUserDataRoot = vi.hoisted(() => {
   const tempRoot = process.env.TEMP || process.env.TMP || process.env.TMPDIR || '.'
@@ -100,6 +101,29 @@ const writeLive2dFixture = (modelDir: string, modelName: string): string => {
 }
 
 describe('PetModelCatalog', () => {
+  it('never chooses a plugin provider as the implicit default model', () => {
+    const pluginRegistry = {
+      snapshot: () => ({
+        plugins: [{
+          id: 'example',
+          permissions: { modelScopes: ['example-vrm-provider'] },
+          modelProviders: [{
+            id: 'example-vrm-provider',
+            modelType: 'vrm',
+            name: 'AAA Example VRM Provider',
+            assetPath: 'providers/example-vrm-provider',
+          }],
+        }],
+      }),
+    } as unknown as PluginRegistry
+    const catalog = new PetModelCatalog(pluginRegistry)
+    const defaultModel = catalog.getModelById(catalog.getDefaultModelId())
+
+    expect(defaultModel?.source).toBe('bundled')
+    expect(defaultModel?.type).toBe('live2d')
+    expect(defaultModel?.id).toBe('hiyori')
+  })
+
   it('includes the active lip-sync profile in renderer configuration', () => {
     const catalog = new PetModelCatalog()
     const state = {

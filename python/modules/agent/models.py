@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
+from .permission_receipt import PermissionReceipt, serialize_permission_receipt
+
 
 @dataclass
 class StepConditionRecord:
@@ -150,11 +152,14 @@ class StepResultRecord:
     capability_id: str | None = None
     capability_type: str | None = None
     capability_kind: str | None = None
+    permission_receipt: PermissionReceipt | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         if self.condition is not None:
             data["condition"] = self.condition.to_dict()
+        if self.permission_receipt is not None:
+            data["permission_receipt"] = serialize_permission_receipt(self.permission_receipt)
         return data
 
 
@@ -187,11 +192,14 @@ class StepExecutionRecord:
     capability_id: str | None = None
     capability_type: str | None = None
     capability_kind: str | None = None
+    permission_receipt: PermissionReceipt | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         if self.condition is not None:
             data["condition"] = self.condition.to_dict()
+        if self.permission_receipt is not None:
+            data["permission_receipt"] = serialize_permission_receipt(self.permission_receipt)
         return data
 
 
@@ -208,6 +216,10 @@ class PermissionAuditRecord:
     request_id: str | None = None
     remember: bool | None = None
     requires_approval: bool | None = None
+    agent_request_id: str | None = None
+    permission_request_id: str | None = None
+    capability_call_id: str | None = None
+    permission_scope: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

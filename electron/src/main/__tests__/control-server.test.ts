@@ -22,13 +22,17 @@ type RequestHandler = {
   handleRequest: (req: IncomingMessage, res: ServerResponse) => Promise<void>
 }
 
-const createRequest = (url: string, headers: IncomingMessage['headers'] = {}): IncomingMessage => {
+const createRequest = (
+  url: string,
+  headers: IncomingMessage['headers'] = {},
+  method = 'GET',
+): IncomingMessage => {
   const request = new EventEmitter() as EventEmitter & {
     method: string
     url: string
     headers: IncomingMessage['headers']
   }
-  request.method = 'GET'
+  request.method = method
   request.url = url
   request.headers = headers
   return request as unknown as IncomingMessage
@@ -159,6 +163,19 @@ describe('ControlServer API auth', () => {
     expect(getStatus()).toBe(401)
     expect(getJson()).toEqual({ error: 'Unauthorized' })
     expect(getHeader('Access-Control-Allow-Origin')).toBe('http://127.0.0.1:5173')
+  })
+
+  it('allows the trusted packaged renderer origin through API preflight', async () => {
+    const server = await createServer()
+    const { response, getStatus, getHeader } = createJsonResponse()
+
+    await (server as unknown as RequestHandler).handleRequest(
+      createRequest('/api/ping', { origin: 'yuizaki-app://renderer' }, 'OPTIONS'),
+      response,
+    )
+
+    expect(getStatus()).toBe(204)
+    expect(getHeader('Access-Control-Allow-Origin')).toBe('yuizaki-app://renderer')
   })
 
   it('allows API requests with the control token', async () => {

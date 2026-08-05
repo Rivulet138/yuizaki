@@ -2,7 +2,7 @@ import { computed, ref } from "vue";
 import { useDomainRequest } from "@/shared/composables/useDomainRequest";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { memoryClient } from "@/api/client";
-import type { MemoryDocListOptions } from "@/api/clients/memory-client";
+import type { MemoryDocListOptions, MemoryMetadata } from "@/api/clients/memory-client";
 
 export interface MemoryDoc {
 	id: string;
@@ -13,7 +13,10 @@ export interface MemoryDoc {
 	confidence?: number;
 	quality_score?: number;
 	updated_at?: string;
-	metadata?: Record<string, unknown>;
+	source?: string;
+	scope?: string;
+	expires_at?: string;
+	metadata?: MemoryMetadata;
 }
 
 export interface MemoryDuplicateCandidate {
@@ -132,6 +135,9 @@ const normalizeDoc = (raw: unknown): MemoryDoc => {
 		confidence: numberOrUndefined(metadata.confidence),
 		quality_score: numberOrUndefined(metadata.quality_score),
 		updated_at: stringOrUndefined(metadata.updated_at),
+		source: stringOrUndefined(metadata.source),
+		scope: stringOrUndefined(metadata.scope),
+		expires_at: stringOrUndefined(metadata.expires_at),
 		metadata,
 	};
 };
@@ -243,7 +249,7 @@ export function useMemoryDomain() {
 		importance?: number;
 		confidence?: number;
 		confidence_source?: string;
-		metadata?: Record<string, unknown>;
+		metadata?: MemoryMetadata;
 		session_id?: string;
 		workspace_id?: string;
 		scope?: string;
@@ -267,7 +273,7 @@ export function useMemoryDomain() {
 			confidence?: number;
 			confidence_source?: string;
 			edit_reason?: string;
-			metadata?: Record<string, unknown>;
+			metadata?: MemoryMetadata;
 			session_id?: string;
 			workspace_id?: string;
 			scope?: string;
@@ -298,15 +304,8 @@ export function useMemoryDomain() {
 				topK: payload.top_k ?? 5,
 				sessionId: payload.session_id,
 				workspaceId: resolvedWorkspaceId,
-				scope: resolvedScope,
-				layers: payload.layers ?? [
-					"profile",
-					"working",
-					"episodic",
-					"relationship",
-					"reflective",
-					"semantic",
-				],
+				scope: resolvedScope === "workspace" ? undefined : resolvedScope,
+				layers: payload.layers,
 			}),
 		);
 		if (result) {

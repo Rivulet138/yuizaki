@@ -8,12 +8,26 @@ from typing import Any
 
 from .tool_executor import ToolExecutor
 from .tool_registry import ToolDefinition, ToolRegistry
+from .permission_receipt import serialize_permission_receipt
 from ..llm.capabilities import infer_model_capability_support
 
 logger = logging.getLogger(__name__)
 
 
 _OPENAI_TOOL_NAME_MAX_LENGTH = 64
+_SIDE_EFFECT_TOOL_MARKERS = (
+    "create", "delete", "execute", "install", "launch", "open", "post", "remove",
+    "run", "send", "set", "update", "upload", "write",
+)
+
+
+def _requires_untrusted_followup_confirmation(tool: ToolDefinition) -> bool:
+    normalized_name = re.sub(r"[^a-z0-9]+", "_", tool.name.lower())
+    return bool(
+        tool.risk_level != "safe"
+        or tool.require_confirm
+        or any(marker in normalized_name.split("_") for marker in _SIDE_EFFECT_TOOL_MARKERS)
+    )
 
 
 def _openai_safe_tool_name(name: str, used_names: set[str]) -> str:
@@ -130,6 +144,7 @@ async def run_tool_loop(
     if not include_web_search_tools:
         tool_definitions = [tool for tool in tool_definitions if tool.name != "web_search"]
     tools, model_tool_name_map = _build_openai_tools(tool_definitions)
+    untrusted_mcp_seen = False
 
     for _ in range(max_iterations):
         result = await llm_client.complete_chat(
@@ -180,7 +195,14 @@ async def run_tool_loop(
                 permission_request_cb=permission_request_cb,
                 plugin_manager=plugin_manager,
                 ctx=ctx,
+                force_confirmation=(
+                    untrusted_mcp_seen
+                    and (definition := tool_registry.get(str(tool_name))) is not None
+                    and _requires_untrusted_followup_confirmation(definition)
+                ),
             )
+            if outcome.source == "mcp":
+                untrusted_mcp_seen = True
             tool_result_content = json.dumps({
                 "source": f"{outcome.source}:{outcome.tool_name or tool_name}",
                 "trust": "untrusted",
@@ -193,6 +215,20 @@ async def run_tool_loop(
                 "tool_call_id": tool_call.get("id"),
                 "content": tool_result_content,
             })
+            receipt = outcome.permission_receipt
+            if receipt is not None and receipt.retryable is False:
+                return {
+                    "reply": "",
+                    "tool_calls": [{
+                        "tool": outcome.tool_name,
+                        "success": False,
+                        "error": outcome.error,
+                        "permission_receipt": serialize_permission_receipt(receipt),
+                    }],
+                    "pet_control": None,
+                    "permission_receipt": receipt,
+                    "stopped_reason": f"permission_{receipt.decision}",
+                }
 
     return {
         "reply": "工具循环达到最大迭代次数，已停止。",

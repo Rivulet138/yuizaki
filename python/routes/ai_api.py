@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from modules.agent import AgentRuntime
 from modules.agent.context import AgentRequestContext, bind_runtime_bindings
+from modules.agent.permission_receipt import serialize_permission_payload
 from modules.ocr.payload import MAX_OCR_IMAGE_BYTES
 from modules.system.api_response import error_response
 from modules.system.memory_write_pipeline import build_user_signal_event
@@ -194,11 +195,13 @@ def create_ai_router(
                 gen = generation_mgr.start(session_id)
                 try:
                     messages = [m.model_dump() for m in req.messages]
-                    await _write_user_relationship_event(messages)
+                    if req.autonomy_mode != "silent":
+                        await _write_user_relationship_event(messages)
+                    request_id = req.request_id or f"agent_{uuid.uuid4().hex[:12]}"
                     ctx = AgentRequestContext(
                         sid="http-stream",
                         session_id=session_id,
-                        request_id=req.request_id,
+                        request_id=request_id,
                         messages=messages,
                         workspace_id=workspace_id,
                         model=req.model,
@@ -223,14 +226,15 @@ def create_ai_router(
                         trace_store=trace_store,
                         plugin_manager=plugin_manager,
                         permission_scope="http:chat-completions:stream",
-                        autonomy_mode=(getattr(req, 'autonomy_mode', None) or 'companion'),
+                        autonomy_mode=req.autonomy_mode,
                     )
-                    ctx = await _bind_runtime_context(ctx)
+                    if req.autonomy_mode != "silent":
+                        ctx = await _bind_runtime_context(ctx)
                     result_obj = await pipeline.run_streaming(ctx, None, gen)
                     final_reply = result_obj.reply
                     yield f"data: {json.dumps({'choices': [{'delta': {'content': final_reply}}]})}\n\n"
                     if result_obj.action_envelope:
-                        yield f"data: {json.dumps({'action_envelope': result_obj.action_envelope})}\n\n"
+                        yield f"data: {json.dumps({'action_envelope': serialize_permission_payload(result_obj.action_envelope)})}\n\n"
                 except Exception as e:
                     logger.error("Chat error: %s", e, exc_info=True)
                     yield f"data: {json.dumps({'error': _chat_error_message(e)})}\n\n"
@@ -238,11 +242,13 @@ def create_ai_router(
         session_id = _resolve_chat_session_id(req.session_id)
         try:
             messages = [m.model_dump() for m in req.messages]
-            await _write_user_relationship_event(messages)
+            if req.autonomy_mode != "silent":
+                await _write_user_relationship_event(messages)
+            request_id = req.request_id or f"agent_{uuid.uuid4().hex[:12]}"
             ctx = AgentRequestContext(
                 sid="http",
                 session_id=session_id,
-                request_id=req.request_id,
+                request_id=request_id,
                 messages=messages,
                 workspace_id=workspace_id,
                 model=req.model,
@@ -267,9 +273,10 @@ def create_ai_router(
                 trace_store=trace_store,
                 plugin_manager=plugin_manager,
                 permission_scope="http:chat-completions",
-                autonomy_mode=(getattr(req, 'autonomy_mode', None) or 'companion'),
+                autonomy_mode=req.autonomy_mode,
             )
-            ctx = await _bind_runtime_context(ctx)
+            if req.autonomy_mode != "silent":
+                ctx = await _bind_runtime_context(ctx)
             result = await pipeline.run(ctx)
             response_payload: dict[str, Any] = {
                 "choices": [{
@@ -282,7 +289,7 @@ def create_ai_router(
             if result.pet_control:
                 response_payload["pet_control"] = result.pet_control
             if result.action_envelope:
-                response_payload["action_envelope"] = result.action_envelope
+                response_payload["action_envelope"] = serialize_permission_payload(result.action_envelope)
             return JSONResponse(response_payload)
         except Exception as e:
             logger.error("Chat error: %s", e, exc_info=True)

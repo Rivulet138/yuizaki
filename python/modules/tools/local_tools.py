@@ -19,9 +19,10 @@ import subprocess
 import sys
 import webbrowser
 from html import unescape
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any, Dict
-from urllib.parse import quote_plus, unquote
+from urllib.parse import quote_plus, unquote, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -30,6 +31,30 @@ LOCAL_TOOL_ROOTS_ENV = "YUIZAKI_LOCAL_TOOL_ROOTS"
 
 class LocalToolError(Exception):
     """Custom error type for local tool failures."""
+
+
+def _is_valid_url_host(host: str) -> bool:
+    candidate = host.rstrip(".")
+    if not candidate:
+        return False
+    try:
+        ip_address(candidate)
+        return True
+    except ValueError:
+        pass
+    try:
+        ascii_host = candidate.encode("idna").decode("ascii")
+    except UnicodeError:
+        return False
+    if len(ascii_host) > 253:
+        return False
+    labels = ascii_host.split(".")
+    return all(
+        label
+        and len(label) <= 63
+        and re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?", label) is not None
+        for label in labels
+    )
 
 
 def _is_path_inside(path: Path, root: Path) -> bool:
@@ -114,9 +139,39 @@ def open_app(name: str) -> str:
 def open_url(url: str) -> str:
     """Open a URL in the default browser."""
 
+    raw_url = str(url or "")
+    if (
+        any(ord(char) < 32 or ord(char) == 127 for char in raw_url)
+        or "\\" in raw_url
+        or re.search(r"(?i)%(?:0[0-9a-f]|1[0-9a-f]|7f|5c)", raw_url) is not None
+    ):
+        raise LocalToolError("A valid HTTP or HTTPS URL is required")
+    clean_url = raw_url.strip()
     try:
-        webbrowser.open(url)
-        return f"Opened URL: {url}"
+        parsed = urlsplit(clean_url)
+        host = parsed.hostname
+        port = parsed.port
+    except (TypeError, ValueError) as exc:
+        raise LocalToolError("A valid HTTP or HTTPS URL is required") from exc
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not host
+        or not _is_valid_url_host(host)
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None and not (1 <= port <= 65535)
+    ):
+        raise LocalToolError("A valid HTTP or HTTPS URL is required")
+
+    normalized_host = host.rstrip(".").encode("idna").decode("ascii").lower()
+    normalized_netloc = f"[{normalized_host}]" if ":" in normalized_host else normalized_host
+    if port is not None:
+        normalized_netloc = f"{normalized_netloc}:{port}"
+    normalized_url = urlunsplit((parsed.scheme.lower(), normalized_netloc, parsed.path, parsed.query, parsed.fragment))
+
+    try:
+        webbrowser.open(normalized_url)
+        return f"Opened URL: {normalized_url}"
     except Exception as exc:  # pragma: no cover - system dependent
         raise LocalToolError(str(exc))
 

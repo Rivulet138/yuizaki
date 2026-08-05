@@ -61,7 +61,12 @@ export default defineConfig({
               entriesAware: true,
             },
             { name: 'live2d-vendor', test: /node_modules[\\/]easy-live2d/, priority: 80, entriesAware: true },
-            { name: 'pixi-vendor', test: /node_modules[\\/]pixi\.js/, priority: 70, entriesAware: true },
+            {
+              name: 'pixi-vendor',
+              test: (id) => /node_modules[\\/]pixi\.js/.test(id) || id.includes('@pixi/sound'),
+              priority: 70,
+              entriesAware: true,
+            },
             {
               name: 'transport-vendor',
               test: (id) => id.includes('axios') || id.includes('socket.io-client'),

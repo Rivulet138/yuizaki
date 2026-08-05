@@ -20,6 +20,7 @@ import numpy as np
 from ..core.config import DEFAULT_EMBEDDING_MODEL
 from .backend import MemoryBackendStatus
 from .schema import MemorySearchFilters
+from .expiry import is_memory_expired
 from .reranker import LearnedReranker, lexical_overlap_score, normalize_scores
 
 logger = logging.getLogger(__name__)
@@ -286,6 +287,8 @@ class VectorStore:
     memory_types: Sequence[Any] | None = None,
   ) -> bool:
     metadata = doc.metadata or {}
+    if is_memory_expired(metadata):
+      return False
     allowed_types = _memory_type_filter_values(memory_types)
     if allowed_types is not None and str(metadata.get("type") or "") not in allowed_types:
       return False

@@ -10,6 +10,11 @@
           </article>
         </div>
       </section>
+      <nav class="canonical-links" :aria-label="t('canonical.system.aria')">
+        <span>{{ t('canonical.system.label') }}</span>
+        <router-link :to="canonicalPath('infrastructure')">{{ t('canonical.system.diagnostics') }}</router-link>
+        <router-link :to="canonicalPath('deploy')">{{ t('canonical.system.legacyRuntime') }}</router-link>
+      </nav>
 
       <section class="ops-card chain-card">
         <div class="ops-card-head">
@@ -265,11 +270,14 @@ import { useSettingsStore } from '@/state/settingsStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { inferLlmProviderPreset } from '@/domains/settings/llmProviders'
 import { normalizeOpenAiBaseUrl } from '@/domains/settings/llmDiscovery'
+import { useI18n } from '@/i18n'
 
 const governanceData = ref<any>(null)
 const governanceReq = reactive({ loading: false, error: '' })
 const settingsStore = useSettingsStore()
 const workspaceStore = useWorkspaceStore()
+const { t } = useI18n()
+const canonicalPath = (moduleId: string) => `/w/${workspaceStore.activeWorkspaceId}/${moduleId}`
 
 const loadGovernance = async () => {
   governanceReq.loading = true
@@ -948,6 +956,33 @@ onUnmounted(() => {
 
 .compact-actions {
   margin-top: 12px;
+}
+
+.canonical-links {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 14px;
+  color: var(--yui-muted);
+  font-size: 12px;
+}
+
+.canonical-links span {
+  font-weight: 700;
+}
+
+.canonical-links a {
+  color: var(--yui-accent);
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
+
+.canonical-links a:focus-visible {
+  border-radius: 4px;
+  outline: 3px solid var(--yui-accent);
+  outline-offset: 2px;
 }
 
 @media (max-width: 1180px) {

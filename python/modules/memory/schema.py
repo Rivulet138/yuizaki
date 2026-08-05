@@ -60,3 +60,6 @@ class RetrievalTrace:
     average_score: float | None = None
     latency_ms: float = 0.0
     backend_filter_downpushed: bool = False
+    complete: bool = True
+    error_code: str | None = None
+    scan_limit_reached: bool = False
