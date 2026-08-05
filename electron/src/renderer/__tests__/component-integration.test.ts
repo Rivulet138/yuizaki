@@ -456,9 +456,15 @@ describe("refactor surface component integration", () => {
 
 		const advancedButton = wrapper.get('[data-testid="memory-advanced-tools-toggle"]');
 		expect(advancedButton.attributes("aria-label")).toBe("高级工具");
+		expect(advancedButton.attributes("aria-expanded")).toBe("false");
+		const docMetadata = wrapper.get('[data-memory-id="doc-1"] .doc-meta').text();
+		expect(docMetadata).toContain("手动");
+		expect(docMetadata).toContain("工作区");
+		expect(docMetadata).toContain("长期有效");
 		await advancedButton.trigger("click");
 		await flushPromises();
 
+		expect(advancedButton.attributes("aria-expanded")).toBe("true");
 		expect(wrapper.text()).toContain("style+support-signal-boosted");
 		expect(wrapper.text()).toContain("relationship > working > profile");
 		expect(wrapper.text()).toContain("写入原始文档");

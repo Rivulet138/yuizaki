@@ -226,4 +226,21 @@ describe('G005 focused presentation boundaries', () => {
     expect(wrapper.emitted('discover-local')).toEqual([[]])
     expect(asrSettings.provider).toBe('sherpa-onnx-online')
   })
+
+  it('keeps focused Chat and Settings components presentation-only and parent-owned', () => {
+    const chatPanel = readFileSync('src/renderer/domains/chat/views/ChatPanel.vue', 'utf8')
+    const settingsPanel = readFileSync('src/renderer/domains/settings/views/SettingsPanel.vue', 'utf8')
+    const focusedComponents = [
+      'src/renderer/domains/chat/components/ChatComposerStatusLine.vue',
+      'src/renderer/domains/chat/components/ChatVoiceStatus.vue',
+      'src/renderer/domains/settings/components/SettingsAsrSection.vue',
+      'src/renderer/domains/settings/components/SettingsSectionHeader.vue',
+    ].map((path) => readFileSync(path, 'utf8'))
+
+    expect(chatPanel).toContain('<ChatComposerStatusLine')
+    expect(chatPanel).toContain('<ChatVoiceStatus')
+    expect(settingsPanel).toContain('<SettingsAsrSection')
+    expect(focusedComponents[2]).toContain('<SettingsSectionHeader')
+    expect(focusedComponents.join('\n')).not.toMatch(/Client\.|fetch\(|requestJson|onMounted|watch\(/)
+  })
 })

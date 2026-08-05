@@ -1,15 +1,63 @@
 """Tests for token budget, layered assembly and sliding-window truncation."""
 
+from concurrent.futures import ThreadPoolExecutor
+
+from modules.core.state import Generation, GenerationManager
 from modules.llm.context_window import (
     TokenEstimator,
     apply_sliding_window,
-    build_layered_context,
     build_and_truncate_layered_context,
+    build_layered_context,
     message_content_to_text,
     normalize_messages,
 )
-from modules.core.state import GenerationManager
-from concurrent.futures import ThreadPoolExecutor
+
+
+def test_generation_invalidation_sets_terminal_state() -> None:
+    generation = Generation(generation_id="generation-1", session_id="session-1")
+
+    generation.invalidate()
+
+    assert generation.invalidated is True
+    assert generation.cancel.is_set()
+
+
+def test_starting_a_new_generation_invalidates_the_previous_turn() -> None:
+    manager = GenerationManager()
+
+    previous = manager.start("session-1")
+    current = manager.start("session-1")
+
+    assert previous.cancel.is_set()
+    assert previous.invalidated is True
+    assert manager.get("session-1") is current
+
+
+def test_generation_history_is_isolated_by_session() -> None:
+    manager = GenerationManager()
+    manager.append_history("session-1", "user", "Hello")
+    manager.append_history("session-1", "assistant", "Hi there")
+
+    messages = manager.get_messages_for_new_turn("session-1", "How are you?")
+
+    assert messages == [
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "Hi there"},
+        {"role": "user", "content": "How are you?"},
+    ]
+    assert manager.get_history_snapshot("session-2") == []
+
+
+def test_interrupting_one_session_preserves_other_active_generations() -> None:
+    manager = GenerationManager()
+    first = manager.start("session-1")
+    interrupted = manager.start("session-2")
+    third = manager.start("session-3")
+
+    assert manager.interrupt("session-2") is interrupted
+    assert interrupted.cancel.is_set()
+    assert not first.cancel.is_set()
+    assert not third.cancel.is_set()
 
 
 def test_sliding_window_keeps_latest_messages_under_budget() -> None:

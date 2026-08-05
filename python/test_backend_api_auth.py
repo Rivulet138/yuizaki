@@ -4,8 +4,14 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
-from modules.system.backend_api_auth import backend_api_auth_required, verify_backend_api_authorization
-from modules.system.api_security import require_bearer_token, resolve_admin_authorization
+from modules.system.api_security import (
+    require_bearer_token,
+    resolve_admin_authorization,
+)
+from modules.system.backend_api_auth import (
+    backend_api_auth_required,
+    verify_backend_api_authorization,
+)
 
 
 def _build_client(token: str) -> TestClient:
@@ -170,3 +176,27 @@ def test_backend_api_auth_keeps_health_audio_and_socket_public():
     assert client.get("/health").status_code == 200
     assert client.get("/audio/sample.wav").status_code == 200
     assert client.get("/socket.io/").status_code == 200
+
+
+def test_backend_api_auth_keeps_ping_and_preflight_public():
+    assert backend_api_auth_required("/api/ping", "secret-token") is False
+    assert backend_api_auth_required("/api/settings", "secret-token", "OPTIONS") is False
+
+
+def test_missing_backend_token_fails_closed_for_loopback_and_remote_clients(monkeypatch):
+    monkeypatch.delenv("YUIZAKI_ALLOW_UNAUTHENTICATED_LOCAL_DEV", raising=False)
+
+    for client_host in ("127.0.0.1", "localhost", "::1", "192.168.1.20"):
+        assert backend_api_auth_required("/api/settings", "", client_host=client_host) is True
+        assert verify_backend_api_authorization(None, "", client_host=client_host) == (
+            False,
+            "Backend API token is not configured",
+        )
+
+
+def test_local_dev_override_applies_only_to_loopback_clients(monkeypatch):
+    monkeypatch.setenv("YUIZAKI_ALLOW_UNAUTHENTICATED_LOCAL_DEV", "true")
+
+    assert backend_api_auth_required("/api/settings", "", client_host="127.0.0.1") is False
+    assert verify_backend_api_authorization(None, "", client_host="::1") == (True, "")
+    assert backend_api_auth_required("/api/settings", "", client_host="192.168.1.20") is True

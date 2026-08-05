@@ -463,8 +463,11 @@ describe('destructive action confirmation', () => {
     const wrapper = mount(PetControlPanel, { global })
     await flushPromises()
 
-    const card = wrapper.find('.lipsync-card')
+    const advancedControls = wrapper.get('details.pet-advanced-controls')
+    expect(advancedControls.get('summary').exists()).toBe(true)
+    const card = advancedControls.find('.lipsync-card')
     expect(card.exists()).toBe(true)
+    expect(advancedControls.find('.expression-card').exists()).toBe(true)
     const applyButton = card.findAll('button').find((button) => button.text().includes('应用'))
     expect(applyButton).toBeTruthy()
     await applyButton?.trigger('click')

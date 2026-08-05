@@ -8,6 +8,9 @@ import { router } from '../router'
 const appShell = readFileSync(resolve(process.cwd(), 'src/renderer/app/AppShell.vue'), 'utf8')
 const navigationModules = readFileSync(resolve(process.cwd(), 'src/renderer/navigation/modules.ts'), 'utf8')
 const svcPanel = readFileSync(resolve(process.cwd(), 'src/renderer/domains/tools/views/SVCPanel.vue'), 'utf8')
+const toolPanel = readFileSync(resolve(process.cwd(), 'src/renderer/domains/tools/views/ToolPanel.vue'), 'utf8')
+const tracePanel = readFileSync(resolve(process.cwd(), 'src/renderer/domains/system/views/AgentTracePanel.vue'), 'utf8')
+const overviewPanel = readFileSync(resolve(process.cwd(), 'src/renderer/domains/system/views/OverviewPanel.vue'), 'utf8')
 
 describe('navigation view host', () => {
   it('does not block async routes behind an out-in keep-alive transition', () => {
@@ -50,5 +53,13 @@ describe('navigation view host', () => {
     expect(router.resolve('/w/default/tool').name).toBe('tool')
     expect(router.resolve('/w/default/settings').name).toBe('settings')
     expect(router.resolve('/w/default/agent-trace').name).toBe('agent-trace')
+  })
+
+  it('links canonical administration views to their compatible specialist routes', () => {
+    expect(toolPanel).toContain("canonicalPath('plugins')")
+    expect(toolPanel).toContain("canonicalPath('agent-governance')")
+    expect(tracePanel).toContain("canonicalPath('agent-trace-admin')")
+    expect(overviewPanel).toContain("canonicalPath('infrastructure')")
+    expect(overviewPanel).toContain("canonicalPath('deploy')")
   })
 })

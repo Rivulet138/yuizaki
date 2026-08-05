@@ -1,7 +1,10 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 
+import CompanionActivitySummary from '../domains/companion/components/CompanionActivitySummary.vue'
+import CompanionHero from '../domains/companion/components/CompanionHero.vue'
 import CompanionQuickActions from '../domains/companion/components/CompanionQuickActions.vue'
 import CompanionPanel from '../domains/companion/views/CompanionPanel.vue'
 import { useCompanionRuntimeBridge } from '../app/composables/useCompanionRuntimeBridge'
@@ -142,9 +145,12 @@ describe('Companion Home interactions', () => {
     vi.restoreAllMocks()
   })
 
-  it('restores a valid preset before Home mounts and exposes all canonical advanced routes', async () => {
-    window.localStorage.setItem('yuizaki.companion.proactivity-preset', 'standard')
+  it('normalizes a legacy preset before Home mounts and exposes all canonical advanced routes', async () => {
+    window.localStorage.setItem('yuizaki.companion.proactivity-preset', 'legacy-value')
     const bridge = useCompanionRuntimeBridge()
+    expect(bridge.proactivityPreset.value).toBe('conservative')
+
+    expect(bridge.setProactivityPreset('standard')).toBe(true)
     expect(bridge.proactivityPreset.value).toBe('standard')
 
     const wrapper = await mountHome()
@@ -155,6 +161,7 @@ describe('Companion Home interactions', () => {
       '/w/ws-1/persona-memory',
       '/w/ws-1/settings',
       '/w/ws-1/memory',
+      '/w/ws-1/pet',
       '/w/ws-1/agent-governance',
       '/w/ws-1/agent-trace',
     ]))
@@ -162,6 +169,30 @@ describe('Companion Home interactions', () => {
     const talkLink = wrapper.get('[data-testid="companion-talk-action"]')
     talkLink.element.focus()
     expect(document.activeElement).toBe(talkLink.element)
+  })
+
+  it('composes an accessible first viewport with responsive daily commands', async () => {
+    const wrapper = await mountHome()
+
+    expect(wrapper.findComponent(CompanionHero).exists()).toBe(true)
+    expect(wrapper.findComponent(CompanionQuickActions).exists()).toBe(true)
+    expect(wrapper.findComponent(CompanionActivitySummary).exists()).toBe(true)
+    expect(wrapper.get('[role="status"]').attributes('aria-live')).toBe('polite')
+
+    const quickActions = readFileSync('src/renderer/domains/companion/components/CompanionQuickActions.vue', 'utf8')
+    const hero = readFileSync('src/renderer/domains/companion/components/CompanionHero.vue', 'utf8')
+    expect(quickActions).toContain('.command:focus-visible')
+    expect(quickActions).toContain('@media (max-width: 760px)')
+    expect(quickActions).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))')
+    expect(hero).toContain('overflow-wrap: anywhere')
+    expect(hero).toContain('@media (max-width: 760px)')
+  })
+
+  it('keeps maintenance ownership and persisted presets outside Home', () => {
+    const source = readFileSync('src/renderer/domains/companion/views/CompanionPanel.vue', 'utf8')
+
+    expect(source).not.toMatch(/VisionRegionSelector|saveCompanion|handleDelete|heartbeatLatestBehavior/)
+    expect(source).not.toMatch(/localStorage|setInterval/)
   })
 
   it('dispatches mute and interrupt through the existing chat store', async () => {

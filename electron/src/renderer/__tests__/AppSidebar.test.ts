@@ -31,18 +31,23 @@ describe('AppSidebar', () => {
       { id: 'agent-governance', title: 'Governance', icon },
       { id: 'agent-trace', title: 'Tasks', icon },
       { id: 'agent-trace-admin', title: 'Trace archive', icon },
+      { id: 'overview', title: 'Operations', icon },
+      { id: 'infrastructure', title: 'Infrastructure', icon },
+      { id: 'deploy', title: 'Deployment', icon },
     ])
     await wrapper.get('.admin-toggle').trigger('click')
 
     expect(wrapper.get('a[href="/w/default/tool"]').text()).toContain('Capabilities')
     expect(wrapper.get('a[href="/w/default/agent-trace"]').text()).toContain('Tasks')
+    expect(wrapper.get('a[href="/w/default/infrastructure"]').text()).toContain('Infrastructure')
 
     const relatedRoutes = wrapper.findAll('details.related-routes')
-    expect(relatedRoutes).toHaveLength(2)
+    expect(relatedRoutes).toHaveLength(3)
     expect(relatedRoutes[0].attributes('open')).toBeUndefined()
     expect(relatedRoutes[0].get('a[href="/w/default/plugins"]').text()).toContain('Plugins')
     expect(relatedRoutes[0].get('a[href="/w/default/agent-governance"]').text()).toContain('Governance')
     expect(relatedRoutes[1].get('a[href="/w/default/agent-trace-admin"]').text()).toContain('Trace archive')
+    expect(relatedRoutes[2].get('a[href="/w/default/deploy"]').text()).toContain('Deployment')
   })
 
   it('keeps advanced tools collapsed until the user opens them', async () => {
