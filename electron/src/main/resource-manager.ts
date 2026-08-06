@@ -13,6 +13,7 @@ import type {
   ResourceDownloadProgress,
   ResourceFailureCode,
   ResourceProgressPhase,
+  ResourceProgressSnapshot,
   ResourceRemovalResult,
   ResumableResourceDownload,
   PetImportableModelType,
@@ -313,9 +314,9 @@ export const readResumableResourceDownload = (
   partialPath: string,
   fallbackTotal: number | null = null,
 ): ResumableResourceDownload | null => {
-  if (!fs.existsSync(partialPath) || !fs.statSync(partialPath).isFile()) return null
+  if (!fs.existsSync(partialPath)) return null
   const stat = fs.statSync(partialPath)
-  if (stat.size <= 0) return null
+  if (!stat.isFile() || stat.size <= 0) return null
   let bytesTotal = fallbackTotal && fallbackTotal >= stat.size ? fallbackTotal : null
   let updatedAt = stat.mtime.toISOString()
   const journalPath = `${partialPath}.json`
@@ -455,12 +456,14 @@ const resolveEmbeddingSnapshot = (modelName: string): string | null => {
         return snapshotPath
       }
     }
-    const snapshotNames = fs.readdirSync(snapshotsDir).filter((item) => fs.statSync(path.join(snapshotsDir, item)).isDirectory())
-    if (snapshotNames.length > 0) {
-      const sorted = snapshotNames.sort((left, right) => (
-        fs.statSync(path.join(snapshotsDir, right)).mtimeMs - fs.statSync(path.join(snapshotsDir, left)).mtimeMs
-      ))
-      return path.join(snapshotsDir, sorted[0] ?? '')
+    const snapshots = fs.readdirSync(snapshotsDir).flatMap((name) => {
+      const snapshotPath = path.join(snapshotsDir, name)
+      const stat = fs.statSync(snapshotPath)
+      return stat.isDirectory() ? [{ path: snapshotPath, mtimeMs: stat.mtimeMs }] : []
+    })
+    if (snapshots.length > 0) {
+      snapshots.sort((left, right) => right.mtimeMs - left.mtimeMs)
+      return snapshots[0]?.path ?? null
     }
   }
   return null
@@ -558,11 +561,13 @@ const buildSherpaOnlineStatus = (settings: StoredSettings): SherpaResourceStatus
   const modelPath = resolveBackendRelativePath(useConfiguredPaths ? settings.asr?.sherpa_model_path : '', DEFAULT_SHERPA_ONLINE_MODEL_PATH)
   const tokensPath = resolveBackendRelativePath(useConfiguredPaths ? settings.asr?.sherpa_tokens_path : '', DEFAULT_SHERPA_ONLINE_TOKENS_PATH)
   const validationPath = path.join(path.dirname(modelPath), '.yuizaki-validation.json')
-  const filesExist = fs.existsSync(modelPath) && fs.existsSync(tokensPath)
+  const modelExists = fs.existsSync(modelPath)
+  const tokensExist = fs.existsSync(tokensPath)
+  const filesExist = modelExists && tokensExist
   const validated = filesExist && hasCurrentSherpaOnlineValidation(modelPath, tokensPath, validationPath)
   const summary = buildSummary([
-    [fs.existsSync(modelPath), 'Sherpa streaming Zipformer2 CTC model file is missing'],
-    [fs.existsSync(tokensPath), 'Sherpa streaming tokens file is missing'],
+    [modelExists, 'Sherpa streaming Zipformer2 CTC model file is missing'],
+    [tokensExist, 'Sherpa streaming tokens file is missing'],
     [validated, 'Sherpa streaming model has not passed the Yuizaki load validation'],
   ])
 
@@ -788,6 +793,10 @@ export const getModelResourceStatus = (petModelCatalog: PetModelCatalog): ModelR
   }
 }
 
+export const getModelResourceProgress = (): ResourceProgressSnapshot => ({
+  activeDownloads: [...resourceProgress.values()].map((progress) => ({ ...progress })),
+})
+
 export const pickLocalModelPath = async (modelType: PetImportableModelType): Promise<string | null> => {
   const result = await dialog.showOpenDialog({
     title: modelType === 'live2d' ? 'Select a Live2D model' : 'Select a VRM model',
@@ -947,7 +956,8 @@ export const prepareModelResources = async (
   requested: readonly ManagedModelResourceId[],
   petModelCatalog: PetModelCatalog,
 ): Promise<ResourceCommandResult> => {
-  const missing = missingModelResources(getModelResourceStatus(petModelCatalog), requested)
+  const status = getModelResourceStatus(petModelCatalog)
+  const missing = missingModelResources(status, requested)
   if (missing.length === 0) {
     return {
       success: true,
@@ -956,7 +966,7 @@ export const prepareModelResources = async (
       retryable: false,
       stdout: [],
       stderr: [],
-      status: getModelResourceStatus(petModelCatalog),
+      status,
     }
   }
 

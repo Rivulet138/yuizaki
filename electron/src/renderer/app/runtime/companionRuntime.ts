@@ -23,6 +23,7 @@ export interface ProactiveDeliveryResult {
 export type ProactivePollResult = ProactiveSuppressionReason | ProactiveDeliveryResult | 'empty' | 'in_flight' | 'stopped'
 
 const DEFAULT_COMPANION_POLL_INTERVAL_MS = 15_000
+const DEFAULT_DELIVERED_IDENTITY_LIMIT = 256
 
 export interface CompanionRuntimeEvent {
   source: CompanionRuntimeSource
@@ -63,6 +64,7 @@ export interface CompanionRuntimeDependencies {
   cooldownMs?: number
   frequencyBudget?: number
   frequencyWindowMs?: number
+  deliveredIdentityLimit?: number
   now?: () => number
   reducedMotionObserver?: ReducedMotionObserver
   onSinkError?: (failure: { sink: CompanionRuntimeSinkName; message: string }) => void
@@ -241,6 +243,19 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     return reason
   }
 
+  const rememberDeliveredIdentity = (identity: string) => {
+    const configuredLimit = dependencies.deliveredIdentityLimit ?? DEFAULT_DELIVERED_IDENTITY_LIMIT
+    const limit = Number.isFinite(configuredLimit)
+      ? Math.max(1, Math.floor(configuredLimit))
+      : DEFAULT_DELIVERED_IDENTITY_LIMIT
+    while (deliveredIdentities.size >= limit) {
+      const oldest = deliveredIdentities.values().next().value
+      if (oldest === undefined) break
+      deliveredIdentities.delete(oldest)
+    }
+    deliveredIdentities.add(identity)
+  }
+
   const invokeSink = async (
     name: CompanionRuntimeSinkName,
     sink: (() => void | Promise<void>) | undefined,
@@ -339,7 +354,7 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
         if (!await invokeSink('notification', notificationSink ? () => notificationSink(candidate.message!) : undefined, result, isRequestCurrent)) return 'stopped'
       }
       if (!isRequestCurrent()) return 'stopped'
-      deliveredIdentities.add(identity)
+      rememberDeliveredIdentity(identity)
       categoryDeliveredAt.set(category, now)
       deliveredAt.push(now)
       result.status = result.failed.length === 0 ? 'delivered' : result.succeeded.length === 0 ? 'failed' : 'partial'

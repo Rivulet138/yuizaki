@@ -20,16 +20,65 @@ import { buildPackagedRendererUrl } from './renderer-protocol'
 const getRendererLogPath = (): string =>
   path.join(__dirname, '../../live2d-renderer.log')
 
+let rendererLogBuffer = ''
+let rendererLogDroppedEntries = 0
+let rendererLogFlushTimer: NodeJS.Timeout | null = null
+let rendererLogWriteActive = false
+let rendererLogDirectoryReady: Promise<void> | null = null
+const RENDERER_LOG_FLUSH_DELAY_MS = 100
+const RENDERER_LOG_BUFFER_LIMIT = 256 * 1024
+
+const ensureRendererLogDirectory = (): Promise<void> => {
+  if (rendererLogDirectoryReady) return rendererLogDirectoryReady
+  const ready = fs.promises
+    .mkdir(path.dirname(getRendererLogPath()), { recursive: true })
+    .then(() => undefined)
+    .catch((error) => {
+      rendererLogDirectoryReady = null
+      throw error
+    })
+  rendererLogDirectoryReady = ready
+  return ready
+}
+
+const scheduleRendererLogFlush = (): void => {
+  if (rendererLogFlushTimer || rendererLogWriteActive) return
+  rendererLogFlushTimer = setTimeout(flushRendererLog, RENDERER_LOG_FLUSH_DELAY_MS)
+}
+
+const flushRendererLog = (): void => {
+  if (rendererLogFlushTimer) clearTimeout(rendererLogFlushTimer)
+  rendererLogFlushTimer = null
+  if (rendererLogWriteActive || (!rendererLogBuffer && rendererLogDroppedEntries === 0)) return
+
+  const dropped = rendererLogDroppedEntries
+  const content = `${dropped > 0 ? `[renderer-log] dropped ${dropped} entries while the log writer was busy\n` : ''}${rendererLogBuffer}`
+  rendererLogBuffer = ''
+  rendererLogDroppedEntries = 0
+  rendererLogWriteActive = true
+
+  void ensureRendererLogDirectory()
+    .then(() => fs.promises.appendFile(getRendererLogPath(), content, 'utf8'))
+    .catch((error) => logger.warn('[Live2DWindow] renderer log write failed:', error))
+    .finally(() => {
+      rendererLogWriteActive = false
+      if (rendererLogBuffer || rendererLogDroppedEntries > 0) scheduleRendererLogFlush()
+    })
+}
+
 const writeRendererLog = (message: string, payload?: unknown): void => {
   const prefix = `[${new Date().toISOString()}] ${message}`
-  const content =
+  const entry =
     payload === undefined
       ? `${prefix}\n`
       : `${prefix} ${JSON.stringify(payload, null, 2)}\n`
 
-  const logPath = getRendererLogPath()
-  fs.mkdirSync(path.dirname(logPath), { recursive: true })
-  fs.appendFileSync(logPath, content, 'utf8')
+  if (rendererLogBuffer.length + entry.length <= RENDERER_LOG_BUFFER_LIMIT) {
+    rendererLogBuffer += entry
+  } else {
+    rendererLogDroppedEntries += 1
+  }
+  scheduleRendererLogFlush()
 }
 
 const TOPMOST_GUARD_INTERVAL_MS = 30000
@@ -144,7 +193,6 @@ export class Live2DWindow {
     this.applyEffectiveMousePassthrough(true)
     this.rendererLoaded = false
     this.ensureTopMost()
-    this.startTopMostGuard()
     configureTrustedNavigation(this.win.webContents)
 
     const devServerUrl = resolveTrustedDevServerUrl(process.env['VITE_DEV_SERVER_URL'])
@@ -438,9 +486,11 @@ export class Live2DWindow {
   show(): void {
     this.win?.show()
     this.ensureTopMost()
+    this.startTopMostGuard()
   }
 
   hide(): void {
+    this.stopTopMostGuard()
     this.win?.hide()
   }
 
@@ -580,6 +630,9 @@ export class Live2DWindow {
   }
 
   private startTopMostGuard(): void {
+    if (!this.win || this.win.isDestroyed()) {
+      return
+    }
     this.stopTopMostGuard()
     this.topMostGuardTimer = setInterval(() => {
       this.ensureTopMost()

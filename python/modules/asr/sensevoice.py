@@ -73,6 +73,18 @@ class SenseVoiceClient:
         self._model: Any = None
         self._available = False
         self._cache_dir = _resolve_modelscope_cache()
+        self._connect_lock = asyncio.Lock()
+        self._load_task: asyncio.Task[Any] | None = None
+        self._load_waiters = 0
+        self._lifecycle_generation = 0
+
+    def _release_completed_load(self, completed: asyncio.Task[Any]) -> None:
+        if not completed.done():
+            return
+        if not completed.cancelled():
+            completed.exception()
+        if self._load_task is completed and self._load_waiters == 0:
+            self._load_task = None
 
     async def connect(self) -> None:
         """Load SenseVoiceSmall and its built-in VAD model.
@@ -81,39 +93,74 @@ class SenseVoiceClient:
         ``python/.cache/modelscope``) — stored locally inside the
         project; subsequent runs reuse the cached model.
         """
+        async with self._connect_lock:
+            if self.is_available:
+                return
+            request_generation = self._lifecycle_generation
+            load_task = self._load_task
+            if load_task is None:
+                try:
+                    from funasr import AutoModel  # type: ignore[import-untyped]
+                except ImportError:
+                    self._available = False
+                    logger.warning("FunASR/SenseVoice dependencies not installed; ASR voice input disabled")
+                    return
+
+                cache = self._cache_dir
+                os.makedirs(cache, exist_ok=True)
+                os.environ.setdefault("MODELSCOPE_CACHE", cache)
+
+                logger.info(
+                    "Loading SenseVoiceSmall model=%s device=%s cache=%s ...",
+                    self._model_name,
+                    self._device,
+                    cache,
+                )
+                load_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        AutoModel,
+                        model=self._model_name,
+                        vad_model="fsmn-vad",
+                        vad_kwargs={"max_single_segment_time": 30000},
+                        device=self._device,
+                    ),
+                    name="sensevoice-model-load",
+                )
+                load_task.add_done_callback(self._release_completed_load)
+                self._load_task = load_task
+            self._load_waiters += 1
+
         try:
-            from funasr import AutoModel  # type: ignore[import-untyped]
+            try:
+                model = await asyncio.shield(load_task)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                async with self._connect_lock:
+                    if request_generation == self._lifecycle_generation:
+                        if self._load_task is load_task:
+                            self._load_task = None
+                        self._available = False
+                logger.error("SenseVoiceSmall init failed: %s", exc)
+                return
 
-            cache = self._cache_dir
-            os.makedirs(cache, exist_ok=True)
-            os.environ.setdefault("MODELSCOPE_CACHE", cache)
-
-            logger.info(
-                "Loading SenseVoiceSmall model=%s device=%s cache=%s ...",
-                self._model_name,
-                self._device,
-                cache,
-            )
-            self._model = await asyncio.to_thread(
-                AutoModel,
-                model=self._model_name,
-                vad_model="fsmn-vad",
-                vad_kwargs={"max_single_segment_time": 30000},
-                device=self._device,
-            )
-            self._available = True
-            logger.info("SenseVoiceSmall loaded successfully")
-
-        except ImportError:
-            self._available = False
-            logger.warning("FunASR/SenseVoice dependencies not installed; ASR voice input disabled")
-        except Exception as exc:
-            self._available = False
-            logger.error("SenseVoiceSmall init failed: %s", exc)
+            async with self._connect_lock:
+                if request_generation != self._lifecycle_generation or self.is_available:
+                    return
+                if self._load_task is load_task:
+                    self._load_task = None
+                self._model = model
+                self._available = True
+                logger.info("SenseVoiceSmall loaded successfully")
+        finally:
+            self._load_waiters -= 1
+            self._release_completed_load(load_task)
 
     async def disconnect(self) -> None:
-        self._model = None
-        self._available = False
+        async with self._connect_lock:
+            self._lifecycle_generation += 1
+            self._model = None
+            self._available = False
         logger.info("SenseVoiceSmall disconnected")
 
     @property

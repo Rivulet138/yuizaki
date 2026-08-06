@@ -66,6 +66,23 @@ describe('api clients', () => {
     )
   })
 
+  it('uses the lightweight resource progress route for active downloads', async () => {
+    window.sessionStorage.setItem('yuizaki.control.token', 'resource-token')
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ activeDownloads: [] }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await resourceClient.progress()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${CONTROL_ORIGIN}/api/system/resources/progress`,
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+  })
+
   it('uses JSON contracts for resource preparation, cancellation, and permanent removal', async () => {
     window.sessionStorage.setItem('yuizaki.control.token', 'resource-token')
     const fetchMock = vi.fn().mockResolvedValue({

@@ -376,6 +376,30 @@ describe('companion runtime controller', () => {
     controller.stop()
   })
 
+  it('bounds delivered identity history while retaining recent duplicate suppression', async () => {
+    let tick = 0
+    const controller = createCompanionRuntimeController({
+      pollSnapshot: async () => ({
+        heartbeat: { behavior_events: [event({ tick: ++tick, at: `t${tick}` })] },
+      } as never),
+      isAvailable: () => true,
+      readDoNotDisturb: async () => false,
+      sinks: {},
+      cooldownMs: 0,
+      frequencyBudget: 10,
+      deliveredIdentityLimit: 3,
+    })
+
+    await controller.pollOnce()
+    await controller.pollOnce()
+    await controller.pollOnce()
+    await controller.pollOnce()
+
+    expect(controller.deliveredIdentities.size).toBe(3)
+    expect(controller.deliveredIdentities.has('suggestion:1:t1')).toBe(false)
+    expect(controller.deliveredIdentities.has('suggestion:4:t4')).toBe(true)
+  })
+
   it('applies unavailable, eligibility, cooldown, and frequency gates before effects', async () => {
     const sinks = { emotion: vi.fn(), motion: vi.fn(), advice: vi.fn(), notification: vi.fn() }
     const unavailablePoll = vi.fn()

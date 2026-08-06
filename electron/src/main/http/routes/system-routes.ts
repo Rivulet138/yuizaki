@@ -5,6 +5,7 @@ import { getRuntimeExceptions } from '../../runtime-diagnostics'
 import {
   cancelModelResources,
   getModelResourceStatus,
+  getModelResourceProgress,
   importSoulxReferenceAudio,
   prepareEmbeddingModel,
   prepareGenieTts,
@@ -863,6 +864,11 @@ export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, ur
 
   if (method === 'GET' && url.pathname === '/api/system/resources') {
     sendJson(res, 200, getModelResourceStatus(ctx.petModelCatalog))
+    return true
+  }
+
+  if (method === 'GET' && url.pathname === '/api/system/resources/progress') {
+    sendJson(res, 200, getModelResourceProgress())
     return true
   }
 

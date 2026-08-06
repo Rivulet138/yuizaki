@@ -1366,6 +1366,7 @@ const activeResourceIds = ref<ManagedModelResourceId[]>([])
 const resourceCancelLoading = ref(false)
 let resourceProgressPollTimer: ReturnType<typeof window.setInterval> | null = null
 let resourceProgressPollBusy = false
+const RESOURCE_PROGRESS_POLL_INTERVAL_MS = 1000
 const storageStatus = ref<StorageStatusPayload | null>(null)
 const storageLoading = ref(false)
 const storageActionKey = ref('')
@@ -2970,7 +2971,16 @@ const pollResourceStatus = async () => {
   if (resourceProgressPollBusy) return
   resourceProgressPollBusy = true
   try {
-    resourceStatus.value = normalizeResourceStatus(await resourceClient.status())
+    const hadActiveDownloads = activeDownloadProgress.value.length > 0
+    const progress = await resourceClient.progress()
+    if (hadActiveDownloads && progress.activeDownloads.length === 0 && !resourceActionKey.value) {
+      resourceStatus.value = normalizeResourceStatus(await resourceClient.status())
+    } else if (resourceStatus.value) {
+      resourceStatus.value = {
+        ...resourceStatus.value,
+        activeDownloads: progress.activeDownloads,
+      }
+    }
   } catch {
     // The foreground command reports actionable failures; polling stays silent.
   } finally {
@@ -2981,12 +2991,21 @@ const pollResourceStatus = async () => {
 
 const syncResourceProgressPolling = () => {
   const shouldPoll = Boolean(resourceActionKey.value) || activeDownloadProgress.value.length > 0
-  if (!shouldPoll) {
+  if (!shouldPoll || document.hidden) {
     stopResourceProgressPolling()
     return
   }
   if (resourceProgressPollTimer !== null) return
-  resourceProgressPollTimer = window.setInterval(() => void pollResourceStatus(), 500)
+  resourceProgressPollTimer = window.setInterval(() => void pollResourceStatus(), RESOURCE_PROGRESS_POLL_INTERVAL_MS)
+}
+
+const handleResourceProgressVisibility = () => {
+  if (document.hidden) {
+    stopResourceProgressPolling()
+    return
+  }
+  syncResourceProgressPolling()
+  if (resourceActionKey.value || activeDownloadProgress.value.length > 0) void pollResourceStatus()
 }
 
 const loadResourceStatus = async () => {
@@ -3481,6 +3500,7 @@ const hydrateForm = () => {
 }
 
 onMounted(async () => {
+  document.addEventListener('visibilitychange', handleResourceProgressVisibility)
   await Promise.all([refreshAdminTokenStatus(), refreshBackendTokenStatus(), inputBindingsStore.load()])
   await loadSettings()
   hydrateForm()
@@ -3509,6 +3529,7 @@ onUnmounted(() => {
   saveTimeout = null
   modelDiscoveryTimeout = null
   stopResourceProgressPolling()
+  document.removeEventListener('visibilitychange', handleResourceProgressVisibility)
   notifySaveIdle()
 })
 

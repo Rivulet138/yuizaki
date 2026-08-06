@@ -8,6 +8,7 @@ import type {
   ResourceCancelResult,
   ResourceCommandResult,
   ResourceRemovalResult,
+  ResourceProgressSnapshot,
   StorageCategoryId,
   StorageCleanupResult,
   StorageStatusPayload,
@@ -17,6 +18,7 @@ const RESOURCE_OPERATION_TIMEOUT_MS = 30 * 60 * 1000
 
 export const resourceClient = {
   status: async () => requestJson<ModelResourceStatusPayload>(`${CONTROL_ORIGIN}/api/system/resources`),
+  progress: async () => requestJson<ResourceProgressSnapshot>(`${CONTROL_ORIGIN}/api/system/resources/progress`),
   prepare: async (resources: ManagedModelResourceId[]) => requestJson<ResourceCommandResult>(`${CONTROL_ORIGIN}/api/system/resources/prepare`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -35,6 +35,10 @@ import {
 } from "./pet-interaction-controller";
 import { PointerMoveCoalescer } from "./pet-pointer-coalescer";
 import {
+	PetPerformanceController,
+	type PetFpsTier,
+} from "./pet-performance-controller";
+import {
 	resolveCursor,
 	resolveMouseCapture,
 	resolvePassthroughStrategy,
@@ -101,8 +105,6 @@ interface PetConfig {
 	locked: boolean;
 	lipSyncProfile: PetLipSyncProfile;
 }
-
-type FpsTier = "active" | "idle";
 
 const DEFAULT_CONFIG: PetConfig = {
 	modelType: "live2d",
@@ -208,9 +210,7 @@ class PetRenderer {
 	private focusedInteraction = false;
 	private readonly petEventDispatchAt = new Map<DesktopPetEventName, number>();
 
-	private fpsTier: FpsTier = "active";
-	private fpsCheckTimer: number | null = null;
-	private lastActivityAt = Date.now();
+	private performanceController: PetPerformanceController | null = null;
 
 	private scalePersistTimer: number | null = null;
 	private positionPersistTimer: number | null = null;
@@ -251,6 +251,12 @@ class PetRenderer {
 				click: false,
 				wheel: false,
 			},
+		});
+		this.performanceController = new PetPerformanceController({
+			ticker: this.app.ticker,
+			isHidden: () => document.hidden,
+			onTierChange: (tier, reason) => this.applyFpsTier(tier, reason),
+			idleThresholdMs: IDLE_THRESHOLD_MS,
 		});
 
 		if ("eventMode" in this.app.stage) {
@@ -904,6 +910,7 @@ class PetRenderer {
 			handleWindowError: this.handleWindowError,
 			handleUnhandledRejection: this.handleUnhandledRejection,
 		});
+		document.addEventListener('visibilitychange', this.handleVisibilityChange);
 	}
 
 	private installEasyLive2DInteractivity(): void {
@@ -1227,37 +1234,26 @@ class PetRenderer {
 	}
 
 	private startPerformanceController(): void {
-		this.applyFpsTier("active", "startup");
-		this.stopPerformanceController();
-
-		this.fpsCheckTimer = window.setInterval(() => {
-			const idleTime = Date.now() - this.lastActivityAt;
-			if (idleTime >= IDLE_THRESHOLD_MS && this.fpsTier !== "idle") {
-				this.applyFpsTier("idle", `idle-${Math.round(idleTime / 1000)}s`);
-			}
-		}, 1000);
+		this.performanceController?.start();
 	}
 
 	private stopPerformanceController(): void {
-		if (this.fpsCheckTimer !== null) {
-			window.clearInterval(this.fpsCheckTimer);
-			this.fpsCheckTimer = null;
-		}
+		this.performanceController?.stop();
+	}
+
+	private syncVisibilityPerformance(): void {
+		this.performanceController?.syncVisibility();
 	}
 
 	private markActivity(reason: string): void {
-		this.lastActivityAt = Date.now();
-		if (this.fpsTier !== "active") {
-			this.applyFpsTier("active", reason);
-		}
+		this.performanceController?.markActivity(reason);
 	}
 
-	private applyFpsTier(tier: FpsTier, reason: string): void {
+	private applyFpsTier(tier: PetFpsTier, reason: string): void {
 		if (!this.app) {
 			return;
 		}
 
-		this.fpsTier = tier;
 		const targetFps = tier === "active" ? ACTIVE_FPS : IDLE_FPS;
 		this.app.ticker.maxFPS = targetFps;
 		this.app.ticker.minFPS = Math.min(targetFps, IDLE_FPS);
@@ -1533,7 +1529,7 @@ class PetRenderer {
 				}
 			}
 
-			this.lastActivityAt = Date.now();
+			this.markActivity("window-drag");
 			return;
 		}
 
@@ -1711,6 +1707,10 @@ class PetRenderer {
 		logger.error("[PetRenderer] unhandled rejection:", event.reason);
 	};
 
+	private readonly handleVisibilityChange = (): void => {
+		this.syncVisibilityPerformance();
+	};
+
 	private finishWindowDrag(): void {
 		const result = resolveDragEnd(this.isDraggingWindow, Date.now());
 		if (!result.shouldFinish) {
@@ -1722,7 +1722,7 @@ class PetRenderer {
 		this.dragLastClient = null;
 		this.dragCooldownUntil = result.nextDragCooldownUntil;
 		window.live2dApi?.pet.endWindowDrag?.();
-		this.lastActivityAt = result.draggedAt;
+		this.markActivity("window-drag-end");
 		this.dragMoved = result.nextDragMoved;
 		this.modelHovering = result.nextModelHovering;
 		this.testState.lastDragEndAt = result.draggedAt;
@@ -1887,6 +1887,8 @@ class PetRenderer {
 		this.quickMenuEl = null;
 
 		this.stopPerformanceController();
+		this.performanceController = null;
+		document.removeEventListener('visibilitychange', this.handleVisibilityChange);
 		detachWindowListeners({
 			handleWindowMouseDown: this.handleWindowMouseDown,
 			handleWindowMouseMove: this.handleWindowMouseMove,

@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, nextTick, ref } from 'vue'
 
 import DeployPanel from '../domains/deploy/views/DeployPanel.vue'
@@ -38,6 +38,7 @@ const settingsClientMocks = vi.hoisted(() => ({
 
 const resourceClientMocks = vi.hoisted(() => ({
   status: vi.fn(),
+  progress: vi.fn(),
   storageStatus: vi.fn(),
   cleanupStorage: vi.fn(),
   prepareSherpaOnline: vi.fn(),
@@ -318,6 +319,11 @@ const global = {
 }
 
 describe('destructive action confirmation', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false })
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     elementPlusMocks.confirm.mockRejectedValue(new Error('cancel'))
@@ -394,6 +400,7 @@ describe('destructive action confirmation', () => {
     settingsClientMocks.metadata.mockResolvedValue({})
     settingsClientMocks.history.mockResolvedValue({ history: [], count: 0 })
     resourceClientMocks.status.mockResolvedValue(null)
+    resourceClientMocks.progress.mockResolvedValue({ activeDownloads: [] })
     resourceClientMocks.storageStatus.mockResolvedValue({ categories: [], total_bytes: 0, reclaimable_bytes: 0 })
     resourceClientMocks.cleanupStorage.mockResolvedValue({
       deleted_files: 0,
@@ -689,6 +696,70 @@ describe('destructive action confirmation', () => {
     await flushPromises()
     expect(resourceClientMocks.cancel).toHaveBeenLastCalledWith(['sherpa_online'])
     resumedWrapper.unmount()
+  })
+
+  it('polls resource progress only while the settings panel is visible', async () => {
+    vi.useFakeTimers()
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true })
+    const activeDownloads = [{
+      resourceId: 'sherpa_online',
+      phase: 'downloading',
+      message: 'Downloading model archive',
+      bytesDownloaded: 512,
+      bytesTotal: 1024,
+      percent: 50,
+      startedAt: '2026-07-20T00:00:00.000Z',
+      updatedAt: '2026-07-20T00:00:01.000Z',
+    }]
+    resourceClientMocks.status.mockResolvedValue({ activeDownloads })
+    resourceClientMocks.progress.mockResolvedValue({ activeDownloads })
+
+    const wrapper = mount(SettingsPanel, { global })
+    await flushPromises()
+
+    expect(resourceClientMocks.progress).not.toHaveBeenCalled()
+
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false })
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    expect(resourceClientMocks.progress).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(resourceClientMocks.progress).toHaveBeenCalledTimes(2)
+
+    wrapper.unmount()
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(resourceClientMocks.progress).toHaveBeenCalledTimes(2)
+  })
+
+  it('refreshes full resource status when a resumed download completes', async () => {
+    vi.useFakeTimers()
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false })
+    const activeDownload = {
+      resourceId: 'sherpa_online',
+      phase: 'downloading',
+      message: 'Downloading model archive',
+      bytesDownloaded: 512,
+      bytesTotal: 1024,
+      percent: 50,
+      startedAt: '2026-07-20T00:00:00.000Z',
+      updatedAt: '2026-07-20T00:00:01.000Z',
+    }
+    resourceClientMocks.status
+      .mockResolvedValueOnce({ activeDownloads: [activeDownload] })
+      .mockResolvedValueOnce({ activeDownloads: [] })
+    resourceClientMocks.progress.mockResolvedValue({ activeDownloads: [] })
+
+    const wrapper = mount(SettingsPanel, { global })
+    await flushPromises()
+    expect(resourceClientMocks.status).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+
+    expect(resourceClientMocks.progress).toHaveBeenCalledTimes(1)
+    expect(resourceClientMocks.status).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
   })
 
   it('flushes pending settings autosave before unmount', async () => {

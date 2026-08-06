@@ -119,6 +119,10 @@ export interface ModelResourceStatusPayload {
   resumableDownloads: ResumableResourceDownload[]
 }
 
+export interface ResourceProgressSnapshot {
+  activeDownloads: ResourceDownloadProgress[]
+}
+
 export type ManagedModelResourceId = 'soulx' | 'sherpa' | 'sherpa_online' | 'embedding' | 'tts'
 
 export type ResourceFailureCode =

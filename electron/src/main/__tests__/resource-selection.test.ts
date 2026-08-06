@@ -12,6 +12,7 @@ import {
   cancelModelResources,
   classifyResourceFailure,
   getModelResourceStatus,
+  getModelResourceProgress,
   isManagedResourceRemovalTarget,
   missingModelResources,
   parseResourceProgressLine,
@@ -71,6 +72,7 @@ describe('model resource selection', () => {
         updatedAt: '2026-07-20T00:00:00.000Z',
       }))
 
+      const statSpy = vi.spyOn(fs, 'statSync')
       expect(readResumableResourceDownload('sherpa', partialPath, 120)).toEqual({
         resourceId: 'sherpa',
         bytesDownloaded: 25,
@@ -78,9 +80,20 @@ describe('model resource selection', () => {
         percent: 25,
         updatedAt: '2026-07-20T00:00:00.000Z',
       })
+      expect(statSpy).toHaveBeenCalledTimes(1)
+      statSpy.mockRestore()
     } finally {
       fs.rmSync(root, { recursive: true, force: true })
     }
+  })
+
+  it('reads active download progress without scanning model directories', () => {
+    const readdirSpy = vi.spyOn(fs, 'readdirSync')
+
+    expect(getModelResourceProgress()).toEqual({ activeDownloads: [] })
+    expect(readdirSpy).not.toHaveBeenCalled()
+
+    readdirSpy.mockRestore()
   })
 
   it('reports persistent Hugging Face cache bytes without inventing a percentage', () => {
