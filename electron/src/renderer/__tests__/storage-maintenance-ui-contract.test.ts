@@ -26,4 +26,9 @@ describe('storage maintenance UI contract', () => {
     expect(proxySource).toContain("'/api/system/storage'")
     expect(proxySource).toContain("'/api/system/storage/cleanup'")
   })
+
+  it('reuses the resource refresh orchestration during initialization', () => {
+    expect(source).toContain('await Promise.all([refreshResourcePanel(), loadTtsStatus()])')
+    expect(source).not.toContain('await Promise.all([loadResourceStatus(), loadStorageStatus(), loadTtsStatus()])')
+  })
 })

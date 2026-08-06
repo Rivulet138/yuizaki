@@ -3507,7 +3507,7 @@ onMounted(async () => {
   if (!settingsRequest.error) {
     await loadSettingsAdmin()
   }
-  await Promise.all([loadResourceStatus(), loadStorageStatus(), loadTtsStatus()])
+  await Promise.all([refreshResourcePanel(), loadTtsStatus()])
   void queueTtsWarmup()
   scheduleLlmModelDiscovery({ manual: false })
 })

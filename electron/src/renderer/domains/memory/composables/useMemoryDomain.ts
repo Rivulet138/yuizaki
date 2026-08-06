@@ -231,7 +231,6 @@ export function useMemoryDomain() {
 	}>();
 	const queryRequest = useDomainRequest<unknown>();
 	const rawQueryRequest = useDomainRequest<unknown>();
-	const statusRequest = useDomainRequest<{ status: string; count: number }>();
 
 	const loadDocs = async (options?: MemoryDocListOptions) => {
 		const result = await docsRequest.execute(() => memoryClient.getDocs(options));
@@ -349,10 +348,6 @@ export function useMemoryDomain() {
 		}
 	};
 
-	const loadIndexStatus = async () => {
-		return statusRequest.execute(() => memoryClient.getIndexStatus());
-	};
-
 	return {
 		docs,
 		queryResult,
@@ -361,12 +356,10 @@ export function useMemoryDomain() {
 		updateRequest,
 		queryRequest,
 		rawQueryRequest,
-		statusRequest,
 		loadDocs,
 		addMemory,
 		updateDoc,
 		queryMemory,
 		queryRawRag,
-		loadIndexStatus,
 	};
 }

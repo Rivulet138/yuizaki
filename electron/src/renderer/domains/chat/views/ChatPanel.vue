@@ -776,6 +776,7 @@ const composerTranslating = ref(false)
 const messageTranslatingIndex = ref<number | null>(null)
 const modelOptions = ref<string[]>([])
 const modelsLoading = ref(false)
+const modelOptionsProviderKey = ref('')
 const mcpSummaryLabel = ref('MCP 状态待刷新')
 const attachments = ref<ChatAttachment[]>([])
 const isCreatingSession = ref(false)
@@ -2107,12 +2108,27 @@ const applyTranslationToInput = () => {
   translationDialogVisible.value = false
 }
 
-const refreshModelOptions = async () => {
+const refreshModelOptions = async (force = false) => {
   if (modelsLoading.value) return
+  const providerKey = [
+    settingsStore.state.llm.base_url,
+    settingsStore.state.llm.api_key,
+    settingsStore.state.llm.timeout,
+  ].join('\u0000')
+  if (!force && modelOptionsProviderKey.value === providerKey && modelOptions.value.length) {
+    modelOptions.value = Array.from(new Set([
+      ...modelOptions.value,
+      settingsStore.state.llm.model,
+      chatOptions.model,
+    ].filter(Boolean)))
+    return
+  }
   modelsLoading.value = true
+  let loaded = false
   try {
     if (!settingsStore.state.llm.base_url) {
       modelOptions.value = [settingsStore.state.llm.model, chatOptions.model].filter((item): item is string => Boolean(item))
+      loaded = true
       return
     }
     const result = await settingsClient.listLlmModels({
@@ -2122,10 +2138,12 @@ const refreshModelOptions = async () => {
     })
     const merged = new Set([settingsStore.state.llm.model, chatOptions.model, ...(result.models || [])].filter(Boolean) as string[])
     modelOptions.value = Array.from(merged)
+    loaded = true
   } catch (error) {
     console.warn('[ChatPanel] failed to load LLM models:', error)
     modelOptions.value = [settingsStore.state.llm.model, chatOptions.model].filter((item): item is string => Boolean(item))
   } finally {
+    if (loaded) modelOptionsProviderKey.value = providerKey
     modelsLoading.value = false
   }
 }

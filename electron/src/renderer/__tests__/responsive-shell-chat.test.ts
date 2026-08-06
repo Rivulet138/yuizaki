@@ -68,4 +68,12 @@ describe('responsive shell and chat contracts', () => {
     expect(targetSize(windowButtons, 'width')).toBeGreaterThanOrEqual(44)
     expect(targetSize(windowButtons, 'height')).toBeGreaterThanOrEqual(44)
   })
+
+  it('caches model discovery per provider while keeping the selected model visible', () => {
+    const source = readRendererSource('domains/chat/views/ChatPanel.vue')
+    expect(source).toContain('const modelOptionsProviderKey = ref(\'\')')
+    expect(source).toContain('if (!force && modelOptionsProviderKey.value === providerKey && modelOptions.value.length)')
+    expect(source).toContain('settingsStore.state.llm.model,')
+    expect(source).toContain('chatOptions.model,')
+  })
 })
