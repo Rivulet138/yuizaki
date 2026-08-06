@@ -568,7 +568,7 @@ const petChips = computed(() => [
 
 let syncTimer: number | null = null
 let panelActive = true
-const PET_STATUS_REFRESH_INTERVAL_MS = 30_000
+const PET_STATUS_REFRESH_INTERVAL_MS = 60_000
 
 const pageIsVisible = () => document.visibilityState !== 'hidden'
 
@@ -583,7 +583,7 @@ const startPetSync = (refresh = false) => {
   if (!panelActive || !pageIsVisible() || syncTimer !== null) return
   if (refresh) void syncPetData(false)
   syncTimer = window.setInterval(() => {
-    if (panelActive && pageIsVisible()) void syncPetData(true)
+    if (panelActive && pageIsVisible()) void syncPetData(true, false)
   }, PET_STATUS_REFRESH_INTERVAL_MS)
 }
 

@@ -137,20 +137,22 @@ export function useSystemOverview() {
 		}
 	};
 
-	const syncPetData = async (silent: boolean = true) => {
+	const syncPetData = async (silent: boolean = true, includeCatalog = true) => {
 		try {
 			const [state, catalog] = await Promise.all([
 				petControl.getState(),
-				petControl.getCatalog(),
+				includeCatalog ? petControl.getCatalog() : Promise.resolve(null),
 			]);
-			petCatalog.value.activeModelId = catalog.activeModelId;
-			petCatalog.value.models = catalog.models;
+			if (catalog) {
+				petCatalog.value.activeModelId = catalog.activeModelId;
+				petCatalog.value.models = catalog.models;
+			}
 
 			Object.assign(petState.value, state);
 			scaleDraft.value = Number(state.scale.toFixed(2));
 			opacityDraft.value = Number(state.opacity.toFixed(2));
 			selectedModelId.value =
-				state.modelId ?? catalog.activeModelId ?? catalog.models[0]?.id ?? null;
+				state.modelId ?? petCatalog.value.activeModelId ?? petCatalog.value.models[0]?.id ?? null;
 		} catch {
 			if (!silent) ElMessage.error("无法连接桌宠控制服务");
 		}

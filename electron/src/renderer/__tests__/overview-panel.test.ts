@@ -203,14 +203,21 @@ describe('OverviewPanel chain self check', () => {
     const wrapper = mount(OverviewPanel, { global })
     await flushPromises()
     const initialCalls = clientMocks.petState.mock.calls.length
+    const initialCatalogCalls = clientMocks.petCatalog.mock.calls.length
 
     vi.advanceTimersByTime(5_000)
     await flushPromises()
     expect(clientMocks.petState.mock.calls.length).toBe(initialCalls)
 
-    vi.advanceTimersByTime(25_000)
+    vi.advanceTimersByTime(54_999)
+    await flushPromises()
+    expect(clientMocks.petState.mock.calls.length).toBe(initialCalls)
+    expect(clientMocks.petCatalog.mock.calls.length).toBe(initialCatalogCalls)
+
+    vi.advanceTimersByTime(5_000)
     await flushPromises()
     expect(clientMocks.petState.mock.calls.length).toBeGreaterThan(initialCalls)
+    expect(clientMocks.petCatalog.mock.calls.length).toBe(initialCatalogCalls)
 
     visibility.mockReturnValue('hidden')
     document.dispatchEvent(new Event('visibilitychange'))
