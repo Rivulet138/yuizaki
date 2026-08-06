@@ -146,6 +146,25 @@ describe('companion runtime controller', () => {
     vi.useRealTimers()
   })
 
+  it('uses a low-frequency default polling interval', async () => {
+    vi.useFakeTimers()
+    const pollSnapshot = vi.fn(async () => ({ heartbeat: { behavior_events: [] } } as never))
+    const controller = createCompanionRuntimeController({
+      pollSnapshot,
+      isAvailable: () => true,
+      readDoNotDisturb: async () => false,
+      sinks: {},
+    })
+
+    controller.start()
+    await vi.advanceTimersByTimeAsync(59_999)
+    expect(pollSnapshot).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(pollSnapshot).toHaveBeenCalledTimes(1)
+    controller.stop()
+    vi.useRealTimers()
+  })
+
   it('pauses only proactive polling while the renderer is hidden', async () => {
     vi.useFakeTimers()
     const pollSnapshot = vi.fn(async () => ({ heartbeat: { behavior_events: [] } } as never))

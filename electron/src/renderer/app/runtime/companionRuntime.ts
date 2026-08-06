@@ -22,7 +22,7 @@ export interface ProactiveDeliveryResult {
 }
 export type ProactivePollResult = ProactiveSuppressionReason | ProactiveDeliveryResult | 'empty' | 'in_flight' | 'stopped'
 
-const DEFAULT_COMPANION_POLL_INTERVAL_MS = 15_000
+const DEFAULT_COMPANION_POLL_INTERVAL_MS = 60_000
 const DEFAULT_DELIVERED_IDENTITY_LIMIT = 256
 
 export interface CompanionRuntimeEvent {
