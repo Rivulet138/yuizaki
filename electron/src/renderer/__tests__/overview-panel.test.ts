@@ -193,6 +193,7 @@ describe('OverviewPanel chain self check', () => {
     expect(wrapper.text()).toContain('LLM 未选择模型')
     expect(wrapper.text()).toContain('ASR 缺少地址')
     expect(wrapper.text()).toContain('桌宠模型未加载')
+    expect(clientMocks.companionRuntime).not.toHaveBeenCalled()
   })
 
   it('pauses pet synchronization while hidden and refreshes once on resume', async () => {

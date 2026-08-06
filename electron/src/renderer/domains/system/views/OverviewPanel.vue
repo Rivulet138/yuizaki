@@ -333,7 +333,6 @@ const {
   loadSummarySessions,
   loadSummaryDetail,
   refreshReadiness,
-  loadHeartbeat,
   rewriteSummary,
   syncPetData,
   applyModel,
@@ -602,7 +601,6 @@ onMounted(() => {
     settingsStore.fetchSettings(),
     loadSummarySessions(),
     refreshReadiness(),
-    loadHeartbeat(),
     loadGovernance(),
   ])
 

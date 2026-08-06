@@ -1,20 +1,13 @@
 import { ElMessage } from "element-plus";
-import { computed, ref } from "vue";
-import type {
-	CompanionRuntimeSnapshot,
-	HeartbeatBehaviorEvent,
-	HeartbeatPersona,
-	HeartbeatSnapshot,
-} from "@/../shared/agent";
+import { ref } from "vue";
 import { useDomainRequest } from "@/shared/composables/useDomainRequest";
 import { useSystemStore } from "@/stores/systemStore";
 import { petControl } from "@/utils/petControl";
-import { summaryClient, systemClient } from "@/api/client";
+import { summaryClient } from "@/api/client";
 import type { SummaryDetailResponse } from "@/api/clients/summary-client";
 import type {
 	PetControlState,
 	PetModelCatalogPayload,
-	PetModelDefinition,
 } from "../../../../shared/pet-control";
 import { DEFAULT_PET_CONTROL_STATE } from "../../../../shared/pet-control";
 
@@ -47,31 +40,6 @@ export interface SummarySession {
 	stats: SummaryStats;
 }
 
-export interface SummaryAuditLog {
-	timestamp: string;
-	session_id: string;
-	source: "manual" | "auto" | string;
-	outcome: "ok" | "error" | "timeout" | "skipped" | string;
-	detail: string;
-}
-
-export interface GovernanceTrendRow {
-	day: string;
-	audit_total: number;
-	ok_rate: number;
-	guard_skip_rate: number;
-	fallback_rate: number;
-}
-
-export interface GovernanceAlert {
-	key: string;
-	type: string;
-	severity: "high" | "medium" | "low" | string;
-	day: string;
-	message: string;
-	suggestion: string;
-}
-
 interface ReadinessCheck {
 	ok?: boolean;
 	message?: string;
@@ -99,46 +67,20 @@ export function useSystemOverview() {
 	const scaleDraft = ref(DEFAULT_PET_CONTROL_STATE.scale);
 	const opacityDraft = ref(DEFAULT_PET_CONTROL_STATE.opacity);
 	const selectedModelId = ref<string | null>(DEFAULT_PET_CONTROL_STATE.modelId);
-	const selectedEmotionId = ref("");
-	const selectedMotionId = ref("");
-	const selectedExpressionName = ref("");
 
 	const summarySessions = ref<SummarySession[]>([]);
 	const selectedSummaryDetail = ref<SummaryDetailResponse | null>(null);
-	const auditLogs = ref<SummaryAuditLog[]>([]);
-	const governanceTrends = ref<GovernanceTrendRow[]>([]);
-	const governanceAlerts = ref<GovernanceAlert[]>([]);
-
-	const heartbeatPersona = ref<HeartbeatPersona | null>(null);
-	const latestBehaviorEvent = ref<HeartbeatBehaviorEvent | null>(null);
 
 	const summaryReady = ref(false);
 	const readinessMessage = ref("");
 	const selectedSummarySessionId = ref("");
 
-	const auditSessionFilter = ref<"all" | "selected">("selected");
-	const auditSourceFilter = ref<"all" | "manual" | "auto">("all");
-	const auditOutcomeFilter = ref<
-		"all" | "ok" | "error" | "timeout" | "skipped"
-	>("all");
-
-	const summaryBackoffUntil = ref(0);
-
 	const summarySessionsReq = useDomainRequest<{ sessions: unknown[] }>();
 	const summaryDetailReq = useDomainRequest<SummaryDetailResponse>();
-	const auditReq = useDomainRequest<{ logs: unknown[] }>();
-	const govReportReq = useDomainRequest<{
-		trends: unknown[];
-		alerts: unknown[];
-	}>();
 	const readinessReq = useDomainRequest<ReadinessPayload>();
 	const rewriteReq = useDomainRequest<RewriteSummaryPayload>();
-	const alertActionReq = useDomainRequest<unknown>();
-	const heartbeatReq = useDomainRequest<HeartbeatSnapshot>();
-	const companionRuntimeReq = useDomainRequest<CompanionRuntimeSnapshot>();
 
 	const loadSummarySessions = async () => {
-		if (Date.now() < summaryBackoffUntil.value) return;
 		const result = await summarySessionsReq.execute(() =>
 			summaryClient.getSessions(),
 		);
@@ -156,7 +98,7 @@ export function useSystemOverview() {
 	const loadSummaryDetail = async (
 		sessionId = selectedSummarySessionId.value,
 	) => {
-		if (!sessionId || Date.now() < summaryBackoffUntil.value) return null;
+		if (!sessionId) return null;
 		const result = await summaryDetailReq.execute(() =>
 			summaryClient.getSummary(sessionId),
 		);
@@ -182,76 +124,6 @@ export function useSystemOverview() {
 		}
 	};
 
-	const loadSummaryAudit = async () => {
-		if (Date.now() < summaryBackoffUntil.value) return;
-		const params: Record<string, string | number> = { limit: 120 };
-		if (
-			auditSessionFilter.value === "selected" &&
-			selectedSummarySessionId.value
-		) {
-			params.session_id = selectedSummarySessionId.value;
-		}
-		const result = await auditReq.execute(() => summaryClient.getAudit(params));
-		if (result?.logs) {
-			auditLogs.value = result.logs as SummaryAuditLog[];
-		}
-	};
-
-	const loadGovernanceReport = async () => {
-		if (Date.now() < summaryBackoffUntil.value) return;
-		const result = await govReportReq.execute(() =>
-			summaryClient.getGovernanceReport(7),
-		);
-		if (result) {
-			governanceTrends.value = (result.trends ?? []) as GovernanceTrendRow[];
-			governanceAlerts.value = (result.alerts ?? []) as GovernanceAlert[];
-		}
-	};
-
-	const loadHeartbeat = async () => {
-		const runtime = await companionRuntimeReq.execute(() =>
-			systemClient.companionRuntime(),
-		);
-		if (runtime) {
-			heartbeatPersona.value = runtime.heartbeat.persona ?? null;
-			latestBehaviorEvent.value =
-				Array.isArray(runtime.heartbeat.behavior_events) &&
-				runtime.heartbeat.behavior_events.length > 0
-					? runtime.heartbeat.behavior_events[
-							runtime.heartbeat.behavior_events.length - 1
-						]
-					: null;
-			return;
-		}
-
-		const result = await heartbeatReq.execute(() => systemClient.heartbeat());
-		if (result) {
-			heartbeatPersona.value = result.persona ?? null;
-			latestBehaviorEvent.value =
-				Array.isArray(result.behavior_events) &&
-				result.behavior_events.length > 0
-					? result.behavior_events[result.behavior_events.length - 1]
-					: null;
-		}
-	};
-
-	const ackAlert = async (key: string) => {
-		if (!key) return;
-		await alertActionReq.execute(() => summaryClient.ackAlert(key));
-		await loadGovernanceReport();
-	};
-
-	const snoozeAlert = async (key: string, minutes: number = 120) => {
-		if (!key) return;
-		await alertActionReq.execute(() => summaryClient.snoozeAlert(key, minutes));
-		await loadGovernanceReport();
-	};
-
-	const clearAlerts = async () => {
-		await alertActionReq.execute(() => summaryClient.clearAlerts());
-		await loadGovernanceReport();
-	};
-
 	const rewriteSummary = async () => {
 		if (!selectedSummarySessionId.value) return;
 		const res = await rewriteReq.execute(() =>
@@ -259,11 +131,7 @@ export function useSystemOverview() {
 		);
 		if (res?.ok) {
 			ElMessage.success("摘要重写完成");
-			await Promise.all([
-				loadSummarySessions(),
-				loadSummaryAudit(),
-				loadSummaryDetail(),
-			]);
+			await loadSummarySessions();
 		} else {
 			ElMessage.error(rewriteReq.error || "手动重写摘要失败");
 		}
@@ -327,28 +195,6 @@ export function useSystemOverview() {
 		}
 	};
 
-	const triggerEmotionPreset = async () => {
-		if (!selectedEmotionId.value) return;
-		try {
-			await petControl.triggerEmotion(selectedEmotionId.value);
-		} catch {
-			ElMessage.error("触发情绪预设失败");
-		}
-	};
-
-	const triggerMotion = async (motionGroup?: string) => {
-		const motion = currentModel.value?.motions.find(
-			(item) => item.id === selectedMotionId.value,
-		);
-		const targetGroup = motionGroup || motion?.group;
-		if (!targetGroup) return;
-		try {
-			await petControl.triggerMotion(targetGroup, 0);
-		} catch {
-			ElMessage.error("播放动作失败");
-		}
-	};
-
 	const setInteractMode = async (enabled: string | number | boolean) => {
 		try {
 			const state = await petControl.setInteractMode(Boolean(enabled));
@@ -405,15 +251,6 @@ export function useSystemOverview() {
 		}
 	};
 
-	const currentModel = computed<PetModelDefinition | null>(() => {
-		const activeId = petState.value.modelId ?? petCatalog.value.activeModelId;
-		return (
-			petCatalog.value.models.find((model) => model.id === activeId) ??
-			petCatalog.value.models[0] ??
-			null
-		);
-	});
-
 	return {
 		systemStore,
 		petState,
@@ -421,52 +258,28 @@ export function useSystemOverview() {
 		scaleDraft,
 		opacityDraft,
 		selectedModelId,
-		selectedEmotionId,
-		selectedMotionId,
-		selectedExpressionName,
 		summarySessions,
 		selectedSummaryDetail,
-		auditLogs,
-		governanceTrends,
-		governanceAlerts,
-		heartbeatPersona,
-		latestBehaviorEvent,
 		summaryReady,
 		readinessMessage,
 		selectedSummarySessionId,
-		auditSessionFilter,
-		auditSourceFilter,
-		auditOutcomeFilter,
 		summarySessionsReq,
 		summaryDetailReq,
-		auditReq,
-		govReportReq,
 		readinessReq,
-		alertActionReq,
 		rewriteReq,
-		heartbeatReq,
 		loadSummarySessions,
 		loadSummaryDetail,
 		refreshReadiness,
-		loadSummaryAudit,
-		loadGovernanceReport,
-		loadHeartbeat,
-		ackAlert,
-		snoozeAlert,
-		clearAlerts,
 		rewriteSummary,
 		syncPetData,
 		applyModel,
 		applyScale,
 		applyOpacity,
-		triggerEmotionPreset,
-		triggerMotion,
 		setPetVisible,
 		setDoNotDisturb,
 		setInteractMode,
 		setClickThrough,
 		setLocked,
 		dockBottomRight,
-		currentModel,
 	};
 }
