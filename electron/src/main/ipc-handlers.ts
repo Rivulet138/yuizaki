@@ -1,5 +1,5 @@
 import { app, ipcMain, nativeImage, screen, shell } from 'electron'
-import type { BrowserWindow, Display, NativeImage, Rectangle } from 'electron'
+import type { BrowserWindow, Display, NativeImage, Rectangle, WebContents } from 'electron'
 import { resolvePythonApiOrigin } from './http/python-origin'
 import { logger } from './logger'
 import { assertTrustedIpcSender } from './trusted-renderer-url'
@@ -62,6 +62,7 @@ export interface IpcContext {
     hide: () => void
     reloadRenderer: () => void
     requestPetState: () => void
+    handleRendererReady: (sender: WebContents) => boolean
   }
   petWindow: {
     window: BrowserWindow | null
@@ -666,6 +667,10 @@ function registerPetControlHandlers(ctx: IpcContext): void {
 }
 
 function registerPetInteractionHandlers(ctx: IpcContext): void {
+  ipcMain.on('pet:renderer-ready', (event) => {
+    ctx.live2dWindow.handleRendererReady(event.sender)
+  })
+
   ipcMain.on('pet:interact-enable', (event) => {
     if (!allowTrustedIpcSender(event)) return
     ctx.live2dWindow.setInteractMode(true)

@@ -305,7 +305,8 @@ class PetRenderer {
 
 		this.setupGlobalListeners();
 		this.setupIPCListeners();
-		this.showNotice("等待桌宠模型配置...");
+		this.showNotice("正在恢复上次桌宠模型...");
+		window.live2dApi?.pet.rendererReady();
 		this.startPerformanceController();
 		this.reportRendererMetrics("init");
 	}
@@ -1958,6 +1959,7 @@ if (!petWindow.live2dApi) {
 	};
 	petWindow.live2dApi = {
 		pet: {
+			rendererReady: () => {},
 			setPosition: () => {},
 			dragWindow: () => {
 				const current = (testStateHost.__petTestState ?? {}) as Record<

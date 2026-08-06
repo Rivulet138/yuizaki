@@ -158,4 +158,65 @@ describe('Live2DWindow hardware lifecycle', () => {
     expect(maxActiveWrites).toBe(1)
     expect(String(fsMock.appendFile.mock.calls[1]?.[1])).toContain('[renderer-log] dropped')
   })
+
+  it.each([
+    ['live2d', 'live2d:local:shizuku', 'E:/models/shizuku/shizuku.model3.json'],
+    ['vrm', 'vrm:local:avatar', 'E:/models/avatar/avatar.vrm'],
+  ] as const)('restores the persisted %s model only after the renderer is ready', (modelType, modelId, modelPath) => {
+    const live2dWindow = new Live2DWindow()
+    live2dWindow.create()
+    live2dWindow.applyPetConfig({
+      modelType,
+      modelId,
+      modelPath,
+      scale: 0.82,
+      placement: 'bottom-left',
+      lipSyncProfile: { inputGain: 1.25 },
+    })
+
+    const instance = electronMock.instances[0]
+    instance?.webContentsHandlers.get('did-finish-load')?.()
+    expect(instance?.webContents.send).not.toHaveBeenCalledWith('pet:apply-config', expect.anything())
+
+    expect(live2dWindow.handleRendererReady({} as never)).toBe(false)
+    expect(instance?.webContents.send).not.toHaveBeenCalledWith('pet:apply-config', expect.anything())
+
+    expect(live2dWindow.handleRendererReady(instance?.webContents as never)).toBe(true)
+    expect(instance?.webContents.send).toHaveBeenCalledWith('pet:apply-config', expect.objectContaining({
+      modelType,
+      modelId,
+      modelPath,
+      scale: 0.82,
+      placement: 'bottom-left',
+      lipSyncProfile: { inputGain: 1.25 },
+    }))
+
+    instance?.webContents.send.mockClear()
+    expect(live2dWindow.handleRendererReady(instance?.webContents as never)).toBe(true)
+    expect(instance?.webContents.send).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['main-frame reload', 'did-start-navigation', [{ isMainFrame: true, isSameDocument: false }]],
+    ['renderer recovery', 'render-process-gone', [{}, { reason: 'crashed', exitCode: 1 }]],
+  ] as const)('restores the model again after %s', (_label, eventName, eventArgs) => {
+    const live2dWindow = new Live2DWindow()
+    live2dWindow.create()
+    live2dWindow.applyPetConfig({
+      modelType: 'live2d',
+      modelId: 'live2d:local:shizuku',
+      modelPath: 'E:/models/shizuku/shizuku.model3.json',
+    })
+
+    const instance = electronMock.instances[0]
+    live2dWindow.handleRendererReady(instance?.webContents as never)
+    instance?.webContents.send.mockClear()
+
+    instance?.webContentsHandlers.get(eventName)?.(...eventArgs)
+    expect(live2dWindow.handleRendererReady(instance?.webContents as never)).toBe(true)
+    expect(instance?.webContents.send).toHaveBeenCalledWith('pet:apply-config', expect.objectContaining({
+      modelId: 'live2d:local:shizuku',
+      modelPath: 'E:/models/shizuku/shizuku.model3.json',
+    }))
+  })
 })

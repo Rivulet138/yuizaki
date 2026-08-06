@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { PetControlConfigPatch, PetRendererStatePayload } from '../shared/pet-control'
+import type { PetRendererStatePayload } from '../shared/pet-control'
 import type { DesktopPetEventDispatchResult, DesktopPetEventRecord } from '../shared/plugin'
 
 type ListenerCallback = (...args: unknown[]) => void
@@ -7,6 +7,7 @@ const callbackMap = new WeakMap<ListenerCallback, Map<string, ListenerCallback>>
 
 const live2dApi = {
   pet: {
+    rendererReady: () => ipcRenderer.send('pet:renderer-ready'),
     setPosition: (x: number, y: number) =>
       ipcRenderer.send('pet:set-position', { x, y }),
     dragWindow: (deltaX: number, deltaY: number) =>
@@ -89,7 +90,6 @@ contextBridge.exposeInMainWorld('live2dApi', live2dApi)
 declare global {
   interface Window {
     live2dApi: typeof live2dApi
-    __pendingPetConfig?: PetControlConfigPatch
     __petTestState?: {
       lastPointerDownAt: number | null
       lastPointerDownHit: boolean | null

@@ -67,6 +67,7 @@ const buildIpcContext = (): IpcContext => {
       hide: vi.fn(),
       reloadRenderer: vi.fn(),
       requestPetState: vi.fn(),
+      handleRendererReady: vi.fn(() => true),
     },
     petWindow: {
       window: null,
@@ -276,6 +277,16 @@ describe('IPC handler sender trust', () => {
 
     listener?.(trustedEvent)
     expect(ctx.live2dWindow.setInteractMode).toHaveBeenCalledWith(true)
+  })
+
+  it('passes renderer readiness to the desktop pet window identity check', async () => {
+    const { registerIpcHandlers } = await import('../ipc-handlers')
+    const ctx = buildIpcContext()
+    registerIpcHandlers(ctx)
+
+    electronMock.listeners.get('pet:renderer-ready')?.(trustedEvent)
+
+    expect(ctx.live2dWindow.handleRendererReady).toHaveBeenCalledWith(trustedEvent.sender)
   })
 
   it('forwards only trusted, bounded, and recognized lip-sync levels', async () => {

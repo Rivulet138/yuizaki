@@ -11,7 +11,11 @@ export default defineConfig({
   },
   test: {
     environment: 'happy-dom',
-    include: ['src/main/__tests__/*.test.ts', 'src/renderer/__tests__/*.test.ts'],
+    include: [
+      'src/main/__tests__/*.test.ts',
+      'src/preload/__tests__/*.test.ts',
+      'src/renderer/__tests__/*.test.ts',
+    ],
     testTimeout: 15000,
   },
 })

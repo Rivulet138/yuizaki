@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 const electronMock = vi.hoisted(() => ({
   exposed: {} as Record<string, unknown>,
+  send: vi.fn(),
   on: vi.fn(),
   removeListener: vi.fn(),
 }))
@@ -14,13 +15,24 @@ vi.mock('electron', () => ({
   },
   ipcRenderer: {
     invoke: vi.fn(),
-    send: vi.fn(),
+    send: electronMock.send,
     on: electronMock.on,
     removeListener: electronMock.removeListener,
   },
 }))
 
 describe('live2d preload subscriptions', () => {
+  it('notifies the main process after renderer listeners are ready', async () => {
+    await import('../live2d-preload')
+    const api = electronMock.exposed['live2dApi'] as {
+      pet: { rendererReady: () => void }
+    }
+
+    api.pet.rendererReady()
+
+    expect(electronMock.send).toHaveBeenCalledWith('pet:renderer-ready')
+  })
+
   it('removes the wrapped listener registered for a callback', async () => {
     await import('../live2d-preload')
     const api = electronMock.exposed['live2dApi'] as {

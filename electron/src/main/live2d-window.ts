@@ -1,4 +1,11 @@
-import { BrowserWindow, screen, type Rectangle, type WebContentsConsoleMessageEventParams, type Event } from 'electron'
+import {
+  BrowserWindow,
+  screen,
+  type Event,
+  type Rectangle,
+  type WebContents,
+  type WebContentsConsoleMessageEventParams,
+} from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
@@ -152,7 +159,7 @@ export class Live2DWindow {
   private requestedMousePassthrough = false
   private ignoreMouseEvents: boolean | null = null
   private ignoreMouseEventsForward: boolean | null = null
-  private rendererLoaded = false
+  private rendererReady = false
   private lastPetConfig: PetRendererConfigPayload = {}
   private lastCompanionIdleProfile: PetCompanionIdleProfile | null = null
   private topMostGuardTimer: NodeJS.Timeout | null = null
@@ -191,7 +198,7 @@ export class Live2DWindow {
     this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
 
     this.applyEffectiveMousePassthrough(true)
-    this.rendererLoaded = false
+    this.rendererReady = false
     this.ensureTopMost()
     configureTrustedNavigation(this.win.webContents)
 
@@ -219,18 +226,15 @@ export class Live2DWindow {
     })
 
     this.win.webContents.on('did-finish-load', () => {
-      this.rendererLoaded = true
       logger.info('[Live2DWindow] renderer loaded')
       writeRendererLog('did-finish-load')
       this.setLocked(this.locked)
       this.setClickThrough(this.clickThrough)
-      this.win?.webContents.send('pet:interact-toggle', this.interactMode)
-      if (Object.keys(this.lastPetConfig).length > 0) {
-        this.sendToRenderer('pet:apply-config', this.lastPetConfig)
-        this.requestPetState()
-      }
-      if (this.lastCompanionIdleProfile) {
-        this.sendToRenderer('pet:companion-idle-profile', this.lastCompanionIdleProfile)
+    })
+
+    this.win.webContents.on('did-start-navigation', (details) => {
+      if (details.isMainFrame && !details.isSameDocument) {
+        this.rendererReady = false
       }
     })
 
@@ -270,7 +274,7 @@ export class Live2DWindow {
     this.win.webContents.on('render-process-gone', (_event, details) => {
       logger.error('[Live2DWindow] renderer process gone:', details)
       writeRendererLog('render-process-gone', details)
-      this.rendererLoaded = false
+      this.rendererReady = false
       this.scheduleRendererRecovery('render-process-gone')
     })
 
@@ -282,7 +286,7 @@ export class Live2DWindow {
       this.stopTopMostGuard()
       this.stopRendererRecovery()
       this.win = null
-      this.rendererLoaded = false
+      this.rendererReady = false
       this.allowClose = false
     })
 
@@ -301,6 +305,32 @@ export class Live2DWindow {
     return this.win
   }
 
+  handleRendererReady(sender: WebContents): boolean {
+    if (
+      !this.win ||
+      this.win.isDestroyed() ||
+      sender !== this.win.webContents ||
+      sender.isDestroyed()
+    ) {
+      return false
+    }
+
+    if (this.rendererReady) {
+      return true
+    }
+
+    this.rendererReady = true
+    if (Object.keys(this.lastPetConfig).length > 0) {
+      this.sendToRenderer('pet:apply-config', this.lastPetConfig)
+    }
+    if (this.lastCompanionIdleProfile) {
+      this.sendToRenderer('pet:companion-idle-profile', this.lastCompanionIdleProfile)
+    }
+    this.sendToRenderer('pet:interact-toggle', this.interactMode)
+    this.requestPetState()
+    return true
+  }
+
   get isInteracting(): boolean {
     return this.interactMode
   }
@@ -312,7 +342,7 @@ export class Live2DWindow {
       interactMode: this.interactMode,
     }
 
-    if (this.rendererLoaded) {
+    if (this.rendererReady) {
       this.sendToRenderer('pet:interact-toggle', this.interactMode)
     }
 
@@ -326,7 +356,7 @@ export class Live2DWindow {
       interactMode: this.interactMode,
     }
 
-    if (this.rendererLoaded) {
+    if (this.rendererReady) {
       this.sendToRenderer('pet:interact-toggle', this.interactMode)
     }
   }
@@ -609,12 +639,12 @@ export class Live2DWindow {
       return
     }
 
-    this.rendererLoaded = false
+    this.rendererReady = false
     this.win.webContents.reloadIgnoringCache()
   }
 
   sendToRenderer(channel: string, data?: unknown): void {
-    if (this.win && !this.win.isDestroyed() && this.rendererLoaded) {
+    if (this.win && !this.win.isDestroyed() && this.rendererReady) {
       this.win.webContents.send(channel, data)
     }
   }
