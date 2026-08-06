@@ -60,7 +60,7 @@ from modules.system.settings_api import router as settings_router
 from modules.system.logging_config import configure_application_logging
 from modules.memory.pipeline import RetrievalPipeline
 from modules.memory.backend_factory import create_memory_backend
-from modules.system.heartbeat import HeartbeatScheduler
+from modules.system.heartbeat import HeartbeatScheduler, DEFAULT_HEARTBEAT_INTERVAL_SECONDS
 from modules.system.health_providers import build_app_runtime_health_providers, register_app_runtime_health_checks
 from modules.system.runtime_config import RuntimeConfig, apply_runtime_config
 from modules.system.settings_schema import validate_runtime_patch
@@ -383,7 +383,7 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
 
     _governance_alert_store.load()
     _heartbeat_scheduler = HeartbeatScheduler(
-        interval_seconds=30,
+        interval_seconds=DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
         trace_provider=lambda: _retrieval_pipeline.last_trace if _retrieval_pipeline else None,
         companion_provider=lambda: db_repo.get_workspace_companion(_get_active_workspace_id()) if db_repo else None,
         companion_persist=lambda companion_id, updates: db_repo.update_companion(companion_id, updates) if db_repo else None,

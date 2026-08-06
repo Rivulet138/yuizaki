@@ -9,12 +9,13 @@ from typing import Any
 from .companion_policy import apply_behavior_modifiers, build_base_behavior_event, build_behavior_profile, evaluate_proactive_policy
 
 logger = logging.getLogger(__name__)
+DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 60
 
 
 @dataclass
 class HeartbeatState:
     running: bool = False
-    interval_seconds: int = 30
+    interval_seconds: int = DEFAULT_HEARTBEAT_INTERVAL_SECONDS
     tick_count: int = 0
     last_tick_at: str | None = None
     events: list[dict[str, Any]] = field(default_factory=list)
@@ -28,7 +29,7 @@ class HeartbeatState:
 
 
 class HeartbeatScheduler:
-    def __init__(self, interval_seconds: int = 30, trace_provider=None, companion_provider=None, companion_persist=None, relationship_memory_writer=None, relationship_history_provider=None, relationship_summary_provider=None):
+    def __init__(self, interval_seconds: int = DEFAULT_HEARTBEAT_INTERVAL_SECONDS, trace_provider=None, companion_provider=None, companion_persist=None, relationship_memory_writer=None, relationship_history_provider=None, relationship_summary_provider=None):
         self.state = HeartbeatState(interval_seconds=interval_seconds)
         self._task: asyncio.Task[Any] | None = None
         self._trace_provider = trace_provider

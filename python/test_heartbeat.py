@@ -15,6 +15,12 @@ async def _wait_for(predicate, timeout: float = 0.25):
         await asyncio.sleep(0.005)
 
 
+def test_heartbeat_defaults_to_low_frequency_desktop_pet_interval():
+    scheduler = HeartbeatScheduler()
+
+    assert scheduler.state.interval_seconds == 60
+
+
 @pytest.mark.asyncio
 async def test_heartbeat_scheduler_ticks():
     scheduler = HeartbeatScheduler(interval_seconds=0)
