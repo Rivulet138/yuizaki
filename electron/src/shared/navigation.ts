@@ -146,16 +146,6 @@ export const staticNavigationModuleRecords = [
     primary: false,
   },
   {
-    id: 'agent-trace-admin',
-    title: '任务编排',
-    desc: 'commands、skills、agents、hooks 编排对象清单与后端能力核对',
-    order: 10,
-    enabled: true,
-    capabilities: { plugins: true, admin: true },
-    slot: 'admin',
-    audience: 'admin',
-  },
-  {
     id: 'persona-memory',
     title: '记忆调试',
     desc: '观察 persona、heartbeat、行为事件与记忆检索调试信息',

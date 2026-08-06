@@ -261,7 +261,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref } from 'vue'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import { useSystemOverview } from '../composables/useSystemOverview'
@@ -568,9 +568,35 @@ const petChips = computed(() => [
 ])
 
 let syncTimer: number | null = null
+let panelActive = true
+
+const pageIsVisible = () => document.visibilityState !== 'hidden'
+
+const stopPetSync = () => {
+  if (syncTimer !== null) {
+    window.clearInterval(syncTimer)
+    syncTimer = null
+  }
+}
+
+const startPetSync = (refresh = false) => {
+  if (!panelActive || !pageIsVisible() || syncTimer !== null) return
+  if (refresh) void syncPetData(false)
+  syncTimer = window.setInterval(() => {
+    if (panelActive && pageIsVisible()) void syncPetData(true)
+  }, 5000)
+}
+
+const handleVisibilityChange = () => {
+  if (pageIsVisible()) {
+    startPetSync(true)
+  } else {
+    stopPetSync()
+  }
+}
 
 onMounted(() => {
-  void syncPetData(false)
+  if (pageIsVisible()) void syncPetData(false)
   void Promise.all([
     settingsStore.fetchSettings(),
     loadSummarySessions(),
@@ -579,15 +605,23 @@ onMounted(() => {
     loadGovernance(),
   ])
 
-  syncTimer = window.setInterval(() => {
-    void syncPetData(true)
-  }, 5000)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  startPetSync()
 })
 
 onUnmounted(() => {
-  if (syncTimer !== null) {
-    window.clearInterval(syncTimer)
-  }
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  stopPetSync()
+})
+
+onActivated(() => {
+  panelActive = true
+  startPetSync(true)
+})
+
+onDeactivated(() => {
+  panelActive = false
+  stopPetSync()
 })
 </script>
 

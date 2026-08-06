@@ -110,7 +110,7 @@ const adminExpanded = ref(false)
 
 const adminGroupDefinitions = [
   { id: 'permissions', labelKey: 'sidebar.groups.skillsConnectionsPermissions', canonicalIds: ['tool'], relatedIds: ['plugins', 'agent-governance'] },
-  { id: 'tasks', labelKey: 'sidebar.groups.audit', canonicalIds: ['agent-trace'], relatedIds: ['agent-trace-admin'] },
+  { id: 'tasks', labelKey: 'sidebar.groups.audit', canonicalIds: ['agent-trace'], relatedIds: [] },
   { id: 'system', labelKey: 'sidebar.groups.runtime', canonicalIds: ['overview', 'infrastructure'], relatedIds: ['deploy'] },
   { id: 'developer', labelKey: 'sidebar.groups.debug', canonicalIds: ['settings', 'pet'], relatedIds: ['prompt', 'persona-memory', 'svc', 'i18n'] },
 ]

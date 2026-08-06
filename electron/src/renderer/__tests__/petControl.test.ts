@@ -188,8 +188,8 @@ describe('petControl', () => {
       success: true,
       canceled: false,
       modelType: 'live2d',
-      importedModelId: 'local:hiyori',
-      sourcePath: 'C:/models/hiyori',
+      importedModelId: 'local:sample',
+      sourcePath: 'C:/models/sample',
     })
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)

@@ -121,7 +121,7 @@ describe('PetModelCatalog', () => {
 
     expect(defaultModel?.source).toBe('bundled')
     expect(defaultModel?.type).toBe('live2d')
-    expect(defaultModel?.id).toBe('hiyori')
+    expect(defaultModel?.id).toBe('llm-live2d/yumi')
   })
 
   it('includes the active lip-sync profile in renderer configuration', () => {

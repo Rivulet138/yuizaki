@@ -134,6 +134,7 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
   const deliveredAt: number[] = []
   let timer: ReturnType<typeof setInterval> | null = null
   let started = false
+  let pollingEnabled = true
   let pollInFlight = false
   let lifecycleEpoch = 0
   let healthEpoch = 0
@@ -371,18 +372,36 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     }
   }
 
+  const startPollingTimer = () => {
+    if (!started || !pollingEnabled || timer !== null) return
+    timer = setInterval(() => {
+      state.reducedMotion = reducedMotionObserver.reduced.value
+      void pollOnce().then((result) => dependencies.onPollResult?.(result))
+    }, dependencies.pollIntervalMs ?? DEFAULT_COMPANION_POLL_INTERVAL_MS)
+  }
+
   const start = () => {
     if (started) return
     started = true
+    pollingEnabled = true
     lifecycleEpoch += 1
     abortActivePoll()
     for (const source of activityExpiryTimers.keys()) clearActivityExpiry(source)
     reducedMotionObserver.start()
     state.reducedMotion = reducedMotionObserver.reduced.value
-    timer = setInterval(() => {
-      state.reducedMotion = reducedMotionObserver.reduced.value
-      void pollOnce().then((result) => dependencies.onPollResult?.(result))
-    }, dependencies.pollIntervalMs ?? DEFAULT_COMPANION_POLL_INTERVAL_MS)
+    startPollingTimer()
+  }
+
+  const setPollingEnabled = (enabled: boolean) => {
+    if (pollingEnabled === enabled) return
+    pollingEnabled = enabled
+    if (!enabled) {
+      abortActivePoll()
+      if (timer !== null) clearInterval(timer)
+      timer = null
+      return
+    }
+    startPollingTimer()
   }
 
   const stop = () => {
@@ -413,6 +432,7 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     pollOnce,
     start,
     stop,
+    setPollingEnabled,
     isStarted: () => started,
   }
 }

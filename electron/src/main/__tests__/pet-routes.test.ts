@@ -63,7 +63,7 @@ const createPetRouteContext = (options: { doNotDisturb?: boolean } = {}) => {
       applyCompanionIdleProfile,
     },
     petStateStore: {
-      getState: () => ({ modelId: 'hiyori', doNotDisturb: Boolean(options.doNotDisturb) }),
+      getState: () => ({ modelId: 'llm-live2d/yumi', doNotDisturb: Boolean(options.doNotDisturb) }),
     },
     petModelCatalog: {},
     applyStateToLive2D: (state: unknown) => state,
@@ -87,11 +87,11 @@ const runPetRoute = async (pathname: string, body: unknown, options: { doNotDist
 }
 
 const runMoveRoute = async (locked: boolean) => {
-  const applyConfigPatch = vi.fn((patch: unknown) => ({ modelId: 'hiyori', ...(patch as Record<string, unknown>) }))
+  const applyConfigPatch = vi.fn((patch: unknown) => ({ modelId: 'llm-live2d/yumi', ...(patch as Record<string, unknown>) }))
   const context = {
     live2dWindow: {},
     petStateStore: {
-      getState: () => ({ modelId: 'hiyori', locked }),
+      getState: () => ({ modelId: 'llm-live2d/yumi', locked }),
       applyConfigPatch,
     },
     applyPetStateToRenderer: vi.fn(),
@@ -110,7 +110,7 @@ const runMoveRoute = async (locked: boolean) => {
 
 const runPlaceRoute = async (body: unknown) => {
   const place = vi.fn((placement: unknown, displayId: unknown) => ({
-    modelId: 'hiyori',
+    modelId: 'llm-live2d/yumi',
     placement,
     displayId,
     positionX: null,
@@ -158,7 +158,7 @@ const runLive2dAssetRoute = async (pathname: string) => {
 const runCatalogRoute = async () => {
   const refresh = vi.fn()
   const applyConfigPatch = vi.fn((patch: unknown) => ({
-    modelId: 'hiyori',
+    modelId: 'llm-live2d/yumi',
     modelType: 'live2d',
     ...(patch as Record<string, unknown>),
   }))
@@ -170,11 +170,11 @@ const runCatalogRoute = async () => {
     },
     petModelCatalog: {
       refresh,
-      normalizeModelId: () => 'hiyori',
-      getModelById: (modelId: string | null) => modelId === 'hiyori' ? { id: 'hiyori', type: 'live2d' } : null,
+      normalizeModelId: () => 'llm-live2d/yumi',
+      getModelById: (modelId: string | null) => modelId === 'llm-live2d/yumi' ? { id: 'llm-live2d/yumi', type: 'live2d' } : null,
       getCatalog: () => ({
-        activeModelId: 'hiyori',
-        models: [{ id: 'hiyori', type: 'live2d', source: 'bundled' }],
+        activeModelId: 'llm-live2d/yumi',
+        models: [{ id: 'llm-live2d/yumi', type: 'live2d', source: 'bundled' }],
       }),
     },
     applyStateToLive2D,
@@ -228,7 +228,7 @@ const runSelectPetModelRoute = async (body: unknown, model: { id: string; type: 
       applyConfigPatch,
     },
     petModelCatalog: {
-      getDefaultModelId: vi.fn(() => 'hiyori'),
+      getDefaultModelId: vi.fn(() => 'llm-live2d/yumi'),
       getModelById: vi.fn((modelId: string | null) => (model && modelId === model.id ? model : null)),
     },
     applyStateToLive2D,
@@ -276,19 +276,19 @@ const runModelImportRoute = async (body: unknown) => {
 }
 
 const runModelImportFromPickerRoute = async (body: unknown) => {
-  const importLocalLive2dModel = vi.fn(async () => ({ id: 'local:hiyori', type: 'live2d', source: 'local' }))
-  const applyConfigPatch = vi.fn((patch: unknown) => ({ modelId: 'local:hiyori', ...(patch as Record<string, unknown>) }))
+  const importLocalLive2dModel = vi.fn(async () => ({ id: 'local:sample', type: 'live2d', source: 'local' }))
+  const applyConfigPatch = vi.fn((patch: unknown) => ({ modelId: 'local:sample', ...(patch as Record<string, unknown>) }))
   const context = {
     live2dWindow: {},
     petStateStore: {
       applyConfigPatch,
-      getState: () => ({ modelId: 'local:hiyori' }),
+      getState: () => ({ modelId: 'local:sample' }),
     },
     petModelCatalog: {
       importLocalLive2dModel,
       importLocalVrmModel: vi.fn(),
-      getModels: () => [{ id: 'local:hiyori', type: 'live2d', source: 'local' }],
-      getCatalog: () => ({ activeModelId: 'local:hiyori', models: [{ id: 'local:hiyori', type: 'live2d', source: 'local' }] }),
+      getModels: () => [{ id: 'local:sample', type: 'live2d', source: 'local' }],
+      getCatalog: () => ({ activeModelId: 'local:sample', models: [{ id: 'local:sample', type: 'live2d', source: 'local' }] }),
       getLocalModelRoots: () => ({ live2d: 'live2d-root', vrm: 'vrm-root' }),
     },
     applyStateToLive2D: vi.fn((state: unknown) => state),
@@ -323,11 +323,11 @@ const runModelDeleteRoute = async (body: unknown) => {
     petModelCatalog: {
       removeLocalModel,
       refresh,
-      normalizeModelId: () => 'hiyori',
-      getModelById: () => ({ id: 'hiyori', type: 'live2d' }),
+      normalizeModelId: () => 'llm-live2d/yumi',
+      getModelById: () => ({ id: 'llm-live2d/yumi', type: 'live2d' }),
       getCatalog: (activeModelId: string | null) => ({
         activeModelId,
-        models: [{ id: 'hiyori', type: 'live2d', source: 'bundled' }],
+        models: [{ id: 'llm-live2d/yumi', type: 'live2d', source: 'bundled' }],
       }),
       getLocalModelRoots: () => ({ live2d: 'live2d-root', vrm: 'vrm-root' }),
     },
@@ -364,8 +364,8 @@ describe('pet routes', () => {
     expect(result.applyConfigPatch).not.toHaveBeenCalled()
     expect(result.applyStateToLive2D).not.toHaveBeenCalled()
     expect(result.payload).toEqual({
-      activeModelId: 'hiyori',
-      models: [{ id: 'hiyori', type: 'live2d', source: 'bundled' }],
+      activeModelId: 'llm-live2d/yumi',
+      models: [{ id: 'llm-live2d/yumi', type: 'live2d', source: 'bundled' }],
     })
   })
 
@@ -610,7 +610,7 @@ describe('pet routes', () => {
     expect(result.status).toBe(200)
     expect(result.place).toHaveBeenCalledWith('top-left', 7)
     expect(result.applyStateToLive2D).toHaveBeenCalledWith({
-      modelId: 'hiyori',
+      modelId: 'llm-live2d/yumi',
       placement: 'top-left',
       displayId: 7,
       positionX: null,
@@ -638,7 +638,7 @@ describe('pet routes', () => {
   it('imports Live2D models directly from the picker and selects them immediately', async () => {
     vi.mocked(dialog.showOpenDialog).mockResolvedValue({
       canceled: false,
-      filePaths: ['C:/models/hiyori.zip'],
+      filePaths: ['C:/models/sample.zip'],
     })
     const result = await runModelImportFromPickerRoute({ modelType: 'live2d' })
 
@@ -648,16 +648,16 @@ describe('pet routes', () => {
       title: 'Import Live2D model',
       properties: ['openFile', 'openDirectory'],
     }))
-    expect(result.importLocalLive2dModel).toHaveBeenCalledWith('C:/models/hiyori.zip')
+    expect(result.importLocalLive2dModel).toHaveBeenCalledWith('C:/models/sample.zip')
     expect(result.applyConfigPatch).toHaveBeenCalledWith({
-      modelId: 'local:hiyori',
+      modelId: 'local:sample',
       modelType: 'live2d',
     })
     expect(result.payload).toEqual(expect.objectContaining({
       success: true,
       canceled: false,
-      importedModelId: 'local:hiyori',
-      sourcePath: 'C:/models/hiyori.zip',
+      importedModelId: 'local:sample',
+      sourcePath: 'C:/models/sample.zip',
     }))
   })
 
@@ -721,14 +721,14 @@ describe('pet routes', () => {
       }))
       expect(result.importLocalLive2dModel).toHaveBeenCalledWith(modelDir)
       expect(result.applyConfigPatch).toHaveBeenCalledWith({
-        modelId: 'local:hiyori',
+        modelId: 'local:sample',
         modelType: 'live2d',
       })
       expect(result.payload).toEqual(expect.objectContaining({
         success: true,
         canceled: false,
         modelType: 'live2d',
-        importedModelId: 'local:hiyori',
+        importedModelId: 'local:sample',
         sourcePath: modelDir,
       }))
     } finally {
@@ -744,19 +744,19 @@ describe('pet routes', () => {
     expect(result.removeLocalModel).toHaveBeenCalledWith('local:old')
     expect(result.refresh).toHaveBeenCalled()
     expect(result.applyConfigPatch).toHaveBeenCalledWith({
-      modelId: 'hiyori',
+      modelId: 'llm-live2d/yumi',
       modelType: 'live2d',
     })
     expect(result.applyStateToLive2D).toHaveBeenCalledWith({
-      modelId: 'hiyori',
+      modelId: 'llm-live2d/yumi',
       modelType: 'live2d',
     })
     expect(result.payload).toEqual({
       success: true,
-      state: { modelId: 'hiyori', modelType: 'live2d' },
+      state: { modelId: 'llm-live2d/yumi', modelType: 'live2d' },
       catalog: {
-        activeModelId: 'hiyori',
-        models: [{ id: 'hiyori', type: 'live2d', source: 'bundled' }],
+        activeModelId: 'llm-live2d/yumi',
+        models: [{ id: 'llm-live2d/yumi', type: 'live2d', source: 'bundled' }],
       },
       modelRoots: { live2d: 'live2d-root', vrm: 'vrm-root' },
     })

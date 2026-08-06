@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import hashlib
 import logging
+import time
+from collections import OrderedDict
 from importlib import import_module
 from typing import Protocol, Sequence, TypeAlias, cast
 
@@ -30,6 +34,8 @@ class OCRClient:
         self._initialization_error: str | None = None
         self._connect_lock = asyncio.Lock()
         self._recognize_lock = asyncio.Lock()
+        self._last_error: tuple[str, float] | None = None
+        self._result_cache: OrderedDict[bytes, dict[str, object]] = OrderedDict()
 
     async def connect(self) -> None:
         if self.is_available:
@@ -65,6 +71,7 @@ class OCRClient:
                 self._available = False
                 self._initialization_attempted = False
                 self._initialization_error = None
+                self._result_cache.clear()
         logger.info("OCR engine disconnected")
 
     @property
@@ -91,7 +98,14 @@ class OCRClient:
                     }
                 return await asyncio.to_thread(self._recognize_sync, image_base64, engine)
         except Exception as exc:
-            logger.error("OCR error: %s", exc)
+            error_text = str(exc)
+            now = time.monotonic()
+            previous = self._last_error
+            if previous is None or previous[0] != error_text or now - previous[1] >= 30.0:
+                logger.warning("OCR error: %s", exc)
+                self._last_error = (error_text, now)
+            else:
+                logger.debug("OCR error repeated: %s", exc)
             return {
                 "status": "error",
                 "error": str(exc),
@@ -100,7 +114,14 @@ class OCRClient:
             }
 
     def _recognize_sync(self, image_base64: str, engine: OCREngine) -> dict[str, object]:
-        image_bytes = decode_base64_image_payload(image_base64)
+        # RapidOCR accepts encoded bytes/ndarrays, but not PIL images. Decode once
+        # at this boundary so callers cannot accidentally pass an image object.
+        image_bytes = bytes(decode_base64_image_payload(image_base64))
+        cache_key = hashlib.blake2s(image_bytes, digest_size=16).digest()
+        cached = self._result_cache.get(cache_key)
+        if cached is not None:
+            self._result_cache.move_to_end(cache_key)
+            return copy.deepcopy(cached)
         result, _ = engine(image_bytes)
 
         texts: list[str] = []
@@ -118,7 +139,12 @@ class OCRClient:
 
         full_text = "\n".join(item for item in texts if item)
         logger.info("OCR recognized %d lines, %d chars", len(texts), len(full_text))
-        return {"status": "ok", "text": full_text, "blocks": blocks}
+        payload = {"status": "ok", "text": full_text, "blocks": blocks}
+        self._result_cache[cache_key] = copy.deepcopy(payload)
+        self._result_cache.move_to_end(cache_key)
+        while len(self._result_cache) > 4:
+            self._result_cache.popitem(last=False)
+        return payload
 
 
 def _normalize_box(box: OCRBox) -> list[float]:

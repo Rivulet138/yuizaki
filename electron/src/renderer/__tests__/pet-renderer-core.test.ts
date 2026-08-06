@@ -11,8 +11,8 @@ describe('resolveRendererAsset', () => {
   it('keeps bundled renderer assets relative to the pet window', () => {
     window.history.replaceState({}, '', '/pet-window.html')
 
-    expect(resolveRendererAsset('./live2d/hiyori/hiyori_pro_jp.model3.json')).toBe(
-      `${window.location.origin}/live2d/hiyori/hiyori_pro_jp.model3.json`,
+    expect(resolveRendererAsset('./live2d/llm-live2d/yumi/yumi.model3.json')).toBe(
+      `${window.location.origin}/live2d/llm-live2d/yumi/yumi.model3.json`,
     )
   })
 })

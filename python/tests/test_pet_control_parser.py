@@ -11,7 +11,7 @@ IncrementalJsonReplyDecoder = pet_control_parser.IncrementalJsonReplyDecoder
 
 def test_build_pet_control_prompt_requires_complete_action_from_whitelist():
     prompt = build_pet_control_prompt({
-        "models": [{"id": "hiyori", "type": "live2d"}],
+        "models": [{"id": "llm-live2d/yumi", "type": "live2d"}],
         "emotions": ["happy", "sad"],
         "motionGroups": ["Idle", "Tap"],
         "motionOptions": [{"group": "Tap", "index": 0}],

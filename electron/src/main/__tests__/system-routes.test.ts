@@ -940,7 +940,7 @@ describe('system routes', () => {
           hasVisiblePixels: vi.fn(async () => true),
         },
         petStateStore: {
-          getState: () => ({ modelId: 'hiyori', visible: true }),
+          getState: () => ({ modelId: 'llm-live2d/yumi', visible: true }),
         },
       } as unknown as HttpRouteContext,
     )

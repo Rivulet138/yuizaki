@@ -1,10 +1,6 @@
 <template>
   <PanelShell title="任务中心" tone="admin">
     <div class="trace-console">
-      <nav class="canonical-links" :aria-label="t('canonical.tasks.aria')">
-        <span>{{ t('canonical.tasks.label') }}</span>
-        <router-link :to="canonicalPath('agent-trace-admin')">{{ t('canonical.tasks.compatibility') }}</router-link>
-      </nav>
       <section class="trace-hero panel-card">
         <div class="hero-metrics">
           <div v-for="metric in traceMetrics" :key="metric.label" class="metric-card" :class="`tone-${metric.tone}`">
@@ -286,18 +282,12 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import { useSystemDomain } from '../composables/useSystemDomain'
-import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { useI18n } from '@/i18n'
 import type { PlannerTrace, RuntimeLoopRecord, ScheduleTask, SchedulerRunRecord, StepConditionRecord, StepExecutionRecord } from '@/../shared/agent'
 
 type TagType = 'success' | 'warning' | 'danger' | 'info' | 'primary'
 type TraceFilter = 'all' | 'planner' | 'steps' | 'scheduler' | 'runtime_loop'
 type StatusFilter = 'all' | 'ok' | 'error' | 'partial'
 type MetricTone = 'blue' | 'emerald' | 'amber' | 'rose'
-const workspaceStore = useWorkspaceStore()
-const { t } = useI18n()
-const canonicalPath = (moduleId: string) => `/w/${workspaceStore.activeWorkspaceId}/${moduleId}`
-
 interface TraceEntry {
   traceType: TraceFilter
   timestamp: string

@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import OverviewPanel from '../domains/system/views/OverviewPanel.vue'
 import { useSystemStore } from '../stores/systemStore'
@@ -172,6 +172,10 @@ describe('OverviewPanel chain self check', () => {
     clientMocks.petCatalog.mockResolvedValue({ activeModelId: null, models: [] })
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('renders compact blocking issues for the conversation, voice, and pet chain', async () => {
     const wrapper = mount(OverviewPanel, { global })
     const systemStore = useSystemStore()
@@ -189,5 +193,32 @@ describe('OverviewPanel chain self check', () => {
     expect(wrapper.text()).toContain('LLM 未选择模型')
     expect(wrapper.text()).toContain('ASR 缺少地址')
     expect(wrapper.text()).toContain('桌宠模型未加载')
+  })
+
+  it('pauses pet synchronization while hidden and refreshes once on resume', async () => {
+    vi.useFakeTimers()
+    const visibility = vi.spyOn(document, 'visibilityState', 'get')
+    visibility.mockReturnValue('visible')
+    const wrapper = mount(OverviewPanel, { global })
+    await flushPromises()
+    const initialCalls = clientMocks.petState.mock.calls.length
+
+    vi.advanceTimersByTime(5000)
+    await flushPromises()
+    expect(clientMocks.petState.mock.calls.length).toBeGreaterThan(initialCalls)
+
+    visibility.mockReturnValue('hidden')
+    document.dispatchEvent(new Event('visibilitychange'))
+    const hiddenCalls = clientMocks.petState.mock.calls.length
+    vi.advanceTimersByTime(15_000)
+    await flushPromises()
+    expect(clientMocks.petState.mock.calls.length).toBe(hiddenCalls)
+
+    visibility.mockReturnValue('visible')
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+    expect(clientMocks.petState.mock.calls.length).toBeGreaterThan(hiddenCalls)
+    wrapper.unmount()
+    visibility.mockRestore()
   })
 })

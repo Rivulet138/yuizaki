@@ -57,7 +57,6 @@ const moduleViewDefinitions: Record<NavigationModuleId, { icon: Component; loade
   infrastructure: { icon: DataAnalysis, loader: () => import('@/domains/system/views/InfrastructurePanel.vue') },
   'agent-governance': { icon: Operation, loader: () => import('@/domains/system/views/AgentGovernancePanel.vue') },
   'agent-trace': { icon: Connection, loader: () => import('@/domains/system/views/AgentTracePanel.vue') },
-  'agent-trace-admin': { icon: Connection, loader: () => import('@/domains/system/views/TasksPanel.vue') },
   'persona-memory': { icon: MagicStick, loader: () => import('@/domains/memory/views/PersonaMemoryPanel.vue') },
   settings: { icon: Setting, loader: () => import('@/domains/settings/views/SettingsPanel.vue') },
   i18n: { icon: Setting, loader: () => import('@/domains/i18n/views/I18nPanel.vue') },

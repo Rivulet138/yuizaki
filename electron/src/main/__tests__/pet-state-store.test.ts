@@ -56,7 +56,7 @@ describe('PetStateStore', () => {
 
     store.applyRendererState({
       modelType: 'live2d',
-      modelId: 'hiyori',
+      modelId: 'llm-live2d/yumi',
       scale: 0.31,
       positionX: null,
       positionY: null,
@@ -73,7 +73,7 @@ describe('PetStateStore', () => {
 
     store.applyRendererState({
       modelType: 'live2d',
-      modelId: 'hiyori',
+      modelId: 'llm-live2d/yumi',
       scale: 0.31,
       positionX: 420,
       positionY: 680,

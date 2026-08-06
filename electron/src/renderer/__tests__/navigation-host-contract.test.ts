@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { adminNavigationModules, primaryNavigationModules } from '../navigation/modules'
+import { adminNavigationModules, enabledNavigationModules, primaryNavigationModules } from '../navigation/modules'
 import { staticNavigationModuleRecords } from '../../shared/navigation'
 import { router } from '../router'
 
@@ -9,7 +9,6 @@ const appShell = readFileSync(resolve(process.cwd(), 'src/renderer/app/AppShell.
 const navigationModules = readFileSync(resolve(process.cwd(), 'src/renderer/navigation/modules.ts'), 'utf8')
 const svcPanel = readFileSync(resolve(process.cwd(), 'src/renderer/domains/tools/views/SVCPanel.vue'), 'utf8')
 const toolPanel = readFileSync(resolve(process.cwd(), 'src/renderer/domains/tools/views/ToolPanel.vue'), 'utf8')
-const tracePanel = readFileSync(resolve(process.cwd(), 'src/renderer/domains/system/views/AgentTracePanel.vue'), 'utf8')
 const overviewPanel = readFileSync(resolve(process.cwd(), 'src/renderer/domains/system/views/OverviewPanel.vue'), 'utf8')
 
 describe('navigation view host', () => {
@@ -40,8 +39,8 @@ describe('navigation view host', () => {
       'agent-trace',
       'settings',
     ]))
-    expect(staticNavigationModuleRecords).toHaveLength(17)
-    expect(new Set(staticNavigationModuleRecords.map((module) => module.id)).size).toBe(17)
+    expect(staticNavigationModuleRecords).toHaveLength(16)
+    expect(enabledNavigationModules()).toHaveLength(16)
   })
 
   it('preserves every advanced route as a deep link', () => {
@@ -55,10 +54,9 @@ describe('navigation view host', () => {
     expect(router.resolve('/w/default/agent-trace').name).toBe('agent-trace')
   })
 
-  it('links canonical administration views to their compatible specialist routes', () => {
+  it('links canonical administration views to their specialist routes', () => {
     expect(toolPanel).toContain("canonicalPath('plugins')")
     expect(toolPanel).toContain("canonicalPath('agent-governance')")
-    expect(tracePanel).toContain("canonicalPath('agent-trace-admin')")
     expect(overviewPanel).toContain("canonicalPath('infrastructure')")
     expect(overviewPanel).toContain("canonicalPath('deploy')")
   })

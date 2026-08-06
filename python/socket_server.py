@@ -381,6 +381,7 @@ class DesktopPetSocketServer:
         self._visual_analysis_attempts: dict[str, int] = {}
         self._visual_analysis_skipped: dict[str, int] = {}
         self._visual_ocr_attempts: dict[str, int] = {}
+        self._visual_ocr_frame_ids: dict[str, str] = {}
         self._voice_prepared_sessions: set[str] = set()
         self._voice_prepare_tasks: set[asyncio.Task[None]] = set()
 
@@ -589,6 +590,7 @@ class DesktopPetSocketServer:
         self._visual_analysis_attempts.pop(sid, None)
         self._visual_analysis_skipped.pop(sid, None)
         self._visual_ocr_attempts.pop(sid, None)
+        self._visual_ocr_frame_ids.pop(sid, None)
 
     def _record_visual_frame(
         self,
@@ -653,10 +655,15 @@ class DesktopPetSocketServer:
 
     async def _run_visual_ocr(self, sid: str, frame: JsonDict) -> None:
         """Extract local OCR evidence before deciding whether a VLM is needed."""
+        frame_id = _as_text(frame.get("frame_id"))
+        if frame_id and self._visual_ocr_frame_ids.get(sid) == frame_id:
+            return
         ocr_client = self.ocr_client
         if ocr_client is None:
             frame["ocr_status"] = "unavailable"
             return
+        if frame_id:
+            self._visual_ocr_frame_ids[sid] = frame_id
         self._visual_ocr_attempts[sid] = self._visual_ocr_attempts.get(sid, 0) + 1
         started = time.perf_counter()
         try:

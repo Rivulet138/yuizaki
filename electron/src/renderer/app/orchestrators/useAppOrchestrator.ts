@@ -9,7 +9,6 @@ import { petControlClient } from '@/api/client'
 import { isPanelKey } from '@/navigation/modules'
 import { useCompanionRuntimeBridge } from '../composables/useCompanionRuntimeBridge'
 
-const LEGACY_DEFAULT_MODEL_ID = 'hiyori'
 const encodeRouteParam = (value: string) => encodeURIComponent(value)
 const moduleRoute = (workspaceId: string, tab: string, sessionId?: string | null) =>
   sessionId
@@ -85,8 +84,7 @@ export function useAppOrchestrator() {
 
     const workspaceModelId = workspace.context?.modelId
     const workspaceModelType = workspace.context?.modelType
-    const isLegacyDefaultModel = workspaceModelId === LEGACY_DEFAULT_MODEL_ID && workspaceModelType === 'live2d'
-    if (workspaceModelId && !isLegacyDefaultModel) {
+    if (workspaceModelId) {
       try {
         await petControlClient.setModelSelection(workspaceModelId, workspaceModelType)
       } catch (error) {

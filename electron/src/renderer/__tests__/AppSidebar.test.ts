@@ -24,13 +24,12 @@ const mountSidebar = (adminMenus = [{ id: 'overview', title: '运行总览', ico
 })
 
 describe('AppSidebar', () => {
-  it('keeps canonical links visible and compatibility links disclosed', async () => {
+  it('keeps canonical links visible and related links disclosed', async () => {
     const wrapper = mountSidebar([
       { id: 'tool', title: 'Capabilities', icon },
       { id: 'plugins', title: 'Plugins', icon },
       { id: 'agent-governance', title: 'Governance', icon },
       { id: 'agent-trace', title: 'Tasks', icon },
-      { id: 'agent-trace-admin', title: 'Trace archive', icon },
       { id: 'overview', title: 'Operations', icon },
       { id: 'infrastructure', title: 'Infrastructure', icon },
       { id: 'deploy', title: 'Deployment', icon },
@@ -42,12 +41,11 @@ describe('AppSidebar', () => {
     expect(wrapper.get('a[href="/w/default/infrastructure"]').text()).toContain('Infrastructure')
 
     const relatedRoutes = wrapper.findAll('details.related-routes')
-    expect(relatedRoutes).toHaveLength(3)
+    expect(relatedRoutes).toHaveLength(2)
     expect(relatedRoutes[0].attributes('open')).toBeUndefined()
     expect(relatedRoutes[0].get('a[href="/w/default/plugins"]').text()).toContain('Plugins')
     expect(relatedRoutes[0].get('a[href="/w/default/agent-governance"]').text()).toContain('Governance')
-    expect(relatedRoutes[1].get('a[href="/w/default/agent-trace-admin"]').text()).toContain('Trace archive')
-    expect(relatedRoutes[2].get('a[href="/w/default/deploy"]').text()).toContain('Deployment')
+    expect(relatedRoutes[1].get('a[href="/w/default/deploy"]').text()).toContain('Deployment')
   })
 
   it('keeps advanced tools collapsed until the user opens them', async () => {
@@ -78,7 +76,6 @@ describe('AppSidebar', () => {
       { id: 'tool', title: '本地能力', icon },
       { id: 'plugins', title: '桌宠技能', icon },
       { id: 'agent-governance', title: 'Agent 治理', icon },
-      { id: 'agent-trace-admin', title: '运行追踪', icon },
     ])
     await wrapper.get('.admin-toggle').trigger('click')
 

@@ -5,7 +5,6 @@ import { ref } from "vue";
 
 import CompanionPanel from "../domains/companion/views/CompanionPanel.vue";
 import MemoryPanel from "../domains/memory/views/MemoryPanel.vue";
-import TasksPanel from "../domains/system/views/TasksPanel.vue";
 
 const systemClientMocks = vi.hoisted(() => ({
 	companionRuntime: vi.fn(),
@@ -450,15 +449,6 @@ describe("refactor surface component integration", () => {
 		await flushPromises();
 
 		expect(systemClientMocks.setModelSelection).toHaveBeenCalledWith("yuizaki-live2d", "live2d");
-	});
-
-	it("renders TasksPanel orchestration commands, skills, and owning agents", async () => {
-		const wrapper = mount(TasksPanel, { global });
-		await flushPromises();
-
-		expect(wrapper.text()).toContain("Create Once Task");
-		expect(wrapper.text()).toContain("Capability Routing");
-		expect(wrapper.text()).toContain("Task Router");
 	});
 
 	it("renders MemoryPanel retrieval strategy from companion runtime", async () => {

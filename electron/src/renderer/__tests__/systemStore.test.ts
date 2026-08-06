@@ -34,12 +34,6 @@ describe('systemStore health payloads', () => {
     expect(__test__.isHealthyPythonPayload({ ok: true })).toBe(true)
   })
 
-  it('keeps legacy status based health payloads working', () => {
-    expect(__test__.isHealthyPythonPayload({ status: 'healthy' })).toBe(true)
-    expect(__test__.isHealthyPythonPayload({ status: 'ok' })).toBe(true)
-    expect(__test__.isHealthyPythonPayload({ healthy: true })).toBe(true)
-  })
-
   it('rejects timeout and malformed payloads', () => {
     expect(__test__.isHealthyPythonPayload({ error: 'Python backend request timed out' })).toBe(false)
     expect(__test__.isHealthyPythonPayload(null)).toBe(false)

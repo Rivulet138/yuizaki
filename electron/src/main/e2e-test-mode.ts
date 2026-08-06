@@ -402,10 +402,10 @@ const assertNonblankCapture = (bitmap: Buffer): void => {
 
 const ensureE2ELive2DModel = async (options: E2ESuiteOptions): Promise<Record<string, unknown>> => {
   const selected = await options.panelWindow.webContents.executeJavaScript(
-    `window.petApi.pet.setModelSelection('hiyori', 'live2d')`,
+    `window.petApi.pet.setModelSelection('llm-live2d/yumi', 'live2d')`,
     true,
   ) as Record<string, unknown>
-  assert.equal(selected['modelId'], 'hiyori')
+  assert.equal(selected['modelId'], 'llm-live2d/yumi')
   assert.equal(selected['modelType'], 'live2d')
 
   const deadline = Date.now() + 10_000
@@ -415,10 +415,10 @@ const ensureE2ELive2DModel = async (options: E2ESuiteOptions): Promise<Record<st
       'window.petApi.pet.getState()',
       true,
     ) as Record<string, unknown>
-    if (state['modelId'] === 'hiyori' && state['modelType'] === 'live2d' && state['ready'] === true) break
+    if (state['modelId'] === 'llm-live2d/yumi' && state['modelType'] === 'live2d' && state['ready'] === true) break
     await new Promise<void>((resolve) => setTimeout(resolve, 50))
   }
-  assert.equal(state['ready'], true, `hiyori did not become renderer-ready: ${JSON.stringify(state)}`)
+  assert.equal(state['ready'], true, `Yumi did not become renderer-ready: ${JSON.stringify(state)}`)
 
   const renderer = await options.live2dWindow.webContents.executeJavaScript(`(() => {
     const host = window.petRenderer;
@@ -431,9 +431,9 @@ const ensureE2ELive2DModel = async (options: E2ESuiteOptions): Promise<Record<st
       notice_visible: notice instanceof HTMLElement && getComputedStyle(notice).display !== 'none',
     };
   })()`, true) as Record<string, unknown>
-  assert.equal(renderer['model_id'], 'hiyori')
+  assert.equal(renderer['model_id'], 'llm-live2d/yumi')
   assert.equal(renderer['model_type'], 'live2d')
-  assert.match(String(renderer['model_url']), /\/live2d\/hiyori\/hiyori_pro_jp\.model3\.json$/)
+  assert.match(String(renderer['model_url']), /\/live2d\/llm-live2d\/yumi\/yumi\.model3\.json$/)
   assert.equal(renderer['notice_visible'], false)
   return renderer
 }

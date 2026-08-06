@@ -71,7 +71,7 @@ const runSetModelRoute = async (body: unknown, model: { id: string; type: 'live2
 
 describe('model routes', () => {
   it('rejects unknown model ids instead of falling back and persisting the default model', async () => {
-    const result = await runSetModelRoute({ modelId: 'hiyori', modelType: 'live2d' }, null)
+    const result = await runSetModelRoute({ modelId: 'llm-live2d/yumi', modelType: 'live2d' }, null)
 
     expect(result.handled).toBe(true)
     expect(result.status).toBe(404)

@@ -112,7 +112,6 @@ class PolicyEngine:
             remember_scope=remembered_scope,
             decision="revoked",
         ).to_dict())
-        self._save_store()
         return True
 
     def clear(self) -> int:
@@ -122,7 +121,6 @@ class PolicyEngine:
             timestamp=datetime.now().isoformat(),
             decision="cleared",
         ).to_dict())
-        self._save_store()
         return count
 
     def evaluate_tool(
@@ -272,5 +270,3 @@ class PolicyEngine:
             capability_call_id=metadata.get("capability_call_id"),
             permission_scope=metadata.get("permission_scope") or permission_scope,
         ).to_dict())
-        if remember and tool_name:
-            self._save_store()

@@ -194,8 +194,6 @@ export const jaJPOverrides = {
   'window.electronOnly': '現在はブラウザモードです。ウィンドウ操作は Electron パネルでのみ利用できます。',
   'navigation.agent-governance.desc': 'MCP サービス、プラグイン管理、権限承認',
   'navigation.agent-governance.title': 'Agent ガバナンス',
-  'navigation.agent-trace-admin.desc': 'commands、skills、agents、hooks の編成オブジェクト一覧とバックエンド能力の照合',
-  'navigation.agent-trace-admin.title': 'タスク編成',
   'navigation.agent-trace.desc': 'タスクスケジュール、実行トレース、Agent 実行フロー',
   'navigation.agent-trace.title': 'タスクセンター',
   'navigation.chat.desc': 'テキスト、音声、Agent、デスクトップペット連携のメイン対話エリア',

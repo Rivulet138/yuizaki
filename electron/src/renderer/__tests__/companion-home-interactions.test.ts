@@ -145,11 +145,8 @@ describe('Companion Home interactions', () => {
     vi.restoreAllMocks()
   })
 
-  it('normalizes a legacy preset before Home mounts and exposes all canonical advanced routes', async () => {
-    window.localStorage.setItem('yuizaki.companion.proactivity-preset', 'legacy-value')
+  it('exposes all canonical advanced routes', async () => {
     const bridge = useCompanionRuntimeBridge()
-    expect(bridge.proactivityPreset.value).toBe('conservative')
-
     expect(bridge.setProactivityPreset('standard')).toBe(true)
     expect(bridge.proactivityPreset.value).toBe('standard')
 

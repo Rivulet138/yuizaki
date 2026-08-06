@@ -6,7 +6,34 @@
 			"yumi.8192/texture_00.webp"
 		],
 		"Physics": "yumi.physics3.json",
-		"DisplayInfo": "yumi.cdi3.json"
+		"DisplayInfo": "yumi.cdi3.json",
+		"Expressions": [
+			{ "Name": "俯身按键", "File": "俯身按键.exp3.json" },
+			{ "Name": "抬手右", "File": "抬手右.exp3.json" },
+			{ "Name": "抬手左", "File": "抬手左.exp3.json" },
+			{ "Name": "拿话筒", "File": "拿话筒.exp3.json" },
+			{ "Name": "星星眼", "File": "星星眼.exp3.json" },
+			{ "Name": "歪嘴", "File": "歪嘴.exp3.json" },
+			{ "Name": "泪汪汪", "File": "泪汪汪.exp3.json" },
+			{ "Name": "漂浮小狗", "File": "漂浮小狗.exp3.json" },
+			{ "Name": "爱心眼", "File": "爱心眼.exp3.json" },
+			{ "Name": "猫猫嘴", "File": "猫猫嘴.exp3.json" },
+			{ "Name": "眼泪", "File": "眼泪.exp3.json" },
+			{ "Name": "眼罩", "File": "眼罩.exp3.json" },
+			{ "Name": "短发1", "File": "短发1.exp3.json" },
+			{ "Name": "短发2", "File": "短发2.exp3.json" },
+			{ "Name": "舌头伸出", "File": "舌头伸出.exp3.json" },
+			{ "Name": "蚊香眼", "File": "蚊香眼.exp3.json" },
+			{ "Name": "黑脸", "File": "黑脸.exp3.json" }
+		],
+		"Motions": {
+			"Tap@Body": [
+				{ "File": "wave.motion3.json" }
+			],
+			"Flick": [
+				{ "File": "tear.motion3.json" }
+			]
+		}
 	},
 	"Groups": [
 		{

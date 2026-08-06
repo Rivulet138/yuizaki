@@ -329,7 +329,7 @@ describe('destructive action confirmation', () => {
     elementPlusMocks.confirm.mockRejectedValue(new Error('cancel'))
     petControlMocks.getState.mockResolvedValue({
       modelType: 'live2d',
-      modelId: 'local:hiyori',
+      modelId: 'local:sample',
       displayId: null,
       scale: 0.28,
       positionX: null,
@@ -351,13 +351,13 @@ describe('destructive action confirmation', () => {
       ready: true,
     })
     petControlMocks.getCatalog.mockResolvedValue({
-      activeModelId: 'local:hiyori',
+      activeModelId: 'local:sample',
       models: [{
-        id: 'local:hiyori',
-        name: 'Hiyori Local',
+        id: 'local:sample',
+        name: 'Imported Model',
         type: 'live2d',
         source: 'local',
-        assetPath: 'C:/models/hiyori',
+        assetPath: 'C:/models/sample',
         motions: [],
         expressions: [],
         emotions: [],
@@ -371,7 +371,7 @@ describe('destructive action confirmation', () => {
     petControlMocks.setVisible.mockResolvedValue({ success: true, visible: false })
     petControlMocks.updateConfig.mockResolvedValue({
       modelType: 'live2d',
-      modelId: 'local:hiyori',
+      modelId: 'local:sample',
       displayId: null,
       scale: 0.28,
       positionX: null,
@@ -445,7 +445,7 @@ describe('destructive action confirmation', () => {
     await flushPromises()
 
     expect(elementPlusMocks.confirm).toHaveBeenCalledWith(
-      expect.stringContaining('Hiyori Local'),
+      expect.stringContaining('Imported Model'),
       '删除本地模型',
       expect.objectContaining({ type: 'warning' }),
     )

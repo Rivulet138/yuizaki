@@ -15,7 +15,6 @@ import {
   type ProactivePollResult,
 } from '../runtime/companionRuntime'
 
-const LEGACY_DEFAULT_MODEL_ID = 'hiyori'
 const PROACTIVITY_STORAGE_KEY = 'yuizaki.companion.proactivity-preset'
 export type CompanionProactivityPreset = 'conservative' | 'standard'
 
@@ -27,9 +26,6 @@ const PROACTIVITY_PRESETS: Record<CompanionProactivityPreset, {
   conservative: { cooldownMs: 15 * 60_000, frequencyBudget: 2, frequencyWindowMs: 60 * 60_000 },
   standard: { cooldownMs: 5 * 60_000, frequencyBudget: 3, frequencyWindowMs: 60 * 60_000 },
 }
-
-const isLegacyDefaultModelSelection = (modelId: string | null | undefined, modelType: string | undefined): boolean =>
-  modelId === LEGACY_DEFAULT_MODEL_ID && (modelType === undefined || modelType === 'live2d')
 
 const normalizeProactivityPreset = (value: unknown): CompanionProactivityPreset =>
   value === 'standard' ? 'standard' : 'conservative'
@@ -43,6 +39,7 @@ const readStoredProactivityPreset = (): CompanionProactivityPreset => {
 }
 
 let runtimeController: CompanionRuntimeController | null = null
+let runtimeVisibilityHandler: (() => void) | null = null
 const activeProactivityPreset = ref<CompanionProactivityPreset>('conservative')
 const activeDoNotDisturb = ref(false)
 let e2eClockOffsetMs = 0
@@ -114,9 +111,24 @@ export function useCompanionRuntimeBridge() {
   const startCompanionRuntime = (isAvailable: () => boolean) => {
     controller.configure({ isAvailable })
     controller.start()
+    if (runtimeVisibilityHandler === null) {
+      runtimeVisibilityHandler = () => {
+        const visible = document.visibilityState !== 'hidden'
+        controller.setPollingEnabled(visible)
+        if (visible && controller.isStarted()) void controller.pollOnce()
+      }
+      document.addEventListener('visibilitychange', runtimeVisibilityHandler)
+    }
+    runtimeVisibilityHandler()
   }
 
-  const stopCompanionRuntime = () => controller.stop()
+  const stopCompanionRuntime = () => {
+    if (runtimeVisibilityHandler !== null) {
+      document.removeEventListener('visibilitychange', runtimeVisibilityHandler)
+      runtimeVisibilityHandler = null
+    }
+    controller.stop()
+  }
   const pollCompanionOnce = () => controller.pollOnce()
   const setProactivityPreset = (value: CompanionProactivityPreset): boolean => {
     const preset = normalizeProactivityPreset(value)
@@ -196,7 +208,7 @@ export function useCompanionRuntimeBridge() {
 
     chatStore.setCompanionPersonaPrompt(companion.persona_prompt || null)
 
-    if (companion.model_id && !isLegacyDefaultModelSelection(companion.model_id, companion.model_type)) {
+    if (companion.model_id) {
       const modelType = typeof companion.model_type === 'string' ? companion.model_type : undefined
       try {
         await petControlClient.setModelSelection(companion.model_id, modelType)

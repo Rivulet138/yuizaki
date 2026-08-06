@@ -38,7 +38,7 @@ def upgrade() -> None:
     op.execute(
         """
         INSERT INTO companions (id, name, avatar, model_type, model_id, voice_profile, persona_prompt, emotion_state, affinity_state, energy_state, created_at, updated_at)
-        VALUES ('default', '默认結崎', NULL, 'live2d', 'hiyori', NULL, NULL, 'neutral', 0.5, 1.0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        VALUES ('default', '默认結崎', NULL, 'live2d', 'llm-live2d/yumi', NULL, NULL, 'neutral', 0.5, 1.0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         """
     )
 

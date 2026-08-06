@@ -13,14 +13,14 @@ describe('workspaceStore active workspace switching', () => {
         name: 'Default',
         createdAt: '',
         updatedAt: '',
-        context: { activeTab: 'companion', modelType: 'live2d', modelId: 'hiyori', wallpaperMode: true, heroHeight: 460, menuOrder: [], recentTabs: [], layoutPreset: 'balanced' },
+        context: { activeTab: 'companion', modelType: 'live2d', modelId: 'llm-live2d/yumi', wallpaperMode: true, heroHeight: 460, menuOrder: [], recentTabs: [], layoutPreset: 'balanced' },
       },
       {
         id: 'ws-2',
         name: 'Focus',
         createdAt: '',
         updatedAt: '',
-        context: { activeTab: 'chat', modelType: 'live2d', modelId: 'hiyori', wallpaperMode: true, heroHeight: 460, menuOrder: [], recentTabs: [], layoutPreset: 'balanced' },
+        context: { activeTab: 'chat', modelType: 'live2d', modelId: 'llm-live2d/yumi', wallpaperMode: true, heroHeight: 460, menuOrder: [], recentTabs: [], layoutPreset: 'balanced' },
       },
     ]))
     window.sessionStorage.setItem('yuizaki.control.token', 'backend-token')
@@ -47,6 +47,7 @@ describe('workspaceStore active workspace switching', () => {
     expect(store.recentWorkspaceIds[0]).toBe('ws-2')
     expect(store.activeWorkspace.context.promptMode).toBe('auto')
     expect(store.activeWorkspace.context.promptVersion).toBe(2)
+    expect(store.activeWorkspace.context.modelId).toBe('llm-live2d/yumi')
     expect(store.activeWorkspace.context.promptEngineering.workPrompt).toContain('任务协助模式')
     expect(store.activeWorkspace.context.promptEngineering.workPrompt).toContain('工具结果')
     expect(store.activeWorkspace.context.promptEngineering.dailyPrompt).toContain('日常陪伴模式')
@@ -202,27 +203,4 @@ describe('workspaceStore active workspace switching', () => {
     })
   })
 
-  it('migrates only the legacy default workspace label to desktop pet scene wording', () => {
-    window.localStorage.setItem('deskpet-workspaces', JSON.stringify([
-      {
-        id: 'default',
-        name: '默认工作区',
-        createdAt: '',
-        updatedAt: '',
-        context: {},
-      },
-      {
-        id: 'custom',
-        name: '我的工作区',
-        createdAt: '',
-        updatedAt: '',
-        context: {},
-      },
-    ]))
-
-    const store = useWorkspaceStore()
-
-    expect(store.workspaces.find((workspace) => workspace.id === 'default')?.name).toBe('默认场景')
-    expect(store.workspaces.find((workspace) => workspace.id === 'custom')?.name).toBe('我的工作区')
-  })
 })

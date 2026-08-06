@@ -16,23 +16,7 @@ import { useCompanionStore } from './companionStore'
 
 const STORAGE_KEY = 'deskpet-workspaces'
 const ACTIVE_KEY = 'deskpet-active-workspace'
-const LEGACY_DEFAULT_MODEL_ID = 'hiyori'
 export const DEFAULT_PROMPT_VERSION = 2
-
-const LEGACY_DEFAULT_WORK_PROMPT = `当前处于任务模式。你是 Yuizaki 本地 AI 桌宠 agent 的任务协助人格。
-- 先判断用户要完成的具体结果、约束、风险和可验证标准。
-- 对代码、配置、文件、工具和项目内任务，优先基于当前上下文与可验证证据行动。
-- 可以直接完成的事不要反复确认；缺少关键信息或存在破坏性操作时再提问。
-- 输出要清晰、可执行、可复查；涉及修改时说明关键变更和验证结果，但不要把普通对话写成控制台报告。
-- 不编造文件、日志、命令输出、依赖能力或外部事实。
-- 保持中文为主，必要的代码标识、命令和专有名词保留原文。`
-
-const LEGACY_DEFAULT_DAILY_PROMPT = `当前处于日常陪伴模式。你是轻松、温暖、自然的桌宠 agent。
-- 语气亲近、明朗、不过度正式，优先让对话顺畅舒服。
-- 用户只是闲聊、吐槽、陪伴或轻量咨询时，不要套用工程化流程。
-- 可以给出简短建议、轻松回应和自然追问，但不要显得黏人或施压。
-- 如果用户切到严肃任务，再自然进入结构化协助。
-- 保持中文为主，回应适合后续 TTS 播放，避免过长段落。`
 
 export const DEFAULT_WORK_PROMPT = `当前处于工作模式。你处于任务协助模式。
 - 先用一句话确认用户真正要得到的结果；仅在结果、权限或破坏性风险无法判断时提问。
@@ -106,19 +90,12 @@ const createDefaultWorkspaceContext = (): WorkspaceContext => ({
   memoryPolicy: createDefaultMemoryPolicy(),
 })
 
-const normalizePromptEngineering = (
-  value: Partial<WorkspacePromptEngineering> | undefined,
-  promptVersion: number,
-): WorkspacePromptEngineering => {
+const normalizePromptEngineering = (value: Partial<WorkspacePromptEngineering> | undefined): WorkspacePromptEngineering => {
   const workPrompt = typeof value?.workPrompt === 'string' && value.workPrompt.trim() ? value.workPrompt : DEFAULT_WORK_PROMPT
   const dailyPrompt = typeof value?.dailyPrompt === 'string' && value.dailyPrompt.trim() ? value.dailyPrompt : DEFAULT_DAILY_PROMPT
   return {
-    workPrompt: promptVersion < DEFAULT_PROMPT_VERSION && workPrompt.trim() === LEGACY_DEFAULT_WORK_PROMPT.trim()
-      ? DEFAULT_WORK_PROMPT
-      : workPrompt,
-    dailyPrompt: promptVersion < DEFAULT_PROMPT_VERSION && dailyPrompt.trim() === LEGACY_DEFAULT_DAILY_PROMPT.trim()
-      ? DEFAULT_DAILY_PROMPT
-      : dailyPrompt,
+    workPrompt,
+    dailyPrompt,
   }
 }
 
@@ -198,9 +175,6 @@ const normalizeWorldBook = (value: Partial<WorkspaceWorldBook> | undefined): Wor
 })
 
 const normalizeWorkspaceContext = (context: Partial<WorkspaceContext> | undefined): WorkspaceContext => {
-  const promptVersion = Number.isFinite(Number(context?.promptVersion))
-    ? Math.max(0, Math.round(Number(context?.promptVersion)))
-    : 0
   const normalized: WorkspaceContext = {
     ...createDefaultWorkspaceContext(),
     ...(context ?? {}),
@@ -208,20 +182,14 @@ const normalizeWorkspaceContext = (context: Partial<WorkspaceContext> | undefine
   if (!['auto', 'work', 'daily'].includes(normalized.promptMode)) {
     normalized.promptMode = 'auto'
   }
-  normalized.promptEngineering = normalizePromptEngineering(context?.promptEngineering, promptVersion)
+  normalized.promptEngineering = normalizePromptEngineering(context?.promptEngineering)
   normalized.promptVersion = DEFAULT_PROMPT_VERSION
   normalized.roleCard = normalizeRoleCard(context?.roleCard)
   normalized.worldBook = normalizeWorldBook(context?.worldBook)
   normalized.vision = normalizeVisionSettings(context?.vision)
   normalized.memoryPolicy = normalizeMemoryPolicy(context?.memoryPolicy)
-  if (normalized.modelType === 'live2d' && normalized.modelId === LEGACY_DEFAULT_MODEL_ID) {
-    normalized.modelId = null
-  }
   return normalized
 }
-
-const normalizeWorkspaceName = (id: string, name: string): string =>
-  id === 'default' && name === '默认工作区' ? '默认场景' : name
 
 const createDefaultWorkspace = (): WorkspaceRecord => {
   const now = new Date().toISOString()
@@ -248,7 +216,6 @@ const readState = (): WorkspaceStatePayload => {
     }
     const normalizedWorkspaces = parsed.map((workspace) => ({
       ...workspace,
-      name: normalizeWorkspaceName(workspace.id, workspace.name),
       context: normalizeWorkspaceContext(workspace.context),
     }))
     const activeWorkspaceId = normalizedWorkspaces.some((item) => item.id === active) ? active : (normalizedWorkspaces[0]?.id || fallback.id)
@@ -328,7 +295,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const localContextMap = new Map(state.value.workspaces.map((item) => [item.id, item.context]))
       const backendWorkspaces = payload.workspaces.map((workspace) => ({
         id: workspace.id,
-        name: normalizeWorkspaceName(workspace.id, workspace.name),
+        name: workspace.name,
         description: workspace.description,
         icon: workspace.icon,
         color: workspace.color,

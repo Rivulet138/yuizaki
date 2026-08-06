@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 
 import ToolPanel from '../domains/tools/views/ToolPanel.vue'
 import AgentTracePanel from '../domains/system/views/AgentTracePanel.vue'
-import TasksPanel from '../domains/system/views/TasksPanel.vue'
 import InfrastructurePanel from '../domains/system/views/InfrastructurePanel.vue'
 import PromptPanel from '../domains/prompt/views/PromptPanel.vue'
 import { router } from '../router'
@@ -45,9 +44,8 @@ describe('platform smoke', () => {
     expect(localIds).toContain('i18n')
   })
 
-  it('maps task center routes to the intended panels', async () => {
+  it('maps the task center route to the intended panel', async () => {
     expect(await loadRouteComponent('agent-trace')).toBe(AgentTracePanel)
-    expect(await loadRouteComponent('agent-trace-admin')).toBe(TasksPanel)
   })
 
   it('maps capability center route to the intended panel', async () => {

@@ -231,8 +231,6 @@ const messages = {
 
     'navigation.agent-governance.desc': 'MCP 服务、插件开关、工具权限',
     'navigation.agent-governance.title': '工具权限',
-    'navigation.agent-trace-admin.desc': '命令、技能、Agent、钩子清单',
-    'navigation.agent-trace-admin.title': '编排对象',
     'navigation.agent-trace.desc': '任务调度、执行追踪与 Agent 运行流程',
     'navigation.agent-trace.title': '任务中心',
     'navigation.chat.desc': '文本、语音、Agent 与桌宠联动的主对话区',
@@ -874,8 +872,6 @@ const messages = {
 
     'navigation.agent-governance.desc': 'MCP protocol services, plugin management, and permission approvals',
     'navigation.agent-governance.title': 'Agent Governance',
-    'navigation.agent-trace-admin.desc': 'Commands, skills, agents, and hook orchestration inventory',
-    'navigation.agent-trace-admin.title': 'Task Orchestration',
     'navigation.agent-trace.desc': 'Task scheduling, execution tracing, and Agent workflows',
     'navigation.agent-trace.title': 'Task Center',
     'navigation.chat.desc': 'Main conversation area for text, voice, Agent, and pet linkage',
@@ -1386,8 +1382,6 @@ const messages = {
 
     'navigation.agent-governance.desc': 'MCP protocol services, plugin management, and permission approvals',
     'navigation.agent-governance.title': 'Agent Governance',
-    'navigation.agent-trace-admin.desc': 'Commands, skills, agents, and hook orchestration inventory',
-    'navigation.agent-trace-admin.title': 'Task Orchestration',
     'navigation.agent-trace.desc': 'Task scheduling, execution tracing, and Agent workflows',
     'navigation.agent-trace.title': 'Task Center',
     'navigation.chat.desc': 'Main conversation area for text, voice, Agent, and pet linkage',

@@ -146,6 +146,29 @@ describe('companion runtime controller', () => {
     vi.useRealTimers()
   })
 
+  it('pauses only proactive polling while the renderer is hidden', async () => {
+    vi.useFakeTimers()
+    const pollSnapshot = vi.fn(async () => ({ heartbeat: { behavior_events: [] } } as never))
+    const controller = createCompanionRuntimeController({
+      pollSnapshot,
+      isAvailable: () => true,
+      readDoNotDisturb: async () => false,
+      sinks: {},
+      pollIntervalMs: 1000,
+    })
+
+    controller.start()
+    controller.setPollingEnabled(false)
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(pollSnapshot).not.toHaveBeenCalled()
+
+    controller.setPollingEnabled(true)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(pollSnapshot).toHaveBeenCalledTimes(1)
+    controller.stop()
+    vi.useRealTimers()
+  })
+
   it.each(['interrupt', 'stop'] as const)(
     'invalidates a poll blocked on DND after %s without delivery bookkeeping',
     async (action) => {

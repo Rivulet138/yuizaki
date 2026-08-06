@@ -68,9 +68,9 @@ describe('Live2DRuntimeAdapter companion idle profile replay', () => {
       getViewport: () => viewport as unknown as PIXI.Container,
       ensureViewport: () => viewport as unknown as PIXI.Container,
       config: {
-        modelId: 'hiyori',
+        modelId: 'llm-live2d/yumi',
         modelType: 'live2d',
-        modelPath: './live2d/hiyori/hiyori.model3.json',
+        modelPath: './live2d/llm-live2d/yumi/yumi.model3.json',
         scale: 0.28,
         positionX: null,
         positionY: null,
@@ -95,13 +95,13 @@ describe('Live2DRuntimeAdapter companion idle profile replay', () => {
       trust: 0.85,
       intimacy: 0.88,
     })
-    await adapter.loadModel({ modelPath: './live2d/hiyori/hiyori.model3.json' })
+    await adapter.loadModel({ modelPath: './live2d/llm-live2d/yumi/yumi.model3.json' })
 
     const firstSnapshot = adapter.getBehaviorDebugSnapshot()
     expect(firstSnapshot?.companionIdleProfile.relationshipTrend).toBe('rising')
     expect(firstSnapshot?.effectiveProfile.swayAmplitude).toBeGreaterThan(1)
 
-    await adapter.loadModel({ modelPath: './live2d/hiyori/hiyori.model3.json' })
+    await adapter.loadModel({ modelPath: './live2d/llm-live2d/yumi/yumi.model3.json' })
     const reloadedSnapshot = adapter.getBehaviorDebugSnapshot()
 
     expect(reloadedSnapshot?.companionIdleProfile).toMatchObject({
@@ -124,9 +124,9 @@ describe('Live2DRuntimeAdapter companion idle profile replay', () => {
       getViewport: () => viewport as unknown as PIXI.Container,
       ensureViewport: () => viewport as unknown as PIXI.Container,
       config: {
-        modelId: 'hiyori',
+        modelId: 'llm-live2d/yumi',
         modelType: 'live2d',
-        modelPath: './live2d/hiyori/hiyori.model3.json',
+        modelPath: './live2d/llm-live2d/yumi/yumi.model3.json',
         scale: 0.28,
         positionX: null,
         positionY: null,
@@ -142,7 +142,7 @@ describe('Live2DRuntimeAdapter companion idle profile replay', () => {
       markActivity: vi.fn(),
     })
 
-    await adapter.loadModel({ modelPath: './live2d/hiyori/hiyori.model3.json' })
+    await adapter.loadModel({ modelPath: './live2d/llm-live2d/yumi/yumi.model3.json' })
     adapter.setAttentionTarget({ x: 0.6, y: -0.25, strength: 0.7, durationMs: 600 })
 
     expect(adapter.getBehaviorDebugSnapshot()?.attention).toMatchObject({
@@ -166,9 +166,9 @@ describe('Live2DRuntimeAdapter companion idle profile replay', () => {
       getViewport: () => viewport as unknown as PIXI.Container,
       ensureViewport: () => viewport as unknown as PIXI.Container,
       config: {
-        modelId: 'hiyori',
+        modelId: 'llm-live2d/yumi',
         modelType: 'live2d',
-        modelPath: './live2d/hiyori/hiyori.model3.json',
+        modelPath: './live2d/llm-live2d/yumi/yumi.model3.json',
         scale: 0.28,
         positionX: null,
         positionY: null,
@@ -184,7 +184,7 @@ describe('Live2DRuntimeAdapter companion idle profile replay', () => {
       markActivity: vi.fn(),
     })
 
-    await adapter.loadModel({ modelPath: './live2d/hiyori/hiyori.model3.json' })
+    await adapter.loadModel({ modelPath: './live2d/llm-live2d/yumi/yumi.model3.json' })
     adapter.triggerMotion('Tap', 0)
     adapter.triggerMotion('Flick', 0)
 
