@@ -41,7 +41,6 @@
           <div>
             <h3>最近闭环阶段</h3>
           </div>
-          <el-button size="small" plain :loading="agentTraceRequest.loading" @click="loadAgentTrace">刷新追踪</el-button>
         </div>
         <div class="loop-stages" aria-label="最近运行时循环阶段">
           <div

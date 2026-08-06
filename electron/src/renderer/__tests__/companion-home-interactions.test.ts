@@ -190,6 +190,7 @@ describe('Companion Home interactions', () => {
 
     expect(source).not.toMatch(/saveCompanion|handleDelete|heartbeatLatestBehavior/)
     expect(source).not.toMatch(/localStorage|setInterval/)
+    expect(source).toContain('if (companionHomeLoading) return')
   })
 
   it('keeps authorization errors mutually exclusive from the successful empty state', () => {

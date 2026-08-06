@@ -34,7 +34,6 @@
             </div>
           </div>
           <div class="actions">
-            <el-button type="primary" :loading="healthLoading" :disabled="refreshing" @click="refreshAll">健康检查</el-button>
             <el-button :loading="startLoading" :disabled="!hasElectronPythonControls || startLoading || stopLoading" :title="pythonControlHint" @click="startPython">启动后端</el-button>
             <el-button :loading="stopLoading" :disabled="!hasElectronPythonControls || startLoading || stopLoading" :title="pythonControlHint" @click="stopPython">停止后端</el-button>
             <el-button

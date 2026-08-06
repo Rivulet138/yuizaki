@@ -152,6 +152,7 @@ const petQuickError = ref('')
 const petOperationKey = ref<PetOperationKey>(null)
 const petRuntimeState = reactive<PetControlState>({ ...DEFAULT_PET_CONTROL_STATE })
 let runtimeLoadSequence = 0
+let companionHomeLoading = false
 
 const modulePath = (moduleId: string) => `/w/${activeWorkspaceId.value}/${moduleId}`
 const resolveCompanionLoadError = (error: unknown) => isAuthMissingError(error)
@@ -246,13 +247,18 @@ const loadRuntime = async () => {
 
 const loadCompanionHome = async () => {
   companionLoadError.value = ''
+  companionHomeLoading = true
   try {
-    await companionStore.loadCompanions()
-    if (!e2eMode) await applyActiveCompanionRuntime()
-  } catch (error) {
-    companionLoadError.value = resolveCompanionLoadError(error)
+    try {
+      await companionStore.loadCompanions()
+      if (!e2eMode) await applyActiveCompanionRuntime()
+    } catch (error) {
+      companionLoadError.value = resolveCompanionLoadError(error)
+    }
+    await Promise.all([e2eMode ? undefined : loadRuntime(), refreshPetState()])
+  } finally {
+    companionHomeLoading = false
   }
-  await Promise.all([e2eMode ? undefined : loadRuntime(), refreshPetState()])
 }
 
 const interruptCompanion = () => {
@@ -288,6 +294,7 @@ const setHomeProactivityPreset = (value: string) => {
 }
 
 watch(activeCompanion, () => {
+  if (companionHomeLoading) return
   if (!e2eMode) {
     void applyActiveCompanionRuntime()
     void loadRuntime()
