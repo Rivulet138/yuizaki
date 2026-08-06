@@ -240,30 +240,33 @@
         </el-card>
       </section>
 
-      <el-card class="panel-card logs-card" shadow="never">
-        <template #header>
-          <div class="card-head">
-            <div>
-              <strong>日志追踪</strong>
-            </div>
-            <el-button plain :loading="logsRequest.loading" @click="loadLogs">刷新日志</el-button>
-          </div>
-        </template>
-        <AsyncState :loading="logsRequest.loading" :error="logsRequest.error" @retry="loadLogs">
-          <div class="log-grid">
-            <article v-for="channel in logChannels" :key="channel.key" class="log-panel" :class="channel.tone">
-              <div class="log-head">
-                <div>
-                  <strong>{{ channel.label }}</strong>
-                  <span>{{ channel.description }}</span>
-                </div>
-                <el-tag size="small" :type="channel.content ? 'success' : 'info'">{{ channel.content ? '有日志' : '暂无' }}</el-tag>
+      <details class="logs-disclosure" @toggle="handleLogsToggle">
+        <summary>按需查看日志追踪</summary>
+        <el-card class="panel-card logs-card" shadow="never">
+          <template #header>
+            <div class="card-head">
+              <div>
+                <strong>日志追踪</strong>
               </div>
-              <pre>{{ channel.content || '暂无日志输出' }}</pre>
-            </article>
-          </div>
-        </AsyncState>
-      </el-card>
+              <el-button plain :loading="logsRequest.loading" @click="refreshLogs">刷新日志</el-button>
+            </div>
+          </template>
+          <AsyncState :loading="logsRequest.loading" :error="logsRequest.error" @retry="refreshLogs">
+            <div class="log-grid">
+              <article v-for="channel in logChannels" :key="channel.key" class="log-panel" :class="channel.tone">
+                <div class="log-head">
+                  <div>
+                    <strong>{{ channel.label }}</strong>
+                    <span>{{ channel.description }}</span>
+                  </div>
+                  <el-tag size="small" :type="channel.content ? 'success' : 'info'">{{ channel.content ? '有日志' : '暂无' }}</el-tag>
+                </div>
+                <pre>{{ channel.content || '暂无日志输出' }}</pre>
+              </article>
+            </div>
+          </AsyncState>
+        </el-card>
+      </details>
     </div>
   </PanelShell>
 </template>
@@ -321,6 +324,7 @@ const apiGapLoaded = ref(false)
 const exportingKind = ref<'json' | 'csv' | null>(null)
 const restoreBackupDir = ref('')
 const restorePreview = ref<BackupRestoreResponse | null>(null)
+const logsLoaded = ref(false)
 const restoreMode = ref<'preview' | 'apply' | null>(null)
 const runtimeSnapshot = ref<RuntimeResourceSnapshot | null>(null)
 const runtimeLoading = ref(false)
@@ -604,7 +608,19 @@ const updateStats = async () => {
 }
 
 const refreshAll = async () => {
-  await Promise.all([loadDiagnostics(), loadBackupTargets(), loadLogs(), loadRuntimeSnapshot()])
+  const requests = [loadDiagnostics(), loadBackupTargets(), loadRuntimeSnapshot()]
+  if (logsLoaded.value) requests.push(loadLogs())
+  await Promise.all(requests)
+}
+
+const refreshLogs = async () => {
+  logsLoaded.value = true
+  await loadLogs()
+}
+
+const handleLogsToggle = (event: Event) => {
+  const details = event.currentTarget as HTMLDetailsElement | null
+  if (details?.open && !logsLoaded.value) void refreshLogs()
 }
 
 const createAndSelectBackup = async () => {
@@ -752,6 +768,23 @@ onMounted(() => {
 
 .log-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.logs-disclosure {
+  display: grid;
+  gap: 10px;
+}
+
+.logs-disclosure > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--yui-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.logs-disclosure[open] > summary {
+  color: var(--yui-text);
 }
 
 .metric-card,

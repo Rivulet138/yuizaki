@@ -23,4 +23,11 @@ describe('infrastructure panel UI contract', () => {
     expect(source).not.toContain('后端接口核对')
     expect(source).not.toContain('核对接口')
   })
+
+  it('keeps high-volume logs behind an explicit disclosure', () => {
+    expect(source).toContain('<details class="logs-disclosure" @toggle="handleLogsToggle">')
+    expect(source).toContain('<summary>按需查看日志追踪</summary>')
+    expect(source).toContain('if (logsLoaded.value) requests.push(loadLogs())')
+    expect(source).toContain('if (details?.open && !logsLoaded.value) void refreshLogs()')
+  })
 })

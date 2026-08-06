@@ -13,7 +13,7 @@
       <nav class="canonical-links" :aria-label="t('canonical.system.aria')">
         <span>{{ t('canonical.system.label') }}</span>
         <router-link :to="canonicalPath('infrastructure')">{{ t('canonical.system.diagnostics') }}</router-link>
-        <router-link :to="canonicalPath('deploy')">{{ t('canonical.system.legacyRuntime') }}</router-link>
+        <router-link :to="canonicalPath('deploy')">{{ t('canonical.system.runtimeChecks') }}</router-link>
       </nav>
 
       <section class="ops-card chain-card">
@@ -569,6 +569,7 @@ const petChips = computed(() => [
 
 let syncTimer: number | null = null
 let panelActive = true
+const PET_STATUS_REFRESH_INTERVAL_MS = 30_000
 
 const pageIsVisible = () => document.visibilityState !== 'hidden'
 
@@ -584,7 +585,7 @@ const startPetSync = (refresh = false) => {
   if (refresh) void syncPetData(false)
   syncTimer = window.setInterval(() => {
     if (panelActive && pageIsVisible()) void syncPetData(true)
-  }, 5000)
+  }, PET_STATUS_REFRESH_INTERVAL_MS)
 }
 
 const handleVisibilityChange = () => {

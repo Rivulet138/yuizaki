@@ -203,7 +203,11 @@ describe('OverviewPanel chain self check', () => {
     await flushPromises()
     const initialCalls = clientMocks.petState.mock.calls.length
 
-    vi.advanceTimersByTime(5000)
+    vi.advanceTimersByTime(5_000)
+    await flushPromises()
+    expect(clientMocks.petState.mock.calls.length).toBe(initialCalls)
+
+    vi.advanceTimersByTime(25_000)
     await flushPromises()
     expect(clientMocks.petState.mock.calls.length).toBeGreaterThan(initialCalls)
 
