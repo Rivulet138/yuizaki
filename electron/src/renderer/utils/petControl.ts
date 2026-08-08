@@ -16,6 +16,7 @@ import type {
   LocalModelPickerResponse,
   PetModelImportMode,
 } from '../../shared/resource-manager'
+import type { AvatarCommand, AvatarCommandResult } from '../../shared/avatar-command'
 import {
   CONTROL_AUTH_MISSING_MESSAGE,
   CONTROL_ORIGIN,
@@ -143,6 +144,10 @@ export interface PetPlacementPresetsPayload {
 
 export interface PetLipSyncStopOptions {
   interrupted?: boolean
+}
+
+export interface PetLipSyncStartOptions extends PetControlTriggerOptions {
+  signal?: AbortSignal
 }
 
 export const petControl = {
@@ -377,6 +382,14 @@ export const petControl = {
     })
   },
 
+  async triggerAvatarCommand(command: AvatarCommand, options: PetControlAutomationOptions = {}): Promise<AvatarCommandResult> {
+    return requestJson<{ success: boolean; result: AvatarCommandResult }>('/api/pet/avatar-command', {
+      method: 'POST',
+      body: JSON.stringify({ command, source: options.source }),
+      signal: options.signal,
+    }).then((payload) => payload.result)
+  },
+
   async triggerParameterOverrides(payload: PetExpressionMixPayload, options: PetControlTriggerOptions = {}): Promise<void> {
     await requestJson<{ success: true }>('/api/pet/expression-mix', {
       method: 'POST',
@@ -417,10 +430,11 @@ export const petControl = {
     })
   },
 
-  async startLipSync(audioUrl: string, options: PetControlTriggerOptions = {}): Promise<void> {
+  async startLipSync(audioUrl: string, options: PetLipSyncStartOptions = {}): Promise<void> {
     await requestJson<{ success: true }>('/api/pet/lipsync', {
       method: 'POST',
       body: JSON.stringify({ audioUrl, enabled: true, source: options.source }),
+      signal: options.signal,
     })
   },
 

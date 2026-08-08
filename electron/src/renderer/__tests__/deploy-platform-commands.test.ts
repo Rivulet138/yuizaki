@@ -7,8 +7,8 @@ describe('deploy platform commands', () => {
     expect(buildDeployPlatformCommands('linux')).toEqual({
       label: 'Linux',
       commands: [
-        { title: '统一启动', command: './start.sh' },
-        { title: '带 MCP 启动', command: './start.sh --with-mcp' },
+        { title: '完整启动（含 MCP）', command: './start.sh' },
+        { title: '轻量启动（不含 MCP）', command: './start.sh --no-mcp' },
         { title: '前端调试', command: './start.sh --dev-renderer' },
         { title: '后端调试', command: './scripts/run_backend_dev.sh' },
       ],

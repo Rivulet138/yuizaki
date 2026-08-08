@@ -8,6 +8,12 @@ import {
 } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
+import type {
+  AvatarCapabilitySnapshot,
+  AvatarCommand,
+  AvatarCommandResult,
+} from '../shared/avatar-command'
+import { AVATAR_COMMAND_DELIVERY_TTL_MS } from '../shared/avatar-command'
 import {
   type PetCompanionIdleProfile,
   type PetControlConfigPatch,
@@ -90,6 +96,7 @@ const writeRendererLog = (message: string, payload?: unknown): void => {
 
 const TOPMOST_GUARD_INTERVAL_MS = 30000
 const RENDERER_RECOVERY_DELAY_MS = 1000
+const LIPSYNC_READY_TIMEOUT_MS = 750
 
 type RendererConsoleLevel = 'debug' | 'info' | 'warning' | 'error'
 
@@ -160,6 +167,16 @@ export class Live2DWindow {
   private ignoreMouseEvents: boolean | null = null
   private ignoreMouseEventsForward: boolean | null = null
   private rendererReady = false
+  private avatarCapabilities: AvatarCapabilitySnapshot | null = null
+  private readonly pendingAvatarCommands = new Map<string, {
+    resolve: (result: AvatarCommandResult) => void
+    sequence: number
+    timer: NodeJS.Timeout
+  }>()
+  private readonly pendingLipSyncStarts = new Map<string, {
+    resolve: () => void
+    timer: NodeJS.Timeout
+  }>()
   private lastPetConfig: PetRendererConfigPayload = {}
   private lastCompanionIdleProfile: PetCompanionIdleProfile | null = null
   private topMostGuardTimer: NodeJS.Timeout | null = null
@@ -234,7 +251,7 @@ export class Live2DWindow {
 
     this.win.webContents.on('did-start-navigation', (details) => {
       if (details.isMainFrame && !details.isSameDocument) {
-        this.rendererReady = false
+        this.invalidateAvatarRenderer('Pet renderer navigation interrupted the avatar command')
       }
     })
 
@@ -274,7 +291,7 @@ export class Live2DWindow {
     this.win.webContents.on('render-process-gone', (_event, details) => {
       logger.error('[Live2DWindow] renderer process gone:', details)
       writeRendererLog('render-process-gone', details)
-      this.rendererReady = false
+      this.invalidateAvatarRenderer('Pet renderer process exited before acknowledging the avatar command')
       this.scheduleRendererRecovery('render-process-gone')
     })
 
@@ -285,8 +302,8 @@ export class Live2DWindow {
     this.win.on('closed', () => {
       this.stopTopMostGuard()
       this.stopRendererRecovery()
+      this.invalidateAvatarRenderer('Pet window closed before acknowledging the avatar command')
       this.win = null
-      this.rendererReady = false
       this.allowClose = false
     })
 
@@ -327,8 +344,142 @@ export class Live2DWindow {
       this.sendToRenderer('pet:companion-idle-profile', this.lastCompanionIdleProfile)
     }
     this.sendToRenderer('pet:interact-toggle', this.interactMode)
+    this.sendToRenderer('pet:request-avatar-capabilities')
     this.requestPetState()
     return true
+  }
+
+  handleAvatarCapabilities(sender: WebContents, payload: unknown): boolean {
+    if (!this.isCurrentRenderer(sender)) return false
+    if (payload === null) {
+      this.avatarCapabilities = null
+      return true
+    }
+    if (typeof payload !== 'object') return false
+    this.avatarCapabilities = payload as AvatarCapabilitySnapshot
+    return true
+  }
+
+  handleAvatarCommandResult(sender: WebContents, payload: unknown): boolean {
+    if (!this.isCurrentRenderer(sender) || !payload || typeof payload !== 'object') return false
+    const result = payload as AvatarCommandResult
+    if (typeof result.commandId !== 'string') return false
+    const pending = this.pendingAvatarCommands.get(result.commandId)
+    if (!pending || result.sequence !== pending.sequence) return false
+    clearTimeout(pending.timer)
+    this.pendingAvatarCommands.delete(result.commandId)
+    pending.resolve(result)
+    return true
+  }
+
+  getAvatarCapabilities(): AvatarCapabilitySnapshot | null {
+    return this.avatarCapabilities
+  }
+
+  requestAvatarCapabilities(): void {
+    this.sendToRenderer('pet:request-avatar-capabilities')
+  }
+
+  startLipSync(audioUrl: string): Promise<void> {
+    if (!this.rendererReady || !this.win || this.win.isDestroyed() || this.win.webContents.isDestroyed()) {
+      return Promise.resolve()
+    }
+
+    const requestId = `lipsync_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingLipSyncStarts.delete(requestId)
+        resolve()
+      }, LIPSYNC_READY_TIMEOUT_MS)
+      this.pendingLipSyncStarts.set(requestId, { resolve, timer })
+      this.sendToRenderer('pet:lipsync-start', { audioUrl, requestId })
+    })
+  }
+
+  handleLipSyncReady(sender: WebContents, payload: unknown): boolean {
+    if (!this.isCurrentRenderer(sender) || !payload || typeof payload !== 'object') return false
+    const requestId = (payload as { requestId?: unknown }).requestId
+    if (typeof requestId !== 'string') return false
+    const pending = this.pendingLipSyncStarts.get(requestId)
+    if (!pending) return false
+    clearTimeout(pending.timer)
+    this.pendingLipSyncStarts.delete(requestId)
+    pending.resolve()
+    return true
+  }
+
+  sendAvatarCommand(command: AvatarCommand): Promise<AvatarCommandResult> {
+    if (!this.rendererReady || !this.win || this.win.isDestroyed() || this.win.webContents.isDestroyed()) {
+      return Promise.resolve({
+        commandId: command.id,
+        sequence: command.sequence,
+        status: 'rejected',
+        message: 'Pet renderer is not ready',
+        at: Date.now(),
+      })
+    }
+    if (this.pendingAvatarCommands.has(command.id)) {
+      return Promise.resolve({
+        commandId: command.id,
+        sequence: command.sequence,
+        status: 'rejected',
+        message: 'Avatar command id is already pending',
+        at: Date.now(),
+      })
+    }
+
+    return new Promise((resolve) => {
+      const deliveryCommand: AvatarCommand = {
+        ...command,
+        expiresAt: Math.min(
+          command.expiresAt ?? Number.POSITIVE_INFINITY,
+          Date.now() + AVATAR_COMMAND_DELIVERY_TTL_MS,
+        ),
+      }
+      const timer = setTimeout(() => {
+        this.pendingAvatarCommands.delete(command.id)
+        resolve({
+          commandId: command.id,
+          sequence: command.sequence,
+          status: 'timeout',
+          message: 'Pet renderer acknowledgement timed out; command delivery is unknown',
+          at: Date.now(),
+        })
+      }, 1200)
+      this.pendingAvatarCommands.set(command.id, { resolve, sequence: command.sequence, timer })
+      this.sendToRenderer('pet:avatar-command', deliveryCommand)
+    })
+  }
+
+  private isCurrentRenderer(sender: WebContents): boolean {
+    return Boolean(
+      this.win
+      && !this.win.isDestroyed()
+      && sender === this.win.webContents
+      && !sender.isDestroyed(),
+    )
+  }
+
+  private invalidateAvatarRenderer(message: string): void {
+    this.rendererReady = false
+    this.avatarCapabilities = null
+    for (const [requestId, pending] of this.pendingLipSyncStarts) {
+      clearTimeout(pending.timer)
+      this.pendingLipSyncStarts.delete(requestId)
+      pending.resolve()
+    }
+    const at = Date.now()
+    for (const [commandId, pending] of this.pendingAvatarCommands) {
+      clearTimeout(pending.timer)
+      this.pendingAvatarCommands.delete(commandId)
+      pending.resolve({
+        commandId,
+        sequence: pending.sequence,
+        status: 'dropped',
+        message,
+        at,
+      })
+    }
   }
 
   get isInteracting(): boolean {
@@ -527,6 +678,7 @@ export class Live2DWindow {
   close(): void {
     this.stopTopMostGuard()
     this.stopRendererRecovery()
+    this.invalidateAvatarRenderer('Pet window closed before acknowledging the avatar command')
     this.allowClose = true
     this.win?.close()
   }
@@ -639,7 +791,7 @@ export class Live2DWindow {
       return
     }
 
-    this.rendererReady = false
+    this.invalidateAvatarRenderer('Pet renderer reload interrupted the avatar command')
     this.win.webContents.reloadIgnoringCache()
   }
 

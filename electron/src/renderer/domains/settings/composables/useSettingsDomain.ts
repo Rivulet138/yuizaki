@@ -49,13 +49,7 @@ export function useSettingsDomain() {
   }
 
   const loadLlmModels = async (payload: LlmModelsRequest) => {
-    const result = await llmModelsRequest.execute(() => settingsClient.listLlmModels(payload))
-    if (result?.ok) {
-      llmModels.value = result.models
-    } else if (result) {
-      llmModels.value = []
-    }
-    return result
+    return llmModelsRequest.execute(() => settingsClient.listLlmModels(payload))
   }
 
   const testLlm = async () => {

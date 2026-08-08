@@ -1,9 +1,16 @@
 import type { AvatarManifest, ExpressionLayer, PetControlConfigPatch, PetExpressionMixPayload, PetLipSyncViseme, PetParameterOverrideItem, PetRendererStatePayload } from '../../shared/pet-control'
+import type {
+  AvatarAction,
+  AvatarActionExecutionResult,
+  AvatarCapabilitySnapshot,
+} from '../../shared/avatar-command'
 
 export interface PetRuntimeAdapter {
   readonly modelType: 'live2d' | 'vrm'
   loadModel(config: PetControlConfigPatch): Promise<void>
   applyConfig(config: PetControlConfigPatch): void
+  getCapabilities(): AvatarCapabilitySnapshot
+  executeAvatarAction(action: AvatarAction): AvatarActionExecutionResult
   triggerExpression?(name: string): void
   triggerExpressionMix?(payload: PetExpressionMixPayload): void
   applyExpressionMix?(layers: ExpressionLayer[]): void

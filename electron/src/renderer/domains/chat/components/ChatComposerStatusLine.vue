@@ -1,76 +1,62 @@
 <template>
-  <div class="composer-meta-line" :aria-label="t('chat.composerStatus.aria')">
-    <span class="composer-meta-chip" :class="{ ready: connected }">
-      {{ connected ? t('chat.composerStatus.connected') : t('chat.composerStatus.unavailable') }}
-    </span>
-    <span v-if="webSearchEnabled" class="composer-meta-chip is-active">{{ t('chat.composerStatus.webSearch') }}</span>
-    <span v-if="mcpEnabled" class="composer-meta-chip is-active">MCP</span>
-    <span class="composer-meta-value">{{ modelLabel }}</span>
-    <span>{{ petLinkEnabled ? t('chat.composerStatus.petLinked') : t('chat.composerStatus.standalone') }}</span>
-    <span class="composer-meta-chip" :class="{ 'is-active': ttsEnabled }">{{ ttsEnabled ? 'TTS' : t('chat.composerStatus.muted') }}</span>
-    <span>{{ voicePermissionText }}</span>
-    <span>{{ t('chat.composerStatus.tokens', { count: inputTokens }) }}</span>
+  <div v-if="statusText" class="composer-status-line" :class="statusTone" role="status" aria-live="polite">
+    <span class="composer-status-dot" aria-hidden="true"></span>
+    <span>{{ statusText }}</span>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from '@/i18n'
+
+const props = defineProps<{
+  connected: boolean
+  generating: boolean
+  recording: boolean
+  ttsPlaying: boolean
+}>()
 
 const { t } = useI18n()
 
-defineProps<{
-  connected: boolean
-  webSearchEnabled: boolean
-  mcpEnabled: boolean
-  modelLabel: string
-  petLinkEnabled: boolean
-  ttsEnabled: boolean
-  voicePermissionText: string
-  inputTokens: number
-}>()
+const statusKey = computed(() => {
+  if (!props.connected) return 'chat.composerStatus.unavailable'
+  if (props.recording) return 'chat.composerStatus.recording'
+  if (props.generating) return 'chat.composerStatus.generating'
+  if (props.ttsPlaying) return 'chat.composerStatus.playing'
+  return ''
+})
+const statusText = computed(() => statusKey.value ? t(statusKey.value) : '')
+const statusTone = computed(() => ({
+  'is-error': !props.connected,
+  'is-active': props.connected && Boolean(statusKey.value),
+}))
 </script>
 
 <style scoped>
-.composer-meta-line {
-  display: flex;
-  min-width: 0;
-  flex-wrap: nowrap;
+.composer-status-line {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 20px;
   align-items: center;
-  gap: 6px 10px;
-  min-height: 16px;
-  overflow-x: auto;
-  order: 4;
+  gap: 7px;
   color: var(--yui-muted);
   font-size: 12px;
-  line-height: 16px;
-  scrollbar-width: none;
-  white-space: nowrap;
+  line-height: 20px;
 }
 
-.composer-meta-line::-webkit-scrollbar {
-  display: none;
+.composer-status-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
 }
 
-.composer-meta-chip {
-  border: 1px solid var(--yui-border);
-  border-radius: 6px;
-  background: var(--yui-surface-muted);
-  padding: 2px 6px;
-}
-
-.composer-meta-chip.ready,
-.composer-meta-chip.is-active {
-  border-color: color-mix(in srgb, var(--yui-accent) 20%, transparent);
-  background: var(--yui-accent-soft);
+.composer-status-line.is-active {
   color: var(--yui-accent);
 }
 
-.composer-meta-value {
-  max-width: 128px;
-  overflow: hidden;
-  color: var(--yui-text);
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.composer-status-line.is-error {
+  color: var(--yui-danger, #b91c1c);
 }
 </style>

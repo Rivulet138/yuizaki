@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(dirname "$0")"
 ROOT="$(cd "$SCRIPT_DIR" && pwd)"
 PYTHON="${PYTHON_BIN:-$ROOT/python/.venv/bin/python}"
-WITH_MCP=0
+WITH_MCP=1
 DEV_RENDERER=0
 CHECK_ONLY=0
 SMOKE=0
@@ -19,7 +19,7 @@ for argument in "$@"; do
 	--smoke) SMOKE=1 ;;
 	--no-qdrant | --no-open | --no-show-pet) ;;
 	--help | -h)
-		echo "Usage: ./start.sh [--check] [--with-mcp] [--dev-renderer] [--smoke]"
+		echo "Usage: ./start.sh [--check] [--no-mcp] [--dev-renderer] [--smoke]"
 		exit 0
 		;;
 	*)

@@ -2,8 +2,9 @@ import { type Ref, ref } from 'vue'
 import type { PetSentenceEmotionCue, PetVisemeCue } from '../../shared/pet-control'
 import { petControl } from '../utils/petControl'
 import { resolveBackendUrl } from '../api/clients/http-client'
+import { AudioPlayerEventBridge } from './playbackEventBridge'
 
-interface TtsPlaybackDetail {
+export interface TtsPlaybackDetail {
   audio_url?: string
   text?: string
   sentenceEmotionCues?: PetSentenceEmotionCue[]
@@ -15,7 +16,7 @@ interface TtsPlaybackDetail {
   visemeCues?: PetVisemeCue[]
 }
 
-interface PcmPlaybackDetail extends Omit<TtsPlaybackDetail, 'audio_url'> {
+export interface PcmPlaybackDetail extends Omit<TtsPlaybackDetail, 'audio_url'> {
   audio: Uint8Array
   audioFormat: 'pcm_s16le'
   sampleRate: number
@@ -28,7 +29,7 @@ interface AudioStartedDetail extends TtsPlaybackDetail {
   durationMs?: number
 }
 
-interface TtsStopDetail {
+export interface TtsStopDetail {
   interrupted?: boolean
   petLipSyncHandled?: boolean
 }
@@ -55,6 +56,7 @@ export interface PcmLipSyncEnvelope {
 }
 
 const PCM_LIP_SYNC_FRAME_MS = 33
+const URL_LIP_SYNC_START_TIMEOUT_MS = 500
 
 export const buildPcmS16leEnvelope = (
   pcm: Uint8Array,
@@ -141,15 +143,12 @@ export class AudioPlayer {
   private lastPcmLipSyncFrame = -1
   private pcmVisemeCues: PetVisemeCue[] = []
   private lastPcmVisemeKey: string | null = null
+  private lipSyncAbortController: AbortController | null = null
+  private segmentEndedHandler: (() => void) | null = null
+  private segmentErrorHandler: (() => void) | null = null
 
   constructor() {
     this.audioElement = new Audio()
-    this.audioElement.addEventListener('ended', () => {
-      this.finishCurrentSegment()
-    })
-    this.audioElement.addEventListener('error', () => {
-      this.finishCurrentSegment()
-    })
   }
 
   async play(audioUrl: string, detail: Omit<TtsPlaybackDetail, 'audio_url'> = {}): Promise<void> {
@@ -205,24 +204,92 @@ export class AudioPlayer {
     }
 
     try {
+      this.detachSegmentListeners()
+      const endedHandler = () => {
+        if (this.segmentEndedHandler !== endedHandler || token !== this.playbackToken) return
+        this.segmentEndedHandler = null
+        this.finishCurrentSegment()
+      }
+      const errorHandler = () => {
+        if (this.segmentErrorHandler !== errorHandler || token !== this.playbackToken) return
+        this.segmentErrorHandler = null
+        this.finishCurrentSegment()
+      }
+      this.segmentEndedHandler = endedHandler
+      this.segmentErrorHandler = errorHandler
+      this.audioElement.addEventListener('ended', endedHandler)
+      this.audioElement.addEventListener('error', errorHandler)
       this.currentOwnedObjectUrl = ownedObjectUrl ?? null
       this.audioElement.src = playbackUrl
+      this.audioElement.load?.()
       this.isPlaying.value = true
       const petLinkEnabled = detail.petLinkEnabled !== false
       this.currentPetLinkEnabled = petLinkEnabled
-      await this.audioElement.play()
-      if (token !== this.playbackToken) return
       if (petLinkEnabled) {
         if (lipSyncEnvelope?.levels.length) {
           this.activeLipSyncMode = 'pcm-level'
           this.startPcmLipSync(lipSyncEnvelope, detail.visemeCues)
         } else {
           this.activeLipSyncMode = 'url'
-          void petControl.startLipSync(playbackUrl, { source: 'automation' }).catch((error) => {
-            console.debug('[AudioPlayer] failed to start pet lip sync:', error)
+          const controller = new AbortController()
+          this.lipSyncAbortController = controller
+          const lipSyncStart = petControl.startLipSync(playbackUrl, {
+            source: 'automation',
+            signal: controller.signal,
           })
+          const timeoutMarker = Symbol('lip-sync-start-timeout')
+          let timeoutId: number | null = null
+          let timedOut = false
+          try {
+            const result = await Promise.race([
+              lipSyncStart.then(() => undefined),
+              new Promise<typeof timeoutMarker>((resolve) => {
+                timeoutId = setTimeout(() => resolve(timeoutMarker), URL_LIP_SYNC_START_TIMEOUT_MS)
+              }),
+            ])
+            if (result === timeoutMarker) {
+              timedOut = true
+              console.debug('[AudioPlayer] pet lip sync start timed out; continuing audio playback')
+              void lipSyncStart
+                .catch((error) => {
+                  if (controller.signal.aborted || token !== this.playbackToken) return
+                  console.debug('[AudioPlayer] failed to start pet lip sync:', error)
+                })
+                .finally(() => {
+                  if (this.lipSyncAbortController === controller) {
+                    this.lipSyncAbortController = null
+                  }
+                })
+            }
+          } catch (error) {
+            if (token !== this.playbackToken || controller.signal.aborted) {
+              return false
+            }
+            console.debug('[AudioPlayer] failed to start pet lip sync:', error)
+          } finally {
+            if (timeoutId !== null) {
+              clearTimeout(timeoutId)
+            }
+            if (this.lipSyncAbortController === controller && !timedOut) {
+              this.lipSyncAbortController = null
+            }
+          }
+          if (token !== this.playbackToken) return false
         }
       }
+      if (token !== this.playbackToken) return false
+
+      // The analyzer request is primed before the media element starts. Do not
+      // await HTMLAudioElement.play(): Chromium can leave that promise pending
+      // while the media clock is already advancing, especially for short WAVs.
+      // The started event describes our playback start boundary, while ended or
+      // error events remain responsible for the lifecycle's terminal boundary.
+      const playPromise = Promise.resolve(this.audioElement.play())
+      void playPromise.catch((error) => {
+        if (token !== this.playbackToken || !this.isPlaying.value) return
+        console.debug('[AudioPlayer] media playback failed:', error)
+        this.finishCurrentSegment()
+      })
       const startedDetail: AudioStartedDetail = { audio_url: playbackUrl }
       if (detail.text) {
         startedDetail.text = detail.text
@@ -245,6 +312,7 @@ export class AudioPlayer {
       return true
     } catch (err) {
       console.error('Failed to play audio:', err)
+      this.detachSegmentListeners()
       this.isPlaying.value = false
       this.releaseCurrentObjectUrl()
       return false
@@ -299,7 +367,10 @@ export class AudioPlayer {
 
   private finishPlayback(force = false, options: TtsStopDetail = {}, emitEnded = true): void {
     if (!this.isPlaying.value && !force) return
+    this.detachSegmentListeners()
     this.isPlaying.value = false
+    this.lipSyncAbortController?.abort()
+    this.lipSyncAbortController = null
     if (this.activeLipSyncMode === 'pcm-level') {
       this.stopPcmLipSync()
     } else if (
@@ -327,6 +398,18 @@ export class AudioPlayer {
       if (item.ownedObjectUrl) URL.revokeObjectURL(item.ownedObjectUrl)
     }
     this.queue = []
+  }
+
+  private detachSegmentListeners(): void {
+    if (!this.audioElement) return
+    if (this.segmentEndedHandler) {
+      this.audioElement.removeEventListener('ended', this.segmentEndedHandler)
+      this.segmentEndedHandler = null
+    }
+    if (this.segmentErrorHandler) {
+      this.audioElement.removeEventListener('error', this.segmentErrorHandler)
+      this.segmentErrorHandler = null
+    }
   }
 
   private releaseCurrentObjectUrl(): void {
@@ -406,41 +489,42 @@ export function getAudioPlayer(): AudioPlayer {
   return globalPlayer
 }
 
+let globalEventBridge: AudioPlayerEventBridge | null = null
+const GLOBAL_AUDIO_BRIDGE_KEY = '__yuizakiAudioPlaybackBridge'
+
+export function getAudioPlayerEventBridge(): AudioPlayerEventBridge {
+  if (!globalEventBridge) {
+    globalEventBridge = new AudioPlayerEventBridge({
+      play: (audioUrl, detail) => getAudioPlayer().play(audioUrl, detail),
+      stop: (options) => getAudioPlayer().stop(options),
+      enqueue: (audioUrl, detail) => getAudioPlayer().enqueue(audioUrl, detail),
+      enqueuePcm: (detail) => getAudioPlayer().enqueuePcm(detail),
+    })
+  }
+  return globalEventBridge
+}
+
+const attachGlobalAudioBridge = (): void => {
+  if (typeof window === 'undefined') return
+
+  const host = window as Window & {
+    [GLOBAL_AUDIO_BRIDGE_KEY]?: AudioPlayerEventBridge
+  }
+  const bridge = getAudioPlayerEventBridge()
+
+  // Module reloads can reuse the same window. Detach the previous bridge so
+  // playback events are delivered to exactly one AudioPlayer instance.
+  host[GLOBAL_AUDIO_BRIDGE_KEY]?.detach(window)
+  bridge.attach(window)
+  host[GLOBAL_AUDIO_BRIDGE_KEY] = bridge
+}
+
 // 监听 TTS 播放事件（兼容老的 WS 事件 + 新的 Socket.IO 事件）
 if (typeof window !== 'undefined') {
   // 旧的 WS 路径：由 wsClient 触发 pet:tts-play / pet:tts-stop
-  window.addEventListener('pet:tts-play', (event: Event) => {
-    const player = getAudioPlayer()
-    const detail = (event as CustomEvent<TtsPlaybackDetail>).detail
-    const audioUrl = detail?.audio_url
-    if (audioUrl) {
-      player.play(audioUrl, detail).catch((e) => console.error(e))
-    }
-  })
+  attachGlobalAudioBridge()
 
-  window.addEventListener('pet:tts-stop', (event: Event) => {
-    const player = getAudioPlayer()
-    const detail = (event as CustomEvent<TtsStopDetail>).detail
-    player.stop({
-      interrupted: detail?.interrupted === true,
-      petLipSyncHandled: detail?.petLipSyncHandled === true,
-    })
-  })
 
   // 新的 Socket.IO 路径：直接监听 tts:done 事件由 chatStore 中注册
-  window.addEventListener('pet:tts-play-url', (event: Event) => {
-    const player = getAudioPlayer()
-    const detail = (event as CustomEvent<TtsPlaybackDetail>).detail
-    const audioUrl = detail?.audio_url
-    if (audioUrl) {
-      player.enqueue(audioUrl, detail)
-    }
-  })
 
-  window.addEventListener('pet:tts-play-pcm', (event: Event) => {
-    const detail = (event as CustomEvent<PcmPlaybackDetail>).detail
-    if (detail?.audio instanceof Uint8Array) {
-      getAudioPlayer().enqueuePcm(detail)
-    }
-  })
 }

@@ -28,6 +28,8 @@ const settingsClientMocks = vi.hoisted(() => ({
   adminTokenStatus: vi.fn(),
   metadata: vi.fn(),
   history: vi.fn(),
+  importPayload: vi.fn(),
+  discoverLocal: vi.fn(),
   clearHistory: vi.fn(),
   rollback: vi.fn(),
   deleteSetting: vi.fn(),
@@ -326,6 +328,7 @@ describe('destructive action confirmation', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    settingsState.value = settingsResponse
     elementPlusMocks.confirm.mockRejectedValue(new Error('cancel'))
     petControlMocks.getState.mockResolvedValue({
       modelType: 'live2d',
@@ -399,6 +402,8 @@ describe('destructive action confirmation', () => {
     settingsDomainMocks.patchSettings.mockResolvedValue({ runtime_applied: [], runtime_changed: [] })
     settingsClientMocks.metadata.mockResolvedValue({})
     settingsClientMocks.history.mockResolvedValue({ history: [], count: 0 })
+    settingsClientMocks.importPayload.mockResolvedValue({ runtime_applied: [], runtime_changed: [] })
+    settingsClientMocks.discoverLocal.mockResolvedValue({ llm: [], tts: [], asr: [], svc: [], memory: [] })
     resourceClientMocks.status.mockResolvedValue(null)
     resourceClientMocks.progress.mockResolvedValue({ activeDownloads: [] })
     resourceClientMocks.storageStatus.mockResolvedValue({ categories: [], total_bytes: 0, reclaimable_bytes: 0 })
@@ -799,6 +804,90 @@ describe('destructive action confirmation', () => {
       expect.objectContaining({ type: 'warning' }),
     )
     expect(settingsDomainMocks.patchSettings).not.toHaveBeenCalled()
+  })
+
+  it('ignores stale model discovery results as soon as the endpoint changes', async () => {
+    vi.useFakeTimers()
+    let resolveFirstDiscovery: ((value: { ok: boolean; models: string[]; message: string }) => void) | undefined
+    settingsDomainMocks.loadLlmModels
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveFirstDiscovery = resolve
+      }))
+      .mockResolvedValueOnce({ ok: true, models: [], message: '' })
+
+    const wrapper = mount(SettingsPanel, { global })
+    await flushPromises()
+    const baseUrlInput = wrapper.find('input[name="llm-base-url"]')
+
+    await baseUrlInput.setValue('http://localhost:11434/v1')
+    await baseUrlInput.trigger('change')
+    await vi.advanceTimersByTimeAsync(650)
+    expect(settingsDomainMocks.loadLlmModels).toHaveBeenCalledTimes(1)
+
+    await baseUrlInput.setValue('http://localhost:1234/v1')
+    await baseUrlInput.trigger('change')
+    resolveFirstDiscovery?.({ ok: true, models: ['stale-deepseek-model'], message: '' })
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('stale-deepseek-model')
+    wrapper.unmount()
+  })
+
+  it('limits LLM profile imports to the LLM settings section', async () => {
+    const wrapper = mount(SettingsPanel, { global })
+    await flushPromises()
+    const importInput = wrapper.find('input[type="file"][accept="application/json,.json"]')
+    const file = {
+      text: vi.fn().mockResolvedValue(JSON.stringify({
+        llm: { provider: 'custom', base_url: 'https://models.example/v1', model: 'safe-model' },
+        tts: { lang: 'en' },
+        system: { theme: 'dark' },
+      })),
+    }
+    Object.defineProperty(importInput.element, 'files', { configurable: true, value: [file] })
+
+    await importInput.trigger('change')
+    await flushPromises()
+
+    expect(settingsClientMocks.importPayload).toHaveBeenCalledWith({
+      llm: { provider: 'custom', base_url: 'https://models.example/v1', model: 'safe-model' },
+    })
+  })
+
+  it('clears a cloud model when local discovery returns no local models', async () => {
+    settingsState.value = {
+      ...settingsResponse,
+      llm: {
+        ...settingsResponse.llm,
+        provider: 'chatgpt',
+        base_url: 'https://api.openai.com/v1',
+        api_key: 'sk-test',
+        model: 'gpt-cloud-only',
+      },
+    }
+    settingsClientMocks.discoverLocal.mockResolvedValue({
+      llm: [{
+        ok: true,
+        provider: 'ollama',
+        label: 'Ollama',
+        base_url: 'http://localhost:11434/v1',
+        models: [],
+        message: 'Ollama ready',
+      }],
+      tts: [],
+      asr: [],
+      svc: [],
+      memory: [],
+    })
+
+    const wrapper = mount(SettingsPanel, { global })
+    await flushPromises()
+    const detectButton = wrapper.findAll('button').find((button) => button.text() === '自动检测并填入')
+    expect(detectButton).toBeTruthy()
+    await detectButton?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('gpt-cloud-only')
   })
 
   it('does not rollback settings when confirmation is cancelled', async () => {

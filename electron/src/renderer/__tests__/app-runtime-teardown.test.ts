@@ -29,10 +29,11 @@ describe('renderer runtime teardown', () => {
 
   it('keeps visual capture bound to Agent turns instead of a background timer', () => {
     const shell = readFileSync(resolve(process.cwd(), 'src/renderer/app/AppShell.vue'), 'utf8')
+    const visualRuntime = readFileSync(resolve(process.cwd(), 'src/renderer/app/runtime/visualCaptureRuntime.ts'), 'utf8')
 
-    expect(shell).toContain('chatStore.setAgentTurnPreparation(prepareAgentVisualContext)')
-    expect(shell).toContain("mode: 'vision'")
-    expect(shell).toContain("captureReason: forceEnabled ? 'manual' : 'agent_turn'")
+    expect(shell).toContain('chatStore.setAgentTurnPreparation(visualCaptureRuntime.prepareAgentVisualContext)')
+    expect(visualRuntime).toContain("mode: 'vision'")
+    expect(visualRuntime).toContain("captureReason: forceEnabled ? 'manual' : 'agent_turn'")
     expect(shell).not.toContain('visualFrameTimer')
     expect(shell).not.toContain('restartVisualFrameTimer')
     expect(shell).not.toContain('window.setInterval(() => {\n    void captureRealtimeVisualFrame')

@@ -129,6 +129,74 @@ describe('chatStore', () => {
     }))
   })
 
+  it('attaches agent steps and memory sources to the matching assistant reply', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.sendChat('use my saved preference')
+    const requestId = mocks.sendAgentChat.mock.calls[0][0].request_id
+
+    mocks.handlers.get(SocketEvents.LLM_FINAL)?.({
+      text: 'done',
+      request_id: requestId,
+      assistant_message_id: 22,
+    })
+    mocks.handlers.get(SocketEvents.AGENT_RESULT)?.({
+      version: 1,
+      request_id: requestId,
+      source: 'agent',
+      reply: 'done',
+      actions: [
+        {
+          type: 'tool_trace',
+          payload: [{ step_id: 'step-1', title: 'Read file', status: 'completed', tool: 'read_file' }],
+        },
+        {
+          type: 'memory_trace',
+          payload: [{ id: 'memory-1', text: 'Prefers concise replies', layer: 'profile', source: 'conversation' }],
+        },
+      ],
+    })
+
+    expect(store.state.messages.at(-1)).toMatchObject({
+      id: 22,
+      role: 'assistant',
+      agentSteps: [{ id: 'step-1', title: 'Read file', status: 'completed', tool: 'read_file' }],
+      memorySources: [{ id: 'memory-1', text: 'Prefers concise replies', layer: 'profile', source: 'conversation' }],
+    })
+  })
+
+  it('does not let a late agent result mutate the newly selected session', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.sendChat('session A request')
+    const requestId = mocks.sendAgentChat.mock.calls[0][0].request_id
+
+    mocks.handlers.get(SocketEvents.LLM_FINAL)?.({
+      text: 'session A reply',
+      session_id: 'default',
+      request_id: requestId,
+      assistant_message_id: 22,
+    })
+    store.setWorkspaceContext('default', 'session-b')
+    store.state.messages = [{ id: 31, role: 'user', content: 'session B message' }]
+
+    mocks.handlers.get(SocketEvents.AGENT_RESULT)?.({
+      version: 1,
+      session_id: 'default',
+      request_id: requestId,
+      source: 'agent',
+      reply: 'session A reply',
+      actions: [{
+        type: 'tool_trace',
+        payload: [{ step_id: 'late-step', title: 'Late step', status: 'completed' }],
+      }],
+    })
+
+    expect(store.state.messages).toEqual([{ id: 31, role: 'user', content: 'session B message' }])
+    expect(store.state.lastAgentEnvelope).toBeNull()
+    expect(store.state.agentEnvelopeTimeline).toEqual([])
+  })
+
   it('publishes pipeline pet control and TTS lifecycle with the originating interruption epoch', async () => {
     mocks.connected = true
     const store = useChatStore()
@@ -207,6 +275,25 @@ describe('chatStore', () => {
     expect(mocks.sendAgentChat).not.toHaveBeenCalled()
     finishPreparation?.()
     await vi.waitFor(() => expect(mocks.sendAgentChat).toHaveBeenCalledTimes(1))
+  })
+
+  it('keeps a prepared turn bound to the session that started it', async () => {
+    mocks.connected = true
+    const store = useChatStore()
+    let finishPreparation: (() => void) | undefined
+    const preparation = new Promise<void>((resolve) => {
+      finishPreparation = resolve
+    })
+    store.setWorkspaceContext('workspace-a', 'session-a')
+    store.setAgentTurnPreparation(() => preparation)
+
+    store.sendChat('background request')
+    store.setWorkspaceContext('workspace-b', 'session-b')
+    finishPreparation?.()
+
+    await vi.waitFor(() => expect(mocks.sendAgentChat).toHaveBeenCalledTimes(1))
+    expect(mocks.sendAgentChat.mock.calls[0][1]).toBe('session-a')
+    expect(mocks.sendAgentChat.mock.calls[0][4]).toBe('workspace-a')
   })
 
   it('still sends chat when Agent turn preparation fails', async () => {
@@ -475,7 +562,7 @@ describe('chatStore', () => {
     expect(mocks.requestJson.mock.calls[0][1].body).toContain('"session_id":"session-old"')
   })
 
-  it('migrates old risky chat tool options while preserving bounded output budget', () => {
+  it('keeps MCP available while migrating old web-search defaults', () => {
     window.localStorage.setItem('yuizaki.chat.options', JSON.stringify({
       model: 'gpt-test',
       max_tokens: 64000,
@@ -491,11 +578,11 @@ describe('chatStore', () => {
 
     expect(store.chatOptions.model).toBe('gpt-test')
     expect(store.chatOptions.max_tokens).toBe(64000)
-    expect(store.chatOptions.mcp_enabled).toBe(false)
+    expect(store.chatOptions.mcp_enabled).toBe(true)
     expect(store.chatOptions.web_search_enabled).toBe(false)
     expect(store.chatOptions.tts_enabled).toBe(true)
     expect(store.chatOptions.prompt_mode).toBe('auto')
-    expect(window.localStorage.getItem('yuizaki.chat.options.version')).toBe('6')
+    expect(window.localStorage.getItem('yuizaki.chat.options.version')).toBe('7')
   })
 
   it('can disable TTS output for requests and late playback events', () => {
@@ -977,6 +1064,38 @@ describe('chatStore', () => {
     expect(store.state.lastError).toBeNull()
   })
 
+  it('keeps background stream output out of the active session', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.setWorkspaceContext('workspace-a', 'session-a')
+    store.sendChat('run in A')
+    const requestId = mocks.sendAgentChat.mock.calls[0][3]
+
+    store.clearLocalMessages()
+    store.setWorkspaceContext('workspace-b', 'session-b')
+    mocks.handlers.get(SocketEvents.LLM_DELTA)?.({
+      token: 'partial A',
+      session_id: 'session-a',
+      request_id: requestId,
+    })
+
+    expect(store.state.currentText).toBe('')
+    expect(store.state.messages).toEqual([])
+    expect(store.isSessionGenerating('session-a')).toBe(true)
+    expect(store.isSessionGenerating('session-b')).toBe(false)
+
+    mocks.handlers.get(SocketEvents.LLM_FINAL)?.({
+      text: 'finished A',
+      session_id: 'session-a',
+      request_id: requestId,
+    })
+
+    expect(store.state.currentText).toBe('')
+    expect(store.state.messages).toEqual([])
+    expect(store.isSessionGenerating('session-a')).toBe(false)
+    expect(store.unreadSessionIds).toContain('session-a')
+  })
+
   it('clears session-scoped volatile state when loading history', async () => {
     const store = useChatStore()
     store.state.asrPartialText = '旧识别'
@@ -997,6 +1116,29 @@ describe('chatStore', () => {
     expect(store.state.lastError).toBeNull()
     expect(store.state.lastAgentEnvelope).toBeNull()
     expect(store.state.agentEnvelopeTimeline).toEqual([])
+  })
+
+  it('ignores history responses from a session that is no longer active', async () => {
+    const store = useChatStore()
+    let resolveSessionA: ((value: unknown) => void) | undefined
+    let resolveSessionB: ((value: unknown) => void) | undefined
+    mocks.requestJson.mockImplementation((url: string) => new Promise((resolve) => {
+      if (url.includes('session-a')) resolveSessionA = resolve
+      if (url.includes('session-b')) resolveSessionB = resolve
+    }))
+
+    store.setWorkspaceContext('workspace-a', 'session-a')
+    const sessionARequest = store.loadHistory('session-a', 'workspace-a')
+    store.setWorkspaceContext('workspace-b', 'session-b')
+    const sessionBRequest = store.loadHistory('session-b', 'workspace-b')
+
+    resolveSessionB?.({ history: [{ role: 'assistant', content: 'history B' }] })
+    await sessionBRequest
+    resolveSessionA?.({ history: [{ role: 'assistant', content: 'stale history A' }] })
+    await sessionARequest
+
+    expect(store.state.currentSessionId).toBe('session-b')
+    expect(store.state.messages).toEqual([expect.objectContaining({ content: 'history B' })])
   })
 
   it('encodes session ids when loading persisted history', async () => {
@@ -1078,7 +1220,33 @@ describe('chatStore', () => {
     ])
   })
 
-  it('keeps visible reasoning returned by final socket events', () => {
+  it('applies a replayed final event exactly once', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.sendChat('hello once')
+    const requestId = mocks.sendAgentChat.mock.calls[0][3]
+    const finalPayload = {
+      text: 'one reply',
+      session_id: 'default',
+      request_id: requestId,
+      user_message_id: 31,
+      assistant_message_id: 32,
+    }
+
+    mocks.handlers.get(SocketEvents.LLM_FINAL)?.(finalPayload)
+    mocks.handlers.get(SocketEvents.LLM_FINAL)?.(finalPayload)
+    mocks.handlers.get(SocketEvents.LLM_DELTA)?.({
+      token: 'late token',
+      session_id: 'default',
+      request_id: requestId,
+    })
+
+    expect(store.state.messages.filter((message) => message.id === 32)).toHaveLength(1)
+    expect(store.state.currentText).toBe('')
+    expect(store.state.isGenerating).toBe(false)
+  })
+
+  it('does not persist hidden reasoning returned by final socket events', () => {
     mocks.connected = true
     const store = useChatStore()
 
@@ -1096,9 +1264,9 @@ describe('chatStore', () => {
         id: 21,
         role: 'assistant',
         content: 'final answer',
-        reasoning: 'visible model reasoning',
       }),
     ])
+    expect(store.state.messages.at(-1)).not.toHaveProperty('reasoning')
   })
 
   it('clears persisted conversation messages through the session API', async () => {

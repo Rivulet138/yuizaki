@@ -36,11 +36,12 @@ withDefaults(defineProps<{
 <style scoped>
 .panel-shell {
   position: relative;
-  padding: 16px;
-  border: 1px solid var(--yui-border);
-  border-radius: min(var(--yui-radius-panel), 16px);
-  background: var(--yui-surface);
-  box-shadow: var(--yui-shadow-card);
+  padding: 0;
+  border: 1px solid var(--yui-panel-outline, var(--yui-border));
+  border-radius: var(--yui-radius-panel, 18px);
+  background: var(--yui-panel-surface, var(--yui-surface));
+  background-clip: padding-box;
+  box-shadow: var(--yui-panel-shadow, var(--yui-shadow-card));
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -54,11 +55,15 @@ withDefaults(defineProps<{
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-  backdrop-filter: none;
+}
+
+.panel-shell:not(.panel-shell--minimal):focus-within {
+  border-color: var(--yui-panel-outline-strong, var(--yui-border-strong));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--yui-accent) 14%, transparent), var(--yui-panel-shadow, var(--yui-shadow-card));
 }
 
 .panel-shell--compact {
-  padding: 12px;
+  gap: 12px;
 }
 
 .panel-shell__header {
@@ -127,11 +132,6 @@ withDefaults(defineProps<{
 }
 
 @media (max-width: 900px) {
-  .panel-shell {
-    padding: 12px;
-    border-radius: 12px;
-  }
-
   .panel-shell__header {
     flex-direction: column;
     gap: 12px;
@@ -144,10 +144,6 @@ withDefaults(defineProps<{
 }
 
 @media (max-width: 760px) {
-  .panel-shell {
-    padding: 12px;
-  }
-
   .panel-shell__body {
     padding-right: 0;
   }
@@ -159,11 +155,11 @@ withDefaults(defineProps<{
 }
 
 .panel-shell__body::-webkit-scrollbar-thumb {
-  background: rgba(156, 163, 175, 0.3);
+  background: color-mix(in srgb, var(--yui-muted) 32%, transparent);
   border-radius: 4px;
 }
 
 .panel-shell__body::-webkit-scrollbar-thumb:hover {
-  background: rgba(156, 163, 175, 0.5);
+  background: color-mix(in srgb, var(--yui-muted) 52%, transparent);
 }
 </style>

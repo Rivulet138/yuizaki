@@ -11,7 +11,6 @@ import {
   StarFilled,
   Tickets,
   Tools,
-  UserFilled,
 } from '@element-plus/icons-vue'
 import { type AsyncComponentLoader, type Component, defineAsyncComponent } from 'vue'
 import { hasMessage, t } from '@/i18n'
@@ -50,7 +49,7 @@ const moduleViewDefinitions: Record<NavigationModuleId, { icon: Component; loade
   pet: { icon: StarFilled, loader: () => import('@/domains/pet/views/PetControlPanel.vue') },
   chat: { icon: ChatDotRound, loader: () => import('@/domains/chat/views/ChatPanel.vue') },
   prompt: { icon: Tickets, loader: () => import('@/domains/prompt/views/PromptPanel.vue') },
-  companion: { icon: UserFilled, loader: () => import('@/domains/companion/views/CompanionPanel.vue') },
+  companion: { icon: ChatDotRound, loader: () => import('@/domains/chat/views/ChatPanel.vue') },
   svc: { icon: Cpu, loader: () => import('@/domains/tools/views/SVCPanel.vue') },
   tool: { icon: Tools, loader: () => import('@/domains/tools/views/ToolPanel.vue') },
   plugins: { icon: Operation, loader: () => import('@/domains/plugin/views/PluginManagementPanel.vue') },
@@ -90,7 +89,7 @@ export const enabledNavigationModules = (): NavigationModule[] =>
     .map(localizeNavigationModule)
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 
-const primaryMenuOrder: NavigationModuleId[] = ['companion', 'chat', 'memory']
+const primaryMenuOrder: NavigationModuleId[] = ['chat', 'memory']
 
 export const primaryNavigationModules = (): NavigationModule[] =>
   enabledNavigationModules()

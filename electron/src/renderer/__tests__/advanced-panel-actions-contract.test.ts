@@ -8,9 +8,12 @@ const readPanel = (path: string) => readFileSync(
 )
 
 describe('advanced panel action contracts', () => {
-  it('keeps one trace refresh action for the shared trace snapshot', () => {
+  it('keeps one refresh action for schedules, traces, and experience metrics', () => {
     const source = readPanel('system/views/AgentTracePanel.vue')
-    expect(source.match(/@click="loadAgentTrace"/g)).toHaveLength(1)
+    expect(source.match(/@click="refreshAll"/g)).toHaveLength(1)
+    expect(source).toContain('loadSchedules(),')
+    expect(source).toContain('loadAgentTrace(),')
+    expect(source).toContain('loadExperienceMetrics(),')
   })
 
   it('keeps one global refresh action in the runtime checks panel', () => {

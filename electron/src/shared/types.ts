@@ -1,9 +1,29 @@
+export interface ChatAgentStep {
+  id: string;
+  title: string;
+  status: string;
+  tool?: string;
+  error?: string;
+}
+
+export interface ChatMemorySource {
+  id: string;
+  text: string;
+  layer?: string;
+  source?: string;
+  score?: number;
+}
+
 export interface ChatMessage {
   id?: number | string;
   role: 'user' | 'assistant' | 'system';
   content: string;
-  reasoning?: string | null;
   timestamp?: string | null;
+  request_id?: string | null;
+  tool_trace?: unknown[] | null;
+  memory_trace?: unknown[] | null;
+  agentSteps?: ChatAgentStep[] | null;
+  memorySources?: ChatMemorySource[] | null;
 }
 
 export type ChatReasoningEffort =

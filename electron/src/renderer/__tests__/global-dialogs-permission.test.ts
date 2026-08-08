@@ -66,11 +66,13 @@ vi.mock('@/app/composables/useCompanionRuntimeBridge', () => ({
 }))
 
 const ElDialogStub = {
+  inheritAttrs: false,
   props: ['modelValue', 'beforeClose', 'title'],
-  emits: ['update:modelValue', 'closed'],
+  emits: ['update:modelValue', 'closed', 'open-auto-focus'],
   template: `
-    <section>
-      <h2>{{ title }}</h2>
+    <section v-bind="$attrs">
+      <h2><slot name="header">{{ title }}</slot></h2>
+      <button class="open-auto-focus" @click="$emit('open-auto-focus')">focus</button>
       <button class="dismiss-x" @click="beforeClose(() => $emit('update:modelValue', false))">x</button>
       <button class="dismiss-escape" @click="beforeClose(() => $emit('update:modelValue', false))">escape</button>
       <button class="dismiss-backdrop" @click="beforeClose(() => $emit('update:modelValue', false))">backdrop</button>
@@ -147,6 +149,28 @@ describe('GlobalDialogs permission dismissal', () => {
   it('contains no visible Chinese literals outside i18n resources', () => {
     const source = readFileSync('src/renderer/app/components/dialogs/GlobalDialogs.vue', 'utf8')
     expect(source).not.toMatch(/[一-龥]/u)
+  })
+
+  it('owns the only permission surface and focuses the conservative action', async () => {
+    const wrapper = mountDialogs()
+    const dialog = wrapper.getComponent(ElDialogStub)
+    const deny = wrapper.get('[data-testid="permission-deny"]')
+    const focus = vi.spyOn(deny.element as HTMLElement, 'focus')
+
+    expect(dialog.attributes('role')).toBe('alertdialog')
+    expect(dialog.attributes('aria-labelledby')).toBe('permission-dialog-title')
+    expect(dialog.attributes('aria-describedby')).toBe('permission-dialog-description')
+    expect(wrapper.get('#permission-dialog-title').text()).toBeTruthy()
+    expect(wrapper.get('#permission-dialog-description').text()).toContain('needs approval')
+
+    await wrapper.get('.open-auto-focus').trigger('click')
+    await nextTick()
+    expect(focus).toHaveBeenCalledOnce()
+
+    const chatSource = readFileSync('src/renderer/domains/chat/views/ChatPanel.vue', 'utf8')
+    expect(chatSource).not.toContain('permissionDialogVisible')
+    expect(chatSource).not.toContain('sendPermissionResponse')
+    expect(chatSource).not.toContain('permission-card')
   })
 
   it('routes workspace shortcuts through the existing chat and companion runtime owners', async () => {

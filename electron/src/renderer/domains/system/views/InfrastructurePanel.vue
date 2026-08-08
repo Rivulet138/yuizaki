@@ -708,11 +708,12 @@ onMounted(() => {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 20px;
   padding: 16px;
-  border: 1px solid var(--yui-border);
+  border: 1px solid var(--yui-panel-outline, var(--yui-border));
   border-radius: var(--yui-radius-card);
-  background: var(--yui-surface-raised);
+  background: var(--yui-panel-surface, var(--yui-surface-raised));
+  background-clip: padding-box;
   color: var(--yui-text);
-  box-shadow: var(--yui-shadow-card);
+  box-shadow: var(--yui-panel-shadow, var(--yui-shadow-card));
 }
 
 .infra-hero h2 {

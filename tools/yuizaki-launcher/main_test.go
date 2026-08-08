@@ -29,6 +29,27 @@ func TestBuildRequired(t *testing.T) {
 	}
 }
 
+func TestQdrantAutoStartDefaultsToMemoryBackend(t *testing.T) {
+	if qdrantAutoStartEnabled(map[string]string{"MEMORY_BACKEND": "sqlite"}) {
+		t.Fatal("sqlite memory must not auto-start Qdrant")
+	}
+	if !qdrantAutoStartEnabled(map[string]string{"MEMORY_BACKEND": "qdrant"}) {
+		t.Fatal("qdrant memory backend should opt into Qdrant auto-start")
+	}
+	if qdrantAutoStartEnabled(map[string]string{"MEMORY_BACKEND": "qdrant", "QDRANT_AUTO_START": "0"}) {
+		t.Fatal("explicit QDRANT_AUTO_START=0 must disable auto-start")
+	}
+}
+
+func TestMCPIsEnabledByDefault(t *testing.T) {
+	if !mcpEnabled(map[string]string{}) {
+		t.Fatal("the supervised launcher must start MCP unless explicitly disabled")
+	}
+	if mcpEnabled(map[string]string{"YUIZAKI_WITH_MCP": "0"}) {
+		t.Fatal("YUIZAKI_WITH_MCP=0 must disable MCP startup")
+	}
+}
+
 func TestBuildRequiredWhenOutputIsMissing(t *testing.T) {
 	t.Parallel()
 

@@ -46,7 +46,7 @@ const targetSize = (declarations: string, axis: 'width' | 'height') => {
 
 describe('responsive shell and chat contracts', () => {
   it('keeps the compact composer on one row with horizontal overflow for both tool groups', () => {
-    const source = readRendererSource('domains/chat/views/ChatPanel.vue')
+    const source = readRendererSource('domains/chat/views/ChatPanel.css')
     const compactCss = extractMediaBlock(source, 900)
     const toolbar = ruleBodiesFor(compactCss, '.composer-toolbar')
     const leftTools = ruleBodiesFor(compactCss, '.composer-tools-left')
@@ -75,5 +75,49 @@ describe('responsive shell and chat contracts', () => {
     expect(source).toContain('if (!force && modelOptionsProviderKey.value === providerKey && modelOptions.value.length)')
     expect(source).toContain('settingsStore.state.llm.model,')
     expect(source).toContain('chatOptions.model,')
+  })
+
+  it('keeps desktop pet controls reachable from the conversation surface', () => {
+    const source = readRendererSource('domains/chat/views/ChatPanel.vue')
+
+    expect(source).toContain('data-testid="chat-pet-settings"')
+    expect(source).toContain('openPetSettings')
+    expect(source).toContain('/pet`')
+  })
+
+  it('uses a stable chat surface and disables the unused wallpaper blur layer', () => {
+    const source = readRendererSource('app/AppShell.vue')
+
+    expect(source).toMatch(/\.app-main\.chat-mode\s*\{[\s\S]*background:\s*var\(--yui-chat-page-bg\)/)
+    expect(source).toMatch(/\.wallpaper-blur\s*\{[\s\S]*display:\s*none/)
+  })
+
+  it('keeps wallpaper subordinate to functional panel content', () => {
+    const source = readRendererSource('app/AppShell.vue')
+
+    expect(source).toMatch(/\.wallpaper-mask\s*\{[\s\S]*background:\s*var\(--yui-panel-wallpaper-mask\)/)
+    expect(source).toMatch(/\.wallpaper-on\s+\.wallpaper-layer\s*\{[\s\S]*opacity:\s*var\(--yui-panel-wallpaper-opacity\)/)
+    expect(source).toContain('--yui-panel-wallpaper-opacity: 1')
+    expect(source).toContain('--yui-chat-wallpaper-opacity: 1')
+    expect(source).toContain('--yui-chat-page-bg: transparent')
+    expect(source).toContain('--yui-chat-wallpaper-mask: transparent')
+  })
+
+  it('keeps functional panels inside a complete translucent boundary without backdrop blur', () => {
+    const source = readRendererSource('shared/components/panel/PanelShell.vue')
+    const basePanel = source.match(/\.panel-shell\s*\{([^}]*)\}/)?.[1] ?? ''
+
+    expect(basePanel).toMatch(/border\s*:\s*1px solid var\(--yui-panel-outline/)
+    expect(basePanel).toMatch(/background\s*:\s*var\(--yui-panel-surface/)
+    expect(basePanel).not.toContain('backdrop-filter')
+    expect(basePanel).toMatch(/background-clip\s*:\s*padding-box/)
+  })
+
+  it('lazy-renders every main settings tab', () => {
+    const source = readRendererSource('domains/settings/views/SettingsPanel.vue')
+    const tabPanes = source.match(/<el-tab-pane\b[^>]*>/g) || []
+
+    expect(tabPanes).toHaveLength(8)
+    expect(tabPanes.every((pane) => /\slazy(?:\s|>)/.test(pane))).toBe(true)
   })
 })

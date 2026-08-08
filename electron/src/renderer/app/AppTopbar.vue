@@ -1,7 +1,13 @@
 <template>
   <header class="topbar drag">
     <div class="topbar-left">
-      <h1 class="topbar-title">{{ title }}</h1>
+      <div class="topbar-context">
+        <h1 class="topbar-title">{{ title }}</h1>
+        <div class="companion-presence" :class="`is-${companionState}`" role="status" aria-live="polite">
+          <span aria-hidden="true"></span>
+          {{ companionStateLabel }}
+        </div>
+      </div>
     </div>
 
     <div class="top-actions no-drag">
@@ -72,6 +78,8 @@ defineProps<{
   notificationCount?: number
   adminMode?: boolean
   theme?: 'light' | 'dark'
+  companionState: string
+  companionStateLabel: string
 }>()
 
 const emit = defineEmits<{
@@ -100,14 +108,15 @@ const handleLocaleChange = (value: string | number | boolean) => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 54px;
-  margin-bottom: 14px;
-  padding: 0 12px 0 20px;
+  min-height: 50px;
+  margin-bottom: 10px;
+  padding: 0 4px 0 8px;
   overflow: visible;
-  border: 1px solid var(--yui-border);
-  border-radius: 18px;
-  background: var(--yui-surface);
-  box-shadow: var(--yui-shadow-card);
+  border: 1px solid var(--yui-panel-outline, var(--yui-border));
+  border-radius: 10px;
+  background: var(--yui-panel-surface, var(--yui-surface));
+  background-clip: padding-box;
+  box-shadow: var(--yui-panel-shadow, none);
   box-sizing: border-box;
 }
 
@@ -128,6 +137,13 @@ const handleLocaleChange = (value: string | number | boolean) => {
   min-width: 0;
 }
 
+.topbar-context {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
 .topbar-title {
   margin: 0;
   overflow: hidden;
@@ -138,6 +154,38 @@ const handleLocaleChange = (value: string | number | boolean) => {
   letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.companion-presence {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  color: var(--yui-muted);
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.companion-presence > span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #16a34a;
+}
+
+.companion-presence.is-thinking > span,
+.companion-presence.is-executing > span,
+.companion-presence.is-waiting-for-permission > span {
+  background: #d97706;
+}
+
+.companion-presence.is-offline > span,
+.companion-presence.is-interrupted > span {
+  background: #64748b;
+}
+
+.companion-presence.is-error > span {
+  background: #dc2626;
 }
 
 .top-actions {
@@ -211,7 +259,7 @@ const handleLocaleChange = (value: string | number | boolean) => {
   .topbar {
     align-items: flex-start;
     min-height: 0;
-    padding: 10px;
+    padding: 8px 4px;
     gap: 10px;
   }
 
@@ -219,6 +267,12 @@ const handleLocaleChange = (value: string | number | boolean) => {
     max-width: 180px;
     font-size: 15px;
     line-height: 34px;
+  }
+
+  .topbar-context {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
   }
 
   .top-actions {
@@ -253,6 +307,10 @@ const handleLocaleChange = (value: string | number | boolean) => {
   .topbar-title {
     max-width: 100%;
     line-height: 1.3;
+  }
+
+  .topbar-context {
+    width: 100%;
   }
 
   .top-actions {

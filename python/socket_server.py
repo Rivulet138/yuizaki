@@ -51,6 +51,7 @@ from modules.system.experience_metrics import ExperienceMetricsStore
 from modules.system.memory_write_pipeline import build_user_signal_event
 from modules.tts.synthesizer import StreamingSentenceBuffer, TTSClient
 from modules.tts.visemes import normalize_viseme_cues
+from modules.pet_control import legacy_pet_control_to_avatar_command
 
 from socket_events import (
     AudioEvents, LLMEvents, TTSEvents, SVCEvents, ToolEvents,
@@ -301,6 +302,10 @@ def _event_payload(data: object) -> JsonDict:
     return {}
 
 
+def _agent_result_payload(envelope: object, session_id: str) -> JsonDict:
+    return {**_event_payload(envelope), "session_id": session_id}
+
+
 def _extract_socket_auth_token(auth: object) -> str:
     if not isinstance(auth, Mapping):
         return ""
@@ -382,6 +387,8 @@ class DesktopPetSocketServer:
         self._visual_analysis_skipped: dict[str, int] = {}
         self._visual_ocr_attempts: dict[str, int] = {}
         self._visual_ocr_frame_ids: dict[str, str] = {}
+        self._avatar_command_sequence = 0
+        self._avatar_command_stream_id = f"python:{uuid.uuid4().hex}"
         self._voice_prepared_sessions: set[str] = set()
         self._voice_prepare_tasks: set[asyncio.Task[None]] = set()
 
@@ -419,6 +426,28 @@ class DesktopPetSocketServer:
         self.plugin_manager.set_proactive_dispatch(self._dispatch_plugin_proactive_message)
 
         self._register_handlers()
+
+    def _next_avatar_sequence(self) -> int:
+        sequence = self._avatar_command_sequence
+        self._avatar_command_sequence += 1
+        return sequence
+
+    def _build_avatar_command(
+        self,
+        pet_control: object,
+        *,
+        session_id: str,
+        request_id: str | None = None,
+    ) -> JsonDict | None:
+        sequence = self._next_avatar_sequence()
+        command = legacy_pet_control_to_avatar_command(
+            pet_control,
+            command_id=f"{request_id or session_id}-avatar-{sequence}",
+            stream_id=self._avatar_command_stream_id,
+            sequence=sequence,
+            issued_at=int(time.time() * 1000),
+        )
+        return cast(JsonDict | None, command)
 
     async def _emit_latency(self, target_sid: str, snapshot: Mapping[str, object]) -> None:
         self.experience_metrics.record_latency(snapshot)
@@ -548,6 +577,79 @@ class DesktopPetSocketServer:
         except Exception:
             logger.exception("Failed to persist chat exchange for session %s", session_id)
             return {"user_message_id": None, "assistant_message_id": None}
+
+    @staticmethod
+    def _visible_message_metadata(action_envelope: dict[str, Any] | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if not isinstance(action_envelope, dict):
+            return [], []
+        tool_steps: list[dict[str, Any]] = []
+        memory_sources: list[dict[str, Any]] = []
+        actions = action_envelope.get("actions")
+        for action in actions if isinstance(actions, list) else []:
+            if not isinstance(action, dict) or not isinstance(action.get("payload"), list):
+                continue
+            payload = action["payload"]
+            if action.get("type") == "tool_trace":
+                raw_steps: list[Any] = []
+                for entry in payload:
+                    if not isinstance(entry, dict):
+                        continue
+                    nested_steps = entry.get("step_results")
+                    if isinstance(nested_steps, list):
+                        raw_steps.extend(nested_steps)
+                    elif entry.get("title") or entry.get("tool") or entry.get("name"):
+                        raw_steps.append(entry)
+                for index, step in enumerate(raw_steps):
+                    if not isinstance(step, dict):
+                        continue
+                    tool = str(step.get("tool") or step.get("name") or "").strip()
+                    title = str(step.get("title") or step.get("description") or tool or f"Step {index + 1}").strip()
+                    success = step.get("success")
+                    status = str(step.get("status") or ("failed" if success is False else "completed" if success is True else "recorded")).strip()
+                    error = str(step.get("error") or "").strip()
+                    tool_steps.append({
+                        "id": str(step.get("id") or step.get("step_id") or f"step-{index + 1}"),
+                        "title": title,
+                        "status": status,
+                        **({"tool": tool} if tool else {}),
+                        **({"error": error} if error else {}),
+                    })
+            elif action.get("type") == "memory_trace":
+                for source in payload:
+                    if not isinstance(source, dict):
+                        continue
+                    source_id = str(source.get("id") or "").strip()
+                    text = str(source.get("text") or "").strip()
+                    if not source_id or not text:
+                        continue
+                    layer = str(source.get("layer") or "").strip()
+                    origin = str(source.get("source") or "").strip()
+                    score = source.get("score")
+                    memory_sources.append({
+                        "id": source_id,
+                        "text": text,
+                        **({"layer": layer} if layer else {}),
+                        **({"source": origin} if origin else {}),
+                        **({"score": float(score)} if isinstance(score, (int, float)) else {}),
+                    })
+        return tool_steps, memory_sources
+
+    def _persist_message_metadata(self, message_id: int | None, action_envelope: dict[str, Any] | None) -> None:
+        db_repo = self.runtime_context.db_repo
+        update_metadata = getattr(db_repo, "update_message_metadata", None)
+        if message_id is None or not callable(update_metadata):
+            return
+        tool_steps, memory_sources = self._visible_message_metadata(action_envelope)
+        if not tool_steps and not memory_sources:
+            return
+        try:
+            update_metadata(
+                message_id,
+                tool_trace=tool_steps,
+                memory_trace=memory_sources,
+            )
+        except Exception:
+            logger.exception("Failed to persist agent metadata for message %s", message_id)
 
     def _bind_ctx_runtime(self, ctx: AgentRequestContext, *, include_visual: bool = True) -> None:
         """将 runtime_context 注入到 AgentRequestContext.extra（消除三处重复）。"""
@@ -1186,15 +1288,25 @@ class DesktopPetSocketServer:
         generation_mgr.append_history(runtime_session_id, "assistant", final_reply)
 
         if pipeline_result.action_envelope:
-            await self.sio.emit(AgentEvents.RESULT, pipeline_result.action_envelope, to=target_sid)
+            await self.sio.emit(
+                AgentEvents.RESULT,
+                _agent_result_payload(pipeline_result.action_envelope, runtime_session_id),
+                to=target_sid,
+            )
         await self.sio.emit(LLMEvents.FINAL, _event_payload(LLMFinalData(
             text=final_reply,
             session_id=runtime_session_id,
         )), to=target_sid)
         if pipeline_result.pet_control:
+            avatar_command = self._build_avatar_command(
+                pipeline_result.pet_control,
+                session_id=runtime_session_id,
+                request_id=request_id,
+            )
             await self.sio.emit(PetEvents.CONTROL, {
                 "session_id": runtime_session_id,
                 "pet_control": pipeline_result.pet_control,
+                **({"avatar_command": avatar_command} if avatar_command else {}),
             }, to=target_sid)
         if self.tts_client:
             await self._run_tts_for_generation(runtime_session_id, target_sid)
@@ -1634,6 +1746,7 @@ class DesktopPetSocketServer:
 
             session_id = payload.session_id or sid
             gen = generation_mgr.start(session_id)
+            persisted_assistant_message_id: int | None = None
 
             # 适配 LLMClient.stream_chat 期望的 WebSocket 接口
             outer_server = self
@@ -1644,6 +1757,7 @@ class DesktopPetSocketServer:
                     self._sid: str = client_sid
 
                 async def send_json(self, msg: JsonDict) -> None:
+                    nonlocal persisted_assistant_message_id
                     msg_type = msg.get("type")
                     if msg_type == "token":
                         token = _as_text(msg.get("content"))
@@ -1662,6 +1776,7 @@ class DesktopPetSocketServer:
                             assistant_text=gen.full_text,
                             model=model,
                         )
+                        persisted_assistant_message_id = message_ids["assistant_message_id"]
                         await self._sio.emit(LLMEvents.FINAL, _event_payload(LLMFinalData(
                             text=gen.full_text,
                             session_id=session_id,
@@ -1671,9 +1786,15 @@ class DesktopPetSocketServer:
                         if hasattr(gen, "latency_snapshot"):
                             await outer_server._emit_latency(self._sid, gen.latency_snapshot())
                     elif msg_type == "pet_control":
+                        avatar_command = outer_server._build_avatar_command(
+                            msg.get("pet_control", {}),
+                            session_id=session_id,
+                            request_id=request_id,
+                        )
                         await self._sio.emit(PetEvents.CONTROL, {
                             "session_id": session_id,
                             "pet_control": msg.get("pet_control", {}),
+                            **({"avatar_command": avatar_command} if avatar_command else {}),
                         }, to=self._sid)
                     elif msg_type == "error":
                         await self._sio.emit(SystemEvents.ERROR, {
@@ -1719,8 +1840,17 @@ class DesktopPetSocketServer:
                 )
                 self._bind_ctx_runtime(ctx)
                 result_obj = await self.agent_pipeline.run_streaming(ctx, ws_adapter, gen)
+                await run_in_threadpool(
+                    self._persist_message_metadata,
+                    persisted_assistant_message_id,
+                    result_obj.action_envelope,
+                )
                 if result_obj.action_envelope:
-                    await self.sio.emit(AgentEvents.RESULT, result_obj.action_envelope, to=sid)
+                    await self.sio.emit(
+                        AgentEvents.RESULT,
+                        _agent_result_payload(result_obj.action_envelope, session_id),
+                        to=sid,
+                    )
 
                 # LLM 结束后触发 TTS（如果可用）
                 if tts_enabled and self.tts_client:
@@ -1991,7 +2121,11 @@ class DesktopPetSocketServer:
                     session_id=session_id,
                 )), to=sid)
                 if result.action_envelope:
-                    await self.sio.emit(AgentEvents.RESULT, result.action_envelope, to=sid)
+                    await self.sio.emit(
+                        AgentEvents.RESULT,
+                        _agent_result_payload(result.action_envelope, session_id),
+                        to=sid,
+                    )
                 return
 
             llm_client = self.llm_client
@@ -2189,10 +2323,11 @@ class DesktopPetSocketServer:
                     )
                     gen.tts_task = tts_worker
                 tts_stream_closed = False
+                persisted_assistant_message_id: int | None = None
 
                 class _AgentStreamingAdapter:
                     async def send_json(self, msg: JsonDict) -> None:
-                        nonlocal tts_stream_closed
+                        nonlocal persisted_assistant_message_id, tts_stream_closed
                         msg_type = msg.get("type")
                         if msg_type == "token":
                             token = _as_text(msg.get("content"))
@@ -2227,6 +2362,7 @@ class DesktopPetSocketServer:
                                 assistant_text=gen.full_text,
                                 model=model,
                             )
+                            persisted_assistant_message_id = message_ids["assistant_message_id"]
                             await self_server.sio.emit(LLMEvents.FINAL, _event_payload(LLMFinalData(
                                 text=gen.full_text,
                                 session_id=session_id,
@@ -2236,9 +2372,15 @@ class DesktopPetSocketServer:
                             if hasattr(gen, "latency_snapshot"):
                                 await self_server._emit_latency(sid, gen.latency_snapshot())
                         elif msg_type == "pet_control":
+                            avatar_command = self_server._build_avatar_command(
+                                msg.get("pet_control", {}),
+                                session_id=session_id,
+                                request_id=request_id,
+                            )
                             await self_server.sio.emit(PetEvents.CONTROL, {
                                 "session_id": session_id,
                                 "pet_control": msg.get("pet_control", {}),
+                                **({"avatar_command": avatar_command} if avatar_command else {}),
                             }, to=sid)
                         elif msg_type == "error":
                             if tts_worker is not None and not tts_worker.done():
@@ -2264,7 +2406,16 @@ class DesktopPetSocketServer:
                         await tts_queue.put(segment)
                     await tts_queue.put(None)
                 if pipeline_result.action_envelope:
-                    await self.sio.emit(AgentEvents.RESULT, pipeline_result.action_envelope, to=sid)
+                    await run_in_threadpool(
+                        self_server._persist_message_metadata,
+                        persisted_assistant_message_id,
+                        pipeline_result.action_envelope,
+                    )
+                    await self.sio.emit(
+                        AgentEvents.RESULT,
+                        _agent_result_payload(pipeline_result.action_envelope, session_id),
+                        to=sid,
+                    )
                 if tts_worker is not None:
                     try:
                         await tts_worker

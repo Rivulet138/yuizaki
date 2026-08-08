@@ -69,6 +69,8 @@ Windows：
 .\start.bat
 ```
 
+普通启动使用已构建 UI、SQLite 记忆并启动 MCP，保证工具能力完整；Qdrant 仍按语义记忆需求启用。开发调试可添加 `--dev-renderer`，启用本地 Qdrant 使用 `--with-qdrant`，明确不需要 MCP 时使用 `--no-mcp`。
+
 也可以构建并使用 Windows 监督启动器：
 
 ```powershell

@@ -578,6 +578,88 @@ def _normalize_pet_control_payload(pet_control: Any) -> Optional[dict[str, Any]]
     return normalized or None
 
 
+def legacy_pet_control_to_avatar_command(
+    pet_control: Any,
+    *,
+    command_id: str,
+    stream_id: str,
+    sequence: int,
+    issued_at: int,
+    capability_revision: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """Convert the stable LLM-facing payload into AvatarCommand v1.
+
+    The LLM contract stays intentionally small; transport code can use this
+    converter without duplicating snake_case/camelCase mapping rules.
+    """
+    normalized = _normalize_pet_control_payload(pet_control)
+    if not normalized:
+        return None
+
+    duration_ms = int(normalized.get("duration_ms", 1800))
+    intensity = float(normalized.get("intensity", 1.0))
+    actions: list[dict[str, Any]] = []
+
+    emotion_id = normalized.get("emotion_id")
+    if emotion_id:
+        actions.append({
+            "type": "affect",
+            "emotion": str(emotion_id),
+            "intensity": intensity,
+            "decayMs": duration_ms,
+        })
+
+    for expression in normalized.get("expression_mix", []):
+        actions.append({
+            "type": "expression",
+            "name": expression["expression"],
+            "weight": expression.get("weight", 1.0),
+            "fadeOutMs": duration_ms,
+        })
+
+    parameter_overrides = normalized.get("parameter_overrides", [])
+    if parameter_overrides:
+        actions.append({
+            "type": "parameterPatch",
+            "patches": [
+                {
+                    "id": item["id"],
+                    "value": item["value"],
+                    "weight": item.get("weight", 1.0),
+                    "mode": "set",
+                }
+                for item in parameter_overrides
+            ],
+            "durationMs": duration_ms,
+        })
+
+    motion_group = normalized.get("motion_group")
+    if motion_group:
+        actions.append({
+            "type": "motion",
+            "group": str(motion_group),
+            "index": int(normalized.get("motion_index", 0)),
+            "intensity": intensity,
+        })
+
+    if not actions:
+        return None
+
+    command: dict[str, Any] = {
+        "version": 1,
+        "id": command_id,
+        "streamId": stream_id,
+        "sequence": max(0, int(sequence)),
+        "issuedAt": int(issued_at),
+        "priority": 50,
+        "interrupt": "replace",
+        "actions": actions,
+    }
+    if capability_revision:
+        command["capabilityRevision"] = capability_revision
+    return command
+
+
 def build_pet_control_prompt(control_context: Optional[dict[str, Any]] = None) -> str:
     if not control_context:
         return "\n\n".join([PET_CONTROL_SYSTEM_PROMPT, PET_CONTROL_DIRECTIVE_PROMPT])

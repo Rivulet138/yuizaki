@@ -1,17 +1,18 @@
 <template>
   <PanelShell title="运行总览" tone="admin">
+    <template #actions>
+      <el-button plain :loading="overviewRefreshLoading" @click="refreshOverview">刷新</el-button>
+    </template>
     <div class="overview-console">
       <section class="ops-hero">
         <div class="ops-status-grid">
-          <article v-for="card in connectionCards" :key="card.label" class="ops-status-card" :class="card.tone">
+          <article v-for="card in connectionCards" :key="card.label" class="ops-status-card" :class="card.tone" :title="card.desc">
             <span>{{ card.label }}</span>
             <strong>{{ card.value }}</strong>
-            <small>{{ card.desc }}</small>
           </article>
         </div>
       </section>
       <nav class="canonical-links" :aria-label="t('canonical.system.aria')">
-        <span>{{ t('canonical.system.label') }}</span>
         <router-link :to="canonicalPath('infrastructure')">{{ t('canonical.system.diagnostics') }}</router-link>
         <router-link :to="canonicalPath('deploy')">{{ t('canonical.system.runtimeChecks') }}</router-link>
       </nav>
@@ -21,17 +22,13 @@
           <div>
             <h3>链路自检</h3>
           </div>
-          <div class="action-row">
-            <el-button plain :loading="settingsStore.state.loading || readinessReq.loading" @click="refreshChainStatus">刷新</el-button>
-          </div>
         </div>
         <div class="chain-grid">
-          <article v-for="item in chainChecks" :key="item.label" class="chain-check" :class="item.tone">
+          <article v-for="item in chainChecks" :key="item.label" class="chain-check" :class="item.tone" :title="item.desc">
             <div>
               <strong>{{ item.label }}</strong>
               <span>{{ item.value }}</span>
             </div>
-            <small>{{ item.desc }}</small>
           </article>
         </div>
         <div v-if="chainIssues.length" class="chain-issues" aria-label="链路问题">
@@ -49,7 +46,6 @@
               <h3>摘要状态</h3>
             </div>
             <div class="action-row">
-              <el-button plain :loading="governanceReq.loading" @click="loadGovernance">刷新审计</el-button>
               <el-button type="primary" size="small" @click="exportGovernanceJson">JSON</el-button>
               <el-button type="primary" size="small" @click="exportGovernanceCsv">CSV</el-button>
             </div>
@@ -77,7 +73,6 @@
               <h3>会话摘要</h3>
             </div>
             <div class="action-row">
-              <el-button plain :loading="summarySessionsReq.loading" @click="loadSummarySessions">刷新</el-button>
               <el-button
                 type="primary"
                 :loading="rewriteReq.loading"
@@ -163,7 +158,6 @@
               <el-button type="primary" :disabled="!selectedModelId" @click="applyModel">
                 切换模型
               </el-button>
-              <el-button plain @click="syncPetData(false)">刷新清单</el-button>
             </div>
           </div>
 
@@ -198,7 +192,6 @@
                 inactive-text="关闭"
                 @change="setInteractMode"
               />
-              <el-button plain @click="syncPetData(false)">刷新状态</el-button>
             </div>
           </div>
 
@@ -527,6 +520,21 @@ const refreshChainStatus = async () => {
   ])
 }
 
+const overviewRefreshLoading = computed(() => (
+  settingsStore.state.loading
+  || readinessReq.loading
+  || summarySessionsReq.loading
+  || governanceReq.loading
+))
+
+const refreshOverview = async () => {
+  await Promise.all([
+    refreshChainStatus(),
+    loadSummarySessions(),
+    loadGovernance(),
+  ])
+}
+
 const connectionCards = computed(() => [
   {
     label: 'Control Server',
@@ -596,13 +604,7 @@ const handleVisibilityChange = () => {
 }
 
 onMounted(() => {
-  if (pageIsVisible()) void syncPetData(false)
-  void Promise.all([
-    settingsStore.fetchSettings(),
-    loadSummarySessions(),
-    refreshReadiness(),
-    loadGovernance(),
-  ])
+  void refreshOverview()
 
   document.addEventListener('visibilitychange', handleVisibilityChange)
   startPetSync()
@@ -644,13 +646,14 @@ onDeactivated(() => {
 .ops-status-card,
 .ops-card,
 .control-block {
-  border: 1px solid var(--yui-border);
-  background: var(--yui-surface-raised);
-  box-shadow: var(--yui-shadow-card);
+  border: 1px solid var(--yui-panel-outline, var(--yui-border));
+  background: var(--yui-panel-surface, var(--yui-surface-raised));
+  background-clip: padding-box;
+  box-shadow: var(--yui-panel-shadow, var(--yui-shadow-card));
 }
 
 .ops-status-card {
-  min-height: 116px;
+  min-height: 88px;
   border-radius: var(--yui-radius-card);
   padding: 16px;
   transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
@@ -659,8 +662,14 @@ onDeactivated(() => {
 .ops-status-card:hover,
 .ops-card:hover,
 .control-block:hover {
-  border-color: var(--yui-border-strong);
+  border-color: var(--yui-panel-outline-strong, var(--yui-border-strong));
   box-shadow: var(--yui-shadow-hover);
+}
+
+.ops-card:focus-within,
+.control-block:focus-within {
+  border-color: var(--yui-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--yui-accent) 16%, transparent), var(--yui-shadow-hover);
 }
 
 .ops-status-card span,
@@ -673,7 +682,7 @@ onDeactivated(() => {
 
 .ops-status-card strong {
   display: block;
-  margin: 12px 0 4px;
+  margin: 10px 0 0;
   color: var(--yui-text);
   font-size: 22px;
   font-weight: 950;
@@ -702,10 +711,10 @@ onDeactivated(() => {
 
 .chain-check {
   display: flex;
-  min-height: 96px;
+  min-height: 72px;
   min-width: 0;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: center;
   gap: 10px;
   border: 1px solid var(--yui-border);
   border-radius: var(--yui-radius-card);
@@ -931,7 +940,7 @@ onDeactivated(() => {
 
 .pet-ops-card {
   overflow: hidden;
-  background: var(--yui-surface-raised);
+  background: var(--yui-panel-surface, var(--yui-surface-raised));
 }
 
 .pet-chip-row {

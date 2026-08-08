@@ -6,6 +6,7 @@ build_pet_control_prompt = pet_control_parser.build_pet_control_prompt
 build_pet_control_response_format = pet_control_parser.build_pet_control_response_format
 extract_pet_control_payload = pet_control_parser.extract_pet_control_payload
 filter_pet_control_payload = pet_control_parser.filter_pet_control_payload
+legacy_pet_control_to_avatar_command = pet_control_parser.legacy_pet_control_to_avatar_command
 IncrementalJsonReplyDecoder = pet_control_parser.IncrementalJsonReplyDecoder
 
 
@@ -287,3 +288,41 @@ def test_incremental_reply_decoder_never_emits_pet_control_json():
 
     assert decoder.feed(payload) == "好的。"
     assert decoder.feed("ignored") == ""
+
+
+def test_legacy_pet_control_converts_to_avatar_command_v1():
+    command = legacy_pet_control_to_avatar_command(
+        {
+            "emotion_id": "happy",
+            "expression_mix": [{"expression": "smile", "weight": 0.7}],
+            "parameter_overrides": [{"id": "ParamAngleX", "value": 10, "weight": 0.5}],
+            "motion_group": "TapBody",
+            "motion_index": 2,
+            "intensity": 0.8,
+            "duration_ms": 1200,
+        },
+        command_id="cmd-1",
+        stream_id="python:test",
+        sequence=4,
+        issued_at=1000,
+    )
+
+    assert command == {
+        "version": 1,
+        "id": "cmd-1",
+        "streamId": "python:test",
+        "sequence": 4,
+        "issuedAt": 1000,
+        "priority": 50,
+        "interrupt": "replace",
+        "actions": [
+            {"type": "affect", "emotion": "happy", "intensity": 0.8, "decayMs": 1200},
+            {"type": "expression", "name": "smile", "weight": 0.7, "fadeOutMs": 1200},
+            {
+                "type": "parameterPatch",
+                "patches": [{"id": "ParamAngleX", "value": 10, "weight": 0.5, "mode": "set"}],
+                "durationMs": 1200,
+            },
+            {"type": "motion", "group": "TapBody", "index": 2, "intensity": 0.8},
+        ],
+    }

@@ -30,6 +30,7 @@ const (
 	defaultControlPort  = "38945"
 	defaultRendererPort = "5173"
 	defaultMCPPort      = "7777"
+	defaultMCPEnabled   = true
 )
 
 type launcherConfig struct {
@@ -131,6 +132,7 @@ func newConfig() (*launcherConfig, error) {
 		return nil, err
 	}
 
+	env := envMap()
 	cfg := &launcherConfig{
 		rootDir:          rootDir,
 		pythonDir:        filepath.Join(rootDir, "python"),
@@ -138,8 +140,9 @@ func newConfig() (*launcherConfig, error) {
 		nodeMCPDir:       filepath.Join(rootDir, "node-mcp"),
 		scriptsDir:       filepath.Join(rootDir, "scripts"),
 		logDir:           filepath.Join(rootDir, "logs", "dev"),
-		withMCP:          true,
-		devRenderer:      true,
+		withMCP:          mcpEnabled(env),
+		devRenderer:      envOrMap(env, "YUIZAKI_USE_VITE", "0") == "1",
+		noQdrant:         !qdrantAutoStartEnabled(env),
 		serverHost:       envOr("SERVER_HOST", "127.0.0.1"),
 		serverPort:       envOr("SERVER_PORT", defaultBackendPort),
 		serverFallbacks:  envOr("SERVER_PORT_FALLBACKS", "8011,8012,8013,8014,8015,8021,8022"),
@@ -148,19 +151,20 @@ func newConfig() (*launcherConfig, error) {
 		rendererPort:     envOr("RENDERER_PORT", defaultRendererPort),
 		renderFallbacks:  envOr("RENDERER_PORT_FALLBACKS", "5174,5175,5176,5177"),
 		mcpPort:          envOr("MCP_PORT", defaultMCPPort),
-		env:              envMap(),
+		env:              env,
 	}
 
 	flagSet := flag.NewFlagSet(filepath.Base(os.Args[0]), flag.ExitOnError)
-	flagSet.BoolVar(&cfg.withMCP, "with-mcp", true, "start MCP service")
+	flagSet.BoolVar(&cfg.withMCP, "with-mcp", cfg.withMCP, "start MCP service")
 	flagSet.BoolVar(&cfg.noOpen, "no-open", false, "do not open the panel URL")
 	flagSet.BoolVar(&cfg.noShowPet, "no-show-pet", false, "do not restore the desktop pet layer")
-	flagSet.BoolVar(&cfg.noQdrant, "no-qdrant", false, "skip Qdrant Docker auto-start")
+	flagSet.BoolVar(&cfg.noQdrant, "no-qdrant", cfg.noQdrant, "skip Qdrant Docker auto-start")
+	withQdrant := flagSet.Bool("with-qdrant", false, "start Qdrant Docker when memory backend needs it")
 	flagSet.BoolVar(&cfg.smoke, "smoke", false, "run lightweight smoke checks after startup")
 	flagSet.BoolVar(&cfg.checkOnly, "check", false, "run startup preflight checks only")
 	noMCP := flagSet.Bool("no-mcp", false, "do not start MCP service")
 	noDevRenderer := flagSet.Bool("no-dev-renderer", false, "serve built renderer through Electron control server")
-	devRenderer := flagSet.Bool("dev-renderer", true, "start Vite dev renderer")
+	devRenderer := flagSet.Bool("dev-renderer", cfg.devRenderer, "start Vite dev renderer")
 	if err := flagSet.Parse(os.Args[1:]); err != nil {
 		return nil, err
 	}
@@ -172,8 +176,8 @@ func newConfig() (*launcherConfig, error) {
 	} else {
 		cfg.devRenderer = *devRenderer
 	}
-	if envOr("QDRANT_AUTO_START", "") == "0" {
-		cfg.noQdrant = true
+	if *withQdrant {
+		cfg.noQdrant = false
 	}
 
 	if err := os.MkdirAll(cfg.logDir, 0o755); err != nil {
@@ -319,6 +323,8 @@ func (r *commandRunner) preflight(ctx context.Context) error {
 	}
 	if r.cfg.noQdrant {
 		args = append(args, "--no-qdrant")
+	} else {
+		args = append(args, "--with-qdrant")
 	}
 	return r.runLogged(ctx, "preflight", r.cfg.rootDir, "cmd.exe", args...)
 }
@@ -934,6 +940,20 @@ func envOrMap(values map[string]string, key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func qdrantAutoStartEnabled(values map[string]string) bool {
+	if setting := strings.TrimSpace(values["QDRANT_AUTO_START"]); setting != "" {
+		return setting == "1" || strings.EqualFold(setting, "true")
+	}
+	return strings.EqualFold(strings.TrimSpace(values["MEMORY_BACKEND"]), "qdrant")
+}
+
+func mcpEnabled(values map[string]string) bool {
+	if setting := strings.TrimSpace(values["YUIZAKI_WITH_MCP"]); setting != "" {
+		return setting == "1" || strings.EqualFold(setting, "true")
+	}
+	return defaultMCPEnabled
 }
 
 func firstNonEmptyLine(value string) string {

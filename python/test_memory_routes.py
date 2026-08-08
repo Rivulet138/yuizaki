@@ -58,7 +58,10 @@ class _FakeMemoryStore:
         return MemoryBackendStatus(backend="fake", healthy=True, message="ok", document_count=len(self.docs))
 
 
-def _build_client_with_store(active_workspace_id: str | None = None) -> tuple[TestClient, _FakeMemoryStore]:
+def _build_client_with_store(
+    active_workspace_id: str | None = None,
+    clear_memory_references: Any = None,
+) -> tuple[TestClient, _FakeMemoryStore]:
     store = _FakeMemoryStore([
         Document(id="workspace-default", text="default workspace", metadata={"scope": "workspace", "workspace_id": "default", "layer": "semantic"}),
         Document(id="workspace-other", text="other workspace", metadata={"scope": "workspace", "workspace_id": "other", "layer": "semantic"}),
@@ -71,9 +74,23 @@ def _build_client_with_store(active_workspace_id: str | None = None) -> tuple[Te
         create_memory_router(
             MemoryState(store=store),
             get_active_workspace_id=(lambda: active_workspace_id) if active_workspace_id is not None else None,
+            clear_memory_references=clear_memory_references,
         )
     )
     return TestClient(app), store
+
+
+def test_memory_delete_clears_persisted_chat_references() -> None:
+    cleanup_calls: list[list[str]] = []
+    client, _store = _build_client_with_store(
+        clear_memory_references=lambda memory_ids: cleanup_calls.append(memory_ids) or 2,
+    )
+
+    response = client.delete("/memory/docs/workspace-unscoped")
+
+    assert response.status_code == 200
+    assert response.json()["cleared_message_references"] == 2
+    assert cleanup_calls == [["workspace-unscoped"]]
 
 
 def _build_client() -> TestClient:
@@ -181,6 +198,7 @@ def test_memory_batch_delete_permanently_removes_documents_without_route_shadowi
         "status": "deleted",
         "ids": ["workspace-default", "workspace-unscoped"],
         "deleted_count": 2,
+        "cleared_message_references": 0,
         "storage": None,
     }
     assert not {"workspace-default", "workspace-unscoped"} & {doc.id for doc in store.docs}

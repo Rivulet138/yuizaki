@@ -549,7 +549,11 @@ _companion_relationship_history: Callable[[str, int], dict[str, Any]] = build_co
     is_relationship_milestone=is_relationship_milestone,
 )
 
-memory_router = create_memory_router(_memory_state, get_active_workspace_id=_get_active_workspace_id)
+memory_router = create_memory_router(
+    _memory_state,
+    get_active_workspace_id=_get_active_workspace_id,
+    clear_memory_references=lambda memory_ids: db_repo.clear_memory_references(memory_ids) if db_repo else 0,
+)
 app.include_router(memory_router)
 app.include_router(
     create_storage_router(

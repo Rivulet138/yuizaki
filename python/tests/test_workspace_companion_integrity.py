@@ -140,6 +140,61 @@ def test_save_message_does_not_move_existing_session_between_workspaces(tmp_path
         repo.close()
 
 
+def test_assistant_metadata_survives_history_reload_and_session_branch(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path)
+    try:
+        chat_session = repo.create_chat_session("default", "Metadata Chat")
+        user = repo.save_message(chat_session["id"], "user", "remember this")
+        assistant = repo.save_message(chat_session["id"], "assistant", "done")
+        tool_steps = [{"id": "step-1", "title": "Read memory", "status": "completed", "tool": "memory.query"}]
+        memory_sources = [{"id": "memory-1", "text": "Prefers concise replies", "layer": "profile", "source": "conversation"}]
+
+        repo.update_message_metadata(
+            int(assistant["id"]),
+            tool_trace=tool_steps,
+            memory_trace=memory_sources,
+        )
+
+        history = repo.get_chat_history(chat_session["id"])
+        assert history[-1]["agentSteps"] == tool_steps
+        assert history[-1]["memorySources"] == memory_sources
+
+        branch = repo.branch_chat_session(chat_session["id"], int(assistant["id"]), workspace_id="default")
+        branch_history = repo.get_chat_history(branch["id"])
+        assert len(branch_history) == 2
+        assert branch_history[-1]["agentSteps"] == tool_steps
+        assert branch_history[-1]["memorySources"] == memory_sources
+        assert branch_history[0]["id"] != user["id"]
+    finally:
+        repo.close()
+
+
+def test_clearing_memory_references_removes_deleted_sources_from_reloaded_history(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path)
+    try:
+        chat_session = repo.create_chat_session("default", "Memory provenance")
+        assistant = repo.save_message(
+            chat_session["id"],
+            "assistant",
+            "done",
+            memory_trace=[
+                {"id": "memory-delete", "text": "Delete this source"},
+                {"id": "memory-keep", "text": "Keep this source"},
+            ],
+        )
+
+        changed = repo.clear_memory_references(["memory-delete"])
+
+        assert changed == 1
+        assert repo.get_chat_history(chat_session["id"])[0]["memorySources"] == [
+            {"id": "memory-keep", "text": "Keep this source"},
+        ]
+        assert repo.clear_memory_references(["memory-delete"]) == 0
+        assert assistant["id"] is not None
+    finally:
+        repo.close()
+
+
 def test_delete_message_updates_session_counters(tmp_path: Path) -> None:
     repo = _make_repo(tmp_path)
     try:
@@ -220,5 +275,40 @@ def test_clear_session_messages_keeps_session_and_resets_counters(tmp_path: Path
         assert stored["id"] == chat_session["id"]
         assert stored["message_count"] == 0
         assert stored["total_tokens"] == 0
+    finally:
+        repo.close()
+
+
+def test_archive_session_is_reversible(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path)
+    try:
+        chat_session = repo.create_chat_session("default", "Archive Chat")
+
+        archived = repo.update_chat_session(chat_session["id"], archived=True)
+        restored = repo.update_chat_session(chat_session["id"], archived=False)
+
+        assert archived["archived"] is True
+        assert restored["archived"] is False
+    finally:
+        repo.close()
+
+
+def test_branch_session_copies_history_without_mutating_source(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path)
+    try:
+        source = repo.create_chat_session("default", "Source Chat")
+        first = repo.save_message(source["id"], "user", "first", tokens=3)
+        second = repo.save_message(source["id"], "assistant", "second", tokens=5)
+        repo.save_message(source["id"], "user", "not copied", tokens=7)
+
+        branch = repo.branch_chat_session(source["id"], int(second["id"]), title="Source branch")
+
+        assert branch["parent_session_id"] == source["id"]
+        assert branch["branched_from_message_id"] == second["id"]
+        assert [item["content"] for item in repo.get_chat_history(branch["id"])] == ["first", "second"]
+        assert [item["content"] for item in repo.get_chat_history(source["id"])] == ["first", "second", "not copied"]
+        assert branch["message_count"] == 2
+        assert branch["total_tokens"] == 8
+        assert first["id"] != second["id"]
     finally:
         repo.close()

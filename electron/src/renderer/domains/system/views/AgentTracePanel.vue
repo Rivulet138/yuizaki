@@ -1,12 +1,14 @@
 <template>
   <PanelShell title="任务中心" tone="admin">
+    <template #actions>
+      <el-button size="small" plain :loading="refreshLoading" @click="refreshAll">刷新</el-button>
+    </template>
     <div class="trace-console">
       <section class="trace-hero panel-card">
         <div class="hero-metrics">
-          <div v-for="metric in traceMetrics" :key="metric.label" class="metric-card" :class="`tone-${metric.tone}`">
+          <div v-for="metric in traceMetrics" :key="metric.label" class="metric-card" :class="`tone-${metric.tone}`" :title="metric.desc">
             <span>{{ metric.label }}</span>
             <strong>{{ metric.value }}</strong>
-            <small>{{ metric.desc }}</small>
           </div>
         </div>
       </section>
@@ -16,23 +18,38 @@
           <div>
             <h3>交互体验指标</h3>
           </div>
-          <el-button size="small" plain :loading="experienceMetricsRequest.loading" @click="loadExperienceMetrics">刷新指标</el-button>
         </div>
         <div class="experience-grid">
-          <div v-for="metric in experienceLatencyMetrics" :key="metric.key" class="experience-metric">
+          <div
+            v-for="metric in primaryExperienceMetrics"
+            :key="metric.key"
+            class="experience-metric"
+            :title="`${metric.label}：P95 ${formatLatency(metric.p95)}，${metric.samples} 次采样`"
+          >
             <span>{{ metric.label }}</span>
             <strong>{{ formatLatency(metric.p50) }}</strong>
-            <small>P95 {{ formatLatency(metric.p95) }} · {{ metric.samples }} 次</small>
           </div>
         </div>
+        <details v-if="secondaryExperienceMetrics.length" class="experience-more">
+          <summary>更多指标</summary>
+          <div class="experience-grid experience-grid--secondary">
+            <div
+              v-for="metric in secondaryExperienceMetrics"
+              :key="metric.key"
+              class="experience-metric"
+              :title="`${metric.label}：P95 ${formatLatency(metric.p95)}，${metric.samples} 次采样`"
+            >
+              <span>{{ metric.label }}</span>
+              <strong>{{ formatLatency(metric.p50) }}</strong>
+            </div>
+          </div>
+        </details>
         <div class="experience-rates">
-          <span>语音打断 <strong>{{ formatRate(experienceMetrics?.interrupts.by_source.voice?.hit_rate) }}</strong>（{{ experienceMetrics?.interrupts.by_source.voice?.hits ?? 0 }}/{{ experienceMetrics?.interrupts.by_source.voice?.requests ?? 0 }}）</span>
-          <span>手动中断 <strong>{{ formatRate(experienceMetrics?.interrupts.by_source.manual?.hit_rate) }}</strong>（{{ experienceMetrics?.interrupts.by_source.manual?.hits ?? 0 }}/{{ experienceMetrics?.interrupts.by_source.manual?.requests ?? 0 }}）</span>
-          <span>工具成功 <strong>{{ formatRate(experienceMetrics?.tools.success_rate) }}</strong>（{{ experienceMetrics?.tools.successes ?? 0 }}/{{ experienceMetrics?.tools.calls ?? 0 }}）</span>
-          <span>视觉调用 <strong>{{ formatRate(experienceMetrics?.visual?.analysis_rate) }}</strong>（{{ experienceMetrics?.visual?.analysis_requests ?? 0 }}/{{ experienceMetrics?.visual?.frames ?? 0 }}）</span>
-          <span>视觉可用结论 <strong>{{ formatRate(experienceMetrics?.visual?.usable_rate) }}</strong>（{{ experienceMetrics?.visual?.usable ?? 0 }}/{{ experienceMetrics?.visual?.completed ?? 0 }}）</span>
-          <span>视觉复用 <strong>{{ experienceMetrics?.visual?.analysis_skipped ?? 0 }}</strong> 帧</span>
-          <span>窗口 <strong>{{ experienceMetrics?.window.generation_samples ?? 0 }}</strong> 轮对话</span>
+          <span :title="`${experienceMetrics?.interrupts.by_source.voice?.hits ?? 0}/${experienceMetrics?.interrupts.by_source.voice?.requests ?? 0}`">语音打断 <strong>{{ formatRate(experienceMetrics?.interrupts.by_source.voice?.hit_rate) }}</strong></span>
+          <span :title="`${experienceMetrics?.interrupts.by_source.manual?.hits ?? 0}/${experienceMetrics?.interrupts.by_source.manual?.requests ?? 0}`">手动中断 <strong>{{ formatRate(experienceMetrics?.interrupts.by_source.manual?.hit_rate) }}</strong></span>
+          <span :title="`${experienceMetrics?.tools.successes ?? 0}/${experienceMetrics?.tools.calls ?? 0}`">工具成功 <strong>{{ formatRate(experienceMetrics?.tools.success_rate) }}</strong></span>
+          <span :title="`分析 ${experienceMetrics?.visual?.analysis_requests ?? 0}/${experienceMetrics?.visual?.frames ?? 0}，复用 ${experienceMetrics?.visual?.analysis_skipped ?? 0} 帧`">视觉调用 <strong>{{ formatRate(experienceMetrics?.visual?.analysis_rate) }}</strong></span>
+          <span :title="`${experienceMetrics?.visual?.usable ?? 0}/${experienceMetrics?.visual?.completed ?? 0}`">视觉结论 <strong>{{ formatRate(experienceMetrics?.visual?.usable_rate) }}</strong></span>
         </div>
       </section>
 
@@ -48,9 +65,9 @@
             :key="stage"
             class="loop-stage"
             :class="{ active: lastLoopStage === stage, done: loopStagesDone.includes(stage) }"
+            :title="stage"
           >
             <span>{{ stageLabels[stage] }}</span>
-            <small>{{ stage }}</small>
           </div>
         </div>
       </section>
@@ -61,7 +78,6 @@
             <div>
               <h3>计划任务</h3>
             </div>
-            <el-button size="small" plain :loading="schedulesRequest.loading" @click="loadSchedules">刷新</el-button>
           </div>
 
           <AsyncState :loading="schedulesRequest.loading" :error="schedulesRequest.error" @retry="loadSchedules">
@@ -120,7 +136,6 @@
               <div>
                 <h3>{{ activeTraceFilterLabel }}</h3>
               </div>
-              <el-button size="small" plain :loading="agentTraceRequest.loading" @click="loadAgentTrace">刷新</el-button>
             </div>
 
             <div class="trace-toolbar">
@@ -547,6 +562,19 @@ const experienceLatencyMetrics = computed(() => experienceMetricDefinitions.map(
     samples: summary?.samples ?? 0,
   }
 }))
+const primaryExperienceMetricKeys = new Set([
+  'asr_final',
+  'llm_first_token',
+  'tts_first_chunk',
+  'playback_start',
+  'visual_analysis',
+])
+const primaryExperienceMetrics = computed(() => (
+  experienceLatencyMetrics.value.filter(metric => primaryExperienceMetricKeys.has(metric.key))
+))
+const secondaryExperienceMetrics = computed(() => (
+  experienceLatencyMetrics.value.filter(metric => !primaryExperienceMetricKeys.has(metric.key))
+))
 
 function formatLatency(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return '待采样'
@@ -565,6 +593,18 @@ const createScheduleLoading = computed(() => (
   createOnceScheduleRequest.loading
   || createIntervalScheduleRequest.loading
 ))
+const refreshLoading = computed(() => (
+  schedulesRequest.loading
+  || agentTraceRequest.loading
+  || experienceMetricsRequest.loading
+))
+const refreshAll = async () => {
+  await Promise.all([
+    loadSchedules(),
+    loadAgentTrace(),
+    loadExperienceMetrics(),
+  ])
+}
 const scheduleMutationError = computed(() => (
   createOnceScheduleRequest.error
   || createIntervalScheduleRequest.error
@@ -835,10 +875,11 @@ onMounted(() => {
 }
 
 .panel-card {
-  border: 1px solid var(--yui-border);
+  border: 1px solid var(--yui-panel-outline, var(--yui-border));
   border-radius: var(--yui-radius-card);
-  background: var(--yui-surface);
-  box-shadow: var(--yui-shadow-card);
+  background: var(--yui-panel-surface, var(--yui-surface));
+  background-clip: padding-box;
+  box-shadow: var(--yui-panel-shadow, var(--yui-shadow-card));
 }
 
 .trace-hero {
@@ -892,6 +933,7 @@ onMounted(() => {
   border: 1px solid var(--yui-border);
   border-radius: var(--yui-radius-card);
   background: var(--yui-surface-muted);
+  background-clip: padding-box;
   padding: 14px;
 }
 
@@ -928,21 +970,18 @@ onMounted(() => {
 
 .experience-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 1px;
   border: 1px solid var(--yui-border);
   border-radius: var(--yui-radius-card);
+  background: var(--yui-border);
   overflow: hidden;
 }
 
 .experience-metric {
   min-width: 0;
   padding: 12px;
-  background: var(--yui-surface-muted);
-  border-right: 1px solid var(--yui-border);
-}
-
-.experience-metric:last-child {
-  border-right: 0;
+  background: var(--yui-panel-surface-strong, var(--yui-surface-muted));
 }
 
 .experience-metric span,
@@ -962,10 +1001,38 @@ onMounted(() => {
 .experience-rates {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 18px;
+  gap: 8px;
   margin-top: 10px;
   color: var(--yui-muted);
   font-size: 11px;
+}
+
+.experience-more {
+  margin-top: 10px;
+}
+
+.experience-more > summary {
+  width: fit-content;
+  color: var(--yui-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.experience-more[open] > summary {
+  margin-bottom: 8px;
+  color: var(--yui-text);
+}
+
+.experience-grid--secondary {
+  grid-template-columns: repeat(auto-fit, minmax(124px, 1fr));
+}
+
+.experience-rates > span {
+  border: 1px solid var(--yui-border);
+  border-radius: 999px;
+  background: var(--yui-surface-muted);
+  padding: 5px 9px;
 }
 
 .experience-rates strong {
@@ -1002,7 +1069,7 @@ h3 {
   border-radius: var(--yui-radius-card);
   background: var(--yui-surface-muted);
   padding: 9px 10px;
-  transition: all 0.2s ease;
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 
 .loop-stage span,
@@ -1207,7 +1274,7 @@ h3 {
   cursor: pointer;
   padding: 13px;
   text-align: left;
-  transition: all 0.18s ease;
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 
 .run-card:hover,
@@ -1215,6 +1282,12 @@ h3 {
   transform: translateY(-2px);
   border-color: rgba(37, 99, 235, 0.42);
   box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+}
+
+.run-card:focus-visible {
+  border-color: var(--yui-accent);
+  outline: 3px solid color-mix(in srgb, var(--yui-accent) 22%, transparent);
+  outline-offset: 2px;
 }
 
 .request-id {

@@ -29,6 +29,7 @@ def test_environment_template_matches_persistence_and_resource_defaults():
     values = _read_env_example()
 
     assert values["MEMORY_BACKEND"] == "sqlite"
+    assert values["QDRANT_AUTO_START"] == "0"
     assert values["QDRANT_DOCKER_IMAGE"] == "qdrant/qdrant:v1.18.3"
     assert values["LLM_CONTEXT_MAX_TOKENS"] == "131072"
     assert values["LLM_DEFAULT_MAX_OUTPUT_TOKENS"] == "8192"
@@ -39,6 +40,20 @@ def test_mutable_qdrant_latest_tag_is_normalized_to_pinned_baseline():
 
     assert normalize_qdrant_docker_image("qdrant/qdrant:latest") == DEFAULT_QDRANT_DOCKER_IMAGE
     assert normalize_qdrant_docker_image("qdrant/qdrant:v1.18.3") == "qdrant/qdrant:v1.18.3"
+
+
+def test_qdrant_auto_start_follows_the_selected_memory_backend(monkeypatch):
+    from modules.core.config import _load_config_from_env
+
+    monkeypatch.delenv("QDRANT_AUTO_START", raising=False)
+    monkeypatch.setenv("MEMORY_BACKEND", "sqlite")
+    assert _load_config_from_env().memory.qdrant_auto_start is False
+
+    monkeypatch.setenv("MEMORY_BACKEND", "qdrant")
+    assert _load_config_from_env().memory.qdrant_auto_start is True
+
+    monkeypatch.setenv("QDRANT_AUTO_START", "0")
+    assert _load_config_from_env().memory.qdrant_auto_start is False
 
 
 def test_python_toolchain_targets_project_venv_and_minimum_supported_version():

@@ -542,6 +542,10 @@ class AgentPipeline:
             reply=str(result_obj.reply or ""),
             pet_control=result_obj.pet_control,
             tool_calls=[*result_obj.tool_calls, *trace_suffix],
+            memory_sources=[
+                source for source in (ctx.extra.get("memory_sources") or [])
+                if isinstance(source, dict)
+            ],
             source=str(original_envelope.get("source") or "agent"),
             request_id=str(original_envelope.get("request_id") or ctx.request_id or "") or None,
         )
@@ -644,11 +648,31 @@ class AgentPipeline:
                 ctx.extra["retrieval_prefetch_hit"] = prefetch_hit
                 results = data.get("results", [])
                 chunks: list[str] = []
+                memory_sources: list[dict[str, Any]] = []
                 for item in results:
+                    if not isinstance(item, dict):
+                        continue
                     doc = item.get("doc") or {}
+                    if not isinstance(doc, dict):
+                        continue
                     text = str(doc.get("text", ""))
                     if text:
                         chunks.append(text)
+                    doc_id = str(doc.get("id") or item.get("id") or "").strip()
+                    clean_text = " ".join(text.split())
+                    if not doc_id or not clean_text or len(memory_sources) >= 5:
+                        continue
+                    metadata = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
+                    layer = str(doc.get("layer") or metadata.get("layer") or "").strip()
+                    source = str(doc.get("source") or metadata.get("source") or "").strip()
+                    score = item.get("score")
+                    memory_sources.append({
+                        "id": doc_id,
+                        "text": f"{clean_text[:317]}..." if len(clean_text) > 320 else clean_text,
+                        **({"layer": layer} if layer else {}),
+                        **({"source": source} if source else {}),
+                        **({"score": float(score)} if isinstance(score, (int, float)) else {}),
+                    })
                 if chunks:
                     bindings = get_runtime_bindings(ctx)
                     bindings.retrieved_chunks = chunks[:5]
@@ -661,6 +685,7 @@ class AgentPipeline:
                         retrieved_chunks=bindings.retrieved_chunks,
                     )
                     ctx.extra["retrieved_chunks"] = chunks[:5]
+                    ctx.extra["memory_sources"] = memory_sources
                     recent_signal_docs: list[dict[str, str]] = []
                     for item in results[:5]:
                         doc_payload = item.get("doc") or {}

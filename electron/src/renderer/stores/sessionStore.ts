@@ -9,6 +9,9 @@ export interface SessionRecord {
   title: string
   summary?: string | null
   pinned: boolean
+  archived?: boolean
+  parent_session_id?: string | null
+  branched_from_message_id?: number | null
   created_at: string | null
   updated_at: string | null
   message_count: number
@@ -76,6 +79,32 @@ export const useSessionStore = defineStore('session', () => {
     return session
   }
 
+  const branchSession = async (
+    sourceSessionId: string,
+    messageId: number,
+    title?: string,
+    workspaceId?: string,
+  ) => {
+    const targetWorkspaceId = normalizeWorkspaceId(workspaceId ?? useWorkspaceStore().activeWorkspace?.id)
+    const session = await requestJson<SessionRecord>(`${CONTROL_ORIGIN}/api/session-branches`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source_session_id: sourceSessionId,
+        message_id: messageId,
+        title,
+        workspace_id: targetWorkspaceId,
+      }),
+    })
+    const normalizedSession = {
+      ...session,
+      workspace_id: normalizeWorkspaceId(session.workspace_id),
+    }
+    sessions.value.unshift(normalizedSession)
+    activeSessionId.value = normalizedSession.id
+    return normalizedSession
+  }
+
   const setActiveSession = (sessionId: string) => {
     activeSessionId.value = sessionId
   }
@@ -138,6 +167,7 @@ export const useSessionStore = defineStore('session', () => {
     loading,
     loadSessions,
     createSession,
+    branchSession,
     setActiveSession,
     deleteSession,
     updateSession,

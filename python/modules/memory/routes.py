@@ -469,7 +469,11 @@ class MemoryState:
   io_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
-def create_memory_router(state: MemoryState, get_active_workspace_id: Callable[[], str] | None = None) -> APIRouter:
+def create_memory_router(
+  state: MemoryState,
+  get_active_workspace_id: Callable[[], str] | None = None,
+  clear_memory_references: Callable[[list[str]], int] | None = None,
+) -> APIRouter:
   router = APIRouter(prefix="/memory", tags=["memory"])
 
   def _active_workspace_id() -> str | None:
@@ -522,6 +526,13 @@ def create_memory_router(state: MemoryState, get_active_workspace_id: Callable[[
         return await run_in_threadpool(lambda: fn(*args, **kwargs))
     except MemorySearchIncompleteError as exc:
       raise HTTPException(status_code=503, detail=exc.to_detail()) from exc
+
+  async def _delete_memory_documents(doc_ids: list[str]) -> int:
+    for doc_id in doc_ids:
+      await _run_store_call(state.store.delete_document, doc_id)
+    if clear_memory_references is None:
+      return 0
+    return int(await run_in_threadpool(lambda: clear_memory_references(doc_ids)))
 
   def _normalize_expiry_for_write(metadata: Dict[str, Any]) -> Dict[str, Any]:
     try:
@@ -793,12 +804,12 @@ def create_memory_router(state: MemoryState, get_active_workspace_id: Callable[[
         },
       )
     purge_ids = [str(item['id']) for item in plan['candidates']]
-    for doc_id in purge_ids:
-      await _run_store_call(state.store.delete_document, doc_id)
+    cleared_references = await _delete_memory_documents(purge_ids)
     return {
       'status': 'purged',
       'changed_ids': purge_ids,
       'changed_count': len(purge_ids),
+      'cleared_message_references': cleared_references,
       'storage': await _compact_storage(),
     }
 
@@ -873,12 +884,12 @@ def create_memory_router(state: MemoryState, get_active_workspace_id: Callable[[
     for doc_id in doc_ids:
       _ensure_doc_in_active_workspace(docs_by_id[doc_id])
 
-    for doc_id in doc_ids:
-      await _run_store_call(state.store.delete_document, doc_id)
+    cleared_references = await _delete_memory_documents(doc_ids)
     return {
       "status": "deleted",
       "ids": doc_ids,
       "deleted_count": len(doc_ids),
+      "cleared_message_references": cleared_references,
       "storage": await _compact_storage(),
     }
 
@@ -1014,8 +1025,13 @@ def create_memory_router(state: MemoryState, get_active_workspace_id: Callable[[
     if existing is None:
       raise HTTPException(status_code=404, detail="memory document not found")
     _ensure_doc_in_active_workspace(existing)
-    await _run_store_call(state.store.delete_document, doc_id)
-    return {"status": "deleted", "id": doc_id, "storage": await _compact_storage()}
+    cleared_references = await _delete_memory_documents([doc_id])
+    return {
+      "status": "deleted",
+      "id": doc_id,
+      "cleared_message_references": cleared_references,
+      "storage": await _compact_storage(),
+    }
 
   @router.get("/index/status")
   async def index_status() -> Dict[str, Any]:

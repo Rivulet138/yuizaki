@@ -4,7 +4,7 @@
 
 - Status: Active
 - Last refreshed: 2026-08-04
-- Primary product surfaces: desktop pet window, companion home, conversation, memory, settings and developer administration.
+- Primary product surfaces: desktop pet window, conversation, memory, settings and developer administration.
 - Evidence reviewed: `README.md`, `docs/ARCHITECTURE.md`, `docs/TECH_STACK.md`, `electron/src/shared/navigation.ts`, `electron/src/renderer/app/AppShell.vue`, `electron/src/renderer/app/AppSidebar.vue`, `electron/src/renderer/app/WorkspaceDrawer.vue`, the 17 routed panels, current i18n resources, test suites, and screenshots under `.omx/artifacts/`.
 - External evidence: AIRI, Open-LLM-VTuber, OpenAvatarChat, Amica, ZcChat, ElizaOS and SillyTavern; Relational Agents, HAI Guidelines, mixed-initiative interaction, interruptibility, Generative Agents, MemGPT, ToolEmu, AgentDojo, OWASP LLM Top 10 and NIST AI RMF.
 - Evidence note: source files are valid UTF-8. Mojibake observed in earlier PowerShell output was a console decoding issue, not a repository defect.
@@ -29,8 +29,8 @@
 
 ## Information architecture
 
-- Primary navigation: Desktop Pet Home, Conversation, Memory.
-- Core routes/screens: `companion`, `chat`, `memory` remain stable for compatibility.
+- Primary navigation: Conversation and Memory.
+- Core routes/screens: `chat` and `memory`; the retired `companion` route remains as a compatibility redirect to `chat`.
 - Content hierarchy: daily state and quick actions first; relationship and memory summaries second; models, MCP, diagnostics, traces and raw RAG controls behind an advanced/developer disclosure.
 - Administration groups: Skills, Connections and Permissions; Tasks and Automation; System and Diagnostics; Developer Tools.
 - Workspace drawer: quick scene, avatar, voice and proactive-behavior settings only; deeper configuration links to the canonical settings surface.

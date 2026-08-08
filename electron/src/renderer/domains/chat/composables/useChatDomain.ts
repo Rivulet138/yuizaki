@@ -52,9 +52,10 @@ export function useChatDomain() {
 
   function sendText() {
     const text = inputText.value.trim()
-    if (!text) return
-    chatStore.sendChat(text)
-    inputText.value = ''
+    if (!text) return false
+    const sent = chatStore.sendChat(text)
+    if (sent) inputText.value = ''
+    return sent
   }
 
   function handleInterrupt() {

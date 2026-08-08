@@ -1,0 +1,57 @@
+.yuizaki-bg.yuizaki-bg .chat-mode .chat-surface {
+  background: transparent;
+}
+
+.yuizaki-bg.yuizaki-bg .chat-mode .composer-box {
+  border-color: var(--yui-chat-border);
+  background: var(--yui-chat-surface);
+  box-shadow: none;
+}
+
+.yuizaki-bg.yuizaki-bg .chat-mode .composer-box .el-textarea__inner {
+  background: transparent;
+  box-shadow: none;
+}
+
+.yuizaki-bg.yuizaki-bg .chat-mode .message-bubble-user {
+  border-color: var(--yui-chat-border);
+  background: var(--yui-chat-user-bg);
+  color: var(--yui-chat-text);
+  box-shadow: none;
+}
+
+.yuizaki-bg.yuizaki-bg .chat-mode .message-bubble-assistant,
+.yuizaki-bg.yuizaki-bg .chat-mode .message-bubble-streaming {
+  border-color: var(--yui-chat-border);
+  background: var(--yui-chat-assistant-bg);
+  color: var(--yui-chat-text);
+  box-shadow: none;
+}
+
+[data-theme='dark'] .yuizaki-bg.yuizaki-bg .chat-mode .chat-surface {
+  background: transparent;
+}
+
+[data-theme='dark'] .yuizaki-bg.yuizaki-bg .chat-mode .composer-box {
+  border-color: var(--yui-chat-border);
+  background: var(--yui-chat-surface);
+  color: var(--yui-chat-text);
+  box-shadow: none;
+}
+
+[data-theme='dark'] .yuizaki-bg.yuizaki-bg .chat-mode .composer-box .el-textarea__inner {
+  color: var(--yui-chat-text);
+}
+
+[data-theme='dark'] .yuizaki-bg.yuizaki-bg .chat-mode .message-bubble-user {
+  border-color: var(--yui-chat-border);
+  background: var(--yui-chat-user-bg);
+  color: var(--yui-chat-text);
+}
+
+[data-theme='dark'] .yuizaki-bg.yuizaki-bg .chat-mode .message-bubble-assistant,
+[data-theme='dark'] .yuizaki-bg.yuizaki-bg .chat-mode .message-bubble-streaming {
+  border-color: var(--yui-chat-border);
+  background: var(--yui-chat-assistant-bg);
+  color: var(--yui-chat-text);
+}

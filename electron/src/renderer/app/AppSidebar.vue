@@ -153,16 +153,17 @@ const adminMenuGroups = computed(() => {
   z-index: 3;
   display: flex;
   flex-direction: column;
-  width: 232px;
-  min-width: 232px;
-  height: calc(100% - 36px);
-  margin: 18px 0 18px 18px;
+  width: 202px;
+  min-width: 202px;
+  height: 100%;
+  margin: 0;
   padding: 18px 12px 14px;
   overflow: hidden;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-panel);
-  background: var(--yui-surface);
-  box-shadow: var(--yui-shadow-card);
+  border: 1px solid var(--yui-panel-outline, var(--yui-border));
+  border-radius: 0;
+  background: var(--yui-panel-surface, var(--yui-surface));
+  background-clip: padding-box;
+  box-shadow: var(--yui-panel-shadow, none);
   box-sizing: border-box;
 }
 
@@ -186,11 +187,11 @@ const adminMenuGroups = computed(() => {
 
 .brand-wordmark {
   display: block;
-  width: min(124px, 100%);
+  width: min(108px, 100%);
   height: auto;
   object-fit: contain;
   object-position: left center;
-  filter: drop-shadow(0 8px 16px rgba(244, 114, 182, 0.14));
+  filter: none;
 }
 
 .brand-name {
@@ -246,8 +247,7 @@ const adminMenuGroups = computed(() => {
   border-color: var(--yui-border-strong);
   color: var(--yui-text);
   background: var(--yui-surface-muted);
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
-  transform: translateX(2px);
+  box-shadow: none;
 }
 
 .menu-item:hover::before,
@@ -400,7 +400,7 @@ const adminMenuGroups = computed(() => {
   .sidebar {
     width: 76px;
     min-width: 76px;
-    margin: 10px 0 10px 10px;
+    margin: 0;
     padding: 12px 8px;
   }
 
@@ -460,7 +460,7 @@ const adminMenuGroups = computed(() => {
   .sidebar {
     width: 64px;
     min-width: 64px;
-    margin: 8px 0 8px 8px;
+    margin: 0;
     padding: 10px 7px;
   }
 

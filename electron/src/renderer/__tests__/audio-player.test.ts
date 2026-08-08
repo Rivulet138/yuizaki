@@ -18,7 +18,7 @@ vi.mock('../utils/petControl', () => ({
 
 vi.mock('../api/clients/http-client', () => httpClientMocks)
 
-type AudioEventName = 'ended'
+type AudioEventName = 'ended' | 'error'
 
 class MockAudioElement {
   static instances: MockAudioElement[] = []
@@ -40,6 +40,11 @@ class MockAudioElement {
     this.listeners.set(event, handlers)
   }
 
+  removeEventListener(event: AudioEventName, handler: () => void): void {
+    const handlers = this.listeners.get(event) ?? []
+    this.listeners.set(event, handlers.filter((candidate) => candidate !== handler))
+  }
+
   emit(event: AudioEventName): void {
     for (const handler of this.listeners.get(event) ?? []) {
       handler()
@@ -48,7 +53,7 @@ class MockAudioElement {
 }
 
 const flushAsyncPlayback = async () => {
-  for (let i = 0; i < 5; i += 1) {
+  for (let i = 0; i < 10; i += 1) {
     await Promise.resolve()
   }
 }
@@ -103,7 +108,10 @@ describe('AudioPlayer sentence emotion forwarding', () => {
 
       expect(MockAudioElement.instances).toHaveLength(1)
       expect(MockAudioElement.instances[0]?.play).toHaveBeenCalledTimes(1)
-      expect(petControlMocks.startLipSync).toHaveBeenCalledWith('http://localhost:8001/audio/reply.wav', { source: 'automation' })
+      expect(petControlMocks.startLipSync).toHaveBeenCalledWith(
+        'http://localhost:8001/audio/reply.wav',
+        expect.objectContaining({ source: 'automation', signal: expect.any(AbortSignal) }),
+      )
       expect(startedDetails).toEqual([
         {
           audio_url: 'http://localhost:8001/audio/reply.wav',
@@ -232,7 +240,10 @@ describe('AudioPlayer sentence emotion forwarding', () => {
 
       expect(MockAudioElement.instances[0]?.src).toBe('http://localhost:8001/audio/reply.wav')
       expect(httpClientMocks.resolveBackendUrl).toHaveBeenCalledWith('/audio/reply.wav')
-      expect(petControlMocks.startLipSync).toHaveBeenCalledWith('http://localhost:8001/audio/reply.wav', { source: 'automation' })
+      expect(petControlMocks.startLipSync).toHaveBeenCalledWith(
+        'http://localhost:8001/audio/reply.wav',
+        expect.objectContaining({ source: 'automation', signal: expect.any(AbortSignal) }),
+      )
       expect(startedDetails).toEqual([
         {
           audio_url: 'http://localhost:8001/audio/reply.wav',
@@ -254,7 +265,62 @@ describe('AudioPlayer sentence emotion forwarding', () => {
 
     expect(httpClientMocks.resolveBackendUrl).toHaveBeenCalledWith('/audio/reply.wav')
     expect(MockAudioElement.instances[0]?.src).toBe('http://localhost:8011/audio/reply.wav')
-    expect(petControlMocks.startLipSync).toHaveBeenCalledWith('http://localhost:8011/audio/reply.wav', { source: 'automation' })
+    expect(petControlMocks.startLipSync).toHaveBeenCalledWith(
+      'http://localhost:8011/audio/reply.wav',
+      expect.objectContaining({ source: 'automation', signal: expect.any(AbortSignal) }),
+    )
+  })
+
+  it('waits for URL lip sync startup before announcing audio playback', async () => {
+    let resolveLipSync: (() => void) | undefined
+    petControlMocks.startLipSync.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      resolveLipSync = resolve
+    }))
+    const { AudioPlayer } = await import('../audio/player')
+    const startedListener = vi.fn()
+    window.addEventListener('pet:audio-started', startedListener)
+
+    try {
+      const player = new AudioPlayer()
+      const playback = player.play('/audio/reply.wav')
+      await flushAsyncPlayback()
+
+      expect(petControlMocks.startLipSync).toHaveBeenCalledTimes(1)
+      expect(MockAudioElement.instances[0]?.play).not.toHaveBeenCalled()
+      expect(startedListener).not.toHaveBeenCalled()
+
+      resolveLipSync?.()
+      await playback
+      expect(MockAudioElement.instances[0]?.play).toHaveBeenCalledTimes(1)
+      expect(startedListener).toHaveBeenCalledTimes(1)
+    } finally {
+      window.removeEventListener('pet:audio-started', startedListener)
+    }
+  })
+
+  it('cancels a pending URL lip sync startup when playback is interrupted', async () => {
+    let resolveLipSync: (() => void) | undefined
+    petControlMocks.startLipSync.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      resolveLipSync = resolve
+    }))
+    const { AudioPlayer } = await import('../audio/player')
+    const startedListener = vi.fn()
+    window.addEventListener('pet:audio-started', startedListener)
+
+    try {
+      const player = new AudioPlayer()
+      const playback = player.play('/audio/reply.wav')
+      await flushAsyncPlayback()
+      player.stop({ interrupted: true })
+      resolveLipSync?.()
+      await playback
+
+      expect(startedListener).not.toHaveBeenCalled()
+      expect(petControlMocks.stopLipSync).toHaveBeenCalledWith({ interrupted: true })
+      expect(petControlMocks.startLipSync.mock.calls[0]?.[1]?.signal.aborted).toBe(true)
+    } finally {
+      window.removeEventListener('pet:audio-started', startedListener)
+    }
   })
 
   it('plays queued TTS segments in order and emits one final ended event', async () => {

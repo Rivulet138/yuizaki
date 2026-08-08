@@ -1270,6 +1270,19 @@ const openEditDoc = (doc: MemoryDoc) => {
   editDialogVisible.value = true
 }
 
+const openRequestedMemoryDoc = () => {
+  const query = window.location.hash.split('?')[1] || ''
+  const requestedId = new URLSearchParams(query).get('edit')?.trim() || ''
+  if (!requestedId) return
+  const doc = docs.value.find(item => item.id === requestedId)
+  if (!doc) {
+    ElMessage.warning('未找到要纠正的记忆')
+    return
+  }
+  selectDocById(requestedId)
+  openEditDoc(doc)
+}
+
 const buildDocUpdatePayload = (
   doc: MemoryDoc,
   overrides: {
@@ -1652,7 +1665,8 @@ watch(
 
 onMounted(async () => {
   queryForm.scope = currentMemoryScope.value
-  void loadScopedDocs()
+  await loadScopedDocs()
+  openRequestedMemoryDoc()
   if (e2eMode) return
   try {
     await refreshIndexStatus()

@@ -120,6 +120,32 @@ def create_workspace_router(
         except DatabaseError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 
+    @router.post("/api/session-branches")
+    async def branch_session(payload: dict[str, Any]):
+        db_repo = get_db_repo()
+        if not db_repo:
+            return JSONResponse({"error": "Database not initialized"}, status_code=503)
+        source_session_id = str(payload.get("source_session_id") or "").strip()
+        message_id = payload.get("message_id")
+        if not source_session_id or not isinstance(message_id, int):
+            return JSONResponse({"error": "source_session_id_and_message_id_required"}, status_code=422)
+        workspace_id = str(payload.get("workspace_id") or "").strip() or None
+        guard = await _enforce_active_session_workspace(db_repo, source_session_id, workspace_id)
+        if guard is not None:
+            return guard
+        try:
+            return await run_in_threadpool(
+                db_repo.branch_chat_session,
+                source_session_id,
+                message_id,
+                title=payload.get("title"),
+                workspace_id=workspace_id,
+            )
+        except NotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except DatabaseError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
     @router.patch("/api/sessions/{session_id}")
     async def update_session(session_id: str, payload: dict[str, Any], workspace_id: str | None = None):
         db_repo = get_db_repo()
@@ -129,12 +155,15 @@ def create_workspace_router(
         if guard is not None:
             return guard
         try:
+            updates = {
+                key: payload[key]
+                for key in ("summary", "pinned", "title", "archived")
+                if key in payload
+            }
             return await run_in_threadpool(
                 db_repo.update_chat_session,
                 session_id,
-                summary=payload.get("summary"),
-                pinned=payload.get("pinned"),
-                title=payload.get("title"),
+                **updates,
             )
         except NotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)

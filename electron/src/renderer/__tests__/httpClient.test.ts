@@ -273,6 +273,41 @@ describe('requestJson error normalization', () => {
     }
   })
 
+  it('does not start a backend fetch after cancellation during auth bootstrap', async () => {
+    window.history.replaceState({}, '', `/?control_origin=${encodeURIComponent(CONTROL_ORIGIN)}`)
+    const controller = new AbortController()
+    let resolveBootstrap: ((response: Response) => void) | undefined
+    const fetchMock = vi.fn((url: string) => {
+      if (url === `${CONTROL_ORIGIN}/`) {
+        return new Promise<Response>((resolve) => {
+          resolveBootstrap = resolve
+        })
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({ ok: true }),
+      } as Response)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const requestPromise = requestJson(`${API_ORIGIN}/api/pet/lipsync`, {
+      method: 'POST',
+      signal: controller.signal,
+      body: JSON.stringify({ enabled: false }),
+    })
+    await Promise.resolve()
+    controller.abort()
+    resolveBootstrap?.({
+      ok: true,
+      status: 200,
+      text: vi.fn().mockResolvedValue('<meta name="yuizaki-control-token" content="fresh-token">'),
+    } as unknown as Response)
+
+    await expect(requestPromise).rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('allows long-running local operations to choose a route-specific timeout', async () => {
     vi.useFakeTimers()
     try {

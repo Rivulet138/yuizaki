@@ -15,6 +15,7 @@ def compile_action_envelope(
     source: str = "agent",
     request_id: str | None = None,
     tool_calls: list[dict[str, Any]] | None = None,
+    memory_sources: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     actions: list[CharacterAction] = []
     validated_pet_control = filter_pet_control_payload(pet_control)
@@ -41,6 +42,14 @@ def compile_action_envelope(
             payload=serialize_permission_payload(tool_calls),
             schema_version="yuizaki.tool-trace.v1",
             source="agent_runtime",
+        ))
+
+    if memory_sources:
+        actions.append(CharacterAction(
+            type="memory_trace",
+            payload=memory_sources,
+            schema_version="yuizaki.memory-trace.v1",
+            source="retrieval_pipeline",
         ))
 
     envelope = ActionEnvelope(

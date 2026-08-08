@@ -663,6 +663,7 @@ const PYTHON_JSON_PROXY_PATHS = new Set([
   '/api/system/active-workspace',
   '/api/workspaces',
   '/api/sessions',
+  '/api/session-branches',
 ])
 
 const isPythonJsonProxyPath = (pathname: string): boolean =>

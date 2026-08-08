@@ -54,10 +54,11 @@ html[data-reduced-motion] .skeleton-line {
 @layer components {
   .panel-card {
     border-radius: min(var(--yui-radius-card, 12px), 10px);
-    border: 1px solid var(--yui-border, rgba(203, 213, 225, 0.9));
-    box-shadow: var(--yui-shadow-card, 0 10px 24px rgba(15, 23, 42, 0.06));
-    background: var(--yui-surface, #fff);
-    transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+    border: 1px solid var(--yui-panel-outline, var(--yui-border, rgba(203, 213, 225, 0.9)));
+    background: var(--yui-panel-surface, var(--yui-surface, #fff));
+    background-clip: padding-box;
+    box-shadow: var(--yui-panel-shadow, var(--yui-shadow-card, 0 10px 24px rgba(15, 23, 42, 0.06)));
+    transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease, background 0.16s ease;
   }
 
   .yui-action-row {
@@ -85,7 +86,7 @@ html[data-reduced-motion] .skeleton-line {
   }
 
   .panel-card:focus-within {
-    border-color: rgba(37, 99, 235, 0.32);
+    border-color: var(--yui-panel-outline-strong, rgba(37, 99, 235, 0.42));
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08), var(--yui-shadow-card, 0 10px 24px rgba(15, 23, 42, 0.06));
   }
 
@@ -104,8 +105,9 @@ html[data-reduced-motion] .skeleton-line {
   .main-card,
   .card {
     border-radius: min(var(--yui-radius-card, 12px), 10px);
-    border: 1px solid var(--yui-border, rgba(203, 213, 225, 0.9));
-    box-shadow: var(--yui-shadow-card, 0 10px 24px rgba(15, 23, 42, 0.06));
-    background: var(--yui-surface, #fff);
+    border: 1px solid var(--yui-panel-outline, var(--yui-border, rgba(203, 213, 225, 0.9)));
+    box-shadow: var(--yui-panel-shadow, var(--yui-shadow-card, 0 10px 24px rgba(15, 23, 42, 0.06)));
+    background: var(--yui-panel-surface, var(--yui-surface, #fff));
+    background-clip: padding-box;
   }
 }

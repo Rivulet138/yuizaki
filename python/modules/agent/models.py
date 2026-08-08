@@ -22,7 +22,7 @@ class StepConditionRecord:
         return asdict(self)
 
 
-ActionType = Literal["reply", "pet_control", "tool_trace"]
+ActionType = Literal["reply", "pet_control", "tool_trace", "memory_trace"]
 
 
 @dataclass

@@ -214,7 +214,12 @@ def test_legacy_docs_update_and_delete_accept_encoded_slash_ids() -> None:
 
     deleted = client.delete("/memory/docs/folder%2Fdoc-1")
     assert deleted.status_code == 200
-    assert deleted.json() == {"status": "deleted", "id": "folder/doc-1", "storage": None}
+    assert deleted.json() == {
+        "status": "deleted",
+        "id": "folder/doc-1",
+        "cleared_message_references": 0,
+        "storage": None,
+    }
     assert client.get("/memory/docs", params={"scope": "workspace", "workspace_id": "ws-1"}).json()["docs"] == []
 
 

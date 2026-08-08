@@ -23,7 +23,9 @@
             :active-workspace="activeWorkspace"
             :companion-id="activeWorkspace.companion_profile_id || companionStore.activeCompanionId"
             :companions="companionOptions"
-            :title="yuizakiConfig.heroTitle"
+            :title="activeModuleTitle"
+            :companion-state="companionRuntime.presentationState.value"
+            :companion-state-label="companionStateLabel"
             :admin-mode="adminMode"
             :is-electron-panel="isElectronPanel"
             :notification-count="notifications.length"
@@ -108,14 +110,13 @@ import { getSocketClient, SocketEvents } from '@/net/socketClient'
 import { useChatStore } from '@/stores/chatStore'
 import { useCompanionStore } from '@/stores/companionStore'
 import { useDialogStore, type PermissionRequestPayload } from '@/stores/dialogStore'
-import { useSystemStore, type VisualAnalysisStatus } from '@/stores/systemStore'
+import { useSystemStore } from '@/stores/systemStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useSettingsStore } from '@/state/settingsStore'
 import { useInputBindingsStore } from '@/state/inputBindingsStore'
-import { isTerminalVisualFrameResult, isVisualFrameResult, VisualCaptureEpoch } from '@/visual-capture-epoch'
 import { setLocale, syncLocaleFromSettings, t } from '@/i18n'
-import { adminNavigationModules, isPanelKey, primaryNavigationModules, type NavigationModuleId } from '@/navigation/modules'
 import { logger } from '@/logger'
+import { adminNavigationModules, isPanelKey, primaryNavigationModules, type NavigationModuleId } from '@/navigation/modules'
 import AppSidebar from './AppSidebar.vue'
 import AppTopbar from './AppTopbar.vue'
 import GlobalDialogs from './components/dialogs/GlobalDialogs.vue'
@@ -124,6 +125,7 @@ import { useVoiceConversationBridge } from './composables/useVoiceConversationBr
 import { advanceCompanionCooldownForE2E, useCompanionRuntimeBridge } from './composables/useCompanionRuntimeBridge'
 import { publishCompanionRuntimeEvent } from './runtime/companionRuntime'
 import { createAppRuntimeTeardown } from './runtime/appRuntimeTeardown'
+import { createVisualCaptureRuntime } from './runtime/visualCaptureRuntime'
 
 const systemStore = useSystemStore()
 const workspaceStore = useWorkspaceStore()
@@ -143,7 +145,7 @@ const e2eMode = Boolean(e2eApi)
 
 const activeTab = computed<NavigationModuleId>(() => {
   const segments = route.path.replace(/^\//, '').split('/')
-  return (segments[2] || 'companion') as NavigationModuleId
+  return (segments[2] || 'chat') as NavigationModuleId
 })
 
 const activeWorkspace = computed(() => workspaceStore.activeWorkspace)
@@ -180,27 +182,28 @@ const showOfflineBanner = computed(() => (
   !systemStore.sioConnected
 ))
 
-let visualFrameInFlight = false
-let visualFrameSeq = 0
-const pendingVisualResults = new Map<string, {
-  resolve: (payload: Record<string, unknown>) => void
-  reject: (error: Error) => void
-  timeout: number
-}>()
-const visualCaptureEpoch = new VisualCaptureEpoch()
 let themeMediaQuery: MediaQueryList | null = null
 let healthScheduleEnabled = !e2eMode
 let companionScheduleEnabled = !e2eMode
 let disposeE2EControls: (() => void) | null = null
 let e2eInitialHealthChecked = false
 let visualContextEnabled = activeVisionSettings.value.enabled
-
-const VISUAL_CAPTURE_ENCODING = {
-  maxWidth: 1280,
-  maxHeight: 720,
-  format: 'jpeg' as const,
-  quality: 72,
-}
+const visualCaptureRuntime = createVisualCaptureRuntime({
+  getSettings: () => activeVisionSettings.value,
+  getHealth: () => ({
+    controlRunning: systemStore.controlRunning,
+    pythonRunning: systemStore.pythonRunning,
+  }),
+  isDocumentHidden: () => document.hidden,
+  getScreenApi: () => petApi?.screen,
+  getSocket: getSocketClient,
+  state: {
+    markVisualPerceptionCapturing: systemStore.markVisualPerceptionCapturing,
+    markVisualPerceptionReady: systemStore.markVisualPerceptionReady,
+    markVisualPerceptionError: systemStore.markVisualPerceptionError,
+  },
+  logger,
+})
 const resolveTheme = () => {
   const preferred = settingsStore.state.system.theme || 'light'
   if (preferred !== 'system') return preferred
@@ -240,8 +243,6 @@ const menus = computed(() => {
   return [...localMenus.value]
     .filter((module) => module.enabled !== false)
     .sort((left, right) => {
-      if (left.id === 'companion' && right.id !== 'companion') return -1
-      if (right.id === 'companion' && left.id !== 'companion') return 1
       const leftOrder = orderMap.get(left.id) ?? Number.MAX_SAFE_INTEGER
       const rightOrder = orderMap.get(right.id) ?? Number.MAX_SAFE_INTEGER
       return leftOrder - rightOrder || (left.order ?? 0) - (right.order ?? 0)
@@ -249,6 +250,11 @@ const menus = computed(() => {
 })
 
 const adminMenus = computed(() => (adminMode.value ? localAdminMenus.value : []))
+const activeModuleTitle = computed(() => {
+  const module = [...localMenus.value, ...localAdminMenus.value].find((item) => item.id === activeTab.value)
+  return module?.title || yuizakiConfig.heroTitle
+})
+const companionStateLabel = computed(() => t(`companion.home.state.${companionRuntime.presentationState.value}`))
 
 const retryConnection = () => {
   const socketClient = getSocketClient()
@@ -314,167 +320,13 @@ const handleLocaleChange = async (locale: string) => {
   }
 }
 
-const captureRealtimeVisualFrame = async (
-  requestedFrameId?: string,
-  forceEnabled = false,
-): Promise<string> => {
-  const vision = activeVisionSettings.value
-  const socketClient = getSocketClient()
-  if (!forceEnabled && !vision.enabled) return 'skipped:disabled'
-  if (!forceEnabled && document.hidden) return 'skipped:document-hidden'
-  if (!systemStore.controlRunning || !systemStore.pythonRunning) {
-    return `skipped:health:${systemStore.controlRunning}:${systemStore.pythonRunning}`
-  }
-  if (!socketClient.isConnected()) return 'skipped:socket-disconnected'
-  const screenApi = petApi?.screen
-  if (!screenApi?.capture) {
-    systemStore.markVisualPerceptionError('当前环境不支持屏幕采集')
-    return 'skipped:capture-api-unavailable'
-  }
-  if (visualFrameInFlight) return 'skipped:capture-in-flight'
-
-  const captureEpoch = visualCaptureEpoch.current()
-  visualFrameInFlight = true
-  systemStore.markVisualPerceptionCapturing()
-  try {
-    const captureOptions = {
-      ...VISUAL_CAPTURE_ENCODING,
-      privacyMasks: vision.privacyMasks.map((mask) => ({ ...mask })),
-    }
-    const image = vision.captureMode === 'region' && screenApi.captureRegion
-      ? await screenApi.captureRegion(
-          vision.region.x,
-          vision.region.y,
-          vision.region.width,
-          vision.region.height,
-          vision.displayIndex,
-          captureOptions,
-        )
-      : await screenApi.capture(vision.displayIndex, captureOptions)
-    if (!visualCaptureEpoch.isCurrent(captureEpoch)) return 'skipped:capture-invalidated'
-    if (typeof image !== 'string' || !image.startsWith('data:image/')) {
-      systemStore.markVisualPerceptionError('没有捕获到可用画面')
-      return 'skipped:invalid-image'
-    }
-    visualFrameSeq += 1
-    const frameId = requestedFrameId ?? `renderer-${Date.now()}-${visualFrameSeq}`
-    visualCaptureEpoch.trackFrame(frameId, captureEpoch, forceEnabled)
-    socketClient.requestScreenshot(image, {
-      displayIndex: vision.displayIndex,
-      region: vision.captureMode === 'region' ? { ...vision.region } : undefined,
-      mode: 'vision',
-      source: vision.captureMode === 'region' ? 'desktop_region' : 'desktop',
-      timestamp: Date.now(),
-      frameId,
-      changeScore: 1,
-      captureReason: forceEnabled ? 'manual' : 'agent_turn',
-    })
-    return frameId
-  } catch (error) {
-    if (!visualCaptureEpoch.isCurrent(captureEpoch)) return 'skipped:capture-error-invalidated'
-    logger.warn('Failed to capture realtime visual frame:', error)
-    systemStore.markVisualPerceptionError(error instanceof Error ? error.message : '实时视觉采集失败')
-    return `skipped:capture-error:${error instanceof Error ? error.message : String(error)}`
-  } finally {
-    visualFrameInFlight = false
-  }
-}
-
-const handleVisualFrameResult = (value: unknown) => {
-  if (!value || typeof value !== 'object') return
-  const payload = value as Record<string, unknown>
-  const frameId = typeof payload.frame_id === 'string' ? payload.frame_id : null
-  const pending = frameId ? pendingVisualResults.get(frameId) : undefined
-  const terminalResult = isTerminalVisualFrameResult(payload)
-  const accepted = frameId
-    ? visualCaptureEpoch.acceptResult(frameId, activeVisionSettings.value.enabled, terminalResult)
-    : false
-  if (!accepted) {
-    if (frameId && pending) {
-      window.clearTimeout(pending.timeout)
-      pendingVisualResults.delete(frameId)
-      pending.reject(new Error(`Visual frame result was invalidated: ${frameId}`))
-    }
-    return
-  }
-  if (typeof payload.error === 'string' && payload.error) {
-    if (frameId && pending) {
-      window.clearTimeout(pending.timeout)
-      pendingVisualResults.delete(frameId)
-      pending.reject(new Error(payload.error))
-    }
-    systemStore.markVisualPerceptionError(
-      typeof payload.message === 'string' && payload.message ? payload.message : payload.error,
-    )
-    return
-  }
-  if (payload.status !== 'ok' || !isVisualFrameResult(payload)) return
-  if (frameId && pending) {
-    window.clearTimeout(pending.timeout)
-    pendingVisualResults.delete(frameId)
-    pending.resolve(payload)
-  }
-  systemStore.markVisualPerceptionReady(
-    typeof payload.frame_id === 'string' ? payload.frame_id : null,
-    typeof payload.received_at === 'number' ? payload.received_at : null,
-    {
-      analysisStatus: typeof payload.analysis_status === 'string'
-        ? payload.analysis_status as VisualAnalysisStatus
-        : null,
-      analysisReason: typeof payload.analysis_reason === 'string' ? payload.analysis_reason : null,
-      analysisAttempts: typeof payload.analysis_attempts === 'number' ? payload.analysis_attempts : null,
-      analysisSkipped: typeof payload.analysis_skipped === 'number' ? payload.analysis_skipped : null,
-      changeScore: typeof payload.change_score === 'number' ? payload.change_score : null,
-      captureReason: typeof payload.capture_reason === 'string' ? payload.capture_reason : null,
-      analysisLatencyMs: typeof payload.analysis_latency_ms === 'number' ? payload.analysis_latency_ms : null,
-    },
-  )
-}
-
-const waitForVisualFrameResult = (frameId: string): Promise<Record<string, unknown>> => (
-  new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      pendingVisualResults.delete(frameId)
-      visualCaptureEpoch.forgetFrame(frameId)
-      reject(new Error(`Visual frame result timed out: ${frameId}`))
-    }, 20_000)
-    pendingVisualResults.set(frameId, { resolve, reject, timeout })
-  })
-)
-
-const cancelVisualFrameResultWait = (frameId: string) => {
-  const pending = pendingVisualResults.get(frameId)
-  if (!pending) return
-  window.clearTimeout(pending.timeout)
-  pendingVisualResults.delete(frameId)
-  visualCaptureEpoch.forgetFrame(frameId)
-}
-
-const prepareAgentVisualContext = async () => {
-  if (!activeVisionSettings.value.enabled) return
-  const frameId = `renderer-agent-${Date.now()}-${visualFrameSeq + 1}`
-  const resultPromise = waitForVisualFrameResult(frameId)
-  const sentFrameId = await captureRealtimeVisualFrame(frameId)
-  if (sentFrameId !== frameId) {
-    cancelVisualFrameResultWait(frameId)
-    getSocketClient().clearVisualContext()
-    throw new Error(`Visual frame was not captured: ${sentFrameId}`)
-  }
-  try {
-    await resultPromise
-  } catch (error) {
-    getSocketClient().clearVisualContext()
-    throw error
-  }
-}
-
 const handlePermissionRequest = (data: PermissionRequestPayload) => {
   void publishCompanionRuntimeEvent({ source: 'permission', permission: 'waiting', requestId: data.request_id })
   dialogStore.openPermissionRequest(data)
 }
 
 const stopAppRuntime = () => {
-  visualCaptureEpoch.invalidate()
+  visualCaptureRuntime.stop()
   chatStore.setAgentTurnPreparation(null)
   window.removeEventListener('keydown', handleGlobalKeydown)
   petApi?.off?.('panel:open-tab', handlePanelOpenTab)
@@ -482,14 +334,9 @@ const stopAppRuntime = () => {
   themeMediaQuery?.removeEventListener('change', applyTheme)
   systemStore.stopHealthCheck()
   companionRuntime.stopCompanionRuntime()
-  for (const [frameId, pending] of pendingVisualResults) {
-    window.clearTimeout(pending.timeout)
-    pending.reject(new Error(`Visual frame result wait cancelled: ${frameId}`))
-  }
-  pendingVisualResults.clear()
   const socketClient = getSocketClient()
   socketClient.off(SocketEvents.PERMISSION_REQUEST, handlePermissionRequest)
-  socketClient.off(SocketEvents.SCREENSHOT_RESULT, handleVisualFrameResult)
+  socketClient.off(SocketEvents.SCREENSHOT_RESULT, visualCaptureRuntime.handleResult)
   disposeE2EControls?.()
   disposeE2EControls = null
 }
@@ -537,14 +384,8 @@ if (e2eApi) {
             if (Date.now() >= socketDeadline) throw new Error('Visual sample Socket connection timed out')
             await new Promise(resolve => window.setTimeout(resolve, 25))
           }
-          const frameId = `renderer-e2e-${Date.now()}-${visualFrameSeq + 1}`
-          const resultPromise = waitForVisualFrameResult(frameId)
-          const sentFrameId = await captureRealtimeVisualFrame(frameId, true)
-          if (sentFrameId !== frameId) {
-            cancelVisualFrameResultWait(frameId)
-            throw new Error(`Visual frame was not captured: ${sentFrameId}`)
-          }
-          const result = await resultPromise
+          const frameId = `renderer-e2e-${Date.now()}`
+          const result = await visualCaptureRuntime.captureAndWait(frameId, true)
           return { sampled: true, frameId, status: result['status'] }
         }
       case 'pauseCompanionPolling':
@@ -617,8 +458,8 @@ onMounted(() => {
     )
   }
   socketClient.on(SocketEvents.PERMISSION_REQUEST, handlePermissionRequest)
-  socketClient.on(SocketEvents.SCREENSHOT_RESULT, handleVisualFrameResult)
-  chatStore.setAgentTurnPreparation(prepareAgentVisualContext)
+  socketClient.on(SocketEvents.SCREENSHOT_RESULT, visualCaptureRuntime.handleResult)
+  chatStore.setAgentTurnPreparation(visualCaptureRuntime.prepareAgentVisualContext)
   systemStore.setVisualPerceptionEnabled(activeVisionSettings.value.enabled)
 
   if (companionScheduleEnabled) {
@@ -644,7 +485,7 @@ watch(activeTab, (tab) => {
 watch(activeVisionSettings, () => {
   const wasEnabled = visualContextEnabled
   visualContextEnabled = activeVisionSettings.value.enabled
-  visualCaptureEpoch.invalidate()
+  visualCaptureRuntime.invalidate()
   systemStore.setVisualPerceptionEnabled(visualContextEnabled)
   if (wasEnabled && !visualContextEnabled) getSocketClient().clearVisualContext()
 }, { deep: true })
@@ -673,7 +514,7 @@ watch(
   display: flex;
   width: 100%;
   height: 100%;
-  padding: 18px 20px 20px;
+  padding: 0;
   box-sizing: border-box;
   gap: 0;
 }
@@ -685,6 +526,8 @@ watch(
   height: 100%;
   overflow: hidden;
   background: var(--yui-main-bg);
+  padding: 14px 16px 16px;
+  box-sizing: border-box;
 }
 
 .wallpaper-layer,
@@ -700,11 +543,12 @@ watch(
   background-position: center;
   background-size: cover;
   filter: saturate(1.22) contrast(1.08);
-  opacity: 0.98;
+  opacity: 1;
   transition: opacity 0.3s ease;
 }
 
 .wallpaper-blur {
+  display: none;
   z-index: 0;
   background-position: center;
   background-size: cover;
@@ -714,11 +558,11 @@ watch(
 
 .wallpaper-mask {
   z-index: 1;
-  background: transparent;
+  background: var(--yui-panel-wallpaper-mask);
 }
 
 .wallpaper-on .wallpaper-layer {
-  opacity: 1;
+  opacity: var(--yui-panel-wallpaper-opacity);
 }
 
 .content-frame {
@@ -737,21 +581,24 @@ watch(
   min-height: 0;
   overflow-y: auto;
   border: 1px solid var(--yui-panel-border);
-  border-radius: var(--yui-radius-panel);
-  background: var(--yui-surface);
-  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  background: var(--yui-app-main-panel-bg);
+  box-shadow: none;
 }
 
 .app-main.panel-mode {
   padding: 18px 24px 22px;
+  border-color: var(--yui-panel-outline);
+  background: var(--yui-panel-surface);
+  background-clip: padding-box;
+  box-shadow: var(--yui-panel-shadow);
 }
 
 .app-main.chat-mode {
   padding: 0;
   border-color: transparent;
-  background: transparent;
+  background: var(--yui-chat-page-bg);
   box-shadow: none;
-  backdrop-filter: none;
 }
 
 .main--chat .wallpaper-layer {
@@ -764,7 +611,7 @@ watch(
 }
 
 .main--chat .wallpaper-blur {
-  opacity: 0;
+  display: none;
 }
 
 .chat-bar {
@@ -784,7 +631,6 @@ watch(
   color: #4d5274;
   background: rgba(255, 255, 255, 0.14);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(18px) saturate(1.25);
   font-size: 14px;
 }
 
@@ -810,7 +656,6 @@ watch(
   padding: 4px 12px;
   color: #dc2626;
   background: rgba(255, 242, 242, 0.48);
-  backdrop-filter: blur(16px);
   font-size: 13px;
   cursor: pointer;
 }
@@ -827,7 +672,6 @@ watch(
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.14);
   box-shadow: 0 16px 38px rgba(82, 82, 130, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(18px) saturate(1.16);
 }
 
 .streaming-avatar {
@@ -915,7 +759,6 @@ watch(
   align-items: center;
   justify-content: center;
   background: rgba(31, 34, 65, 0.28);
-  backdrop-filter: blur(12px);
 }
 
 .shortcuts-modal {
@@ -983,11 +826,12 @@ watch(
 
 @media (max-width: 980px) {
   .shell {
-    padding: 12px;
+    padding: 0;
   }
 
   .main {
     min-width: 0;
+    padding: 10px 12px 12px;
   }
 
   .app-main.panel-mode {
@@ -1005,6 +849,10 @@ watch(
 
 @media (max-width: 760px) {
   .shell {
+    padding: 0;
+  }
+
+  .main {
     padding: 8px;
   }
 
@@ -1045,8 +893,13 @@ watch(
   --yui-panel-shine: rgba(255, 255, 255, 0.16);
   --yui-surface: rgba(255, 255, 255, 0.94);
   --yui-surface-raised: #ffffff;
-  --yui-surface-muted: #f6f8fb;
-  --yui-surface-subtle: #eef4fb;
+  --yui-surface-muted: rgba(246, 248, 251, 0.62);
+  --yui-surface-subtle: rgba(238, 244, 251, 0.56);
+  --yui-panel-surface: rgba(255, 255, 255, 0.58);
+  --yui-panel-surface-strong: rgba(255, 255, 255, 0.76);
+  --yui-panel-outline: rgba(255, 255, 255, 0.78);
+  --yui-panel-outline-strong: rgba(255, 255, 255, 0.94);
+  --yui-panel-shadow: 0 12px 28px rgba(15, 23, 42, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.5);
   --yui-border: rgba(203, 213, 225, 0.9);
   --yui-border-strong: rgba(148, 163, 184, 0.72);
   --yui-shadow-card: 0 10px 24px rgba(15, 23, 42, 0.055);
@@ -1058,9 +911,22 @@ watch(
   --yui-success-soft: #ecfdf5;
   --yui-warning-soft: #fffbeb;
   --yui-danger-soft: #fff1f2;
-  --yui-chat-page-bg: #f8fafc;
-  --yui-chat-wallpaper-opacity: 0.55;
-  --yui-chat-wallpaper-mask: rgba(248, 250, 252, 0.58);
+  --yui-app-main-panel-bg: transparent;
+  --yui-panel-wallpaper-opacity: 1;
+  --yui-panel-wallpaper-mask: transparent;
+  --yui-chat-page-bg: transparent;
+  --yui-chat-wallpaper-opacity: 1;
+  --yui-chat-wallpaper-mask: transparent;
+  --yui-chat-surface: rgba(255, 255, 255, 0.74);
+  --yui-chat-surface-muted: rgba(241, 245, 249, 0.66);
+  --yui-chat-sidebar-bg: rgba(244, 247, 251, 0.62);
+  --yui-chat-border: rgba(203, 213, 225, 0.82);
+  --yui-chat-text: #172033;
+  --yui-chat-muted: #64748b;
+  --yui-chat-hover: #e9eff6;
+  --yui-chat-user-bg: #e8eef5;
+  --yui-chat-assistant-bg: #ffffff;
+  --yui-chat-focus: rgba(37, 99, 235, 0.3);
   --yui-text: #172033;
   --yui-muted: #64748b;
 }
@@ -1075,8 +941,13 @@ watch(
   --yui-panel-shine: rgba(255, 255, 255, 0.055);
   --yui-surface: rgba(15, 23, 42, 0.96);
   --yui-surface-raised: #111827;
-  --yui-surface-muted: #1e293b;
-  --yui-surface-subtle: #243044;
+  --yui-surface-muted: rgba(30, 41, 59, 0.64);
+  --yui-surface-subtle: rgba(36, 48, 68, 0.58);
+  --yui-panel-surface: rgba(15, 23, 42, 0.64);
+  --yui-panel-surface-strong: rgba(15, 23, 42, 0.8);
+  --yui-panel-outline: rgba(148, 163, 184, 0.46);
+  --yui-panel-outline-strong: rgba(203, 213, 225, 0.66);
+  --yui-panel-shadow: 0 14px 32px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   --yui-border: rgba(71, 85, 105, 0.82);
   --yui-border-strong: rgba(100, 116, 139, 0.82);
   --yui-shadow-card: 0 12px 28px rgba(0, 0, 0, 0.22);
@@ -1088,9 +959,22 @@ watch(
   --yui-success-soft: rgba(16, 185, 129, 0.14);
   --yui-warning-soft: rgba(245, 158, 11, 0.14);
   --yui-danger-soft: rgba(244, 63, 94, 0.14);
-  --yui-chat-page-bg: #0f172a;
-  --yui-chat-wallpaper-opacity: 0.42;
-  --yui-chat-wallpaper-mask: rgba(15, 23, 42, 0.64);
+  --yui-app-main-panel-bg: transparent;
+  --yui-panel-wallpaper-opacity: 1;
+  --yui-panel-wallpaper-mask: transparent;
+  --yui-chat-page-bg: transparent;
+  --yui-chat-wallpaper-opacity: 1;
+  --yui-chat-wallpaper-mask: transparent;
+  --yui-chat-surface: rgba(17, 24, 39, 0.76);
+  --yui-chat-surface-muted: rgba(30, 41, 59, 0.68);
+  --yui-chat-sidebar-bg: rgba(11, 18, 32, 0.68);
+  --yui-chat-border: rgba(71, 85, 105, 0.82);
+  --yui-chat-text: #e5e7eb;
+  --yui-chat-muted: #94a3b8;
+  --yui-chat-hover: #243044;
+  --yui-chat-user-bg: #263449;
+  --yui-chat-assistant-bg: #111827;
+  --yui-chat-focus: rgba(96, 165, 250, 0.42);
   --yui-text: #e5e7eb;
   --yui-muted: #94a3b8;
 }
@@ -1100,10 +984,12 @@ watch(
 .yuizaki-bg .el-table,
 .yuizaki-bg .el-descriptions,
 .yuizaki-bg .el-alert {
-  border-color: var(--yui-border);
+  border: 1px solid var(--yui-panel-outline);
+  border-color: var(--yui-panel-outline);
   border-radius: var(--yui-radius-card);
-  background: var(--yui-surface);
-  box-shadow: var(--yui-shadow-card);
+  background: var(--yui-panel-surface);
+  background-clip: padding-box;
+  box-shadow: var(--yui-panel-shadow);
   color: var(--yui-text);
 }
 
@@ -1225,11 +1111,48 @@ watch(
 .yuizaki-bg.yuizaki-bg .plugin-toolbar,
 .yuizaki-bg.yuizaki-bg .governance-toolbar,
 .yuizaki-bg.yuizaki-bg .voice-toolbar,
-.yuizaki-bg.yuizaki-bg .panel-toolbar {
-  border-color: var(--yui-border);
+  .yuizaki-bg.yuizaki-bg .panel-toolbar {
+  border-color: var(--yui-panel-outline);
   border-radius: var(--yui-radius-card);
-  background: var(--yui-surface);
-  box-shadow: var(--yui-shadow-card);
+  background: var(--yui-panel-surface);
+  background-clip: padding-box;
+  box-shadow: var(--yui-panel-shadow);
+}
+
+.yuizaki-bg.yuizaki-bg .panel-mode .el-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .el-tabs--border-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .el-descriptions,
+.yuizaki-bg.yuizaki-bg .panel-mode .el-alert,
+.yuizaki-bg.yuizaki-bg .panel-mode .el-table,
+.yuizaki-bg.yuizaki-bg .panel-mode .panel-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .metric-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .ops-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .ops-status-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .control-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .status-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .mode-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .server-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .host-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .plugin-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .preset-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .launch-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .schedule-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .schedule-item,
+.yuizaki-bg.yuizaki-bg .panel-mode .run-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .loop-log-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .observability-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .voice-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .service-item,
+.yuizaki-bg.yuizaki-bg .panel-mode .runway-step,
+.yuizaki-bg.yuizaki-bg .panel-mode .command-item,
+.yuizaki-bg.yuizaki-bg .panel-mode .permission-item,
+.yuizaki-bg.yuizaki-bg .panel-mode .audit-item,
+.yuizaki-bg.yuizaki-bg .panel-mode .detail-block,
+.yuizaki-bg.yuizaki-bg .panel-mode .contribution-item,
+.yuizaki-bg.yuizaki-bg .panel-mode .object-item,
+.yuizaki-bg.yuizaki-bg .panel-mode .summary-detail-card,
+.yuizaki-bg.yuizaki-bg .panel-mode .session-card {
+  box-shadow: none;
 }
 
 .yuizaki-bg.yuizaki-bg .metric-card.green,

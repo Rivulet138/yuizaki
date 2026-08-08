@@ -18,57 +18,25 @@
           :closable="false"
         />
 
-        <el-card class="settings-access-card" shadow="never">
-          <div class="access-stack">
-            <div class="access-row">
-              <div>
-                <strong>{{ t('settings.access.title') }}</strong>
-              </div>
-              <div class="access-controls">
-                <el-input
-                  v-model="adminTokenInput"
-                  class="admin-token-input"
-                  type="password"
-                  show-password
-                  :placeholder="t('settings.access.placeholder')"
-                  @keyup.enter="saveAdminToken"
-                />
-                <el-button type="primary" plain :loading="adminTokenRequest.loading" @click="saveAdminToken">{{ t('settings.access.unlock') }}</el-button>
-                <el-button plain :loading="adminTokenRequest.loading" @click="clearAdminToken">{{ t('common.clear') }}</el-button>
-                <el-tag :type="adminTokenConfigured ? 'success' : 'info'">{{ adminTokenConfigured ? t('settings.access.tokenSet') : t('settings.access.tokenNotSet') }}</el-tag>
-              </div>
-            </div>
-            <div class="access-divider" aria-hidden="true" />
-            <div class="access-row backend-token-row">
-              <div>
-                <strong>{{ t('settings.backendToken.title') }}</strong>
-                <div v-if="backendTokenStatus" class="access-token-details">
-                  <el-tag size="small" type="info">{{ t('settings.backendToken.source') }} · {{ backendTokenSourceLabel }}</el-tag>
-                  <el-tag v-if="backendTokenPreview" size="small" type="info">{{ t('settings.backendToken.preview') }} · {{ backendTokenPreview }}</el-tag>
-                  <el-tag v-if="backendTokenRequiresRestart" size="small" type="warning">{{ t('settings.backendToken.restartRequired') }}</el-tag>
-                </div>
-              </div>
-              <div class="access-controls">
-                <el-input
-                  v-model="backendTokenInput"
-                  class="backend-token-input"
-                  type="password"
-                  show-password
-                  :placeholder="t('settings.backendToken.placeholder')"
-                  @keyup.enter="saveBackendToken"
-                />
-                <el-button type="primary" plain :loading="backendTokenBusy" @click="saveBackendToken">{{ t('settings.backendToken.save') }}</el-button>
-                <el-button plain :loading="backendTokenBusy" @click="resetBackendToken">{{ t('settings.backendToken.reset') }}</el-button>
-                <el-tag :type="backendTokenRequiresRestart ? 'warning' : backendTokenConfigured ? 'success' : 'info'">
-                  {{ backendTokenRequiresRestart ? t('settings.backendToken.restartRequired') : backendTokenConfigured ? t('settings.backendToken.tokenSet') : t('settings.backendToken.tokenNotSet') }}
-                </el-tag>
-              </div>
-            </div>
-          </div>
-        </el-card>
+        <SettingsAccessSection
+          v-model:admin-token="adminTokenInput"
+          v-model:backend-token="backendTokenInput"
+          :admin-token-configured="adminTokenConfigured"
+          :admin-token-loading="adminTokenRequest.loading"
+          :backend-token-configured="backendTokenConfigured"
+          :backend-token-busy="backendTokenBusy"
+          :backend-token-status-known="Boolean(backendTokenStatus)"
+          :backend-token-source-label="backendTokenSourceLabel"
+          :backend-token-preview="backendTokenPreview"
+          :backend-token-requires-restart="backendTokenRequiresRestart"
+          @save-admin-token="saveAdminToken"
+          @clear-admin-token="clearAdminToken"
+          @save-backend-token="saveBackendToken"
+          @reset-backend-token="resetBackendToken"
+        />
 
         <el-tabs v-model="activeSection" type="border-card">
-          <el-tab-pane :label="t('settings.tabs.llm')" name="llm">
+          <el-tab-pane :label="t('settings.tabs.llm')" name="llm" lazy>
             <el-card class="llm-settings-card" shadow="never">
               <template #header>
                 <div class="card-header">
@@ -185,82 +153,20 @@
                         <el-option v-for="model in llmModelSelectOptions" :key="model" :label="model" :value="model" />
                       </el-select>
                       <p v-if="llmModelStatusLabel" class="field-hint" :class="{ error: llmModelsRequest.error }">{{ llmModelStatusLabel }}</p>
-                      <div v-if="form.llm.model.trim()" class="model-capability-panel">
-                        <div class="model-capability-head">
-                          <strong>模型能力</strong>
-                          <span>
-                            {{ modelCapabilitySourceLabel }}
-                            <a
-                              v-if="currentModelCapabilities.metadata"
-                              :href="currentModelCapabilities.metadata.documentationUrl"
-                              target="_blank"
-                              rel="noreferrer"
-                            >来源</a>
-                          </span>
-                        </div>
-                        <div class="model-capability-strip">
-                          <el-tag :type="modelLatencyTagType" size="small">{{ modelLatencyLabel }}</el-tag>
-                          <el-tag
-                            v-for="item in modelCapabilityRows"
-                            :key="item.key"
-                            :type="capabilityTagType(item.support)"
-                            size="small"
-                          >
-                            {{ item.label }} · {{ capabilitySupportLabel(item.support) }}
-                          </el-tag>
-                        </div>
-                        <div v-if="currentModelCapabilities.metadata" class="model-metadata-grid">
-                          <div v-for="item in modelMetadataRows" :key="item.label">
-                            <span>{{ item.label }}</span>
-                            <strong>{{ item.value }}</strong>
-                          </div>
-                        </div>
-                        <p v-if="modelPricingLabel" class="model-pricing-note">{{ modelPricingLabel }}</p>
-                        <el-alert
-                          v-for="warning in modelConfigurationWarnings"
-                          :key="warning"
-                          class="model-capability-warning"
-                          type="warning"
-                          :closable="false"
-                          :title="warning"
-                        />
-                      </div>
+                      <SettingsLlmCapabilityPanel
+                        :provider="llmProviderPreset"
+                        :model="form.llm.model"
+                        :context-max-tokens="Number(form.llm.context_max_tokens)"
+                        :max-output-tokens="Number(form.llm.default_max_output_tokens)"
+                        :vision-enabled="form.llm.vision_enabled"
+                      />
                     </el-form-item>
 
-                    <div class="subsection-title">实时视觉模型</div>
-                    <el-form-item label="使用独立视觉模型">
-                      <el-switch v-model="form.llm.vision_enabled" @change="debouncedSave({ llm: { vision_enabled: $event } })" />
-                    </el-form-item>
-                    <div v-if="form.llm.vision_enabled" class="form-grid three">
-                      <el-form-item label="视觉提供商">
-                        <el-select v-model="form.llm.vision_provider" class="full-width" @change="debouncedSave({ llm: { vision_provider: $event } })">
-                          <el-option v-for="option in llmProviderOptions" :key="option.value" :label="option.label" :value="option.value" />
-                        </el-select>
-                      </el-form-item>
-                      <el-form-item label="视觉模型">
-                        <el-input v-model="form.llm.vision_model" @change="debouncedSave({ llm: { vision_model: $event } })" />
-                      </el-form-item>
-                      <el-form-item label="视觉超时">
-                        <el-input-number v-model="form.llm.vision_timeout" :min="5" :max="120" controls-position="right" @change="debouncedSave({ llm: { vision_timeout: $event } })" />
-                      </el-form-item>
-                      <el-form-item label="Vision detail">
-                        <el-select v-model="form.llm.vision_detail" class="full-width" @change="debouncedSave({ llm: { vision_detail: $event } })">
-                          <el-option label="Low latency" value="low" />
-                          <el-option label="Auto" value="auto" />
-                          <el-option label="High fidelity" value="high" />
-                          <el-option label="Original" value="original" />
-                        </el-select>
-                      </el-form-item>
-                      <el-form-item label="视觉 API 地址（OpenAI 兼容）">
-                        <el-input v-model="form.llm.vision_base_url" @change="debouncedSave({ llm: { vision_base_url: $event } })" />
-                      </el-form-item>
-                      <el-form-item v-if="!KEYLESS_LLM_PROVIDERS.has(form.llm.vision_provider)" label="视觉 API Key">
-                        <el-input v-model="form.llm.vision_api_key" type="password" show-password @change="debouncedSave({ llm: { vision_api_key: $event } })" />
-                      </el-form-item>
-                    </div>
-                    <p v-if="form.llm.vision_enabled && (!form.llm.vision_base_url.trim() || !form.llm.vision_model.trim())" class="field-hint error">
-                      视觉 API 地址和视觉模型未配置
-                    </p>
+                    <SettingsLlmVisionSection
+                      :model-value="llmVisionSettings"
+                      :provider-options="llmProviderOptions"
+                      @update="applyLlmVisionPatch"
+                    />
 
                     <div class="subsection-title">{{ t('settings.llm.sectionSampling') }}</div>
                     <div class="parameter-strip">
@@ -304,7 +210,7 @@
             </el-card>
           </el-tab-pane>
 
-          <el-tab-pane :label="t('settings.tabs.tts')" name="voice">
+          <el-tab-pane :label="t('settings.tabs.tts')" name="voice" lazy>
             <el-card shadow="never">
               <template #header>
                 <div class="card-header">
@@ -415,7 +321,7 @@
             </el-card>
           </el-tab-pane>
 
-          <el-tab-pane :label="t('settings.tabs.asr')" name="asr">
+          <el-tab-pane :label="t('settings.tabs.asr')" name="asr" lazy>
             <SettingsAsrSection
               :model-value="form.asr"
               :discovery-loading="localDiscoveryRequest.loading"
@@ -425,637 +331,77 @@
             />
           </el-tab-pane>
 
-          <el-tab-pane :label="t('settings.tabs.memory')" name="memory">
-            <el-card shadow="never">
-              <template #header>
-                <div class="card-header">
-                  <span>{{ t('settings.memory.title') }}</span>
-                  <div class="button-row">
-                    <el-button plain :loading="localDiscoveryRequest.loading" @click="applyLocalMemoryDiscovery">
-                      <el-icon><Connection /></el-icon>
-                      {{ t('settings.discovery.detectLocal') }}
-                    </el-button>
-                    <el-button
-                      type="primary"
-                      plain
-                      :loading="memoryRebuildRequest.loading"
-                      :disabled="form.memory.backend === 'inmemory'"
-                      @click="handleRebuildMemoryIndex"
-                    >
-                      <el-icon><Refresh /></el-icon>
-                      {{ t('settings.memory.rebuildIndex') }}
-                    </el-button>
-                  </div>
-                </div>
-              </template>
-              <el-form label-position="top" @submit.prevent>
-                <el-form-item :label="t('settings.memory.backend')">
-                  <el-radio-group v-model="form.memory.backend" @change="handleMemoryBackendChange">
-                    <el-radio-button value="sqlite">SQLite</el-radio-button>
-                    <el-radio-button value="inmemory">In-memory</el-radio-button>
-                    <el-radio-button value="qdrant">Qdrant</el-radio-button>
-                  </el-radio-group>
-                </el-form-item>
-                <el-form-item v-if="form.memory.backend === 'sqlite'" label="SQLite 存储文件">
-                  <el-input v-model="form.memory.sqlite_path" placeholder="python/data/memory.db" @change="debouncedSave({ memory: { sqlite_path: $event } })" />
-                </el-form-item>
-                <el-form-item :label="t('settings.memory.embedding')">
-                  <el-input v-model="form.memory.embedding_model" :placeholder="DEFAULT_EMBEDDING_MODEL" @change="debouncedSave({ memory: { embedding_model: $event } })" />
-                </el-form-item>
-                <el-form-item label="Learned reranker">
-                  <el-switch v-model="form.memory.reranker_enabled" @change="debouncedSave({ memory: { reranker_enabled: $event } })" />
-                </el-form-item>
-                <div v-if="form.memory.reranker_enabled" class="form-grid">
-                  <el-form-item label="Reranker model">
-                    <el-input v-model="form.memory.reranker_model" @change="debouncedSave({ memory: { reranker_model: $event } })" />
-                  </el-form-item>
-                  <el-form-item label="Reranker candidates">
-                    <el-input-number v-model="form.memory.reranker_candidate_count" :min="5" :max="100" :step="5" controls-position="right" @change="debouncedSave({ memory: { reranker_candidate_count: $event } })" />
-                  </el-form-item>
-                </div>
-                <div v-if="form.memory.backend === 'qdrant'" class="form-grid">
-                  <el-form-item :label="t('settings.memory.qdrantUrl')">
-                    <el-input v-model="form.memory.qdrant_url" @change="debouncedSave({ memory: { qdrant_url: $event } })" />
-                  </el-form-item>
-                  <el-form-item :label="t('settings.memory.qdrantApiKey')">
-                    <el-input v-model="form.memory.qdrant_api_key" type="password" show-password @change="debouncedSave({ memory: { qdrant_api_key: $event } })" />
-                  </el-form-item>
-                  <el-form-item :label="t('settings.memory.collection')">
-                    <el-input v-model="form.memory.qdrant_collection" placeholder="memories" @change="debouncedSave({ memory: { qdrant_collection: $event } })" />
-                  </el-form-item>
-                  <el-form-item :label="t('settings.memory.qdrantTimeout')">
-                    <el-input-number v-model="form.memory.qdrant_timeout" :min="0.1" :max="300" :step="1" @change="debouncedSave({ memory: { qdrant_timeout: $event } })" />
-                  </el-form-item>
-                </div>
-                <el-form-item v-if="form.memory.backend === 'qdrant'" :label="t('settings.memory.qdrantAutoStart')">
-                  <el-switch v-model="form.memory.qdrant_auto_start" @change="debouncedSave({ memory: { qdrant_auto_start: $event } })" />
-                </el-form-item>
-                <div v-if="form.memory.backend === 'qdrant' && form.memory.qdrant_auto_start" class="form-grid three">
-                  <el-form-item :label="t('settings.memory.qdrantDockerImage')">
-                    <el-input v-model="form.memory.qdrant_docker_image" :placeholder="DEFAULT_QDRANT_DOCKER_IMAGE" @change="debouncedSave({ memory: { qdrant_docker_image: $event } })" />
-                  </el-form-item>
-                  <el-form-item :label="t('settings.memory.qdrantDockerContainer')">
-                    <el-input v-model="form.memory.qdrant_docker_container" placeholder="yuizaki-qdrant" @change="debouncedSave({ memory: { qdrant_docker_container: $event } })" />
-                  </el-form-item>
-                  <el-form-item :label="t('settings.memory.qdrantDockerVolume')">
-                    <el-input v-model="form.memory.qdrant_docker_volume" placeholder="yuizaki-qdrant-storage" @change="debouncedSave({ memory: { qdrant_docker_volume: $event } })" />
-                  </el-form-item>
-                </div>
-              </el-form>
-            </el-card>
+          <el-tab-pane :label="t('settings.tabs.memory')" name="memory" lazy>
+            <SettingsMemorySection
+              :model-value="form.memory"
+              :discovery-loading="localDiscoveryRequest.loading"
+              :rebuild-loading="memoryRebuildRequest.loading"
+              :default-embedding-model="DEFAULT_EMBEDDING_MODEL"
+              :default-qdrant-docker-image="DEFAULT_QDRANT_DOCKER_IMAGE"
+              @change-backend="handleMemoryBackendChange"
+              @update-field="saveMemoryField"
+              @discover-local="applyLocalMemoryDiscovery"
+              @rebuild="handleRebuildMemoryIndex"
+            />
           </el-tab-pane>
 
-          <el-tab-pane :label="t('settings.tabs.summary')" name="summary">
-            <el-card shadow="never">
-              <template #header>{{ t('settings.summary.title') }}</template>
-              <el-form label-position="top" @submit.prevent>
-                <div class="form-grid three">
-                  <el-form-item :label="t('settings.summary.triggerMessages')">
-                    <el-input-number v-model="form.summary.trigger_messages" :min="10" :max="100" controls-position="right" @change="debouncedSave({ summary: { trigger_messages: $event } })" />
-                  </el-form-item>
-                  <el-form-item :label="t('settings.summary.keepRecent')">
-                    <el-input-number v-model="form.summary.keep_recent_messages" :min="0" :max="50" controls-position="right" @change="debouncedSave({ summary: { keep_recent_messages: $event } })" />
-                  </el-form-item>
-                  <el-form-item :label="t('settings.summary.rewriteInterval')">
-                    <el-input-number v-model="form.summary.rewrite_interval_messages" :min="5" :max="100" controls-position="right" @change="debouncedSave({ summary: { rewrite_interval_messages: $event } })" />
-                  </el-form-item>
-                  <el-form-item :label="t('settings.summary.itemMaxChars')">
-                    <el-input-number v-model="form.summary.item_max_chars" :min="100" :max="2000" :step="100" controls-position="right" @change="debouncedSave({ summary: { item_max_chars: $event } })" />
-                  </el-form-item>
-                  <el-form-item :label="t('settings.summary.scorer')">
-                    <el-select v-model="form.summary.quality_scorer_mode" class="full-width" @change="debouncedSave({ summary: { quality_scorer_mode: $event } })">
-                      <el-option label="Rule" value="rule" />
-                      <el-option label="LLM" value="llm" />
-                    </el-select>
-                  </el-form-item>
-                  <el-form-item :label="t('settings.summary.budget')">
-                    <el-input-number v-model="form.summary.quality_score_budget_per_hour" :min="1" :max="100" controls-position="right" @change="debouncedSave({ summary: { quality_score_budget_per_hour: $event } })" />
-                  </el-form-item>
-                  <el-form-item :label="t('settings.summary.cooldown')">
-                    <el-input-number v-model="form.summary.quality_score_cooldown_seconds" :min="0" :max="3600" :step="60" controls-position="right" @change="debouncedSave({ summary: { quality_score_cooldown_seconds: $event } })" />
-                  </el-form-item>
-                </div>
-              </el-form>
-            </el-card>
+          <el-tab-pane :label="t('settings.tabs.summary')" name="summary" lazy>
+            <SettingsSummarySection :model-value="form.summary" @update-field="saveSummaryField" />
           </el-tab-pane>
 
-          <el-tab-pane :label="t('settings.tabs.svc')" name="svc">
-            <el-card shadow="never">
-              <template #header>
-                <div class="card-header">
-                  <span>{{ t('settings.svc.service') }}</span>
-                  <div class="button-row">
-                    <el-button plain :loading="localDiscoveryRequest.loading" @click="applyLocalSvcDiscovery">
-                      <el-icon><Connection /></el-icon>
-                      {{ t('settings.discovery.detectLocal') }}
-                    </el-button>
-                    <el-tag :type="hasSvcEndpoint ? 'success' : 'info'">{{ hasSvcEndpoint ? t('common.configured') : t('common.optional') }}</el-tag>
-                  </div>
-                </div>
-              </template>
-              <el-form label-position="top" @submit.prevent>
-                <el-form-item :label="t('settings.svc.provider')">
-                  <el-select v-model="form.svc.provider" class="full-width" @change="debouncedSave({ svc: { provider: $event } })">
-                    <el-option label="SoulX-Singer-SVC Service" value="soulx-service" />
-                    <el-option :label="t('common.disabled')" value="disabled" />
-                  </el-select>
-                </el-form-item>
-                <el-form-item :label="t('settings.svc.baseUrl')">
-                  <el-input v-model="form.svc.base_url" @change="debouncedSave({ svc: { base_url: $event } })" />
-                </el-form-item>
-                <div class="form-grid">
-                  <el-form-item :label="t('settings.svc.referenceAudioId')">
-                    <el-input-number v-model="form.svc.speaker_id" :min="0" controls-position="right" @change="debouncedSave({ svc: { speaker_id: $event } })" />
-                  </el-form-item>
-                  <el-form-item :label="t('settings.svc.pitch')">
-                    <el-input-number v-model="form.svc.pitch" :min="-36" :max="36" controls-position="right" @change="debouncedSave({ svc: { pitch: $event } })" />
-                  </el-form-item>
-                  <el-form-item :label="t('settings.svc.timeout')">
-                    <el-input-number v-model="form.svc.timeout" :min="10" :max="900" controls-position="right" @change="debouncedSave({ svc: { timeout: $event } })" />
-                  </el-form-item>
-                </div>
-              </el-form>
-            </el-card>
+          <el-tab-pane :label="t('settings.tabs.svc')" name="svc" lazy>
+            <SettingsSvcSection
+              :model-value="form.svc"
+              :discovery-loading="localDiscoveryRequest.loading"
+              :discovery-error="localDiscoveryRequest.error"
+              @discover-local="applyLocalSvcDiscovery"
+              @update-field="saveSvcField"
+            />
           </el-tab-pane>
 
-          <el-tab-pane :label="t('settings.tabs.resources')" name="resources">
-            <div class="resource-stack">
-              <el-alert
-                v-if="resourceMessage"
-                :title="resourceMessage"
-                :type="resourceMessageType"
-                show-icon
-                :closable="false"
-              />
-
-              <div class="button-row">
-                <el-button plain :loading="resourceLoading || storageLoading" @click="refreshResourcePanel">{{ t('settings.resource.refresh') }}</el-button>
-                <el-button
-                  v-if="cancellableResourceIds.length > 0"
-                  type="danger"
-                  plain
-                  :icon="CircleClose"
-                  :loading="resourceCancelLoading"
-                  @click="cancelActiveResourceDownloads"
-                >取消下载</el-button>
-              </div>
-
-              <div v-if="activeDownloadProgress.length" class="resource-progress-list" aria-live="polite">
-                <div v-for="progress in activeDownloadProgress" :key="progress.resourceId" class="resource-progress-row">
-                  <div class="resource-progress-header">
-                    <strong>{{ resourceProgressLabel(progress.resourceId) }}</strong>
-                    <span>{{ resourceProgressPhaseLabel(progress.phase) }}</span>
-                  </div>
-                  <el-progress
-                    :percentage="progress.percent ?? 100"
-                    :indeterminate="progress.percent === null"
-                    :show-text="progress.percent !== null"
-                    :stroke-width="8"
-                  />
-                  <span v-if="progress.bytesDownloaded !== null" class="resource-progress-bytes">
-                    {{ formatStorageBytes(progress.bytesDownloaded) }}<template v-if="progress.bytesTotal !== null"> / {{ formatStorageBytes(progress.bytesTotal) }}</template>
-                  </span>
-                </div>
-              </div>
-
-              <div v-if="resourceView" class="resource-download-bar">
-                <el-checkbox-group v-model="selectedResourceIds" class="resource-download-options">
-                  <el-checkbox
-                    v-for="item in resourceDownloadOptions"
-                    :key="item.id"
-                    :value="item.id"
-                    :disabled="item.ready"
-                  >
-                    <span class="resource-download-label">{{ item.label }}</span>
-                    <el-tag size="small" type="info">{{ item.version }}</el-tag>
-                    <span>{{ formatResourceDownloadBytes(item.downloadBytes) }}</span>
-                    <span>{{ item.license }}</span>
-                    <el-tag v-if="item.resumable" size="small" type="warning">
-                      可续传 {{ formatStorageBytes(item.resumable.bytesDownloaded) }}<template v-if="item.resumable.bytesTotal !== null"> / {{ formatStorageBytes(item.resumable.bytesTotal) }}</template>
-                    </el-tag>
-                  </el-checkbox>
-                </el-checkbox-group>
-                <el-button
-                  type="primary"
-                  :icon="Download"
-                  :loading="resourceActionLoading('selected-download')"
-                  :disabled="selectedResourceIds.length === 0"
-                  @click="downloadSelectedResources"
-                >
-                  下载选中项
-                </el-button>
-              </div>
-
-              <section v-if="storageStatus" class="storage-maintenance" aria-labelledby="storage-maintenance-title">
-                <div class="storage-maintenance-header">
-                  <strong id="storage-maintenance-title">{{ t('settings.storage.title') }}</strong>
-                  <div class="storage-summary">
-                    <el-tag type="info">{{ formatStorageBytes(storageStatus.total_bytes) }}</el-tag>
-                    <el-button
-                      type="danger"
-                      plain
-                      :icon="Delete"
-                      :loading="storageActionKey === 'all'"
-                      :disabled="storageStatus.reclaimable_bytes <= 0"
-                      @click="cleanupAllStorage"
-                    >
-                      {{ t('settings.storage.cleanAll') }}
-                    </el-button>
-                  </div>
-                </div>
-                <el-table :data="storageStatus.categories" size="small" class="storage-table">
-                  <el-table-column :label="t('settings.storage.category')" min-width="150">
-                    <template #default="scope">
-                      <template v-if="scope.row">{{ storageCategoryLabel(scope.row.id) }}</template>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="files" :label="t('settings.storage.files')" width="88" />
-                  <el-table-column :label="t('settings.storage.size')" width="110">
-                    <template #default="scope">
-                      <template v-if="scope.row">{{ formatStorageBytes(scope.row.bytes) }}</template>
-                    </template>
-                  </el-table-column>
-                  <el-table-column :label="t('settings.storage.persistence')" width="110">
-                    <template #default="scope">
-                      <el-tag v-if="scope.row" size="small" type="info">{{ scope.row.persistence === 'memory_only' ? t('settings.storage.memoryOnly') : t('settings.storage.disk') }}</el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column :label="t('settings.storage.action')" width="150" align="right">
-                    <template #default="scope">
-                      <el-button
-                        v-if="scope.row?.action === 'delete_files'"
-                        type="danger"
-                        plain
-                        size="small"
-                        :icon="Delete"
-                        :loading="storageActionKey === scope.row.id"
-                        :disabled="scope.row.files <= 0"
-                        @click="cleanupStorage([scope.row.id])"
-                      >
-                        {{ t('settings.storage.permanentClean') }}
-                      </el-button>
-                      <el-button
-                        v-else-if="scope.row?.action === 'compact'"
-                        plain
-                        size="small"
-                        :icon="Refresh"
-                        :loading="storageActionKey === scope.row.id"
-                        @click="cleanupStorage([scope.row.id])"
-                      >
-                        {{ t('settings.storage.compact') }}
-                      </el-button>
-                      <span v-else-if="scope.row" class="storage-no-action">{{ t('settings.storage.none') }}</span>
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </section>
-
-              <div v-if="resourceView" class="resource-grid">
-                <el-card class="resource-card" shadow="never">
-                  <template #header>
-                    <div class="card-header">
-                      <span>{{ t('settings.resource.desktopLibrary') }}</span>
-                      <el-tag type="info">{{ resourceView.localCounts.live2d }} Live2D / {{ resourceView.localCounts.vrm }} VRM</el-tag>
-                    </div>
-                  </template>
-                  <div class="resource-details">
-                    <div>
-                      <strong>{{ t('settings.resource.live2dRoot') }}</strong>
-                      <code class="resource-path">{{ resourceView.modelRoots.live2d }}</code>
-                    </div>
-                    <div>
-                      <strong>{{ t('settings.resource.vrmRoot') }}</strong>
-                      <code class="resource-path">{{ resourceView.modelRoots.vrm }}</code>
-                    </div>
-                  </div>
-                </el-card>
-
-                <el-card class="resource-card" shadow="never">
-                  <template #header>
-                    <div class="card-header">
-                      <span>Sherpa Streaming Zipformer2 CTC</span>
-                      <el-tag :type="resourceTagType(resourceView.sherpaOnline.state)">{{ resourceView.sherpaOnline.message }}</el-tag>
-                    </div>
-                  </template>
-                  <div class="resource-details">
-                    <div>
-                      <strong>{{ t('settings.resource.model') }}</strong>
-                      <code class="resource-path">{{ resourceView.sherpaOnline.modelPath }}</code>
-                    </div>
-                    <div>
-                      <strong>Sherpa Tokens</strong>
-                      <code class="resource-path">{{ resourceView.sherpaOnline.tokensPath }}</code>
-                    </div>
-                    <div>
-                      <strong>Runtime validation</strong>
-                      <el-tag :type="resourceView.sherpaOnline.validated ? 'success' : 'warning'">
-                        {{ resourceView.sherpaOnline.validated ? 'Zipformer2 CTC verified' : 'Not verified' }}
-                      </el-tag>
-                    </div>
-                  </div>
-                  <ul v-if="resourceView.sherpaOnline.details.length" class="resource-list">
-                    <li v-for="detail in resourceView.sherpaOnline.details" :key="detail">{{ detail }}</li>
-                  </ul>
-                  <div class="button-row resource-actions">
-                    <el-button
-                      type="primary"
-                      plain
-                      :loading="resourceActionLoading('sherpa-online-download')"
-                      @click="runResourceCommand('sherpa-online-download', () => resourceClient.prepareSherpaOnline(), ['sherpa_online'])"
-                    >
-                      {{ t('settings.resource.downloadSherpa') }} (Streaming)
-                    </el-button>
-                    <el-button
-                      v-if="resourceView.sherpaOnline.state !== 'missing'"
-                      type="danger"
-                      plain
-                      :icon="Delete"
-                      :loading="resourceActionLoading('remove-sherpa_online')"
-                      @click="removeModelResource('sherpa_online', '流式语音识别', resourceView.sherpaOnline.metadata)"
-                    >永久卸载</el-button>
-                  </div>
-                </el-card>
-
-                <el-card class="resource-card" shadow="never">
-                  <template #header>
-                    <div class="card-header">
-                      <span>SoulX-Singer-SVC</span>
-                      <el-tag :type="resourceTagType(resourceView.soulx.state)">{{ resourceView.soulx.message }}</el-tag>
-                    </div>
-                  </template>
-                  <div class="resource-details">
-                    <div>
-                      <strong>{{ t('settings.resource.checkpoint') }}</strong>
-                      <code class="resource-path">{{ resourceView.soulx.checkpointPath || resourceView.soulx.checkpointCandidates[0] }}</code>
-                    </div>
-                    <div>
-                      <strong>{{ t('settings.resource.preprocessDir') }}</strong>
-                      <code class="resource-path">{{ resourceView.soulx.preprocessDir }}</code>
-                    </div>
-                    <div>
-                      <strong>{{ t('settings.resource.referenceDir') }}</strong>
-                      <code class="resource-path">{{ resourceView.soulx.referenceDir }}</code>
-                    </div>
-                    <div>
-                      <strong>参考音频</strong>
-                      <el-tag :type="resourceView.soulx.hasReferenceAudio ? 'success' : 'info'">
-                        {{ resourceView.soulx.hasReferenceAudio ? '已导入' : '未导入' }}
-                      </el-tag>
-                    </div>
-                  </div>
-                  <ul v-if="resourceView.soulx.details.length" class="resource-list">
-                    <li v-for="detail in resourceView.soulx.details" :key="detail">{{ detail }}</li>
-                  </ul>
-                  <div class="button-row resource-actions">
-                    <el-button
-                      type="primary"
-                      plain
-                      :loading="resourceActionLoading('soulx-download')"
-                      @click="runResourceCommand('soulx-download', () => resourceClient.prepareSoulx(), ['soulx'])"
-                    >
-                      {{ t('settings.resource.downloadSoulx') }}
-                    </el-button>
-                    <el-button
-                      plain
-                      :loading="resourceActionLoading('soulx-reference')"
-                      @click="runResourceCommand('soulx-reference', () => resourceClient.importSoulxReference())"
-                    >
-                      {{ t('settings.resource.importReference') }}
-                    </el-button>
-                    <el-button
-                      v-if="resourceView.soulx.state !== 'missing'"
-                      type="danger"
-                      plain
-                      :icon="Delete"
-                      :loading="resourceActionLoading('remove-soulx')"
-                      @click="removeModelResource('soulx', 'SoulX 变声', resourceView.soulx.metadata)"
-                    >永久卸载</el-button>
-                  </div>
-                </el-card>
-
-                <el-card class="resource-card" shadow="never">
-                  <template #header>
-                    <div class="card-header">
-                      <span>Sherpa SenseVoice</span>
-                      <el-tag :type="resourceTagType(resourceView.sherpa.state)">{{ resourceView.sherpa.message }}</el-tag>
-                    </div>
-                  </template>
-                  <div class="resource-details">
-                    <div>
-                      <strong>{{ t('settings.resource.model') }}</strong>
-                      <code class="resource-path">{{ resourceView.sherpa.modelPath }}</code>
-                    </div>
-                    <div>
-                      <strong>Sherpa Tokens</strong>
-                      <code class="resource-path">{{ resourceView.sherpa.tokensPath }}</code>
-                    </div>
-                  </div>
-                  <ul v-if="resourceView.sherpa.details.length" class="resource-list">
-                    <li v-for="detail in resourceView.sherpa.details" :key="detail">{{ detail }}</li>
-                  </ul>
-                  <div class="button-row resource-actions">
-                    <el-button
-                      type="primary"
-                      plain
-                      :loading="resourceActionLoading('sherpa-download')"
-                      @click="runResourceCommand('sherpa-download', () => resourceClient.prepareSherpa(), ['sherpa'])"
-                    >
-                      {{ t('settings.resource.downloadSherpa') }}
-                    </el-button>
-                    <el-button
-                      v-if="resourceView.sherpa.state !== 'missing'"
-                      type="danger"
-                      plain
-                      :icon="Delete"
-                      :loading="resourceActionLoading('remove-sherpa')"
-                      @click="removeModelResource('sherpa', '离线语音识别', resourceView.sherpa.metadata)"
-                    >永久卸载</el-button>
-                  </div>
-                </el-card>
-
-                <el-card class="resource-card" shadow="never">
-                  <template #header>
-                    <div class="card-header">
-                      <span>{{ t('settings.resource.embedding') }}</span>
-                      <el-tag :type="resourceTagType(resourceView.embedding.state)">{{ resourceView.embedding.message }}</el-tag>
-                    </div>
-                  </template>
-                  <div class="resource-details">
-                    <div>
-                      <strong>{{ t('settings.resource.model') }}</strong>
-                      <code class="resource-path">{{ resourceView.embedding.modelName }}</code>
-                    </div>
-                    <div>
-                      <strong>{{ t('settings.resource.snapshot') }}</strong>
-                      <code class="resource-path">{{ resourceView.embedding.cachePath || resourceView.embedding.cacheRoot }}</code>
-                    </div>
-                  </div>
-                  <ul v-if="resourceView.embedding.details.length" class="resource-list">
-                    <li v-for="detail in resourceView.embedding.details" :key="detail">{{ detail }}</li>
-                  </ul>
-                  <div class="button-row resource-actions">
-                    <el-button
-                      type="primary"
-                      plain
-                      :loading="resourceActionLoading('embedding-prefetch')"
-                      @click="runResourceCommand('embedding-prefetch', () => resourceClient.prepareEmbedding(), ['embedding'])"
-                    >
-                      {{ t('settings.resource.prefetchEmbedding') }}
-                    </el-button>
-                    <el-button
-                      v-if="resourceView.embedding.state !== 'missing'"
-                      type="danger"
-                      plain
-                      :icon="Delete"
-                      :loading="resourceActionLoading('remove-embedding')"
-                      @click="removeModelResource('embedding', '长期记忆嵌入', resourceView.embedding.metadata)"
-                    >永久卸载</el-button>
-                  </div>
-                </el-card>
-
-                <el-card class="resource-card" shadow="never">
-                  <template #header>
-                    <div class="card-header">
-                      <span>{{ t('settings.resource.ttsAssets') }}</span>
-                      <el-tag :type="resourceTagType(resourceView.tts.state)">{{ resourceView.tts.message }}</el-tag>
-                    </div>
-                  </template>
-                  <div class="resource-details">
-                    <div>
-                      <strong>{{ t('settings.resource.character') }}</strong>
-                      <code class="resource-path">{{ resourceView.tts.character }}</code>
-                    </div>
-                    <div>
-                      <strong>{{ t('settings.resource.cacheDir') }}</strong>
-                      <code class="resource-path">{{ resourceView.tts.cacheDir }}</code>
-                    </div>
-                    <div>
-                      <strong>{{ t('settings.resource.modelDir') }}</strong>
-                      <code class="resource-path">{{ resourceView.tts.modelDir }}</code>
-                    </div>
-                  </div>
-                  <ul v-if="resourceView.tts.details.length" class="resource-list">
-                    <li v-for="detail in resourceView.tts.details" :key="detail">{{ detail }}</li>
-                  </ul>
-                  <div class="button-row resource-actions">
-                    <el-button
-                      type="primary"
-                      plain
-                      :loading="resourceActionLoading('tts-prefetch')"
-                      @click="runResourceCommand('tts-prefetch', () => resourceClient.prepareTts(), ['tts'])"
-                    >
-                      {{ t('settings.resource.prefetchTts') }}
-                    </el-button>
-                    <el-button
-                      v-if="resourceView.tts.state !== 'missing'"
-                      type="danger"
-                      plain
-                      :icon="Delete"
-                      :loading="resourceActionLoading('remove-tts')"
-                      @click="removeModelResource('tts', 'Genie TTS', resourceView.tts.metadata)"
-                    >永久卸载</el-button>
-                  </div>
-                </el-card>
-              </div>
-
-              <el-empty v-else :description="t('settings.resource.noStatus')" />
-            </div>
+          <el-tab-pane :label="t('settings.tabs.resources')" name="resources" lazy>
+            <SettingsResourcesSection
+              :resource-message="resourceMessage"
+              :resource-message-type="resourceMessageType"
+              :resource-loading="resourceLoading"
+              :storage-loading="storageLoading"
+              :cancellable-resource-ids="cancellableResourceIds"
+              :resource-cancel-loading="resourceCancelLoading"
+              :active-download-progress="activeDownloadProgress"
+              :resource-view="resourceView"
+              :selected-resource-ids="selectedResourceIds"
+              :resource-download-options="resourceDownloadOptions"
+              :storage-status="storageStatus"
+              :resource-action-key="resourceActionKey"
+              :storage-action-key="storageActionKey"
+              @refresh="refreshResourcePanel"
+              @cancel-downloads="cancelActiveResourceDownloads"
+              @update:selected-resource-ids="selectedResourceIds = $event"
+              @download-selected="downloadSelectedResources"
+              @prepare-resource="prepareResource"
+              @import-soulx-reference="importSoulxReference"
+              @remove-resource="removeModelResource"
+              @cleanup-storage="cleanupStorage"
+              @cleanup-all="cleanupAllStorage"
+            />
           </el-tab-pane>
+          <el-tab-pane :label="t('settings.tabs.system')" name="system" lazy>
+            <SettingsInterfaceSection
+              :model-value="form.system"
+              :theme-options="themeOptions"
+              :language-options="languageOptions"
+              @change-theme="handleSystemThemeChange"
+              @change-language="handleSystemLanguageChange"
+            />
 
-          <el-tab-pane :label="t('settings.tabs.system')" name="system">
-            <el-card shadow="never">
-              <template #header>{{ t('settings.interface.title') }}</template>
-              <el-form label-position="top" @submit.prevent>
-                <el-form-item :label="t('settings.system.theme')">
-                  <el-segmented v-model="form.system.theme" :options="themeOptions" @change="handleSystemThemeChange" />
-                </el-form-item>
-                <el-form-item :label="t('settings.system.language')">
-                  <el-segmented v-model="form.system.language" :options="languageOptions" @change="handleSystemLanguageChange" />
-                </el-form-item>
-              </el-form>
-            </el-card>
-
-            <el-card class="desktop-input-card" shadow="never">
-              <template #header>
-                <div class="card-header">
-                  <div class="header-title">
-                    <span>桌面输入</span>
-                  </div>
-                  <div class="button-row">
-                    <el-tag :type="inputBindingState.status.pushToTalkActive ? 'success' : 'warning'">
-                      {{ inputBindingState.status.pushToTalkActive ? '侧键监听可用' : '侧键监听不可用' }}
-                    </el-tag>
-                    <el-button :icon="Refresh" :loading="inputBindingState.loading" title="恢复默认快捷键" aria-label="恢复默认快捷键" @click="resetDesktopInputBindings" />
-                  </div>
-                </div>
-              </template>
-
-              <el-alert
-                v-if="!inputBindingState.available"
-                type="info"
-                :closable="false"
-                title="桌面输入配置仅在 Electron 应用中可用"
-              />
-              <el-alert
-                v-else-if="inputBindingState.status.errors.length"
-                type="warning"
-                :closable="false"
-                :title="inputBindingState.status.errors.join('；')"
-              />
-
-              <el-form class="desktop-input-form" label-position="top" @submit.prevent>
-                <div class="desktop-input-row">
-                  <div>
-                    <strong>按住说话</strong>
-                  </div>
-                  <el-switch
-                    :model-value="inputBindingState.settings.pushToTalk.enabled"
-                    :disabled="!inputBindingState.available || inputBindingState.loading"
-                    @change="setPushToTalkEnabled"
-                  />
-                  <el-select
-                    :model-value="inputBindingState.settings.pushToTalk.mouseButton"
-                    :disabled="!inputBindingState.available || inputBindingState.loading"
-                    class="desktop-input-select"
-                    @change="setPushToTalkMouseButton"
-                  >
-                    <el-option label="鼠标侧键 1（后退）" :value="4" />
-                    <el-option label="鼠标侧键 2（前进）" :value="5" />
-                  </el-select>
-                </div>
-
-                <div class="keyboard-binding-list">
-                  <div v-for="binding in keyboardBindingRows" :key="binding.action" class="keyboard-binding-row">
-                    <div>
-                      <strong>{{ binding.label }}</strong>
-                    </div>
-                    <el-input
-                      :model-value="inputBindingState.settings.keyboard[binding.action]"
-                      :placeholder="activeKeyboardCapture === binding.action ? '请按下组合键' : '点击后按下组合键'"
-                      :disabled="!inputBindingState.available || inputBindingState.loading"
-                      readonly
-                      @focus="activeKeyboardCapture = binding.action"
-                      @blur="activeKeyboardCapture = null"
-                      @keydown.prevent="captureKeyboardBinding(binding.action, $event)"
-                    >
-                      <template #append>
-                        <el-button
-                          :icon="CircleClose"
-                          :disabled="!inputBindingState.settings.keyboard[binding.action]"
-                          title="禁用此快捷键"
-                          :aria-label="`禁用${binding.label}`"
-                          @mousedown.prevent
-                          @click="clearKeyboardBinding(binding.action)"
-                        />
-                      </template>
-                    </el-input>
-                    <el-tag :type="inputBindingState.status.keyboard[binding.action] ? 'success' : 'info'">
-                      {{ inputBindingState.status.keyboard[binding.action] ? '已注册' : inputBindingState.settings.keyboard[binding.action] ? '不可用' : '已禁用' }}
-                    </el-tag>
-                  </div>
-                </div>
-              </el-form>
-            </el-card>
+            <SettingsDesktopInputSection
+              :state="inputBindingState"
+              @reset="resetDesktopInputBindings"
+              @set-push-to-talk-enabled="setPushToTalkEnabled"
+              @set-push-to-talk-mouse-button="setPushToTalkMouseButton"
+              @capture-keyboard="captureKeyboardBinding"
+              @clear-keyboard="clearKeyboardBinding"
+            />
 
             <el-card class="settings-admin-card" shadow="never">
               <template #header>{{ t('settings.admin.title') }}</template>
@@ -1113,7 +459,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CircleClose, Connection, Delete, Document, Download, Refresh, Upload } from '@element-plus/icons-vue'
+import { Connection, Document, Download, Upload } from '@element-plus/icons-vue'
 import { currentLocale, localeLabel, normalizeLocale, setLocale, supportedLocales, t } from '@/i18n'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
@@ -1128,15 +474,24 @@ import { useInputBindingsStore } from '@/state/inputBindingsStore'
 import { settingsClient, type BackendTokenMutationResponse, type BackendTokenStatusResponse, type LocalRuntimeCandidate, type LocalRuntimeDiscoveryResponse, type TtsRuntimeStatusResponse } from '@/api/clients/settings-client'
 import { resourceClient } from '@/api/clients/resource-client'
 import { memoryClient } from '@/api/clients/memory-client'
-import type { ManagedModelResourceId, ManagedResourceMetadata, ModelResourceStatusPayload, ResumableResourceDownload, ResourceCommandResult, ResourceDownloadProgress, ResourceProgressPhase, StorageCategoryId, StorageStatusPayload } from '@/../shared/resource-manager'
+import type { ManagedModelResourceId, ManagedResourceMetadata, ModelResourceStatusPayload, ResumableResourceDownload, ResourceCommandResult, StorageCategoryId, StorageStatusPayload } from '@/../shared/resource-manager'
 import { DEFAULT_VAD_MIN_SILENCE_MS } from '@/../shared/runtime-defaults'
-import { inferModelCapabilities, type ModelCapabilitySupport } from '@/../shared/model-capabilities'
 import type { InputBindingSettingsPatch, KeyboardShortcutAction, MouseSideButton } from '@/../shared/input-bindings'
 import { useSettingsDomain } from '../composables/useSettingsDomain'
 import SettingsAsrSection, { type AsrSettings } from '../components/SettingsAsrSection.vue'
+import SettingsAccessSection from '../components/SettingsAccessSection.vue'
+import SettingsLlmCapabilityPanel from '../components/SettingsLlmCapabilityPanel.vue'
+import SettingsLlmVisionSection from '../components/SettingsLlmVisionSection.vue'
+import SettingsMemorySection, { type MemorySettings } from '../components/SettingsMemorySection.vue'
+import SettingsSummarySection, { type SummarySettings } from '../components/SettingsSummarySection.vue'
+import SettingsSvcSection, { type SvcSettings } from '../components/SettingsSvcSection.vue'
+import SettingsDesktopInputSection from '../components/SettingsDesktopInputSection.vue'
+import SettingsInterfaceSection from '../components/SettingsInterfaceSection.vue'
+import SettingsResourcesSection from '../components/SettingsResourcesSection.vue'
 import { isLocalLlmEndpoint, normalizeOpenAiBaseUrl, shouldAutoDiscoverLlmModels } from '../llmDiscovery'
 import { LLM_PROVIDER_BASE_URLS, LLM_PROVIDER_ENDPOINTS, choosePreferredLlmModel, getLlmProviderOptions, inferLlmProviderPreset } from '../llmProviders'
 import type { LlmProviderPreset } from '../llmProviders'
+import { isPlainRecord, normalizeResourceStatus, normalizeStorageStatus } from '../resourceStatus'
 
 type SaveTimeout = ReturnType<typeof window.setTimeout>
 type SettingSectionId = 'llm' | 'voice' | 'asr' | 'memory' | 'summary' | 'svc' | 'resources' | 'system'
@@ -1167,6 +522,15 @@ type LlmProfile = {
 }
 type LlmProfileField = keyof LlmProfile
 type LlmProfiles = Partial<Record<LlmProviderPreset, LlmProfile>>
+type LlmVisionPatch = Partial<{
+  enabled: boolean
+  provider: LlmProviderPreset
+  baseUrl: string
+  apiKey: string
+  model: string
+  timeout: number
+  detail: 'low' | 'high' | 'auto' | 'original'
+}>
 type ProviderStatusClass = 'ready' | 'warning' | 'muted'
 type TtsProviderPreset = 'genie-tts'
 type SaveFieldOptions = {
@@ -1217,16 +581,6 @@ const {
 const settingsStore = useSettingsStore()
 const inputBindingsStore = useInputBindingsStore()
 const inputBindingState = inputBindingsStore.state
-const activeKeyboardCapture = ref<KeyboardShortcutAction | null>(null)
-const keyboardBindingRows: Array<{
-  action: KeyboardShortcutAction
-  label: string
-}> = [
-  { action: 'interact', label: '切换拖动模式' },
-  { action: 'lock', label: '锁定桌宠位置' },
-  { action: 'openPanel', label: '打开陪伴面板' },
-  { action: 'toggleVision', label: '暂停或恢复视觉' },
-]
 
 const form = reactive({
   llm: {
@@ -1304,7 +658,7 @@ const form = reactive({
     qdrant_api_key: '',
     qdrant_collection: 'memories',
     qdrant_timeout: 10,
-    qdrant_auto_start: true,
+    qdrant_auto_start: false,
     qdrant_docker_image: DEFAULT_QDRANT_DOCKER_IMAGE,
     qdrant_docker_container: 'yuizaki-qdrant',
     qdrant_docker_volume: 'yuizaki-qdrant-storage',
@@ -1371,7 +725,23 @@ const storageStatus = ref<StorageStatusPayload | null>(null)
 const storageLoading = ref(false)
 const storageActionKey = ref('')
 
+const invalidateLlmModelDiscovery = () => {
+  modelDiscoveryRun += 1
+  if (modelDiscoveryTimeout) clearTimeout(modelDiscoveryTimeout)
+  modelDiscoveryTimeout = null
+  llmModelsRequest.reset()
+}
+
 const llmProviderOptions = computed(() => getLlmProviderOptions(t('common.custom')))
+const llmVisionSettings = computed(() => ({
+  enabled: form.llm.vision_enabled,
+  provider: form.llm.vision_provider,
+  baseUrl: form.llm.vision_base_url,
+  apiKey: form.llm.vision_api_key,
+  model: form.llm.vision_model,
+  timeout: form.llm.vision_timeout,
+  detail: form.llm.vision_detail,
+}))
 const activeLlmProfileLabel = computed(() => (
   llmProviderOptions.value.find((item) => item.value === llmProviderPreset.value)?.label || t('common.custom')
 ))
@@ -1387,6 +757,14 @@ const llmApiKeyTagLabel = computed(() => {
 const saveAsrField = (field: keyof AsrSettings, value: string | number) => {
   Object.assign(form.asr, { [field]: value })
   debouncedSave({ asr: { [field]: value } })
+}
+const saveMemoryField = (field: keyof MemorySettings, value: MemorySettings[keyof MemorySettings]) => {
+  Object.assign(form.memory, { [field]: value })
+  debouncedSave({ memory: { [field]: value } })
+}
+const saveSummaryField = (field: keyof SummarySettings, value: number | string) => {
+  Object.assign(form.summary, { [field]: value })
+  debouncedSave({ summary: { [field]: value } })
 }
 const activeTtsProviderLabel = computed(() => t('settings.tts.genieProvider'))
 const formatTtsDuration = (value?: number | null): string => {
@@ -1492,149 +870,6 @@ const backendTokenSourceLabel = computed(() => {
   return source ? t(`settings.backendToken.source.${source}`) : t('i18n.unknown')
 })
 
-const isPlainRecord = (value: unknown): value is SettingsPatch => {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-const resourceSummaryFallback = (message = '') => ({
-  ready: false,
-  state: 'missing' as const,
-  message,
-  details: [] as string[],
-})
-
-const normalizeResourceStatus = (value: unknown): ModelResourceStatusPayload | null => {
-  if (!isPlainRecord(value)) return null
-  const modelRoots = isPlainRecord(value.modelRoots) ? value.modelRoots : {}
-  const localCounts = isPlainRecord(value.localCounts) ? value.localCounts : {}
-  const soulx = isPlainRecord(value.soulx) ? value.soulx : {}
-  const sherpa = isPlainRecord(value.sherpa) ? value.sherpa : {}
-  const sherpaOnline = isPlainRecord(value.sherpaOnline) ? value.sherpaOnline : {}
-  const embedding = isPlainRecord(value.embedding) ? value.embedding : {}
-  const ttsStatus = isPlainRecord(value.tts) ? value.tts : {}
-  const progressPhases = new Set<ResourceProgressPhase>(['preparing', 'downloading', 'verifying', 'extracting', 'installing', 'cancelling'])
-  const activeDownloads = (Array.isArray(value.activeDownloads) ? value.activeDownloads : [])
-    .filter(isPlainRecord)
-    .flatMap((progress): ResourceDownloadProgress[] => {
-      const resourceId = String(progress.resourceId || '') as ManagedModelResourceId
-      const phase = progress.phase as ResourceProgressPhase
-      if (!['soulx', 'sherpa', 'sherpa_online', 'embedding', 'tts'].includes(resourceId) || !progressPhases.has(phase)) return []
-      const bytesDownloaded = progress.bytesDownloaded === null ? null : Math.max(0, Number(progress.bytesDownloaded || 0))
-      const bytesTotal = progress.bytesTotal === null ? null : Math.max(0, Number(progress.bytesTotal || 0))
-      const percent = progress.percent === null ? null : Math.min(100, Math.max(0, Number(progress.percent || 0)))
-      return [{
-        resourceId,
-        phase,
-        message: String(progress.message || ''),
-        bytesDownloaded,
-        bytesTotal,
-        percent,
-        startedAt: String(progress.startedAt || ''),
-        updatedAt: String(progress.updatedAt || ''),
-      }]
-    })
-  const resumableDownloads = (Array.isArray(value.resumableDownloads) ? value.resumableDownloads : [])
-    .filter(isPlainRecord)
-    .flatMap((download): ResumableResourceDownload[] => {
-      const resourceId = String(download.resourceId || '') as ManagedModelResourceId
-      if (!['soulx', 'sherpa', 'sherpa_online', 'embedding', 'tts'].includes(resourceId)) return []
-      const bytesDownloaded = Math.max(0, Number(download.bytesDownloaded || 0))
-      if (!Number.isFinite(bytesDownloaded) || bytesDownloaded <= 0) return []
-      const rawBytesTotal = download.bytesTotal === null ? null : Number(download.bytesTotal || 0)
-      const bytesTotal = rawBytesTotal !== null && Number.isFinite(rawBytesTotal)
-        ? Math.max(bytesDownloaded, rawBytesTotal)
-        : null
-      const rawPercent = download.percent === null ? null : Number(download.percent || 0)
-      const percent = rawPercent !== null && Number.isFinite(rawPercent)
-        ? Math.min(100, Math.max(0, rawPercent))
-        : null
-      return [{
-        resourceId,
-        bytesDownloaded,
-        bytesTotal,
-        percent,
-        updatedAt: String(download.updatedAt || ''),
-      }]
-    })
-  const metadata = (source: SettingsPatch) => {
-    const raw = isPlainRecord(source.metadata) ? source.metadata : {}
-    const integrity = raw.integrity === 'sha256' || raw.integrity === 'revision' || raw.integrity === 'package' || raw.integrity === 'package+revision'
-      ? raw.integrity
-      : 'unverified'
-    return {
-      label: String(raw.label || ''),
-      version: String(raw.version || ''),
-      license: String(raw.license || ''),
-      licenseUrl: String(raw.licenseUrl || ''),
-      downloadBytes: Math.max(0, Number(raw.downloadBytes || 0)),
-      source: String(raw.source || ''),
-      integrity,
-      inUseBy: Array.isArray(raw.inUseBy) ? raw.inUseBy.map(String) : [],
-    }
-  }
-  const summary = (source: SettingsPatch, fallbackMessage: string) => ({
-    ...resourceSummaryFallback(String(source.message || fallbackMessage)),
-    ...source,
-    ready: Boolean(source.ready),
-    state: source.state === 'ready' || source.state === 'partial' ? source.state : 'missing',
-    message: String(source.message || fallbackMessage),
-    details: Array.isArray(source.details) ? source.details.map(String) : [],
-    metadata: metadata(source),
-  })
-  return {
-    modelRoots: {
-      live2d: String(modelRoots.live2d || ''),
-      vrm: String(modelRoots.vrm || ''),
-    },
-    localCounts: {
-      live2d: Number(localCounts.live2d || 0),
-      vrm: Number(localCounts.vrm || 0),
-    },
-    soulx: {
-      ...summary(soulx, 'SoulX resources unavailable'),
-      serviceDir: String(soulx.serviceDir || ''),
-      launcherPath: String(soulx.launcherPath || ''),
-      checkpointPath: typeof soulx.checkpointPath === 'string' ? soulx.checkpointPath : null,
-      checkpointCandidates: Array.isArray(soulx.checkpointCandidates) ? soulx.checkpointCandidates.map(String) : [],
-      preprocessDir: String(soulx.preprocessDir || ''),
-      referenceDir: String(soulx.referenceDir || ''),
-      hasReferenceAudio: Boolean(soulx.hasReferenceAudio),
-    },
-    sherpa: {
-      ...summary(sherpa, 'Sherpa resources unavailable'),
-      assetUrl: String(sherpa.assetUrl || ''),
-      modelPath: String(sherpa.modelPath || ''),
-      tokensPath: String(sherpa.tokensPath || ''),
-      format: 'sensevoice-offline',
-      validated: Boolean(sherpa.validated),
-      validationPath: typeof sherpa.validationPath === 'string' ? sherpa.validationPath : null,
-    },
-    sherpaOnline: {
-      ...summary(sherpaOnline, 'Sherpa streaming resources unavailable'),
-      assetUrl: String(sherpaOnline.assetUrl || ''),
-      modelPath: String(sherpaOnline.modelPath || ''),
-      tokensPath: String(sherpaOnline.tokensPath || ''),
-      format: 'zipformer2-ctc-online',
-      validated: Boolean(sherpaOnline.validated),
-      validationPath: typeof sherpaOnline.validationPath === 'string' ? sherpaOnline.validationPath : null,
-    },
-    embedding: {
-      ...summary(embedding, 'Embedding resources unavailable'),
-      modelName: String(embedding.modelName || ''),
-      cachePath: typeof embedding.cachePath === 'string' ? embedding.cachePath : null,
-      cacheRoot: String(embedding.cacheRoot || ''),
-    },
-    tts: {
-      ...summary(ttsStatus, 'TTS resources unavailable'),
-      character: String(ttsStatus.character || ''),
-      cacheDir: String(ttsStatus.cacheDir || ''),
-      modelDir: String(ttsStatus.modelDir || ''),
-    },
-    activeDownloads,
-    resumableDownloads,
-  }
-}
-
 const mergePatch = (base: SettingsPatch, patch: SettingsPatch): SettingsPatch => {
   const merged: SettingsPatch = { ...base }
   for (const [key, value] of Object.entries(patch)) {
@@ -1644,30 +879,6 @@ const mergePatch = (base: SettingsPatch, patch: SettingsPatch): SettingsPatch =>
       : value
   }
   return merged
-}
-
-const storageCategoryIds: StorageCategoryId[] = ['tts_audio', 'runtime_temp', 'memory', 'visual_frames']
-const normalizeStorageStatus = (value: unknown): StorageStatusPayload | null => {
-  if (!isPlainRecord(value) || !Array.isArray(value.categories)) return null
-  const categories = value.categories.flatMap((rawCategory) => {
-    if (!isPlainRecord(rawCategory)) return []
-    const id = String(rawCategory.id || '') as StorageCategoryId
-    if (!storageCategoryIds.includes(id)) return []
-    const action = rawCategory.action === 'delete_files' || rawCategory.action === 'compact' ? rawCategory.action : 'none'
-    return [{
-      id,
-      bytes: Math.max(0, Number(rawCategory.bytes || 0)),
-      files: Math.max(0, Number(rawCategory.files || 0)),
-      action,
-      persistence: rawCategory.persistence === 'disk' ? 'disk' as const : 'memory_only' as const,
-      failed_files: Math.max(0, Number(rawCategory.failed_files || 0)),
-    }]
-  })
-  return {
-    categories,
-    total_bytes: Math.max(0, Number(value.total_bytes || 0)),
-    reclaimable_bytes: Math.max(0, Number(value.reclaimable_bytes || 0)),
-  }
 }
 
 const numberValue = (value: unknown, fallback: number): number => {
@@ -1920,7 +1131,6 @@ const canRequestLlmModels = computed(() => Boolean(normalizeOpenAiBaseUrl(form.l
 const hasTtsVoice = computed(() => {
   return ttsProfileHasRunnableConfig(sanitizeTtsProfile(form.tts))
 })
-const hasSvcEndpoint = computed(() => Boolean(form.svc.provider !== 'disabled' && form.svc.base_url.trim()))
 const llmEndpointSummary = computed(() => {
   const value = normalizeOpenAiBaseUrl(form.llm.base_url)
   if (!value) return t('settings.llm.summaryMissing')
@@ -1973,85 +1183,6 @@ const canAutoDiscoverLlmModels = computed(() => {
   return shouldAutoDiscoverLlmModels(form.llm.base_url, llmProviderNeedsApiKey.value ? form.llm.api_key : '')
 })
 
-const currentModelCapabilities = computed(() => inferModelCapabilities(llmProviderPreset.value, form.llm.model))
-const formatTokenLimit = (value: number | null) => value === null ? '未知' : value.toLocaleString('en-US')
-const modelLifecycleLabel = computed(() => ({
-  stable: '稳定',
-  preview: '预览',
-  deprecated: '即将停用',
-  legacy: '旧版',
-  unknown: '未知',
-}[currentModelCapabilities.value.metadata?.lifecycle || 'unknown']))
-const modelCapabilitySourceLabel = computed(() => {
-  const metadata = currentModelCapabilities.value.metadata
-  if (currentModelCapabilities.value.source === 'registry' && metadata) {
-    return `官方资料登记 · 核验 ${metadata.verifiedAt}`
-  }
-  if (currentModelCapabilities.value.source === 'model-pattern') return '根据模型名推断，请以提供商文档为准'
-  return '未识别，请以服务端文档为准'
-})
-const modelMetadataRows = computed(() => {
-  const metadata = currentModelCapabilities.value.metadata
-  if (!metadata) return []
-  return [
-    { label: '上下文窗口', value: `${formatTokenLimit(metadata.contextWindowTokens)} tokens` },
-    { label: '最大输出', value: `${formatTokenLimit(metadata.maxOutputTokens)} tokens` },
-    { label: '生命周期', value: modelLifecycleLabel.value },
-    { label: '规范模型', value: metadata.canonicalModel },
-  ]
-})
-const modelPricingLabel = computed(() => {
-  const pricing = currentModelCapabilities.value.metadata?.pricing
-  if (!pricing) return ''
-  const cached = pricing.cachedInputPerMillionUsd === undefined
-    ? ''
-    : `，缓存命中输入 $${pricing.cachedInputPerMillionUsd}`
-  const note = pricing.note ? `；${pricing.note}` : ''
-  return `参考价（每 100 万 tokens）：输入 $${pricing.inputPerMillionUsd}，输出 $${pricing.outputPerMillionUsd}${cached}${note}`
-})
-const modelConfigurationWarnings = computed(() => {
-  const metadata = currentModelCapabilities.value.metadata
-  if (!metadata) return []
-  const warnings: string[] = []
-  if (metadata.lifecycle === 'deprecated') {
-    const date = metadata.deprecationAt ? new Date(metadata.deprecationAt).toLocaleString() : '提供商公布的停用时间'
-    warnings.push(`当前模型别名将于 ${date} 停用，建议切换到 ${metadata.canonicalModel}。`)
-  }
-  if (metadata.contextWindowTokens !== null && Number(form.llm.context_max_tokens) > metadata.contextWindowTokens) {
-    warnings.push(`当前上下文配置 ${formatTokenLimit(Number(form.llm.context_max_tokens))} 超过登记上限 ${formatTokenLimit(metadata.contextWindowTokens)}。`)
-  }
-  if (metadata.maxOutputTokens !== null && Number(form.llm.default_max_output_tokens) > metadata.maxOutputTokens) {
-    warnings.push(`当前最大输出 ${formatTokenLimit(Number(form.llm.default_max_output_tokens))} 超过登记上限 ${formatTokenLimit(metadata.maxOutputTokens)}。`)
-  }
-  if (currentModelCapabilities.value.vision === false && !form.llm.vision_enabled) {
-    warnings.push('当前文本模型不支持视觉；启用实时屏幕观察前，请配置独立视觉模型。')
-  }
-  return warnings
-})
-const modelCapabilityRows = computed(() => [
-  { key: 'vision', label: '视觉', support: currentModelCapabilities.value.vision },
-  { key: 'tools', label: '工具', support: currentModelCapabilities.value.tools },
-  { key: 'structuredOutput', label: '结构化输出', support: currentModelCapabilities.value.structuredOutput },
-  { key: 'realtimeAudio', label: '实时音频', support: currentModelCapabilities.value.realtimeAudio },
-  { key: 'computerUse', label: '电脑操作', support: currentModelCapabilities.value.computerUse },
-])
-const capabilitySupportLabel = (support: ModelCapabilitySupport) => support === true ? '支持' : support === false ? '不支持' : '未知'
-const capabilityTagType = (support: ModelCapabilitySupport): TagType => support === true ? 'success' : support === false ? 'info' : 'warning'
-const modelLatencyLabel = computed(() => ({
-  realtime: '延迟 · 实时',
-  fast: '延迟 · 快',
-  balanced: '延迟 · 均衡',
-  deliberate: '延迟 · 深度',
-  unknown: '延迟 · 未知',
-}[currentModelCapabilities.value.latency]))
-const modelLatencyTagType = computed<TagType>(() => currentModelCapabilities.value.latency === 'realtime'
-  ? 'success'
-  : currentModelCapabilities.value.latency === 'fast'
-    ? 'success'
-    : currentModelCapabilities.value.latency === 'unknown'
-      ? 'warning'
-      : 'info')
-
 const saveBusy = computed(() => updateRequest.loading || saveInFlight.value || Boolean(pendingSavePatch.value))
 
 const saveStatusType = computed<AlertType>(() => {
@@ -2075,14 +1206,6 @@ const saveStatusDetail = computed(() => {
   if (lastSavedAt.value) return t('settings.status.recent', { time: lastSavedAt.value })
   return ''
 })
-
-const resourceActionLoading = (key: string) => resourceActionKey.value === key
-
-const resourceTagType = (state: 'missing' | 'partial' | 'ready') => {
-  if (state === 'ready') return 'success'
-  if (state === 'partial') return 'warning'
-  return 'danger'
-}
 
 const resourceView = computed(() => normalizeResourceStatus(resourceStatus.value))
 const activeDownloadProgress = computed(() => resourceView.value?.activeDownloads ?? [])
@@ -2124,24 +1247,6 @@ const formatStorageBytes = (value: number): string => {
 }
 
 const formatResourceDownloadBytes = (value: number): string => value > 0 ? formatStorageBytes(value) : '按模型'
-
-const resourceProgressLabels: Record<ManagedModelResourceId, string> = {
-  soulx: 'SoulX 变声',
-  sherpa: '离线语音识别',
-  sherpa_online: '流式语音识别',
-  embedding: '长期记忆嵌入',
-  tts: 'Genie TTS',
-}
-const resourceProgressPhaseLabels: Record<ResourceProgressPhase, string> = {
-  preparing: '准备',
-  downloading: '下载',
-  verifying: '校验',
-  extracting: '解压',
-  installing: '安装',
-  cancelling: '取消中',
-}
-const resourceProgressLabel = (resourceId: ManagedModelResourceId): string => resourceProgressLabels[resourceId]
-const resourceProgressPhaseLabel = (phase: ResourceProgressPhase): string => resourceProgressPhaseLabels[phase]
 
 const storageCategoryLabel = (id: StorageCategoryId): string => t(`settings.storage.category.${id}`)
 
@@ -2240,6 +1345,39 @@ const debouncedSave = (patch: SettingsPatch) => {
     saveTimeout = null
     void drainSaveQueue()
   }, 1000)
+}
+
+const applyLlmVisionPatch = (patch: LlmVisionPatch) => {
+  const settingsPatch: Record<string, unknown> = {}
+  if (patch.enabled !== undefined) {
+    form.llm.vision_enabled = patch.enabled
+    settingsPatch.vision_enabled = patch.enabled
+  }
+  if (patch.provider !== undefined) {
+    form.llm.vision_provider = patch.provider
+    settingsPatch.vision_provider = patch.provider
+  }
+  if (patch.baseUrl !== undefined) {
+    form.llm.vision_base_url = patch.baseUrl
+    settingsPatch.vision_base_url = patch.baseUrl
+  }
+  if (patch.apiKey !== undefined) {
+    form.llm.vision_api_key = patch.apiKey
+    settingsPatch.vision_api_key = patch.apiKey
+  }
+  if (patch.model !== undefined) {
+    form.llm.vision_model = patch.model
+    settingsPatch.vision_model = patch.model
+  }
+  if (patch.timeout !== undefined) {
+    form.llm.vision_timeout = patch.timeout
+    settingsPatch.vision_timeout = patch.timeout
+  }
+  if (patch.detail !== undefined) {
+    form.llm.vision_detail = patch.detail
+    settingsPatch.vision_detail = patch.detail
+  }
+  if (Object.keys(settingsPatch).length) debouncedSave({ llm: settingsPatch })
 }
 
 const flushPendingSave = async () => {
@@ -2413,7 +1551,8 @@ const applyLocalLlmDiscovery = async () => {
   const models = (candidate.models || []).map(String).filter(Boolean)
   const nextModel = models.length
     ? choosePreferredLlmModel(models, provider)
-    : form.llm.model
+    : (llmProfiles[provider]?.model || '')
+  invalidateLlmModelDiscovery()
   const nextProfile = sanitizeLlmProfile(provider, {
     ...form.llm,
     provider,
@@ -2464,6 +1603,11 @@ const applyLocalTtsDiscovery = async () => {
     return
   }
   notifyLocalCandidateApplied(candidate, 'Genie TTS')
+}
+
+const saveSvcField = (field: keyof SvcSettings, value: string | number) => {
+  form.svc[field] = value as never
+  debouncedSave({ svc: { [field]: value } })
 }
 
 const applyLocalSvcDiscovery = async () => {
@@ -2614,10 +1758,7 @@ const normalizeLlmProviderValue = (value: string | undefined, baseUrl = ''): Llm
 
 const normalizeLlmProfilePayload = (payload: unknown): SettingsPatch | null => {
   if (!isPlainRecord(payload)) return null
-  const knownSections = ['llm', 'tts', 'asr', 'svc', 'summary', 'memory', 'system']
-  if (knownSections.some((key) => isPlainRecord(payload[key]))) {
-    return payload
-  }
+  if (isPlainRecord(payload.llm)) return { llm: payload.llm }
 
   const nestedProfile = ['connectionProfile', 'profile', 'preset', 'api', 'connection']
     .map((key) => payload[key])
@@ -3080,6 +2221,31 @@ const cancelActiveResourceDownloads = async () => {
   }
 }
 
+const prepareResource = async (resourceId: ManagedModelResourceId) => {
+  switch (resourceId) {
+    case 'sherpa_online':
+      await runResourceCommand('sherpa-online-download', () => resourceClient.prepareSherpaOnline(), [resourceId])
+      break
+    case 'soulx':
+      await runResourceCommand('soulx-download', () => resourceClient.prepareSoulx(), [resourceId])
+      break
+    case 'sherpa':
+      await runResourceCommand('sherpa-download', () => resourceClient.prepareSherpa(), [resourceId])
+      break
+    case 'embedding':
+      await runResourceCommand('embedding-prefetch', () => resourceClient.prepareEmbedding(), [resourceId])
+      break
+    case 'tts':
+      await runResourceCommand('tts-prefetch', () => resourceClient.prepareTts(), [resourceId])
+      break
+  }
+}
+
+const importSoulxReference = () => runResourceCommand(
+  'soulx-reference',
+  () => resourceClient.importSoulxReference(),
+)
+
 const removeModelResource = async (
   resourceId: ManagedModelResourceId,
   label: string,
@@ -3220,7 +2386,13 @@ const cleanupAllStorage = async () => {
 }
 
 const discoverLlmModels = async (options?: LlmModelDiscoveryOptions) => {
+  if (modelDiscoveryTimeout) clearTimeout(modelDiscoveryTimeout)
+  modelDiscoveryTimeout = null
   const baseUrl = normalizeOpenAiBaseUrl(form.llm.base_url)
+  const provider = llmProviderPreset.value
+  const apiKey = llmProviderNeedsApiKey.value ? form.llm.api_key.trim() : ''
+  const timeout = form.llm.timeout
+  const runId = ++modelDiscoveryRun
   if (!baseUrl) {
     llmModels.value = []
     llmModelStatus.value = ''
@@ -3236,16 +2408,23 @@ const discoverLlmModels = async (options?: LlmModelDiscoveryOptions) => {
     return
   }
 
-  const runId = ++modelDiscoveryRun
   const result = await loadLlmModels({
-    provider: llmProviderPreset.value,
+    provider,
     base_url: baseUrl,
-    api_key: llmProviderNeedsApiKey.value ? form.llm.api_key.trim() : '',
-    timeout: form.llm.timeout,
+    api_key: apiKey,
+    timeout,
   })
-  if (runId !== modelDiscoveryRun) return
+  const currentApiKey = llmProviderNeedsApiKey.value ? form.llm.api_key.trim() : ''
+  if (
+    runId !== modelDiscoveryRun
+    || provider !== llmProviderPreset.value
+    || baseUrl !== normalizeOpenAiBaseUrl(form.llm.base_url)
+    || apiKey !== currentApiKey
+    || timeout !== form.llm.timeout
+  ) return
 
   if (result?.ok) {
+    llmModels.value = result.models
     applyDetectedLlmModel(result.models, options)
     llmModelStatus.value = result.models.length
       ? t('settings.llm.modelsDetected', {
@@ -3254,6 +2433,7 @@ const discoverLlmModels = async (options?: LlmModelDiscoveryOptions) => {
       })
       : (result.message || t('settings.llm.modelsEmpty'))
   } else if (result) {
+    llmModels.value = []
     llmModelStatus.value = result.message || t('settings.llm.modelsFailed')
     llmModelAutoSelected.value = false
   }
@@ -3261,7 +2441,7 @@ const discoverLlmModels = async (options?: LlmModelDiscoveryOptions) => {
 
 const scheduleLlmModelDiscovery = (options?: LlmModelDiscoveryOptions) => {
   if (suppressModelDiscovery) return
-  if (modelDiscoveryTimeout) clearTimeout(modelDiscoveryTimeout)
+  invalidateLlmModelDiscovery()
   if (!normalizeOpenAiBaseUrl(form.llm.base_url)) {
     llmModels.value = []
     llmModelStatus.value = ''
@@ -3277,6 +2457,7 @@ const scheduleLlmModelDiscovery = (options?: LlmModelDiscoveryOptions) => {
     return
   }
   modelDiscoveryTimeout = setTimeout(() => {
+    modelDiscoveryTimeout = null
     void discoverLlmModels(options)
   }, 650)
 }
@@ -3316,8 +2497,9 @@ const handleLlmEndpointChange = (field: 'base_url' | 'api_key', value: string | 
   form.llm.api_key = llmProviderNeedsApiKey.value ? String(value ?? '') : ''
   saveLlmField(field, form.llm.api_key)
   if (field === 'api_key') {
-    if (modelDiscoveryTimeout) clearTimeout(modelDiscoveryTimeout)
+    invalidateLlmModelDiscovery()
     modelDiscoveryTimeout = setTimeout(async () => {
+      modelDiscoveryTimeout = null
       await flushPendingSave()
       await discoverLlmModels({ manual: false })
     }, 700)
@@ -3481,7 +2663,7 @@ const hydrateForm = () => {
     form.memory.qdrant_api_key = s.memory.qdrant_api_key ?? ''
     form.memory.qdrant_collection = s.memory.qdrant_collection ?? 'memories'
     form.memory.qdrant_timeout = s.memory.qdrant_timeout ?? 10
-    form.memory.qdrant_auto_start = s.memory.qdrant_auto_start ?? true
+    form.memory.qdrant_auto_start = s.memory.qdrant_auto_start ?? false
     form.memory.qdrant_docker_image = s.memory.qdrant_docker_image ?? DEFAULT_QDRANT_DOCKER_IMAGE
     form.memory.qdrant_docker_container = s.memory.qdrant_docker_container ?? 'yuizaki-qdrant'
     form.memory.qdrant_docker_volume = s.memory.qdrant_docker_volume ?? 'yuizaki-qdrant-storage'
@@ -3544,834 +2726,4 @@ watch(activeSection, (value) => {
 })
 </script>
 
-<style scoped>
-.settings-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 0;
-}
-
-.card-header,
-.button-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-}
-
-.button-row {
-  justify-content: flex-start;
-  flex-wrap: wrap;
-}
-
-.llm-toolbar {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 9px;
-}
-
-.tts-toolbar {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-}
-
-.llm-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px 12px;
-  min-width: 0;
-}
-
-.llm-action-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  min-width: 0;
-  padding: 3px;
-  border: 1px solid var(--yui-border);
-  border-radius: 10px;
-  background: var(--yui-surface-muted);
-}
-
-.llm-action-group + .llm-action-group {
-  margin-left: 2px;
-}
-
-.llm-status-strip {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px;
-  max-width: 560px;
-}
-
-.tts-status-strip {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px;
-  max-width: 560px;
-}
-
-.header-title,
-.profile-rail-head,
-.profile-card,
-.credential-card {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.header-title span,
-.profile-rail-head strong,
-.profile-card strong,
-.credential-card strong {
-  color: var(--yui-text);
-  font-weight: 750;
-}
-
-.profile-card span,
-.credential-card span {
-  color: var(--yui-muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.sr-only-input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-}
-
-.llm-workspace,
-.voice-workspace {
-  display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-  gap: 18px;
-  align-items: start;
-}
-
-.llm-profile-rail,
-.voice-provider-rail {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid var(--yui-border);
-  border-radius: 10px;
-  background: var(--yui-surface-muted);
-}
-
-.provider-stack {
-  display: grid;
-  gap: 6px;
-}
-
-.provider-stack :deep(.el-radio-button__inner) {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  justify-content: flex-start;
-  border-radius: 8px;
-  text-align: left;
-  font-weight: 650;
-}
-
-.provider-stack :deep(.el-radio-button:first-child .el-radio-button__inner),
-.provider-stack :deep(.el-radio-button:last-child .el-radio-button__inner) {
-  border-radius: 8px;
-}
-
-.provider-option-label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  width: 100%;
-  min-width: 0;
-}
-
-.provider-option-label strong {
-  overflow: hidden;
-  color: inherit;
-  font-size: 13px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.provider-option-label small {
-  flex: 0 0 auto;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.provider-option-label .status-ready {
-  color: #047857;
-}
-
-.provider-option-label .status-warning {
-  color: #b45309;
-}
-
-.provider-option-label .status-muted {
-  color: var(--yui-muted);
-}
-
-.profile-reset-button {
-  width: 100%;
-  justify-content: center;
-}
-
-.profile-card,
-.credential-card {
-  padding: 10px;
-  border: 1px solid var(--yui-border);
-  border-radius: 8px;
-  background: var(--yui-surface-raised);
-}
-
-.credential-card {
-  border-color: color-mix(in srgb, var(--yui-accent) 34%, var(--yui-border));
-  background: color-mix(in srgb, var(--yui-accent) 8%, var(--yui-surface-raised));
-}
-
-.credential-card.empty {
-  border-color: var(--yui-border);
-  background: var(--yui-surface);
-}
-
-.llm-connection-summary {
-  display: grid;
-  gap: 8px;
-}
-
-.summary-row {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-  padding: 9px 10px;
-  border: 1px solid var(--yui-border);
-  border-radius: 8px;
-  background: var(--yui-surface);
-}
-
-.summary-row span {
-  color: var(--yui-muted);
-  font-size: 11px;
-}
-
-.summary-row strong {
-  overflow-wrap: anywhere;
-  color: var(--yui-text);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.llm-main-form,
-.voice-main-form {
-  min-width: 0;
-  padding: 14px;
-  border: 1px solid var(--yui-border);
-  border-radius: 10px;
-  background: var(--yui-surface-raised);
-}
-
-.tts-runtime-panel {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(156px, 1fr));
-  gap: 8px;
-  margin-bottom: 12px;
-  padding: 10px;
-  border: 1px solid var(--yui-border);
-  border-radius: 8px;
-  background: var(--yui-surface-muted);
-}
-
-.tts-runtime-item {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.tts-runtime-item span {
-  color: var(--yui-muted);
-  font-size: 11px;
-  line-height: 1.3;
-}
-
-.tts-runtime-item small {
-  color: var(--yui-muted);
-  font-size: 10px;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
-}
-
-.tts-runtime-item strong {
-  overflow: hidden;
-  color: var(--yui-text);
-  font-size: 13px;
-  font-weight: 760;
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tts-runtime-alert {
-  margin-bottom: 12px;
-}
-
-.subsection-title {
-  margin: 2px 0 10px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--yui-border);
-  color: var(--yui-text);
-  font-size: 13px;
-  font-weight: 760;
-}
-
-.parameter-strip {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 16px;
-  padding: 13px 14px;
-  border: 1px solid var(--yui-border);
-  border-radius: 8px;
-  background: var(--yui-surface-muted);
-}
-
-.settings-access-card {
-  border-color: var(--yui-border);
-  background: var(--yui-surface);
-}
-
-.settings-access-card :deep(.el-card__body) {
-  padding: 12px 14px;
-}
-
-.access-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.access-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-width: 0;
-}
-
-.access-row strong {
-  color: var(--yui-text);
-  font-size: 14px;
-}
-
-.access-divider {
-  height: 1px;
-  background: var(--yui-border);
-}
-
-.access-token-details {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.access-controls {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 7px;
-  min-width: min(560px, 100%);
-  flex-wrap: wrap;
-}
-
-.admin-token-input {
-  max-width: 250px;
-}
-
-.backend-token-input {
-  max-width: 300px;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 16px;
-  min-width: 0;
-}
-
-.form-grid.three {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.full-width {
-  width: 100%;
-}
-
-.field-hint {
-  margin: 6px 0 0;
-  color: var(--yui-muted);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.field-hint.error {
-  color: #dc2626;
-}
-
-.model-capability-panel {
-  width: 100%;
-  margin-top: 8px;
-  padding: 10px;
-  border: 1px solid var(--yui-border);
-  border-radius: 8px;
-  background: var(--yui-surface-muted);
-}
-
-.model-capability-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
-.model-capability-head strong {
-  color: var(--yui-text);
-  font-size: 12px;
-}
-
-.model-capability-head span {
-  color: var(--yui-muted);
-  font-size: 11px;
-  text-align: right;
-}
-
-.model-capability-head a {
-  margin-left: 5px;
-  color: var(--el-color-primary);
-}
-
-.model-capability-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.model-metadata-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 12px;
-  margin-top: 9px;
-}
-
-.model-metadata-grid > div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-  color: var(--yui-muted);
-  font-size: 11px;
-}
-
-.model-metadata-grid strong {
-  overflow-wrap: anywhere;
-  color: var(--yui-text);
-  font-size: 11px;
-  text-align: right;
-}
-
-.model-pricing-note {
-  margin: 8px 0 0;
-  color: var(--yui-muted);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.model-capability-warning {
-  margin-top: 8px;
-}
-
-@media (max-width: 720px) {
-  .model-metadata-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.desktop-input-card,
-.settings-admin-card {
-  margin-top: 16px;
-}
-
-.desktop-input-form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  margin-top: 14px;
-}
-
-.desktop-input-row,
-.keyboard-binding-row {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto minmax(220px, 300px);
-  align-items: center;
-  gap: 14px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--yui-border);
-}
-
-.keyboard-binding-row {
-  grid-template-columns: minmax(180px, 1fr) minmax(240px, 360px) auto;
-}
-
-.desktop-input-select {
-  width: 100%;
-}
-
-.keyboard-binding-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.resource-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.resource-download-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 0;
-  border-block: 1px solid var(--yui-border);
-}
-
-.resource-download-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-  min-width: 0;
-}
-
-.resource-download-options :deep(.el-checkbox__label) {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.resource-download-label {
-  font-weight: 600;
-}
-
-.storage-maintenance {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-  padding: 12px 0;
-  border-block: 1px solid var(--yui-border);
-}
-
-.storage-maintenance-header,
-.storage-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-}
-
-.storage-summary {
-  justify-content: flex-end;
-}
-
-.storage-table {
-  width: 100%;
-}
-
-.storage-no-action {
-  color: var(--yui-muted);
-  font-size: 12px;
-}
-
-.resource-progress-list {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-card);
-  background: var(--yui-surface-muted);
-}
-
-.resource-progress-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(180px, 2fr) auto;
-  min-height: 24px;
-  gap: 12px;
-  align-items: center;
-}
-
-.resource-progress-header {
-  display: flex;
-  min-width: 0;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 12px;
-}
-
-.resource-progress-header span,
-.resource-progress-bytes {
-  color: var(--yui-muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.resource-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-@media (max-width: 860px) {
-  .resource-progress-row {
-    grid-template-columns: 1fr;
-    gap: 6px;
-  }
-}
-
-.resource-card {
-  min-width: 0;
-}
-
-.resource-details {
-  display: grid;
-  gap: 12px;
-}
-
-.resource-details strong {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--yui-text);
-  font-size: 13px;
-}
-
-.resource-path {
-  display: block;
-  overflow-wrap: anywhere;
-  padding: 8px 10px;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-card);
-  background: var(--yui-surface-muted);
-  color: var(--yui-text);
-  font-size: 12px;
-}
-
-.resource-list {
-  margin: 12px 0 0;
-  padding-left: 18px;
-  color: var(--yui-muted);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.resource-actions {
-  flex-wrap: wrap;
-}
-
-.settings-json,
-.table-json {
-  overflow: auto;
-  margin: 10px 0;
-  padding: 10px;
-  border-radius: var(--yui-radius-card);
-  background: #0f172a;
-  color: #e2e8f0;
-}
-
-:deep(.el-tabs--border-card) {
-  overflow: hidden;
-  border-color: var(--yui-border);
-  border-radius: 10px;
-  background: var(--yui-surface);
-  box-shadow: none;
-}
-
-:deep(.el-tabs__nav-wrap) {
-  padding-inline: 6px;
-}
-
-:deep(.el-tabs__nav-scroll) {
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-:deep(.el-tabs__nav-scroll::-webkit-scrollbar) {
-  display: none;
-}
-
-:deep(.el-card) {
-  border-color: var(--yui-border);
-  border-radius: 8px;
-  box-shadow: none;
-}
-
-:deep(.el-card__header) {
-  padding: 11px 14px;
-}
-
-:deep(.el-card__body) {
-  padding: 13px 14px;
-}
-
-:deep(.el-button) {
-  border-radius: 8px;
-  font-weight: 650;
-}
-
-:deep(.el-input__wrapper),
-:deep(.el-select__wrapper),
-:deep(.el-input-number .el-input__wrapper) {
-  border-radius: 8px;
-}
-
-:deep(.el-form-item) {
-  margin-bottom: 12px;
-}
-
-:deep(.el-tabs__content) {
-  padding: 12px;
-}
-
-:deep(.el-collapse) {
-  border: 0;
-}
-
-:deep(.el-collapse-item__header),
-:deep(.el-collapse-item__wrap) {
-  border-color: var(--yui-border);
-  background: transparent;
-}
-
-:deep(.el-collapse-item__content) {
-  padding-bottom: 0;
-}
-
-.table-json {
-  max-height: 120px;
-}
-
-@media (max-width: 960px) {
-  .form-grid,
-  .form-grid.three,
-  .llm-workspace,
-  .voice-workspace,
-  .parameter-strip,
-  .resource-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .desktop-input-row,
-  .keyboard-binding-row {
-    grid-template-columns: 1fr;
-  }
-
-  .card-header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .llm-toolbar,
-  .llm-status-strip,
-  .tts-toolbar,
-  .tts-status-strip,
-  .llm-actions {
-    align-items: flex-start;
-    justify-content: flex-start;
-  }
-
-  .llm-action-group + .llm-action-group {
-    margin-left: 0;
-  }
-
-  .access-row,
-  .access-controls {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .access-controls,
-  .admin-token-input {
-    width: 100%;
-    max-width: none;
-  }
-
-  .storage-maintenance-header,
-  .storage-summary {
-    align-items: stretch;
-    flex-direction: column;
-  }
-}
-
-@media (max-width: 520px) {
-  :deep(.el-tabs__content),
-  :deep(.el-card__body) {
-    padding: 8px;
-  }
-
-  .resource-download-bar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .resource-download-options {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 10px;
-  }
-
-  .resource-download-bar :deep(.el-button) {
-    width: 100%;
-    margin-left: 0;
-  }
-
-  .llm-main-form,
-  .voice-main-form {
-    padding: 0;
-    border: 0;
-    background: transparent;
-  }
-
-  .tts-runtime-panel {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 9px 12px;
-    padding: 8px;
-  }
-
-  .tts-runtime-item strong {
-    overflow: visible;
-    text-overflow: clip;
-  }
-}
-</style>
+<style scoped src="./SettingsPanel.css"></style>

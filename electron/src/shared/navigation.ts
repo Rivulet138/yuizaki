@@ -41,13 +41,13 @@ export const staticNavigationModuleRecords = [
   {
     id: 'companion',
     title: '桌宠首页',
-    desc: '本地桌宠 Agent 的档案、关系、记忆和联动总览',
+    desc: '兼容旧链接并转到桌宠对话',
     order: 0,
     enabled: true,
     capabilities: { petControl: true, memory: true, voice: true, companion: true },
     slot: 'primary',
     audience: 'core',
-    primary: true,
+    primary: false,
   },
   {
     id: 'chat',

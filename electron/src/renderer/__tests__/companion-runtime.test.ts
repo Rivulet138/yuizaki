@@ -599,7 +599,6 @@ describe('companion runtime controller', () => {
     const voice = source('src/renderer/app/composables/useVoiceConversationBridge.ts')
     const runtimeBridge = source('src/renderer/app/composables/useCompanionRuntimeBridge.ts')
     const shell = source('src/renderer/app/AppShell.vue')
-    const companion = source('src/renderer/domains/companion/views/CompanionPanel.vue')
 
     expect(chat).toContain('publishCompanionRuntimeEvent')
     expect(voice).toContain('publishCompanionRuntimeEvent')
@@ -610,6 +609,5 @@ describe('companion runtime controller', () => {
     expect(voice).not.toContain("petControl.setBehaviorState(")
     expect(shell).toContain('startCompanionRuntime')
     expect(shell).not.toContain('systemClient.companionRuntime')
-    expect(companion).not.toContain('runtimeRefreshTimer')
   })
 })

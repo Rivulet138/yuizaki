@@ -8,6 +8,16 @@ const schedulerMocks = vi.hoisted(() => ({
   cancel: vi.fn(),
 }))
 
+const petControlMocks = vi.hoisted(() => ({
+  getCatalog: vi.fn(() => Promise.resolve({ models: [] })),
+  setModelSelection: vi.fn(),
+  triggerEmotion: vi.fn(),
+  triggerMotion: vi.fn(),
+  triggerExpressionMix: vi.fn(),
+  triggerExpression: vi.fn(),
+  triggerAvatarCommand: vi.fn(),
+}))
+
 vi.mock('@/pet-sentence-emotion-scheduler', () => ({
   PetSentenceEmotionScheduler: class {
     schedule = schedulerMocks.schedule
@@ -45,14 +55,7 @@ vi.mock('@/audio/audio-capture', () => ({
 }))
 
 vi.mock('@/utils/petControl', () => ({
-  petControl: {
-    getCatalog: vi.fn(() => Promise.resolve({ models: [] })),
-    setModelSelection: vi.fn(),
-    triggerEmotion: vi.fn(),
-    triggerMotion: vi.fn(),
-    triggerExpressionMix: vi.fn(),
-    triggerExpression: vi.fn(),
-  },
+  petControl: petControlMocks,
 }))
 
 vi.mock('@/api/client', () => ({
@@ -77,6 +80,7 @@ describe('useVoiceConversationBridge sentence emotion scheduling', () => {
     setActivePinia(createPinia())
     schedulerMocks.schedule.mockReset()
     schedulerMocks.cancel.mockReset()
+    Object.values(petControlMocks).forEach((mock) => mock.mockClear())
   })
 
   afterEach(() => {
@@ -125,4 +129,41 @@ describe('useVoiceConversationBridge sentence emotion scheduling', () => {
     )
     expect(schedulerMocks.schedule).toHaveBeenCalledTimes(1)
   }, 15000)
+
+  it('uses an attached avatar command even when the legacy payload has no model type', async () => {
+    const { useVoiceConversationBridge } = await import('../app/composables/useVoiceConversationBridge')
+    const TestHarness = defineComponent({
+      setup() {
+        useVoiceConversationBridge()
+        return () => h('div')
+      },
+    })
+    const wrapper = mount(TestHarness)
+    const command = {
+      version: 1,
+      id: 'python-command',
+      streamId: 'python:test',
+      sequence: 4,
+      issuedAt: Date.now(),
+      priority: 50,
+      interrupt: 'replace',
+      actions: [{ type: 'affect', emotion: 'happy' }],
+    }
+
+    window.dispatchEvent(new CustomEvent('pet:llm-control', {
+      detail: {
+        emotion_id: 'happy',
+        expression_mix: [{ expression: 'smile', weight: 1 }],
+        avatar_command: command,
+      },
+    }))
+    await vi.waitFor(() => expect(petControlMocks.triggerAvatarCommand).toHaveBeenCalledWith(
+      command,
+      { source: 'automation' },
+    ))
+    expect(petControlMocks.triggerEmotion).not.toHaveBeenCalled()
+    expect(petControlMocks.triggerExpressionMix).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
 })

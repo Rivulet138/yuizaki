@@ -28,7 +28,6 @@ describe('navigation view host', () => {
 
   it('keeps the desktop pet primary navigation focused on daily use', () => {
     expect(primaryNavigationModules().map((module) => module.id)).toEqual([
-      'companion',
       'chat',
       'memory',
     ])
@@ -41,6 +40,13 @@ describe('navigation view host', () => {
     ]))
     expect(staticNavigationModuleRecords).toHaveLength(16)
     expect(enabledNavigationModules()).toHaveLength(16)
+  })
+
+  it('retires the standalone companion home while preserving its deep link', () => {
+    const companionRoute = router.getRoutes().find((route) => route.name === 'companion')
+
+    expect(companionRoute?.redirect).toBeTypeOf('function')
+    expect(staticNavigationModuleRecords.find((module) => module.id === 'companion')?.primary).toBe(false)
   })
 
   it('preserves every advanced route as a deep link', () => {

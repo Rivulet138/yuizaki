@@ -3,7 +3,6 @@ import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ref } from "vue";
 
-import CompanionPanel from "../domains/companion/views/CompanionPanel.vue";
 import MemoryPanel from "../domains/memory/views/MemoryPanel.vue";
 
 const systemClientMocks = vi.hoisted(() => ({
@@ -430,25 +429,6 @@ describe("refactor surface component integration", () => {
 				metadata: { scope: "workspace", workspace_id: "ws-1", source: "manual" },
 			},
 		];
-	});
-
-	it("renders CompanionPanel runtime snapshot state and behavior profile", async () => {
-		const wrapper = mount(CompanionPanel, { global });
-		await flushPromises();
-
-		expect(wrapper.text()).toContain("gentle-support");
-		expect(wrapper.text()).toContain("随时可以陪你");
-		expect(wrapper.text()).toContain("support_request");
-		expect(wrapper.text()).toContain("打开当前任务");
-		expect(wrapper.text()).toContain("查看权限回执");
-		expect(wrapper.text()).not.toContain("soft");
-	});
-
-	it("applies the active CompanionPanel profile through the existing runtime bridge", async () => {
-		mount(CompanionPanel, { global });
-		await flushPromises();
-
-		expect(systemClientMocks.setModelSelection).toHaveBeenCalledWith("yuizaki-live2d", "live2d");
 	});
 
 	it("renders MemoryPanel retrieval strategy from companion runtime", async () => {

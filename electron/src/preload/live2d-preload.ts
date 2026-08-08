@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { AvatarCapabilitySnapshot, AvatarCommandResult } from '../shared/avatar-command'
 import type { PetRendererStatePayload } from '../shared/pet-control'
 import type { DesktopPetEventDispatchResult, DesktopPetEventRecord } from '../shared/plugin'
 
@@ -35,6 +36,12 @@ const live2dApi = {
       ipcRenderer.invoke('pet:dispatch-event', payload) as Promise<DesktopPetEventDispatchResult>,
     openControlPanel: () => ipcRenderer.send('pet:open-control-panel'),
     openChatCenter: () => ipcRenderer.send('pet:open-chat-center'),
+    reportAvatarCapabilities: (payload: AvatarCapabilitySnapshot | null) =>
+      ipcRenderer.send('pet:avatar-capabilities', payload),
+    reportAvatarCommandResult: (payload: AvatarCommandResult) =>
+      ipcRenderer.send('pet:avatar-command-result', payload),
+    reportLipSyncReady: (payload: { requestId: string; ready: boolean }) =>
+      ipcRenderer.send('pet:lipsync-ready', payload),
   },
 
   interact: {
@@ -57,6 +64,8 @@ const live2dApi = {
       'pet:lipsync-stop',
       'pet:lipsync-level',
       'pet:lipsync-viseme',
+      'pet:avatar-command',
+      'pet:request-avatar-capabilities',
     ]
 
     if (validChannels.includes(channel)) {

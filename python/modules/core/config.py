@@ -147,7 +147,7 @@ class MemoryConfig(BaseModel):
     qdrant_api_key: str = Field(default="")
     qdrant_collection: str = Field(default="memories")
     qdrant_timeout: float = Field(default=10.0)
-    qdrant_auto_start: bool = Field(default=True)
+    qdrant_auto_start: bool = Field(default=False)
     qdrant_docker_image: str = Field(default=DEFAULT_QDRANT_DOCKER_IMAGE)
     qdrant_docker_container: str = Field(default=DEFAULT_QDRANT_DOCKER_CONTAINER)
     qdrant_docker_volume: str = Field(default=DEFAULT_QDRANT_DOCKER_VOLUME)
@@ -189,6 +189,7 @@ def public_config_snapshot(value: AppConfig) -> dict[str, object]:
 
 def _load_config_from_env() -> AppConfig:
     """Load configuration from environment variables."""
+    memory_backend = os.getenv("MEMORY_BACKEND", "sqlite").strip().lower()
     return AppConfig(
         llm=LLMConfig(
             provider=os.getenv("LLM_PROVIDER", "custom").strip().lower(),
@@ -265,13 +266,13 @@ def _load_config_from_env() -> AppConfig:
             quality_score_budget_per_hour=int(os.getenv("SUMMARY_QUALITY_SCORE_BUDGET_PER_HOUR", "20")),
         ),
         memory=MemoryConfig(
-            backend=os.getenv("MEMORY_BACKEND", "sqlite").strip().lower(),
+            backend=memory_backend,
             sqlite_path=os.getenv("MEMORY_SQLITE_PATH", str(DEFAULT_MEMORY_SQLITE_PATH)).strip() or str(DEFAULT_MEMORY_SQLITE_PATH),
             qdrant_url=os.getenv("QDRANT_URL", "").rstrip("/"),
             qdrant_api_key=os.getenv("QDRANT_API_KEY", "").strip(),
             qdrant_collection=os.getenv("QDRANT_COLLECTION", "memories").strip() or "memories",
             qdrant_timeout=float(os.getenv("QDRANT_TIMEOUT", "10")),
-            qdrant_auto_start=_env_bool("QDRANT_AUTO_START", True),
+            qdrant_auto_start=_env_bool("QDRANT_AUTO_START", memory_backend == "qdrant"),
             qdrant_docker_image=normalize_qdrant_docker_image(os.getenv("QDRANT_DOCKER_IMAGE", DEFAULT_QDRANT_DOCKER_IMAGE)),
             qdrant_docker_container=os.getenv("QDRANT_DOCKER_CONTAINER", DEFAULT_QDRANT_DOCKER_CONTAINER).strip() or DEFAULT_QDRANT_DOCKER_CONTAINER,
             qdrant_docker_volume=os.getenv("QDRANT_DOCKER_VOLUME", DEFAULT_QDRANT_DOCKER_VOLUME).strip() or DEFAULT_QDRANT_DOCKER_VOLUME,

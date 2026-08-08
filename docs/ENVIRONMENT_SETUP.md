@@ -78,7 +78,7 @@ Sherpa Streaming Zipformer 是默认本地 ASR；SenseVoice/FunASR 服务需要�
 | `QDRANT_API_KEY` | 空 | Qdrant 密钥 |
 | `QDRANT_COLLECTION` | `memories` | collection |
 | `QDRANT_TIMEOUT` | `10` | 超时秒数 |
-| `QDRANT_AUTO_START` | `1` | 尝试启动本地容器 |
+| `QDRANT_AUTO_START` | `0`（`MEMORY_BACKEND=qdrant` 时默认为 `1`） | 是否尝试启动本地容器 |
 | `QDRANT_DOCKER_IMAGE` | `qdrant/qdrant:v1.18.3` | 固定容器版本 |
 | `EMBEDDING_MODEL` | `Qwen/Qwen3-Embedding-0.6B` | 默认嵌入模型 |
 | `EMBEDDING_MODEL_LOCAL_PATH` | 空 | 本地模型目录 |

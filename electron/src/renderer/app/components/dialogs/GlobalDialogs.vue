@@ -2,12 +2,18 @@
   <!-- Permission Dialog -->
   <el-dialog
     v-model="dialogStore.permissionDialogVisible"
-    :title="t('dialogs.permission.title')"
     width="480px"
+    role="alertdialog"
+    aria-labelledby="permission-dialog-title"
+    aria-describedby="permission-dialog-description"
     :before-close="dismissPermissionRequest"
     @closed="handlePermissionDialogClosed"
+    @open-auto-focus="focusPermissionDeny"
   >
-    <div v-if="dialogStore.permissionRequest">
+    <template #header>
+      <span id="permission-dialog-title">{{ t('dialogs.permission.title') }}</span>
+    </template>
+    <div v-if="dialogStore.permissionRequest" id="permission-dialog-description">
       <p><strong>{{ t('dialogs.permission.tool') }}：</strong>{{ dialogStore.permissionRequest.tool_name }}</p>
       <p v-if="dialogStore.permissionRequest.capability_id"><strong>Capability：</strong>{{ dialogStore.permissionRequest.capability_id }}</p>
       <p v-if="dialogStore.permissionRequest.capability_kind"><strong>{{ t('dialogs.permission.category') }}：</strong>{{ dialogStore.permissionRequest.capability_type }} / {{ dialogStore.permissionRequest.capability_kind }}</p>
@@ -17,7 +23,7 @@
       <el-checkbox v-model="rememberPermissionDecision">{{ t('dialogs.permission.remember') }}</el-checkbox>
     </div>
     <template #footer>
-      <el-button data-testid="permission-deny" @click="respondPermission(false)">{{ t('dialogs.permission.deny') }}</el-button>
+      <el-button ref="permissionDenyButton" data-testid="permission-deny" @click="respondPermission(false)">{{ t('dialogs.permission.deny') }}</el-button>
       <el-button data-testid="permission-allow" type="primary" @click="respondPermission(true)">{{ t('dialogs.permission.allow') }}</el-button>
     </template>
   </el-dialog>
@@ -69,7 +75,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useDialogStore } from '@/stores/dialogStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
@@ -97,9 +103,18 @@ const muted = computed(() => chatStore.chatOptions.tts_enabled === false)
 const dndLoading = ref(false)
 
 const rememberPermissionDecision = ref(false)
+const permissionDenyButton = ref<HTMLElement | { $el?: HTMLElement } | null>(null)
 const respondingPermissionIds = new Set<string>()
 
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : t('common.error.unknown')
+
+const focusPermissionDeny = () => {
+  void nextTick(() => {
+    const target = permissionDenyButton.value
+    const element = target instanceof HTMLElement ? target : target?.$el
+    element?.focus()
+  })
+}
 
 const respondPermission = async (allow: boolean) => {
   const req = dialogStore.permissionRequest

@@ -109,6 +109,13 @@ LLM_MODEL=your-model
 .\start.bat
 ```
 
+普通启动默认使用已构建的 Electron 渲染器、SQLite 记忆并启动 MCP；Qdrant 仍只在语义记忆需要时启用。调试渲染器或切换启动范围时可使用：
+
+```powershell
+.\start.bat --dev-renderer --with-qdrant
+.\start.bat --no-mcp
+```
+
 ```bash
 ./start.sh
 ```

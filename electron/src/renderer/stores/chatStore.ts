@@ -1,12 +1,20 @@
 import { ElMessage } from 'element-plus'
 import { defineStore } from 'pinia'
-import { onScopeDispose, reactive, ref, watch } from 'vue'
+import { computed, onScopeDispose, reactive, ref, watch } from 'vue'
 import { petControl } from '@/utils/petControl'
 import { chatClient } from '@/api/client'
 import { API_ORIGIN, CONTROL_ORIGIN, requestJson } from '@/api/clients/http-client'
 import type { ActionEnvelope, ActionEnvelopeWithTrace } from '../../shared/agent'
 import { isPetLipSyncViseme, type PetSentenceEmotionCue, type PetVisemeCue } from '../../shared/pet-control'
-import type { ChatMessage, ChatOptions, ChatPromptMode, ChatPromptProfile, PetControlContextPayload } from '../../shared/types'
+import type {
+  ChatAgentStep,
+  ChatMemorySource,
+  ChatMessage,
+  ChatOptions,
+  ChatPromptMode,
+  ChatPromptProfile,
+  PetControlContextPayload,
+} from '../../shared/types'
 import { SocketEvents } from '../net/socketClient'
 import { normalizeSentenceEmotionCues } from '../pet-sentence-emotion-scheduler'
 import { useWorkspaceStore } from './workspaceStore'
@@ -52,18 +60,37 @@ export interface ChatAdviceItem {
   source: string
 }
 
+export interface ChatSessionRuntime {
+  sessionId: string
+  workspaceId: string
+  requestId: string | null
+  currentText: string
+  isGenerating: boolean
+  unread: boolean
+}
+
 type UnknownRecord = Record<string, unknown>
 type SendChatOptions = {
   appendUser?: boolean
   chatOptions?: Partial<ChatOptions>
+}
+type RuntimeRequest = {
+  requestId: string
+  interruptionEpoch: number
+  sessionId: string
+  workspaceId: string
 }
 type AgentTurnPreparation = () => Promise<void>
 type ChatHistoryRecord = {
   id?: number | string | null
   role: 'user' | 'assistant' | 'system'
   content: string
-  reasoning?: string | null
   timestamp?: string | null
+  request_id?: string | null
+  tool_trace?: unknown[] | null
+  memory_trace?: unknown[] | null
+  agentSteps?: ChatAgentStep[] | null
+  memorySources?: ChatMemorySource[] | null
 }
 type RealtimeTurnRecord = {
   turnId: string
@@ -88,7 +115,7 @@ const createRequestId = () => `req_${Date.now()}_${Math.random().toString(36).sl
 const createAdviceId = () => `advice_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 const CHAT_OPTIONS_STORAGE_KEY = 'yuizaki.chat.options'
 const CHAT_OPTIONS_STORAGE_VERSION_KEY = 'yuizaki.chat.options.version'
-const CHAT_OPTIONS_STORAGE_VERSION = '6'
+const CHAT_OPTIONS_STORAGE_VERSION = '7'
 const CHAT_OPTIONS_MAX_OUTPUT_TOKENS = 65535
 const createTtsStopEvent = (detail?: { interrupted?: boolean; petLipSyncHandled?: boolean }) =>
   new CustomEvent('pet:tts-stop', { detail })
@@ -105,7 +132,7 @@ const DEFAULT_CHAT_OPTIONS: Required<Pick<ChatOptions, 'temperature' | 'top_p' |
   max_tokens: 8192,
   reasoning_effort: 'default',
   response_mode: 'balanced',
-  mcp_enabled: false,
+  mcp_enabled: true,
   web_search_enabled: false,
   tts_enabled: true,
   pet_link_enabled: true,
@@ -229,14 +256,6 @@ const readMessageId = (value: unknown, key: string): number | string | undefined
   return undefined
 }
 
-const readReasoningText = (value: unknown): string | null => {
-  for (const key of ['reasoning', 'reasoning_content', 'thinking', 'thoughts']) {
-    const text = readString(value, key).trim()
-    if (text) return text
-  }
-  return null
-}
-
 const normalizePromptMode = (value: unknown): ChatPromptMode =>
   value === 'work' || value === 'daily' || value === 'auto' ? value : DEFAULT_CHAT_OPTIONS.prompt_mode
 
@@ -339,7 +358,8 @@ const loadChatOptions = (): ChatOptions => {
         temperature: normalized.temperature === 0.7 ? DEFAULT_CHAT_OPTIONS.temperature : normalized.temperature,
         top_p: normalized.top_p === 1 ? DEFAULT_CHAT_OPTIONS.top_p : normalized.top_p,
         max_tokens: normalized.max_tokens === 2048 ? DEFAULT_CHAT_OPTIONS.max_tokens : normalized.max_tokens,
-        ...(version === '4' || version === '5' ? {} : { mcp_enabled: false, web_search_enabled: false }),
+        mcp_enabled: true,
+        ...(version === '4' || version === '5' || version === '6' ? {} : { web_search_enabled: false }),
       })
       persistChatOptions(migrated)
       return migrated
@@ -400,22 +420,127 @@ export const useChatStore = defineStore('chat', () => {
       generation: null,
     },
   })
+  type TraceMetadata = {
+    tool_trace?: unknown[]
+    memory_trace?: unknown[]
+    agentSteps?: ChatAgentStep[]
+    memorySources?: ChatMemorySource[]
+  }
+  const pendingMessageTraces = new Map<string, TraceMetadata>()
+
+  const normalizeAgentSteps = (items: unknown[]): ChatAgentStep[] => items.flatMap((item, index) => {
+    if (!isRecord(item)) return []
+    const id = String(item.id ?? item.step_id ?? `step-${index + 1}`).trim()
+    const tool = String(item.tool ?? '').trim()
+    const title = String(item.title || item.description || tool || `步骤 ${index + 1}`).trim()
+    if (!title) return []
+    const success = typeof item.success === 'boolean' ? item.success : undefined
+    const status = String(item.status ?? (success === false ? 'failed' : success === true ? 'completed' : 'recorded')).trim()
+    const error = String(item.error ?? '').trim()
+    return [{ id, title, status, ...(tool ? { tool } : {}), ...(error ? { error } : {}) }]
+  })
+
+  const normalizeMemorySources = (items: unknown[]): ChatMemorySource[] => items.flatMap((item) => {
+    if (!isRecord(item)) return []
+    const doc = isRecord(item.doc) ? item.doc : item
+    const metadata = isRecord(doc.metadata) ? doc.metadata : {}
+    const id = String(doc.id ?? item.document_id ?? '').trim()
+    const text = String(doc.text ?? doc.content ?? '').trim()
+    if (!id || !text) return []
+    const layer = String(doc.layer ?? metadata.layer ?? '').trim()
+    const source = String(doc.source ?? metadata.source ?? '').trim()
+    const score = typeof item.score === 'number' && Number.isFinite(item.score) ? item.score : undefined
+    return [{ id, text, ...(layer ? { layer } : {}), ...(source ? { source } : {}), ...(score !== undefined ? { score } : {}) }]
+  })
+
+  const readTraceMetadata = (data: unknown) => {
+    if (!isRecord(data)) return null
+    const actions = Array.isArray(data.actions) ? data.actions.filter(isRecord) : []
+    const tool = Array.isArray(data.tool_trace) ? data.tool_trace : actions.flatMap((a) => a.type === 'tool_trace' && Array.isArray(a.payload) ? a.payload : [])
+    const memory = Array.isArray(data.memory_trace) ? data.memory_trace : actions.flatMap((a) => a.type === 'memory_trace' && Array.isArray(a.payload) ? a.payload : [])
+    if (!tool.length && !memory.length) return null
+    const visibleToolSteps = tool.flatMap((item) => {
+      if (!isRecord(item)) return []
+      return Array.isArray(item.step_results) ? item.step_results : [item]
+    })
+    const agentSteps = normalizeAgentSteps(visibleToolSteps)
+    const memorySources = normalizeMemorySources(memory)
+    return {
+      ...(tool.length ? { tool_trace: tool } : {}),
+      ...(agentSteps.length ? { agentSteps } : {}),
+      ...(memory.length ? { memory_trace: memory } : {}),
+      ...(memorySources.length ? { memorySources } : {}),
+    }
+  }
 
   const petControlContext = ref<PetControlContextPayload | null>(null)
   const companionPersonaPrompt = ref<string | null>(null)
   const promptProfile = ref<ChatPromptProfile | null>(null)
   const chatOptions = reactive<ChatOptions>(loadChatOptions())
+  const sessionRuntime = reactive<Record<string, ChatSessionRuntime>>({})
   watch(chatOptions, () => persistChatOptions(chatOptions), { deep: true })
   let pendingSentenceEmotionCues: PetSentenceEmotionCue[] = []
   let lastAssistantText = ''
   let initialized = false
-  let pendingUserMessage: { sessionId: string; content: string; index: number } | null = null
+  const pendingUserMessages = new Map<string, { content: string; index: number }>()
   const pendingInterrupts = new Map<string, { startedAt: number; sessionId: string; timeoutId: number }>()
-  let currentRuntimeRequest: { requestId: string; interruptionEpoch: number } | null = null
+  const runtimeRequests = new Map<string, RuntimeRequest>()
+  let currentRuntimeRequest: RuntimeRequest | null = null
   let currentRealtimeRuntimeRequest: { requestId: string; interruptionEpoch: number } | null = null
   let agentTurnPreparation: AgentTurnPreparation | null = null
+  let historyLoadEpoch = 0
   const blockedTtsGenerations = new Set<string>()
   const reportedPlaybackGenerations = new Set<string>()
+
+  const ensureSessionRuntime = (sessionId: string, workspaceId = state.currentWorkspaceId): ChatSessionRuntime => {
+    const id = sessionId.trim() || 'default'
+    const existing = sessionRuntime[id]
+    if (existing) {
+      if (workspaceId) existing.workspaceId = workspaceId
+      return existing
+    }
+    const created: ChatSessionRuntime = {
+      sessionId: id,
+      workspaceId: workspaceId.trim() || 'default',
+      requestId: null,
+      currentText: '',
+      isGenerating: false,
+      unread: false,
+    }
+    sessionRuntime[id] = created
+    return created
+  }
+
+  const resolveEventRuntime = (data: unknown): ChatSessionRuntime | null => {
+    const sessionId = readString(data, 'session_id').trim()
+    if (sessionId) return ensureSessionRuntime(sessionId)
+    const requestId = readString(data, 'request_id').trim()
+    const request = requestId ? runtimeRequests.get(requestId) : undefined
+    if (request) return ensureSessionRuntime(request.sessionId, request.workspaceId)
+    const running = Object.values(sessionRuntime).filter((runtime) => runtime.isGenerating)
+    if (running.length > 1) return null
+    if (running.length === 1 && running[0].sessionId !== state.currentSessionId) return null
+    return ensureSessionRuntime(state.currentSessionId, state.currentWorkspaceId)
+  }
+
+  const eventMatchesRuntime = (data: unknown, runtime: ChatSessionRuntime) => {
+    const requestId = readString(data, 'request_id').trim()
+    if (!requestId) return true
+    if (runtime.requestId === requestId) return true
+    return runtimeRequests.get(requestId)?.sessionId === runtime.sessionId
+  }
+
+  const runningSessionIds = computed(() => Object.values(sessionRuntime)
+    .filter((runtime) => runtime.isGenerating)
+    .map((runtime) => runtime.sessionId))
+  const unreadSessionIds = computed(() => Object.values(sessionRuntime)
+    .filter((runtime) => runtime.unread)
+    .map((runtime) => runtime.sessionId))
+  const isSessionGenerating = (sessionId: string) => Boolean(sessionRuntime[sessionId]?.isGenerating)
+  const markSessionRead = (sessionId: string) => {
+    const runtime = sessionRuntime[sessionId]
+    if (runtime) runtime.unread = false
+  }
 
   const rememberBlockedTtsGeneration = (generationId: string) => {
     if (!generationId) return
@@ -466,8 +591,8 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  const clearPendingUserMessage = () => {
-    pendingUserMessage = null
+  const clearPendingUserMessage = (sessionId = state.currentSessionId) => {
+    pendingUserMessages.delete(sessionId)
   }
 
   const initChatStore = () => {
@@ -515,11 +640,15 @@ export const useChatStore = defineStore('chat', () => {
       for (const pending of pendingInterrupts.values()) window.clearTimeout(pending.timeoutId)
       pendingInterrupts.clear()
       blockedTtsGenerations.clear()
-      if (state.isGenerating) {
-        state.isGenerating = false
-        state.currentText = ''
+      runtimeRequests.clear()
+      for (const runtime of Object.values(sessionRuntime)) {
+        runtime.isGenerating = false
+        runtime.currentText = ''
+        runtime.requestId = null
       }
-      clearPendingUserMessage()
+      state.isGenerating = false
+      state.currentText = ''
+      pendingUserMessages.clear()
       state.lastError = '实时通道已断开，请确认 Python 服务和 Socket.IO 已启动'
     })
 
@@ -540,22 +669,29 @@ export const useChatStore = defineStore('chat', () => {
     socketClient.on(SocketEvents.LLM_DELTA, (data: unknown) => {
       const token = readString(data, 'token')
       if (!token) return
-      state.currentText += token
-      state.isGenerating = true
-      state.lastError = null
+      const runtime = resolveEventRuntime(data)
+      if (!runtime || !eventMatchesRuntime(data, runtime)) return
+      runtime.currentText += token
+      runtime.isGenerating = true
+      if (runtime.sessionId === state.currentSessionId) {
+        state.currentText = runtime.currentText
+        state.isGenerating = true
+        state.lastError = null
+      }
     })
 
     socketClient.on(SocketEvents.LLM_FINAL, (data: unknown) => {
+      const runtime = resolveEventRuntime(data)
+      if (!runtime || !eventMatchesRuntime(data, runtime)) return
       const text = readString(data, 'text')
-      const assistantText = text || state.currentText
+      const assistantText = text || runtime.currentText
       const userMessageId = readMessageId(data, 'user_message_id')
       const assistantMessageId = readMessageId(data, 'assistant_message_id')
-      if (userMessageId !== undefined && pendingUserMessage) {
-        const finalSessionId = readString(data, 'session_id') || state.currentSessionId
-        const pending = pendingUserMessage
+      const pending = pendingUserMessages.get(runtime.sessionId)
+      const isActiveSession = runtime.sessionId === state.currentSessionId
+      if (userMessageId !== undefined && pending && isActiveSession) {
         const message = state.messages[pending.index]
         if (
-          pending.sessionId === finalSessionId &&
           message?.role === 'user' &&
           message.id === undefined &&
           message.content === pending.content
@@ -563,23 +699,33 @@ export const useChatStore = defineStore('chat', () => {
           message.id = userMessageId
         }
       }
-      pendingUserMessage = null
+      pendingUserMessages.delete(runtime.sessionId)
       const assistantTimestamp = readString(data, 'assistant_timestamp') || readString(data, 'timestamp') || new Date().toISOString()
-      const assistantReasoning = readReasoningText(data)
-      if (text) {
-        state.messages.push({ id: assistantMessageId, role: 'assistant', content: text, ...(assistantReasoning ? { reasoning: assistantReasoning } : {}), timestamp: assistantTimestamp })
-      } else if (state.currentText) {
-        state.messages.push({ id: assistantMessageId, role: 'assistant', content: state.currentText, ...(assistantReasoning ? { reasoning: assistantReasoning } : {}), timestamp: assistantTimestamp })
+      const responseRequestId = readString(data, 'request_id') || runtime.requestId || ''
+      const traces = responseRequestId ? pendingMessageTraces.get(responseRequestId) : undefined
+      if (responseRequestId) pendingMessageTraces.delete(responseRequestId)
+      const messageMetadata = traces
+        ? { request_id: responseRequestId, ...traces }
+        : responseRequestId ? { request_id: responseRequestId } : {}
+      const assistantAlreadyVisible = assistantMessageId !== undefined && state.messages.some((message) => message.id === assistantMessageId)
+      if (isActiveSession && text && !assistantAlreadyVisible) {
+        state.messages.push({ id: assistantMessageId, role: 'assistant', content: text, timestamp: assistantTimestamp, ...messageMetadata })
+      } else if (isActiveSession && runtime.currentText && !assistantAlreadyVisible) {
+        state.messages.push({ id: assistantMessageId, role: 'assistant', content: runtime.currentText, timestamp: assistantTimestamp, ...messageMetadata })
       }
-      lastAssistantText = assistantText
-      state.currentText = ''
-      state.isGenerating = false
-      state.lastError = null
-      if (isPetLinkEnabled()) {
-        const responseRequestId = readString(data, 'request_id')
-        const runtimeRequest = !responseRequestId || responseRequestId === currentRuntimeRequest?.requestId
-          ? currentRuntimeRequest
-          : null
+      runtime.currentText = ''
+      runtime.isGenerating = false
+      runtime.unread = !isActiveSession
+      const runtimeRequest = responseRequestId ? runtimeRequests.get(responseRequestId) : undefined
+      if (responseRequestId) runtimeRequests.delete(responseRequestId)
+      runtime.requestId = null
+      if (isActiveSession) {
+        lastAssistantText = assistantText
+        state.currentText = ''
+        state.isGenerating = false
+        state.lastError = null
+      }
+      if (isActiveSession && isPetLinkEnabled()) {
         void publishCompanionRuntimeEvent({
           source: 'chat',
           activity: 'idle',
@@ -591,7 +737,20 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     socketClient.on(SocketEvents.AGENT_RESULT, (data: unknown) => {
+      const runtime = resolveEventRuntime(data)
+      if (runtime && runtime.sessionId !== state.currentSessionId) return
       const envelope = normalizeActionEnvelope(data)
+      const requestId = readString(data, 'request_id').trim()
+      const traces = readTraceMetadata(data)
+      if (traces) {
+        const assistant = requestId
+          ? state.messages.find((message) => message.role === 'assistant' && message.request_id === requestId)
+          : state.messages.length && state.messages[state.messages.length - 1].role === 'assistant'
+            ? state.messages[state.messages.length - 1]
+            : undefined
+        if (assistant) Object.assign(assistant, traces)
+        else if (requestId) pendingMessageTraces.set(requestId, { ...(pendingMessageTraces.get(requestId) || {}), ...traces })
+      }
       state.lastAgentEnvelope = envelope
       if (envelope) {
         state.agentEnvelopeTimeline.unshift({
@@ -608,12 +767,17 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     socketClient.on(SocketEvents.PET_CONTROL, (data: unknown) => {
+      const runtime = resolveEventRuntime(data)
+      if (runtime && runtime.sessionId !== state.currentSessionId) return
       if (!isPetLinkEnabled()) {
         pendingSentenceEmotionCues = []
         return
       }
       const payload = isRecord(data) && isRecord(data.pet_control)
-        ? data.pet_control
+        ? {
+            ...data.pet_control,
+            ...(isRecord(data.avatar_command) ? { avatar_command: data.avatar_command } : {}),
+          }
         : isRecord(data)
           ? data
           : null
@@ -636,6 +800,7 @@ export const useChatStore = defineStore('chat', () => {
     const handleTtsAudio = (data: unknown, finalEvent: boolean) => {
       const sessionId = readString(data, 'session_id') || state.currentSessionId
       const generationId = readString(data, 'generation_id')
+      if (sessionId !== state.currentSessionId) return
       if (
         hasPendingInterruptForSession(sessionId) ||
         (generationId && blockedTtsGenerations.has(generationId))
@@ -712,17 +877,27 @@ export const useChatStore = defineStore('chat', () => {
     socketClient.on(SocketEvents.ERROR, (data: unknown) => {
       const message = readString(data, 'message') || readString(data, 'error') || '对话服务返回错误'
       const code = readString(data, 'code')
-      state.lastError = message
+      const runtime = resolveEventRuntime(data)
+      const isActiveSession = !runtime || runtime.sessionId === state.currentSessionId
+      if (isActiveSession) state.lastError = message
       if (code.startsWith('LLM') || code.startsWith('GEN') || code.startsWith('AGENT') || code === 'chat_error') {
-        state.isGenerating = false
-        state.currentText = ''
-        clearPendingUserMessage()
+        if (runtime) {
+          runtime.isGenerating = false
+          runtime.currentText = ''
+          if (runtime.requestId) runtimeRequests.delete(runtime.requestId)
+          runtime.requestId = null
+          clearPendingUserMessage(runtime.sessionId)
+        }
+        if (isActiveSession) {
+          state.isGenerating = false
+          state.currentText = ''
+        }
       }
       if (code.startsWith('TTS')) {
         stopTtsPlaybackState()
         window.dispatchEvent(createTtsStopEvent())
       }
-      ElMessage.error(message)
+      if (isActiveSession) ElMessage.error(message)
     })
 
     if (typeof window !== 'undefined') {
@@ -780,6 +955,7 @@ export const useChatStore = defineStore('chat', () => {
     state.lastError = null
     state.lastAgentEnvelope = null
     state.agentEnvelopeTimeline = []
+    pendingMessageTraces.clear()
     clearPendingUserMessage()
   }
 
@@ -789,17 +965,19 @@ export const useChatStore = defineStore('chat', () => {
 
   const sendChat = (text: string, options: SendChatOptions = {}) => {
     const trimmed = text.trim()
-    if (!trimmed) return
+    if (!trimmed) return false
 
     const socketClient = chatClient.getSocketClient()
     if (!socketClient.isConnected()) {
       const message = '实时通道未连接，请先启动 Python 服务并等待 Socket.IO 连接'
       state.lastError = message
       ElMessage.warning(message)
-      return
+      return false
     }
 
     const shouldAppendUser = options.appendUser !== false
+    const sessionId = state.currentSessionId
+    const workspaceId = state.currentWorkspaceId
     let pendingUserIndex: number | null = null
     if (shouldAppendUser) {
       pendingUserIndex = state.messages.push({ role: 'user', content: trimmed, timestamp: new Date().toISOString() }) - 1
@@ -811,15 +989,26 @@ export const useChatStore = defineStore('chat', () => {
       }
     }
     if (pendingUserIndex !== null) {
-      pendingUserMessage = {
-        sessionId: state.currentSessionId,
+      pendingUserMessages.set(sessionId, {
         content: trimmed,
         index: pendingUserIndex,
-      }
+      })
     }
 
     const requestId = createRequestId()
-    currentRuntimeRequest = { requestId, interruptionEpoch: getCompanionInterruptionEpoch() }
+    const runtimeRequest: RuntimeRequest = {
+      requestId,
+      interruptionEpoch: getCompanionInterruptionEpoch(),
+      sessionId,
+      workspaceId,
+    }
+    runtimeRequests.set(requestId, runtimeRequest)
+    currentRuntimeRequest = runtimeRequest
+    const runtime = ensureSessionRuntime(sessionId, workspaceId)
+    runtime.requestId = requestId
+    runtime.currentText = ''
+    runtime.isGenerating = true
+    runtime.unread = false
     state.currentText = ''
     state.isGenerating = true
     state.lastError = null
@@ -830,25 +1019,28 @@ export const useChatStore = defineStore('chat', () => {
         source: 'chat',
         activity: 'thinking',
         requestId,
-        interruptionEpoch: currentRuntimeRequest.interruptionEpoch,
+        interruptionEpoch: runtimeRequest.interruptionEpoch,
       })
     }
 
     const contextMessages = activeContextMessages()
     const petContext = isPetLinkEnabled() ? petControlContext.value || undefined : undefined
+    const requestOptions = requestChatOptions(options.chatOptions)
     const dispatchAgentChat = () => {
-      if (currentRuntimeRequest?.requestId !== requestId || !state.isGenerating) return
-      socketClient.sendAgentChat(contextMessages, state.currentSessionId, petContext, requestId, state.currentWorkspaceId, requestChatOptions(options.chatOptions))
+      const pendingRuntime = sessionRuntime[sessionId]
+      if (pendingRuntime?.requestId !== requestId || !pendingRuntime.isGenerating) return
+      socketClient.sendAgentChat(contextMessages, sessionId, petContext, requestId, workspaceId, requestOptions)
     }
     const prepareTurn = agentTurnPreparation
     if (!prepareTurn) {
       dispatchAgentChat()
-      return
+      return true
     }
     void Promise.resolve()
       .then(prepareTurn)
       .catch((error) => logger.warn('Agent turn preparation failed; continuing without it:', error))
       .finally(dispatchAgentChat)
+    return true
   }
 
   const applyRealtimeInputPartial = (text: string) => {
@@ -976,7 +1168,12 @@ export const useChatStore = defineStore('chat', () => {
 
     state.isGenerating = false
     state.currentText = ''
-    clearPendingUserMessage()
+    const runtime = ensureSessionRuntime(state.currentSessionId, state.currentWorkspaceId)
+    runtime.isGenerating = false
+    runtime.currentText = ''
+    if (runtime.requestId) runtimeRequests.delete(runtime.requestId)
+    runtime.requestId = null
+    clearPendingUserMessage(runtime.sessionId)
     stopTtsPlaybackState()
     pendingSentenceEmotionCues = []
     void petControl.stopLipSync({ interrupted: true }).catch((error) => {
@@ -998,32 +1195,49 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   const setWorkspaceContext = (workspaceId: string, sessionId: string) => {
+    historyLoadEpoch += 1
     state.currentWorkspaceId = workspaceId
     state.currentSessionId = sessionId
-    clearPendingUserMessage()
+    const runtime = ensureSessionRuntime(sessionId, workspaceId)
+    state.currentText = runtime.currentText
+    state.isGenerating = runtime.isGenerating
+    state.asrPartialText = ''
+    state.lastError = null
+    currentRuntimeRequest = runtime.requestId ? runtimeRequests.get(runtime.requestId) || null : null
+    markSessionRead(sessionId)
   }
 
   const loadHistory = async (sessionId: string, workspaceId?: string) => {
+    const requestEpoch = ++historyLoadEpoch
+    state.currentSessionId = sessionId
+    if (workspaceId) state.currentWorkspaceId = workspaceId
     const payload = await requestJson<{ history: ChatHistoryRecord[] }>(
       withWorkspaceQuery(`${CONTROL_ORIGIN}/api/history/${encodeURIComponent(sessionId)}?limit=50`, workspaceId),
     )
-    state.currentSessionId = sessionId
+    if (requestEpoch !== historyLoadEpoch || state.currentSessionId !== sessionId) return
     state.messages = Array.isArray(payload.history)
       ? payload.history.map((message) => ({
           id: message.id ?? undefined,
           role: message.role,
           content: message.content,
-          ...(message.reasoning ? { reasoning: message.reasoning } : {}),
           timestamp: message.timestamp || null,
+          ...(message.request_id ? { request_id: message.request_id } : {}),
+          ...(message.tool_trace ? { tool_trace: message.tool_trace } : {}),
+          ...(message.memory_trace ? { memory_trace: message.memory_trace } : {}),
+          ...(message.agentSteps ? { agentSteps: message.agentSteps } : {}),
+          ...(message.memorySources ? { memorySources: message.memorySources } : {}),
         }))
       : []
     state.contextStartIndex = 0
-    state.currentText = ''
+    const runtime = ensureSessionRuntime(sessionId, workspaceId || state.currentWorkspaceId)
+    state.currentText = runtime.currentText
     state.asrPartialText = ''
+    state.isGenerating = runtime.isGenerating
     state.lastError = null
     state.lastAgentEnvelope = null
     state.agentEnvelopeTimeline = []
-    clearPendingUserMessage()
+    pendingMessageTraces.clear()
+    markSessionRead(sessionId)
   }
 
   const appendLocalAdvice = (text: string, source = 'behavior'): ChatAdviceItem | null => {
@@ -1189,6 +1403,7 @@ export const useChatStore = defineStore('chat', () => {
     state.lastError = null
     state.lastAgentEnvelope = null
     state.agentEnvelopeTimeline = []
+    pendingMessageTraces.clear()
     clearPendingUserMessage()
   }
 
@@ -1226,6 +1441,11 @@ export const useChatStore = defineStore('chat', () => {
   return {
     state,
     chatOptions,
+    sessionRuntime,
+    runningSessionIds,
+    unreadSessionIds,
+    isSessionGenerating,
+    markSessionRead,
     initChatStore,
     sendChat,
     applyRealtimeInputPartial,

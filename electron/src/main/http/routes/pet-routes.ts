@@ -5,6 +5,7 @@ import type {
   PetControlSource,
   PetPlacement,
 } from '../../../shared/pet-control'
+import { normalizeAvatarCommand, type AvatarCommand } from '../../../shared/avatar-command'
 import type { HttpRouteHandler } from '../types'
 import { parseRequestBody, sendJson } from '../utils'
 import {
@@ -351,6 +352,49 @@ export const handlePetRoutes: HttpRouteHandler = async (req, res, method, url, c
     return true
   }
 
+  if (method === 'GET' && url.pathname === '/api/pet/avatar-capabilities') {
+    const capabilities = ctx.live2dWindow.getAvatarCapabilities?.() ?? null
+    if (!capabilities) {
+      ctx.live2dWindow.requestAvatarCapabilities?.()
+      sendJson(res, 503, { success: false, error: 'Pet renderer capabilities are not ready' })
+      return true
+    }
+    sendJson(res, 200, { success: true, capabilities })
+    return true
+  }
+
+  if (method === 'POST' && url.pathname === '/api/pet/avatar-command') {
+    const body = await parseRequestBody<{ command?: Partial<AvatarCommand>; source?: PetControlSource }>(req)
+    if (shouldSkipAutomation(ctx, body.source)) {
+      sendAutomationSkipped(res)
+      return true
+    }
+    // Main-process delivery applies the short transport lease; the HTTP boundary
+    // should not discard a command merely because it waited in the backend queue.
+    const normalized = normalizeAvatarCommand(body.command, 0)
+    if (!normalized.command) {
+      sendJson(res, 400, { success: false, error: 'Invalid AvatarCommand v1 payload' })
+      return true
+    }
+    if (!ctx.live2dWindow.sendAvatarCommand) {
+      sendJson(res, 503, { success: false, error: 'Pet renderer command transport is unavailable' })
+      return true
+    }
+    const result = await ctx.live2dWindow.sendAvatarCommand(normalized.command)
+    const statusCode = result.status === 'rejected'
+      ? 409
+      : result.status === 'timeout'
+        ? 504
+        : result.status === 'dropped'
+          ? 202
+          : 200
+    sendJson(res, statusCode, {
+      success: result.status !== 'rejected' && result.status !== 'timeout',
+      result,
+    })
+    return true
+  }
+
   if (method === 'POST' && url.pathname === '/api/pet/animation') {
     const body = await parseRequestBody<{ group?: string; index?: number; name?: string; source?: PetControlSource }>(req)
     if (shouldSkipAutomation(ctx, body.source)) {
@@ -464,7 +508,11 @@ export const handlePetRoutes: HttpRouteHandler = async (req, res, method, url, c
       return true
     }
 
-    ctx.live2dWindow.sendToRenderer('pet:lipsync-start', { audioUrl: safeAudioUrl })
+    if (typeof ctx.live2dWindow.startLipSync === 'function') {
+      await ctx.live2dWindow.startLipSync(safeAudioUrl)
+    } else {
+      ctx.live2dWindow.sendToRenderer('pet:lipsync-start', { audioUrl: safeAudioUrl })
+    }
     sendJson(res, 200, { success: true })
     return true
   }

@@ -4,6 +4,7 @@ import { resolvePythonApiOrigin } from './http/python-origin'
 import { logger } from './logger'
 import { assertTrustedIpcSender } from './trusted-renderer-url'
 import { isPetLipSyncViseme } from '../shared/pet-control'
+import type { AvatarCapabilitySnapshot, AvatarCommandResult } from '../shared/avatar-command'
 import type {
   PetControlConfigPatch,
   PetControlState,
@@ -63,6 +64,11 @@ export interface IpcContext {
     reloadRenderer: () => void
     requestPetState: () => void
     handleRendererReady: (sender: WebContents) => boolean
+    handleAvatarCapabilities: (sender: WebContents, payload: unknown) => boolean
+    handleAvatarCommandResult: (sender: WebContents, payload: unknown) => boolean
+    handleLipSyncReady: (sender: WebContents, payload: unknown) => boolean
+    getAvatarCapabilities: () => unknown
+    requestAvatarCapabilities: () => void
   }
   petWindow: {
     window: BrowserWindow | null
@@ -669,6 +675,19 @@ function registerPetControlHandlers(ctx: IpcContext): void {
 function registerPetInteractionHandlers(ctx: IpcContext): void {
   ipcMain.on('pet:renderer-ready', (event) => {
     ctx.live2dWindow.handleRendererReady(event.sender)
+  })
+
+  ipcMain.on('pet:avatar-capabilities', (event, payload: AvatarCapabilitySnapshot) => {
+    ctx.live2dWindow.handleAvatarCapabilities(event.sender, payload)
+  })
+
+  ipcMain.on('pet:avatar-command-result', (event, payload: AvatarCommandResult) => {
+    ctx.live2dWindow.handleAvatarCommandResult(event.sender, payload)
+  })
+
+  ipcMain.on('pet:lipsync-ready', (event, payload: unknown) => {
+    if (!allowTrustedIpcSender(event)) return
+    ctx.live2dWindow.handleLipSyncReady(event.sender, payload)
   })
 
   ipcMain.on('pet:interact-enable', (event) => {

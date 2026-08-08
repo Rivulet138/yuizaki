@@ -4,15 +4,17 @@ cd /d "%~dp0"
 
 set "WITH_MCP=1"
 set "CHECK_ONLY=0"
-set "DEV_RENDERER=1"
+set "DEV_RENDERER=0"
 set "SMOKE=0"
 set "VERIFY=0"
 set "NO_PAUSE=0"
 set "NO_OPEN=0"
 set "SHOW_PET=1"
+if not defined QDRANT_AUTO_START set "QDRANT_AUTO_START=0"
 for %%A in (%*) do (
   if /I "%%~A"=="--with-mcp" set "WITH_MCP=1"
   if /I "%%~A"=="--no-mcp" set "WITH_MCP=0"
+  if /I "%%~A"=="--with-qdrant" set "QDRANT_AUTO_START=1"
   if /I "%%~A"=="--check" set "CHECK_ONLY=1"
   if /I "%%~A"=="--dev-renderer" set "DEV_RENDERER=1"
   if /I "%%~A"=="--no-dev-renderer" set "DEV_RENDERER=0"
@@ -100,7 +102,7 @@ call :log_info "Yuizaki startup initialized"
 call :log_info "Project root: %SCRIPT_DIR%"
 call :log_info "Mode: %APP_ENV%"
 if "%WITH_MCP%"=="1" (
-  call :log_info "MCP startup: enabled (default full-service mode)"
+  call :log_info "MCP startup: enabled (default full startup)"
 ) else (
   call :log_info "MCP startup: disabled (--no-mcp)"
 )
@@ -155,9 +157,13 @@ call :banner "Stage 4/7 - Model cache check"
 call :ensure_embedding_model
 if errorlevel 1 goto :fatal
 
-call :banner "Stage 4.5/7 - Qdrant Docker check"
-call :ensure_qdrant_docker
-if errorlevel 1 goto :fatal
+if "%QDRANT_AUTO_START%"=="1" (
+  call :banner "Stage 4.5/7 - Qdrant Docker check"
+  call :ensure_qdrant_docker
+  if errorlevel 1 goto :fatal
+) else (
+  call :log_info "Qdrant Docker check skipped (SQLite/local memory mode)"
+)
 
 call :banner "Stage 5/7 - Backend availability check"
 call :select_backend_port

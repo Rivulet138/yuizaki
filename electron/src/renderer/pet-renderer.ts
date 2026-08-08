@@ -18,6 +18,15 @@ import {
 	type PetRendererStatePayload,
 	type PetResolvedEmotionTrigger,
 } from "../shared/pet-control";
+import {
+	normalizeAvatarCommand,
+	validateAvatarCommandAgainstCapabilities,
+	type AvatarAction,
+	type AvatarActionType,
+	type AvatarCapabilitySnapshot,
+	type AvatarCommand,
+	type AvatarCommandResult,
+} from "../shared/avatar-command";
 import type {
 	DesktopPetEventName,
 	DesktopPetEventRecord,
@@ -82,15 +91,9 @@ import type {
 } from "./runtime/live2d-behavior-controller";
 import { Live2DRuntimeAdapter } from "./runtime/live2d-runtime-adapter";
 import type { VrmRuntimeAdapter as VrmRuntimeAdapterType } from "./runtime/vrm-runtime-adapter";
+import type { PetRuntimeAdapter } from "./runtime/pet-runtime-adapter";
 
-type PetRendererWindow = typeof window & {
-	PIXI?: typeof PIXI;
-	live2dApi?: typeof window.live2dApi;
-	petRenderer?: PetRenderer;
-	__petTestState?: PetTestState | Record<string, unknown>;
-};
-
-(window as PetRendererWindow).PIXI = PIXI;
+type AvatarCancelableActionType = Exclude<AvatarActionType, "cancel">;
 
 interface PetConfig {
 	modelType: "live2d" | "vrm";
@@ -218,6 +221,20 @@ class PetRenderer {
 	private readonly testState: PetTestState = { ...DEFAULT_PET_TEST_STATE };
 	private vrmRuntime: VrmRuntimeAdapterType | null = null;
 	private live2dRuntime: Live2DRuntimeAdapter | null = null;
+	private avatarCapabilities: AvatarCapabilitySnapshot | null = null;
+	private readonly avatarLastSequences = new Map<string, number>();
+	private readonly avatarScheduledCommands = new Map<string, {
+		command: AvatarCommand;
+		timer: number;
+		startAt: number;
+	}>();
+	private readonly avatarActiveCommands = new Map<string, {
+		streamId: string;
+		priority: number;
+		until: number;
+		channels: Set<AvatarCancelableActionType>;
+	}>();
+	private modelLoadGeneration = 0;
 	private companionIdleProfile: PetCompanionIdleProfile = {};
 	private externalLipSyncSource: PetLipSyncLevelSource | null = null;
 
@@ -233,6 +250,7 @@ class PetRenderer {
 	}
 
 	async init(): Promise<void> {
+		(window as typeof window & { PIXI?: typeof PIXI }).PIXI = PIXI;
 		Live2DConfig.MotionGroupIdle = "Idle";
 		Live2DConfig.MouseFollow = false;
 
@@ -315,7 +333,11 @@ class PetRenderer {
 		if (!this.app) {
 			return;
 		}
+		const loadGeneration = ++this.modelLoadGeneration;
 
+		this.avatarCapabilities = null;
+		window.live2dApi?.pet.reportAvatarCapabilities(null);
+		this.clearAvatarScheduling();
 		this.live2dRuntime?.destroy();
 		this.vrmRuntime?.destroy();
 		this.live2dRuntime = null;
@@ -332,7 +354,13 @@ class PetRenderer {
 					reportState: (force) => this.reportState(force),
 					markActivity: (reason) => this.markActivity(reason),
 				});
-				await this.vrmRuntime.loadModel({ modelPath });
+				const runtime = this.vrmRuntime;
+				await runtime.loadModel({ modelPath });
+				if (loadGeneration !== this.modelLoadGeneration) {
+					runtime.destroy();
+					return;
+				}
+				this.publishAvatarCapabilities();
 				this.reportState(true);
 			} catch (error) {
 				this.showNotice(
@@ -375,13 +403,266 @@ class PetRenderer {
 					this.syncMouseCaptureFromLastPoint(reason, immediate),
 				markActivity: (reason) => this.markActivity(reason),
 			});
-			await this.live2dRuntime.loadModel({ modelPath });
+			const runtime = this.live2dRuntime;
+			await runtime.loadModel({ modelPath });
+			if (loadGeneration !== this.modelLoadGeneration) {
+				runtime.destroy();
+				return;
+			}
 			this.live2dRuntime.setCompanionIdleProfile(this.companionIdleProfile);
+			this.publishAvatarCapabilities();
 			console.info("[PetRenderer] model loaded:", modelPath);
 		} catch (error) {
 			this.showNotice(getReadableError(error));
 			console.error("[PetRenderer] failed to load model:", error);
 		}
+	}
+
+	private getActiveRuntime(): PetRuntimeAdapter | null {
+		return this.config.modelType === "vrm" ? this.vrmRuntime : this.live2dRuntime;
+	}
+
+	private publishAvatarCapabilities(): void {
+		const runtime = this.getActiveRuntime();
+		if (!runtime) return;
+		this.avatarCapabilities = runtime.getCapabilities();
+		window.live2dApi?.pet.reportAvatarCapabilities(this.avatarCapabilities);
+	}
+
+	private reportAvatarCommandResult(result: AvatarCommandResult): void {
+		window.live2dApi?.pet.reportAvatarCommandResult(result);
+	}
+
+	private executeAvatarCommand(data: unknown): void {
+		const input = data as AvatarCommand;
+		const now = Date.now();
+		const normalized = normalizeAvatarCommand(input, now);
+		if (!normalized.command) {
+			this.reportAvatarCommandResult({
+				commandId: typeof input?.id === "string" ? input.id : "unknown",
+				sequence: Number.isInteger(input?.sequence) ? input.sequence : -1,
+				status: normalized.status,
+				message: normalized.errors.join("; "),
+				at: now,
+			});
+			return;
+		}
+
+		const command = normalized.command;
+		const lastSequence = this.avatarLastSequences.get(command.streamId) ?? -1;
+		if (command.sequence <= lastSequence) {
+			this.reportAvatarCommandResult({
+				commandId: command.id,
+				sequence: command.sequence,
+				status: "dropped",
+				message: "Avatar command sequence is stale",
+				at: now,
+			});
+			return;
+		}
+
+		const runtime = this.getActiveRuntime();
+		const capabilities = this.avatarCapabilities ?? runtime?.getCapabilities() ?? null;
+		if (!runtime || !capabilities) {
+			this.reportAvatarCommandResult({
+				commandId: command.id,
+				sequence: command.sequence,
+				status: "rejected",
+				message: "Pet model is not ready",
+				at: now,
+			});
+			return;
+		}
+
+		const capabilityResult = validateAvatarCommandAgainstCapabilities(command, capabilities);
+		if (capabilityResult.status === "rejected") {
+			this.reportAvatarCommandResult({
+				commandId: command.id,
+				sequence: command.sequence,
+				status: "rejected",
+				capabilityRevision: capabilities.revision,
+				message: capabilityResult.message,
+				at: now,
+			});
+			return;
+		}
+		this.pruneAvatarCommands(now);
+		const activePriority = Math.max(
+			0,
+			...Array.from(this.avatarActiveCommands.values())
+				.filter((active) => active.until > now)
+				.map((active) => active.priority),
+		);
+		if (command.interrupt === "ignore" && command.priority <= activePriority) {
+			this.reportAvatarCommandResult({
+				commandId: command.id,
+				sequence: command.sequence,
+				status: "dropped",
+				capabilityRevision: capabilities.revision,
+				message: "Lower-priority avatar command ignored",
+				at: now,
+			});
+			return;
+		}
+
+		this.avatarLastSequences.set(command.streamId, command.sequence);
+		if (command.interrupt === "replace") {
+			this.cancelAvatarCommands(runtime);
+		}
+
+		const startAt = Math.max(now, command.startAt ?? now);
+		if (command.expiresAt !== undefined && startAt > command.expiresAt) {
+			this.reportAvatarCommandResult({
+				commandId: command.id,
+				sequence: command.sequence,
+				status: "dropped",
+				capabilityRevision: capabilities.revision,
+				message: "Avatar command expired before its scheduled start",
+				at: now,
+			});
+			return;
+		}
+		const queueStart = command.interrupt === "queue"
+			? Math.max(startAt, this.avatarQueueTail(command.streamId))
+			: startAt;
+		const durationMs = this.avatarCommandDuration(command);
+		this.avatarLastSequences.set(command.streamId, command.sequence);
+		this.avatarQueueTailByStream.set(command.streamId, queueStart + durationMs);
+		if (queueStart > now) {
+			const timer = window.setTimeout(() => {
+				this.avatarScheduledCommands.delete(command.id);
+				if (command.expiresAt !== undefined && Date.now() > command.expiresAt) {
+					this.reportAvatarCommandResult({
+						commandId: command.id,
+						sequence: command.sequence,
+						status: "dropped",
+						message: "Avatar command delivery lease expired before execution",
+						at: Date.now(),
+					});
+					return;
+				}
+				this.runAvatarCommand(command, runtime, capabilities, capabilityResult);
+			}, queueStart - now);
+			this.avatarScheduledCommands.set(command.id, { command, timer, startAt: queueStart });
+			this.reportAvatarCommandResult({
+				commandId: command.id,
+				sequence: command.sequence,
+				status: "accepted",
+				capabilityRevision: capabilities.revision,
+				at: now,
+			});
+			return;
+		}
+		this.runAvatarCommand(command, runtime, capabilities, capabilityResult);
+	}
+
+	private readonly avatarQueueTailByStream = new Map<string, number>();
+
+	private avatarQueueTail(streamId: string): number {
+		return this.avatarQueueTailByStream.get(streamId) ?? Date.now();
+	}
+
+	private avatarCommandDuration(command: AvatarCommand): number {
+		return Math.max(16, ...command.actions.map((action) => {
+			switch (action.type) {
+				case "behavior": return action.durationMs ?? 800;
+				case "affect": return action.decayMs ?? 1200;
+				case "gaze": return action.holdMs ?? 800;
+				case "expression": return (action.fadeInMs ?? 160) + (action.fadeOutMs ?? 1200);
+				case "parameterPatch": return action.durationMs ?? 600;
+				case "motion": return 1000;
+				case "viseme": return 120;
+				case "cancel": return 16;
+			}
+		}));
+	}
+
+	private runAvatarCommand(
+		command: AvatarCommand,
+		runtime: PetRuntimeAdapter,
+		capabilities: AvatarCapabilitySnapshot,
+		capabilityResult: ReturnType<typeof validateAvatarCommandAgainstCapabilities>,
+	): void {
+		let degraded = capabilityResult.status === "degraded";
+		const unsupported = new Set(capabilityResult.unsupportedActionIndexes);
+		const channels = new Set<AvatarCancelableActionType>();
+		const messages: string[] = [];
+		command.actions.forEach((action, index) => {
+			if (unsupported.has(index)) {
+				degraded = true;
+				return;
+			}
+			if (action.type === "cancel") {
+				this.cancelAvatarTarget(action, runtime);
+				return;
+			}
+			channels.add(action.type);
+			const result = runtime.executeAvatarAction(action);
+			if (result.status !== "completed") {
+				degraded = true;
+				if (result.message) messages.push(result.message);
+			}
+		});
+		this.avatarActiveCommands.set(command.id, {
+			streamId: command.streamId,
+			priority: command.priority,
+			until: Date.now() + this.avatarCommandDuration(command),
+			channels,
+		});
+		this.reportAvatarCommandResult({
+			commandId: command.id,
+			sequence: command.sequence,
+			status: degraded ? "degraded" : "accepted",
+			modelType: runtime.modelType,
+			capabilityRevision: capabilities.revision,
+			...(capabilityResult.unsupportedActionIndexes.length > 0
+				? { unsupportedActionIndexes: capabilityResult.unsupportedActionIndexes }
+				: {}),
+			...(messages.length > 0 ? { message: messages.join("; ") } : {}),
+			at: Date.now(),
+		});
+	}
+
+	private pruneAvatarCommands(now: number): void {
+		for (const [commandId, active] of this.avatarActiveCommands) {
+			if (active.until <= now) this.avatarActiveCommands.delete(commandId);
+		}
+		for (const [streamId, tail] of this.avatarQueueTailByStream) {
+			if (tail <= now) this.avatarQueueTailByStream.delete(streamId);
+		}
+	}
+
+	private cancelAvatarCommands(runtime: PetRuntimeAdapter): void {
+		this.clearAvatarScheduling();
+		runtime.executeAvatarAction({ type: "cancel" });
+	}
+
+	private clearAvatarScheduling(): void {
+		for (const scheduled of this.avatarScheduledCommands.values()) {
+			window.clearTimeout(scheduled.timer);
+		}
+		this.avatarScheduledCommands.clear();
+		this.avatarActiveCommands.clear();
+		this.avatarQueueTailByStream.clear();
+	}
+
+	private cancelAvatarTarget(action: Extract<AvatarAction, { type: "cancel" }>, runtime: PetRuntimeAdapter): void {
+		if (action.commandId) {
+			const scheduled = this.avatarScheduledCommands.get(action.commandId);
+			if (scheduled) {
+				window.clearTimeout(scheduled.timer);
+				this.avatarScheduledCommands.delete(action.commandId);
+			}
+			const active = this.avatarActiveCommands.get(action.commandId);
+			if (active) {
+				for (const channel of active.channels) {
+					runtime.executeAvatarAction({ type: "cancel", channel });
+				}
+				this.avatarActiveCommands.delete(action.commandId);
+			}
+			return;
+		}
+		runtime.executeAvatarAction(action);
 	}
 
 	playMotion(group: string, index = 0): void {
@@ -540,13 +821,42 @@ class PetRenderer {
 		this.live2dRuntime?.setAttentionTarget(target);
 	}
 
-	startLipSync(audioUrl: string): void {
+	async startLipSync(audioUrl: string, requestId?: string): Promise<void> {
 		if (this.config.modelType !== "live2d" || !audioUrl.trim()) {
+			if (requestId) {
+				window.live2dApi?.pet.reportLipSyncReady?.({ requestId, ready: false });
+			}
 			return;
 		}
-		void this.live2dRuntime?.startLipSync(audioUrl);
-		this.emitPetEvent("onSpeechStart", { audioUrl });
-		this.markActivity("tts-lipsync-start");
+		let readyReported = false;
+		let speechStarted = false;
+		const announceSpeechStart = () => {
+			if (speechStarted) return;
+			speechStarted = true;
+			this.emitPetEvent("onSpeechStart", { audioUrl });
+			this.markActivity("tts-lipsync-start");
+		};
+		const reportReady = (ready: boolean) => {
+			if (!requestId || readyReported) return;
+			readyReported = true;
+			window.live2dApi?.pet.reportLipSyncReady?.({ requestId, ready });
+		};
+		const runtime = this.live2dRuntime;
+		if (!runtime) {
+			reportReady(false);
+			return;
+		}
+		// Speech start is the request boundary. The analyzer may still be
+		// loading/resuming, but the panel must be able to align its audio clock
+		// without waiting for an HTMLAudioElement promise to settle.
+		announceSpeechStart();
+		try {
+			await runtime.startLipSync(audioUrl, () => reportReady(true));
+		} finally {
+			// A failed or interrupted analyzer still needs to release the main
+			// process waiter; the request boundary was already announced above.
+			reportReady(true);
+		}
 	}
 
 	stopLipSync(options: { interrupted?: boolean } = {}): void {
@@ -611,6 +921,8 @@ class PetRenderer {
 
 	private applyConfig(patch: PetControlConfigPatch, report = true): void {
 		let nextModelPath: string | null = null;
+		const previousModelType = this.config.modelType;
+		const previousModelId = this.config.modelId;
 		if (patch.modelType === "live2d" || patch.modelType === "vrm") {
 			this.config.modelType = patch.modelType;
 		}
@@ -632,6 +944,15 @@ class PetRenderer {
 			if (resolvedModelPath !== this.config.modelPath) {
 				this.config.modelPath = resolvedModelPath;
 				nextModelPath = resolvedModelPath;
+			}
+		}
+
+		const modelIdentityChanged = previousModelType !== this.config.modelType || previousModelId !== this.config.modelId;
+		if (modelIdentityChanged) {
+			this.avatarCapabilities = null;
+			window.live2dApi?.pet.reportAvatarCapabilities(null);
+			if (!nextModelPath && this.config.modelPath) {
+				nextModelPath = this.config.modelPath;
 			}
 		}
 
@@ -709,6 +1030,9 @@ class PetRenderer {
 		this.vrmRuntime?.applyConfig({
 			lipSyncProfile: this.config.lipSyncProfile,
 		});
+		if (modelIdentityChanged) {
+			this.publishAvatarCapabilities();
+		}
 		this.applyModelTransform();
 
 		if (report) {
@@ -1303,6 +1627,14 @@ class PetRenderer {
 			this.reportState(true);
 		});
 
+		window.live2dApi?.on("pet:request-avatar-capabilities", () => {
+			this.publishAvatarCapabilities();
+		});
+
+		window.live2dApi?.on("pet:avatar-command", (data: unknown) => {
+			this.executeAvatarCommand(data);
+		});
+
 		window.live2dApi?.on("pet:trigger-expression", (data: unknown) => {
 			const payload = data as { name?: string };
 			if (payload?.name) {
@@ -1337,9 +1669,9 @@ class PetRenderer {
 		});
 
 		window.live2dApi?.on("pet:lipsync-start", (data: unknown) => {
-			const payload = data as { audioUrl?: string } | undefined;
+			const payload = data as { audioUrl?: string; requestId?: string } | undefined;
 			if (payload?.audioUrl) {
-				this.startLipSync(payload.audioUrl);
+				void this.startLipSync(payload.audioUrl, payload.requestId);
 			}
 		});
 
@@ -1862,6 +2194,7 @@ class PetRenderer {
 	destroy(): void {
 		this.destroyed = true;
 		this.hoverMoveCoalescer.cancel();
+		this.clearAvatarScheduling();
 
 		if (this.singleClickTimer !== null) {
 			window.clearTimeout(this.singleClickTimer);
@@ -1945,122 +2278,5 @@ class PetRenderer {
 		}
 	}
 }
-
-const renderer = new PetRenderer("pet-canvas");
-renderer.init().catch((error) => {
-	logger.error("[PetRenderer] init failed:", error);
-});
-
-const petWindow = window as PetRendererWindow;
-
-if (!petWindow.live2dApi) {
-	const testStateHost = petWindow as typeof window & {
-		__petTestState?: Record<string, unknown>;
-	};
-	petWindow.live2dApi = {
-		pet: {
-			rendererReady: () => {},
-			setPosition: () => {},
-			dragWindow: () => {
-				const current = (testStateHost.__petTestState ?? {}) as Record<
-					string,
-					unknown
-				>;
-				const nextCount = Number(current.dragMoveCount ?? 0) + 1;
-				testStateHost.__petTestState = {
-					...current,
-					dragMoveCount: nextCount,
-					lastDragStartAt: current.lastDragStartAt ?? Date.now(),
-				};
-			},
-			endWindowDrag: () => {
-				const current = (testStateHost.__petTestState ?? {}) as Record<
-					string,
-					unknown
-				>;
-				testStateHost.__petTestState = {
-					...current,
-					lastDragEndAt: Date.now(),
-				};
-			},
-			setMouseIgnore: () => {},
-			setLocked: async () => ({
-				modelType: "live2d",
-				modelId: null,
-				scale: 0.28,
-				positionX: 0,
-				positionY: 0,
-				placement: "bottom-right",
-				interactMode: false,
-				clickThrough: true,
-				locked: false,
-				opacity: 1,
-				ready: false,
-			}),
-			setClickThrough: async () => ({
-				modelType: "live2d",
-				modelId: null,
-				scale: 0.28,
-				positionX: 0,
-				positionY: 0,
-				placement: "bottom-right",
-				interactMode: false,
-				clickThrough: true,
-				locked: false,
-				opacity: 1,
-				ready: false,
-			}),
-			hasVisiblePixel: async () => true,
-			snapBottomRight: async () => ({
-				modelType: "live2d",
-				modelId: null,
-				scale: 0.28,
-				positionX: 0,
-				positionY: 0,
-				placement: "bottom-right",
-				interactMode: false,
-				clickThrough: true,
-				locked: false,
-				opacity: 1,
-				ready: false,
-			}),
-			reloadRenderer: async () => ({ success: true }),
-			setExpression: () => {},
-			playAnimation: () => {},
-			saveScale: () => {},
-			savePosition: () => {},
-			reportState: () => {},
-			openControlPanel: () => {},
-			openChatCenter: () => {
-				const current = (testStateHost.__petTestState ?? {}) as Record<
-					string,
-					unknown
-				>;
-				testStateHost.__petTestState = {
-					...current,
-					lastChatCenterRequestAt: Date.now(),
-				};
-			},
-			dispatchEvent: async () => ({
-				ok: true,
-				matched: 0,
-				dispatched: 0,
-				skipped: 0,
-				results: [],
-			}),
-		},
-		interact: {
-			enable: () => {},
-			disable: () => {},
-		},
-		on: () => {},
-		off: () => {},
-	};
-}
-
-petWindow.petRenderer = renderer;
-petWindow.__petTestState = petWindow.__petTestState ?? {
-	...DEFAULT_PET_TEST_STATE,
-};
 
 export { PetRenderer };

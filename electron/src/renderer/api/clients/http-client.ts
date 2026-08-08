@@ -505,12 +505,19 @@ export const isAuthMissingError = (error: unknown): boolean => {
 }
 
 export const requestJson = async <T>(url: string, init?: LocalRequestInit): Promise<T> => {
+  const ensureRequestActive = () => {
+    if (init?.signal?.aborted) {
+      throw new DOMException('Request aborted', 'AbortError')
+    }
+  }
+  ensureRequestActive()
   const traceId = createTraceId()
   const needsLocalAuth = isControlRequest(url) || isBackendRequest(url)
   let authHeaders = needsLocalAuth ? getControlAuthHeaders() : {}
   let hasAuthHeader = Boolean(authHeaders['Authorization'])
   if (needsLocalAuth && !hasAuthHeader) {
     const refreshedToken = await refreshControlTokenFromServer()
+    ensureRequestActive()
     if (refreshedToken) {
       authHeaders = { Authorization: `Bearer ${refreshedToken}` }
       hasAuthHeader = true
@@ -520,6 +527,7 @@ export const requestJson = async <T>(url: string, init?: LocalRequestInit): Prom
     throw createClientError(getAuthMissingMessage(url), { code: 'auth_missing' })
   }
   let requestUrl = await rewriteBackendRequestUrl(url, authHeaders)
+  ensureRequestActive()
   let response: Response
   try {
     response = await sendJsonRequest(requestUrl, init, traceId, authHeaders)
@@ -535,11 +543,13 @@ export const requestJson = async <T>(url: string, init?: LocalRequestInit): Prom
   }
   if (needsLocalAuth && response.status === 401) {
     const refreshedToken = await refreshControlTokenFromServer()
+    ensureRequestActive()
     const previousAuthHeader = authHeaders['Authorization'] || ''
     if (refreshedToken && `Bearer ${refreshedToken}` !== previousAuthHeader) {
       try {
         const refreshedAuthHeaders = { Authorization: `Bearer ${refreshedToken}` }
         requestUrl = await rewriteBackendRequestUrl(url, refreshedAuthHeaders)
+        ensureRequestActive()
         response = await sendJsonRequest(requestUrl, init, traceId, refreshedAuthHeaders)
       } catch (error) {
         if (error instanceof LocalRequestTimeoutError) {

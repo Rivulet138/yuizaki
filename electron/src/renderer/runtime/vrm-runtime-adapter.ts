@@ -2,6 +2,13 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm'
 import {
+  createAvatarCapabilityRevision,
+  type AvatarAction,
+  type AvatarActionExecutionResult,
+  type AvatarBehavior,
+  type AvatarCapabilitySnapshot,
+} from '../../shared/avatar-command'
+import {
   normalizePetLipSyncProfile,
   type PetControlConfigPatch,
   type PetLipSyncProfile,
@@ -44,8 +51,114 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
   private activeLipSyncViseme: PetLipSyncViseme | null = null
   private activeLipSyncVisemeWeight = 1
   private appliedLipSyncExpression: Exclude<PetLipSyncViseme, 'sil'> | null = null
+  private readonly expressionStates = new Map<string, {
+    current: number
+    target: number
+    fadeMs: number
+    expiresAt: number | null
+    fadeOutMs: number
+  }>()
+  private gazeTarget: { x: number; y: number; strength: number; expiresAt: number | null } | null = null
+  private smoothedGaze = new THREE.Vector2()
+  private readonly lookAtOrigin = new THREE.Vector3()
+  private readonly lookAtTarget = new THREE.Vector3()
+  private behavior: AvatarBehavior = 'idle'
+  private behaviorStartedAt = performance.now()
 
   constructor(private readonly host: VrmHostContext) {}
+
+  getCapabilities(): AvatarCapabilitySnapshot {
+    const expressions = Object.keys(this.vrm?.expressionManager?.expressionMap ?? {})
+    const gaze = Boolean(this.vrm?.lookAt)
+    const revision = createAvatarCapabilityRevision('vrm', this.host.config.modelId, [
+      ...expressions,
+      gaze ? 'lookAt' : 'no-lookAt',
+    ])
+    return {
+      revision,
+      modelType: 'vrm',
+      modelId: this.host.config.modelId,
+      generatedAt: Date.now(),
+      actions: {
+        behavior: true,
+        affect: expressions.length > 0,
+        gaze,
+        motion: false,
+        expression: expressions.length > 0,
+        parameterPatch: false,
+        viseme: expressions.some((name) => ['aa', 'ih', 'ou', 'ee', 'oh'].includes(name)),
+        cancel: true,
+      },
+      expressions,
+      motions: [],
+      parameters: [],
+    }
+  }
+
+  executeAvatarAction(action: AvatarAction): AvatarActionExecutionResult {
+    switch (action.type) {
+      case 'behavior':
+        this.behavior = action.behavior
+        this.behaviorStartedAt = performance.now()
+        return { status: 'completed' }
+      case 'affect': {
+        const expression = this.resolveVrmExpression(action.emotion)
+        if (!expression) return { status: 'degraded', message: `VRM expression not available: ${action.emotion}` }
+        this.setExpressionTarget(expression, action.intensity ?? 1, 160, action.decayMs ?? 1800)
+        return { status: 'completed' }
+      }
+      case 'gaze':
+        if (!this.vrm?.lookAt) return { status: 'degraded', message: 'VRM model has no LookAt capability' }
+        this.gazeTarget = {
+          x: action.target.x,
+          y: action.target.y,
+          strength: action.strength ?? 0.75,
+          expiresAt: action.holdMs ? performance.now() + action.holdMs : null,
+        }
+        return { status: 'completed' }
+      case 'motion':
+        return { status: 'degraded', message: 'No VRM animation clip source is loaded' }
+      case 'expression': {
+        const expression = this.resolveVrmExpression(action.name)
+        if (!expression) return { status: 'degraded', message: `VRM expression not available: ${action.name}` }
+        this.setExpressionTarget(expression, action.weight ?? 1, action.fadeInMs ?? 160, action.fadeOutMs ?? 1200)
+        return { status: 'completed' }
+      }
+      case 'parameterPatch':
+        return { status: 'degraded', message: 'Raw parameter patches are not defined for VRM' }
+      case 'viseme':
+        this.setLipSyncViseme(action.viseme, action.weight ?? 1, action.active ?? true)
+        return { status: 'completed' }
+      case 'cancel':
+        if (action.channel === 'gaze') {
+          this.gazeTarget = null
+          return { status: 'completed' }
+        }
+        if (action.channel === 'viseme') {
+          this.setLipSyncViseme('sil', 0, false)
+          return { status: 'completed' }
+        }
+        if (action.channel === 'behavior') {
+          this.behavior = 'idle'
+          return { status: 'completed' }
+        }
+        if (action.channel === 'expression' || action.channel === 'affect') {
+          this.expressionStates.forEach((state) => {
+            state.target = 0
+            state.expiresAt = null
+          })
+          return { status: 'completed' }
+        }
+        this.expressionStates.forEach((state) => {
+          state.target = 0
+          state.expiresAt = null
+        })
+        this.gazeTarget = null
+        this.behavior = 'idle'
+        this.setLipSyncViseme('sil', 0, false)
+        return { status: 'completed' }
+    }
+  }
 
   async loadModel(config: PetControlConfigPatch): Promise<void> {
     const modelPath = config.modelPath ?? this.host.config.modelPath
@@ -139,6 +252,9 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
     this.camera = null
     this.light = null
     this.ambientLight = null
+    this.expressionStates.clear()
+    this.gazeTarget = null
+    this.smoothedGaze.set(0, 0)
   }
 
   resize(width: number, height: number): void {
@@ -226,6 +342,8 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
 
       this.timer.update(timestamp)
       const delta = this.timer.getDelta()
+      this.updateExpressionBlend(delta)
+      this.updateGaze(delta)
       this.vrm?.update(delta)
       this.renderer.render(this.scene, this.camera)
     }
@@ -259,5 +377,74 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
       expressionManager.setValue(this.appliedLipSyncExpression, 0)
     }
     this.appliedLipSyncExpression = null
+  }
+
+  private resolveVrmExpression(name: string): string | null {
+    const expressionManager = this.vrm?.expressionManager
+    if (!expressionManager) return null
+    const normalized = name.toLowerCase()
+    const aliases: Record<string, string> = {
+      joy: 'happy',
+      happiness: 'happy',
+      calm: 'relaxed',
+      surprise: 'surprised',
+      anger: 'angry',
+    }
+    const target = aliases[normalized] ?? normalized
+    return Object.keys(expressionManager.expressionMap).find((key) => key.toLowerCase() === target) ?? null
+  }
+
+  private setExpressionTarget(name: string, target: number, fadeMs: number, fadeOutMs: number): void {
+    const current = this.vrm?.expressionManager?.getValue(name) ?? 0
+    this.expressionStates.set(name, {
+      current,
+      target: Math.max(0, Math.min(1, target)),
+      fadeMs: Math.max(16, fadeMs),
+      expiresAt: fadeOutMs > 0 ? performance.now() + fadeOutMs : null,
+      fadeOutMs: Math.max(80, fadeOutMs),
+    })
+  }
+
+  private updateExpressionBlend(deltaSeconds: number): void {
+    const expressionManager = this.vrm?.expressionManager
+    if (!expressionManager) return
+    const now = performance.now()
+    this.expressionStates.forEach((state, name) => {
+      if (state.expiresAt !== null && now >= state.expiresAt) {
+        state.target = 0
+        state.fadeMs = state.fadeOutMs
+        state.expiresAt = null
+      }
+      const alpha = 1 - Math.exp(-Math.max(0, deltaSeconds) * 1000 / Math.max(16, state.fadeMs))
+      state.current += (state.target - state.current) * alpha
+      expressionManager.setValue(name, Math.max(0, Math.min(1, state.current)))
+      if (state.target === 0 && state.current < 0.002) {
+        expressionManager.setValue(name, 0)
+        this.expressionStates.delete(name)
+      }
+    })
+  }
+
+  private updateGaze(deltaSeconds: number): void {
+    const lookAt = this.vrm?.lookAt
+    if (!lookAt) return
+    const now = performance.now()
+    if (this.gazeTarget?.expiresAt !== null && this.gazeTarget?.expiresAt !== undefined && now >= this.gazeTarget.expiresAt) {
+      this.gazeTarget = null
+    }
+    const elapsed = (now - this.behaviorStartedAt) / 1000
+    const idleAmplitude = this.behavior === 'think' ? 0.12 : this.behavior === 'listen' ? 0.05 : 0.025
+    const desiredX = this.gazeTarget?.x ?? Math.sin(elapsed * 0.55) * idleAmplitude
+    const desiredY = this.gazeTarget?.y ?? Math.sin(elapsed * 0.38) * idleAmplitude * 0.5
+    const strength = this.gazeTarget?.strength ?? 1
+    const alpha = 1 - Math.exp(-Math.max(0, deltaSeconds) * 8)
+    this.smoothedGaze.x += (desiredX * strength - this.smoothedGaze.x) * alpha
+    this.smoothedGaze.y += (desiredY * strength - this.smoothedGaze.y) * alpha
+    lookAt.getLookAtWorldPosition(this.lookAtOrigin)
+    this.lookAtTarget.copy(this.lookAtOrigin)
+    this.lookAtTarget.x += this.smoothedGaze.x * 1.8
+    this.lookAtTarget.y += this.smoothedGaze.y * 1.2
+    this.lookAtTarget.z += 3
+    lookAt.lookAt(this.lookAtTarget)
   }
 }

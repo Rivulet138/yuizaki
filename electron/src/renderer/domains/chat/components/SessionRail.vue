@@ -3,12 +3,25 @@
     <div class="session-rail-header">
       <div class="session-title-stack">
         <span class="session-title">会话</span>
-        <small>{{ railSummary }}</small>
+        <small v-if="sessions.length">{{ railSummary }}</small>
       </div>
-      <button class="new-session-btn" :class="{ loading: creating }" type="button" :disabled="creating" :aria-busy="creating" aria-label="新建会话" title="新建会话" @click="$emit('create-session')">
-        <el-icon><Loading v-if="creating" /><Plus v-else /></el-icon>
-        <span>新建</span>
-      </button>
+      <div class="session-header-actions">
+        <button
+          class="archive-filter-btn"
+          :class="{ active: showArchived }"
+          type="button"
+          data-testid="session-archive-filter"
+          :aria-label="showArchived ? '显示活跃会话' : '显示已归档会话'"
+          :title="showArchived ? '活跃会话' : '已归档会话'"
+          @click="showArchived = !showArchived"
+        >
+          <el-icon><FolderOpened /></el-icon>
+        </button>
+        <button class="new-session-btn" :class="{ loading: creating }" type="button" :disabled="creating" :aria-busy="creating" aria-label="新建会话" title="新建会话" @click="$emit('create-session')">
+          <el-icon><Loading v-if="creating" /><Plus v-else /></el-icon>
+          <span>新建</span>
+        </button>
+      </div>
     </div>
 
     <div class="session-search">
@@ -43,8 +56,30 @@
           @keydown.space.prevent="$emit('select-session', session.id)"
         >
           <div class="title-row">
-            <span class="title">{{ session.title || '未命名会话' }}</span>
+            <input
+              v-if="editingSessionId === session.id"
+              ref="renameInput"
+              v-model="renameDraft"
+              class="session-rename-input"
+              type="text"
+              maxlength="120"
+              aria-label="会话标题"
+              @click.stop
+              @keydown.enter.prevent.stop="commitRename(session)"
+              @keydown.esc.prevent.stop="cancelRename"
+              @blur="commitRename(session)"
+            />
+            <span v-else class="title" @dblclick.stop="startRename(session)">{{ session.title || '未命名会话' }}</span>
             <span v-if="session.pinned" class="pin-dot">置顶</span>
+            <span v-if="session.archived" class="session-state">已归档</span>
+          </div>
+          <div v-if="sessionStateLabels(session.id).length" class="session-state-row" aria-live="polite">
+            <span v-if="runningSessionSet.has(session.id)" class="session-state is-running">
+              <el-icon><Loading /></el-icon>
+              生成中
+            </span>
+            <span v-if="draftSessionSet.has(session.id)" class="session-state">草稿</span>
+            <span v-if="unreadSessionSet.has(session.id)" class="session-state is-unread">新回复</span>
           </div>
           <div class="meta-row">
             <span v-if="workspaceLabel(session.workspace_id)" class="workspace-chip">{{ workspaceLabel(session.workspace_id) }}</span>
@@ -62,6 +97,8 @@
               </button>
               <template #dropdown>
                 <el-dropdown-menu>
+                  <el-dropdown-item command="rename">重命名</el-dropdown-item>
+                  <el-dropdown-item command="archive">{{ session.archived ? '恢复会话' : '归档会话' }}</el-dropdown-item>
                   <el-dropdown-item command="export-json">导出 JSON</el-dropdown-item>
                   <el-dropdown-item command="export-csv">导出 CSV</el-dropdown-item>
                   <el-dropdown-item divided command="delete">
@@ -76,16 +113,15 @@
     </div>
 
     <div v-else class="session-empty">
-      <strong>{{ searchQuery ? '没有匹配会话' : '还没有会话' }}</strong>
-      <el-button size="small" type="primary" plain :loading="creating" @click="$emit('create-session')">新建</el-button>
+      <strong>{{ searchQuery ? '没有匹配会话' : showArchived ? '暂无已归档会话' : '暂无会话' }}</strong>
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
-import { Loading, MoreFilled, Plus, Search, Star, StarFilled } from '@element-plus/icons-vue'
-import { computed, ref } from 'vue'
+import { FolderOpened, Loading, MoreFilled, Plus, Search, Star, StarFilled } from '@element-plus/icons-vue'
+import { computed, nextTick, ref } from 'vue'
 import { systemClient } from '@/api/client'
 
 interface SessionRailRecord {
@@ -94,27 +130,73 @@ interface SessionRailRecord {
   title: string
   summary?: string | null
   pinned: boolean
+  archived?: boolean
   created_at?: string | null
   updated_at?: string | null
   message_count: number
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   sessions: SessionRailRecord[]
   activeSessionId: string
   activeWorkspaceId: string
   workspaceNames?: Record<string, string>
   creating?: boolean
-}>()
+  draftSessionIds?: string[]
+  runningSessionIds?: string[]
+  unreadSessionIds?: string[]
+}>(), {
+  workspaceNames: () => ({}),
+  creating: false,
+  draftSessionIds: () => [],
+  runningSessionIds: () => [],
+  unreadSessionIds: () => [],
+})
 
 const emit = defineEmits<{
   (e: 'create-session'): void
   (e: 'select-session', sessionId: string): void
   (e: 'toggle-pin', sessionId: string, pinned: boolean): void
+  (e: 'rename-session', sessionId: string, title: string): void
+  (e: 'archive-session', sessionId: string, archived: boolean): void
   (e: 'delete-session', sessionId: string): void
 }>()
 
 const searchQuery = ref('')
+const showArchived = ref(false)
+const editingSessionId = ref('')
+const renameDraft = ref('')
+const renameInput = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
+const draftSessionSet = computed(() => new Set(props.draftSessionIds))
+const runningSessionSet = computed(() => new Set(props.runningSessionIds))
+const unreadSessionSet = computed(() => new Set(props.unreadSessionIds))
+const sessionStateLabels = (sessionId: string) => [
+  runningSessionSet.value.has(sessionId) ? '生成中' : '',
+  draftSessionSet.value.has(sessionId) ? '草稿' : '',
+  unreadSessionSet.value.has(sessionId) ? '新回复' : '',
+].filter(Boolean)
+
+const startRename = (session: SessionRailRecord) => {
+  editingSessionId.value = session.id
+  renameDraft.value = session.title || ''
+  void nextTick(() => {
+    const input = Array.isArray(renameInput.value) ? renameInput.value[0] : renameInput.value
+    if (typeof input?.select === 'function') input.select()
+  })
+}
+
+const cancelRename = () => {
+  editingSessionId.value = ''
+  renameDraft.value = ''
+}
+
+const commitRename = (session: SessionRailRecord) => {
+  if (editingSessionId.value !== session.id) return
+  const title = renameDraft.value.trim()
+  cancelRename()
+  if (!title || title === session.title) return
+  emit('rename-session', session.id, title)
+}
 
 const normalizeWorkspaceId = (workspaceId?: string | null) => (workspaceId || 'default').trim() || 'default'
 const isDefaultWorkspace = (workspaceId?: string | null) => normalizeWorkspaceId(workspaceId) === 'default'
@@ -132,17 +214,18 @@ const workspaceLabel = (workspaceId?: string | null) => {
 
 const filteredSessions = computed(() => {
   const q = searchQuery.value.toLowerCase().trim()
-  if (!q) return props.sessions
-  return props.sessions.filter((session) =>
+  const sessions = props.sessions.filter((session) => Boolean(session.archived) === showArchived.value)
+  if (!q) return sessions
+  return sessions.filter((session) =>
     session.title?.toLowerCase().includes(q) ||
     session.summary?.toLowerCase().includes(q) ||
     workspaceName(session.workspace_id).toLowerCase().includes(q)
   )
 })
 const activeWorkspaceSessionCount = computed(() => props.sessions.filter((session) =>
-  normalizeWorkspaceId(session.workspace_id) === normalizedActiveWorkspaceId.value,
+  !session.archived && normalizeWorkspaceId(session.workspace_id) === normalizedActiveWorkspaceId.value,
 ).length)
-const visibleSessionCount = computed(() => props.sessions.length)
+const visibleSessionCount = computed(() => props.sessions.filter((session) => !session.archived).length)
 const railSummary = computed(() => {
   if (!props.sessions.length) return '准备开始'
   return `本项目 ${activeWorkspaceSessionCount.value} / 全部 ${visibleSessionCount.value}`
@@ -225,8 +308,16 @@ const sessionAriaLabel = (session: SessionRailRecord) => {
 }
 
 const handleMoreCommand = (command: string, session: SessionRailRecord) => {
+  if (command === 'rename') {
+    startRename(session)
+    return
+  }
   if (command === 'export-json') {
     void exportSession(session.id, session.workspace_id, 'json')
+    return
+  }
+  if (command === 'archive') {
+    emit('archive-session', session.id, !session.archived)
     return
   }
   if (command === 'export-csv') {
@@ -263,9 +354,7 @@ const exportSession = async (sessionId: string, workspaceId: string, format: 'js
   width: 276px;
   box-sizing: border-box;
   border-right: 1px solid rgba(203, 213, 225, 0.82);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(241, 245, 249, 0.96)),
-    #f1f5f9;
+  background: rgba(248, 250, 252, 0.9);
   padding: 14px 11px;
 }
 
@@ -300,6 +389,38 @@ const exportSession = async (sessionId: string, workspaceId: string, format: 'js
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.session-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.archive-filter-btn {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.42);
+  border-radius: 8px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.archive-filter-btn:hover,
+.archive-filter-btn.active {
+  border-color: rgba(37, 99, 235, 0.38);
+  background: rgba(219, 234, 254, 0.72);
+  color: #1d4ed8;
+}
+
+.archive-filter-btn:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.62);
+  outline-offset: 2px;
 }
 
 .new-session-btn {
@@ -487,6 +608,57 @@ const exportSession = async (sessionId: string, workspaceId: string, format: 'js
   white-space: nowrap;
 }
 
+.session-rename-input {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  box-sizing: border-box;
+  border: 1px solid rgba(37, 99, 235, 0.5);
+  border-radius: 6px;
+  background: #fff;
+  color: #111827;
+  font: inherit;
+  outline: none;
+  padding: 4px 7px;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.session-state-row {
+  display: flex;
+  min-height: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 5px;
+}
+
+.session-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 6px;
+  background: rgba(100, 116, 139, 0.1);
+  color: #475569;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 18px;
+  padding: 0 6px;
+}
+
+.session-state.is-running {
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+}
+
+.session-state.is-running .el-icon {
+  animation: spin 0.9s linear infinite;
+}
+
+.session-state.is-unread {
+  background: rgba(16, 185, 129, 0.1);
+  color: #047857;
+}
+
 .pin-dot {
   flex-shrink: 0;
   padding: 2px 6px;
@@ -643,10 +815,33 @@ const exportSession = async (sessionId: string, workspaceId: string, format: 'js
 }
 
 :global([data-theme='dark']) .search-input,
+:global([data-theme='dark']) .session-rename-input,
 :global([data-theme='dark']) .quick-actions {
   border-color: rgba(51, 65, 85, 0.9);
   background: #111827;
   color: #cbd5e1;
+}
+
+:global([data-theme='dark']) .session-state {
+  background: rgba(148, 163, 184, 0.12);
+  color: #cbd5e1;
+}
+
+:global([data-theme='dark']) .session-state.is-running {
+  background: rgba(96, 165, 250, 0.14);
+  color: #bfdbfe;
+}
+
+:global([data-theme='dark']) .session-state.is-unread {
+  background: rgba(52, 211, 153, 0.14);
+  color: #a7f3d0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-state.is-running .el-icon,
+  .new-session-btn.loading .el-icon {
+    animation: none;
+  }
 }
 
 :global([data-theme='dark']) .section-title small,

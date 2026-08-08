@@ -10,6 +10,7 @@ import json
 import csv
 from io import StringIO
 import logging
+from uuid import uuid4
 
 from typing import Any
 
@@ -83,6 +84,16 @@ class DatabaseRepository:
         return normalized
 
     def _message_to_record(self, message: ChatMessage) -> dict[str, Any]:
+        def decode(value: str | None) -> list[dict[str, Any]]:
+            if not value:
+                return []
+            try:
+                payload = json.loads(value)
+                return payload if isinstance(payload, list) else []
+            except (TypeError, ValueError):
+                return []
+        tool_trace = decode(message.tool_trace)
+        memory_trace = decode(message.memory_trace)
         return {
             "id": message.id,
             "session_id": message.session_id,
@@ -91,10 +102,30 @@ class DatabaseRepository:
             "timestamp": _isoformat_or_none(message.timestamp),
             "tokens": message.tokens_used,
             "model": message.model,
+            "agentSteps": tool_trace,
+            "memorySources": memory_trace,
+        }
+
+    def _session_to_record(self, chat_session: ChatSession) -> dict[str, Any]:
+        return {
+            "id": chat_session.id,
+            "workspace_id": chat_session.workspace_id,
+            "title": chat_session.title,
+            "summary": chat_session.summary,
+            "pinned": bool(chat_session.pinned),
+            "archived": bool(chat_session.archived),
+            "parent_session_id": chat_session.parent_session_id,
+            "branched_from_message_id": chat_session.branched_from_message_id,
+            "created_at": _isoformat_or_none(chat_session.created_at),
+            "updated_at": _isoformat_or_none(chat_session.updated_at),
+            "message_count": int(chat_session.message_count or 0),
+            "total_tokens": int(chat_session.total_tokens or 0),
         }
 
     def save_message(self, session_id: str, role: str, content: str,
-                     tokens: int = 0, model: str = "", workspace_id: str = "default") -> dict[str, Any]:
+                     tokens: int = 0, model: str = "", workspace_id: str = "default",
+                     tool_trace: list[dict[str, Any]] | None = None,
+                     memory_trace: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         """保存聊天消息
 
         Args:
@@ -116,7 +147,9 @@ class DatabaseRepository:
                 role=role,
                 content=content,
                 tokens_used=tokens,
-                model=model
+                model=model,
+                tool_trace=json.dumps(tool_trace, ensure_ascii=False) if tool_trace else None,
+                memory_trace=json.dumps(memory_trace, ensure_ascii=False) if memory_trace else None,
             )
             session.add(msg)
 
@@ -240,20 +273,82 @@ class DatabaseRepository:
                 .limit(limit)\
                 .all()
 
-            return [
-                {
-                    "id": m.id,
-                    "role": m.role,
-                    "content": m.content,
-                    "timestamp": _isoformat_or_none(m.timestamp),
-                    "tokens": m.tokens_used,
-                    "model": m.model
-                }
-                for m in messages
-            ]
+            records: list[dict[str, Any]] = []
+            for message in messages:
+                metadata = self._message_to_record(message)
+                records.append({
+                    "id": message.id,
+                    "role": message.role,
+                    "content": message.content,
+                    "timestamp": _isoformat_or_none(message.timestamp),
+                    "tokens": message.tokens_used,
+                    "model": message.model,
+                    **({"agentSteps": metadata["agentSteps"]} if metadata["agentSteps"] else {}),
+                    **({"memorySources": metadata["memorySources"]} if metadata["memorySources"] else {}),
+                })
+            return records
         except Exception as exc:
             logger.exception(f"Failed to get chat history: {exc}")
             raise DatabaseError(f"failed_to_get_chat_history: {exc}") from exc
+        finally:
+            session.close()
+
+    def update_message_metadata(
+        self,
+        message_id: int,
+        *,
+        tool_trace: list[dict[str, Any]] | None = None,
+        memory_trace: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        session = self.SessionLocal()
+        try:
+            message = session.query(ChatMessage).filter_by(id=message_id).first()
+            if message is None:
+                raise NotFoundError(f"message_not_found: {message_id}")
+            if tool_trace is not None:
+                message.tool_trace = json.dumps(tool_trace, ensure_ascii=False) if tool_trace else None
+            if memory_trace is not None:
+                message.memory_trace = json.dumps(memory_trace, ensure_ascii=False) if memory_trace else None
+            session.commit()
+            return self._message_to_record(message)
+        except NotFoundError:
+            session.rollback()
+            raise
+        except Exception as exc:
+            session.rollback()
+            raise DatabaseError(f"failed_to_update_message_metadata: {exc}") from exc
+        finally:
+            session.close()
+
+    def clear_memory_references(self, memory_ids: list[str]) -> int:
+        target_ids = {str(memory_id).strip() for memory_id in memory_ids if str(memory_id).strip()}
+        if not target_ids:
+            return 0
+
+        session = self.SessionLocal()
+        try:
+            changed = 0
+            messages = session.query(ChatMessage).filter(ChatMessage.memory_trace.isnot(None)).all()
+            for message in messages:
+                try:
+                    trace = json.loads(message.memory_trace or "[]")
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(trace, list):
+                    continue
+                filtered = [
+                    source for source in trace
+                    if not isinstance(source, dict) or str(source.get("id") or "").strip() not in target_ids
+                ]
+                if len(filtered) == len(trace):
+                    continue
+                message.memory_trace = json.dumps(filtered, ensure_ascii=False) if filtered else None
+                changed += 1
+            session.commit()
+            return changed
+        except Exception as exc:
+            session.rollback()
+            raise DatabaseError(f"failed_to_clear_memory_references: {exc}") from exc
         finally:
             session.close()
 
@@ -272,20 +367,7 @@ class DatabaseRepository:
                 .order_by(ChatSession.updated_at.desc())\
                 .all()
 
-            return [
-                {
-                    "id": s.id,
-                    "workspace_id": s.workspace_id,
-                    "title": s.title,
-                    "summary": s.summary,
-                    "pinned": bool(s.pinned),
-                    "created_at": s.created_at.isoformat() if s.created_at else None,
-                    "updated_at": s.updated_at.isoformat() if s.updated_at else None,
-                    "message_count": s.message_count,
-                    "total_tokens": s.total_tokens
-                }
-                for s in sessions
-            ]
+            return [self._session_to_record(chat_session) for chat_session in sessions]
         except Exception as exc:
             logger.exception(f"Failed to get sessions: {exc}")
             raise DatabaseError(f"failed_to_get_sessions: {exc}") from exc
@@ -855,20 +937,7 @@ class DatabaseRepository:
             normalized_workspace_id = self._require_workspace(session, workspace_id)
             query = session.query(ChatSession).filter_by(workspace_id=normalized_workspace_id)
             sessions = query.order_by(ChatSession.pinned.desc(), ChatSession.updated_at.desc()).all()
-            return [
-                {
-                    "id": s.id,
-                    "workspace_id": s.workspace_id,
-                    "title": s.title,
-                    "summary": s.summary,
-                    "pinned": bool(s.pinned),
-                    "created_at": _isoformat_or_none(s.created_at),
-                    "updated_at": _isoformat_or_none(s.updated_at),
-                    "message_count": s.message_count,
-                    "total_tokens": s.total_tokens,
-                }
-                for s in sessions
-            ]
+            return [self._session_to_record(chat_session) for chat_session in sessions]
         finally:
             session.close()
 
@@ -885,17 +954,7 @@ class DatabaseRepository:
             )
             session.add(chat_session)
             session.commit()
-            return {
-                "id": chat_session.id,
-                "workspace_id": chat_session.workspace_id,
-                "title": chat_session.title,
-                "summary": chat_session.summary,
-                "pinned": bool(chat_session.pinned),
-                "created_at": _isoformat_or_none(chat_session.created_at),
-                "updated_at": _isoformat_or_none(chat_session.updated_at),
-                "message_count": chat_session.message_count,
-                "total_tokens": chat_session.total_tokens,
-            }
+            return self._session_to_record(chat_session)
         except NotFoundError:
             session.rollback()
             raise
@@ -905,7 +964,7 @@ class DatabaseRepository:
         finally:
             session.close()
 
-    def update_chat_session(self, session_id: str, *, summary: str | None = None, pinned: bool | None = None, title: str | None = None) -> dict[str, Any]:
+    def update_chat_session(self, session_id: str, *, summary: str | None = None, pinned: bool | None = None, title: str | None = None, archived: bool | None = None) -> dict[str, Any]:
         session = self.SessionLocal()
         try:
             chat_session = session.query(ChatSession).filter_by(id=session_id).first()
@@ -917,19 +976,73 @@ class DatabaseRepository:
                 chat_session.pinned = pinned
             if title is not None:
                 chat_session.title = title
+            if archived is not None:
+                chat_session.archived = archived
             chat_session.updated_at = datetime.now(timezone.utc)
             session.commit()
-            return {
-                "id": chat_session.id,
-                "workspace_id": chat_session.workspace_id,
-                "title": chat_session.title,
-                "summary": chat_session.summary,
-                "pinned": bool(chat_session.pinned),
-                "created_at": _isoformat_or_none(chat_session.created_at),
-                "updated_at": _isoformat_or_none(chat_session.updated_at),
-                "message_count": chat_session.message_count,
-                "total_tokens": chat_session.total_tokens,
-            }
+            return self._session_to_record(chat_session)
+        finally:
+            session.close()
+
+    def branch_chat_session(
+        self,
+        source_session_id: str,
+        message_id: int,
+        *,
+        title: str | None = None,
+        workspace_id: str | None = None,
+    ) -> dict[str, Any]:
+        session = self.SessionLocal()
+        try:
+            source = session.query(ChatSession).filter_by(id=source_session_id).first()
+            if not source:
+                raise NotFoundError(f"session_not_found: {source_session_id}")
+            source_workspace_id = self._normalize_workspace_id(source.workspace_id)
+            requested_workspace_id = self._normalize_workspace_id(workspace_id or source_workspace_id)
+            if requested_workspace_id != source_workspace_id:
+                raise DatabaseError("session_workspace_mismatch")
+
+            branch_point = session.query(ChatMessage).filter_by(id=message_id, session_id=source_session_id).first()
+            if not branch_point:
+                raise NotFoundError(f"message_not_found_in_session: {message_id}")
+            source_messages = session.query(ChatMessage)\
+                .filter(ChatMessage.session_id == source_session_id, ChatMessage.id <= message_id)\
+                .order_by(ChatMessage.id.asc())\
+                .all()
+
+            branch_session = ChatSession(
+                id=f"sess_{uuid4().hex[:20]}",
+                workspace_id=source_workspace_id,
+                title=title or f"{source.title or 'Chat'} branch",
+                pinned=False,
+                archived=False,
+                parent_session_id=source_session_id,
+                branched_from_message_id=message_id,
+                message_count=len(source_messages),
+                total_tokens=sum(int(message.tokens_used or 0) for message in source_messages),
+            )
+            session.add(branch_session)
+            session.flush()
+            for message in source_messages:
+                session.add(ChatMessage(
+                    session_id=branch_session.id,
+                    role=message.role,
+                    content=message.content,
+                    timestamp=message.timestamp,
+                    tokens_used=message.tokens_used,
+                    model=message.model,
+                    tool_trace=message.tool_trace,
+                    memory_trace=message.memory_trace,
+                ))
+            session.commit()
+            session.refresh(branch_session)
+            return self._session_to_record(branch_session)
+        except (NotFoundError, DatabaseError):
+            session.rollback()
+            raise
+        except Exception as exc:
+            session.rollback()
+            raise DatabaseError(f"failed_to_branch_chat_session: {exc}") from exc
         finally:
             session.close()
 

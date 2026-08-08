@@ -1,5 +1,12 @@
 import { Config as Live2DConfig, type Live2DSprite, Priority } from 'easy-live2d'
 import type * as PIXI from 'pixi.js'
+import {
+  createAvatarCapabilityRevision,
+  type AvatarAction,
+  type AvatarActionExecutionResult,
+  type AvatarBehavior,
+  type AvatarCapabilitySnapshot,
+} from '../../shared/avatar-command'
 import type {
   AvatarManifest,
   ExpressionLayer,
@@ -117,6 +124,153 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
   private pendingMotionCommand: MotionCommand | null = null
 
   constructor(private readonly host: Live2DHostContext) {}
+
+  getCapabilities(): AvatarCapabilitySnapshot {
+    const manifest = this.host.config.modelManifest
+    const expressions = manifest?.expressions.map((expression) => expression.id) ?? []
+    const motionIndexes = new Map<string, number>()
+    const motions = manifest
+      ? Object.entries(manifest.motions).map(([id, motion]) => {
+          const group = motion.group ?? id
+          const index = motionIndexes.get(group) ?? 0
+          motionIndexes.set(group, index + 1)
+          return { group, index, label: id }
+        })
+      : []
+    const parameters = manifest?.parameterControls.map((parameter) => ({
+      id: parameter.id,
+      min: parameter.min,
+      max: parameter.max,
+      modes: ['set' as const],
+    })) ?? []
+    const revision = createAvatarCapabilityRevision('live2d', this.host.config.modelId, [
+      ...expressions,
+      ...motions.map((motion) => `${motion.group}:${motion.index}`),
+      ...parameters.map((parameter) => parameter.id),
+    ])
+
+    return {
+      revision,
+      modelType: 'live2d',
+      modelId: this.host.config.modelId,
+      generatedAt: Date.now(),
+      actions: {
+        behavior: true,
+        affect: expressions.length > 0,
+        gaze: true,
+        motion: motions.length > 0,
+        expression: expressions.length > 0,
+        parameterPatch: parameters.length > 0,
+        viseme: false,
+        cancel: true,
+      },
+      expressions,
+      motions,
+      parameters,
+    }
+  }
+
+  executeAvatarAction(action: AvatarAction): AvatarActionExecutionResult {
+    switch (action.type) {
+      case 'behavior':
+        this.setBehaviorState(this.mapAvatarBehavior(action.behavior), action.durationMs ?? 0)
+        return { status: 'completed' }
+      case 'affect': {
+        const expression = this.resolveExpressionName(action.emotion)
+        if (!expression) return { status: 'degraded', message: `Expression not available: ${action.emotion}` }
+        this.triggerExpressionMix({
+          expressions: [{ expression, weight: action.intensity ?? 1 }],
+          intensity: action.intensity ?? 1,
+          durationMs: action.decayMs ?? 1800,
+        })
+        return { status: 'completed' }
+      }
+      case 'gaze':
+        this.setAttentionTarget({
+          x: action.target.x,
+          y: action.target.y,
+          strength: action.strength ?? 0.72,
+          durationMs: action.holdMs ?? 1200,
+        })
+        return { status: 'completed' }
+      case 'motion':
+        if (!action.group) return { status: 'rejected', message: 'Live2D motion group is required' }
+        this.triggerMotion(action.group, action.index ?? 0)
+        return { status: 'completed' }
+      case 'expression':
+        if (!this.resolveExpressionName(action.name)) {
+          return { status: 'degraded', message: `Expression not available: ${action.name}` }
+        }
+        this.triggerExpressionMix({
+          expressions: [{ expression: action.name, weight: action.weight ?? 1 }],
+          durationMs: action.fadeOutMs ?? 1800,
+        })
+        return { status: 'completed' }
+      case 'parameterPatch': {
+        const setPatches = action.patches.filter((patch) => (patch.mode ?? 'set') === 'set')
+        if (setPatches.length === 0) {
+          return { status: 'degraded', message: 'Live2D adapter currently supports set parameter patches only' }
+        }
+        this.applyParameterOverrides(setPatches.map((patch) => ({
+          id: patch.id,
+          value: patch.value,
+          weight: patch.weight ?? 1,
+        })))
+        return setPatches.length === action.patches.length
+          ? { status: 'completed' }
+          : { status: 'degraded', message: 'Unsupported parameter blend modes were skipped' }
+      }
+      case 'viseme':
+        return { status: 'degraded', message: 'Live2D visemes use model lip-sync parameters instead of named presets' }
+      case 'cancel':
+        if (action.channel === 'gaze') {
+          this.setAttentionTarget(null)
+          return { status: 'completed' }
+        }
+        if (action.channel === 'motion') {
+          this.clearPendingMotionTransition()
+          return { status: 'completed' }
+        }
+        if (action.channel === 'viseme') {
+          this.stopLipSync()
+          return { status: 'completed' }
+        }
+        if (action.channel === 'behavior') {
+          this.setBehaviorState('idle')
+          return { status: 'completed' }
+        }
+        if (action.channel === 'expression' || action.channel === 'affect') {
+          this.stopExpressionMixLoop()
+          return { status: 'completed' }
+        }
+        this.setAttentionTarget(null)
+        this.stopExpressionMixLoop()
+        this.clearPendingMotionTransition()
+        this.setBehaviorState('idle')
+        return { status: 'completed' }
+    }
+  }
+
+  private mapAvatarBehavior(behavior: AvatarBehavior): Live2DBehaviorState {
+    const mapping: Record<AvatarBehavior, Live2DBehaviorState> = {
+      idle: 'idle',
+      listen: 'focused',
+      think: 'thinking',
+      speak: 'speaking',
+      backchannel: 'curious',
+      react: 'reacting',
+    }
+    return mapping[behavior]
+  }
+
+  private resolveExpressionName(name: string): string | null {
+    const target = name.toLowerCase()
+    const expression = this.host.config.modelManifest?.expressions.find((item) =>
+      item.id.toLowerCase() === target
+      || item.aliases?.some((alias) => alias.toLowerCase() === target),
+    )
+    return expression?.id ?? null
+  }
 
   async loadModel(config: PetControlConfigPatch): Promise<void> {
     if (!this.host.app) {
@@ -460,12 +614,12 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
     return this.behaviorController?.getDebugSnapshot() ?? null
   }
 
-  async startLipSync(audioUrl: string): Promise<void> {
+  async startLipSync(audioUrl: string, onReady?: () => void): Promise<void> {
     if (!this.lipSyncController) {
       return
     }
     this.setBehaviorState('speaking')
-    await this.lipSyncController.start(audioUrl)
+    await this.lipSyncController.start(audioUrl, onReady)
   }
 
   setLipSyncLevel(level: number, active: boolean): void {

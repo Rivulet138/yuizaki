@@ -10,6 +10,10 @@ const clientSource = readFileSync(
   resolve(process.cwd(), 'src/renderer/api/clients/resource-client.ts'),
   'utf8',
 )
+const resourceStatusSource = readFileSync(
+  resolve(process.cwd(), 'src/renderer/domains/settings/resourceStatus.ts'),
+  'utf8',
+)
 const proxySource = readFileSync(
   resolve(process.cwd(), 'src/main/http/routes/system-routes.ts'),
   'utf8',
@@ -17,9 +21,9 @@ const proxySource = readFileSync(
 
 describe('storage maintenance UI contract', () => {
   it('exposes canonical storage categories and permanent actions only', () => {
-    expect(source).toContain('tts_audio')
-    expect(source).toContain('runtime_temp')
-    expect(source).toContain('visual_frames')
+    expect(resourceStatusSource).toContain('tts_audio')
+    expect(resourceStatusSource).toContain('runtime_temp')
+    expect(resourceStatusSource).toContain('visual_frames')
     expect(source).toContain('cleanupStorage')
     expect(clientSource).toContain('PERMANENT_CLEAN')
     expect(source).not.toContain('softDeleteStorage')

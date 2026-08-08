@@ -535,6 +535,8 @@ async def test_agent_chat_silent_mode_completes_with_zero_runtime_side_effects(m
         {"text": "", "session_id": "session-silent", "total_tokens": 0, "finish_reason": "stop"},
         "sid-silent",
     )
+    assert isinstance(emitted[1][1], dict)
+    assert emitted[1][1]["session_id"] == "session-silent"
     assert "silent_autonomy_mode" in str(emitted[1][1])
 
 

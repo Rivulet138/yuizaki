@@ -49,6 +49,7 @@ const manifest: AvatarManifest = {
   ],
   motions: {
     Idle: { group: 'Idle', file: 'idle.motion3.json' },
+    IdleSecond: { group: 'Idle', file: 'idle-2.motion3.json' },
   },
 }
 
@@ -94,5 +95,18 @@ describe('pet control directive normalization', () => {
     expect(normalized.parameterOverrides).toEqual([{ id: 'ParamMouthOpenY', value: 1, weight: 1 }])
     expect(normalized.intensity).toBe(1)
     expect(normalized.durationMs).toBe(100)
+  })
+
+  it('rejects a motion index outside the selected group', () => {
+    const validation = validatePetControlDirective({
+      expressionMix: [],
+      parameterOverrides: [],
+      motion: { group: 'Idle', index: 2 },
+      intensity: 1,
+      durationMs: 1000,
+    }, manifest)
+
+    expect(validation.valid).toBe(false)
+    expect(validation.errors).toContain('Unknown motion target: Idle:2')
   })
 })

@@ -57,7 +57,7 @@ const sessions = [
   },
 ]
 
-const mountRail = () => mount(SessionRail, {
+const mountRail = (extraProps: Record<string, unknown> = {}) => mount(SessionRail, {
   props: {
     sessions,
     activeSessionId: 'alpha-pinned',
@@ -66,6 +66,7 @@ const mountRail = () => mount(SessionRail, {
       alpha: 'Alpha',
       beta: 'Beta',
     },
+    ...extraProps,
   },
   global: {
     stubs: {
@@ -114,5 +115,51 @@ describe('SessionRail grouping', () => {
     expect(wrapper.text()).toContain('Beta 会话')
     expect(wrapper.text()).not.toContain('Alpha 项目')
     expect(wrapper.text()).not.toContain('日常闲聊')
+  })
+
+  it('renames a session inline without selecting it', async () => {
+    const wrapper = mountRail()
+    const session = wrapper.findAll('.session-item').find((item) => item.text().includes('旧任务'))
+    expect(session).toBeDefined()
+
+    await session!.find('.title').trigger('dblclick')
+    const input = session!.find('.session-rename-input')
+    await input.setValue('  新标题  ')
+    await input.trigger('keydown.enter')
+
+    expect(wrapper.emitted('rename-session')).toEqual([['alpha-old', '新标题']])
+    expect(wrapper.emitted('select-session')).toBeUndefined()
+  })
+
+  it('shows draft, running, and unread state on the owning sessions only', () => {
+    const wrapper = mountRail({
+      draftSessionIds: ['alpha-old'],
+      runningSessionIds: ['beta-session'],
+      unreadSessionIds: ['default-session'],
+    })
+
+    const byTitle = (title: string) => wrapper.findAll('.session-item').find((item) => item.text().includes(title))
+    expect(byTitle('旧任务')?.text()).toContain('草稿')
+    expect(byTitle('旧任务')?.text()).not.toContain('生成中')
+    expect(byTitle('Beta 会话')?.text()).toContain('生成中')
+    expect(byTitle('日常闲聊')?.text()).toContain('新回复')
+  })
+
+  it('keeps archived sessions out of the daily list and allows restoring them', async () => {
+    const archivedSession = {
+      ...sessions[0],
+      id: 'alpha-archived',
+      title: '已归档任务',
+      archived: true,
+    }
+    const wrapper = mountRail({ sessions: [...sessions, archivedSession] })
+
+    expect(wrapper.text()).not.toContain('已归档任务')
+    await wrapper.get('[data-testid="session-archive-filter"]').trigger('click')
+    expect(wrapper.text()).toContain('已归档任务')
+
+    ;(wrapper.vm as unknown as { handleMoreCommand: (command: string, session: typeof archivedSession) => void })
+      .handleMoreCommand('archive', archivedSession)
+    expect(wrapper.emitted('archive-session')).toEqual([['alpha-archived', false]])
   })
 })

@@ -58,54 +58,63 @@ const holdVoiceProps = {
 describe('G005 focused presentation boundaries', () => {
   afterEach(() => syncLocaleFromSettings('zh-CN'))
 
-  it('renders composer state without owning chat side effects', () => {
+  it('stays silent while the composer is connected and idle', () => {
     const wrapper = mount(ChatComposerStatusLine, {
       props: {
         connected: true,
-        webSearchEnabled: true,
-        mcpEnabled: true,
-        modelLabel: 'local-model',
-        petLinkEnabled: true,
-        ttsEnabled: true,
-        voicePermissionText: 'microphone ready',
-        inputTokens: 42,
+        generating: false,
+        recording: false,
+        ttsPlaying: false,
       },
     })
 
-    expect(wrapper.text()).toContain('local-model')
-    expect(wrapper.text()).toContain('MCP')
-    expect(wrapper.text()).toContain('microphone ready')
-    expect(wrapper.text()).toContain('42 tokens')
+    expect(wrapper.text()).toBe('')
   })
 
-  it('renders composer status in all supported locales without hardcoded Chinese', async () => {
+  it('renders only actionable composer status in all supported locales', async () => {
     const wrapper = mount(ChatComposerStatusLine, {
       props: {
         connected: false,
-        webSearchEnabled: true,
-        mcpEnabled: true,
-        modelLabel: 'local-model',
-        petLinkEnabled: false,
-        ttsEnabled: false,
-        voicePermissionText: 'microphone ready',
-        inputTokens: 42,
+        generating: false,
+        recording: false,
+        ttsPlaying: false,
       },
     })
 
     syncLocaleFromSettings('en-US')
     await nextTick()
     expect(wrapper.text()).toContain('Realtime channel unavailable')
-    expect(wrapper.text()).toContain('Web search')
-    expect(wrapper.text()).toContain('Standalone chat')
+    expect(wrapper.text()).not.toContain('Web search')
 
     syncLocaleFromSettings('ja-JP')
     await nextTick()
     expect(wrapper.text()).toContain('リアルタイム接続を利用できません')
-    expect(wrapper.text()).toContain('ウェブ検索')
-    expect(wrapper.text()).toContain('単独チャット')
 
     const source = readFileSync('src/renderer/domains/chat/components/ChatComposerStatusLine.vue', 'utf8')
     expect(source).not.toMatch(/[一-龥]/u)
+  })
+
+  it('prioritizes recording and generation feedback while connected', async () => {
+    const wrapper = mount(ChatComposerStatusLine, {
+      props: {
+        connected: true,
+        generating: true,
+        recording: false,
+        ttsPlaying: false,
+      },
+    })
+
+    expect(wrapper.text()).toContain('正在生成')
+    await wrapper.setProps({ recording: true })
+    expect(wrapper.text()).toContain('正在聆听')
+    expect(wrapper.text()).not.toContain('正在生成')
+  })
+
+  it('keeps the composer editable while blocking a second send in the active turn', () => {
+    const source = readFileSync('src/renderer/domains/chat/views/ChatPanel.vue', 'utf8')
+
+    expect(source).not.toContain(':disabled="chatState.isGenerating"')
+    expect(source).toMatch(/const handleSendComposer = \(\) => \{\s*if \(chatState\.isGenerating\) return/)
   })
 
   it('emits voice mode and control intents while respecting offline state', async () => {

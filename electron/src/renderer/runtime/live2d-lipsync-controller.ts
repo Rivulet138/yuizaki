@@ -18,6 +18,8 @@ export class Live2DLipSyncController {
   private parameterIds = ['ParamMouthOpenY']
   private mouthOpen = 0
   private unavailableParams = new Set<string>()
+  private startGeneration = 0
+  private readyCleanup: (() => void) | null = null
 
   constructor(
     private readonly app: PIXI.Application,
@@ -25,17 +27,43 @@ export class Live2DLipSyncController {
     private readonly onEnded?: () => void,
   ) {}
 
-  async start(audioUrl: string): Promise<void> {
+  async start(audioUrl: string, onReady?: () => void): Promise<void> {
     this.stop()
+    const generation = this.startGeneration
     if (!audioUrl.trim()) {
       return
     }
 
-    const audio = new Audio(audioUrl)
+    const audio = new Audio()
     audio.crossOrigin = 'anonymous'
     audio.preload = 'auto'
+    let readyReported = false
+    let readyFallbackTimer: number | null = null
+    const cleanupReady = () => {
+      audio.removeEventListener('loadstart', reportReady)
+      if (readyFallbackTimer !== null) {
+        window.clearTimeout(readyFallbackTimer)
+        readyFallbackTimer = null
+      }
+      if (this.readyCleanup === cleanupReady) {
+        this.readyCleanup = null
+      }
+    }
+    const reportReady = () => {
+      if (readyReported) return
+      readyReported = true
+      cleanupReady()
+      onReady?.()
+    }
+    this.readyCleanup = cleanupReady
+    audio.addEventListener('loadstart', reportReady, { once: true })
+    audio.src = audioUrl
     audio.addEventListener('ended', this.handleAudioEnded, { once: true })
     audio.addEventListener('error', this.handleAudioError, { once: true })
+    // Start the analyser request before any async AudioContext work. The panel
+    // playback clock can be interrupted while the context is resuming.
+    audio.load()
+    readyFallbackTimer = window.setTimeout(reportReady, 120)
 
     const context = new AudioContext()
     const source = context.createMediaElementSource(audio)
@@ -56,9 +84,15 @@ export class Live2DLipSyncController {
       await context.resume()
     }
 
+    if (generation !== this.startGeneration) {
+      this.stopResources(audio, context)
+      return
+    }
+
     try {
       await audio.play()
     } catch (error) {
+      if (generation !== this.startGeneration) return
       console.warn('[Live2DLipSync] failed to play analyser audio:', error)
       this.stop()
     }
@@ -89,6 +123,9 @@ export class Live2DLipSyncController {
   }
 
   stop(): void {
+    this.startGeneration += 1
+    this.readyCleanup?.()
+    this.readyCleanup = null
     this.stopTicker()
     const audio = this.audioElement
     if (audio) {
@@ -116,6 +153,16 @@ export class Live2DLipSyncController {
         this.setParameter(coreModel, parameterId, 0, 1)
       }
     }
+  }
+
+  private stopResources(audio: HTMLAudioElement, context: AudioContext): void {
+    audio.removeEventListener('ended', this.handleAudioEnded)
+    audio.removeEventListener('error', this.handleAudioError)
+    audio.pause()
+    audio.src = ''
+    context.close().catch((error) => {
+      console.debug('[Live2DLipSync] audio context close failed:', error)
+    })
   }
 
   private startTicker(): void {

@@ -212,11 +212,152 @@ describe('Live2DWindow hardware lifecycle', () => {
     live2dWindow.handleRendererReady(instance?.webContents as never)
     instance?.webContents.send.mockClear()
 
+    live2dWindow.handleAvatarCapabilities(instance?.webContents as never, {
+      revision: 'live2d:model-a:1',
+      modelType: 'live2d',
+      modelId: 'live2d:local:shizuku',
+      generatedAt: Date.now(),
+      actions: {},
+      expressions: [],
+      motions: [],
+      parameters: [],
+    })
+    expect(live2dWindow.getAvatarCapabilities()).not.toBeNull()
+
     instance?.webContentsHandlers.get(eventName)?.(...eventArgs)
+    expect(live2dWindow.getAvatarCapabilities()).toBeNull()
     expect(live2dWindow.handleRendererReady(instance?.webContents as never)).toBe(true)
     expect(instance?.webContents.send).toHaveBeenCalledWith('pet:apply-config', expect.objectContaining({
       modelId: 'live2d:local:shizuku',
       modelPath: 'E:/models/shizuku/shizuku.model3.json',
     }))
+  })
+
+  it('drops pending avatar commands immediately when the renderer reloads', async () => {
+    const live2dWindow = new Live2DWindow()
+    live2dWindow.create()
+    const instance = electronMock.instances[0]
+    live2dWindow.handleRendererReady(instance?.webContents as never)
+    live2dWindow.handleAvatarCapabilities(instance?.webContents as never, {
+      revision: 'live2d:model-a:1',
+      modelType: 'live2d',
+      modelId: 'model-a',
+      generatedAt: Date.now(),
+      actions: {},
+      expressions: [],
+      motions: [],
+      parameters: [],
+    })
+
+    const resultPromise = live2dWindow.sendAvatarCommand({
+      version: 1,
+      id: 'reload-command',
+      sequence: 1,
+      issuedAt: Date.now(),
+      priority: 50,
+      interrupt: 'replace',
+      actions: [{ type: 'behavior', behavior: 'idle' }],
+    })
+
+    instance?.webContentsHandlers.get('did-start-navigation')?.({
+      isMainFrame: true,
+      isSameDocument: false,
+    })
+
+    await expect(resultPromise).resolves.toMatchObject({
+      commandId: 'reload-command',
+      status: 'dropped',
+      message: 'Pet renderer navigation interrupted the avatar command',
+    })
+    expect(live2dWindow.getAvatarCapabilities()).toBeNull()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('rejects duplicate in-flight avatar command ids without replacing the original waiter', async () => {
+    const live2dWindow = new Live2DWindow()
+    live2dWindow.create()
+    const instance = electronMock.instances[0]
+    live2dWindow.handleRendererReady(instance?.webContents as never)
+    const command = {
+      version: 1 as const,
+      id: 'duplicate-command',
+      sequence: 2,
+      issuedAt: Date.now(),
+      priority: 50,
+      interrupt: 'replace' as const,
+      actions: [{ type: 'behavior' as const, behavior: 'think' as const }],
+    }
+
+    const firstResult = live2dWindow.sendAvatarCommand(command)
+    await expect(live2dWindow.sendAvatarCommand(command)).resolves.toMatchObject({
+      commandId: 'duplicate-command',
+      status: 'rejected',
+      message: 'Avatar command id is already pending',
+    })
+
+    expect(live2dWindow.handleAvatarCommandResult(instance?.webContents as never, {
+      commandId: 'duplicate-command',
+      sequence: 1,
+      status: 'completed',
+      at: Date.now(),
+    })).toBe(false)
+
+    expect(live2dWindow.handleAvatarCommandResult(instance?.webContents as never, {
+      commandId: 'duplicate-command',
+      sequence: 2,
+      status: 'completed',
+      at: Date.now(),
+    })).toBe(true)
+    await expect(firstResult).resolves.toMatchObject({ status: 'completed' })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('reports a transport timeout distinctly from a renderer-side drop', async () => {
+    const live2dWindow = new Live2DWindow()
+    live2dWindow.create()
+    const instance = electronMock.instances[0]
+    live2dWindow.handleRendererReady(instance?.webContents as never)
+
+    const resultPromise = live2dWindow.sendAvatarCommand({
+      version: 1,
+      id: 'timeout-command',
+      streamId: 'test-stream',
+      sequence: 3,
+      issuedAt: Date.now(),
+      priority: 50,
+      interrupt: 'replace',
+      actions: [{ type: 'behavior', behavior: 'idle' }],
+    })
+
+    await vi.advanceTimersByTimeAsync(1200)
+    await expect(resultPromise).resolves.toMatchObject({
+      commandId: 'timeout-command',
+      status: 'timeout',
+    })
+  })
+
+  it('waits for the Live2D media request-start acknowledgement', async () => {
+    const live2dWindow = new Live2DWindow()
+    live2dWindow.create()
+    const instance = electronMock.instances[0]
+    live2dWindow.handleRendererReady(instance?.webContents as never)
+
+    let settled = false
+    const resultPromise = live2dWindow.startLipSync('https://fixture.test/audio.wav')
+      .then(() => { settled = true })
+    const startCall = instance?.webContents.send.mock.calls
+      .find((call: unknown[]) => call[0] === 'pet:lipsync-start')
+    const payload = startCall?.[1] as { requestId?: string } | undefined
+    expect(payload?.requestId).toEqual(expect.any(String))
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    expect(live2dWindow.handleLipSyncReady(instance?.webContents as never, {
+      requestId: payload?.requestId,
+      ready: true,
+    })).toBe(true)
+    await resultPromise
+    expect(settled).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

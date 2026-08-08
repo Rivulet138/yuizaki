@@ -117,10 +117,14 @@ export const validateMotionTarget = (
   let normalizedMotion: PetMotionTarget | undefined
 
   if (motion) {
-    const motionExists = Object.values(manifest.motions).some((item) =>
-      item.group === motion.group || item.file === motion.group,
+    const groupMotions = Object.entries(manifest.motions).filter(([key, item]) =>
+      key === motion.group || item.group === motion.group || item.file === motion.group,
     )
-    if (motionExists && Number.isInteger(motion.index) && motion.index >= 0) {
+    if (
+      Number.isInteger(motion.index)
+      && motion.index >= 0
+      && motion.index < groupMotions.length
+    ) {
       normalizedMotion = { group: motion.group, index: motion.index }
     } else {
       validation.valid = false

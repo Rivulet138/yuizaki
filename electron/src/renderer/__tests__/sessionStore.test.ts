@@ -127,4 +127,47 @@ describe('sessionStore', () => {
     expect(fetchMock.mock.calls[2][0]).toBe('http://localhost:38945/api/sessions/folder%2Fsession%201?workspace_id=team%2Falpha')
     expect(fetchMock.mock.calls[3][0]).toBe('http://localhost:38945/api/sessions/folder%2Fsession%201?workspace_id=team%2Falpha')
   })
+
+  it('creates a non-destructive branch through the dedicated endpoint', async () => {
+    window.localStorage.setItem('deskpet-workspaces', JSON.stringify([{
+      id: 'team/alpha',
+      name: 'Team Alpha',
+      createdAt: '',
+      updatedAt: '',
+      context: { activeTab: 'chat', modelType: 'live2d', modelId: null, wallpaperMode: true, heroHeight: 460, menuOrder: [], recentTabs: [], layoutPreset: 'balanced' },
+    }]))
+    window.localStorage.setItem('deskpet-active-workspace', 'team/alpha')
+    const branch = {
+      id: 'branch-1',
+      workspace_id: 'team/alpha',
+      title: 'Branch',
+      summary: null,
+      pinned: false,
+      archived: false,
+      parent_session_id: 'source/session',
+      branched_from_message_id: 42,
+      created_at: null,
+      updated_at: null,
+      message_count: 2,
+      total_tokens: 8,
+    }
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(branch))
+    vi.stubGlobal('fetch', fetchMock)
+    const store = useSessionStore()
+
+    const created = await store.branchSession('source/session', 42, 'Branch', 'team/alpha')
+
+    expect(created).toEqual(branch)
+    expect(store.sessions[0]).toEqual(branch)
+    expect(store.activeSessionId).toBe('branch-1')
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:38945/api/session-branches', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        source_session_id: 'source/session',
+        message_id: 42,
+        title: 'Branch',
+        workspace_id: 'team/alpha',
+      }),
+    }))
+  })
 })
