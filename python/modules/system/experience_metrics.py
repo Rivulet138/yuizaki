@@ -29,6 +29,7 @@ TRACKED_ASR_STAGES = (
 TRACKED_CLIENT_STAGES = (
     "interrupt_ack",
     "realtime_connect",
+    "realtime_transcript_stable",
     "realtime_speech_to_response",
     "realtime_speech_to_playback",
     "realtime_interrupt_ack",

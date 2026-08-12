@@ -47,6 +47,7 @@ export interface RealtimeVoiceEventMap {
   'turn-complete': RealtimeVoiceTurn
   connect: { elapsedMs: number }
   'speech-end': { elapsedMs: number }
+  'transcript-stable': { elapsedMs: number }
   'response-start': { elapsedMs: number }
   'playback-start': { elapsedMs: number }
   'playback-end': Record<string, never>
@@ -113,7 +114,9 @@ type RealtimeVoiceListener<K extends keyof RealtimeVoiceEventMap> =
 
 const REALTIME_CALLS_URL = 'https://api.openai.com/v1/realtime/calls'
 const MIN_PUSH_TO_TALK_MS = 120
-const TRANSCRIPT_GRACE_MS = 1_200
+// Keep a short tail for provider transcript ordering without adding a full
+// second of dead air after audio has already finished.
+const TRANSCRIPT_GRACE_MS = 600
 const ICE_GATHER_TIMEOUT_MS = 2_000
 const DISCONNECT_GRACE_MS = 5_000
 const MAX_REUSABLE_SESSION_MS = 55 * 60 * 1_000
@@ -196,6 +199,7 @@ export class RealtimeVoiceSession {
   private responseActive = false
   private playbackReported = false
   private inputTranscript = ''
+  private inputTranscriptStableReported = false
   private assistantTranscript = ''
   private assistantDeltaText = ''
   private responseDone = false
@@ -516,6 +520,11 @@ export class RealtimeVoiceSession {
       if (this.currentTurnCancelled || !this.matchesCurrentInputItem(event)) return
       this.inputTranscript = readString(event.transcript).trim() || this.inputTranscript.trim()
       this.emit('input-partial', { ...this.currentScope(), text: this.inputTranscript })
+      if (!this.inputTranscriptStableReported && this.inputTranscript.trim()) {
+        this.inputTranscriptStableReported = true
+        const elapsedMs = this.elapsedSinceSpeechEnd()
+        if (elapsedMs !== null) this.emit('transcript-stable', { elapsedMs })
+      }
       this.maybeFinalizeTurn()
       return
     }
@@ -956,6 +965,7 @@ export class RealtimeVoiceSession {
       this.finalizeTimer = null
     }
     this.inputTranscript = ''
+    this.inputTranscriptStableReported = false
     this.assistantTranscript = ''
     this.assistantDeltaText = ''
     this.responseDone = false

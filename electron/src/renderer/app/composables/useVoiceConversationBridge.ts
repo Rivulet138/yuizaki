@@ -465,6 +465,11 @@ export function useVoiceConversationBridge() {
         })
       }
     })
+    realtimeEventBridge.listen('transcript-stable', ({ elapsedMs }) => {
+      if (socketClient.isConnected()) {
+        socketClient.sendClientTiming('realtime_transcript_stable', { elapsedMs })
+      }
+    })
     realtimeEventBridge.listen('playback-start', ({ elapsedMs }) => {
       chatStore.setRealtimePlayback(true)
       if (socketClient.isConnected()) {

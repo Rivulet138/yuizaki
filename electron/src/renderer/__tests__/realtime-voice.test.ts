@@ -212,11 +212,13 @@ describe('RealtimeVoiceSession', () => {
     const turns: Array<{ userText: string; assistantText: string }> = []
     const assistantDeltas: string[] = []
     const interruptAcks: number[] = []
+    const transcriptStable: number[] = []
     let now = 2_000
     vi.spyOn(performance, 'now').mockImplementation(() => now)
     session.on('turn-complete', (turn) => turns.push(turn))
     session.on('assistant-delta', ({ text }) => assistantDeltas.push(text))
     session.on('interrupt-ack', ({ elapsedMs }) => interruptAcks.push(elapsedMs))
+    session.on('transcript-stable', ({ elapsedMs }) => transcriptStable.push(elapsedMs))
 
     await session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })
     now = 2_300
@@ -242,6 +244,8 @@ describe('RealtimeVoiceSession', () => {
       workspaceId: 'default',
       sessionId: 'voice',
     })
+    expect(transcriptStable).toHaveLength(1)
+    expect(transcriptStable[0]).toBeGreaterThanOrEqual(0)
 
     now = 3_000
     session.interrupt()
@@ -249,6 +253,29 @@ describe('RealtimeVoiceSession', () => {
     channel.serverEvent({ type: 'output_audio_buffer.cleared' })
     expect(interruptAcks).toEqual([45])
     session.close()
+  })
+
+  it('uses a bounded transcript grace window when provider events arrive out of order', async () => {
+    vi.useFakeTimers()
+    try {
+      const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
+      const session = new RealtimeVoiceSession()
+      const turns: unknown[] = []
+      session.on('turn-complete', (turn) => turns.push(turn))
+      await session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })
+      session.stopPushToTalk()
+      const channel = MockPeerConnection.latest!.channel
+      channel.serverEvent({ type: 'response.output_audio_transcript.done', transcript: 'answer' })
+      channel.serverEvent({ type: 'response.done', response: { status: 'completed' } })
+      vi.advanceTimersByTime(599)
+      expect(turns).toHaveLength(0)
+      channel.serverEvent({ type: 'conversation.item.input_audio_transcription.completed', transcript: 'question' })
+      expect(turns).toHaveLength(1)
+      expect(turns[0]).toMatchObject({ userText: 'question', assistantText: 'answer' })
+      session.close()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('ignores late transcript and audio events after a turn is interrupted', async () => {
