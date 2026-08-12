@@ -28,6 +28,7 @@ export interface RealtimeVoiceTurn extends RealtimeVoiceScope {
   userText: string
   assistantText: string
   model: string
+  elapsedMs: number
   actionEnvelope?: unknown
 }
 
@@ -948,6 +949,7 @@ export class RealtimeVoiceSession {
       userText,
       assistantText,
       model: this.model,
+      elapsedMs: this.elapsedSinceSpeechEnd() ?? 0,
       workspaceId: this.workspaceId,
       sessionId: this.sessionId,
       interruptionEpoch: this.currentInterruptionEpoch,

@@ -427,6 +427,13 @@ export function useVoiceConversationBridge() {
         interruptionEpoch: getCompanionInterruptionEpoch(),
         ...identity,
       })) return
+      if (socketClient.isConnected()) {
+        socketClient.sendClientTiming('realtime_turn_complete', {
+          elapsedMs: turn.elapsedMs,
+          sessionId: turn.sessionId,
+          generationId: turn.generationId,
+        })
+      }
       void chatStore.completeRealtimeTurn(turn)
     })
     realtimeEventBridge.listen('agent-result', ({ petControl, ...scope }) => {

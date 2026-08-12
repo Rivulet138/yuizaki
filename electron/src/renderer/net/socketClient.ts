@@ -399,6 +399,7 @@ export class SocketClient {
     | 'realtime_transcript_stable'
     | 'realtime_speech_to_response'
     | 'realtime_speech_to_playback'
+    | 'realtime_turn_complete'
     | 'realtime_interrupt_ack',
   options: {
     sessionId?: string;

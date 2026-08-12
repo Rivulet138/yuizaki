@@ -244,6 +244,7 @@ describe('RealtimeVoiceSession', () => {
       workspaceId: 'default',
       sessionId: 'voice',
     })
+    expect(turns[0].elapsedMs).toBeGreaterThanOrEqual(0)
     expect(transcriptStable).toHaveLength(1)
     expect(transcriptStable[0]).toBeGreaterThanOrEqual(0)
 
