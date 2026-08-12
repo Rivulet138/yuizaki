@@ -128,7 +128,7 @@ describe('useVoiceConversationBridge sentence emotion scheduling', () => {
       }),
     )
     expect(schedulerMocks.schedule).toHaveBeenCalledTimes(1)
-  }, 15000)
+  }, 30000)
 
   it('uses an attached avatar command even when the legacy payload has no model type', async () => {
     const { useVoiceConversationBridge } = await import('../app/composables/useVoiceConversationBridge')

@@ -75,6 +75,23 @@
                       <span class="agent-step-copy">
                         <strong>{{ step.title }}</strong>
                         <small v-if="step.tool">{{ step.tool }}</small>
+                        <small v-if="step.progress !== undefined">{{ Math.round(step.progress * 100) }}%</small>
+                        <small v-if="step.resultSummary">{{ step.resultSummary }}</small>
+                        <small v-if="step.durationMs !== undefined || step.artifactCount !== undefined" class="agent-step-meta">
+                          <template v-if="step.durationMs !== undefined">{{ step.durationMs }} ms</template>
+                          <template v-if="step.durationMs !== undefined && step.artifactCount !== undefined"> · </template>
+                          <template v-if="step.artifactCount !== undefined">{{ step.artifactCount }} artifacts</template>
+                        </small>
+                        <small v-if="step.artifacts?.length" class="agent-step-artifacts">
+                          <a
+                            v-for="artifact in step.artifacts"
+                            :key="artifact.id || artifact.url || artifact.name"
+                            :href="artifact.url"
+                            target="_blank"
+                            rel="noreferrer"
+                            @click.stop
+                          >{{ artifact.name || artifact.id || 'artifact' }}</a>
+                        </small>
                         <small v-if="step.error" class="agent-step-error">{{ step.error }}</small>
                       </span>
                     </li>
@@ -90,6 +107,10 @@
                       <div class="memory-source-meta">
                         <span v-if="source.layer">{{ source.layer }}</span>
                         <span v-if="source.source">{{ source.source }}</span>
+                        <span v-if="source.confidence !== undefined">{{ Math.round(source.confidence * 100) }}%</span>
+                        <span v-if="source.traceId">{{ source.traceId }}</span>
+                        <span v-if="source.modelVersion">{{ source.modelVersion }}</span>
+                        <span v-if="source.correctionState && source.correctionState !== 'none'">{{ source.correctionState }}</span>
                       </div>
                       <div class="memory-source-actions">
                         <button type="button" data-memory-action="correct" @click.stop="emit('correct-memory', source)">纠正</button>

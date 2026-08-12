@@ -32,6 +32,17 @@ interface VisualSocketApi {
   isConnected: () => boolean
   requestScreenshot: (image: string, options: Record<string, unknown>) => void
   clearVisualContext: () => void
+  discardScreenshotRequest: (request: Record<string, unknown>, reason: string) => void
+}
+
+export interface VisualCaptureRequest {
+  workspaceId: string
+  sessionId: string
+  turnId: string
+  jobId: string
+  requestId: string
+  frameId: string
+  interruptionEpoch: number
 }
 
 interface VisualCaptureState {
@@ -114,7 +125,7 @@ export const createVisualCaptureRuntime = (options: VisualCaptureRuntimeOptions)
     epoch.forgetFrame(frameId)
   }
 
-  const capture = async (requestedFrameId?: string, forceEnabled = false): Promise<string> => {
+  const capture = async (requestedFrameId?: string, forceEnabled = false, request?: VisualCaptureRequest): Promise<string> => {
     const vision = options.getSettings()
     const socket = options.getSocket()
     if (!forceEnabled && !vision.enabled) return 'skipped:disabled'
@@ -166,6 +177,14 @@ export const createVisualCaptureRuntime = (options: VisualCaptureRuntimeOptions)
         frameId,
         changeScore: 1,
         captureReason: forceEnabled ? 'manual' : 'agent_turn',
+        ...(request ? {
+          workspaceId: request.workspaceId,
+          sessionId: request.sessionId,
+          turnId: request.turnId,
+          jobId: request.jobId,
+          requestId: request.requestId,
+          interruptionEpoch: request.interruptionEpoch,
+        } : {}),
       })
       return frameId
     } catch (error) {
@@ -233,32 +252,46 @@ export const createVisualCaptureRuntime = (options: VisualCaptureRuntimeOptions)
     return resultPromise
   }
 
-  const prepareAgentVisualContext = async () => {
-    if (!options.getSettings().enabled) return
-    const frameId = `renderer-agent-${now()}-${frameSequence + 1}`
-    try {
-      await captureAndWait(frameId)
-    } catch (error) {
-      options.getSocket().clearVisualContext()
-      throw error
+  const isCaptureRequest = (value: unknown): value is VisualCaptureRequest => {
+    if (!value || typeof value !== 'object') return false
+    const request = value as Record<string, unknown>
+    return ['workspaceId', 'sessionId', 'turnId', 'jobId', 'requestId', 'frameId']
+      .every(key => typeof request[key] === 'string' && request[key] !== '')
+      && Number.isInteger(request['interruptionEpoch'])
+      && Number(request['interruptionEpoch']) >= 0
+  }
+
+  const handleCaptureRequest = async (value: unknown) => {
+    if (!isCaptureRequest(value)) return
+    const request = value
+    const result = await capture(request.frameId, false, request)
+    if (result !== request.frameId) {
+      options.getSocket().discardScreenshotRequest(request as unknown as Record<string, unknown>, result)
     }
   }
 
-  const invalidate = () => epoch.invalidate()
+  const discardOutstanding = (reason: string) => {
+    for (const [frameId, pending] of pendingResults) {
+      clearTimer(pending.timeout)
+      pending.reject(new Error(`Visual frame result wait ${reason}: ${frameId}`))
+    }
+    pendingResults.clear()
+  }
+
+  const invalidate = () => {
+    epoch.invalidate()
+    discardOutstanding('invalidated')
+  }
 
   const stop = () => {
     epoch.invalidate()
-    for (const [frameId, pending] of pendingResults) {
-      clearTimer(pending.timeout)
-      pending.reject(new Error(`Visual frame result wait cancelled: ${frameId}`))
-    }
-    pendingResults.clear()
+    discardOutstanding('cancelled')
   }
 
   return {
     capture,
     captureAndWait,
-    prepareAgentVisualContext,
+    handleCaptureRequest,
     handleResult,
     waitForResult,
     cancelResultWait,

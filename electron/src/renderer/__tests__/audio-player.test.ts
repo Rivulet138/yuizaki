@@ -352,6 +352,52 @@ describe('AudioPlayer sentence emotion forwarding', () => {
     }
   })
 
+  it('reorders sequenced TTS segments that arrive out of order', async () => {
+    const { AudioPlayer } = await import('../audio/player')
+    const player = new AudioPlayer()
+    player.enqueue('/audio/segment-1.wav', { generationId: 'g1', sequence: 1, isFinal: true })
+    await flushAsyncPlayback()
+    expect(MockAudioElement.instances[0]?.play).not.toHaveBeenCalled()
+
+    player.enqueue('/audio/segment-0.wav', { generationId: 'g1', sequence: 0, isFinal: false })
+    await flushAsyncPlayback()
+    const audio = MockAudioElement.instances[0]
+    expect(audio?.src).toBe('http://localhost:8001/audio/segment-0.wav')
+    audio?.emit('ended')
+    await flushAsyncPlayback()
+    expect(audio?.src).toBe('http://localhost:8001/audio/segment-1.wav')
+  })
+
+  it('drops a duplicate segment after its sequence was already consumed', async () => {
+    const { AudioPlayer } = await import('../audio/player')
+    const player = new AudioPlayer()
+    player.enqueue('/audio/segment-0.wav', { generationId: 'g-consumed', sequence: 0 })
+    await flushAsyncPlayback()
+
+    player.enqueue('/audio/duplicate-0.wav', { generationId: 'g-consumed', sequence: 0 })
+    MockAudioElement.instances[0]?.emit('ended')
+    await flushAsyncPlayback()
+
+    expect(MockAudioElement.instances[0]?.play).toHaveBeenCalledTimes(1)
+    expect(httpClientMocks.resolveBackendUrl).not.toHaveBeenCalledWith('/audio/duplicate-0.wav')
+  })
+
+  it('flushes an incomplete final sequence instead of deadlocking playback', async () => {
+    vi.useFakeTimers()
+    const { AudioPlayer } = await import('../audio/player')
+    try {
+      const player = new AudioPlayer()
+      player.enqueue('/audio/segment-2.wav', { generationId: 'g2', sequence: 2, isFinal: true })
+      await flushAsyncPlayback()
+      vi.advanceTimersByTime(250)
+      await flushAsyncPlayback()
+      const audio = MockAudioElement.instances[0]
+      expect(audio?.src).toBe('http://localhost:8001/audio/segment-2.wav')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('plays streamed PCM from memory and releases the object URL after playback', async () => {
     const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:tts-pcm-1')
     const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
@@ -397,6 +443,32 @@ describe('AudioPlayer sentence emotion forwarding', () => {
     } finally {
       window.removeEventListener('pet:audio-started', onStarted)
     }
+  })
+
+  it('revokes a PCM object URL when its sequence is older than the playback cursor', async () => {
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL')
+      .mockReturnValueOnce('blob:tts-pcm-current')
+      .mockReturnValueOnce('blob:tts-pcm-stale')
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    const { AudioPlayer } = await import('../audio/player')
+    const player = new AudioPlayer()
+    const pcm = {
+      audio: new Uint8Array(6_400),
+      audioFormat: 'pcm_s16le' as const,
+      sampleRate: 32_000,
+      channels: 1,
+      sampleWidthBytes: 2 as const,
+      generationId: 'generation-pcm-stale',
+      sequence: 0,
+    }
+
+    player.enqueuePcm(pcm)
+    await flushAsyncPlayback()
+    player.enqueuePcm(pcm)
+
+    expect(createObjectURL).toHaveBeenCalledTimes(2)
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:tts-pcm-stale')
+    expect(MockAudioElement.instances[0]?.play).toHaveBeenCalledTimes(1)
   })
 
   it('builds raw PCM RMS frames and follows the audio playback clock', async () => {

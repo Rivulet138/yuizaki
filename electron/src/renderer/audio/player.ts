@@ -1,16 +1,16 @@
 import { type Ref, ref } from 'vue'
+import type { GenerationEnvelope } from '../../shared/agent'
 import type { PetSentenceEmotionCue, PetVisemeCue } from '../../shared/pet-control'
 import { petControl } from '../utils/petControl'
 import { resolveBackendUrl } from '../api/clients/http-client'
 import { AudioPlayerEventBridge } from './playbackEventBridge'
 
-export interface TtsPlaybackDetail {
+export interface TtsPlaybackDetail extends GenerationEnvelope {
   audio_url?: string
+  sessionId?: string
   text?: string
   sentenceEmotionCues?: PetSentenceEmotionCue[]
   petLinkEnabled?: boolean
-  generationId?: string
-  sequence?: number
   isFinal?: boolean
   durationMs?: number
   visemeCues?: PetVisemeCue[]
@@ -57,6 +57,7 @@ export interface PcmLipSyncEnvelope {
 
 const PCM_LIP_SYNC_FRAME_MS = 33
 const URL_LIP_SYNC_START_TIMEOUT_MS = 500
+const SEQUENCE_GAP_TIMEOUT_MS = 250
 
 export const buildPcmS16leEnvelope = (
   pcm: Uint8Array,
@@ -136,9 +137,12 @@ export class AudioPlayer {
   private currentPetLinkEnabled = true
   private playbackPending = false
   private queue: QueuedAudio[] = []
+  private readonly sequenceBuffers = new Map<string, Map<number, QueuedAudio>>()
+  private readonly nextSequenceByGeneration = new Map<string, number>()
+  private readonly sequenceGapTimers = new Map<string, number>()
   private currentOwnedObjectUrl: string | null = null
   private activeLipSyncMode: ActiveLipSyncMode = 'none'
-  private pcmLipSyncTimer: number | null = null
+  private pcmLipSyncFrame: number | null = null
   private pcmLipSyncEnvelope: PcmLipSyncEnvelope | null = null
   private lastPcmLipSyncFrame = -1
   private pcmVisemeCues: PetVisemeCue[] = []
@@ -180,9 +184,71 @@ export class AudioPlayer {
   private enqueueInternal(item: QueuedAudio): void {
     const { audioUrl } = item
     if (!audioUrl.trim()) return
+    const generationId = item.detail.generationId
+    const sequence = item.detail.sequence
+    if (generationId && sequence !== undefined && Number.isInteger(sequence) && sequence >= 0) {
+      const nextSequence = this.nextSequenceByGeneration.get(generationId) ?? 0
+      if (sequence < nextSequence) {
+        if (item.ownedObjectUrl) URL.revokeObjectURL(item.ownedObjectUrl)
+        return
+      }
+      const buffer = this.sequenceBuffers.get(generationId) ?? new Map<number, QueuedAudio>()
+      const previous = buffer.get(sequence)
+      if (previous?.ownedObjectUrl) URL.revokeObjectURL(previous.ownedObjectUrl)
+      buffer.set(sequence, item)
+      this.sequenceBuffers.set(generationId, buffer)
+      this.flushSequenceBuffer(generationId, item.detail.isFinal === true)
+      if (!this.isPlaying.value && !this.playbackPending && this.queue.length > 0) {
+        void this.playNextQueued()
+      }
+      return
+    }
     this.queue.push(item)
     if (!this.isPlaying.value && !this.playbackPending) {
       void this.playNextQueued()
+    }
+  }
+
+  private flushSequenceBuffer(generationId: string, isFinal: boolean): void {
+    const buffer = this.sequenceBuffers.get(generationId)
+    if (!buffer) return
+    let next = this.nextSequenceByGeneration.get(generationId) ?? 0
+    while (buffer.has(next)) {
+      const item = buffer.get(next)
+      if (!item) break
+      buffer.delete(next)
+      this.queue.push(item)
+      next += 1
+    }
+    // Hold a final segment briefly for an earlier segment that is still in flight.
+    // If it never arrives, release the remaining segments so playback cannot deadlock.
+    if (isFinal && buffer.size > 0 && !this.sequenceGapTimers.has(generationId)) {
+      const timer = window.setTimeout(() => {
+        this.sequenceGapTimers.delete(generationId)
+        const pending = this.sequenceBuffers.get(generationId)
+        if (!pending) return
+        for (const sequence of [...pending.keys()].sort((left, right) => left - right)) {
+          const item = pending.get(sequence)
+          if (item) this.queue.push(item)
+        }
+        pending.clear()
+        this.sequenceBuffers.delete(generationId)
+        this.nextSequenceByGeneration.delete(generationId)
+        if (!this.isPlaying.value && !this.playbackPending && this.queue.length > 0) {
+          void this.playNextQueued()
+        }
+      }, SEQUENCE_GAP_TIMEOUT_MS)
+      this.sequenceGapTimers.set(generationId, timer)
+      return
+    }
+    this.nextSequenceByGeneration.set(generationId, next)
+    if (buffer.size === 0) {
+      this.sequenceBuffers.delete(generationId)
+      const timer = this.sequenceGapTimers.get(generationId)
+      if (timer !== undefined) {
+        window.clearTimeout(timer)
+        this.sequenceGapTimers.delete(generationId)
+      }
     }
   }
 
@@ -306,6 +372,12 @@ export class AudioPlayer {
         startedDetail.petLinkEnabled = false
       }
       if (detail.generationId) startedDetail.generationId = detail.generationId
+      if (detail.requestId) startedDetail.requestId = detail.requestId
+      if (detail.turnId) startedDetail.turnId = detail.turnId
+      if (detail.interruptionEpoch !== undefined) startedDetail.interruptionEpoch = detail.interruptionEpoch
+      if (detail.conversationId) startedDetail.conversationId = detail.conversationId
+      if (detail.operationId) startedDetail.operationId = detail.operationId
+      if (detail.stepIndex !== undefined) startedDetail.stepIndex = detail.stepIndex
       if (detail.sequence !== undefined) startedDetail.sequence = detail.sequence
       if (detail.isFinal !== undefined) startedDetail.isFinal = detail.isFinal
       window.dispatchEvent(new CustomEvent('pet:audio-started', { detail: startedDetail }))
@@ -397,7 +469,16 @@ export class AudioPlayer {
     for (const item of this.queue) {
       if (item.ownedObjectUrl) URL.revokeObjectURL(item.ownedObjectUrl)
     }
+    for (const buffer of this.sequenceBuffers.values()) {
+      for (const item of buffer.values()) {
+        if (item.ownedObjectUrl) URL.revokeObjectURL(item.ownedObjectUrl)
+      }
+    }
     this.queue = []
+    this.sequenceBuffers.clear()
+    this.nextSequenceByGeneration.clear()
+    for (const timer of this.sequenceGapTimers.values()) window.clearTimeout(timer)
+    this.sequenceGapTimers.clear()
   }
 
   private detachSegmentListeners(): void {
@@ -425,9 +506,12 @@ export class AudioPlayer {
     this.lastPcmLipSyncFrame = -1
     this.lastPcmVisemeKey = null
     this.reportPcmLipSyncFrame()
-    this.pcmLipSyncTimer = window.setInterval(() => {
+    const tick = () => {
+      if (!this.pcmLipSyncEnvelope) return
       this.reportPcmLipSyncFrame()
-    }, envelope.frameDurationMs)
+      this.pcmLipSyncFrame = window.requestAnimationFrame(tick)
+    }
+    this.pcmLipSyncFrame = window.requestAnimationFrame(tick)
   }
 
   private reportPcmLipSyncFrame(): void {
@@ -444,9 +528,9 @@ export class AudioPlayer {
   }
 
   private stopPcmLipSync(reportInactive = true): void {
-    if (this.pcmLipSyncTimer !== null) {
-      window.clearInterval(this.pcmLipSyncTimer)
-      this.pcmLipSyncTimer = null
+    if (this.pcmLipSyncFrame !== null) {
+      window.cancelAnimationFrame(this.pcmLipSyncFrame)
+      this.pcmLipSyncFrame = null
     }
     this.pcmLipSyncEnvelope = null
     this.lastPcmLipSyncFrame = -1

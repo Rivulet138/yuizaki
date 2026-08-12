@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 
 from .backend import MemoryBackend, MemorySearchIncompleteError
-from .vector_store import Document, MemoryType
+from .vector_store import Document, MemoryType, is_memory_recallable
 from .pipeline import RetrievalPipeline
 from .schema import MemorySearchFilters, RetrievalRequest, RetrievalTrace
 from .expiry import is_memory_expired, normalize_memory_expiry
@@ -46,6 +46,11 @@ class MemoryDocPayload(BaseModel):
   importance: float | None = None
   confidence: float | None = None
   confidence_source: str | None = None
+  source_kind: str | None = None
+  source_id: str | None = None
+  turn_id: str | None = None
+  evidence: Any = None
+  confidence_history: list[Dict[str, Any]] | None = None
   dedupe: bool = True
   dedupe_threshold: float = Field(default=0.92, ge=0, le=1)
 
@@ -79,6 +84,8 @@ class MemoryDocUpdatePayload(BaseModel):
   confidence: float | None = None
   confidence_source: str | None = None
   edit_reason: str | None = None
+  turn_id: str | None = None
+  evidence: Any = None
 
   @field_validator('scope')
   @classmethod
@@ -114,6 +121,26 @@ class MemoryDocBatchDeletePayload(BaseModel):
         cleaned.append(doc_id)
         seen.add(doc_id)
     return cleaned
+
+
+class MemoryCorrectionPayload(BaseModel):
+  model_config = ConfigDict(extra='forbid')
+  text: str = Field(min_length=1)
+  reason: str | None = None
+  turn_id: str | None = None
+  evidence: Any = None
+  confidence: float | None = None
+
+  @field_validator('confidence')
+  @classmethod
+  def validate_confidence(cls, value: float | None) -> float | None:
+    return _validate_unit_field(value)
+
+
+class MemorySoftForgetPayload(BaseModel):
+  model_config = ConfigDict(extra='forbid')
+  reason: str | None = None
+  turn_id: str | None = None
 
 
 class MemoryMaintenancePayload(BaseModel):
@@ -152,6 +179,11 @@ class MemoryAddPayload(BaseModel):
   scope: str | None = None
   confidence: float | None = None
   confidence_source: str | None = None
+  source_kind: str | None = None
+  source_id: str | None = None
+  turn_id: str | None = None
+  evidence: Any = None
+  confidence_history: list[Dict[str, Any]] | None = None
   dedupe: bool = True
   dedupe_threshold: float = Field(default=0.92, ge=0, le=1)
 
@@ -316,6 +348,25 @@ def _append_audit(metadata: Dict[str, Any], *, action: str, reason: str | None =
     event['before'] = before
   audit.append(event)
   metadata['audit'] = audit[-25:]
+  return metadata
+
+
+def _apply_provenance(metadata: Dict[str, Any], payload: Dict[str, Any], *, preserve: bool = True) -> Dict[str, Any]:
+  """Normalize provenance fields while keeping the original origin immutable."""
+  keys = ('source_kind', 'source_id', 'turn_id', 'evidence')
+  for key in keys:
+    value = payload.get(key)
+    if value is None and isinstance(payload.get('metadata'), dict):
+      value = payload['metadata'].get(key)
+    if value is not None and (not preserve or key not in metadata):
+      metadata[key] = value
+  history = metadata.get('confidence_history')
+  if not isinstance(history, list):
+    history = []
+  supplied = payload.get('confidence_history')
+  if isinstance(supplied, list) and not history:
+    history = [item for item in supplied if isinstance(item, dict)]
+  metadata['confidence_history'] = history[-50:]
   return metadata
 
 
@@ -530,9 +581,10 @@ def create_memory_router(
   async def _delete_memory_documents(doc_ids: list[str]) -> int:
     for doc_id in doc_ids:
       await _run_store_call(state.store.delete_document, doc_id)
-    if clear_memory_references is None:
+    clear_references = clear_memory_references
+    if clear_references is None:
       return 0
-    return int(await run_in_threadpool(lambda: clear_memory_references(doc_ids)))
+    return int(await run_in_threadpool(lambda: clear_references(doc_ids)))
 
   def _normalize_expiry_for_write(metadata: Dict[str, Any]) -> Dict[str, Any]:
     try:
@@ -753,6 +805,7 @@ def create_memory_router(
           layer=resolved_layer,
         )
         and not is_memory_expired(doc.metadata)
+        and not (doc.metadata or {}).get('soft_forgotten')
       ]
     }
 
@@ -846,6 +899,8 @@ def create_memory_router(
       "workspace_id": workspace_id,
     }
     metadata.update(_score_memory_quality({**payload_dict, "text": text}, metadata, importance=importance))
+    _apply_provenance(metadata, payload_dict, preserve=False)
+    metadata['confidence_history'].append({'at': now, 'confidence': metadata.get('confidence'), 'source': 'create'})
     _append_audit(metadata, action='create')
     if payload.dedupe:
       candidates = await _run_store_call(
@@ -909,6 +964,10 @@ def create_memory_router(
     existing_metadata = dict(existing.metadata or {})
     incoming_metadata = dict(payload_dict.get("metadata") or {})
     merged_metadata = {**existing_metadata, **incoming_metadata}
+    # Origin provenance cannot be rewritten by an update payload.
+    for provenance_key in ('source_kind', 'source_id', 'turn_id', 'evidence', 'confidence_history'):
+      if provenance_key in existing_metadata:
+        merged_metadata[provenance_key] = existing_metadata[provenance_key]
     memory_type = _memory_type_value(payload_dict.get("type") or merged_metadata.get("type") or MemoryType.FACT)
     importance = _coerce_importance(payload_dict.get("importance", merged_metadata.get("importance", 0.5)))
     routing_payload = {
@@ -948,6 +1007,22 @@ def create_memory_router(
       "workspace_id": workspace_id,
     }
     metadata.update(_score_memory_quality(routing_payload, metadata, importance=importance))
+    _apply_provenance(metadata, routing_payload, preserve=True)
+    if payload_dict.get('confidence') is not None and payload_dict.get('confidence') != existing_metadata.get('confidence'):
+      metadata['confidence_history'].append({'at': now, 'confidence': metadata.get('confidence'), 'source': 'update', 'reason': payload.edit_reason})
+    if payload.turn_id or payload.evidence is not None:
+      correction_history = metadata.get('correction_history')
+      corrections = list(correction_history) if isinstance(correction_history, list) else []
+      correction: Dict[str, Any] = {
+        'at': now,
+        'reason': payload.edit_reason or 'memory_update',
+      }
+      if payload.turn_id:
+        correction['turn_id'] = payload.turn_id
+      if payload.evidence is not None:
+        correction['evidence'] = payload.evidence
+      corrections.append(correction)
+      metadata['correction_history'] = corrections[-25:]
     _append_audit(metadata, action='update', reason=payload.edit_reason, before=before)
 
     await _write_memory_document(Document(id=doc_id, text=text, metadata=metadata))
@@ -990,6 +1065,8 @@ def create_memory_router(
     scope = routing['scope']
     metadata = routing['metadata']
     metadata = _normalize_expiry_for_write(metadata)
+    _apply_provenance(metadata, payload_dict, preserve=False)
+    metadata['confidence_history'].append({'at': metadata.get('timestamp'), 'confidence': metadata.get('confidence'), 'source': 'create'})
     _append_audit(metadata, action='create')
     if payload.dedupe:
       candidates = await _run_store_call(
@@ -1033,14 +1110,46 @@ def create_memory_router(
       "storage": await _compact_storage(),
     }
 
+  @router.post("/docs/{doc_id:path}/correction")
+  async def correct_doc(doc_id: str, payload: MemoryCorrectionPayload) -> Dict[str, Any]:
+    """Apply a conversational correction while retaining origin provenance and audit history."""
+    result = await update_doc(doc_id, MemoryDocUpdatePayload(
+      text=payload.text.strip(),
+      edit_reason=payload.reason or 'conversational_correction',
+      turn_id=payload.turn_id,
+      evidence=payload.evidence,
+      confidence=payload.confidence,
+    ))
+    result['action'] = 'correction'
+    return result
+
+  @router.post("/docs/{doc_id:path}/soft-forget")
+  async def soft_forget_doc(doc_id: str, payload: MemorySoftForgetPayload) -> Dict[str, Any]:
+    """Hide a memory without deleting its immutable record or provenance."""
+    documents = await _run_store_call(state.store.list_documents)
+    existing = next((doc for doc in documents if doc.id == doc_id), None)
+    if existing is None:
+      raise HTTPException(status_code=404, detail="memory document not found")
+    _ensure_doc_in_active_workspace(existing)
+    metadata = dict(existing.metadata or {})
+    now = datetime.now().isoformat()
+    metadata['soft_forgotten'] = True
+    metadata['soft_forgotten_at'] = now
+    if payload.turn_id:
+      metadata['soft_forget_turn_id'] = payload.turn_id
+    _append_audit(metadata, action='soft_forget', reason=payload.reason or 'conversational_soft_forget', before={'text': existing.text})
+    await _write_memory_document(Document(id=doc_id, text=existing.text, metadata=metadata))
+    return {'status': 'soft_forgotten', 'id': doc_id, 'action': 'soft_forget'}
+
   @router.get("/index/status")
   async def index_status() -> Dict[str, Any]:
     backend_status = await _run_store_call(state.store.get_status)
     documents = await _run_store_call(state.store.list_documents)
+    recallable_count = sum(1 for document in documents if is_memory_recallable(document))
     metadata = dict(backend_status.metadata or {})
     metadata.update({
       "document_count": len(documents),
-      "recallable_count": len(documents),
+      "recallable_count": recallable_count,
     })
     return {
       "status": state.status,

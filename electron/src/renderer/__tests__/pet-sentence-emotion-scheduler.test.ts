@@ -78,4 +78,23 @@ describe('pet sentence emotion scheduler', () => {
 
     expect(applied).toEqual([{ offsetMs: 50, emotionId: 'curious' }])
   })
+
+  it('rejects a stale queued callback even when the timer transport cannot cancel it', () => {
+    const callbacks: Array<() => void> = []
+    const applied: PetSentenceEmotionCue[] = []
+    const scheduler = new PetSentenceEmotionScheduler({
+      applyCue: (cue) => applied.push(cue),
+      setTimeout: (handler) => {
+        callbacks.push(handler)
+        return callbacks.length as unknown as ReturnType<typeof setTimeout>
+      },
+      clearTimeout: () => undefined,
+    })
+
+    scheduler.schedule([{ emotionId: 'stale' }])
+    scheduler.schedule([{ emotionId: 'current' }])
+    callbacks.forEach((callback) => callback())
+
+    expect(applied).toEqual([{ emotionId: 'current' }])
+  })
 })

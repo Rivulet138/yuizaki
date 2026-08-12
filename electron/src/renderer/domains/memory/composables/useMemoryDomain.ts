@@ -17,6 +17,11 @@ export interface MemoryDoc {
 	scope?: string;
 	expires_at?: string;
 	metadata?: MemoryMetadata;
+	source_kind?: string;
+	source_id?: string;
+	turn_id?: string;
+	evidence?: unknown;
+	confidence_history?: Array<Record<string, unknown>>;
 }
 
 export interface MemoryDuplicateCandidate {
@@ -139,6 +144,11 @@ const normalizeDoc = (raw: unknown): MemoryDoc => {
 		scope: stringOrUndefined(metadata.scope),
 		expires_at: stringOrUndefined(metadata.expires_at),
 		metadata,
+		source_kind: stringOrUndefined(metadata.source_kind),
+		source_id: stringOrUndefined(metadata.source_id),
+		turn_id: stringOrUndefined(metadata.turn_id),
+		evidence: metadata.evidence,
+		confidence_history: Array.isArray(metadata.confidence_history) ? metadata.confidence_history as Array<Record<string, unknown>> : [],
 	};
 };
 
@@ -286,6 +296,10 @@ export function useMemoryDomain() {
 			}),
 		);
 	};
+	const correctDoc = (id: string, payload: { text: string; reason?: string; turn_id?: string; evidence?: unknown }) =>
+		memoryClient.correctDoc(id, payload);
+	const softForgetDoc = (id: string, payload?: { reason?: string; turn_id?: string }) =>
+		memoryClient.softForgetDoc(id, payload);
 
 	const queryMemory = async (payload: {
 		query: string;
@@ -359,6 +373,8 @@ export function useMemoryDomain() {
 		loadDocs,
 		addMemory,
 		updateDoc,
+		correctDoc,
+		softForgetDoc,
 		queryMemory,
 		queryRawRag,
 	};

@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 from .backend import MemoryBackend, MemoryBackendStatus
 from .schema import MemorySearchFilters
-from .vector_store import Document
+from .vector_store import Document, is_memory_recallable
 
 
 logger = logging.getLogger(__name__)
@@ -87,12 +87,20 @@ class IndexedMemoryBackend:
     def _authoritative_results(
         self,
         results: list[tuple[Document, float]],
+        *,
+        filters: MemorySearchFilters | None = None,
+        memory_types: Sequence[Any] | None = None,
     ) -> list[tuple[Document, float]]:
         authority_by_id = {document.id: document for document in self.authority.list_documents()}
         return [
             (authority_by_id[document.id], score)
             for document, score in results
             if document.id in authority_by_id
+            and is_memory_recallable(
+                authority_by_id[document.id],
+                filters=filters,
+                memory_types=memory_types,
+            )
         ]
 
     def search(
@@ -101,17 +109,18 @@ class IndexedMemoryBackend:
         top_k: int = 5,
         filters: MemorySearchFilters | None = None,
     ) -> list[tuple[Document, float]]:
+        if self._index_dirty:
+            return self.authority.search(query=query, top_k=top_k, filters=filters)
         indexed = self._best_effort_index(
             "search",
             lambda: self.index.search(query=query, top_k=top_k, filters=filters),
         )
         if not indexed:
             return self.authority.search(query=query, top_k=top_k, filters=filters)
-        authoritative = self._authoritative_results(indexed)
+        authoritative = self._authoritative_results(indexed, filters=filters)
         if len(authoritative) < len(indexed):
             self._index_dirty = True
-        if not authoritative:
-            logger.warning("Memory index returned only stale document IDs; using SQLite authority")
+            logger.warning("Memory index returned stale or hidden documents; using SQLite authority")
             return self.authority.search(query=query, top_k=top_k, filters=filters)
         return authoritative
 
@@ -124,6 +133,15 @@ class IndexedMemoryBackend:
         quality_weight: float = 0.15,
         filters: MemorySearchFilters | None = None,
     ) -> list[tuple[Document, float]]:
+        if self._index_dirty:
+            return self.authority.search_with_rerank(
+                query=query,
+                top_k=top_k,
+                memory_types=memory_types,
+                recency_weight=recency_weight,
+                quality_weight=quality_weight,
+                filters=filters,
+            )
         indexed = self._best_effort_index(
             "search_with_rerank",
             lambda: self.index.search_with_rerank(
@@ -144,11 +162,14 @@ class IndexedMemoryBackend:
                 quality_weight=quality_weight,
                 filters=filters,
             )
-        authoritative = self._authoritative_results(indexed)
+        authoritative = self._authoritative_results(
+            indexed,
+            filters=filters,
+            memory_types=memory_types,
+        )
         if len(authoritative) < len(indexed):
             self._index_dirty = True
-        if not authoritative:
-            logger.warning("Memory index rerank returned only stale document IDs; using SQLite authority")
+            logger.warning("Memory index rerank returned stale or hidden documents; using SQLite authority")
             return self.authority.search_with_rerank(
                 query=query,
                 top_k=top_k,

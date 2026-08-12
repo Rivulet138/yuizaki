@@ -115,6 +115,37 @@ class Document:
   metadata: Dict[str, Any]
 
 
+def is_memory_recallable(
+  doc: Document,
+  filters: MemorySearchFilters | None = None,
+  memory_types: Sequence[Any] | None = None,
+) -> bool:
+  metadata = doc.metadata or {}
+  if metadata.get("soft_forgotten") or is_memory_expired(metadata):
+    return False
+  allowed_types = _memory_type_filter_values(memory_types)
+  if allowed_types is not None and str(metadata.get("type") or "") not in allowed_types:
+    return False
+  if not filters:
+    return True
+  if filters.layers and str(metadata.get("layer") or "semantic") not in filters.layers:
+    return False
+  doc_scope = str(metadata.get("scope") or "workspace")
+  if filters.scope == "global":
+    return doc_scope == "global"
+  if filters.scope == "session":
+    return doc_scope == "session" and bool(filters.session_id) and metadata.get("session_id") == filters.session_id
+  if filters.scope == "workspace":
+    if doc_scope != "workspace":
+      return False
+    return not filters.workspace_id or metadata.get("workspace_id") in (filters.workspace_id, None)
+  if filters.session_id is not None and metadata.get("session_id") not in (None, filters.session_id):
+    return False
+  if filters.workspace_id is not None and metadata.get("workspace_id") not in (None, filters.workspace_id):
+    return False
+  return True
+
+
 class EmbeddingProvider(Protocol):
   @property
   def dimension(self) -> int: ...
@@ -286,30 +317,7 @@ class VectorStore:
     filters: MemorySearchFilters | None = None,
     memory_types: Sequence[Any] | None = None,
   ) -> bool:
-    metadata = doc.metadata or {}
-    if is_memory_expired(metadata):
-      return False
-    allowed_types = _memory_type_filter_values(memory_types)
-    if allowed_types is not None and str(metadata.get("type") or "") not in allowed_types:
-      return False
-    if not filters:
-      return True
-    if filters.layers and str(metadata.get("layer") or "semantic") not in filters.layers:
-      return False
-    doc_scope = str(metadata.get("scope") or "workspace")
-    if filters.scope == "global":
-      return doc_scope == "global"
-    if filters.scope == "session":
-      return doc_scope == "session" and bool(filters.session_id) and metadata.get("session_id") == filters.session_id
-    if filters.scope == "workspace":
-      if doc_scope != "workspace":
-        return False
-      return not filters.workspace_id or metadata.get("workspace_id") in (filters.workspace_id, None)
-    if filters.session_id is not None and metadata.get("session_id") not in (None, filters.session_id):
-      return False
-    if filters.workspace_id is not None and metadata.get("workspace_id") not in (None, filters.workspace_id):
-      return False
-    return True
+    return is_memory_recallable(doc, filters=filters, memory_types=memory_types)
 
   def search(
     self,

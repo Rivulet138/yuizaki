@@ -9,6 +9,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass
 from importlib import import_module
+import inspect
 import logging
 import os
 import secrets
@@ -21,6 +22,7 @@ from starlette.types import ASGIApp
 
 from modules.agent import AgentRuntime, create_agent_runtime, fetch_plugin_snapshot, register_plugin_tools
 from modules.agent.agent_trace_store import AgentTraceStore
+from modules.agent.companion_events import CompanionJobCapacityError, CompanionJobEventLog
 from modules.agent.context import AgentRequestContext, AutonomyMode, coerce_autonomy_mode
 from modules.agent.mcp_manager import MCPManager
 from modules.agent.pipeline import AgentPipeline, visual_context_requested
@@ -79,6 +81,7 @@ _VISUAL_ANALYSIS_MIN_INTERVAL_SECONDS = 2.0
 _VISUAL_ANALYSIS_REFRESH_SECONDS = 10.0
 _VISUAL_ANALYSIS_SIGNIFICANT_CHANGE = 0.12
 _VISUAL_ANALYSIS_REQUEST_WAIT_SECONDS = 0.9
+_VISUAL_CAPTURE_REQUEST_TIMEOUT_SECONDS = 6.0
 _EMPTY_LLM_RESPONSE_MESSAGE = "模型没有返回可朗读内容，请重试，或把最大输出 tokens 调高到 256 以上。"
 
 
@@ -302,8 +305,47 @@ def _event_payload(data: object) -> JsonDict:
     return {}
 
 
-def _agent_result_payload(envelope: object, session_id: str) -> JsonDict:
-    return {**_event_payload(envelope), "session_id": session_id}
+def _generation_identity(generation: object | None) -> JsonDict:
+    if generation is None:
+        return {}
+    return {
+        "generation_id": _as_text(getattr(generation, "generation_id", "")),
+        "turn_id": _as_text(getattr(generation, "turn_id", "")),
+        "request_id": _as_text(getattr(generation, "request_id", "")),
+        **({"conversation_id": _as_text(getattr(generation, "conversation_id", ""))} if _as_text(getattr(generation, "conversation_id", "")) else {}),
+        **({"operation_id": _as_text(getattr(generation, "operation_id", ""))} if _as_text(getattr(generation, "operation_id", "")) else {}),
+        **({"run_id": _as_text(getattr(generation, "run_id", ""))} if _as_text(getattr(generation, "run_id", "")) else {}),
+        "step_index": max(0, _as_int(getattr(generation, "step_index", 0), 0)),
+        "interruption_epoch": _as_int(getattr(generation, "interruption_epoch", 0), 0),
+        "version": _as_int(getattr(generation, "envelope_version", 1), 1),
+    }
+
+
+def _request_identity(data: Mapping[str, object], session_id: str) -> JsonDict:
+    identity = {
+        "session_id": session_id,
+        "generation_id": _as_text(data.get("generation_id")),
+        "turn_id": _as_text(data.get("turn_id")),
+        "request_id": _as_text(data.get("request_id")),
+        "interruption_epoch": _as_int(data.get("interruption_epoch"), 0),
+        "version": _as_int(data.get("version"), 1),
+    }
+    for source_key, target_key in (("conversation_id", "conversation_id"), ("operation_id", "operation_id"), ("run_id", "run_id")):
+        value = _as_text(data.get(source_key)).strip()
+        if value:
+            identity[target_key] = value
+    step_index = data.get("step_index")
+    if isinstance(step_index, int) and step_index >= 0:
+        identity["step_index"] = step_index
+    return identity
+
+
+def _agent_result_payload(
+    envelope: object,
+    session_id: str,
+    identity: Mapping[str, object] | None = None,
+) -> JsonDict:
+    return {**_event_payload(envelope), "session_id": session_id, **(identity or {})}
 
 
 def _extract_socket_auth_token(auth: object) -> str:
@@ -387,8 +429,11 @@ class DesktopPetSocketServer:
         self._visual_analysis_skipped: dict[str, int] = {}
         self._visual_ocr_attempts: dict[str, int] = {}
         self._visual_ocr_frame_ids: dict[str, str] = {}
+        self._visual_capture_waiters: dict[str, asyncio.Future[str | None]] = {}
+        self._visual_capture_requests: dict[str, JsonDict] = {}
         self._avatar_command_sequence = 0
         self._avatar_command_stream_id = f"python:{uuid.uuid4().hex}"
+        self._interruption_epoch = 0
         self._voice_prepared_sessions: set[str] = set()
         self._voice_prepare_tasks: set[asyncio.Task[None]] = set()
 
@@ -402,14 +447,22 @@ class DesktopPetSocketServer:
         self.ocr_client: OCRClient | None = None
         self.runtime_context: SocketRuntimeContext = SocketRuntimeContext()
         self.experience_metrics = ExperienceMetricsStore()
+        self.job_events = CompanionJobEventLog()
         self.runtime: AgentRuntime = create_agent_runtime(
             schedule_context_factory=self._build_schedule_context,
+            schedule_workspace_id_provider=self._active_workspace_id,
+            schedule_interruption_epoch_provider=self._active_interruption_epoch,
             tool_outcome_observer=self.experience_metrics.record_tool_outcome,
+            job_event_log=self.job_events,
         )
         self.tool_registry: ToolRegistry = self.runtime.tool_registry
         self.mcp_manager: MCPManager = self.runtime.mcp_manager
         self.policy_engine: PolicyEngine = self.runtime.policy_engine
         self.tool_executor: ToolExecutor = self.runtime.tool_executor
+        # Tool calls received directly over Socket.IO do not carry an AgentRequestContext.
+        # Bind the shared replay log at the server boundary while preserving ToolExecutor's
+        # standalone API for callers that provide their own context/log.
+        self.tool_executor.job_event_log = self.job_events
         self.step_executor: StepExecutor = self.runtime.step_executor
         self.agent_pipeline: AgentPipeline = self.runtime.agent_pipeline
         self.trace_store: AgentTraceStore = self.runtime.trace_store
@@ -420,12 +473,22 @@ class DesktopPetSocketServer:
         self._permission_request_tool_map: dict[str, str] = {}
         self._permission_request_scope_map: dict[str, str] = {}
         self._permission_request_sid_map: dict[str, str] = {}
+        self._tool_cancellation_signals: dict[str, tuple[str, str, asyncio.Event]] = {}
         self._plugins_initialized: bool = False
         self._plugin_init_lock = asyncio.Lock()
         self._plugin_refresh_task: asyncio.Task[None] | None = None
         self.plugin_manager.set_proactive_dispatch(self._dispatch_plugin_proactive_message)
 
         self._register_handlers()
+
+    def _cancel_direct_tool_calls(self, sid: str, request_id: str | None = None) -> bool:
+        cancelled = False
+        for tool_sid, tool_request_id, signal in self._tool_cancellation_signals.values():
+            if tool_sid != sid or (request_id and tool_request_id != request_id):
+                continue
+            signal.set()
+            cancelled = True
+        return cancelled
 
     def _next_avatar_sequence(self) -> int:
         sequence = self._avatar_command_sequence
@@ -438,6 +501,7 @@ class DesktopPetSocketServer:
         *,
         session_id: str,
         request_id: str | None = None,
+        capability_revision: str | None = None,
     ) -> JsonDict | None:
         sequence = self._next_avatar_sequence()
         command = legacy_pet_control_to_avatar_command(
@@ -446,6 +510,7 @@ class DesktopPetSocketServer:
             stream_id=self._avatar_command_stream_id,
             sequence=sequence,
             issued_at=int(time.time() * 1000),
+            capability_revision=capability_revision,
         )
         return cast(JsonDict | None, command)
 
@@ -528,6 +593,9 @@ class DesktopPetSocketServer:
         except Exception:
             logger.exception("Failed to resolve active workspace id")
             return "default"
+
+    def _active_interruption_epoch(self) -> int:
+        return self._interruption_epoch
 
     def _resolve_socket_workspace_id(self, requested_workspace_id: str | None) -> tuple[str | None, bool]:
         requested = str(requested_workspace_id or "").strip()
@@ -651,7 +719,13 @@ class DesktopPetSocketServer:
         except Exception:
             logger.exception("Failed to persist agent metadata for message %s", message_id)
 
-    def _bind_ctx_runtime(self, ctx: AgentRequestContext, *, include_visual: bool = True) -> None:
+    def _bind_ctx_runtime(
+        self,
+        ctx: AgentRequestContext,
+        *,
+        include_visual: bool = True,
+        expected_visual_frame_id: str | None = None,
+    ) -> None:
         """将 runtime_context 注入到 AgentRequestContext.extra（消除三处重复）。"""
         bindings = {
             "db_repo": self.runtime_context.db_repo,
@@ -666,9 +740,13 @@ class DesktopPetSocketServer:
         ctx.extra["relationship_event_writer"] = bindings["relationship_event_writer"]
         ctx.extra["relationship_history"] = bindings["relationship_history"]
         ctx.extra["relationship_summary"] = bindings["relationship_summary"]
+        ctx.extra["job_event_log"] = self.job_events
         if include_visual:
             visual_frame = self._latest_visual_frame_for_sid(ctx.sid)
-            if visual_frame is not None:
+            if visual_frame is not None and (
+                expected_visual_frame_id is None
+                or _as_text(visual_frame.get("frame_id")) == expected_visual_frame_id
+            ):
                 ctx.extra["latest_visual_frame"] = visual_frame
 
     def _latest_visual_frame_for_sid(self, sid: str) -> JsonDict | None:
@@ -677,11 +755,132 @@ class DesktopPetSocketServer:
             return None
         received_at = _as_float(frame.get("received_at"), 0.0)
         if received_at and time.time() - received_at > _VISUAL_CONTEXT_TTL_SECONDS:
+            self._complete_visual_job(frame, status='cancelled', phase='discarded', reason='frame_expired')
             self._latest_visual_frames.pop(sid, None)
             return None
         return dict(frame)
 
+    async def _request_visual_capture(
+        self,
+        *,
+        sid: str,
+        workspace_id: str,
+        session_id: str,
+        request_id: str,
+        interruption_epoch: int,
+    ) -> str | None:
+        job_id = f"vision:{request_id}"
+        frame_id = f"frame:{request_id}"
+        request: JsonDict = {
+            'sid': sid,
+            'workspace_id': workspace_id,
+            'session_id': session_id,
+            'turn_id': f"turn:{request_id}",
+            'job_id': job_id,
+            'request_id': request_id,
+            'frame_id': frame_id,
+            'interruption_epoch': max(0, interruption_epoch),
+        }
+        try:
+            self._emit_visual_job_event(request, 'created', phase='requested')
+        except CompanionJobCapacityError:
+            logger.warning("Visual capture unavailable: companion job event log is at active-job capacity")
+            return None
+
+        if any(_as_text(item.get('sid')) == sid for item in self._visual_capture_requests.values()):
+            self._complete_visual_job(
+                request,
+                status='cancelled',
+                phase='discarded',
+                reason='visual_request_in_flight',
+            )
+            return None
+
+        waiter = asyncio.get_running_loop().create_future()
+        self._visual_capture_waiters[job_id] = waiter
+        self._visual_capture_requests[job_id] = request
+        try:
+            await self.sio.emit(ScreenshotEvents.CAPTURE_REQUEST, {
+                'workspaceId': workspace_id,
+                'sessionId': session_id,
+                'turnId': request['turn_id'],
+                'jobId': job_id,
+                'requestId': request_id,
+                'frameId': frame_id,
+                'interruptionEpoch': request['interruption_epoch'],
+            }, to=sid)
+            return await asyncio.wait_for(asyncio.shield(waiter), timeout=_VISUAL_CAPTURE_REQUEST_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            self._complete_visual_job(
+                request,
+                status='cancelled',
+                phase='discarded',
+                reason='capture_request_timeout',
+            )
+            return None
+        except asyncio.CancelledError:
+            self._complete_visual_job(
+                request,
+                status='cancelled',
+                phase='discarded',
+                reason='capture_request_cancelled',
+            )
+            raise
+        except Exception as exc:
+            logger.warning("Failed to request visual capture from %s: %s", sid, exc)
+            self._complete_visual_job(
+                request,
+                status='failed',
+                phase='discarded',
+                reason='capture_request_emit_failed',
+            )
+            return None
+        finally:
+            if not waiter.done():
+                waiter.cancel()
+            if self._visual_capture_waiters.get(job_id) is waiter:
+                self._visual_capture_waiters.pop(job_id, None)
+                self._visual_capture_requests.pop(job_id, None)
+
+    def _resolve_visual_capture_request(self, sid: str, job_id: str, frame_id: str | None) -> None:
+        request = self._visual_capture_requests.get(job_id)
+        waiter = self._visual_capture_waiters.get(job_id)
+        if request is None or waiter is None or waiter.done() or _as_text(request.get('sid')) != sid:
+            return
+        waiter.set_result(frame_id)
+
+    @staticmethod
+    def _visual_capture_identity_matches(request: Mapping[str, object], sid: str, data: Mapping[str, object]) -> bool:
+        return request.get('visual_job_terminal') is not True and all((
+            _as_text(request.get('sid')) == sid,
+            _as_text(request.get('workspace_id')) == _as_text(data.get('workspace_id')),
+            _as_text(request.get('session_id')) == _as_text(data.get('session_id')),
+            _as_text(request.get('turn_id')) == _as_text(data.get('turn_id')),
+            _as_text(request.get('request_id')) == _as_text(data.get('request_id')),
+            _as_text(request.get('frame_id')) == _as_text(data.get('frame_id')),
+            _as_int(request.get('interruption_epoch'), 0) == _as_int(data.get('interruption_epoch'), 0),
+        ))
+
+    def _discard_pending_visual_requests(
+        self,
+        sid: str,
+        *,
+        reason: str,
+        request_id: str | None = None,
+    ) -> None:
+        for job_id, request in list(self._visual_capture_requests.items()):
+            if _as_text(request.get('sid')) != sid:
+                continue
+            if request_id and _as_text(request.get('request_id')) != request_id:
+                continue
+            self._complete_visual_job(request, status='cancelled', phase='discarded', reason=reason)
+            self._resolve_visual_capture_request(sid, job_id, None)
+
     def _clear_visual_context(self, sid: str) -> None:
+        self._discard_pending_visual_requests(sid, reason='visual_context_cleared')
+        frame = self._latest_visual_frames.get(sid)
+        if frame is not None:
+            self._complete_visual_job(frame, status='cancelled', phase='discarded', reason='visual_context_cleared')
         self._latest_visual_frames.pop(sid, None)
         self._latest_visual_observations.pop(sid, None)
         task = self._visual_analysis_tasks.pop(sid, None)
@@ -702,6 +901,9 @@ class DesktopPetSocketServer:
         *,
         estimated_bytes: int,
     ) -> JsonDict:
+        previous = self._latest_visual_frames.get(sid)
+        if previous is not None:
+            self._complete_visual_job(previous, status='cancelled', phase='discarded', reason='frame_superseded')
         frame_id = _as_text(data.get("frame_id")).strip() or f"frame-{uuid.uuid4().hex[:12]}"
         caption = _as_text(data.get("caption")).strip()
         source = _as_text(data.get("source")).strip() or "desktop"
@@ -717,6 +919,17 @@ class DesktopPetSocketServer:
             "change_score": max(0.0, min(1.0, _as_float(data.get("change_score"), 1.0))),
             "capture_reason": _as_text(data.get("capture_reason"), "manual"),
         }
+        for source_key, frame_key in (
+            ('workspace_id', 'workspace_id'),
+            ('session_id', 'session_id'),
+            ('turn_id', 'turn_id'),
+            ('job_id', 'job_id'),
+            ('request_id', 'request_id'),
+        ):
+            value = _as_text(data.get(source_key)).strip()
+            if value:
+                frame[frame_key] = value
+        frame['interruption_epoch'] = max(0, _as_int(data.get('interruption_epoch'), 0))
         timestamp = _optional_float(data.get("timestamp"))
         if timestamp is not None:
             frame["source_timestamp"] = timestamp
@@ -727,6 +940,65 @@ class DesktopPetSocketServer:
             frame["region"] = region
         self._latest_visual_frames[sid] = frame
         return dict(frame)
+
+    def _emit_visual_job_event(
+        self,
+        frame: Mapping[str, object],
+        status: str,
+        *,
+        phase: str,
+        reason: str | None = None,
+    ) -> None:
+        job_id = _as_text(frame.get('job_id')).strip()
+        request_id = _as_text(frame.get('request_id')).strip()
+        if not job_id or not request_id:
+            return
+        data: dict[str, Any] = {
+            'phase': phase,
+            'frameId': _as_text(frame.get('frame_id')),
+        }
+        if reason:
+            data['reason'] = reason
+        self.job_events.append(
+            workspace_id=_as_text(frame.get('workspace_id'), self._active_workspace_id()),
+            session_id=_as_text(frame.get('session_id'), 'vision'),
+            turn_id=_as_text(frame.get('turn_id'), f'turn:{request_id}'),
+            job_id=job_id,
+            request_id=request_id,
+            interruption_epoch=max(0, _as_int(frame.get('interruption_epoch'), 0)),
+            source='vision',
+            timestamp=time.time(),
+            status=status,
+            data=data,
+        )
+
+    def _start_visual_job(self, frame: Mapping[str, object]) -> None:
+        job_id = _as_text(frame.get('job_id')).strip()
+        if not job_id:
+            return
+        if not self.job_events.contains(job_id):
+            self._emit_visual_job_event(frame, 'created', phase='requested')
+        if self.job_events.is_active(job_id):
+            self._emit_visual_job_event(frame, 'running', phase='captured')
+
+    def _complete_visual_job(
+        self,
+        frame: JsonDict,
+        *,
+        status: str,
+        phase: str,
+        reason: str | None = None,
+    ) -> None:
+        if frame.get('visual_job_terminal'):
+            return
+        job_id = _as_text(frame.get('job_id')).strip()
+        if job_id and job_id not in self.job_events.active_job_ids():
+            frame['visual_job_terminal'] = True
+            frame.pop('image', None)
+            return
+        self._emit_visual_job_event(frame, status, phase=phase, reason=reason)
+        frame['visual_job_terminal'] = True
+        frame.pop('image', None)
 
     def _visual_result_payload(self, sid: str, frame: Mapping[str, object]) -> JsonDict:
         return {
@@ -740,7 +1012,7 @@ class DesktopPetSocketServer:
             "observation_frame_id": frame.get("observation_frame_id"),
             "received_at": frame.get("received_at"),
             "estimated_bytes": frame.get("estimated_bytes"),
-            "has_image": True,
+            "has_image": bool(frame.get("image")),
             "change_score": frame.get("change_score"),
             "capture_reason": frame.get("capture_reason"),
             "analysis_status": frame.get("analysis_status", "unavailable"),
@@ -753,6 +1025,10 @@ class DesktopPetSocketServer:
             "ocr_blocks": frame.get("ocr_blocks", []),
             "ocr_attempts": self._visual_ocr_attempts.get(sid, 0),
             "vision_skipped_reason": frame.get("vision_skipped_reason"),
+            "job_id": frame.get("job_id"),
+            "request_id": frame.get("request_id"),
+            "turn_id": frame.get("turn_id"),
+            "interruption_epoch": frame.get("interruption_epoch"),
         }
 
     async def _run_visual_ocr(self, sid: str, frame: JsonDict) -> None:
@@ -899,8 +1175,9 @@ class DesktopPetSocketServer:
             analysis_latency_ms = max(0.0, (time.perf_counter() - started_at) * 1000)
             caption = _as_text(result.get("reply")).strip()
             latest = self._latest_visual_frames.get(sid)
-            if latest is None or _as_text(latest.get("frame_id")) != frame_id:
+            if latest is None or _as_text(latest.get("frame_id")) != frame_id or _as_int(latest.get("interruption_epoch"), 0) != _as_int(frame.get("interruption_epoch"), 0):
                 outcome = "stale"
+                self._complete_visual_job(frame, status='cancelled', phase='discarded', reason='stale_frame')
                 return
             outcome = "ready" if caption else "empty"
             latest["analysis_status"] = outcome
@@ -926,6 +1203,7 @@ class DesktopPetSocketServer:
                     latest["analysis_reason"] = "vision_empty_ocr_fallback"
             completed_frame = dict(latest)
         except asyncio.CancelledError:
+            self._complete_visual_job(frame, status='cancelled', phase='discarded', reason='analysis_cancelled')
             raise
         except Exception as exc:
             analysis_latency_ms = max(0.0, (time.perf_counter() - started_at) * 1000)
@@ -946,6 +1224,17 @@ class DesktopPetSocketServer:
                 self._visual_analysis_last_completed[sid] = time.monotonic()
                 self.experience_metrics.record_visual_analysis(outcome, analysis_latency_ms)
             if completed_frame is not None:
+                latest = self._latest_visual_frames.get(sid)
+                if latest is not None and _as_text(latest.get('frame_id')) == frame_id:
+                    terminal_status = 'completed' if _as_text(latest.get('analysis_status')) != 'error' else 'failed'
+                    terminal_phase = 'completed' if terminal_status == 'completed' else 'discarded'
+                    self._complete_visual_job(
+                        latest,
+                        status=terminal_status,
+                        phase=terminal_phase,
+                        reason=_as_text(latest.get('analysis_error')) or None,
+                    )
+                    completed_frame = dict(latest)
                 try:
                     await self.sio.emit(ScreenshotEvents.RESULT, self._visual_result_payload(sid, completed_frame), to=sid)
                 except Exception as exc:
@@ -1023,7 +1312,7 @@ class DesktopPetSocketServer:
             model or getattr(main_client, "model", None),
         )
         if vision_support == "unsupported":
-            return [{
+            unsupported_messages = [{
                 "role": "system",
                 "content": "\n".join([
                     "[PROMPT_BLOCK id=visual_evidence source=desktop_capture trust=untrusted authority=evidence status=unsupported]",
@@ -1036,6 +1325,15 @@ class DesktopPetSocketServer:
                     "[END_PROMPT_BLOCK id=visual_evidence]",
                 ]),
             }]
+            stored_frame = self._latest_visual_frames.get(sid)
+            if stored_frame is not None and _as_text(stored_frame.get('frame_id')) == _as_text(frame.get('frame_id')):
+                self._complete_visual_job(
+                    stored_frame,
+                    status='cancelled',
+                    phase='discarded',
+                    reason='model_vision_unsupported',
+                )
+            return unsupported_messages
         image = _as_text(frame.get("image")).strip()
         image_url = image if image.startswith("data:") else f"data:image/png;base64,{image}"
         lines = [
@@ -1075,7 +1373,7 @@ class DesktopPetSocketServer:
         main_image_detail = getattr(main_client, "image_detail", None)
         if main_image_detail:
             main_image_block["detail"] = main_image_detail
-        return [
+        messages = [
             {"role": "system", "content": "\n".join(lines)},
             {
                 "role": "user",
@@ -1085,6 +1383,11 @@ class DesktopPetSocketServer:
                 ],
             },
         ]
+        stored_frame = self._latest_visual_frames.get(sid)
+        if stored_frame is not None and _as_text(stored_frame.get('frame_id')) == _as_text(frame.get('frame_id')):
+            self._complete_visual_job(stored_frame, status='completed', phase='completed')
+            stored_frame.pop('image', None)
+        return messages
 
     def _with_latest_visual_context(
         self,
@@ -1092,7 +1395,12 @@ class DesktopPetSocketServer:
         messages: list[dict[str, Any]],
         *,
         model: str | None = None,
+        expected_frame_id: str | None = None,
     ) -> list[dict[str, Any]]:
+        if expected_frame_id is not None:
+            frame = self._latest_visual_frame_for_sid(sid)
+            if frame is None or _as_text(frame.get('frame_id')) != expected_frame_id:
+                return list(messages)
         context_messages = self._latest_visual_context_messages(sid, model=model)
         if not context_messages:
             return list(messages)
@@ -1126,10 +1434,11 @@ class DesktopPetSocketServer:
         *,
         model: str | None = None,
         force_analysis: bool = False,
+        expected_frame_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if force_analysis and self.vision_llm_client is not None:
             frame = self._latest_visual_frame_for_sid(sid)
-            if frame is not None:
+            if frame is not None and (expected_frame_id is None or _as_text(frame.get('frame_id')) == expected_frame_id):
                 self._schedule_visual_frame_analysis(
                     sid,
                     frame,
@@ -1145,7 +1454,12 @@ class DesktopPetSocketServer:
                         )
                     except (asyncio.TimeoutError, asyncio.CancelledError):
                         pass
-        return self._with_latest_visual_context(sid, messages, model=model)
+        return self._with_latest_visual_context(
+            sid,
+            messages,
+            model=model,
+            expected_frame_id=expected_frame_id,
+        )
 
     def _resolve_target_sid(self, preferred_sid: str | None = None) -> str | None:
         if preferred_sid and preferred_sid in self.sessions:
@@ -1158,6 +1472,7 @@ class DesktopPetSocketServer:
         *,
         sid: str,
         session_id: str,
+        generation: object | None = None,
         code: str = "LLM_ERROR",
     ) -> None:
         def _on_done(done: asyncio.Task[None]) -> None:
@@ -1171,16 +1486,23 @@ class DesktopPetSocketServer:
                     "code": code,
                     "message": _chat_task_error_message(exc),
                     "session_id": session_id,
+                    **_generation_identity(generation),
                 }, to=sid))
 
         task.add_done_callback(_on_done)
 
-    async def _emit_empty_llm_response(self, sid: str, session_id: str) -> None:
+    async def _emit_empty_llm_response(
+        self,
+        sid: str,
+        session_id: str,
+        generation: object | None = None,
+    ) -> None:
         logger.warning("[SIO] LLM returned empty reply for session %s; skipping TTS", session_id)
         await self.sio.emit(SystemEvents.ERROR, {
             "code": "LLM_EMPTY_RESPONSE",
             "message": _EMPTY_LLM_RESPONSE_MESSAGE,
             "session_id": session_id,
+            **_generation_identity(generation),
         }, to=sid)
 
     def _schedule_socket_tool_bridge_refresh(self) -> None:
@@ -1237,7 +1559,12 @@ class DesktopPetSocketServer:
 
         request_id = f"req_plugin_{plugin_id}_{uuid.uuid4().hex[:8]}"
         runtime_session_id = session_id or f"plugin:{plugin_id}"
-        gen = generation_mgr.start(runtime_session_id)
+        gen = generation_mgr.start(
+            runtime_session_id,
+            turn_id=f"turn_{request_id}",
+            request_id=request_id,
+            envelope_version=1,
+        )
 
         async def _permission_request_cb(**payload: object) -> None:
             permission_request_id = payload.get("request_id")
@@ -1290,21 +1617,38 @@ class DesktopPetSocketServer:
         if pipeline_result.action_envelope:
             await self.sio.emit(
                 AgentEvents.RESULT,
-                _agent_result_payload(pipeline_result.action_envelope, runtime_session_id),
+                _agent_result_payload(
+                    pipeline_result.action_envelope,
+                    runtime_session_id,
+                    _generation_identity(gen),
+                ),
                 to=target_sid,
             )
         await self.sio.emit(LLMEvents.FINAL, _event_payload(LLMFinalData(
             text=final_reply,
             session_id=runtime_session_id,
+            generation_id=gen.generation_id,
+            turn_id=gen.turn_id,
+            request_id=gen.request_id,
+            interruption_epoch=gen.interruption_epoch,
+            version=gen.envelope_version,
+            sequence=0,
+            tts_expected=self.tts_client is not None,
         )), to=target_sid)
         if pipeline_result.pet_control:
             avatar_command = self._build_avatar_command(
                 pipeline_result.pet_control,
                 session_id=runtime_session_id,
                 request_id=request_id,
+                capability_revision=(pet_control_context or {}).get("capabilityRevision"),
             )
             await self.sio.emit(PetEvents.CONTROL, {
                 "session_id": runtime_session_id,
+                "generation_id": gen.generation_id,
+                "turn_id": gen.turn_id,
+                "request_id": gen.request_id,
+                "interruption_epoch": gen.interruption_epoch,
+                "version": gen.envelope_version,
                 "pet_control": pipeline_result.pet_control,
                 **({"avatar_command": avatar_command} if avatar_command else {}),
             }, to=target_sid)
@@ -1363,6 +1707,10 @@ class DesktopPetSocketServer:
                 "duration_ms": msg.get("duration_ms"),
                 "session_id": session_id,
                 "generation_id": _as_text(msg.get("generation_id")),
+                "turn_id": _as_text(msg.get("turn_id")),
+                "request_id": _as_text(msg.get("request_id")),
+                "interruption_epoch": _as_int(msg.get("interruption_epoch"), 0),
+                "version": _as_int(msg.get("version"), 1),
                 "sequence": _as_int(msg.get("sequence"), 0),
                 "chunk_index": _as_int(msg.get("chunk_index"), 0),
                 "is_final": False,
@@ -1382,6 +1730,10 @@ class DesktopPetSocketServer:
                 "audio_url": audio_url,
                 "session_id": session_id,
                 "generation_id": _as_text(msg.get("generation_id")),
+                "turn_id": _as_text(msg.get("turn_id")),
+                "request_id": _as_text(msg.get("request_id")),
+                "interruption_epoch": _as_int(msg.get("interruption_epoch"), 0),
+                "version": _as_int(msg.get("version"), 1),
                 "sequence": _as_int(msg.get("sequence"), 0),
                 "is_final": is_final,
                 "text": _as_text(msg.get("text")),
@@ -1391,6 +1743,10 @@ class DesktopPetSocketServer:
             await self.sio.emit(TTSEvents.DONE, {
                 "session_id": session_id,
                 "generation_id": _as_text(msg.get("generation_id")),
+                "turn_id": _as_text(msg.get("turn_id")),
+                "request_id": _as_text(msg.get("request_id")),
+                "interruption_epoch": _as_int(msg.get("interruption_epoch"), 0),
+                "version": _as_int(msg.get("version"), 1),
                 "sequence": _as_int(msg.get("sequence"), 0),
                 "is_final": True,
                 "complete": True,
@@ -1400,6 +1756,11 @@ class DesktopPetSocketServer:
                 "code": "TTS_ERROR",
                 "message": _as_text(msg.get("error"), "TTS generation failed"),
                 "session_id": session_id,
+                "generation_id": _as_text(msg.get("generation_id")),
+                "turn_id": _as_text(msg.get("turn_id")),
+                "request_id": _as_text(msg.get("request_id")),
+                "interruption_epoch": _as_int(msg.get("interruption_epoch"), 0),
+                "version": _as_int(msg.get("version"), 1),
             }, to=target_sid)
         latency = msg.get("latency")
         if isinstance(latency, dict):
@@ -1415,7 +1776,7 @@ class DesktopPetSocketServer:
         if not gen:
             return
         if not gen.full_text.strip():
-            await self._emit_empty_llm_response(target_sid, gen_session_id)
+            await self._emit_empty_llm_response(target_sid, gen_session_id, gen)
             return
 
         class _TTSWSAdapter:
@@ -1424,6 +1785,12 @@ class DesktopPetSocketServer:
                 self._sid: str = client_sid
 
             async def send_json(self, msg: JsonDict) -> None:
+                # Stamp legacy provider messages with the active generation envelope.
+                msg.setdefault("version", gen.envelope_version)
+                msg.setdefault("generation_id", gen.generation_id)
+                msg.setdefault("turn_id", gen.turn_id)
+                msg.setdefault("request_id", gen.request_id)
+                msg.setdefault("interruption_epoch", gen.interruption_epoch)
                 await outer_server._forward_tts_message(self._sid, gen_session_id, msg)
 
         outer_server = self
@@ -1457,6 +1824,7 @@ class DesktopPetSocketServer:
         async def disconnect(sid: str) -> None:
             logger.info("[SIO] Client disconnected: %s", sid)
             _ = self.sessions.pop(sid, None)
+            self._cancel_direct_tool_calls(sid)
             self._clear_visual_context(sid)
             self._voice_prepared_sessions.discard(sid)
             if self.asr_manager is not None:
@@ -1476,22 +1844,37 @@ class DesktopPetSocketServer:
         self.sio.on(SystemEvents.HEARTBEAT, handler=on_heartbeat)
 
         async def on_interrupt(sid: str, data: JsonDict) -> None:
+            self._interruption_epoch += 1
             session_id = _as_text(data.get("session_id"), sid)
             request_id = _as_text(data.get("request_id"))
             source = _as_text(data.get("source"), "manual").strip().lower()
+            self._discard_pending_visual_requests(
+                sid,
+                reason='agent_interrupted',
+                request_id=request_id or None,
+            )
+            visual_task = self._visual_analysis_tasks.pop(sid, None)
+            if visual_task is not None and not visual_task.done():
+                visual_task.cancel()
+            latest_frame = self._latest_visual_frames.pop(sid, None)
+            if latest_frame is not None:
+                self._complete_visual_job(latest_frame, status='cancelled', phase='discarded', reason='agent_interrupted')
+            self._latest_visual_observations.pop(sid, None)
             processing_started = time.perf_counter()
+            interrupted_tool = self._cancel_direct_tool_calls(sid, request_id or None)
             interrupted: Generation | None = None
             if self.generation_mgr:
                 interrupted = self.generation_mgr.interrupt(session_id)
-                self.experience_metrics.record_interrupt(interrupted is not None, source)
+                self.experience_metrics.record_interrupt(interrupted is not None or interrupted_tool, source)
             else:
-                self.experience_metrics.record_interrupt(False, source)
+                self.experience_metrics.record_interrupt(interrupted_tool, source)
             await self.sio.emit(SystemEvents.INTERRUPT_ACK, {
                 "request_id": request_id,
                 "session_id": session_id,
                 "source": source if source in {"manual", "voice"} else "other",
                 "generation_id": interrupted.generation_id if interrupted is not None else "",
                 "hit_active_generation": interrupted is not None,
+                "hit_active_tool": interrupted_tool,
                 "server_processing_ms": round((time.perf_counter() - processing_started) * 1000, 1),
             }, to=sid)
         self.sio.on(SystemEvents.INTERRUPT, handler=on_interrupt)
@@ -1582,6 +1965,15 @@ class DesktopPetSocketServer:
                 self._schedule_voice_turn_preparation()
 
             outer_server = self
+            session_id = _as_text(data.get("session_id"), sid)
+            asr_identity = {
+                "session_id": session_id,
+                "generation_id": _as_text(data.get("generation_id")),
+                "turn_id": _as_text(data.get("turn_id")),
+                "request_id": _as_text(data.get("request_id")),
+                "interruption_epoch": _as_int(data.get("interruption_epoch"), 0),
+                "version": _as_int(data.get("version"), 1),
+            }
             class _SocketIOWSAdapter:
                 def __init__(self, server: SocketIOAsyncServer, client_sid: str):
                     self._sio: SocketIOAsyncServer = server
@@ -1595,6 +1987,7 @@ class DesktopPetSocketServer:
                             "text": partial_text,
                             "confidence": 0.0,
                             "lang": "zh",
+                            **asr_identity,
                         }
                         await self._sio.emit(AudioEvents.ASR_PARTIAL, payload, to=self._sid)
                         outer_server.agent_pipeline.schedule_retrieval_prefetch(
@@ -1635,6 +2028,7 @@ class DesktopPetSocketServer:
                             "text": final_text,
                             "confidence": 0.0,
                             "lang": "zh",
+                            **asr_identity,
                         }
                         await self._sio.emit(AudioEvents.ASR_FINAL, payload, to=self._sid)
                     elif msg_type == "asr_vad_start":
@@ -1670,12 +2064,14 @@ class DesktopPetSocketServer:
         async def on_llm_request(sid: str, data: JsonDict) -> None:
             """接收聊天请求 → LLM 流式回复（Socket.IO）"""
             logger.info("[SIO] llm:request from %s", sid)
+            request_identity = _request_identity(data, _as_text(data.get("session_id"), sid))
 
             llm_client = self.llm_client
             if llm_client is None:
                 await self.sio.emit(SystemEvents.ERROR, {
                     "code": "LLM_NOT_READY",
                     "message": "LLM client not initialized",
+                    **request_identity,
                 }, to=sid)
                 return
 
@@ -1684,6 +2080,7 @@ class DesktopPetSocketServer:
                 await self.sio.emit(SystemEvents.ERROR, {
                     "code": "GEN_MGR_NOT_READY",
                     "message": "Generation manager not initialized",
+                    **request_identity,
                 }, to=sid)
                 return
 
@@ -1713,9 +2110,10 @@ class DesktopPetSocketServer:
                 await self.sio.emit(SystemEvents.ERROR, {
                     "code": "WORKSPACE_MISMATCH",
                     "message": "Socket request workspace does not match the active workspace",
+                    **request_identity,
                 }, to=sid)
                 return
-            request_id = _as_text(data.get("request_id")) or None
+            request_id = _as_text(data.get("request_id")).strip() or f"agent_{uuid.uuid4().hex[:12]}"
             model = _as_text(_request_option(data, "model")) or None
             reasoning_effort = _as_text(_request_option(data, "reasoning_effort")) or None
             mcp_enabled = _optional_bool(_request_option(data, "mcp_enabled"))
@@ -1745,8 +2143,24 @@ class DesktopPetSocketServer:
             )
 
             session_id = payload.session_id or sid
-            gen = generation_mgr.start(session_id)
+            generation_id = _as_text(data.get("generation_id")).strip() or None
+            turn_id = _as_text(data.get("turn_id")).strip() or None
+            interruption_epoch = max(0, _as_int(data.get("interruption_epoch"), 0))
+            envelope_version = max(1, _as_int(data.get("version"), 1))
+            gen = generation_mgr.start(
+                session_id,
+                generation_id=generation_id,
+                turn_id=turn_id,
+                request_id=request_id,
+                interruption_epoch=interruption_epoch,
+                envelope_version=envelope_version,
+                conversation_id=_as_text(data.get("conversation_id")),
+                operation_id=_as_text(data.get("operation_id")),
+                run_id=_as_text(data.get("run_id")),
+                step_index=max(0, _as_int(data.get("step_index"), 0)),
+            )
             persisted_assistant_message_id: int | None = None
+            llm_sequence = 0
 
             # 适配 LLMClient.stream_chat 期望的 WebSocket 接口
             outer_server = self
@@ -1757,14 +2171,22 @@ class DesktopPetSocketServer:
                     self._sid: str = client_sid
 
                 async def send_json(self, msg: JsonDict) -> None:
-                    nonlocal persisted_assistant_message_id
+                    nonlocal persisted_assistant_message_id, llm_sequence
                     msg_type = msg.get("type")
                     if msg_type == "token":
                         token = _as_text(msg.get("content"))
                         await self._sio.emit(LLMEvents.DELTA, _event_payload(LLMDeltaData(
                             token=token,
+                            index=llm_sequence,
                             session_id=session_id,
+                            generation_id=gen.generation_id,
+                            turn_id=gen.turn_id,
+                            request_id=gen.request_id,
+                            interruption_epoch=gen.interruption_epoch,
+                            version=gen.envelope_version,
+                            sequence=llm_sequence,
                         )), to=self._sid)
+                        llm_sequence += 1
                     elif msg_type == "done":
                         if hasattr(gen, "mark"):
                             gen.mark("llm_completed")
@@ -1782,6 +2204,13 @@ class DesktopPetSocketServer:
                             session_id=session_id,
                             user_message_id=message_ids["user_message_id"],
                             assistant_message_id=message_ids["assistant_message_id"],
+                            generation_id=gen.generation_id,
+                            turn_id=gen.turn_id,
+                            request_id=gen.request_id,
+                            interruption_epoch=gen.interruption_epoch,
+                            version=gen.envelope_version,
+                            sequence=llm_sequence,
+                            tts_expected=tts_enabled and outer_server.tts_client is not None,
                         )), to=self._sid)
                         if hasattr(gen, "latency_snapshot"):
                             await outer_server._emit_latency(self._sid, gen.latency_snapshot())
@@ -1790,9 +2219,15 @@ class DesktopPetSocketServer:
                             msg.get("pet_control", {}),
                             session_id=session_id,
                             request_id=request_id,
+                            capability_revision=(pet_control_context or {}).get("capabilityRevision"),
                         )
                         await self._sio.emit(PetEvents.CONTROL, {
                             "session_id": session_id,
+                            "generation_id": gen.generation_id,
+                            "turn_id": gen.turn_id,
+                            "request_id": gen.request_id,
+                            "interruption_epoch": gen.interruption_epoch,
+                            "version": gen.envelope_version,
                             "pet_control": msg.get("pet_control", {}),
                             **({"avatar_command": avatar_command} if avatar_command else {}),
                         }, to=self._sid)
@@ -1800,6 +2235,8 @@ class DesktopPetSocketServer:
                         await self._sio.emit(SystemEvents.ERROR, {
                             "code": "LLM_ERROR",
                             "message": msg.get("error", "LLM error"),
+                            "session_id": session_id,
+                            **_generation_identity(gen),
                         }, to=self._sid)
                     else:
                         logger.debug("[SIO] unhandled LLM message: %s", msg_type)
@@ -1848,7 +2285,11 @@ class DesktopPetSocketServer:
                 if result_obj.action_envelope:
                     await self.sio.emit(
                         AgentEvents.RESULT,
-                        _agent_result_payload(result_obj.action_envelope, session_id),
+                        _agent_result_payload(
+                            result_obj.action_envelope,
+                            session_id,
+                            _generation_identity(gen),
+                        ),
                         to=sid,
                     )
 
@@ -1860,7 +2301,12 @@ class DesktopPetSocketServer:
                 _run_llm_and_tts(),
                 name=f"llm-sio-{gen.generation_id}",
             )
-            self._attach_chat_task_error_handler(gen.llm_task, sid=sid, session_id=session_id)
+            self._attach_chat_task_error_handler(
+                gen.llm_task,
+                sid=sid,
+                session_id=session_id,
+                generation=gen,
+            )
         self.sio.on(LLMEvents.REQUEST, handler=on_llm_request)
 
         # ─── 工具调用 ──────────────────────────
@@ -1876,20 +2322,76 @@ class DesktopPetSocketServer:
                 id=_as_text(data.get("id")),
                 name=_as_text(data.get("name")),
                 args=_as_json_dict(data.get("args")),
+                request_id=_as_text(data.get("requestId") or data.get("request_id")) or None,
+                run_id=_as_text(data.get("runId") or data.get("run_id")) or None,
+                job_id=_as_text(data.get("jobId") or data.get("job_id")) or None,
+                source=_as_text(data.get("source")) or None,
+                retry=bool(data.get("retry", False)),
             )
 
             logger.info("[SIO] tool:call from %s: %s", sid, call.name)
+            tool_request_id = call.request_id or call.id or f"req:{uuid.uuid4().hex}"
+            tool_signal_key = f"{sid}:{tool_request_id}:{uuid.uuid4().hex}"
+            tool_cancellation_signal = asyncio.Event()
+            self._tool_cancellation_signals[tool_signal_key] = (
+                sid,
+                tool_request_id,
+                tool_cancellation_signal,
+            )
+            permission_request_ids: set[str] = set()
+            tool_ctx = AgentRequestContext(
+                sid=sid,
+                session_id=sid,
+                request_id=tool_request_id,
+                messages=[],
+                workspace_id=self._active_workspace_id(),
+                tool_registry=self.tool_registry,
+                tool_executor=self.tool_executor,
+                trace_store=self.trace_store,
+                plugin_manager=self.plugin_manager,
+                permission_scope=f"socket:{sid}",
+            )
+            tool_ctx.extra["turn_id"] = f"turn:{tool_request_id}"
+            self._bind_ctx_runtime(tool_ctx, include_visual=False)
 
             async def _permission_request_cb(**payload: object) -> None:
                 request_id = payload.get("request_id")
                 if isinstance(request_id, str):
+                    permission_request_ids.add(request_id)
                     self._permission_request_tool_map[request_id] = call.name
                     self._permission_request_scope_map[request_id] = str(payload.get("permission_scope") or sid)
                     self._permission_request_sid_map[request_id] = sid
                 await self.sio.emit(SystemEvents.PERMISSION_REQUEST, payload, to=sid)
 
             try:
-                outcome = await self.tool_executor.execute(call.name, call.args, permission_request_cb=_permission_request_cb)
+                execute_kwargs: dict[str, object] = {
+                    "permission_request_cb": _permission_request_cb,
+                    "ctx": tool_ctx,
+                    "request_id": tool_request_id,
+                    "run_id": call.run_id,
+                    "job_id": call.job_id,
+                    "source": call.source,
+                    "cancellation_signal": tool_cancellation_signal,
+                    "retry": call.retry,
+                }
+                # Keep direct Socket.IO calls compatible with injected/legacy
+                # executors while forwarding the job metadata to the current
+                # ToolExecutor implementation.
+                execute = cast(Callable[..., Awaitable[Any]], self.tool_executor.execute)
+                try:
+                    execute_signature = inspect.signature(execute)
+                except (TypeError, ValueError):
+                    execute_signature = None
+                if execute_signature is not None and not any(
+                    parameter.kind == inspect.Parameter.VAR_KEYWORD
+                    for parameter in execute_signature.parameters.values()
+                ):
+                    execute_kwargs = {
+                        key: value
+                        for key, value in execute_kwargs.items()
+                        if key in execute_signature.parameters
+                    }
+                outcome = await execute(call.name, call.args, **execute_kwargs)
 
                 if outcome.success:
                     result = ToolResultData(id=call.id, output=str(outcome.content))
@@ -1900,6 +2402,13 @@ class DesktopPetSocketServer:
             except Exception as exc:
                 err = ToolResultData(id=call.id, output="", error=str(exc))
                 await self.sio.emit(ToolEvents.ERROR, _event_payload(err), to=sid)
+            finally:
+                self._tool_cancellation_signals.pop(tool_signal_key, None)
+                if tool_cancellation_signal.is_set():
+                    for permission_request_id in permission_request_ids:
+                        self._permission_request_sid_map.pop(permission_request_id, None)
+                        self._permission_request_tool_map.pop(permission_request_id, None)
+                        self._permission_request_scope_map.pop(permission_request_id, None)
         self.sio.on(ToolEvents.CALL, handler=on_tool_call)
 
         # ─── SVC ────────────────────────────────
@@ -1943,6 +2452,29 @@ class DesktopPetSocketServer:
             request_frame_id = _as_text(data.get("frame_id")).strip()
             correlation = {"frame_id": request_frame_id} if request_frame_id else {}
 
+            if mode == 'discard':
+                job_id = _as_text(data.get('job_id')).strip()
+                request = self._visual_capture_requests.get(job_id)
+                if request is None or not self._visual_capture_identity_matches(request, sid, data):
+                    await self.sio.emit(ScreenshotEvents.RESULT, {
+                        **correlation,
+                        'job_id': job_id,
+                        'error': 'CAPTURE_REQUEST_STALE',
+                        'message': 'Visual capture request is no longer active',
+                    }, to=sid)
+                    return
+                reason = _as_text(data.get('reason'), 'capture_discarded')
+                self._complete_visual_job(request, status='cancelled', phase='discarded', reason=reason)
+                self._resolve_visual_capture_request(sid, job_id, None)
+                await self.sio.emit(ScreenshotEvents.RESULT, {
+                    **correlation,
+                    'job_id': job_id,
+                    'request_id': request.get('request_id'),
+                    'error': 'CAPTURE_DISCARDED',
+                    'message': reason,
+                }, to=sid)
+                return
+
             if mode == "clear":
                 self._clear_visual_context(sid)
                 await self.sio.emit(ScreenshotEvents.RESULT, {
@@ -1961,6 +2493,19 @@ class DesktopPetSocketServer:
 
             estimated_bytes = estimate_base64_decoded_bytes(image_b64)
             if mode in _VISUAL_FRAME_MODES:
+                job_id = _as_text(data.get('job_id')).strip()
+                if job_id:
+                    pending = self._visual_capture_requests.get(job_id)
+                    identity_matches = pending is not None and self._visual_capture_identity_matches(pending, sid, data)
+                    if not identity_matches:
+                        await self.sio.emit(ScreenshotEvents.RESULT, {
+                            **correlation,
+                            'job_id': job_id,
+                            'request_id': _as_text(data.get('request_id')),
+                            'error': 'CAPTURE_REQUEST_STALE',
+                            'message': 'Visual frame does not match an active capture request',
+                        }, to=sid)
+                        return
                 if estimated_bytes > _MAX_VISUAL_FRAME_BYTES:
                     await self.sio.emit(ScreenshotEvents.RESULT, {
                         **correlation,
@@ -1970,7 +2515,27 @@ class DesktopPetSocketServer:
                         "estimated_bytes": estimated_bytes,
                     }, to=sid)
                     return
+                previous = self._latest_visual_frames.get(sid)
+                previous_job_id = _as_text(previous.get('job_id')).strip() if previous is not None else ''
+                if (
+                    previous is not None
+                    and previous_job_id in self.job_events.active_job_ids()
+                    and _as_text(previous.get('frame_id')) != request_frame_id
+                ):
+                    await self.sio.emit(ScreenshotEvents.RESULT, {
+                        'frame_id': previous.get('frame_id'),
+                        'job_id': previous.get('job_id'),
+                        'request_id': previous.get('request_id'),
+                        'error': 'FRAME_SUPERSEDED',
+                        'message': 'Visual frame was superseded by a newer explicit request',
+                    }, to=sid)
                 frame = self._record_visual_frame(sid, image_b64, data, estimated_bytes=estimated_bytes)
+                self._start_visual_job(frame)
+                self._resolve_visual_capture_request(
+                    sid,
+                    _as_text(frame.get('job_id')),
+                    _as_text(frame.get('frame_id')) or None,
+                )
                 analysis_status = "unavailable"
                 stored_frame = self._latest_visual_frames.get(sid)
                 if stored_frame is not None:
@@ -1990,6 +2555,8 @@ class DesktopPetSocketServer:
                         await self._run_visual_ocr(sid, stored_frame)
                         analysis_status = "ocr_ready" if _as_text(stored_frame.get("ocr_text")).strip() else "ocr_empty"
                         stored_frame["analysis_reason"] = "vision_unavailable_ocr_fallback"
+                        if analysis_status == 'ocr_ready':
+                            self._complete_visual_job(stored_frame, status='completed', phase='completed')
                     frame = dict(stored_frame)
                 frame["analysis_status"] = analysis_status
                 self.experience_metrics.record_visual_frame(
@@ -2107,6 +2674,10 @@ class DesktopPetSocketServer:
             if autonomy_mode == "silent":
                 session_id = _as_text(data.get("session_id")).strip() or sid
                 request_id = _as_text(data.get("request_id")).strip() or f"agent_{uuid.uuid4().hex[:12]}"
+                generation_id = _as_text(data.get("generation_id")).strip()
+                turn_id = _as_text(data.get("turn_id")).strip()
+                interruption_epoch = max(0, _as_int(data.get("interruption_epoch"), 0))
+                envelope_version = max(1, _as_int(data.get("version"), 1))
                 ctx = AgentRequestContext(
                     sid=sid,
                     session_id=session_id,
@@ -2119,21 +2690,36 @@ class DesktopPetSocketServer:
                 await self.sio.emit(LLMEvents.FINAL, _event_payload(LLMFinalData(
                     text="",
                     session_id=session_id,
+                    generation_id=generation_id,
+                    turn_id=turn_id,
+                    request_id=request_id,
+                    interruption_epoch=interruption_epoch,
+                    version=envelope_version,
+                    sequence=0,
+                    tts_expected=False,
                 )), to=sid)
                 if result.action_envelope:
                     await self.sio.emit(
                         AgentEvents.RESULT,
-                        _agent_result_payload(result.action_envelope, session_id),
+                        _agent_result_payload(result.action_envelope, session_id, {
+                            "generation_id": generation_id,
+                            "turn_id": turn_id,
+                            "request_id": request_id,
+                            "interruption_epoch": interruption_epoch,
+                            "version": envelope_version,
+                        }),
                         to=sid,
                     )
                 return
 
+            request_identity = _request_identity(data, _as_text(data.get("session_id"), sid))
             llm_client = self.llm_client
             generation_mgr = self.generation_mgr
             if llm_client is None or generation_mgr is None:
                 await sio.emit(SystemEvents.ERROR, {
                     "code": "AGENT_NOT_READY",
                     "message": "LLM or generation manager not initialized",
+                    **request_identity,
                 }, to=sid)
                 return
 
@@ -2157,13 +2743,15 @@ class DesktopPetSocketServer:
                 max_tokens=_as_int(_request_option(data, "max_tokens"), 8192),
             )
             pet_control_context = _as_json_dict(data.get("pet_control_context")) or None
-            request_id = _as_text(data.get("request_id")) or None
+            request_id = _as_text(data.get("request_id")).strip() or f"agent_{uuid.uuid4().hex[:12]}"
+            interruption_epoch = max(0, _as_int(data.get('interruption_epoch'), 0))
             requested_workspace_id = _as_text(data.get("workspace_id")) or None
             workspace_id, workspace_allowed = self._resolve_socket_workspace_id(requested_workspace_id)
             if not workspace_allowed:
                 await self.sio.emit(SystemEvents.ERROR, {
                     "code": "WORKSPACE_MISMATCH",
                     "message": "Socket request workspace does not match the active workspace",
+                    **request_identity,
                 }, to=sid)
                 return
             model = _as_text(_request_option(data, "model")) or None
@@ -2195,7 +2783,17 @@ class DesktopPetSocketServer:
             )
 
             session_id = payload.session_id or sid
-            gen = generation_mgr.start(session_id)
+            generation_id = _as_text(data.get("generation_id")).strip() or None
+            turn_id = _as_text(data.get("turn_id")).strip() or None
+            envelope_version = max(1, _as_int(data.get("version"), 1))
+            gen = generation_mgr.start(
+                session_id,
+                generation_id=generation_id,
+                turn_id=turn_id,
+                request_id=request_id,
+                interruption_epoch=interruption_epoch,
+                envelope_version=envelope_version,
+            )
 
             async def _run_agent_loop_and_tts() -> None:
                 async def _permission_request_cb(**payload: object) -> None:
@@ -2226,20 +2824,31 @@ class DesktopPetSocketServer:
                     isinstance(voice_prefetch, dict)
                     and voice_prefetch.get("visual_requested") is True
                 ) or visual_context_requested(user_text)
+                captured_frame_id: str | None = None
+                if final_visual_request:
+                    captured_frame_id = await self._request_visual_capture(
+                        sid=sid,
+                        workspace_id=_as_text(workspace_id, self._active_workspace_id()),
+                        session_id=session_id,
+                        request_id=request_id,
+                        interruption_epoch=interruption_epoch,
+                    )
                 if isinstance(voice_prefetch, dict):
                     messages = await self._with_ready_visual_context(
                         sid,
                         original_messages,
                         model=model,
                         force_analysis=True,
-                    ) if final_visual_request else list(original_messages)
+                        expected_frame_id=captured_frame_id,
+                    ) if final_visual_request and captured_frame_id is not None else list(original_messages)
                 else:
                     messages = await self._with_ready_visual_context(
                         sid,
                         original_messages,
                         model=model,
                         force_analysis=final_visual_request,
-                    )
+                        expected_frame_id=captured_frame_id,
+                    ) if final_visual_request and captured_frame_id is not None else list(original_messages)
                 messages, visual_prompt_block = self._extract_visual_prompt_block(messages)
                 if relationship_writer:
                     event = build_user_signal_event(user_text)
@@ -2280,8 +2889,12 @@ class DesktopPetSocketServer:
                     permission_scope=f"socket:{sid}",
                     autonomy_mode=autonomy_mode,
                 )
-                include_visual = not isinstance(voice_prefetch, dict) or final_visual_request
-                self._bind_ctx_runtime(ctx, include_visual=include_visual)
+                include_visual = final_visual_request and captured_frame_id is not None
+                self._bind_ctx_runtime(
+                    ctx,
+                    include_visual=include_visual,
+                    expected_visual_frame_id=captured_frame_id,
+                )
                 ctx.extra["visual_context_requested"] = final_visual_request
                 if visual_prompt_block is not None:
                     ctx.extra["additional_prompt_blocks"] = [visual_prompt_block]
@@ -2298,6 +2911,11 @@ class DesktopPetSocketServer:
 
                 class _StreamingTTSAdapter:
                     async def send_json(self, msg: JsonDict) -> None:
+                        msg.setdefault("version", gen.envelope_version)
+                        msg.setdefault("generation_id", gen.generation_id)
+                        msg.setdefault("turn_id", gen.turn_id)
+                        msg.setdefault("request_id", gen.request_id)
+                        msg.setdefault("interruption_epoch", gen.interruption_epoch)
                         await self_server._forward_tts_message(sid, session_id, msg)
 
                 async def _run_streaming_tts(queue: asyncio.Queue[str | None], client: TTSClient) -> None:
@@ -2324,18 +2942,27 @@ class DesktopPetSocketServer:
                     gen.tts_task = tts_worker
                 tts_stream_closed = False
                 persisted_assistant_message_id: int | None = None
+                llm_sequence = 0
 
                 class _AgentStreamingAdapter:
                     async def send_json(self, msg: JsonDict) -> None:
-                        nonlocal persisted_assistant_message_id, tts_stream_closed
+                        nonlocal persisted_assistant_message_id, tts_stream_closed, llm_sequence
                         msg_type = msg.get("type")
                         if msg_type == "token":
                             token = _as_text(msg.get("content"))
                             if token:
                                 await self_server.sio.emit(LLMEvents.DELTA, _event_payload(LLMDeltaData(
                                     token=token,
+                                    index=llm_sequence,
                                     session_id=session_id,
+                                    generation_id=gen.generation_id,
+                                    turn_id=gen.turn_id,
+                                    request_id=gen.request_id,
+                                    interruption_epoch=gen.interruption_epoch,
+                                    version=gen.envelope_version,
+                                    sequence=llm_sequence,
                                 )), to=sid)
+                                llm_sequence += 1
                                 if tts_queue is not None:
                                     complete_segments = sentence_buffer.feed(token)
                                     if complete_segments and hasattr(gen, "mark"):
@@ -2353,7 +2980,7 @@ class DesktopPetSocketServer:
                                     if tts_worker is not None and not tts_worker.done():
                                         tts_worker.cancel()
                                     tts_stream_closed = True
-                                    await self_server._emit_empty_llm_response(sid, session_id)
+                                    await self_server._emit_empty_llm_response(sid, session_id, gen)
                             message_ids = await run_in_threadpool(
                                 self_server._persist_chat_exchange,
                                 session_id=session_id,
@@ -2368,6 +2995,13 @@ class DesktopPetSocketServer:
                                 session_id=session_id,
                                 user_message_id=message_ids["user_message_id"],
                                 assistant_message_id=message_ids["assistant_message_id"],
+                                generation_id=gen.generation_id,
+                                turn_id=gen.turn_id,
+                                request_id=gen.request_id,
+                                interruption_epoch=gen.interruption_epoch,
+                                version=gen.envelope_version,
+                                sequence=llm_sequence,
+                                tts_expected=tts_client is not None,
                             )), to=sid)
                             if hasattr(gen, "latency_snapshot"):
                                 await self_server._emit_latency(sid, gen.latency_snapshot())
@@ -2376,9 +3010,15 @@ class DesktopPetSocketServer:
                                 msg.get("pet_control", {}),
                                 session_id=session_id,
                                 request_id=request_id,
+                                capability_revision=(pet_control_context or {}).get("capabilityRevision"),
                             )
                             await self_server.sio.emit(PetEvents.CONTROL, {
                                 "session_id": session_id,
+                                "generation_id": gen.generation_id,
+                                "turn_id": gen.turn_id,
+                                "request_id": gen.request_id,
+                                "interruption_epoch": gen.interruption_epoch,
+                                "version": gen.envelope_version,
                                 "pet_control": msg.get("pet_control", {}),
                                 **({"avatar_command": avatar_command} if avatar_command else {}),
                             }, to=sid)
@@ -2389,6 +3029,7 @@ class DesktopPetSocketServer:
                                 "code": "LLM_ERROR",
                                 "message": msg.get("error", "LLM error"),
                                 "session_id": session_id,
+                                **_generation_identity(gen),
                             }, to=sid)
 
                 try:
@@ -2413,7 +3054,11 @@ class DesktopPetSocketServer:
                     )
                     await self.sio.emit(
                         AgentEvents.RESULT,
-                        _agent_result_payload(pipeline_result.action_envelope, session_id),
+                        _agent_result_payload(
+                            pipeline_result.action_envelope,
+                            session_id,
+                            _generation_identity(gen),
+                        ),
                         to=sid,
                     )
                 if tts_worker is not None:
@@ -2426,7 +3071,12 @@ class DesktopPetSocketServer:
                 _run_agent_loop_and_tts(),
                 name=f"agent-llm-sio-{gen.generation_id}",
             )
-            self._attach_chat_task_error_handler(gen.llm_task, sid=sid, session_id=session_id)
+            self._attach_chat_task_error_handler(
+                gen.llm_task,
+                sid=sid,
+                session_id=session_id,
+                generation=gen,
+            )
         self.sio.on(AgentEvents.CHAT, handler=on_agent_chat)
 
     # ─── 公共方法 ──────────────────────────────

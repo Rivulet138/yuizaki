@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Coroutine
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
 from fastapi.responses import JSONResponse
@@ -33,6 +34,11 @@ def test_build_experience_metrics_endpoint_returns_store_snapshot():
 _heartbeat_builder = cast(
     Callable[..., Callable[[], JSONResponse | dict[str, Any]]],
     getattr(system_runtime_endpoints, "build_heartbeat_status_endpoint"),
+)
+
+_opportunity_outcome_builder = cast(
+    Callable[..., Callable[[str, dict[str, Any]], JSONResponse | dict[str, Any]]],
+    getattr(system_runtime_endpoints, "build_companion_opportunity_outcome_endpoint"),
 )
 
 _active_workspace_builder = cast(
@@ -109,6 +115,37 @@ def test_build_heartbeat_status_endpoint_returns_snapshot_payload():
     assert result["behavior_events"] == [{"kind": "care_signal"}]
     assert result["active_workspace_id"] == "ws-main"
     assert result["active_companion"] == {"id": "companion-ws-main", "support_style": "gentle"}
+
+
+def test_companion_opportunity_outcome_endpoint_validates_and_forwards_identity():
+    resolve = Mock(return_value=True)
+    endpoint = _opportunity_outcome_builder(
+        heartbeat_scheduler_provider=lambda: SimpleNamespace(resolve_opportunity=resolve),
+    )
+
+    result = endpoint("job-1", {"request_id": "request-1", "outcome": "suppressed", "reason": "dnd"})
+
+    assert result == {
+        "ok": True,
+        "job_id": "job-1",
+        "request_id": "request-1",
+        "outcome": "suppressed",
+    }
+    resolve.assert_called_once_with(job_id="job-1", request_id="request-1", outcome="suppressed", reason="dnd")
+
+    failed = endpoint("job-2", {"request_id": "request-2", "outcome": "failed", "reason": "all_sinks_failed"})
+    assert failed["outcome"] == "failed"
+
+
+def test_companion_opportunity_outcome_endpoint_rejects_invalid_or_inactive_updates():
+    endpoint = _opportunity_outcome_builder(
+        heartbeat_scheduler_provider=lambda: SimpleNamespace(resolve_opportunity=lambda **_kwargs: False),
+    )
+    invalid = endpoint("job-1", {"request_id": "", "outcome": "unknown"})
+    inactive = endpoint("job-1", {"request_id": "request-1", "outcome": "delivered"})
+
+    assert isinstance(invalid, JSONResponse) and invalid.status_code == 422
+    assert isinstance(inactive, JSONResponse) and inactive.status_code == 409
 
 
 def test_build_active_workspace_endpoint_normalizes_workspace_id_and_returns_companion():

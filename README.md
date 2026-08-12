@@ -1,218 +1,172 @@
-<p align="center">
-  <img src="electron/src/renderer/assets/yuizaki/decor/yuizaki-wordmark.png" width="420" alt="Yuizaki">
-</p>
+# Yuizaki
 
-<p align="center">
-  本地优先、可扩展的跨平台 AI 桌宠 Agent
-</p>
+Yuizaki is a local-first desktop AI companion agent. It combines a transparent Live2D or VRM pet window with chat, realtime voice, optional on-demand vision, memory, tools, MCP, scheduling, and visible Agent Job traces.
 
-<p align="center">
-  <a href="https://github.com/Rivulet138/yuizaki/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Rivulet138/yuizaki/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-2f6f5e"></a>
-  <img alt="Platforms" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-4b5563">
-  <img alt="Python" src="https://img.shields.io/badge/Python-3.11--3.13-3776ab">
-  <img alt="Node.js" src="https://img.shields.io/badge/Node.js-22.13%2B-43853d">
-</p>
+The project is designed around three separate runtime lanes:
 
-Yuizaki 让 Live2D/VRM 角色常驻桌面，并围绕角色整合实时语音、屏幕视觉、长期记忆、工具调用、MCP 和插件。数据默认保存在本机；文本、视觉、语音和嵌入模型既可以使用本地服务，也可以连接用户选择的云端提供方。
+- **Audio**: microphone capture and playback stay on the realtime audio path. AudioWorklet is used when available, with a ScriptProcessor fallback for older runtimes.
+- **Interaction**: ASR, LLM, TTS, tool calls, cancellation, and interruption are bound to `sessionId`, `turnId`, `requestId`, and `interruptionEpoch`.
+- **Presentation**: Live2D/VRM animation, lip-sync, gaze, expressions, and idle behavior are driven locally from high-level targets. The model is not asked to generate animation frames.
 
-> [!IMPORTANT]
-> 当前项目处于开发预览阶段，适合开发测试和个人部署。公开分发前仍需完成安装包签名、模型/素材授权复核和更多真实设备验证。
+## What Works
 
-## 核心能力
+- Transparent, draggable desktop pet window with Live2D and VRM adapters.
+- Startup restoration of the last selected pet model.
+- Push-to-talk and realtime voice turns with streaming ASR, incremental responses, ordered TTS playback, lip-sync, and barge-in cancellation.
+- Chat sessions with independent generation identity, background completion, unread state, and visible Agent steps.
+- MCP, built-in tools, plugins, scheduler, heartbeat, and visual capture represented as cancellable Job events.
+- Job trace details: status, progress, tool name, result summary, duration, artifact references, failure, cancellation, and retry state.
+- Local memory with confidence, trace identity, model version, correction, and forget actions.
+- Vision is opt-in and request-scoped: no permanent screenshot loop is started by default.
+- Hardware-aware pet rendering: DPR cap, power preference, active/idle FPS tiers, hidden-window pause, and coalesced pointer input.
+- MCP starts by default from the normal launcher. Use `--no-mcp` only when explicitly needed.
 
-| 能力 | 当前实现 |
-| --- | --- |
-| 桌面角色 | Live2D、VRM、透明置顶窗口、拖拽、缩放、动作与表情 |
-| 实时语音 | 按住说话、流式 ASR、分句 TTS、播放打断和端到端延迟指标 |
-| 屏幕视觉 | 默认关闭；启用后仅在 Agent 回合按需采集单帧，独立 VLM、按需 OCR |
-| 长期记忆 | SQLite 权威存储、摘要与关系信息、可选 Qdrant 语义检索和 reranker |
-| Agent | 工具调用、权限确认、执行记录、计划任务、MCP 和插件 |
-| 本地优先 | 对话、记忆和设置默认本地持久化；实时视觉默认不保存截图历史 |
-| 可复现运行 | 项目内 `python/.venv`、平台 lock、模型资源 lock、Windows/Linux CI |
-
-## 系统结构
+## Architecture
 
 ```mermaid
 flowchart LR
-    USER["用户"] --> PET["Live2D / VRM 桌宠"]
-    USER --> PANEL["Vue 控制面板"]
-    PET --> ELECTRON["Electron 主进程"]
-    PANEL --> ELECTRON
-    ELECTRON --> API["FastAPI + Socket.IO"]
-    API --> LLM["LLM / VLM Provider"]
-    API --> VOICE["Sherpa ASR / Genie TTS"]
-    API --> MEMORY["SQLite / Qdrant"]
-    API --> TOOLS["工具 / 插件 / MCP"]
-    ELECTRON --> RESOURCES["受管模型与资源"]
+  U[User] --> PET[Live2D / VRM Pet]
+  U --> CHAT[Vue Chat and Control Panels]
+  PET --> E[Electron Runtime]
+  CHAT --> E
+  E --> S[FastAPI + Socket.IO]
+  S --> A[Agent Pipeline]
+  A --> L[LLM / VLM Providers]
+  A --> V[ASR / TTS]
+  A --> M[SQLite / Optional Vector Memory]
+  A --> J[Tools / MCP / Plugins / Scheduler]
+  J --> TRACE[Companion Job Event Log]
+  TRACE --> CHAT
 ```
 
-Electron 负责窗口、全局输入、屏幕能力和本地进程；Python 服务负责 Agent、模型路由、语音、视觉、记忆和工具策略；Node MCP 服务隔离浏览器自动化能力。详细边界见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+`electron/` owns windows, input, rendering, audio transport, and UI. `python/` owns the Agent pipeline, model routing, voice, vision, memory, tools, and scheduling. `node-mcp/` is the optional browser/MCP service.
 
-## 模型与运行时
+## Requirements
 
-| 类别 | 默认或推荐方案 | 说明 |
-| --- | --- | --- |
-| LLM | OpenAI 兼容接口 | 支持 DeepSeek、Qwen、OpenAI、xAI、Ollama、LM Studio 和自定义服务 |
-| 原生 LLM 协议 | Claude、Gemini | 分别使用 Anthropic Messages 与 Gemini 原生接口 |
-| VLM | 独立 OpenAI 兼容视觉端点 | 与文本模型分开配置，默认低细节以降低延迟 |
-| ASR | Sherpa Streaming Zipformer | 本地流式、体积较小；SenseVoice/FunASR 为显式可选项 |
-| OCR | RapidOCR ONNX Runtime | VLM 不可用或需要精确读字时使用 |
-| TTS | Genie TTS | 支持懒加载、后台预热、分句合成和中断 |
-| SVC | SoulX Singer SVC | 作为可选 Docker 外部服务隔离重型依赖 |
-| Embedding | Qwen3 Embedding 0.6B | 可选 Qdrant 检索和 CrossEncoder 重排 |
+- Windows 10/11 or x86_64 Linux
+- Python 3.11-3.13
+- Node.js 22.13 or newer
+- 8 GiB RAM minimum; 16 GiB recommended for local models
+- Docker is optional for Qdrant or external voice services
 
-模型文件按需下载，来源、revision、大小和校验信息由 [`resources.lock.json`](resources.lock.json) 管理。完整技术选型见 [TECH_STACK.md](docs/TECH_STACK.md)，质量指标见 [MODEL_EVALUATION.md](docs/MODEL_EVALUATION.md)。
+Older compatible dependency versions are preferred where they do not remove required runtime behavior. The repository keeps platform-specific Python lockfiles and a resource lock at `resources.lock.json`.
 
-## 快速开始
+## Quick Start
 
-### 环境要求
-
-- Windows 10/11 或 x86_64 Linux
-- Node.js 22.13 以上，推荐 24 LTS
-- Python 3.11、3.12 或 3.13（新环境优先 3.12/3.13）
-- 最低 8 GiB 内存，推荐 16 GiB
-- Docker 可选，仅 Qdrant、SoulX 等外部服务需要
-
-### 安装
-
-Windows：
+### Windows
 
 ```powershell
 .\install.bat core
-```
-
-Linux：
-
-```bash
-./install.sh core
-```
-
-安装脚本会创建并使用仓库内 `python/.venv`，Node 依赖使用 `npm ci`，Python 依赖使用对应平台 lock。核心安装不会强制下载所有模型。
-
-### 配置文本模型
-
-首次安装会从 `python/.env.example` 创建 `python/.env`。至少配置一个文本模型：
-
-```dotenv
-LLM_PROVIDER=custom
-LLM_BASE_URL=https://example.com/v1
-LLM_API_KEY=replace-me
-LLM_MODEL=your-model
-```
-
-不要提交真实密钥。本地 Ollama、LM Studio 或其他 OpenAI 兼容服务也使用这组配置。
-
-### 启动
-
-```powershell
 .\start.bat
 ```
 
-普通启动默认使用已构建的 Electron 渲染器、SQLite 记忆并启动 MCP；Qdrant 仍只在语义记忆需要时启用。调试渲染器或切换启动范围时可使用：
+The normal launcher performs a full startup and enables MCP. Useful options:
 
 ```powershell
-.\start.bat --dev-renderer --with-qdrant
-.\start.bat --no-mcp
+.\start.bat --check          # preflight only
+.\start.bat --verify         # type checks, build, and tests without launching
+.\start.bat --dev-renderer   # run the renderer through Vite
+.\start.bat --with-qdrant   # start Qdrant when Docker is available
+.\start.bat --no-mcp         # opt out of the default MCP service
 ```
 
+### Linux
+
 ```bash
+./install.sh core
 ./start.sh
 ```
 
-仅检查环境和启动链而不启动服务：
+The Linux launcher also starts MCP by default. Use `./start.sh --check` for a non-launching preflight.
 
-```powershell
-.\start.bat --check
+### Model configuration
+
+Copy `python/.env.example` to `python/.env` and configure at least one text provider:
+
+```dotenv
+LLM_PROVIDER=custom
+LLM_BASE_URL=http://127.0.0.1:11434/v1
+LLM_API_KEY=local
+LLM_MODEL=your-model
 ```
 
-完整语音、视觉、记忆和本地模型配置见 [QUICKSTART.md](docs/QUICKSTART.md)。Linux 依赖与显示服务说明见 [LINUX.md](docs/LINUX.md)。
+OpenAI-compatible local servers such as Ollama or LM Studio can use the same shape. Never commit real API keys.
 
-## 数据与隐私
+## Runtime Behavior
 
-| 数据 | 默认位置 | 行为 |
+### Voice and latency
+
+Microphone capture uses 16 kHz mono PCM in approximately 32 ms batches. The audio worklet only buffers and transfers samples; network and UI work stay outside the realtime audio thread. TTS lip-sync follows the audio playback clock through `requestAnimationFrame`.
+
+Interruption immediately cancels the active turn, clears queued audio, returns lip-sync to neutral, increments `interruptionEpoch`, and rejects late ASR/LLM/TTS results.
+
+### Vision
+
+Vision is explicit and request-scoped. A screenshot is captured only after an Agent turn requests visual context, analyzed once, and then released. There is no always-on desktop capture loop.
+
+### Job and trace visibility
+
+Every tool, scheduler, heartbeat, and visual operation has a bounded Job lifecycle:
+
+`created -> running/progress -> completed | failed | cancelled | interrupted`
+
+Progress events are coalesced within a short window to reduce socket and UI pressure. Terminal events are never coalesced. Chat messages show the user-facing summary; the Agent Trace panel provides the global view.
+
+## Data and Privacy
+
+Default local data locations:
+
+| Data | Location | Behavior |
 | --- | --- | --- |
-| 对话 | `python/data/chat.db` | 本地持久化 |
-| 长期记忆 | `python/data/memory.db` | 本地持久化，可永久删除 |
-| 设置 | `python/config/settings.json` | 本地持久化，密钥通过受控接口管理 |
-| TTS 音频 | `python/audio_cache/` | 临时缓存，可清理 |
-| 按需视觉帧 | 内存 | 仅在启用视觉的 Agent 回合采集并替换，默认不建立截图历史 |
-| 模型 | 受管资源目录 | 不进入默认用户数据备份 |
+| Chat history | `python/data/chat.db` | Local persistent storage |
+| Long-term memory | `python/data/memory.db` | Local, correctable, forgettable |
+| Settings | `python/config/settings.json` | Local runtime settings |
+| TTS cache | `python/audio_cache/` | Temporary and removable |
+| Vision frames | memory | Request-scoped; no default history |
 
-如果选择云端模型，对应文本、图像或音频会发送给所配置的服务提供方。资源卸载、备份和永久删除边界见 [RESOURCE_MANAGEMENT.md](docs/RESOURCE_MANAGEMENT.md)，安全模型见 [SECURITY.md](SECURITY.md)。
+When a cloud model is selected, the configured provider receives the corresponding text, image, or audio payload. Local models can keep those payloads on the device.
 
-## 开发与验证
+## Verification
 
-Electron：
+Electron focused checks:
 
 ```powershell
 cd electron
-npm ci
 npm run type-check
 npm run lint
 npm test
 npm run build
 ```
 
-Python（Windows）：
+Python checks should use explicit test paths when the workspace contains restricted temporary directories:
 
 ```powershell
 cd python
-.\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\python.exe -m pyright --pythonversion 3.11
-.\.venv\Scripts\python.exe -m evals
+python -m pytest -q tests python/test_*.py
+python -m compileall -q modules app.py socket_server.py
 ```
 
-仓库契约：
+The launcher also supports `--verify` for the supported end-to-end preflight path.
 
-```powershell
-python scripts/check_docs.py
-python scripts/check_resources.py
-python python/scripts/check_requirements_lock.py
-```
+## Project Status
 
-CI 在 Windows/Ubuntu 验证 Electron，并在 Python 3.11/3.12/3.13 上运行依赖、类型、测试和离线模型评测。Python 直接依赖已按平台精确固定；完整传递依赖 hash lock 仍是后续供应链工作。
+Yuizaki is an active development project intended for local deployment and experimentation. The core companion loop is implemented, while provider-specific model quality, packaging, and broad hardware coverage still require machine-level validation.
 
-## 项目目录
+## References
 
-| 路径 | 职责 |
-| --- | --- |
-| `electron/` | Electron 主进程、Vue 控制面板、Live2D/VRM 桌宠 |
-| `python/` | FastAPI、Socket.IO、Agent、模型、语音、视觉和记忆 |
-| `node-mcp/` | 独立浏览器 MCP 服务 |
-| `services/soulx-svc/` | 可选 SoulX Singer SVC 服务 |
-| `scripts/` | 环境检查、开发启动、模型与资源验证 |
-| `resources.lock.json` | 模型和外部资源的可审计来源 |
+The current interaction and latency direction is informed by active upstream projects and 2024-2026 research, including:
 
-## 文档
+- [Project AIRI](https://github.com/moeru-ai/airi)
+- [AIRI DevLog](https://airi.moeru.ai/docs/en/blog/DevLog-2026.03.14/)
+- [W3C Web Audio API](https://www.w3.org/TR/webaudio-1.1/)
+- [MDN AudioWorklet](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorklet)
+- [LTS-VoiceAgent (2026)](https://arxiv.org/abs/2601.19952)
+- [Endpoint Anticipation for Low-Latency Spoken Dialogue (2026)](https://arxiv.org/abs/2606.13450)
+- [HumDial Full-Duplex Study (2026)](https://arxiv.org/abs/2604.21406)
+- [Moshi-Face (2026)](https://arxiv.org/abs/2606.21970)
 
-| 文档 | 内容 |
-| --- | --- |
-| [QUICKSTART.md](docs/QUICKSTART.md) | 完整安装、首次配置与常见问题 |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 进程、核心链路和数据边界 |
-| [TECH_STACK.md](docs/TECH_STACK.md) | 技术栈、模型选型和同类项目参考 |
-| [ENVIRONMENT_SETUP.md](docs/ENVIRONMENT_SETUP.md) | 环境变量与运行时配置 |
-| [API.md](docs/API.md) | HTTP、Socket.IO 与控制接口 |
-| [RESOURCE_MANAGEMENT.md](docs/RESOURCE_MANAGEMENT.md) | 模型下载、缓存、备份和清理 |
-| [DEPENDENCIES.md](docs/DEPENDENCIES.md) | 依赖锁、升级和供应链策略 |
-| [MODEL_EVALUATION.md](docs/MODEL_EVALUATION.md) | ASR、TTS、LLM、Embedding 评测 |
-| [LINUX.md](docs/LINUX.md) | Linux 运行和桌面环境支持 |
-| [SECURITY.md](SECURITY.md) | 安全边界与漏洞报告 |
-| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | 第三方代码、模型、字体和素材许可 |
+See `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/QUICKSTART.md`, and `SECURITY.md` for implementation and operational details.
 
-## 设计原则
+## License
 
-- 桌宠本体是主要交互界面，控制面板只负责对话、管理和配置。
-- 模型可替换，但 provider 差异收敛在适配器边界。
-- 高影响工具必须经过权限判断和用户确认。
-- 模型按需下载，固定来源并验证内容。
-- 用户数据默认本地保存，并提供备份和永久删除能力。
-- 实时体验优先测量首 token、首音频、RTF、打断成功率和工具成功率。
-
-## 参考项目
-
-Yuizaki 的模块化模型层和语音交互参考了 [Open-LLM-VTuber](https://github.com/Open-LLM-VTuber/Open-LLM-VTuber)；角色优先、多运行时和 MCP 方向参考了 [Project AIRI](https://github.com/moeru-ai/airi)。Yuizaki 当前更聚焦本机桌面常驻、受控系统能力、长期记忆和可审计资源管理。
-
-## 许可
-
-源代码使用 [MIT License](LICENSE)。Live2D/VRM 模型、字体、角色图片、声音和下载模型适用各自许可，分发前请阅读 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+Source code is released under the [MIT License](LICENSE). Live2D/VRM models, voices, fonts, artwork, and downloaded model weights may have separate licenses; review `THIRD_PARTY_NOTICES.md` before redistribution.

@@ -23,6 +23,15 @@ class Generation:
 
     generation_id: str
     session_id: str
+    turn_id: str = ""
+    request_id: str = ""
+    conversation_id: str = ""
+    operation_id: str = ""
+    run_id: str = ""
+    step_index: int = 0
+    interruption_epoch: int = 0
+    envelope_version: int = 1
+    sequence: int = 0
     cancel: asyncio.Event = field(default_factory=asyncio.Event)
     invalidated: bool = False
     tokens: list[str] = field(default_factory=list)
@@ -61,6 +70,10 @@ class Generation:
             "kind": "generation",
             "session_id": self.session_id,
             "generation_id": self.generation_id,
+            "turn_id": self.turn_id,
+            "request_id": self.request_id,
+            "interruption_epoch": self.interruption_epoch,
+            "version": self.envelope_version,
             "stages": stages,
             "total_ms": round(max(stages.values(), default=0.0), 1),
         }
@@ -417,7 +430,20 @@ class GenerationManager:
 
     # ── generation lifecycle ─────────────────────────────────
 
-    def start(self, session_id: str) -> Generation:
+    def start(
+        self,
+        session_id: str,
+        *,
+        generation_id: str | None = None,
+        turn_id: str | None = None,
+        request_id: str | None = None,
+        interruption_epoch: int = 0,
+        envelope_version: int = 1,
+        conversation_id: str | None = None,
+        operation_id: str | None = None,
+        run_id: str | None = None,
+        step_index: int = 0,
+    ) -> Generation:
         """Create a new Generation, invalidating any prior one."""
         prev = self._active.get(session_id)
         if prev is not None:
@@ -429,8 +455,16 @@ class GenerationManager:
             )
 
         gen = Generation(
-            generation_id=uuid.uuid4().hex[:12],
+            generation_id=str(generation_id or uuid.uuid4().hex[:12]),
             session_id=session_id,
+            turn_id=str(turn_id or uuid.uuid4().hex[:12]),
+            request_id=str(request_id or uuid.uuid4().hex),
+            interruption_epoch=max(0, int(interruption_epoch)),
+            envelope_version=max(1, int(envelope_version)),
+            conversation_id=str(conversation_id or session_id),
+            operation_id=str(operation_id or ""),
+            run_id=str(run_id or ""),
+            step_index=max(0, int(step_index)),
         )
         self._active[session_id] = gen
         return gen

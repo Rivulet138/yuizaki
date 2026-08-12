@@ -166,6 +166,90 @@ def test_memory_add_defaults_workspace_scope_to_active_workspace():
     assert created.metadata["workspace_id"] == "default"
 
 
+def test_memory_correction_preserves_origin_and_appends_correction_history() -> None:
+    client, store = _build_client_with_store(active_workspace_id="default")
+    created = client.post(
+        "/memory/docs",
+        json={
+            "id": "provenance-doc",
+            "text": "The user likes coffee",
+            "scope": "workspace",
+            "source_kind": "chat",
+            "source_id": "message-origin",
+            "turn_id": "turn-origin",
+            "evidence": {"quote": "I like coffee"},
+            "confidence": 0.7,
+            "dedupe": False,
+        },
+    )
+
+    corrected = client.post(
+        "/memory/docs/provenance-doc/correction",
+        json={
+            "text": "The user likes tea",
+            "reason": "user_correction",
+            "turn_id": "turn-correction",
+            "evidence": {"quote": "I prefer tea now"},
+            "confidence": 0.95,
+        },
+    )
+
+    assert created.status_code == 200
+    assert corrected.status_code == 200
+    doc = next(doc for doc in store.docs if doc.id == "provenance-doc")
+    assert doc.text == "The user likes tea"
+    assert doc.metadata["source_kind"] == "chat"
+    assert doc.metadata["source_id"] == "message-origin"
+    assert doc.metadata["turn_id"] == "turn-origin"
+    assert doc.metadata["evidence"] == {"quote": "I like coffee"}
+    assert doc.metadata["correction_history"][-1] == {
+        "at": doc.metadata["correction_history"][-1]["at"],
+        "reason": "user_correction",
+        "turn_id": "turn-correction",
+        "evidence": {"quote": "I prefer tea now"},
+    }
+    assert [item["source"] for item in doc.metadata["confidence_history"]] == ["create", "update"]
+    assert doc.metadata["confidence_history"][-1]["confidence"] == 0.95
+
+
+def test_memory_soft_forget_keeps_audit_record_but_hides_document() -> None:
+    client, store = _build_client_with_store(active_workspace_id="default")
+    created = client.post(
+        "/memory/docs",
+        json={
+            "id": "forgettable-doc",
+            "text": "Temporary preference",
+            "scope": "workspace",
+            "source_kind": "chat",
+            "source_id": "message-1",
+            "turn_id": "turn-1",
+            "dedupe": False,
+        },
+    )
+    forgotten = client.post(
+        "/memory/docs/forgettable-doc/soft-forget",
+        json={"reason": "user_request", "turn_id": "turn-forget"},
+    )
+    listed = client.get("/memory/docs")
+
+    assert created.status_code == 200
+    assert forgotten.status_code == 200
+    doc = next(doc for doc in store.docs if doc.id == "forgettable-doc")
+    assert doc.metadata["source_kind"] == "chat"
+    assert doc.metadata["source_id"] == "message-1"
+    assert doc.metadata["turn_id"] == "turn-1"
+    assert doc.metadata["soft_forgotten"] is True
+    assert doc.metadata["soft_forget_turn_id"] == "turn-forget"
+    assert doc.metadata["audit"][-1]["action"] == "soft_forget"
+    assert doc.metadata["audit"][-1]["reason"] == "user_request"
+    assert "forgettable-doc" not in {item["id"] for item in listed.json()["docs"]}
+
+    status = client.get("/memory/index/status")
+    assert status.status_code == 200
+    assert status.json()["metadata"]["document_count"] == 6
+    assert status.json()["metadata"]["recallable_count"] == 5
+
+
 def test_memory_update_and_delete_reject_cross_workspace_doc():
     client, _store = _build_client_with_store(active_workspace_id="default")
 

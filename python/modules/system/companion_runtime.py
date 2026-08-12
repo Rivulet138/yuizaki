@@ -23,6 +23,8 @@ def build_companion_runtime_snapshot(
     summarize_relationship_events,
     is_relationship_milestone,
     limit: int = 8,
+    scheduler: Any = None,
+    job_event_log: Any = None,
 ) -> Dict[str, Any]:
     companion = db_repo.get_workspace_companion(active_workspace_id) if db_repo else None
     companion_id = companion.get("id") if isinstance(companion, dict) else None
@@ -34,14 +36,27 @@ def build_companion_runtime_snapshot(
         "persona": heartbeat_scheduler.state.persona if heartbeat_scheduler else {"mood": "neutral", "energy": 1.0, "affinity": 0.5},
         "events": heartbeat_scheduler.state.events if heartbeat_scheduler else [],
         "behavior_events": heartbeat_scheduler.state.behavior_events if heartbeat_scheduler else [],
+        "goals": heartbeat_scheduler.goal_snapshot() if heartbeat_scheduler and hasattr(heartbeat_scheduler, "goal_snapshot") else [],
         "proactive_state": (heartbeat_scheduler.state.last_relationship_snapshot or {}).get("proactive_state") if heartbeat_scheduler else None,
         "behavior_profile": (heartbeat_scheduler.state.last_relationship_snapshot or {}).get("behavior_profile") if heartbeat_scheduler else None,
+    }
+    event_source = job_event_log or scheduler
+    if job_event_log:
+        job_events = job_event_log.snapshot()
+    elif scheduler:
+        job_events = scheduler.snapshot_job_events()
+    else:
+        job_events = []
+    jobs = {
+        "events": job_events,
+        "active_job_ids": event_source.active_job_ids() if event_source else [],
     }
     if not companion_id:
         return {
             "active_workspace_id": active_workspace_id,
             "active_companion": None,
             "heartbeat": heartbeat,
+            "jobs": jobs,
             "companion_state": {
                 "mood": "neutral",
                 "energy": 1.0,
@@ -152,6 +167,7 @@ def build_companion_runtime_snapshot(
         "active_workspace_id": active_workspace_id,
         "active_companion": companion,
         "heartbeat": heartbeat,
+        "jobs": jobs,
         "companion_state": {
             "mood": str(companion.get("emotion_state") or heartbeat_mood or "neutral") if isinstance(companion, dict) else "neutral",
             "energy": current_energy,

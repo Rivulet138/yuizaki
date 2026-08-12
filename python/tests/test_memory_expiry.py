@@ -132,6 +132,27 @@ def test_expired_docs_are_hidden_from_list_and_vector_search_before_ranking() ->
     assert [doc.id for doc, _score in results] == ["active"]
 
 
+def test_soft_forgotten_docs_are_hidden_from_list_and_vector_search() -> None:
+    client, store = _client()
+    _, vector_store, _ = _modules()
+    store.add_document(vector_store.Document(
+        id="forgotten",
+        text="same",
+        metadata={"scope": "global", "soft_forgotten": True},
+    ))
+    store.add_document(vector_store.Document(
+        id="active",
+        text="same",
+        metadata={"scope": "global"},
+    ))
+
+    listed = client.get("/memory/docs", params={"scope": "global"})
+    results = store.search_with_rerank("same", top_k=10)
+
+    assert [doc["id"] for doc in listed.json()["docs"]] == ["active"]
+    assert [doc.id for doc, _score in results] == ["active"]
+
+
 def test_retrieval_pipeline_defensively_filters_expired_results_with_trace_reason() -> None:
     _, vector_store, pipeline_module = _modules()
     expired = vector_store.Document(

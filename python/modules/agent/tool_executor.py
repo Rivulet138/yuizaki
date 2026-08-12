@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import re
+import time
+import uuid
 from dataclasses import replace
 from datetime import datetime
 from typing import Any, Callable
@@ -15,9 +18,20 @@ from .tool_result import ToolResultEnvelope
 from .models import RuntimeLoopRecord
 from .permission_receipt import build_permission_receipt
 from .route_policy import memory_reflector_route
+from .companion_events import CompanionJobEventLog, CompanionJobCapacityError
 
 
 PermissionRequestCallback = Any
+_RESULT_SUMMARY_LIMIT = 360
+
+
+def _bounded_result_summary(content: Any) -> str:
+    """Keep the user-visible job result useful without copying tool output into the event log."""
+    text = str(content or "").strip()
+    text = re.sub(r"\s+", " ", text)
+    if len(text) <= _RESULT_SUMMARY_LIMIT:
+        return text
+    return f"{text[:_RESULT_SUMMARY_LIMIT - 3].rstrip()}..."
 
 
 class ToolExecutor:
@@ -26,10 +40,96 @@ class ToolExecutor:
         registry: ToolRegistry,
         policy_engine: PolicyEngine | None = None,
         outcome_observer: Callable[[bool], None] | None = None,
+        job_event_log: CompanionJobEventLog | None = None,
     ) -> None:
         self.registry = registry
         self.policy_engine = policy_engine or PolicyEngine()
         self.outcome_observer = outcome_observer
+        self.job_event_log = job_event_log
+
+    @staticmethod
+    def _cancelled(signal: Any) -> bool:
+        if signal is None:
+            return False
+        try:
+            return bool(signal.is_set()) if hasattr(signal, "is_set") else bool(signal()) if callable(signal) else bool(signal)
+        except Exception:
+            # A broken cancellation signal must fail closed.
+            return True
+
+    def _job_event(
+        self,
+        *,
+        ctx: Any,
+        status: str,
+        job_id: str,
+        run_id: str,
+        request_id: str,
+        source: str,
+        tool_name: str,
+        progress: float | None = None,
+        error: str | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> bool:
+        log = self.job_event_log
+        if log is None and ctx is not None:
+            log = getattr(ctx, "extra", {}).get("job_event_log")
+        if log is None:
+            return True
+        event_data: dict[str, Any] = {"toolName": tool_name, **(data or {})}
+        if progress is not None:
+            event_data["progress"] = max(0.0, min(1.0, float(progress)))
+        if error:
+            event_data["error"] = error
+        try:
+            log.append(
+                workspace_id=str(getattr(ctx, "workspace_id", None) or getattr(ctx, "extra", {}).get("active_workspace_id", "default")),
+                session_id=str(getattr(ctx, "session_id", None) or "tool"),
+                turn_id=str(getattr(ctx, "extra", {}).get("turn_id") or f"turn:{request_id}"),
+                job_id=job_id, run_id=run_id, request_id=request_id,
+                interruption_epoch=int(getattr(ctx, "extra", {}).get("interruption_epoch", 0) or 0),
+                source=source, timestamp=time.time(), status=status, data=event_data,
+            )
+        except CompanionJobCapacityError:
+            return False
+        return True
+
+    @classmethod
+    async def _wait_for_cancellation(cls, signal: Any) -> None:
+        if isinstance(signal, asyncio.Event):
+            await signal.wait()
+            return
+        while not cls._cancelled(signal):
+            await asyncio.sleep(0.02)
+
+    @classmethod
+    async def _await_with_cancellation(cls, awaitable: Any, signal: Any) -> tuple[Any, bool]:
+        task = asyncio.ensure_future(awaitable)
+        if signal is None:
+            return await task, False
+        if cls._cancelled(signal):
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            return None, True
+
+        cancellation_task = asyncio.create_task(cls._wait_for_cancellation(signal))
+        try:
+            done, _ = await asyncio.wait(
+                {task, cancellation_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if cancellation_task in done and cls._cancelled(signal):
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                return None, True
+            return await task, False
+        except asyncio.CancelledError:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            raise
+        finally:
+            cancellation_task.cancel()
+            await asyncio.gather(cancellation_task, return_exceptions=True)
 
     def _finish(self, outcome: ToolResultEnvelope) -> ToolResultEnvelope:
         self._observe(bool(outcome.success))
@@ -79,6 +179,12 @@ class ToolExecutor:
         plugin_manager: Any = None,
         ctx: Any = None,
         force_confirmation: bool = False,
+        request_id: str | None = None,
+        run_id: str | None = None,
+        job_id: str | None = None,
+        source: str | None = None,
+        cancellation_signal: Any = None,
+        retry: bool = False,
     ) -> ToolResultEnvelope:
         tool = self.registry.get(tool_name)
         if tool is None:
@@ -90,19 +196,101 @@ class ToolExecutor:
                 error=f"Unknown tool: {tool_name}",
             ))
 
-        if plugin_manager is not None:
-            args = await plugin_manager.before_tool(tool.name, args, ctx)
-
-        request_id = getattr(ctx, 'request_id', None) if ctx is not None else None
-        permission_scope = getattr(ctx, 'permission_scope', None) if ctx is not None else None
-        decision = await asyncio.to_thread(
-            self._evaluate_policy,
-            tool,
-            request_id=request_id,
-            permission_scope=permission_scope,
-            parameters=args,
-            force_confirm=force_confirmation,
+        request_id = str(
+            request_id
+            or (getattr(ctx, 'request_id', None) if ctx is not None else None)
+            or f"req:{uuid.uuid4().hex}"
         )
+        extra = getattr(ctx, "extra", {}) if ctx is not None else {}
+        cancellation_signal = cancellation_signal or extra.get("cancellation_signal") or extra.get("cancel_event")
+        if cancellation_signal is None and ctx is not None:
+            generation_mgr = getattr(ctx, "generation_mgr", None)
+            get_generation = getattr(generation_mgr, "get", None)
+            generation = get_generation(getattr(ctx, "session_id", "")) if callable(get_generation) else None
+            cancellation_signal = getattr(generation, "cancel", None)
+        retry_of_run_id = str(run_id or extra.get("run_id") or "") or None
+        retry_of_job_id = str(job_id or extra.get("job_id") or "") or None
+        run_id = retry_of_run_id or f"run:{uuid.uuid4().hex}"
+        job_id = retry_of_job_id or f"job:{uuid.uuid4().hex}"
+        if retry:
+            run_id = f"{run_id}:retry:{uuid.uuid4().hex[:8]}"
+            job_id = f"job:{uuid.uuid4().hex}"
+        permission_scope = getattr(ctx, 'permission_scope', None) if ctx is not None else None
+        event_source = str(getattr(tool, "source", None) or "builtin")
+        job_data: dict[str, Any] = {"toolSource": event_source}
+        if source:
+            job_data["invocationSource"] = source
+        if retry:
+            job_data["retry"] = True
+            if retry_of_job_id:
+                job_data["retryOfJobId"] = retry_of_job_id
+            if retry_of_run_id:
+                job_data["retryOfRunId"] = retry_of_run_id
+        if not self._job_event(
+            ctx=ctx,
+            status="created",
+            job_id=job_id,
+            run_id=run_id,
+            request_id=request_id,
+            source=event_source,
+            tool_name=tool_name,
+            data=job_data,
+        ):
+            return self._finish(ToolResultEnvelope(
+                success=False,
+                content="",
+                source=tool.source,
+                tool_name=tool_name,
+                error="Tool execution rejected: companion job capacity exceeded",
+                data={"code": "TOOL_JOB_CAPACITY_EXCEEDED"},
+            ))
+        if self._cancelled(cancellation_signal):
+            self._job_event(
+                ctx=ctx,
+                status="cancelled",
+                job_id=job_id,
+                run_id=run_id,
+                request_id=request_id,
+                source=event_source,
+                tool_name=tool_name,
+                error="cancelled",
+                data=job_data,
+            )
+            return self._finish(ToolResultEnvelope(
+                success=False,
+                content="",
+                source=tool.source,
+                tool_name=tool_name,
+                error="Tool execution cancelled",
+            ))
+
+        try:
+            if plugin_manager is not None:
+                args = await plugin_manager.before_tool(tool.name, args, ctx)
+            decision = await asyncio.to_thread(
+                self._evaluate_policy,
+                tool,
+                request_id=request_id,
+                permission_scope=permission_scope,
+                parameters=args,
+                force_confirm=force_confirmation,
+            )
+        except asyncio.CancelledError:
+            self._job_event(
+                ctx=ctx, status="cancelled", job_id=job_id, run_id=run_id,
+                request_id=request_id, source=event_source, tool_name=tool_name,
+                error="cancelled", data=job_data,
+            )
+            self._observe(False)
+            raise
+        except Exception as exc:
+            self._job_event(
+                ctx=ctx, status="failed", job_id=job_id, run_id=run_id,
+                request_id=request_id, source=event_source, tool_name=tool_name,
+                error=str(exc), data=job_data,
+            )
+            self._observe(False)
+            raise
         allowed_by_policy = bool(getattr(decision, "allowed", False))
         require_confirm = bool(getattr(decision, "require_confirm", False))
         decision_request_id = getattr(decision, "request_id", None)
@@ -146,6 +334,11 @@ class ToolExecutor:
                 discard_permission = getattr(self.policy_engine, "discard_permission", None)
                 if callable(discard_permission):
                     discard_permission(decision_request_id)
+                self._job_event(
+                    ctx=ctx, status="failed", job_id=job_id, run_id=run_id,
+                    request_id=request_id, source=event_source, tool_name=tool_name,
+                    error=decision_reason, data={**job_data, "args": redacted_args, "retryable": False},
+                )
                 return self._finish(ToolResultEnvelope(
                     success=False,
                     content="",
@@ -163,19 +356,68 @@ class ToolExecutor:
                 ))
 
             future = self.policy_engine.register_pending(decision_request_id)
-            await permission_request_cb(
-                request_id=decision_request_id,
-                tool_name=tool.name,
-                capability_id=tool.name,
-                capability_type="tool",
-                capability_kind=f"{tool.source}-tool",
-                permission_scope=permission_scope,
-                risk_level=tool.risk_level,
-                reason=decision_reason,
-                args=redacted_args,
-            )
-            allowed = await future
+            try:
+                await permission_request_cb(
+                    request_id=decision_request_id,
+                    tool_name=tool.name,
+                    capability_id=tool.name,
+                    capability_type="tool",
+                    capability_kind=f"{tool.source}-tool",
+                    permission_scope=permission_scope,
+                    risk_level=tool.risk_level,
+                    reason=decision_reason,
+                    args=redacted_args,
+                )
+            except asyncio.CancelledError:
+                self.policy_engine.resolve_pending(
+                    decision_request_id, False, False, tool.name, permission_scope,
+                )
+                self._job_event(
+                    ctx=ctx, status="cancelled", job_id=job_id, run_id=run_id,
+                    request_id=request_id, source=event_source, tool_name=tool_name,
+                    error="cancelled", data={**job_data, "args": redacted_args, "retryable": True},
+                )
+                self._observe(False)
+                raise
+            except Exception as exc:
+                self.policy_engine.resolve_pending(
+                    decision_request_id, False, False, tool.name, permission_scope,
+                )
+                self._job_event(
+                    ctx=ctx, status="failed", job_id=job_id, run_id=run_id,
+                    request_id=request_id, source=event_source, tool_name=tool_name,
+                    error=str(exc), data={**job_data, "args": redacted_args, "retryable": True},
+                )
+                self._observe(False)
+                raise
+            allowed, cancelled = await self._await_with_cancellation(future, cancellation_signal)
+            if cancelled:
+                self.policy_engine.resolve_pending(
+                    decision_request_id,
+                    False,
+                    False,
+                    tool.name,
+                    permission_scope,
+                )
+                self._job_event(
+                    ctx=ctx, status="cancelled", job_id=job_id, run_id=run_id,
+                    request_id=request_id, source=event_source, tool_name=tool_name,
+                    error="cancelled", data={**job_data, "args": redacted_args, "retryable": True},
+                )
+                return self._finish(ToolResultEnvelope(
+                    success=False,
+                    content="",
+                    source=tool.source,
+                    tool_name=tool.name,
+                    error="Tool execution cancelled",
+                    permission_receipt=receipt,
+                ))
             if not allowed:
+                self._job_event(
+                    ctx=ctx, status="cancelled", job_id=job_id, run_id=run_id,
+                    request_id=request_id, source=event_source, tool_name=tool_name,
+                    error="permission_denied", data={**job_data, "args": redacted_args, "retryable": False},
+                )
                 return self._finish(ToolResultEnvelope(
                     success=False,
                     content="",
@@ -199,6 +441,11 @@ class ToolExecutor:
             ) if receipt is not None else None
 
         if not allowed_by_policy and not (require_confirm and receipt and receipt.decision == "allowed"):
+            self._job_event(
+                ctx=ctx, status="failed", job_id=job_id, run_id=run_id,
+                request_id=request_id, source=event_source, tool_name=tool_name,
+                error=decision_reason, data={**job_data, "args": redacted_args, "retryable": False},
+            )
             return self._finish(ToolResultEnvelope(
                 success=False,
                 content="",
@@ -232,18 +479,96 @@ class ToolExecutor:
                 ).to_dict(),
             )
 
-        try:
+        terminal_data = {
+            **job_data,
+            "args": redacted_args,
+            "retryable": not bool(getattr(receipt, "redacted_paths", [])),
+        }
+        started_at = time.perf_counter()
+        self._job_event(
+            ctx=ctx,
+            status="running",
+            job_id=job_id,
+            run_id=run_id,
+            request_id=request_id,
+            source=event_source,
+            tool_name=tool_name,
+            data=job_data,
+        )
+
+        async def _run_tool() -> Any:
             if inspect.iscoroutinefunction(tool.handler):
-                result = await tool.handler(args)
+                tool_result = await tool.handler(args)
             else:
-                result = await asyncio.to_thread(tool.handler, args)
-                if inspect.isawaitable(result):
-                    result = await result
+                tool_result = await asyncio.to_thread(tool.handler, args)
+                if inspect.isawaitable(tool_result):
+                    tool_result = await tool_result
             if plugin_manager is not None:
-                result = await plugin_manager.after_tool(result, tool.name, args, ctx)
-        except Exception:
+                tool_result = await plugin_manager.after_tool(tool_result, tool.name, args, ctx)
+            return tool_result
+
+        try:
+            # asyncio cannot stop a synchronous function already running in a
+            # worker thread. Await it to a real terminal state before reporting
+            # cancellation, so the job never claims a side effect stopped while
+            # it is still executing.
+            if not inspect.iscoroutinefunction(tool.handler):
+                result = await _run_tool()
+                cancelled = self._cancelled(cancellation_signal)
+            else:
+                result, cancelled = await self._await_with_cancellation(_run_tool(), cancellation_signal)
+        except asyncio.CancelledError:
+            terminal_data = {**terminal_data, "durationMs": round((time.perf_counter() - started_at) * 1000)}
+            self._job_event(
+                ctx=ctx, status="cancelled", job_id=job_id, run_id=run_id,
+                request_id=request_id, source=event_source, tool_name=tool_name,
+                error="cancelled", data=terminal_data,
+            )
             self._observe(False)
             raise
+        except Exception as exc:
+            terminal_data = {**terminal_data, "durationMs": round((time.perf_counter() - started_at) * 1000)}
+            self._job_event(
+                ctx=ctx, status="failed", job_id=job_id, run_id=run_id,
+                request_id=request_id, source=event_source, tool_name=tool_name,
+                error=str(exc), data=terminal_data,
+            )
+            self._observe(False)
+            raise
+        if cancelled:
+            terminal_data = {**terminal_data, "durationMs": round((time.perf_counter() - started_at) * 1000), "cancellationReason": "cancelled"}
+            self._job_event(
+                ctx=ctx, status="cancelled", job_id=job_id, run_id=run_id,
+                request_id=request_id, source=event_source, tool_name=tool_name,
+                progress=1.0, error="cancelled", data=terminal_data,
+            )
+            return self._finish(ToolResultEnvelope(
+                success=False,
+                content="",
+                source=tool.source,
+                tool_name=tool_name,
+                error="Tool execution cancelled",
+                permission_receipt=receipt,
+            ))
+        result_summary = _bounded_result_summary(getattr(result, "content", ""))
+        terminal_data = {
+            **terminal_data,
+            "durationMs": round((time.perf_counter() - started_at) * 1000),
+            "artifactCount": len(getattr(result, "artifacts", []) or []),
+            **({"resultSummary": result_summary} if result_summary else {}),
+        }
+        self._job_event(
+            ctx=ctx,
+            status="completed" if result.success else "failed",
+            job_id=job_id,
+            run_id=run_id,
+            request_id=request_id,
+            source=event_source,
+            tool_name=tool_name,
+            progress=1.0,
+            error=str(result.error) if not result.success else None,
+            data=terminal_data,
+        )
         result.permission_receipt = receipt
         bindings = get_runtime_bindings(ctx) if ctx is not None else None
         relationship_writer = bindings.relationship_event_writer if bindings is not None else None

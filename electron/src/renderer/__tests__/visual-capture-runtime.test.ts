@@ -18,6 +18,7 @@ const createHarness = () => {
   const captureRegion = vi.fn(async () => 'data:image/jpeg;base64,region')
   const requestScreenshot = vi.fn()
   const clearVisualContext = vi.fn()
+  const discardScreenshotRequest = vi.fn()
   const state = {
     markVisualPerceptionCapturing: vi.fn(),
     markVisualPerceptionReady: vi.fn(),
@@ -33,6 +34,7 @@ const createHarness = () => {
       isConnected: () => socketConnected,
       requestScreenshot,
       clearVisualContext,
+      discardScreenshotRequest,
     }),
     state,
     logger,
@@ -47,6 +49,7 @@ const createHarness = () => {
     captureRegion,
     requestScreenshot,
     clearVisualContext,
+    discardScreenshotRequest,
     state,
     logger,
     setHidden: (value: boolean) => { hidden = value },
@@ -75,6 +78,45 @@ describe('visual capture runtime', () => {
 
     expect(harness.capture).not.toHaveBeenCalled()
     expect(harness.requestScreenshot).not.toHaveBeenCalled()
+  })
+
+  it('discards a backend request without touching capture APIs when vision is disabled', async () => {
+    const harness = createHarness()
+    harness.setSettings({ ...harness.getSettings(), enabled: false })
+
+    await harness.runtime.handleCaptureRequest({
+      requestId: 'request-disabled',
+      sessionId: 'session-disabled',
+      workspaceId: 'workspace-disabled',
+      turnId: 'turn-disabled',
+      jobId: 'vision:request-disabled',
+      frameId: 'frame-disabled',
+      interruptionEpoch: 0,
+    })
+
+    expect(harness.capture).not.toHaveBeenCalled()
+    expect(harness.requestScreenshot).not.toHaveBeenCalled()
+    expect(harness.discardScreenshotRequest).toHaveBeenCalledWith(expect.objectContaining({
+      jobId: 'vision:request-disabled',
+    }), 'skipped:disabled')
+  })
+
+  it('ignores malformed backend capture identities', async () => {
+    const harness = createHarness()
+
+    await harness.runtime.handleCaptureRequest({
+      requestId: 'request-malformed',
+      sessionId: 'session-malformed',
+      workspaceId: 'workspace-malformed',
+      turnId: 'turn-malformed',
+      jobId: 'vision:request-malformed',
+      frameId: 'frame-malformed',
+      interruptionEpoch: -1,
+    })
+
+    expect(harness.capture).not.toHaveBeenCalled()
+    expect(harness.requestScreenshot).not.toHaveBeenCalled()
+    expect(harness.discardScreenshotRequest).not.toHaveBeenCalled()
   })
 
   it('rejects unavailable health, disconnected socket, and concurrent capture', async () => {
@@ -134,13 +176,56 @@ describe('visual capture runtime', () => {
     expect(harness.state.markVisualPerceptionReady).not.toHaveBeenCalled()
   })
 
-  it('prepares agent context through one explicit capture and result wait', async () => {
+  it('responds to one backend capture request without local intent matching', async () => {
     const harness = createHarness()
-    const preparation = harness.runtime.prepareAgentVisualContext()
-    await vi.waitFor(() => expect(harness.requestScreenshot).toHaveBeenCalledTimes(1))
-    const frameId = harness.requestScreenshot.mock.calls[0]?.[1]?.frameId
-    harness.runtime.handleResult({ frame_id: frameId, status: 'ok', mode: 'vision', analysis_status: 'ready' })
-    await expect(preparation).resolves.toBeUndefined()
-    expect(harness.clearVisualContext).not.toHaveBeenCalled()
+    await harness.runtime.handleCaptureRequest({
+      workspaceId: 'workspace-backend',
+      sessionId: 'session-backend',
+      turnId: 'turn-backend',
+      jobId: 'vision:request-backend',
+      requestId: 'request-backend',
+      frameId: 'frame-backend',
+      interruptionEpoch: 3,
+    })
+
+    expect(harness.requestScreenshot).toHaveBeenCalledTimes(1)
+    expect(harness.requestScreenshot.mock.calls[0]?.[1]).toMatchObject({
+      frameId: 'frame-backend',
+      jobId: 'vision:request-backend',
+      requestId: 'request-backend',
+      turnId: 'turn-backend',
+    })
+  })
+
+  it('discards a concurrent backend request without cancelling the active capture', async () => {
+    const harness = createHarness()
+    let releaseCapture!: (value: string) => void
+    harness.capture.mockImplementationOnce(() => new Promise(resolve => { releaseCapture = resolve }))
+    const firstRequest = {
+      requestId: 'request-first',
+      sessionId: 'session-first',
+      workspaceId: 'workspace-vision',
+      turnId: 'turn-first',
+      jobId: 'vision:request-first',
+      frameId: 'frame-first',
+      interruptionEpoch: 0,
+    }
+    const secondRequest = {
+      ...firstRequest,
+      requestId: 'request-second',
+      sessionId: 'session-second',
+      turnId: 'turn-second',
+      jobId: 'vision:request-second',
+      frameId: 'frame-second',
+    }
+
+    const first = harness.runtime.handleCaptureRequest(firstRequest)
+    await vi.waitFor(() => expect(harness.state.markVisualPerceptionCapturing).toHaveBeenCalledTimes(1))
+    await harness.runtime.handleCaptureRequest(secondRequest)
+
+    expect(harness.discardScreenshotRequest).toHaveBeenCalledWith(secondRequest, 'skipped:capture-in-flight')
+    releaseCapture('data:image/jpeg;base64,frame')
+    await first
+    expect(harness.requestScreenshot).toHaveBeenCalledTimes(1)
   })
 })

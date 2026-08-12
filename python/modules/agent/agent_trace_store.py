@@ -104,6 +104,8 @@ def _coerce_scheduler(item: dict[str, Any]) -> SchedulerRunRecord:
         task_name=str(item.get("task_name") or ""),
         mode=str(item.get("mode") or ""),
         status=str(item.get("status") or ""),
+        run_id=item.get("run_id") if item.get("run_id") is None else str(item.get("run_id")),
+        job_id=item.get("job_id") if item.get("job_id") is None else str(item.get("job_id")),
         request_id=item.get("request_id") if item.get("request_id") is None else str(item.get("request_id")),
         owner_agent_id=item.get("owner_agent_id") if item.get("owner_agent_id") is None else str(item.get("owner_agent_id")),
         owner_agent_role=item.get("owner_agent_role") if item.get("owner_agent_role") is None else str(item.get("owner_agent_role")),

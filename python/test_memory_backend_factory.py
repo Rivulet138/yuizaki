@@ -126,6 +126,37 @@ def test_index_failure_does_not_lose_sqlite_authority(tmp_path: Any) -> None:
     assert status.metadata["index_healthy"] is False
 
 
+def test_dirty_index_cannot_recall_a_soft_forgotten_authority_document(tmp_path: Any) -> None:
+    from modules.memory.indexed_backend import IndexedMemoryBackend
+    from modules.memory.sqlite_store import SQLiteMemoryStore
+
+    class _FailingUpdateIndex(vector_store_module.VectorStore):
+        backend_name = "failing-update-index"
+        fail_writes = False
+
+        def add_document(self, doc: Document) -> None:
+            if self.fail_writes:
+                raise RuntimeError("index update unavailable")
+            super().add_document(doc)
+
+    embedding_service = _RoleAwareEmbeddingService()
+    authority = SQLiteMemoryStore(tmp_path / "authority.db", embedding_service=embedding_service)
+    index = _FailingUpdateIndex(embedding_service=embedding_service)
+    store = IndexedMemoryBackend(authority=authority, index=index)
+    store.add_document(Document(id="memory-1", text="private memory", metadata={}))
+
+    index.fail_writes = True
+    store.add_document(Document(
+        id="memory-1",
+        text="private memory",
+        metadata={"soft_forgotten": True},
+    ))
+
+    assert store.search("private") == []
+    assert store.search_with_rerank("private") == []
+    assert store.get_status().metadata["index_dirty"] is True
+
+
 def test_stale_index_ids_fall_back_to_sqlite_authority(tmp_path: Any) -> None:
     from modules.memory.indexed_backend import IndexedMemoryBackend
     from modules.memory.sqlite_store import SQLiteMemoryStore

@@ -254,6 +254,7 @@ export class PetSentenceEmotionScheduler {
   private readonly scheduleTimeout: (handler: () => void, timeoutMs: number) => SentenceEmotionTimer
   private readonly cancelTimeout: (timer: SentenceEmotionTimer) => void
   private timers: SentenceEmotionTimer[] = []
+  private epoch = 0
 
   constructor(dependencies: SentenceEmotionSchedulerDependencies = {}) {
     this.applyCue = dependencies.applyCue ?? applySentenceEmotionCue
@@ -266,10 +267,12 @@ export class PetSentenceEmotionScheduler {
     options: { text?: string; audioDurationMs?: number } = {},
   ): ScheduledSentenceEmotionCue[] {
     this.cancel()
+    const epoch = this.epoch
 
     const schedule = resolveSentenceEmotionCueSchedule(cues, options)
     for (const item of schedule) {
       const timer = this.scheduleTimeout(() => {
+        if (epoch !== this.epoch) return
         void Promise.resolve(this.applyCue(item.cue)).catch((error) => {
           console.debug('[PetSentenceEmotionScheduler] failed to apply sentence cue:', error)
         })
@@ -280,6 +283,7 @@ export class PetSentenceEmotionScheduler {
   }
 
   cancel(): void {
+    this.epoch += 1
     for (const timer of this.timers) {
       this.cancelTimeout(timer)
     }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 
 import {
   ProtocolLedger,
@@ -16,6 +17,8 @@ describe('runtime protocol manifest', () => {
       'cases',
     ])
     expect(runtimeProtocolHash).toMatch(/^[a-f0-9]{64}$/)
+    const canonicalManifest = JSON.stringify(runtimeProtocolManifest)
+    expect(runtimeProtocolHash).toBe(createHash('sha256').update(canonicalManifest).digest('hex'))
   })
 
   it('matches required, optional, absent, nullable, and oneOf payload fields', () => {
@@ -24,6 +27,10 @@ describe('runtime protocol manifest', () => {
     expect(matchProtocolPayload(schema, {
       session_id: 's1',
       generation_id: 'g1',
+      turn_id: 't1',
+      request_id: 'r1',
+      interruption_epoch: 0,
+      version: 1,
       sequence: 1,
       is_final: true,
       complete: true,
@@ -31,6 +38,10 @@ describe('runtime protocol manifest', () => {
     expect(matchProtocolPayload(schema, {
       session_id: 's1',
       generation_id: 'g1',
+      turn_id: 't1',
+      request_id: 'r1',
+      interruption_epoch: 0,
+      version: 1,
       sequence: 1,
       is_final: true,
       audio_url: 'http://127.0.0.1/audio.wav',
@@ -39,6 +50,10 @@ describe('runtime protocol manifest', () => {
     expect(matchProtocolPayload(schema, {
       session_id: 's1',
       generation_id: 'g1',
+      turn_id: 't1',
+      request_id: 'r1',
+      interruption_epoch: 0,
+      version: 1,
       sequence: 1,
       is_final: true,
       complete: null,

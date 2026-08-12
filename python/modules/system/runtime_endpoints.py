@@ -11,6 +11,8 @@ from ..agent.orchestration_registry import OrchestrationRegistry
 
 __all__ = [
     "build_companion_runtime_endpoint",
+    "build_companion_opportunity_outcome_endpoint",
+    "build_heartbeat_goal_cancel_endpoint",
     "build_capability_snapshot",
     "build_orchestration_snapshot",
     "build_heartbeat_status_endpoint",
@@ -45,6 +47,7 @@ __all__ = [
     "build_remove_schedule_endpoint",
     "build_toggle_schedule_endpoint",
     "build_run_schedule_now_endpoint",
+    "build_cancel_schedule_endpoint",
 ]
 
 
@@ -52,6 +55,43 @@ def build_companion_runtime_endpoint(*, snapshot_provider: Callable[[int], dict[
     def _endpoint(limit: int = 8) -> dict[str, Any]:
         return snapshot_provider(limit)
 
+    return _endpoint
+
+
+def build_companion_opportunity_outcome_endpoint(
+    *, heartbeat_scheduler_provider: Callable[[], Any]
+) -> Callable[[str, dict[str, Any]], JSONResponse | dict[str, Any]]:
+    def _endpoint(job_id: str, payload: dict[str, Any]) -> JSONResponse | dict[str, Any]:
+        scheduler = heartbeat_scheduler_provider()
+        if scheduler is None:
+            return JSONResponse({"error": "heartbeat_scheduler_not_initialized"}, status_code=503)
+        request_id = str(payload.get("request_id") or "").strip()
+        outcome = str(payload.get("outcome") or "").strip().lower()
+        reason = str(payload.get("reason") or "").strip() or None
+        if not request_id or outcome not in {"delivered", "suppressed", "expired", "cancelled", "failed"}:
+            return JSONResponse({"error": "invalid_opportunity_outcome"}, status_code=422)
+        accepted = scheduler.resolve_opportunity(
+            job_id=job_id,
+            request_id=request_id,
+            outcome=outcome,
+            reason=reason,
+        )
+        if not accepted:
+            return JSONResponse({"error": "opportunity_not_active"}, status_code=409)
+        return {"ok": True, "job_id": job_id, "request_id": request_id, "outcome": outcome}
+
+    return _endpoint
+
+
+def build_heartbeat_goal_cancel_endpoint(*, heartbeat_scheduler_provider: Callable[[], Any]) -> Callable[[str, dict[str, Any]], JSONResponse | dict[str, Any]]:
+    def _endpoint(goal_id: str, payload: dict[str, Any]) -> JSONResponse | dict[str, Any]:
+        scheduler = heartbeat_scheduler_provider()
+        if scheduler is None:
+            return JSONResponse({"error": "heartbeat_scheduler_not_initialized"}, status_code=503)
+        reason = str(payload.get("reason") or "cancelled").strip() or "cancelled"
+        if not scheduler.cancel_goal(goal_id, reason=reason):
+            return JSONResponse({"error": "goal_not_cancellable", "goal_id": goal_id}, status_code=409)
+        return {"ok": True, "goal_id": str(goal_id), "reason": reason}
     return _endpoint
 
 
@@ -84,6 +124,7 @@ def build_heartbeat_status_endpoint(
             "persona": heartbeat_scheduler.state.persona,
             "events": heartbeat_scheduler.state.events,
             "behavior_events": heartbeat_scheduler.state.behavior_events,
+            "goals": heartbeat_scheduler.goal_snapshot() if hasattr(heartbeat_scheduler, "goal_snapshot") else [],
             "active_workspace_id": active_workspace_id,
             "active_companion": db_repo.get_workspace_companion(active_workspace_id) if db_repo else None,
         }
@@ -505,6 +546,18 @@ def build_toggle_schedule_endpoint(scheduler: Any) -> Callable[[str, bool], Coro
 def build_run_schedule_now_endpoint(scheduler: Any) -> Callable[[str], Coroutine[Any, Any, dict[str, Any]]]:
     async def _endpoint(task_id: str) -> dict[str, Any]:
         task = await scheduler.run_now(task_id)
-        return {"ok": task is not None, "task": task.__dict__ if task else None}
+        get_run = getattr(scheduler, "get_run", None)
+        run = get_run(task_id) if task is not None and callable(get_run) else None
+        return {"ok": task is not None, "task": task.__dict__ if task else None, "run": run}
+
+    return _endpoint
+
+
+def build_cancel_schedule_endpoint(scheduler: Any) -> Callable[[str], Coroutine[Any, Any, dict[str, Any]]]:
+    async def _endpoint(task_or_job_id: str) -> dict[str, Any]:
+        cancelled = await scheduler.cancel(task_or_job_id)
+        get_run = getattr(scheduler, "get_run", None)
+        run = get_run(task_or_job_id) if callable(get_run) else None
+        return {"ok": cancelled, "run": run}
 
     return _endpoint

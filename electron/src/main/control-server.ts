@@ -379,6 +379,14 @@ export class ControlServer {
   }
   private applyStateToLive2D(state: PetControlState): PetControlState {
     let nextState = state
+    const restoredModelId = this.petModelCatalog.normalizeModelId(state.modelId)
+    if (restoredModelId && restoredModelId !== state.modelId) {
+      const restoredModel = this.petModelCatalog.getModelById(restoredModelId)
+      nextState = this.petStateStore.applyConfigPatch({
+        modelId: restoredModelId,
+        ...(restoredModel ? { modelType: restoredModel.type } : {}),
+      })
+    }
     const layout = this.live2dWindow.applyWindowLayout(state)
 
     if (layout) {

@@ -293,10 +293,6 @@ function restorePersistedPetModelSelection(): void {
     return
   }
 
-  if (state.modelId) {
-    return
-  }
-
   const defaultModelId = petModelCatalog.getDefaultModelId()
   const defaultModel = petModelCatalog.getModelById(defaultModelId)
   petStateStore.applyConfigPatch({
@@ -335,6 +331,14 @@ function normalizePetPatch(patch: PetControlConfigPatch): PetControlConfigPatch 
 
 function applyPetStateToRenderer(state: PetControlState): void {
   let nextState = state
+  const restoredModelId = petModelCatalog.normalizeModelId(state.modelId)
+  if (restoredModelId && restoredModelId !== state.modelId) {
+    const restoredModel = petModelCatalog.getModelById(restoredModelId)
+    nextState = petStateStore.applyConfigPatch({
+      modelId: restoredModelId,
+      ...(restoredModel ? { modelType: restoredModel.type } : {}),
+    })
+  }
   const layoutResult = live2dWindow.applyWindowLayout(state)
 
   if (layoutResult) {

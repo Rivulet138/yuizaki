@@ -34,6 +34,8 @@ SUPPORTED_REALTIME_VOICES = {
     "marin",
     "cedar",
 }
+REALTIME_AGENT_TOOL_NAME = "delegate_to_agent"
+REALTIME_AGENT_INTENTS = ["tool", "memory", "vision", "task", "deep_answer"]
 
 
 class RealtimeSessionRequest(BaseModel):
@@ -49,6 +51,8 @@ class RealtimeTranscriptRequest(BaseModel):
     turn_id: str = Field(min_length=1, max_length=240)
     user_text: str = Field(min_length=1, max_length=12000)
     assistant_text: str = Field(min_length=1, max_length=12000)
+    tool_trace: list[dict[str, Any]] | None = None
+    memory_trace: list[dict[str, Any]] | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -105,10 +109,9 @@ def build_realtime_instructions(
                 order=225,
                 content=(
                     "This is the low-latency voice companion lane. Respond in the user's language with short, "
-                    "natural speech. Do not claim that tools, screen vision, external actions, or long-term "
-                    "memory were used in this lane. For requests that need tools, exact screen evidence, file "
-                    "changes, or durable memory writes, say briefly that the request should continue in balanced "
-                    "or deep mode. Never invent an execution result."
+                    "natural speech. For requests that need tools, screen evidence, durable memory, file changes, "
+                    "or a longer task, call delegate_to_agent instead of inventing an execution result. Wait for "
+                    "the tool result, then summarize it naturally. Do not call the tool for ordinary conversation."
                 ),
             )
         ],
@@ -128,20 +131,42 @@ def resolve_realtime_safety_identifier(api_key: str) -> str:
     return f"yuizaki_{digest[:32]}"
 
 
-async def mint_realtime_client_secret(
-    *,
-    api_key: str,
-    model: str,
-    voice: str,
-    instructions: str,
-) -> dict[str, Any]:
-    session = {
+def build_realtime_session_config(*, model: str, voice: str, instructions: str) -> dict[str, Any]:
+    return {
         "type": "realtime",
         "model": model,
         "instructions": instructions,
         "output_modalities": ["audio"],
         "max_output_tokens": 1024,
-        "tool_choice": "none",
+        "tool_choice": "auto",
+        "tools": [
+            {
+                "type": "function",
+                "name": REALTIME_AGENT_TOOL_NAME,
+                "description": (
+                    "Delegate a request to Yuizaki's local Agent runtime when it needs MCP tools, durable memory, "
+                    "screen vision, external actions, or a longer multi-step answer."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "request": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 12000,
+                            "description": "The complete user request to execute or answer.",
+                        },
+                        "intent": {
+                            "type": "string",
+                            "enum": REALTIME_AGENT_INTENTS,
+                            "description": "Why the full Agent runtime is required.",
+                        },
+                    },
+                    "required": ["request", "intent"],
+                },
+            }
+        ],
         "audio": {
             "input": {
                 "transcription": {
@@ -157,6 +182,16 @@ async def mint_realtime_client_secret(
             },
         },
     }
+
+
+async def mint_realtime_client_secret(
+    *,
+    api_key: str,
+    model: str,
+    voice: str,
+    instructions: str,
+) -> dict[str, Any]:
+    session = build_realtime_session_config(model=model, voice=voice, instructions=instructions)
     async with httpx.AsyncClient(
         base_url=OPENAI_REALTIME_ORIGIN,
         timeout=httpx.Timeout(15.0, connect=5.0),
@@ -265,6 +300,7 @@ def create_realtime_router(
             "expires_at": upstream.get("expires_at"),
             "model": model,
             "voice": voice,
+            "agent_model": str(getattr(getattr(config, "llm", None), "model", "") or ""),
             "workspace_id": workspace_id,
             "session_id": session_id,
         }
@@ -295,6 +331,8 @@ def create_realtime_router(
                     assistant_text,
                     model=model,
                     workspace_id=workspace_id,
+                    tool_trace=payload.tool_trace,
+                    memory_trace=payload.memory_trace,
                 )
             except DatabaseError as exc:
                 return JSONResponse({"error": str(exc)}, status_code=400)

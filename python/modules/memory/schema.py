@@ -19,6 +19,12 @@ class MemoryRecord:
     workspace_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    # Provenance is immutable origin context. Legacy records may leave these unset.
+    source_kind: str | None = None
+    source_id: str | None = None
+    turn_id: str | None = None
+    evidence: Any = None
+    confidence_history: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

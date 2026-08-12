@@ -44,13 +44,53 @@
             </div>
           </div>
         </details>
-        <div class="experience-rates">
+            <div class="experience-rates">
           <span :title="`${experienceMetrics?.interrupts.by_source.voice?.hits ?? 0}/${experienceMetrics?.interrupts.by_source.voice?.requests ?? 0}`">语音打断 <strong>{{ formatRate(experienceMetrics?.interrupts.by_source.voice?.hit_rate) }}</strong></span>
           <span :title="`${experienceMetrics?.interrupts.by_source.manual?.hits ?? 0}/${experienceMetrics?.interrupts.by_source.manual?.requests ?? 0}`">手动中断 <strong>{{ formatRate(experienceMetrics?.interrupts.by_source.manual?.hit_rate) }}</strong></span>
           <span :title="`${experienceMetrics?.tools.successes ?? 0}/${experienceMetrics?.tools.calls ?? 0}`">工具成功 <strong>{{ formatRate(experienceMetrics?.tools.success_rate) }}</strong></span>
           <span :title="`分析 ${experienceMetrics?.visual?.analysis_requests ?? 0}/${experienceMetrics?.visual?.frames ?? 0}，复用 ${experienceMetrics?.visual?.analysis_skipped ?? 0} 帧`">视觉调用 <strong>{{ formatRate(experienceMetrics?.visual?.analysis_rate) }}</strong></span>
           <span :title="`${experienceMetrics?.visual?.usable ?? 0}/${experienceMetrics?.visual?.completed ?? 0}`">视觉结论 <strong>{{ formatRate(experienceMetrics?.visual?.usable_rate) }}</strong></span>
         </div>
+      </section>
+
+      <section class="jobs-panel panel-card">
+        <div class="section-header compact">
+          <div>
+            <h3>Agent Jobs</h3>
+          </div>
+          <div class="job-summary">
+            <el-tag size="small" type="success" effect="plain">{{ activeCompanionJobs.length }} active</el-tag>
+            <el-tag size="small" type="info" effect="plain">{{ companionJobs.length }} recent</el-tag>
+          </div>
+        </div>
+        <AsyncState :loading="companionRuntimeRequest.loading" :error="companionRuntimeRequest.error" @retry="loadCompanionRuntime">
+          <div v-if="companionJobs.length" class="job-list">
+            <article v-for="job in companionJobs" :key="job.jobId" class="job-card">
+              <div class="job-card-main">
+                <div class="job-title-row">
+                  <strong>{{ companionJobTitle(job) }}</strong>
+                  <el-tag size="small" :type="companionJobTagType(job.status)" effect="light">{{ companionJobStatusLabel(job.status) }}</el-tag>
+                </div>
+                <p class="job-subtitle">{{ job.source }} · {{ job.jobId }}</p>
+                <div class="tag-row">
+                  <el-tag v-if="job.runId" size="small" type="primary" effect="plain">run {{ job.runId }}</el-tag>
+                  <el-tag size="small" type="info" effect="plain">rev {{ job.revision }}</el-tag>
+                  <el-tag v-if="job.data?.goalId" size="small" type="success" effect="plain">goal {{ String(job.data.goalId) }}</el-tag>
+                  <el-tag v-if="job.data?.phase" size="small" type="warning" effect="plain">{{ String(job.data.phase) }}</el-tag>
+                </div>
+                <el-progress v-if="companionJobProgress(job) !== null" class="job-progress" :percentage="companionJobProgress(job) || 0" :show-text="false" :status="job.status === 'failed' ? 'exception' : undefined" />
+                <p v-if="companionJobResultSummary(job)" class="job-result">{{ companionJobResultSummary(job) }}</p>
+                <p v-if="companionJobOutcome(job)" class="job-outcome">{{ companionJobOutcome(job) }}</p>
+                <p v-if="companionJobDuration(job)" class="job-meta">耗时 {{ companionJobDuration(job) }}<span v-if="job.data?.artifactCount"> · 产物 {{ String(job.data.artifactCount) }}</span></p>
+              </div>
+              <div class="job-card-actions">
+                <el-button v-if="canRetryCompanionJob(job)" size="small" type="warning" plain :loading="retryingJobIds.has(job.jobId)" :disabled="retryingJobIds.has(job.jobId)" @click="retryCompanionJob(job)">重试</el-button>
+                <el-button v-if="canCancelCompanionJob(job)" size="small" type="warning" plain :loading="cancellingJobIds.has(job.jobId)" :disabled="cancellingJobIds.has(job.jobId)" @click="cancelCompanionJob(job)">停止</el-button>
+              </div>
+            </article>
+          </div>
+          <el-empty v-else description="暂无 Agent Job" :image-size="52" />
+        </AsyncState>
       </section>
 
       <section class="runtime-strip panel-card">
@@ -92,6 +132,8 @@
                   <el-tag size="small" type="info" effect="light">{{ task.mode }}</el-tag>
                   <el-tag size="small" :type="statusTagType(task.last_status || 'pending')" effect="light">{{ task.last_status || 'pending' }}</el-tag>
                   <el-tag v-if="task.owner_agent_role" size="small" type="danger" effect="plain">{{ task.owner_agent_role }}</el-tag>
+                  <el-tag v-if="task.last_run_id" size="small" type="primary" effect="plain">run {{ task.last_run_id }}</el-tag>
+                  <el-tag v-if="task.last_job_id" size="small" type="info" effect="plain">job {{ task.last_job_id }}</el-tag>
                   <el-tag v-if="task.last_request_id" size="small" type="success" effect="plain">{{ task.last_request_id }}</el-tag>
                 </div>
                 <div class="schedule-times">
@@ -101,7 +143,8 @@
                 <div v-if="task.route_reason" class="route-note">{{ task.route_reason }}</div>
                 <div v-if="task.last_run_summary" class="summary-note">{{ task.last_run_summary }}</div>
                 <div class="schedule-actions">
-                  <el-button size="small" type="primary" plain :loading="runningScheduleIds.has(task.id)" :disabled="isScheduleBusy(task.id)" @click="runScheduleItemNow(task.id)">入队运行</el-button>
+                  <el-button size="small" :type="isScheduleRetryable(task.last_status) ? 'warning' : 'primary'" plain :loading="runningScheduleIds.has(task.id)" :disabled="isScheduleBusy(task.id)" @click="runScheduleItemNow(task.id)">{{ isScheduleRetryable(task.last_status) ? '重试' : '入队运行' }}</el-button>
+                  <el-button v-if="isScheduleActive(task.last_status)" size="small" type="warning" plain :loading="cancellingScheduleIds.has(task.id)" :disabled="isScheduleBusy(task.id)" @click="cancelScheduleItem(task.id)">停止</el-button>
                   <el-button size="small" type="danger" plain :loading="removingScheduleIds.has(task.id)" :disabled="isScheduleBusy(task.id)" @click="removeScheduleItem(task.id)">删除</el-button>
                 </div>
               </article>
@@ -181,6 +224,11 @@
                       <span>{{ group.stepChain.length }} 个步骤</span>
                       <span v-if="group.ownerRoles.length">{{ group.ownerRoles.join(' / ') }}</span>
                     </div>
+                    <div v-if="group.operationId || group.conversationId || group.runId" class="run-identity" aria-label="run identity">
+                      <span v-if="group.operationId">op {{ group.operationId }}</span>
+                      <span v-if="group.conversationId">conversation {{ group.conversationId }}</span>
+                      <span v-if="group.runId">run {{ group.runId }}</span>
+                    </div>
                   </div>
                   <div class="run-counts">
                     <strong>{{ group.steps }}</strong><span>步骤</span>
@@ -204,6 +252,13 @@
                 <div><span>步骤</span><strong>{{ selectedTrace.steps }}</strong></div>
                 <div><span>计划器</span><strong>{{ selectedTrace.scheduler }}</strong></div>
                 <div><span>循环</span><strong>{{ selectedTrace.runtimeLoop }}</strong></div>
+              </div>
+
+              <div v-if="selectedTrace.operationId || selectedTrace.conversationId || selectedTrace.turnId || selectedTrace.runId" class="detail-identity">
+                <span v-if="selectedTrace.operationId">operation {{ selectedTrace.operationId }}</span>
+                <span v-if="selectedTrace.conversationId">conversation {{ selectedTrace.conversationId }}</span>
+                <span v-if="selectedTrace.turnId">turn {{ selectedTrace.turnId }}</span>
+                <span v-if="selectedTrace.runId">run {{ selectedTrace.runId }}</span>
               </div>
 
               <div v-if="selectedTrace.stepChain.length" class="detail-section">
@@ -264,14 +319,18 @@
                       <span>{{ formatTime(entry.timestamp) }}</span>
                     </div>
                     <p>{{ entry.task_name || '-' }}</p>
+                    <div v-if="entry.run_id || entry.job_id" class="tag-row">
+                      <el-tag v-if="entry.run_id" size="small" type="primary" effect="plain">run {{ entry.run_id }}</el-tag>
+                      <el-tag v-if="entry.job_id" size="small" type="info" effect="plain">job {{ entry.job_id }}</el-tag>
+                    </div>
                     <div v-if="entry.summary" class="summary-note">{{ entry.summary }}</div>
                     <div v-if="entry.route_reason" class="route-note">{{ entry.route_reason }}</div>
                   </article>
                 </div>
               </div>
 
-              <div class="detail-section">
-                <div class="detail-section-title">原始事件</div>
+              <details class="detail-section detail-section--raw">
+                <summary class="detail-section-title">原始事件</summary>
                 <div class="raw-events">
                   <div v-for="(entry, index) in selectedTrace.entries" :key="index" class="raw-line">
                     <span>{{ formatTime(entry.timestamp) }}</span>
@@ -280,7 +339,7 @@
                     <code>{{ entry.task_name || entry.goal || entry.summary || '' }}</code>
                   </div>
                 </div>
-              </div>
+              </details>
             </template>
             <el-empty v-else description="未选择运行记录" :image-size="64" />
           </aside>
@@ -295,8 +354,10 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
+import { getSocketClient } from '@/net/socketClient'
 import { useSystemDomain } from '../composables/useSystemDomain'
 import type { PlannerTrace, RuntimeLoopRecord, ScheduleTask, SchedulerRunRecord, StepConditionRecord, StepExecutionRecord } from '@/../shared/agent'
+import type { CompanionEventEnvelope, CompanionJobStatus } from '@/../shared/companion-event'
 
 type TagType = 'success' | 'warning' | 'danger' | 'info' | 'primary'
 type TraceFilter = 'all' | 'planner' | 'steps' | 'scheduler' | 'runtime_loop'
@@ -321,6 +382,12 @@ interface TraceEntry {
   owner_agent_id?: string
   owner_agent_role?: string
   route_reason?: string
+  run_id?: string
+  job_id?: string
+  conversation_id?: string
+  operation_id?: string
+  turn_id?: string
+  step_index?: number
 }
 
 interface StepDisplay {
@@ -359,27 +426,38 @@ interface TraceGroup {
   firstTimestamp: string
   lastTimestamp: string
   ownerRoles: string[]
+  conversationId?: string
+  operationId?: string
+  turnId?: string
+  runId?: string
 }
 
 const {
   schedules,
   agentTrace,
+  companionRuntime,
   experienceMetrics,
   schedulesRequest,
   agentTraceRequest,
+  companionRuntimeRequest,
   experienceMetricsRequest,
   createOnceScheduleRequest,
   createIntervalScheduleRequest,
   removeScheduleRequest,
   toggleScheduleRequest,
   runScheduleNowRequest,
+  cancelScheduleRequest,
   loadSchedules,
   createOnceSchedule,
   createIntervalSchedule,
   removeSchedule,
   toggleSchedule,
   runScheduleNow,
+  cancelSchedule,
+  resolveCompanionOpportunity,
+  cancelHeartbeatGoal,
   loadAgentTrace,
+  loadCompanionRuntime,
   loadExperienceMetrics,
 } = useSystemDomain()
 
@@ -391,6 +469,9 @@ const selectedTraceId = ref('')
 const removingScheduleIds = ref(new Set<string>())
 const togglingScheduleIds = ref(new Set<string>())
 const runningScheduleIds = ref(new Set<string>())
+const cancellingScheduleIds = ref(new Set<string>())
+const cancellingJobIds = ref(new Set<string>())
+const retryingJobIds = ref(new Set<string>())
 
 const addPending = (setRef: { value: Set<string> }, key: string) => {
   setRef.value = new Set(setRef.value).add(key)
@@ -406,7 +487,11 @@ const isScheduleBusy = (taskId: string) => (
   removingScheduleIds.value.has(taskId)
   || togglingScheduleIds.value.has(taskId)
   || runningScheduleIds.value.has(taskId)
+  || cancellingScheduleIds.value.has(taskId)
 )
+
+const isScheduleActive = (status?: string | null) => status === 'queued' || status === 'running'
+const isScheduleRetryable = (status?: string | null) => Boolean(status && (status.startsWith('error:') || status.startsWith('interrupted:')))
 
 const runtimeStageOrder = ['observe', 'interpret', 'recall', 'decide', 'ask_act', 'reflect', 'update_relationship']
 const stageLabels: Record<string, string> = { observe: '观察', interpret: '理解', recall: '回忆', decide: '决策', ask_act: '执行', reflect: '反思', update_relationship: '关系' }
@@ -419,6 +504,156 @@ const runtimeLoops = computed<RuntimeLoopRecord[]>(() => {
 const sortedRuntimeLoops = computed(() => [...runtimeLoops.value].sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || '')))
 const lastLoopStage = computed(() => sortedRuntimeLoops.value.length ? sortedRuntimeLoops.value[sortedRuntimeLoops.value.length - 1].stage : '')
 const loopStagesDone = computed(() => Array.from(new Set(runtimeLoops.value.map(loop => loop.stage).filter(Boolean))))
+
+const companionJobs = computed<CompanionEventEnvelope[]>(() => {
+  const latest = new Map<string, CompanionEventEnvelope>()
+  for (const event of companionRuntime.value?.jobs?.events || []) {
+    const previous = latest.get(event.jobId)
+    if (!previous || event.revision > previous.revision || (event.revision === previous.revision && event.timestamp > previous.timestamp)) {
+      latest.set(event.jobId, event)
+    }
+  }
+  return [...latest.values()].sort((a, b) => b.timestamp - a.timestamp)
+})
+const activeCompanionJobs = computed(() => companionJobs.value.filter(job => !isTerminalCompanionJob(job.status)))
+
+function isTerminalCompanionJob(status: CompanionJobStatus) {
+  return status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'interrupted'
+}
+
+function companionJobTitle(job: CompanionEventEnvelope) {
+  const data = job.data || {}
+  for (const key of ['title', 'task_name', 'taskName', 'behaviorType', 'summary', 'phase']) {
+    const value = data[key]
+    if (typeof value === 'string' && value.trim()) return value
+  }
+  return `${job.source} job`
+}
+
+function companionJobProgress(job: CompanionEventEnvelope) {
+  const data = job.data || {}
+  const value = data.progress ?? data.percent
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return Math.max(0, Math.min(100, Math.round(value <= 1 ? value * 100 : value)))
+}
+
+function companionJobResultSummary(job: CompanionEventEnvelope) {
+  const value = job.data?.resultSummary
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function companionJobDuration(job: CompanionEventEnvelope) {
+  const value = job.data?.durationMs
+  return typeof value === 'number' && Number.isFinite(value) ? `${Math.max(0, Math.round(value))} ms` : ''
+}
+
+function companionJobOutcome(job: CompanionEventEnvelope) {
+  const value = job.data?.error ?? job.data?.cancellationReason
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function companionJobTagType(status: CompanionJobStatus): TagType {
+  if (status === 'completed') return 'success'
+  if (status === 'failed') return 'danger'
+  if (status === 'interrupted') return 'warning'
+  if (status === 'cancelled') return 'info'
+  if (status === 'progress') return 'warning'
+  return 'primary'
+}
+
+function companionJobStatusLabel(status: CompanionJobStatus) {
+  const labels: Record<CompanionJobStatus, string> = {
+    created: 'created', running: 'running', progress: 'progress', completed: 'completed', failed: 'failed', cancelled: 'cancelled', interrupted: 'interrupted',
+  }
+  return labels[status]
+}
+
+function companionToolName(job: CompanionEventEnvelope) {
+  const toolName = job.data?.toolName
+  return typeof toolName === 'string' ? toolName.trim() : ''
+}
+
+function companionToolArgs(job: CompanionEventEnvelope) {
+  const args = job.data?.args
+  return args && typeof args === 'object' && !Array.isArray(args)
+    ? args as Record<string, unknown>
+    : null
+}
+
+function isToolCompanionJob(job: CompanionEventEnvelope) {
+  return Boolean(companionToolName(job))
+}
+
+function canCancelCompanionJob(job: CompanionEventEnvelope) {
+  return !isTerminalCompanionJob(job.status)
+    && (isToolCompanionJob(job) || job.source === 'scheduler' || job.source === 'heartbeat')
+}
+
+function canRetryCompanionJob(job: CompanionEventEnvelope) {
+  if (job.status !== 'failed' && job.status !== 'cancelled' && job.status !== 'interrupted') return false
+  if (isToolCompanionJob(job)) {
+    return job.data?.retryable !== false && companionToolArgs(job) !== null
+  }
+  return job.source === 'scheduler' && typeof job.data?.taskId === 'string'
+}
+
+const retryCompanionJob = async (job: CompanionEventEnvelope) => {
+  if (!canRetryCompanionJob(job)) return
+  addPending(retryingJobIds, job.jobId)
+  try {
+    if (isToolCompanionJob(job)) {
+      const toolName = companionToolName(job)
+      const args = companionToolArgs(job)
+      if (!toolName || !args) return
+      const retryRequestId = `${job.requestId}:retry:${Date.now()}`
+      getSocketClient().sendToolCall(retryRequestId, toolName, args, {
+        requestId: retryRequestId,
+        runId: job.runId,
+        jobId: job.jobId,
+        source: 'desktop',
+        retry: true,
+      })
+      ElMessage.success('Tool retry requested')
+      await new Promise(resolve => window.setTimeout(resolve, 80))
+      await loadCompanionRuntime()
+      return
+    }
+    const taskId = String(job.data?.taskId || '').trim()
+    if (!taskId) return
+    const result = await runScheduleNow(taskId)
+    if (result?.ok) {
+      ElMessage.success('Job 已重新入队')
+      await Promise.all([loadCompanionRuntime(), loadSchedules()])
+    }
+  } finally {
+    removePending(retryingJobIds, job.jobId)
+  }
+}
+
+const cancelCompanionJob = async (job: CompanionEventEnvelope) => {
+  if (!canCancelCompanionJob(job)) return
+  addPending(cancellingJobIds, job.jobId)
+  try {
+    if (isToolCompanionJob(job)) {
+      getSocketClient().sendInterrupt(job.sessionId, job.requestId, 'manual')
+      ElMessage.success('Tool cancellation requested')
+      await new Promise(resolve => window.setTimeout(resolve, 80))
+      await loadCompanionRuntime()
+      return
+    }
+    const result = job.source === 'heartbeat'
+      ? (job.data?.goalId
+        ? await cancelHeartbeatGoal(String(job.data.goalId), 'user_cancelled_from_job_panel')
+        : await resolveCompanionOpportunity(job.jobId, { request_id: job.requestId, outcome: 'cancelled', reason: 'user_cancelled_from_job_panel' }))
+      : await cancelSchedule(job.runId || job.jobId)
+    if (result?.ok) {
+      ElMessage.success('Job 已停止')
+      await loadCompanionRuntime()
+    }
+  } finally {
+    removePending(cancellingJobIds, job.jobId)
+  }
+}
 const unlinkedTraceCount = computed(() => {
   const snapshot = agentTrace.value
   if (!snapshot) return 0
@@ -450,6 +685,10 @@ const traceGroups = computed<TraceGroup[]>(() => {
         firstTimestamp: '',
         lastTimestamp: '',
         ownerRoles: [],
+        conversationId: undefined,
+        operationId: undefined,
+        turnId: undefined,
+        runId: undefined,
       })
     }
     return map.get(requestId)!
@@ -497,6 +736,11 @@ const traceGroups = computed<TraceGroup[]>(() => {
   }
 
   for (const group of map.values()) {
+    const identity = group.entries.find(entry => entry.conversation_id || entry.operation_id || entry.turn_id || entry.run_id)
+    group.conversationId = identity?.conversation_id
+    group.operationId = identity?.operation_id
+    group.turnId = identity?.turn_id
+    group.runId = identity?.run_id
     group.status = inferGroupStatus(group)
     group.entries.sort((a, b) => a.timestamp.localeCompare(b.timestamp))
     group.stepChain.sort((a, b) => a.step_id.localeCompare(b.step_id))
@@ -597,12 +841,14 @@ const refreshLoading = computed(() => (
   schedulesRequest.loading
   || agentTraceRequest.loading
   || experienceMetricsRequest.loading
+  || companionRuntimeRequest.loading
 ))
 const refreshAll = async () => {
   await Promise.all([
     loadSchedules(),
     loadAgentTrace(),
     loadExperienceMetrics(),
+    loadCompanionRuntime(),
   ])
 }
 const scheduleMutationError = computed(() => (
@@ -611,6 +857,7 @@ const scheduleMutationError = computed(() => (
   || removeScheduleRequest.error
   || toggleScheduleRequest.error
   || runScheduleNowRequest.error
+  || cancelScheduleRequest.error
 ))
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -628,7 +875,14 @@ function fallbackTraceRequestId(type: TraceFilter, index: number, timestamp?: st
 }
 
 function traceEntryFromPlanner(item: PlannerTrace): TraceEntry {
-  return { traceType: 'planner', timestamp: item.timestamp || '', goal: item.goal, mode: item.mode }
+  return {
+    traceType: 'planner', timestamp: item.timestamp || '', goal: item.goal, mode: item.mode,
+    conversation_id: item.conversation_id || undefined,
+    operation_id: item.operation_id || undefined,
+    turn_id: item.turn_id || undefined,
+    run_id: item.run_id || undefined,
+    step_index: item.step_index ?? undefined,
+  }
 }
 
 function traceGroupCount(group: TraceGroup, filter: TraceFilter) {
@@ -659,9 +913,15 @@ function traceEntryFromScheduler(item: SchedulerRunRecord): TraceEntry {
     mode: item.mode,
     status: item.status,
     summary: item.summary || undefined,
+    run_id: item.run_id || undefined,
+    job_id: item.job_id || undefined,
     owner_agent_id: item.owner_agent_id || undefined,
     owner_agent_role: item.owner_agent_role || undefined,
     route_reason: item.route_reason || undefined,
+    conversation_id: item.conversation_id || undefined,
+    operation_id: item.operation_id || undefined,
+    turn_id: item.turn_id || undefined,
+    step_index: item.step_index ?? undefined,
   }
 }
 
@@ -679,6 +939,11 @@ function traceEntryFromRuntimeLoop(item: RuntimeLoopRecord): TraceEntry {
     top_route_reason: stringField(data, 'top_route_reason'),
     agent_id: item.agent_id || undefined,
     agent_role: item.agent_role || undefined,
+    conversation_id: item.conversation_id || undefined,
+    operation_id: item.operation_id || undefined,
+    turn_id: item.turn_id || undefined,
+    run_id: item.run_id || undefined,
+    step_index: item.step_index ?? undefined,
   }
 }
 
@@ -859,11 +1124,24 @@ const runScheduleItemNow = async (taskId: string) => {
     removePending(runningScheduleIds, taskId)
   }
 }
+const cancelScheduleItem = async (taskId: string) => {
+  addPending(cancellingScheduleIds, taskId)
+  try {
+    const result = await cancelSchedule(taskId)
+    if (result?.ok) {
+      ElMessage.success('任务已停止')
+      await loadAgentTrace()
+    }
+  } finally {
+    removePending(cancellingScheduleIds, taskId)
+  }
+}
 
 onMounted(() => {
   void loadSchedules()
   void loadAgentTrace()
   void loadExperienceMetrics()
+  void loadCompanionRuntime()
 })
 </script>
 
@@ -966,6 +1244,73 @@ onMounted(() => {
 
 .experience-panel {
   padding: 16px;
+}
+
+.jobs-panel {
+  padding: 16px;
+}
+
+.job-summary,
+.job-title-row,
+.job-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.job-summary {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.job-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.job-card {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-card);
+  background: var(--yui-surface-muted);
+  padding: 12px;
+}
+
+.job-card-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.job-title-row {
+  min-width: 0;
+  justify-content: space-between;
+}
+
+.job-title-row strong,
+.job-subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-title-row strong {
+  color: var(--yui-text);
+  font-size: 13px;
+}
+
+.job-subtitle {
+  margin: 5px 0 8px;
+  color: var(--yui-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+}
+
+.job-progress {
+  margin-top: 10px;
 }
 
 .experience-grid {

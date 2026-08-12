@@ -1,9 +1,23 @@
+export interface ChatArtifactRef {
+  id?: string;
+  name?: string;
+  type?: string;
+  url?: string;
+}
+
 export interface ChatAgentStep {
   id: string;
   title: string;
   status: string;
   tool?: string;
   error?: string;
+  jobId?: string;
+  runId?: string;
+  resultSummary?: string;
+  durationMs?: number;
+  artifactCount?: number;
+  artifacts?: ChatArtifactRef[];
+  progress?: number;
 }
 
 export interface ChatMemorySource {
@@ -12,6 +26,11 @@ export interface ChatMemorySource {
   layer?: string;
   source?: string;
   score?: number;
+  confidence?: number;
+  traceId?: string;
+  eventId?: string;
+  modelVersion?: string;
+  correctionState?: 'none' | 'corrected' | 'forgotten';
 }
 
 export interface ChatMessage {
@@ -121,6 +140,22 @@ export interface PetControlContextPayload {
   motionOptions: Array<{ group: string; index: number }>
   expressions: string[]
   parameters: Array<{ id: string; min: number; max: number }>
+  /** Snapshot identity used to reject commands generated for an older model. */
+  capabilityRevision?: string
+  modelType?: 'live2d' | 'vrm'
+  modelId?: string | null
+  /** High-level support flags; omitted for legacy/catalog-only contexts. */
+  actions?: Partial<{
+    behavior: boolean
+    affect: boolean
+    gaze: boolean
+    motion: boolean
+    expression: boolean
+    parameterPatch: boolean
+    viseme: boolean
+    cancel: boolean
+  }>
+  viseme?: boolean
   avatarPrompt?: string
 }
 

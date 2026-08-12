@@ -9,6 +9,7 @@ from routes import realtime_api
 class FakeRepository:
     def __init__(self) -> None:
         self.saved: list[tuple[str, str, str, str, str]] = []
+        self.pair_metadata: dict[str, object] = {}
 
     def get_workspace_companion(self, _workspace_id: str):
         return None
@@ -44,7 +45,13 @@ class FakeRepository:
         *,
         model: str,
         workspace_id: str,
+        tool_trace=None,
+        memory_trace=None,
     ):
+        self.pair_metadata = {
+            "tool_trace": tool_trace,
+            "memory_trace": memory_trace,
+        }
         return (
             self.save_message(session_id, "user", user_content, 0, model, workspace_id),
             self.save_message(session_id, "assistant", assistant_content, 0, model, workspace_id),
@@ -106,6 +113,27 @@ def test_realtime_mints_ephemeral_secret_without_returning_server_key(monkeypatc
     assert captured["instructions"].index("order=220") < captured["instructions"].index("order=225")
 
 
+def test_realtime_session_exposes_only_the_agent_delegation_tool():
+    session = realtime_api.build_realtime_session_config(
+        model="gpt-realtime-test",
+        voice="marin",
+        instructions="voice instructions",
+    )
+
+    assert session["tool_choice"] == "auto"
+    assert [tool["name"] for tool in session["tools"]] == ["delegate_to_agent"]
+    parameters = session["tools"][0]["parameters"]
+    assert parameters["additionalProperties"] is False
+    assert parameters["required"] == ["request", "intent"]
+    assert parameters["properties"]["intent"]["enum"] == [
+        "tool",
+        "memory",
+        "vision",
+        "task",
+        "deep_answer",
+    ]
+
+
 def test_realtime_safety_identifier_is_stable_and_does_not_expose_the_api_key(monkeypatch):
     monkeypatch.delenv("YUIZAKI_OPENAI_SAFETY_IDENTIFIER", raising=False)
 
@@ -140,6 +168,8 @@ def test_realtime_transcript_is_ordered_and_idempotent(monkeypatch):
         "turn_id": "turn-1",
         "user_text": "你好",
         "assistant_text": "我在。",
+        "tool_trace": [{"step_id": "tool-1", "status": "completed"}],
+        "memory_trace": [{"id": "memory-1", "text": "preference"}],
     }
 
     first = client.post("/api/realtime/transcript", json=payload)
@@ -151,3 +181,7 @@ def test_realtime_transcript_is_ordered_and_idempotent(monkeypatch):
     assert duplicate.json()["status"] == "duplicate"
     assert [record[1] for record in repository.saved] == ["user", "assistant"]
     assert all(record[3] == "gpt-realtime-test" for record in repository.saved)
+    assert repository.pair_metadata == {
+        "tool_trace": [{"step_id": "tool-1", "status": "completed"}],
+        "memory_trace": [{"id": "memory-1", "text": "preference"}],
+    }

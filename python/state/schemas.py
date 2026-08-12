@@ -1,4 +1,4 @@
-from typing import Optional, List, Literal
+from typing import Optional, List, Literal, Dict
 from pydantic import BaseModel, Field
 from enum import Enum
 
@@ -37,6 +37,11 @@ class PetControlContext(BaseModel):
     motionOptions: List[PetControlMotionOption] = Field(default_factory=list)
     expressions: List[str] = Field(default_factory=list)
     parameters: List[PetControlParameterOption] = Field(default_factory=list)
+    capabilityRevision: Optional[str] = None
+    modelType: Optional[Literal["live2d", "vrm"]] = None
+    modelId: Optional[str] = None
+    actions: Dict[str, bool] = Field(default_factory=dict)
+    viseme: Optional[bool] = None
     avatarPrompt: Optional[str] = None
 
 

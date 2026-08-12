@@ -4,10 +4,12 @@ import { computed, onScopeDispose, reactive, ref, watch } from 'vue'
 import { petControl } from '@/utils/petControl'
 import { chatClient } from '@/api/client'
 import { API_ORIGIN, CONTROL_ORIGIN, requestJson } from '@/api/clients/http-client'
-import type { ActionEnvelope, ActionEnvelopeWithTrace } from '../../shared/agent'
+import type { ActionEnvelope, ActionEnvelopeWithTrace, GenerationEnvelope } from '../../shared/agent'
 import { isPetLipSyncViseme, type PetSentenceEmotionCue, type PetVisemeCue } from '../../shared/pet-control'
+import { isCompanionEventEnvelope, type CompanionEventEnvelope } from '../../shared/companion-event'
 import type {
   ChatAgentStep,
+  ChatArtifactRef,
   ChatMemorySource,
   ChatMessage,
   ChatOptions,
@@ -18,7 +20,6 @@ import type {
 import { SocketEvents } from '../net/socketClient'
 import { normalizeSentenceEmotionCues } from '../pet-sentence-emotion-scheduler'
 import { useWorkspaceStore } from './workspaceStore'
-import { logger } from '@/logger'
 import {
   getCompanionInterruptionEpoch,
   publishCompanionInterrupt,
@@ -67,20 +68,34 @@ export interface ChatSessionRuntime {
   currentText: string
   isGenerating: boolean
   unread: boolean
+  conversationId: string
+  operationId: string | null
+  turnId: string | null
+  runId: string | null
+  stepIndex: number | null
 }
 
 type UnknownRecord = Record<string, unknown>
 type SendChatOptions = {
   appendUser?: boolean
   chatOptions?: Partial<ChatOptions>
+  envelope?: GenerationEnvelope
 }
 type RuntimeRequest = {
   requestId: string
+  generationId: string
+  turnId: string
   interruptionEpoch: number
   sessionId: string
   workspaceId: string
+  ttsEnabled: boolean
+  lastLlmSequence: number
+  llmFinalReceived: boolean
+  conversationId: string
+  operationId: string
+  runId: string | null
+  stepIndex: number
 }
-type AgentTurnPreparation = () => Promise<void>
 type ChatHistoryRecord = {
   id?: number | string | null
   role: 'user' | 'assistant' | 'system'
@@ -99,6 +114,10 @@ type RealtimeTurnRecord = {
   model: string
   workspaceId: string
   sessionId: string
+  interruptionEpoch: number
+  generationId: string
+  requestId: string
+  actionEnvelope?: unknown
 }
 type RealtimeTranscriptResponse = {
   status: string
@@ -112,6 +131,9 @@ const withWorkspaceQuery = (url: string, workspaceId?: string | null) => {
 }
 
 const createRequestId = () => `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+const createGenerationId = () => `gen_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+const createTurnId = () => `turn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+const createOperationId = () => `op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 const createAdviceId = () => `advice_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 const CHAT_OPTIONS_STORAGE_KEY = 'yuizaki.chat.options'
 const CHAT_OPTIONS_STORAGE_VERSION_KEY = 'yuizaki.chat.options.version'
@@ -157,6 +179,24 @@ const readNumber = (value: unknown, key: string): number | undefined => {
     return Number.isFinite(parsed) ? parsed : undefined
   }
   return undefined
+}
+
+const readGenerationEnvelope = (value: unknown): GenerationEnvelope | null => {
+  const requestId = readString(value, 'request_id').trim()
+  const generationId = readString(value, 'generation_id').trim()
+  const turnId = readString(value, 'turn_id').trim()
+  const interruptionEpoch = readNumber(value, 'interruption_epoch')
+  const version = readNumber(value, 'envelope_version') ?? readNumber(value, 'version')
+  if (!requestId || !generationId || !turnId || interruptionEpoch === undefined || version !== 1) return null
+  const conversationId = readString(value, 'conversation_id') || readString(value, 'conversationId')
+  const operationId = readString(value, 'operation_id') || readString(value, 'operationId')
+  const stepIndex = readNumber(value, 'step_index') ?? readNumber(value, 'stepIndex')
+  return {
+    version: 1, requestId, generationId, turnId, interruptionEpoch,
+    ...(conversationId ? { conversationId } : {}),
+    ...(operationId ? { operationId } : {}),
+    ...(stepIndex !== undefined ? { stepIndex } : {}),
+  }
 }
 
 type PcmAudioPayload = {
@@ -437,8 +477,70 @@ export const useChatStore = defineStore('chat', () => {
     const success = typeof item.success === 'boolean' ? item.success : undefined
     const status = String(item.status ?? (success === false ? 'failed' : success === true ? 'completed' : 'recorded')).trim()
     const error = String(item.error ?? '').trim()
-    return [{ id, title, status, ...(tool ? { tool } : {}), ...(error ? { error } : {}) }]
+    const resultSummary = String(item.resultSummary ?? item.result_summary ?? '').trim().slice(0, 360)
+    const durationMs = readNumber(item, 'durationMs') ?? readNumber(item, 'duration_ms')
+    const artifactCount = readNumber(item, 'artifactCount') ?? readNumber(item, 'artifact_count')
+    const jobId = String(item.jobId ?? item.job_id ?? '').trim()
+    const runId = String(item.runId ?? item.run_id ?? '').trim()
+    return [{
+      id,
+      title,
+      status,
+      ...(tool ? { tool } : {}),
+      ...(error ? { error } : {}),
+      ...(jobId ? { jobId } : {}),
+      ...(runId ? { runId } : {}),
+      ...(resultSummary ? { resultSummary } : {}),
+      ...(durationMs !== undefined && durationMs >= 0 ? { durationMs: Math.round(durationMs) } : {}),
+      ...(artifactCount !== undefined && artifactCount >= 0 ? { artifactCount: Math.round(artifactCount) } : {}),
+    }]
   })
+
+  const companionJobToStep = (event: CompanionEventEnvelope): ChatAgentStep => {
+    const data = event.data || {}
+    const text = (value: unknown) => typeof value === 'string' ? value.trim() : ''
+    const title = text(data.title) || text(data.task_name) || text(data.taskName) || text(data.phase) || `${event.source} job`
+    const tool = text(data.toolName) || text(data.tool_name) || text(data.tool)
+    const resultSummary = text(data.resultSummary ?? data.result_summary).replace(/\s+/g, ' ').slice(0, 360)
+    const error = text(data.error ?? data.cancellationReason ?? data.cancellation_reason)
+    const durationMs = typeof data.durationMs === 'number' && Number.isFinite(data.durationMs) ? Math.max(0, Math.round(data.durationMs)) : undefined
+    const artifactCount = typeof data.artifactCount === 'number' && Number.isFinite(data.artifactCount) ? Math.max(0, Math.round(data.artifactCount)) : undefined
+    const progressRaw = typeof data.progress === 'number' && Number.isFinite(data.progress) ? data.progress : undefined
+    const progress = progressRaw === undefined ? undefined : Math.max(0, Math.min(1, progressRaw > 1 ? progressRaw / 100 : progressRaw))
+    const artifacts: ChatArtifactRef[] = Array.isArray(data.artifacts)
+      ? data.artifacts.flatMap((artifact) => {
+        if (!isRecord(artifact)) return []
+        const id = String(artifact.id ?? artifact.artifactId ?? '').trim()
+        const name = String(artifact.name ?? artifact.filename ?? '').trim()
+        const type = String(artifact.type ?? artifact.mimeType ?? '').trim()
+        const url = String(artifact.url ?? artifact.path ?? '').trim()
+        if (!id && !name && !url) return []
+        return [{ ...(id ? { id } : {}), ...(name ? { name } : {}), ...(type ? { type } : {}), ...(url ? { url } : {}) }]
+      })
+      : []
+    return {
+      id: event.jobId,
+      title,
+      status: event.status,
+      ...(tool ? { tool } : {}),
+      ...(error ? { error } : {}),
+      jobId: event.jobId,
+      ...(event.runId ? { runId: event.runId } : {}),
+      ...(resultSummary ? { resultSummary } : {}),
+      ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(artifactCount !== undefined ? { artifactCount } : {}),
+      ...(artifacts.length ? { artifacts } : {}),
+      ...(progress !== undefined ? { progress } : {}),
+    }
+  }
+
+  const mergeAgentStep = (target: ChatAgentStep[] | null | undefined, next: ChatAgentStep) => {
+    const steps = target ? [...target] : []
+    const index = steps.findIndex((step) => (next.jobId && step.jobId === next.jobId) || step.id === next.id)
+    if (index < 0) steps.push(next)
+    else steps[index] = { ...steps[index], ...next }
+    return steps
+  }
 
   const normalizeMemorySources = (items: unknown[]): ChatMemorySource[] => items.flatMap((item) => {
     if (!isRecord(item)) return []
@@ -450,7 +552,29 @@ export const useChatStore = defineStore('chat', () => {
     const layer = String(doc.layer ?? metadata.layer ?? '').trim()
     const source = String(doc.source ?? metadata.source ?? '').trim()
     const score = typeof item.score === 'number' && Number.isFinite(item.score) ? item.score : undefined
-    return [{ id, text, ...(layer ? { layer } : {}), ...(source ? { source } : {}), ...(score !== undefined ? { score } : {}) }]
+    const rawConfidence = doc.confidence ?? metadata.confidence
+    const confidence = typeof rawConfidence === 'number' && Number.isFinite(rawConfidence)
+      ? Math.max(0, Math.min(1, rawConfidence))
+      : undefined
+    const traceId = String(
+      doc.trace_id ?? doc.traceId ?? metadata.trace_id ?? metadata.traceId ?? item.trace_id ?? '',
+    ).trim()
+    const eventId = String(doc.event_id ?? doc.eventId ?? metadata.event_id ?? metadata.eventId ?? item.event_id ?? '').trim()
+    const modelVersion = String(doc.model_version ?? doc.modelVersion ?? metadata.model_version ?? metadata.modelVersion ?? item.model_version ?? '').trim()
+    const correctionStateRaw = String(doc.correction_state ?? doc.correctionState ?? metadata.correction_state ?? '').trim()
+    const correctionState = correctionStateRaw === 'corrected' || correctionStateRaw === 'forgotten' ? correctionStateRaw : undefined
+    return [{
+      id,
+      text,
+      ...(layer ? { layer } : {}),
+      ...(source ? { source } : {}),
+      ...(score !== undefined ? { score } : {}),
+      ...(confidence !== undefined ? { confidence } : {}),
+      ...(traceId ? { traceId } : {}),
+      ...(eventId ? { eventId } : {}),
+      ...(modelVersion ? { modelVersion } : {}),
+      ...(correctionState ? { correctionState } : {}),
+    }]
   })
 
   const readTraceMetadata = (data: unknown) => {
@@ -473,6 +597,28 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  const attachCompanionJobEvent = (event: CompanionEventEnvelope) => {
+    const request = runtimeRequests.get(event.requestId) ?? completedRuntimeRequests.get(event.requestId)
+    if (!request) return
+    if (event.workspaceId !== request.workspaceId || event.sessionId !== request.sessionId || event.turnId !== request.turnId) return
+    if (event.interruptionEpoch !== request.interruptionEpoch) return
+    if (event.conversationId !== undefined && event.conversationId !== request.conversationId) return
+    if (event.operationId !== undefined && event.operationId !== request.operationId) return
+    if (event.stepIndex !== undefined && event.stepIndex !== request.stepIndex) return
+    const step = companionJobToStep(event)
+    const existing = pendingMessageTraces.get(event.requestId) || {}
+    const assistant = state.messages.find((message) => message.role === 'assistant' && message.request_id === event.requestId)
+    if (assistant) {
+      assistant.agentSteps = mergeAgentStep(assistant.agentSteps, step)
+      if (event.sessionId !== state.currentSessionId) ensureSessionRuntime(event.sessionId, event.workspaceId).unread = true
+      return
+    }
+    pendingMessageTraces.set(event.requestId, {
+      ...existing,
+      agentSteps: mergeAgentStep(existing.agentSteps, step),
+    })
+  }
+
   const petControlContext = ref<PetControlContextPayload | null>(null)
   const companionPersonaPrompt = ref<string | null>(null)
   const promptProfile = ref<ChatPromptProfile | null>(null)
@@ -485,9 +631,9 @@ export const useChatStore = defineStore('chat', () => {
   const pendingUserMessages = new Map<string, { content: string; index: number }>()
   const pendingInterrupts = new Map<string, { startedAt: number; sessionId: string; timeoutId: number }>()
   const runtimeRequests = new Map<string, RuntimeRequest>()
+  const completedRuntimeRequests = new Map<string, RuntimeRequest>()
   let currentRuntimeRequest: RuntimeRequest | null = null
-  let currentRealtimeRuntimeRequest: { requestId: string; interruptionEpoch: number } | null = null
-  let agentTurnPreparation: AgentTurnPreparation | null = null
+  let currentRealtimeRuntimeRequest: { requestId: string; interruptionEpoch: number; generationId: string; turnId: string } | null = null
   let historyLoadEpoch = 0
   const blockedTtsGenerations = new Set<string>()
   const reportedPlaybackGenerations = new Set<string>()
@@ -506,6 +652,11 @@ export const useChatStore = defineStore('chat', () => {
       currentText: '',
       isGenerating: false,
       unread: false,
+      conversationId: id,
+      operationId: null,
+      turnId: null,
+      runId: null,
+      stepIndex: null,
     }
     sessionRuntime[id] = created
     return created
@@ -515,7 +666,9 @@ export const useChatStore = defineStore('chat', () => {
     const sessionId = readString(data, 'session_id').trim()
     if (sessionId) return ensureSessionRuntime(sessionId)
     const requestId = readString(data, 'request_id').trim()
-    const request = requestId ? runtimeRequests.get(requestId) : undefined
+    const request = requestId
+      ? runtimeRequests.get(requestId) ?? completedRuntimeRequests.get(requestId)
+      : undefined
     if (request) return ensureSessionRuntime(request.sessionId, request.workspaceId)
     const running = Object.values(sessionRuntime).filter((runtime) => runtime.isGenerating)
     if (running.length > 1) return null
@@ -523,11 +676,50 @@ export const useChatStore = defineStore('chat', () => {
     return ensureSessionRuntime(state.currentSessionId, state.currentWorkspaceId)
   }
 
-  const eventMatchesRuntime = (data: unknown, runtime: ChatSessionRuntime) => {
-    const requestId = readString(data, 'request_id').trim()
-    if (!requestId) return true
-    if (runtime.requestId === requestId) return true
-    return runtimeRequests.get(requestId)?.sessionId === runtime.sessionId
+  const eventMatchesRuntime = (
+    data: unknown,
+    runtime: ChatSessionRuntime,
+    options: { checkSequence?: boolean; allowCompleted?: boolean } = {},
+  ) => {
+    const envelope = readGenerationEnvelope(data)
+    if (!envelope) return false
+    const { requestId, generationId, turnId, interruptionEpoch } = envelope
+    const activeRequest = runtime.requestId ? runtimeRequests.get(runtime.requestId) : undefined
+    const request = activeRequest?.requestId === requestId
+      ? activeRequest
+      : options.allowCompleted
+        ? completedRuntimeRequests.get(requestId)
+        : undefined
+    if (!request || request.sessionId !== runtime.sessionId) return false
+    if (generationId !== request.generationId || turnId !== request.turnId) return false
+    if (interruptionEpoch !== request.interruptionEpoch) return false
+    if (envelope.conversationId !== undefined && envelope.conversationId !== request.conversationId) return false
+    if (envelope.operationId !== undefined && envelope.operationId !== request.operationId) return false
+    if (envelope.stepIndex !== undefined && envelope.stepIndex !== request.stepIndex) return false
+    if (options.checkSequence) {
+      const sequence = readNumber(data, 'sequence')
+      if (sequence === undefined || !Number.isInteger(sequence) || sequence < 0 || sequence <= request.lastLlmSequence) return false
+      request.lastLlmSequence = sequence
+    }
+    return true
+  }
+
+  const requestForRuntime = (runtime: ChatSessionRuntime) =>
+    runtime.requestId ? runtimeRequests.get(runtime.requestId) : undefined
+
+  const completeRuntimeRequest = (runtime: ChatSessionRuntime, requestId = runtime.requestId) => {
+    if (!requestId || runtime.requestId !== requestId) return
+    const request = runtimeRequests.get(requestId)
+    runtimeRequests.delete(requestId)
+    if (request) {
+      completedRuntimeRequests.set(requestId, request)
+      if (completedRuntimeRequests.size > 64) {
+        const oldest = completedRuntimeRequests.keys().next().value
+        if (oldest) completedRuntimeRequests.delete(oldest)
+      }
+    }
+    runtime.requestId = null
+    if (currentRuntimeRequest?.requestId === requestId) currentRuntimeRequest = null
   }
 
   const runningSessionIds = computed(() => Object.values(sessionRuntime)
@@ -599,6 +791,13 @@ export const useChatStore = defineStore('chat', () => {
     if (initialized) return
     initialized = true
     const socketClient = chatClient.getSocketClient()
+    const handleCompanionJob = (event: Event) => {
+      const detail = (event as CustomEvent<CompanionEventEnvelope>).detail
+      if (!isCompanionEventEnvelope(detail)) return
+      attachCompanionJobEvent(detail)
+    }
+    window.addEventListener('companion:job', handleCompanionJob as EventListener)
+    onScopeDispose(() => window.removeEventListener('companion:job', handleCompanionJob as EventListener))
 
     socketClient.on(SocketEvents.ASR_SPEECH_START, () => {
       if (!state.isGenerating && !state.isTTSPlaying && !state.isSpeaking) return
@@ -606,6 +805,7 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     socketClient.on(SocketEvents.ASR_PARTIAL, (data: unknown) => {
+      if (!readGenerationEnvelope(data)) return
       state.asrPartialText = readString(data, 'text')
       state.lastError = null
     })
@@ -641,6 +841,7 @@ export const useChatStore = defineStore('chat', () => {
       pendingInterrupts.clear()
       blockedTtsGenerations.clear()
       runtimeRequests.clear()
+      completedRuntimeRequests.clear()
       for (const runtime of Object.values(sessionRuntime)) {
         runtime.isGenerating = false
         runtime.currentText = ''
@@ -654,8 +855,9 @@ export const useChatStore = defineStore('chat', () => {
 
     socketClient.on(SocketEvents.ASR_FINAL, (data: unknown) => {
       const text = readString(data, 'text').trim()
+      const envelope = readGenerationEnvelope(data)
       state.asrPartialText = ''
-      if (!text) return
+      if (!text || !envelope) return
       if (
         (state.isGenerating || state.isTTSPlaying || state.isSpeaking) &&
         !hasPendingInterruptForSession(state.currentSessionId)
@@ -663,14 +865,15 @@ export const useChatStore = defineStore('chat', () => {
         interrupt('voice')
       }
       state.messages.push({ role: 'user', content: text, timestamp: new Date().toISOString() })
-      sendChat(text, { appendUser: false })
+      sendChat(text, { appendUser: false, envelope })
     })
 
     socketClient.on(SocketEvents.LLM_DELTA, (data: unknown) => {
       const token = readString(data, 'token')
       if (!token) return
       const runtime = resolveEventRuntime(data)
-      if (!runtime || !eventMatchesRuntime(data, runtime)) return
+      if (!runtime || !eventMatchesRuntime(data, runtime, { checkSequence: true })) return
+      if (requestForRuntime(runtime)?.llmFinalReceived) return
       runtime.currentText += token
       runtime.isGenerating = true
       if (runtime.sessionId === state.currentSessionId) {
@@ -682,7 +885,10 @@ export const useChatStore = defineStore('chat', () => {
 
     socketClient.on(SocketEvents.LLM_FINAL, (data: unknown) => {
       const runtime = resolveEventRuntime(data)
-      if (!runtime || !eventMatchesRuntime(data, runtime)) return
+      if (!runtime || !eventMatchesRuntime(data, runtime, { checkSequence: true })) return
+      const runtimeRequest = requestForRuntime(runtime)
+      if (runtimeRequest?.llmFinalReceived) return
+      if (runtimeRequest) runtimeRequest.llmFinalReceived = true
       const text = readString(data, 'text')
       const assistantText = text || runtime.currentText
       const userMessageId = readMessageId(data, 'user_message_id')
@@ -716,9 +922,10 @@ export const useChatStore = defineStore('chat', () => {
       runtime.currentText = ''
       runtime.isGenerating = false
       runtime.unread = !isActiveSession
-      const runtimeRequest = responseRequestId ? runtimeRequests.get(responseRequestId) : undefined
-      if (responseRequestId) runtimeRequests.delete(responseRequestId)
-      runtime.requestId = null
+      const ttsExpected = isRecord(data) && data.tts_expected === false
+        ? false
+        : runtimeRequest?.ttsEnabled
+      if (!ttsExpected) completeRuntimeRequest(runtime, responseRequestId || runtime.requestId)
       if (isActiveSession) {
         lastAssistantText = assistantText
         state.currentText = ''
@@ -738,7 +945,8 @@ export const useChatStore = defineStore('chat', () => {
 
     socketClient.on(SocketEvents.AGENT_RESULT, (data: unknown) => {
       const runtime = resolveEventRuntime(data)
-      if (runtime && runtime.sessionId !== state.currentSessionId) return
+      if (!runtime || !eventMatchesRuntime(data, runtime, { allowCompleted: true })) return
+      if (runtime.sessionId !== state.currentSessionId) return
       const envelope = normalizeActionEnvelope(data)
       const requestId = readString(data, 'request_id').trim()
       const traces = readTraceMetadata(data)
@@ -748,7 +956,17 @@ export const useChatStore = defineStore('chat', () => {
           : state.messages.length && state.messages[state.messages.length - 1].role === 'assistant'
             ? state.messages[state.messages.length - 1]
             : undefined
-        if (assistant) Object.assign(assistant, traces)
+        if (assistant) {
+          const existingSteps = assistant.agentSteps || []
+          const { agentSteps, ...otherTraces } = traces
+          Object.assign(assistant, otherTraces)
+          if (agentSteps?.length) {
+            assistant.agentSteps = agentSteps.reduce(
+              (steps, step) => mergeAgentStep(steps, step),
+              existingSteps,
+            )
+          }
+        }
         else if (requestId) pendingMessageTraces.set(requestId, { ...(pendingMessageTraces.get(requestId) || {}), ...traces })
       }
       state.lastAgentEnvelope = envelope
@@ -768,7 +986,7 @@ export const useChatStore = defineStore('chat', () => {
 
     socketClient.on(SocketEvents.PET_CONTROL, (data: unknown) => {
       const runtime = resolveEventRuntime(data)
-      if (runtime && runtime.sessionId !== state.currentSessionId) return
+      if (!runtime || runtime.sessionId !== state.currentSessionId || !eventMatchesRuntime(data, runtime, { allowCompleted: true })) return
       if (!isPetLinkEnabled()) {
         pendingSentenceEmotionCues = []
         return
@@ -782,6 +1000,17 @@ export const useChatStore = defineStore('chat', () => {
           ? data
           : null
       if (!payload) return
+      const runtimeRequest = runtime.requestId
+        ? runtimeRequests.get(runtime.requestId)
+        : completedRuntimeRequests.get(readString(data, 'request_id').trim())
+      const controlEnvelope = {
+        version: 1 as const,
+        sessionId: runtime.sessionId,
+        generationId: runtimeRequest?.generationId,
+        turnId: runtimeRequest?.turnId,
+        requestId: runtimeRequest?.requestId,
+        interruptionEpoch: runtimeRequest?.interruptionEpoch,
+      }
       pendingSentenceEmotionCues = normalizeSentenceEmotionCues(payload.sentence_emotions)
       void publishCompanionRuntimeEvent({
         source: 'chat',
@@ -792,7 +1021,7 @@ export const useChatStore = defineStore('chat', () => {
       })
       window.dispatchEvent(
         new CustomEvent('pet:llm-control', {
-          detail: payload,
+          detail: { ...payload, ...controlEnvelope },
         }),
       )
     })
@@ -800,25 +1029,36 @@ export const useChatStore = defineStore('chat', () => {
     const handleTtsAudio = (data: unknown, finalEvent: boolean) => {
       const sessionId = readString(data, 'session_id') || state.currentSessionId
       const generationId = readString(data, 'generation_id')
-      if (sessionId !== state.currentSessionId) return
+      const requestIdFromEvent = readString(data, 'request_id').trim()
+      const request = requestIdFromEvent ? runtimeRequests.get(requestIdFromEvent) : undefined
+      const runtime = ensureSessionRuntime(sessionId, request?.workspaceId || state.currentWorkspaceId)
+      if (!eventMatchesRuntime(data, runtime)) return
+      const isActiveSession = sessionId === state.currentSessionId
       if (
         hasPendingInterruptForSession(sessionId) ||
         (generationId && blockedTtsGenerations.has(generationId))
       ) {
         return
       }
+      const requestId = runtime.requestId
       const audioUrl = readString(data, 'audio_url')
       const pcmAudio = readPcmAudio(data)
       if (!audioUrl && !pcmAudio) {
         if (finalEvent && isRecord(data) && data.complete === true) {
           pendingSentenceEmotionCues = []
+          completeRuntimeRequest(runtime, requestId)
         }
+        return
+      }
+      if (!isActiveSession) {
+        if (finalEvent) completeRuntimeRequest(runtime, requestId)
         return
       }
       if (!isTtsEnabled()) {
         stopTtsPlaybackState()
         pendingSentenceEmotionCues = []
         window.dispatchEvent(createTtsStopEvent())
+        if (finalEvent) completeRuntimeRequest(runtime, requestId)
         return
       }
       const petLinkEnabled = isPetLinkEnabled()
@@ -837,7 +1077,21 @@ export const useChatStore = defineStore('chat', () => {
           interruptionEpoch: currentRuntimeRequest?.interruptionEpoch,
         })
       }
-      const eventDetail: { text?: string; sentenceEmotionCues?: PetSentenceEmotionCue[]; visemeCues?: PetVisemeCue[]; petLinkEnabled?: boolean; generationId?: string; sequence?: number; isFinal?: boolean } = {}
+      const eventDetail: { text?: string; sentenceEmotionCues?: PetSentenceEmotionCue[]; visemeCues?: PetVisemeCue[]; petLinkEnabled?: boolean; sessionId?: string; generationId?: string; turnId?: string; requestId?: string; conversationId?: string; operationId?: string; runId?: string; stepIndex?: number; interruptionEpoch?: number; version?: 1; sequence?: number; isFinal?: boolean } = {
+        sessionId,
+        turnId: readString(data, 'turn_id'),
+        requestId: requestIdFromEvent,
+        interruptionEpoch: readNumber(data, 'interruption_epoch'),
+        version: 1,
+      }
+      const conversationId = readString(data, 'conversation_id') || readString(data, 'conversationId')
+      const operationId = readString(data, 'operation_id') || readString(data, 'operationId')
+      const runId = readString(data, 'run_id') || readString(data, 'runId')
+      const stepIndex = readNumber(data, 'step_index') ?? readNumber(data, 'stepIndex')
+      if (conversationId) eventDetail.conversationId = conversationId
+      if (operationId) eventDetail.operationId = operationId
+      if (runId) eventDetail.runId = runId
+      if (stepIndex !== undefined) eventDetail.stepIndex = stepIndex
       if (hasFinalField) eventDetail.isFinal = isFinal
       if (generationId) eventDetail.generationId = generationId
       if (sequence !== undefined) eventDetail.sequence = sequence
@@ -869,6 +1123,7 @@ export const useChatStore = defineStore('chat', () => {
         }))
       }
       if (isFinal) pendingSentenceEmotionCues = []
+      if (finalEvent) completeRuntimeRequest(runtime, requestId)
     }
 
     socketClient.on(SocketEvents.TTS_CHUNK, (data: unknown) => handleTtsAudio(data, false))
@@ -879,13 +1134,14 @@ export const useChatStore = defineStore('chat', () => {
       const code = readString(data, 'code')
       const runtime = resolveEventRuntime(data)
       const isActiveSession = !runtime || runtime.sessionId === state.currentSessionId
+      const ownedRuntimeError = code.startsWith('LLM') || code.startsWith('GEN') || code.startsWith('AGENT') || code.startsWith('TTS') || code === 'chat_error'
+      if (ownedRuntimeError && (!runtime || !eventMatchesRuntime(data, runtime))) return
       if (isActiveSession) state.lastError = message
       if (code.startsWith('LLM') || code.startsWith('GEN') || code.startsWith('AGENT') || code === 'chat_error') {
         if (runtime) {
           runtime.isGenerating = false
           runtime.currentText = ''
-          if (runtime.requestId) runtimeRequests.delete(runtime.requestId)
-          runtime.requestId = null
+          completeRuntimeRequest(runtime)
           clearPendingUserMessage(runtime.sessionId)
         }
         if (isActiveSession) {
@@ -896,6 +1152,7 @@ export const useChatStore = defineStore('chat', () => {
       if (code.startsWith('TTS')) {
         stopTtsPlaybackState()
         window.dispatchEvent(createTtsStopEvent())
+        if (runtime) completeRuntimeRequest(runtime)
       }
       if (isActiveSession) ElMessage.error(message)
     })
@@ -959,10 +1216,6 @@ export const useChatStore = defineStore('chat', () => {
     clearPendingUserMessage()
   }
 
-  const setAgentTurnPreparation = (callback: AgentTurnPreparation | null) => {
-    agentTurnPreparation = callback
-  }
-
   const sendChat = (text: string, options: SendChatOptions = {}) => {
     const trimmed = text.trim()
     if (!trimmed) return false
@@ -995,17 +1248,33 @@ export const useChatStore = defineStore('chat', () => {
       })
     }
 
-    const requestId = createRequestId()
+    const requestId = options.envelope?.requestId || createRequestId()
+    const requestOptions = requestChatOptions(options.chatOptions)
     const runtimeRequest: RuntimeRequest = {
       requestId,
-      interruptionEpoch: getCompanionInterruptionEpoch(),
+      generationId: options.envelope?.generationId || createGenerationId(),
+      turnId: options.envelope?.turnId || createTurnId(),
+      interruptionEpoch: options.envelope?.interruptionEpoch ?? getCompanionInterruptionEpoch(),
       sessionId,
       workspaceId,
+      ttsEnabled: requestOptions.tts_enabled !== false,
+      lastLlmSequence: -1,
+      llmFinalReceived: false,
+      conversationId: options.envelope?.conversationId || sessionId,
+      operationId: options.envelope?.operationId || createOperationId(),
+      runId: null,
+      stepIndex: options.envelope?.stepIndex ?? 0,
     }
+    const runtime = ensureSessionRuntime(sessionId, workspaceId)
+    if (runtime.requestId) runtimeRequests.delete(runtime.requestId)
     runtimeRequests.set(requestId, runtimeRequest)
     currentRuntimeRequest = runtimeRequest
-    const runtime = ensureSessionRuntime(sessionId, workspaceId)
     runtime.requestId = requestId
+    runtime.conversationId = runtimeRequest.conversationId
+    runtime.operationId = runtimeRequest.operationId
+    runtime.turnId = runtimeRequest.turnId
+    runtime.runId = runtimeRequest.runId
+    runtime.stepIndex = runtimeRequest.stepIndex
     runtime.currentText = ''
     runtime.isGenerating = true
     runtime.unread = false
@@ -1025,21 +1294,28 @@ export const useChatStore = defineStore('chat', () => {
 
     const contextMessages = activeContextMessages()
     const petContext = isPetLinkEnabled() ? petControlContext.value || undefined : undefined
-    const requestOptions = requestChatOptions(options.chatOptions)
     const dispatchAgentChat = () => {
       const pendingRuntime = sessionRuntime[sessionId]
       if (pendingRuntime?.requestId !== requestId || !pendingRuntime.isGenerating) return
-      socketClient.sendAgentChat(contextMessages, sessionId, petContext, requestId, workspaceId, requestOptions)
+      socketClient.sendAgentChat(
+        contextMessages,
+        sessionId,
+        petContext,
+        requestId,
+        workspaceId,
+        requestOptions,
+        runtimeRequest.interruptionEpoch,
+        runtimeRequest.generationId,
+        runtimeRequest.turnId,
+        {
+          conversationId: runtimeRequest.conversationId,
+          operationId: runtimeRequest.operationId,
+          stepIndex: runtimeRequest.stepIndex,
+          runId: runtimeRequest.runId || undefined,
+        },
+      )
     }
-    const prepareTurn = agentTurnPreparation
-    if (!prepareTurn) {
-      dispatchAgentChat()
-      return true
-    }
-    void Promise.resolve()
-      .then(prepareTurn)
-      .catch((error) => logger.warn('Agent turn preparation failed; continuing without it:', error))
-      .finally(dispatchAgentChat)
+    dispatchAgentChat()
     return true
   }
 
@@ -1055,12 +1331,17 @@ export const useChatStore = defineStore('chat', () => {
     state.lastError = null
   }
 
-  const setRealtimeRecording = (recording: boolean) => {
+  const setRealtimeRecording = (
+    recording: boolean,
+    identity?: { requestId: string; interruptionEpoch: number; generationId: string; turnId: string },
+  ) => {
     state.isRecording = recording
     if (recording) {
-      currentRealtimeRuntimeRequest = {
+      currentRealtimeRuntimeRequest = identity ?? {
         requestId: `realtime_${createRequestId()}`,
         interruptionEpoch: getCompanionInterruptionEpoch(),
+        generationId: createGenerationId(),
+        turnId: createTurnId(),
       }
       state.asrPartialText = ''
       state.currentText = ''
@@ -1085,31 +1366,48 @@ export const useChatStore = defineStore('chat', () => {
     const userText = turn.userText.trim()
     const assistantText = turn.assistantText.trim()
     if (!userText || !assistantText) return
+    const currentRealtime = currentRealtimeRuntimeRequest
 
     const timestamp = new Date().toISOString()
-    const userIndex = state.messages.push({
-      role: 'user',
-      content: userText,
-      timestamp,
-    }) - 1
-    const assistantIndex = state.messages.push({
-      role: 'assistant',
-      content: assistantText,
-      timestamp,
-    }) - 1
-    lastAssistantText = assistantText
-    state.currentText = ''
-    state.asrPartialText = ''
-    state.isGenerating = false
-    state.lastError = null
-    if (isPetLinkEnabled()) {
-      void publishCompanionRuntimeEvent({
-        source: 'chat',
-        activity: 'idle',
-        durationMs: 800,
-        requestId: currentRealtimeRuntimeRequest?.requestId,
-        interruptionEpoch: currentRealtimeRuntimeRequest?.interruptionEpoch,
-      })
+    const isCurrentSession = turn.workspaceId === state.currentWorkspaceId
+      && turn.sessionId === state.currentSessionId
+    if (!turn.turnId || !turn.generationId || !turn.requestId) return
+    if (isCurrentSession && (!currentRealtime
+      || currentRealtime.interruptionEpoch !== turn.interruptionEpoch
+      || currentRealtime.generationId !== turn.generationId
+      || currentRealtime.requestId !== turn.requestId)) return
+    const envelope = normalizeActionEnvelope(turn.actionEnvelope)
+    const traces = readTraceMetadata(turn.actionEnvelope)
+    let userIndex = -1
+    let assistantIndex = -1
+    if (isCurrentSession) {
+      userIndex = state.messages.push({ role: 'user', content: userText, timestamp }) - 1
+      assistantIndex = state.messages.push({ role: 'assistant', content: assistantText, timestamp }) - 1
+      const localAssistant = state.messages[assistantIndex]
+      if (localAssistant && traces) Object.assign(localAssistant, traces)
+      state.lastAgentEnvelope = envelope
+      if (envelope) {
+        state.agentEnvelopeTimeline.unshift({ received_at: timestamp, ...envelope })
+        state.agentEnvelopeTimeline = state.agentEnvelopeTimeline.slice(0, 10)
+        window.dispatchEvent(new CustomEvent('pet:agent-result', { detail: envelope }))
+      }
+      lastAssistantText = assistantText
+      state.currentText = ''
+      state.asrPartialText = ''
+      state.isGenerating = false
+      state.lastError = null
+      if (isPetLinkEnabled()) {
+        void publishCompanionRuntimeEvent({
+          source: 'chat',
+          activity: 'idle',
+          durationMs: 800,
+          requestId: currentRealtimeRuntimeRequest?.requestId,
+          interruptionEpoch: currentRealtimeRuntimeRequest?.interruptionEpoch,
+        })
+      }
+    } else {
+      const runtime = ensureSessionRuntime(turn.sessionId, turn.workspaceId)
+      runtime.unread = true
     }
 
     try {
@@ -1122,10 +1420,12 @@ export const useChatStore = defineStore('chat', () => {
           turn_id: turn.turnId,
           user_text: userText,
           assistant_text: assistantText,
+          tool_trace: traces?.tool_trace,
+          memory_trace: traces?.memory_trace,
         }),
       })
-      const userMessage = state.messages[userIndex]
-      const assistantMessage = state.messages[assistantIndex]
+      const userMessage = userIndex >= 0 ? state.messages[userIndex] : undefined
+      const assistantMessage = assistantIndex >= 0 ? state.messages[assistantIndex] : undefined
       if (userMessage && saved.user_message?.id !== undefined) {
         userMessage.id = saved.user_message.id
         userMessage.timestamp = saved.user_message.timestamp || userMessage.timestamp
@@ -1185,6 +1485,8 @@ export const useChatStore = defineStore('chat', () => {
   const setPetControlContext = (context: PetControlContextPayload) => {
     petControlContext.value = context
   }
+
+  const getPetControlContext = () => isPetLinkEnabled() ? petControlContext.value : null
 
   const setCompanionPersonaPrompt = (prompt: string | null) => {
     companionPersonaPrompt.value = prompt?.trim() || null
@@ -1453,14 +1755,15 @@ export const useChatStore = defineStore('chat', () => {
     setRealtimeRecording,
     setRealtimePlayback,
     completeRealtimeTurn,
+    getCurrentRealtimeIdentity: () => currentRealtimeRuntimeRequest,
     setRealtimeError,
     setChatOptions,
     setTtsEnabled,
     activeContextMessages,
     setContextStartIndex,
-    setAgentTurnPreparation,
     interrupt,
     setPetControlContext,
+    getPetControlContext,
     setCompanionPersonaPrompt,
     setPromptProfile,
     setWorkspaceContext,

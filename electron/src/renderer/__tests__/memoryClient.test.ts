@@ -103,6 +103,30 @@ describe('memoryClient', () => {
     )
   })
 
+  it('soft-forgets a memory without issuing a destructive delete', async () => {
+    window.sessionStorage.setItem('yuizaki.control.token', 'memory-token')
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ status: 'ok', id: 'memory-1', action: 'soft-forget' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await memoryClient.softForgetDoc('memory-1', { reason: 'chat_memory_feedback', turn_id: 'turn-1' })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${CONTROL_ORIGIN}/memory/docs/memory-1/soft-forget`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ reason: 'chat_memory_feedback', turn_id: 'turn-1' }),
+      }),
+    )
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      `${CONTROL_ORIGIN}/memory/docs/memory-1`,
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
   it('maps maintenance preview and purge controls to explicit backend contracts', async () => {
     window.sessionStorage.setItem('yuizaki.control.token', 'memory-token')
     const fetchMock = vi.fn().mockResolvedValue({

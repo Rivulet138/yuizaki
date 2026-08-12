@@ -31,7 +31,8 @@ describe('renderer runtime teardown', () => {
     const shell = readFileSync(resolve(process.cwd(), 'src/renderer/app/AppShell.vue'), 'utf8')
     const visualRuntime = readFileSync(resolve(process.cwd(), 'src/renderer/app/runtime/visualCaptureRuntime.ts'), 'utf8')
 
-    expect(shell).toContain('chatStore.setAgentTurnPreparation(visualCaptureRuntime.prepareAgentVisualContext)')
+    expect(shell).toContain('socketClient.on(SocketEvents.SCREENSHOT_CAPTURE_REQUEST, visualCaptureRuntime.handleCaptureRequest)')
+    expect(shell).not.toContain('setAgentTurnPreparation')
     expect(visualRuntime).toContain("mode: 'vision'")
     expect(visualRuntime).toContain("captureReason: forceEnabled ? 'manual' : 'agent_turn'")
     expect(shell).not.toContain('visualFrameTimer')

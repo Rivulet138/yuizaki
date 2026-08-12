@@ -31,6 +31,7 @@
       "RAG_QUERY": "rag:query",
       "RAG_RESULT": "rag:result",
       "SCREENSHOT_REQUEST": "screenshot:request",
+      "SCREENSHOT_CAPTURE_REQUEST": "screenshot:capture-request",
       "SCREENSHOT_RESULT": "screenshot:result",
       "PET_STATE": "pet:state",
       "PET_INTERACT": "pet:interact",
@@ -53,12 +54,20 @@
           "messages": { "type": "array" },
           "session_id": { "type": "string" },
           "workspace_id": { "type": "string" },
-          "request_id": { "type": "string" }
+          "request_id": { "type": "string" },
+          "generation_id": { "type": "string" },
+          "turn_id": { "type": "string" },
+          "interruption_epoch": { "type": "integer" },
+          "version": { "const": 1 }
         },
         "optional": {
           "pet_control_context": { "oneOf": [{ "type": "object" }, { "type": "null" }] },
           "chat_options": { "oneOf": [{ "type": "object" }, { "type": "null" }] }
         }
+      },
+      "audio:chunk": {
+        "type": "object",
+        "required": { "chunk": { "type": "string" }, "sample_rate": { "type": "integer" }, "is_final": { "type": "boolean" }, "session_id": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 } }
       },
       "asr:speech-start": {
         "type": "object",
@@ -66,30 +75,30 @@
       },
       "asr:partial": {
         "type": "object",
-        "required": { "session_id": { "type": "string" }, "text": { "type": "string" }, "confidence": { "type": "number" }, "lang": { "type": "string" } }
+        "required": { "session_id": { "type": "string" }, "text": { "type": "string" }, "confidence": { "type": "number" }, "lang": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 } }
       },
       "asr:final": {
         "type": "object",
-        "required": { "session_id": { "type": "string" }, "text": { "type": "string" }, "confidence": { "type": "number" }, "lang": { "type": "string" } }
+        "required": { "session_id": { "type": "string" }, "text": { "type": "string" }, "confidence": { "type": "number" }, "lang": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 } }
       },
       "llm:delta": {
         "type": "object",
-        "required": { "token": { "type": "string" }, "index": { "type": "integer" }, "session_id": { "type": "string" } }
+        "required": { "token": { "type": "string" }, "index": { "type": "integer" }, "session_id": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 }, "sequence": { "type": "integer" } }
       },
       "llm:final": {
         "type": "object",
-        "required": { "text": { "type": "string" }, "session_id": { "type": "string" }, "total_tokens": { "type": "integer" }, "finish_reason": { "type": "string" } },
-        "optional": { "user_message_id": { "type": "integer" }, "assistant_message_id": { "type": "integer" } }
+        "required": { "text": { "type": "string" }, "session_id": { "type": "string" }, "total_tokens": { "type": "integer" }, "finish_reason": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 }, "sequence": { "type": "integer" } },
+        "optional": { "user_message_id": { "type": "integer" }, "assistant_message_id": { "type": "integer" }, "tts_expected": { "type": "boolean" } }
       },
       "tts:chunk": {
         "oneOf": [
           {
             "type": "object",
-            "required": { "session_id": { "type": "string" }, "generation_id": { "type": "string" }, "sequence": { "type": "integer" }, "is_final": { "const": false }, "audio_url": { "type": "string" }, "text": { "type": "string" } }
+            "required": { "session_id": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 }, "sequence": { "type": "integer" }, "is_final": { "const": false }, "audio_url": { "type": "string" }, "text": { "type": "string" } }
           },
           {
             "type": "object",
-            "required": { "session_id": { "type": "string" }, "generation_id": { "type": "string" }, "sequence": { "type": "integer" }, "is_final": { "const": false }, "audio": { "type": "string" }, "audio_format": { "type": "string" }, "sample_rate": { "type": "integer" }, "channels": { "type": "integer" }, "sample_width_bytes": { "type": "integer" }, "chunk_index": { "type": "integer" }, "duration_ms": { "oneOf": [{ "type": "number" }, { "type": "null" }] }, "text": { "type": "string" } },
+            "required": { "session_id": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 }, "sequence": { "type": "integer" }, "is_final": { "const": false }, "audio": { "type": "string" }, "audio_format": { "type": "string" }, "sample_rate": { "type": "integer" }, "channels": { "type": "integer" }, "sample_width_bytes": { "type": "integer" }, "chunk_index": { "type": "integer" }, "duration_ms": { "oneOf": [{ "type": "number" }, { "type": "null" }] }, "text": { "type": "string" } },
             "optional": { "visemes": { "type": "array" } }
           }
         ]
@@ -98,11 +107,11 @@
         "oneOf": [
           {
             "type": "object",
-            "required": { "session_id": { "type": "string" }, "generation_id": { "type": "string" }, "sequence": { "type": "integer" }, "is_final": { "const": true }, "complete": { "const": true } }
+            "required": { "session_id": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 }, "sequence": { "type": "integer" }, "is_final": { "const": true }, "complete": { "const": true } }
           },
           {
             "type": "object",
-            "required": { "session_id": { "type": "string" }, "generation_id": { "type": "string" }, "sequence": { "type": "integer" }, "is_final": { "const": true }, "audio_url": { "type": "string" }, "text": { "type": "string" } }
+            "required": { "session_id": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 }, "sequence": { "type": "integer" }, "is_final": { "const": true }, "audio_url": { "type": "string" }, "text": { "type": "string" } }
           }
         ]
       },

@@ -104,6 +104,7 @@ interface Live2DHostContext {
 
 export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
   readonly modelType = 'live2d' as const
+  private loadGeneration = 0
   private expressionMixTicker: ((ticker: PIXI.Ticker) => void) | null = null
   private activeMixState:
     | {
@@ -161,7 +162,7 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
         motion: motions.length > 0,
         expression: expressions.length > 0,
         parameterPatch: parameters.length > 0,
-        viseme: false,
+        viseme: Boolean(manifest?.lipSync?.parameterIds?.length),
         cancel: true,
       },
       expressions,
@@ -221,7 +222,9 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
           : { status: 'degraded', message: 'Unsupported parameter blend modes were skipped' }
       }
       case 'viseme':
-        return { status: 'degraded', message: 'Live2D visemes use model lip-sync parameters instead of named presets' }
+        if (!this.lipSyncController) return { status: 'degraded', message: 'Live2D lip-sync is not ready' }
+        this.lipSyncController.setExternalViseme(action.weight ?? 1, action.active ?? true)
+        return { status: 'completed' }
       case 'cancel':
         if (action.channel === 'gaze') {
           this.setAttentionTarget(null)
@@ -277,6 +280,7 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
       return
     }
 
+    const generation = ++this.loadGeneration
     this.stopBehaviorControllers()
 
     const modelPath = config.modelPath ?? this.host.config.modelPath
@@ -288,12 +292,17 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
     this.host.setModel(destroyCurrentModel(this.host.app, currentModel))
 
     await ensureCubismCore()
+    if (generation !== this.loadGeneration) return
     Live2DConfig.MotionGroupIdle = 'Idle'
     Live2DConfig.MouseFollow = false
 
     const model = createLive2DModel(modelPath)
     if (!model) {
       this.host.showNotice('Live2D model is empty.')
+      return
+    }
+    if (generation !== this.loadGeneration) {
+      destroyCurrentModel(this.host.app, model)
       return
     }
 
@@ -631,6 +640,11 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
     }
     this.lipSyncController.stopExternal()
     this.setBehaviorState('idle')
+  }
+
+  setLipSyncViseme(_viseme: PetLipSyncViseme, weight: number, active: boolean): void {
+    this.lipSyncController?.setExternalViseme(weight, active)
+    if (active) this.setBehaviorState('speaking')
   }
 
   stopLipSync(): void {

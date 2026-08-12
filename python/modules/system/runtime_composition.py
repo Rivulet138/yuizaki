@@ -13,7 +13,10 @@ from .runtime_endpoints import (
     build_experience_metrics_endpoint,
     build_capabilities_state_endpoint,
     build_capability_snapshot,
+    build_cancel_schedule_endpoint,
     build_clear_permissions_endpoint,
+    build_companion_opportunity_outcome_endpoint,
+    build_heartbeat_goal_cancel_endpoint,
     build_create_interval_schedule_endpoint,
     build_create_once_schedule_endpoint,
     build_health_endpoint,
@@ -50,6 +53,8 @@ class RuntimeHandlers:
     system_status: Callable[..., Any]
     heartbeat_status: Callable[..., Any]
     companion_runtime_status: Callable[..., Any]
+    companion_opportunity_outcome: Callable[..., Any]
+    heartbeat_goal_cancel: Callable[..., Any]
     capabilities_state: Callable[..., Any]
     orchestration_state: Callable[..., Any]
     active_workspace: Callable[..., Any]
@@ -63,6 +68,7 @@ class RuntimeHandlers:
     remove_schedule: Callable[..., Any]
     toggle_schedule: Callable[..., Any]
     run_schedule_now: Callable[..., Any]
+    cancel_schedule: Callable[..., Any]
     agent_trace_state: Callable[..., Any]
     experience_metrics_state: Callable[..., Any]
     mcp_state: Callable[..., Any]
@@ -130,6 +136,10 @@ def build_runtime_handlers(
             db_repo_provider=db_repo_provider,
         ),
         companion_runtime_status=companion_runtime_status,
+        companion_opportunity_outcome=build_companion_opportunity_outcome_endpoint(
+            heartbeat_scheduler_provider=heartbeat_scheduler_provider,
+        ),
+        heartbeat_goal_cancel=build_heartbeat_goal_cancel_endpoint(heartbeat_scheduler_provider=heartbeat_scheduler_provider),
         capabilities_state=build_capabilities_state_endpoint(
             tool_registry_provider=lambda: runtime.tool_registry if runtime else None,
             capability_snapshot_builder=build_capability_snapshot,
@@ -158,6 +168,7 @@ def build_runtime_handlers(
         remove_schedule=build_remove_schedule_endpoint(sio_server.scheduler),
         toggle_schedule=build_toggle_schedule_endpoint(sio_server.scheduler),
         run_schedule_now=build_run_schedule_now_endpoint(sio_server.scheduler),
+        cancel_schedule=build_cancel_schedule_endpoint(sio_server.scheduler),
         agent_trace_state=build_agent_trace_state_endpoint(sio_server.trace_store),
         experience_metrics_state=build_experience_metrics_endpoint(sio_server.experience_metrics),
         mcp_state=build_mcp_state_endpoint(sio_server.mcp_manager),
@@ -187,6 +198,8 @@ def build_system_router_from_handlers(
         system_status_handler=handlers.system_status,
         heartbeat_status_handler=handlers.heartbeat_status,
         companion_runtime_handler=handlers.companion_runtime_status,
+        companion_opportunity_outcome_handler=handlers.companion_opportunity_outcome,
+        heartbeat_goal_cancel_handler=handlers.heartbeat_goal_cancel,
         capabilities_state_handler=handlers.capabilities_state,
         orchestration_state_handler=handlers.orchestration_state,
         active_workspace_handler=handlers.active_workspace,
@@ -199,6 +212,7 @@ def build_system_router_from_handlers(
         remove_schedule_handler=handlers.remove_schedule,
         toggle_schedule_handler=handlers.toggle_schedule,
         run_schedule_now_handler=handlers.run_schedule_now,
+        cancel_schedule_handler=handlers.cancel_schedule,
         agent_trace_handler=handlers.agent_trace_state,
         experience_metrics_handler=handlers.experience_metrics_state,
         mcp_state_handler=handlers.mcp_state,

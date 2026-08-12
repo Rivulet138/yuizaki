@@ -124,6 +124,7 @@ describe('systemClient exports', () => {
 
     await systemClient.toggleSchedule('daily/tasks review', false)
     await systemClient.runScheduleNow('daily/tasks review')
+    await systemClient.cancelSchedule('daily/tasks review')
     await systemClient.removeSchedule('daily/tasks review')
 
     expect(fetch).toHaveBeenNthCalledWith(1, `${CONTROL_ORIGIN}/api/system/schedules/daily%2Ftasks%20review/toggle`, expect.objectContaining({
@@ -133,9 +134,35 @@ describe('systemClient exports', () => {
     expect(fetch).toHaveBeenNthCalledWith(2, `${CONTROL_ORIGIN}/api/system/schedules/daily%2Ftasks%20review/run`, expect.objectContaining({
       method: 'POST',
     }))
-    expect(fetch).toHaveBeenNthCalledWith(3, `${CONTROL_ORIGIN}/api/system/schedules/daily%2Ftasks%20review`, expect.objectContaining({
+    expect(fetch).toHaveBeenNthCalledWith(3, `${CONTROL_ORIGIN}/api/system/schedules/daily%2Ftasks%20review/cancel`, expect.objectContaining({
+      method: 'POST',
+    }))
+    expect(fetch).toHaveBeenNthCalledWith(4, `${CONTROL_ORIGIN}/api/system/schedules/daily%2Ftasks%20review`, expect.objectContaining({
       method: 'DELETE',
     }))
+  })
+
+  it('writes a proactive outcome to the correlated heartbeat job', async () => {
+    window.sessionStorage.setItem('yuizaki.control.token', 'heartbeat-token')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ ok: true }),
+    }))
+
+    await systemClient.resolveCompanionOpportunity('heartbeat/job 1', {
+      request_id: 'heartbeat-request-1',
+      outcome: 'suppressed',
+      reason: 'dnd',
+    })
+
+    expect(fetch).toHaveBeenCalledWith(
+      `${CONTROL_ORIGIN}/api/system/companion-runtime/opportunities/outcome/heartbeat%2Fjob%201`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ request_id: 'heartbeat-request-1', outcome: 'suppressed', reason: 'dnd' }),
+      }),
+    )
   })
 
   it('saves agent plugin config through the authenticated control server', async () => {

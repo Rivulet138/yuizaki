@@ -83,6 +83,19 @@ describe('Live2DBehaviorController Phase 2 arbitration', () => {
     expect(controller.getDebugSnapshot().resolvedState).toBe('thinking')
   })
 
+  it('keeps speaking above reacting until speech ends', () => {
+    vi.useFakeTimers()
+    const { controller, ticker } = createController()
+
+    controller.setState('speaking')
+    controller.setState('reacting', 220)
+    runFrames(ticker, 80)
+    expect(controller.getDebugSnapshot().resolvedState).toBe('speaking')
+
+    controller.setState('idle')
+    expect(controller.getDebugSnapshot().resolvedState).toBe('idle')
+  })
+
   it('clears active requests when explicitly set back to idle', () => {
     vi.useFakeTimers()
     const { controller, ticker } = createController()

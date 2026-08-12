@@ -97,6 +97,11 @@ export function useCompanionRuntimeBridge() {
       sinks: runtimeSinks,
       onSinkError: reportCompanionRuntimeSinkError,
       onPollResult: reportCompanionRuntimePollResult,
+      reportOpportunityOutcome: (jobId, requestId, outcome, reason) => systemClient.resolveCompanionOpportunity(jobId, {
+        request_id: requestId,
+        outcome,
+        ...(reason ? { reason } : {}),
+      }),
       ...(window.petApi?.e2e ? {
         now: () => Date.now() + e2eClockOffsetMs,
         pollIntervalMs: 250,

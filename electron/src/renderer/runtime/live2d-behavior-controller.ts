@@ -156,12 +156,12 @@ const BEHAVIOR_PROFILES: Record<Live2DBehaviorState, BehaviorProfile> = {
 const STATE_PRIORITY: Record<Exclude<Live2DBehaviorState, 'idle'>, number> = {
   sleepy: 4,
   waiting: 6,
-  thinking: 10,
   curious: 12,
   focused: 14,
-  speaking: 20,
-  reacting: 30,
-  interrupted: 35,
+  thinking: 20,
+  reacting: 20,
+  interrupted: 25,
+  speaking: 30,
 }
 
 const STATE_AFFECT_IMPULSES: Record<Exclude<Live2DBehaviorState, 'idle'>, AffectState> = {

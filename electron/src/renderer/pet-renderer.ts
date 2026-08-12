@@ -47,6 +47,11 @@ import {
 	PetPerformanceController,
 	type PetFpsTier,
 } from "./pet-performance-controller";
+import { resolvePetRenderBudget } from "./pet-render-budget";
+import {
+	PetEmbodimentCoordinator,
+	type PetEmbodimentBehavior,
+} from "./pet-embodiment-coordinator";
 import {
 	resolveCursor,
 	resolveMouseCapture,
@@ -100,6 +105,7 @@ interface PetConfig {
 	modelId: string | null;
 	modelPath: string;
 	modelManifest: AvatarManifest | null;
+	animationPaths: string[];
 	scale: number;
 	positionX: number | null;
 	positionY: number | null;
@@ -114,6 +120,7 @@ const DEFAULT_CONFIG: PetConfig = {
 	modelId: null,
 	modelPath: "",
 	modelManifest: null,
+	animationPaths: [],
 	scale: 0.28,
 	positionX: null,
 	positionY: null,
@@ -126,7 +133,6 @@ const DEFAULT_CONFIG: PetConfig = {
 const DEFAULT_SCALE = 0.28;
 const MIN_SCALE = 0.12;
 const MAX_SCALE = 0.6;
-const RENDERER_DPR_CAP = 1.5;
 const PASSTHROUGH_MIN_SWITCH_MS = 140;
 const HOVER_HYSTERESIS_PX = 14;
 const DOUBLE_CLICK_INTERVAL_MS = 280;
@@ -135,6 +141,8 @@ const LONG_PRESS_MOVE_CANCEL_PX = 10;
 const ACTIVE_FPS = 60;
 const IDLE_FPS = 30;
 const IDLE_THRESHOLD_MS = 30000;
+const MODEL_LOAD_MAX_RETRIES = 3;
+const MODEL_LOAD_RETRY_BASE_MS = 250;
 const PET_EVENT_DISPATCH_INTERVAL_MS: Record<DesktopPetEventName, number> = {
 	onPetClicked: 180,
 	onPetDragged: 600,
@@ -214,6 +222,11 @@ class PetRenderer {
 	private readonly petEventDispatchAt = new Map<DesktopPetEventName, number>();
 
 	private performanceController: PetPerformanceController | null = null;
+	private currentFpsTier: PetFpsTier = "active";
+	private readonly renderBudget = resolvePetRenderBudget({
+		hardwareConcurrency: navigator.hardwareConcurrency,
+		deviceMemory: (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
+	});
 
 	private scalePersistTimer: number | null = null;
 	private positionPersistTimer: number | null = null;
@@ -235,8 +248,16 @@ class PetRenderer {
 		channels: Set<AvatarCancelableActionType>;
 	}>();
 	private modelLoadGeneration = 0;
+	private modelLoadRetryTimer: number | null = null;
+	private modelLoadRetryResolve: ((shouldContinue: boolean) => void) | null = null;
 	private companionIdleProfile: PetCompanionIdleProfile = {};
 	private externalLipSyncSource: PetLipSyncLevelSource | null = null;
+	private readonly embodiment = new PetEmbodimentCoordinator({
+		applyBehavior: (behavior) => this.applyResolvedBehavior(behavior),
+		resetTransient: (channel) => {
+			this.getActiveRuntime()?.executeAvatarAction({ type: "cancel", channel });
+		},
+	});
 
 	constructor(containerId: string) {
 		const element = document.getElementById(containerId);
@@ -258,10 +279,10 @@ class PetRenderer {
 			width: window.innerWidth,
 			height: window.innerHeight,
 			backgroundAlpha: 0,
-			antialias: true,
-			resolution: Math.min(window.devicePixelRatio || 1, RENDERER_DPR_CAP),
+			antialias: this.renderBudget.antialias,
+			resolution: Math.min(window.devicePixelRatio || 1, this.renderBudget.dprCap),
 			autoDensity: true,
-			powerPreference: "high-performance",
+			powerPreference: this.renderBudget.powerPreference,
 			eventMode: "none",
 			eventFeatures: {
 				move: false,
@@ -333,7 +354,7 @@ class PetRenderer {
 		if (!this.app) {
 			return;
 		}
-		const loadGeneration = ++this.modelLoadGeneration;
+		const loadGeneration = this.beginModelLoadGeneration();
 
 		this.avatarCapabilities = null;
 		window.live2dApi?.pet.reportAvatarCapabilities(null);
@@ -342,6 +363,9 @@ class PetRenderer {
 		this.vrmRuntime?.destroy();
 		this.live2dRuntime = null;
 		this.vrmRuntime = null;
+		// Publish the teardown boundary immediately so the main process cannot
+		// keep advertising the previous model as ready during a replacement.
+		this.reportState(true);
 
 		if (this.config.modelType !== "live2d") {
 			try {
@@ -355,18 +379,27 @@ class PetRenderer {
 					markActivity: (reason) => this.markActivity(reason),
 				});
 				const runtime = this.vrmRuntime;
-				await runtime.loadModel({ modelPath });
+				await this.loadRuntimeWithRecovery(
+					() => runtime.loadModel({ modelPath, animationPaths: this.resolveAnimationPaths() }),
+					loadGeneration,
+					"vrm",
+				);
 				if (loadGeneration !== this.modelLoadGeneration) {
-					runtime.destroy();
 					return;
 				}
+				this.applyRuntimePerformancePolicy();
 				this.publishAvatarCapabilities();
 				this.reportState(true);
 			} catch (error) {
+				if (loadGeneration !== this.modelLoadGeneration) {
+					return;
+				}
+				this.reportModelLoadTerminal("vrm", modelPath, error);
 				this.showNotice(
 					`Failed to load VRM model: ${error instanceof Error ? error.message : String(error)}`,
 				);
 				console.error("[PetRenderer] failed to load VRM model:", error);
+				this.reportState(true);
 			}
 			return;
 		}
@@ -404,22 +437,113 @@ class PetRenderer {
 				markActivity: (reason) => this.markActivity(reason),
 			});
 			const runtime = this.live2dRuntime;
-			await runtime.loadModel({ modelPath });
+			await this.loadRuntimeWithRecovery(
+				() => runtime.loadModel({ modelPath, animationPaths: this.resolveAnimationPaths() }),
+				loadGeneration,
+				"live2d",
+			);
 			if (loadGeneration !== this.modelLoadGeneration) {
-				runtime.destroy();
 				return;
 			}
 			this.live2dRuntime.setCompanionIdleProfile(this.companionIdleProfile);
 			this.publishAvatarCapabilities();
 			console.info("[PetRenderer] model loaded:", modelPath);
 		} catch (error) {
+			if (loadGeneration !== this.modelLoadGeneration) {
+				return;
+			}
+			this.reportModelLoadTerminal("live2d", modelPath, error);
 			this.showNotice(getReadableError(error));
 			console.error("[PetRenderer] failed to load model:", error);
+			this.reportState(true);
 		}
+	}
+
+	private async loadRuntimeWithRecovery(
+		load: () => Promise<void>,
+		generation: number,
+		modelType: "live2d" | "vrm",
+	): Promise<void> {
+		let attempt = 0;
+		while (true) {
+			if (generation !== this.modelLoadGeneration || this.destroyed) return;
+			try {
+				await load();
+				if (generation === this.modelLoadGeneration) {
+					console.info("[PetRenderer] model load recovered", { modelType, attempt });
+				}
+				return;
+			} catch (error) {
+				if (generation !== this.modelLoadGeneration || this.destroyed) return;
+				if (attempt >= MODEL_LOAD_MAX_RETRIES) throw error;
+				attempt += 1;
+				const delayMs = MODEL_LOAD_RETRY_BASE_MS * 2 ** (attempt - 1);
+				console.warn("[PetRenderer] model load retry scheduled", {
+					modelType,
+					attempt,
+					maxRetries: MODEL_LOAD_MAX_RETRIES,
+					delayMs,
+					error: error instanceof Error ? error.message : String(error),
+				});
+				const shouldContinue = await this.waitForModelLoadRetry(delayMs, generation);
+				if (!shouldContinue) return;
+			}
+		}
+	}
+
+	private waitForModelLoadRetry(delayMs: number, generation: number): Promise<boolean> {
+		return new Promise((resolve) => {
+			this.modelLoadRetryResolve = resolve;
+			this.modelLoadRetryTimer = window.setTimeout(() => {
+				this.modelLoadRetryTimer = null;
+				this.modelLoadRetryResolve = null;
+				resolve(generation === this.modelLoadGeneration && !this.destroyed);
+			}, delayMs);
+		});
+	}
+
+	private beginModelLoadGeneration(): number {
+		this.cancelModelLoadRetry();
+		this.modelLoadGeneration += 1;
+		return this.modelLoadGeneration;
+	}
+
+	private cancelModelLoadRetry(): void {
+		if (this.modelLoadRetryTimer !== null) {
+			window.clearTimeout(this.modelLoadRetryTimer);
+			this.modelLoadRetryTimer = null;
+		}
+		const resolve = this.modelLoadRetryResolve;
+		this.modelLoadRetryResolve = null;
+		resolve?.(false);
+	}
+
+	private reportModelLoadTerminal(
+		modelType: "live2d" | "vrm",
+		modelPath: string,
+		error: unknown,
+	): void {
+		console.error("[PetRenderer] model load recovery exhausted", {
+			modelType,
+			modelPath,
+			maxRetries: MODEL_LOAD_MAX_RETRIES,
+			error: error instanceof Error ? error.message : String(error),
+		});
 	}
 
 	private getActiveRuntime(): PetRuntimeAdapter | null {
 		return this.config.modelType === "vrm" ? this.vrmRuntime : this.live2dRuntime;
+	}
+
+	private resolveAnimationPaths(): string[] {
+		return this.config.animationPaths
+			.map((animationPath) => animationPath.trim())
+			.filter(Boolean)
+			.map((animationPath) => /^https?:\/\//i.test(animationPath)
+				|| animationPath.startsWith("file:")
+				|| animationPath.startsWith("/api/")
+				? animationPath
+				: resolveRendererAsset(animationPath));
 	}
 
 	private publishAvatarCapabilities(): void {
@@ -597,6 +721,20 @@ class PetRenderer {
 				return;
 			}
 			channels.add(action.type);
+			if (action.type === "behavior") {
+				this.embodiment.requestBehavior(this.mapAvatarBehavior(action.behavior), action.durationMs ?? 0, command.id);
+				return;
+			}
+			if (action.type === "gaze") {
+				this.embodiment.beginTransient("gaze", action.holdMs ?? 800, command.id);
+			} else if (action.type === "expression") {
+				this.embodiment.beginTransient("expression", (action.fadeInMs ?? 160) + (action.fadeOutMs ?? 1200), command.id);
+			} else if (action.type === "affect") {
+				this.embodiment.beginTransient("expression", action.decayMs ?? 1200, command.id);
+			} else if (action.type === "viseme") {
+				if (action.active === false) this.embodiment.cancelOwner(command.id, "viseme");
+				else this.embodiment.beginTransient("viseme", 120, command.id);
+			}
 			const result = runtime.executeAvatarAction(action);
 			if (result.status !== "completed") {
 				degraded = true;
@@ -635,6 +773,7 @@ class PetRenderer {
 	private cancelAvatarCommands(runtime: PetRuntimeAdapter): void {
 		this.clearAvatarScheduling();
 		runtime.executeAvatarAction({ type: "cancel" });
+		this.embodiment.refresh();
 	}
 
 	private clearAvatarScheduling(): void {
@@ -644,6 +783,7 @@ class PetRenderer {
 		this.avatarScheduledCommands.clear();
 		this.avatarActiveCommands.clear();
 		this.avatarQueueTailByStream.clear();
+		this.embodiment.cancelCommandClaims();
 	}
 
 	private cancelAvatarTarget(action: Extract<AvatarAction, { type: "cancel" }>, runtime: PetRuntimeAdapter): void {
@@ -655,14 +795,36 @@ class PetRenderer {
 			}
 			const active = this.avatarActiveCommands.get(action.commandId);
 			if (active) {
-				for (const channel of active.channels) {
+				let channels: AvatarCancelableActionType[];
+				if (!action.channel) {
+					channels = [...active.channels];
+				} else if (active.channels.has(action.channel)) {
+					channels = [action.channel];
+				} else {
+					channels = [];
+				}
+				for (const channel of channels) {
 					runtime.executeAvatarAction({ type: "cancel", channel });
 				}
-				this.avatarActiveCommands.delete(action.commandId);
+				if (!action.channel) this.avatarActiveCommands.delete(action.commandId);
+				else active.channels.delete(action.channel);
 			}
+			const embodimentChannel = this.mapEmbodimentChannel(action.channel);
+			if (!action.channel) this.embodiment.cancelOwner(action.commandId);
+			else if (embodimentChannel) this.embodiment.cancelOwner(action.commandId, embodimentChannel);
 			return;
 		}
+		const embodimentChannel = this.mapEmbodimentChannel(action.channel);
+		if (!action.channel) this.embodiment.cancelCommandClaims();
+		else if (embodimentChannel) this.embodiment.cancelCommandClaims(embodimentChannel);
 		runtime.executeAvatarAction(action);
+		this.embodiment.refresh();
+	}
+
+	private mapEmbodimentChannel(channel: AvatarActionType | undefined): "behavior" | "expression" | "gaze" | "viseme" | undefined {
+		if (channel === "affect" || channel === "expression") return "expression";
+		if (channel === "behavior" || channel === "gaze" || channel === "viseme") return channel;
+		return undefined;
 	}
 
 	playMotion(group: string, index = 0): void {
@@ -782,15 +944,53 @@ class PetRenderer {
 	}
 
 	setBehaviorState(state: Live2DBehaviorState, durationMs = 0): void {
-		if (this.config.modelType !== "live2d") {
-			return;
-		}
-		this.live2dRuntime?.setBehaviorState(state, durationMs);
+		this.embodiment.requestBehavior(state, durationMs);
 		this.emitPetEvent("onEmotionChanged", {
 			state,
 			durationMs,
 			source: "renderer",
 		});
+	}
+
+	private applyResolvedBehavior(state: PetEmbodimentBehavior): void {
+		if (this.config.modelType === "live2d") {
+			this.live2dRuntime?.setBehaviorState(state);
+			return;
+		}
+		let behavior: Extract<AvatarAction, { type: "behavior" }>['behavior'];
+		switch (state) {
+			case "speaking":
+				behavior = "speak";
+				break;
+			case "thinking":
+			case "focused":
+				behavior = "think";
+				break;
+			case "reacting":
+			case "interrupted":
+				behavior = "react";
+				break;
+			case "curious":
+				behavior = "backchannel";
+				break;
+			case "waiting":
+				behavior = "listen";
+				break;
+			default:
+				behavior = "idle";
+		}
+		this.vrmRuntime?.executeAvatarAction({ type: "behavior", behavior });
+	}
+
+	private mapAvatarBehavior(behavior: Extract<AvatarAction, { type: "behavior" }>['behavior']): PetEmbodimentBehavior {
+		switch (behavior) {
+			case "listen": return "focused";
+			case "think": return "thinking";
+			case "speak": return "speaking";
+			case "backchannel": return "curious";
+			case "react": return "reacting";
+			case "idle": return "idle";
+		}
 	}
 
 	setCompanionIdleProfile(profile: PetCompanionIdleProfile): void {
@@ -850,6 +1050,7 @@ class PetRenderer {
 		// loading/resuming, but the panel must be able to align its audio clock
 		// without waiting for an HTMLAudioElement promise to settle.
 		announceSpeechStart();
+		this.embodiment.requestBehavior("speaking");
 		try {
 			await runtime.startLipSync(audioUrl, () => reportReady(true));
 		} finally {
@@ -861,6 +1062,7 @@ class PetRenderer {
 
 	stopLipSync(options: { interrupted?: boolean } = {}): void {
 		this.live2dRuntime?.stopLipSync();
+		this.embodiment.clearBehavior("speaking");
 		this.setBehaviorState(options.interrupted ? "interrupted" : "waiting", 900);
 		this.emitPetEvent("onSpeechEnd", {
 			interrupted: options.interrupted === true,
@@ -881,6 +1083,11 @@ class PetRenderer {
 
 		this.live2dRuntime?.setLipSyncLevel(level, active);
 		this.vrmRuntime?.setLipSyncLevel(level, active);
+		if (active) {
+			this.embodiment.requestBehavior("speaking");
+		} else {
+			this.embodiment.clearBehavior("speaking");
+		}
 
 		if (active && this.externalLipSyncSource !== payload.source) {
 			if (this.externalLipSyncSource !== null) {
@@ -903,7 +1110,17 @@ class PetRenderer {
 	}
 
 	setExternalViseme(payload: PetLipSyncVisemePayload): void {
+		if (payload.active) {
+			this.embodiment.beginTransient("viseme");
+		} else {
+			this.embodiment.endTransient("viseme");
+		}
 		this.vrmRuntime?.setLipSyncViseme(
+			payload.viseme,
+			clamp(Number(payload.weight) || 0, 0, 1),
+			payload.active === true,
+		);
+		this.live2dRuntime?.setLipSyncViseme(
 			payload.viseme,
 			clamp(Number(payload.weight) || 0, 0, 1),
 			payload.active === true,
@@ -974,6 +1191,12 @@ class PetRenderer {
 
 		if (patch.modelManifest !== undefined) {
 			this.config.modelManifest = patch.modelManifest ?? null;
+		}
+		if (Array.isArray(patch.animationPaths)) {
+			this.config.animationPaths = patch.animationPaths
+				.filter((animationPath): animationPath is string => typeof animationPath === "string")
+				.map((animationPath) => animationPath.trim())
+				.filter(Boolean);
 		}
 
 		if (patch.lipSyncProfile) {
@@ -1568,6 +1791,7 @@ class PetRenderer {
 
 	private syncVisibilityPerformance(): void {
 		this.performanceController?.syncVisibility();
+		this.applyRuntimePerformancePolicy();
 	}
 
 	private markActivity(reason: string): void {
@@ -1579,9 +1803,11 @@ class PetRenderer {
 			return;
 		}
 
+		this.currentFpsTier = tier;
 		const targetFps = tier === "active" ? ACTIVE_FPS : IDLE_FPS;
 		this.app.ticker.maxFPS = targetFps;
 		this.app.ticker.minFPS = Math.min(targetFps, IDLE_FPS);
+		this.applyRuntimePerformancePolicy();
 		if (tier === "idle") {
 			this.setBehaviorState("sleepy", 5200);
 			this.emitPetEvent("onPetIdle", { reason });
@@ -1593,6 +1819,13 @@ class PetRenderer {
 		});
 	}
 
+	private applyRuntimePerformancePolicy(): void {
+		this.vrmRuntime?.setRenderPolicy({
+			targetFps: this.currentFpsTier === "active" ? ACTIVE_FPS : IDLE_FPS,
+			paused: document.hidden,
+		});
+	}
+
 	private reportRendererMetrics(reason: string): void {
 		if (!this.app) {
 			return;
@@ -1600,7 +1833,9 @@ class PetRenderer {
 
 		logPetRendererDebug("[PetRenderer][perf] metrics", {
 			reason,
-			dprCap: RENDERER_DPR_CAP,
+			dprCap: this.renderBudget.dprCap,
+			antialias: this.renderBudget.antialias,
+			powerPreference: this.renderBudget.powerPreference,
 			resolution: this.app.renderer.resolution,
 			renderWidth: this.app.renderer.width,
 			renderHeight: this.app.renderer.height,
@@ -2193,6 +2428,9 @@ class PetRenderer {
 
 	destroy(): void {
 		this.destroyed = true;
+		this.modelLoadGeneration += 1;
+		this.cancelModelLoadRetry();
+		this.embodiment.destroy();
 		this.hoverMoveCoalescer.cancel();
 		this.clearAvatarScheduling();
 

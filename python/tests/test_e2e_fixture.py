@@ -102,7 +102,7 @@ def test_fixture_loads_same_four_part_manifest_and_hash() -> None:
         "e2e_controls",
         "cases",
     ]
-    assert MANIFEST_HASH == "e0be0c2d1a1a4b9137bffb688f742a68e7d7bda9c75bb71e60a0b9d29260dd9d"
+    assert MANIFEST_HASH == "e801d039b138ebdb1d5e4dd7ed6f57f34aed9f941b7a6274a6291a50975665ab"
 
 
 def test_fixture_matcher_keeps_case_variant_below_production_authority() -> None:
@@ -114,6 +114,10 @@ def test_fixture_matcher_keeps_case_variant_below_production_authority() -> None
         {
             "session_id": "s1",
             "generation_id": "g1",
+            "turn_id": "t1",
+            "request_id": "r1",
+            "interruption_epoch": 0,
+            "version": 1,
             "sequence": 1,
             "is_final": True,
             "complete": True,
@@ -124,6 +128,10 @@ def test_fixture_matcher_keeps_case_variant_below_production_authority() -> None
         {
             "session_id": "s1",
             "generation_id": "g1",
+            "turn_id": "t1",
+            "request_id": "r1",
+            "interruption_epoch": 0,
+            "version": 1,
             "sequence": 1,
             "is_final": True,
             "audio_url": "http://127.0.0.1/audio.wav",

@@ -20,7 +20,21 @@ const mocks = vi.hoisted(() => ({
   publishRuntime: vi.fn(() => Promise.resolve(true)),
   publishInterrupt: vi.fn(() => Promise.resolve(true)),
   interruptionEpoch: 0,
+  llmSequences: new Map<string, number>(),
 }))
+
+const agentCallEnvelope = (callIndex = -1) => {
+  const call = mocks.sendAgentChat.mock.calls.at(callIndex)
+  if (!call) throw new Error('Expected an active Agent request')
+  return {
+    session_id: call[1],
+    request_id: call[3],
+    interruption_epoch: call[6],
+    generation_id: call[7],
+    turn_id: call[8],
+    version: 1,
+  }
+}
 
 vi.mock('@/app/runtime/companionRuntime', () => ({
   getCompanionInterruptionEpoch: () => mocks.interruptionEpoch,
@@ -43,7 +57,59 @@ vi.mock('@/api/client', () => ({
       isConnected: () => mocks.connected,
       connected: { value: mocks.connected },
       on: (event: string, handler: SocketHandler) => {
-        mocks.handlers.set(event, handler)
+        const envelopeEvents = new Set([
+          SocketEvents.ASR_PARTIAL,
+          SocketEvents.ASR_FINAL,
+          SocketEvents.LLM_DELTA,
+          SocketEvents.LLM_FINAL,
+          SocketEvents.AGENT_RESULT,
+          SocketEvents.PET_CONTROL,
+          SocketEvents.TTS_CHUNK,
+          SocketEvents.TTS_DONE,
+          SocketEvents.ERROR,
+        ])
+        mocks.handlers.set(event, (payload: unknown) => {
+          if (!envelopeEvents.has(event) || !payload || typeof payload !== 'object') {
+            handler(payload)
+            return
+          }
+          const record = Object.fromEntries(
+            Object.entries(payload as Record<string, unknown>).filter(([, value]) => value !== undefined),
+          )
+          if (record.__test_unenveloped === true) {
+            delete record.__test_unenveloped
+            handler(record)
+            return
+          }
+          const sessionId = typeof record.session_id === 'string' ? record.session_id : 'default'
+          const call = [...mocks.sendAgentChat.mock.calls]
+            .reverse()
+            .find((candidate) => candidate[1] === sessionId)
+          const envelope = call
+            ? {
+                session_id: call[1],
+                request_id: call[3],
+                interruption_epoch: call[6],
+                generation_id: call[7],
+                turn_id: call[8],
+                version: 1,
+              }
+            : {
+                session_id: sessionId,
+                request_id: 'voice-request',
+                interruption_epoch: 0,
+                generation_id: 'voice-generation',
+                turn_id: 'voice-turn',
+                version: 1,
+              }
+          if ((event === SocketEvents.LLM_DELTA || event === SocketEvents.LLM_FINAL) && record.sequence === undefined) {
+            const requestId = String(record.request_id ?? envelope.request_id)
+            const sequence = mocks.llmSequences.get(requestId) ?? 0
+            record.sequence = sequence
+            mocks.llmSequences.set(requestId, sequence + 1)
+          }
+          handler({ ...envelope, ...record })
+        })
       },
       emit: mocks.emit,
       sendAgentChat: mocks.sendAgentChat,
@@ -83,6 +149,7 @@ describe('chatStore', () => {
     mocks.publishRuntime.mockClear()
     mocks.publishInterrupt.mockClear()
     mocks.interruptionEpoch = 0
+    mocks.llmSequences.clear()
     window.localStorage.clear()
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -100,12 +167,13 @@ describe('chatStore', () => {
   })
 
   it('preserves action envelope schema and source metadata', () => {
+    mocks.connected = true
     const store = useChatStore()
+    store.sendChat('hello')
 
     mocks.handlers.get(SocketEvents.AGENT_RESULT)?.({
       version: 1,
       schema_version: 'yuizaki.action-envelope.v1',
-      request_id: 'req-1',
       source: 'agent',
       reply: '我在。',
       actions: [
@@ -165,6 +233,156 @@ describe('chatStore', () => {
     })
   })
 
+  it('projects accepted companion jobs into the assistant trace with terminal metadata', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.sendChat('run a tool')
+    const envelope = agentCallEnvelope()
+
+    window.dispatchEvent(new CustomEvent('companion:job', {
+      detail: {
+        version: 1,
+        type: 'AgentJobCreated',
+        workspaceId: 'default',
+        sessionId: 'default',
+        turnId: envelope.turn_id,
+        jobId: 'job-1',
+        requestId: envelope.request_id,
+        revision: 1,
+        interruptionEpoch: envelope.interruption_epoch,
+        source: 'mcp',
+        timestamp: Date.now(),
+        status: 'created',
+        data: { toolName: 'read_file', title: 'Read file', progress: 0.4 },
+      },
+    }))
+    window.dispatchEvent(new CustomEvent('companion:job', {
+      detail: {
+        version: 1,
+        type: 'AgentJobCompleted',
+        workspaceId: 'default',
+        sessionId: 'default',
+        turnId: envelope.turn_id,
+        jobId: 'job-1',
+        requestId: envelope.request_id,
+        revision: 2,
+        interruptionEpoch: envelope.interruption_epoch,
+        source: 'mcp',
+        timestamp: Date.now() + 1,
+        status: 'completed',
+        data: { toolName: 'read_file', title: 'Read file', resultSummary: 'ok', durationMs: 42, artifactCount: 1, artifacts: [{ id: 'artifact-1', name: 'output.txt', url: 'file:///tmp/output.txt' }] },
+      },
+    }))
+    mocks.handlers.get(SocketEvents.LLM_FINAL)?.({ text: 'done', request_id: envelope.request_id, assistant_message_id: 30 })
+
+    expect(store.state.messages.at(-1)).toMatchObject({
+      agentSteps: [{
+        id: 'job-1',
+        jobId: 'job-1',
+        status: 'completed',
+        tool: 'read_file',
+        resultSummary: 'ok',
+        durationMs: 42,
+        artifactCount: 1,
+        progress: 0.4,
+        artifacts: [{ id: 'artifact-1', name: 'output.txt', url: 'file:///tmp/output.txt' }],
+      }],
+    })
+  })
+
+  it('does not project a companion job from another session or turn', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.sendChat('current request')
+    const envelope = agentCallEnvelope()
+    window.dispatchEvent(new CustomEvent('companion:job', {
+      detail: {
+        version: 1,
+        type: 'AgentJobCompleted',
+        workspaceId: 'default',
+        sessionId: 'other-session',
+        turnId: envelope.turn_id,
+        jobId: 'foreign-job',
+        requestId: envelope.request_id,
+        revision: 1,
+        interruptionEpoch: envelope.interruption_epoch,
+        source: 'mcp',
+        timestamp: Date.now(),
+        status: 'completed',
+      },
+    }))
+    mocks.handlers.get(SocketEvents.LLM_FINAL)?.({ text: 'done', request_id: envelope.request_id, assistant_message_id: 31 })
+    expect(store.state.messages.at(-1)?.agentSteps).toBeUndefined()
+  })
+
+  it('updates an already visible assistant reply when a job reaches its terminal state', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.sendChat('finish the tool')
+    const envelope = agentCallEnvelope()
+    mocks.handlers.get(SocketEvents.LLM_FINAL)?.({ text: 'done', request_id: envelope.request_id, assistant_message_id: 32 })
+
+    window.dispatchEvent(new CustomEvent('companion:job', {
+      detail: {
+        version: 1,
+        type: 'AgentJobCompleted',
+        workspaceId: 'default',
+        sessionId: 'default',
+        turnId: envelope.turn_id,
+        jobId: 'job-late',
+        requestId: envelope.request_id,
+        revision: 1,
+        interruptionEpoch: envelope.interruption_epoch,
+        source: 'mcp',
+        timestamp: Date.now(),
+        status: 'completed',
+        data: { toolName: 'write_file', resultSummary: 'saved', durationMs: 18, artifactCount: 1 },
+      },
+    }))
+
+    expect(store.state.messages.at(-1)).toMatchObject({
+      request_id: envelope.request_id,
+      agentSteps: [{ jobId: 'job-late', resultSummary: 'saved', durationMs: 18, artifactCount: 1 }],
+    })
+  })
+
+  it('keeps provenance metadata optional for legacy memory traces', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.sendChat('legacy memory')
+    const requestId = mocks.sendAgentChat.mock.calls[0][3]
+    mocks.handlers.get(SocketEvents.LLM_FINAL)?.({ text: 'done', request_id: requestId, assistant_message_id: 33 })
+    mocks.handlers.get(SocketEvents.AGENT_RESULT)?.({
+      version: 1,
+      request_id: requestId,
+      actions: [{ type: 'memory_trace', payload: [{ id: 'memory-legacy', text: 'old fact' }] }],
+    })
+    expect(store.state.messages.at(-1)?.memorySources).toEqual([{ id: 'memory-legacy', text: 'old fact' }])
+  })
+
+  it('bounds memory confidence and keeps retrieval trace identity visible', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.sendChat('use a traced preference')
+    const requestId = mocks.sendAgentChat.mock.calls[0][0].request_id
+    mocks.handlers.get(SocketEvents.LLM_FINAL)?.({ text: 'done', request_id: requestId, assistant_message_id: 23 })
+    mocks.handlers.get(SocketEvents.AGENT_RESULT)?.({
+      version: 1,
+      request_id: requestId,
+      actions: [{
+        type: 'memory_trace',
+        payload: [{ id: 'memory-2', text: 'Traceable fact', metadata: { confidence: 1.4, trace_id: 'trace-2' } }],
+      }],
+    })
+
+    expect(store.state.messages.at(-1)?.memorySources).toEqual([{
+      id: 'memory-2',
+      text: 'Traceable fact',
+      confidence: 1,
+      traceId: 'trace-2',
+    }])
+  })
+
   it('does not let a late agent result mutate the newly selected session', () => {
     mocks.connected = true
     const store = useChatStore()
@@ -195,6 +413,115 @@ describe('chatStore', () => {
     expect(store.state.messages).toEqual([{ id: 31, role: 'user', content: 'session B message' }])
     expect(store.state.lastAgentEnvelope).toBeNull()
     expect(store.state.agentEnvelopeTimeline).toEqual([])
+  })
+
+  it('rejects generation events that omit their identity envelope', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.sendChat('identified request')
+
+    mocks.handlers.get(SocketEvents.LLM_DELTA)?.({
+      __test_unenveloped: true,
+      token: 'must be ignored',
+    })
+
+    expect(store.state.currentText).toBe('')
+    expect(store.state.isGenerating).toBe(true)
+  })
+
+  it('rejects an Agent result that omits its identity envelope', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.sendChat('identified request')
+
+    mocks.handlers.get(SocketEvents.AGENT_RESULT)?.({
+      __test_unenveloped: true,
+      version: 1,
+      source: 'agent',
+      reply: 'must be ignored',
+      actions: [],
+    })
+
+    expect(store.state.lastAgentEnvelope).toBeNull()
+    expect(store.state.agentEnvelopeTimeline).toEqual([])
+  })
+
+  it('rejects Pet control that omits its identity envelope', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.sendChat('identified request')
+    const controls: unknown[] = []
+    const onControl = (event: Event) => controls.push((event as CustomEvent<unknown>).detail)
+    window.addEventListener('pet:llm-control', onControl)
+
+    try {
+      mocks.handlers.get(SocketEvents.PET_CONTROL)?.({
+        __test_unenveloped: true,
+        pet_control: { emotion_id: 'happy' },
+      })
+    } finally {
+      window.removeEventListener('pet:llm-control', onControl)
+    }
+
+    expect(controls).toEqual([])
+  })
+
+  it('rejects TTS playback that omits its identity envelope', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.sendChat('identified request')
+    const playback: unknown[] = []
+    const onPlayback = (event: Event) => playback.push((event as CustomEvent<unknown>).detail)
+    window.addEventListener('pet:tts-play-url', onPlayback)
+
+    try {
+      mocks.handlers.get(SocketEvents.TTS_DONE)?.({
+        __test_unenveloped: true,
+        audio_url: '/audio/unenveloped.wav',
+      })
+    } finally {
+      window.removeEventListener('pet:tts-play-url', onPlayback)
+    }
+
+    expect(playback).toEqual([])
+    expect(store.state.isTTSPlaying).toBe(false)
+  })
+
+  it('rejects an owned backend error that omits its identity envelope', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.sendChat('identified request')
+
+    mocks.handlers.get(SocketEvents.ERROR)?.({
+      __test_unenveloped: true,
+      code: 'LLM_ERROR',
+      message: 'must be ignored',
+    })
+
+    expect(store.state.lastError).toBeNull()
+    expect(store.state.isGenerating).toBe(true)
+  })
+
+  it('keeps a late error from session A from mutating active session B', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.setWorkspaceContext('workspace-a', 'session-a')
+    store.sendChat('request A')
+    const envelopeA = agentCallEnvelope()
+
+    store.setWorkspaceContext('workspace-b', 'session-b')
+    store.sendChat('request B')
+
+    mocks.handlers.get(SocketEvents.ERROR)?.({
+      ...envelopeA,
+      code: 'LLM_ERROR',
+      message: 'late failure A',
+    })
+
+    expect(store.state.currentSessionId).toBe('session-b')
+    expect(store.state.lastError).toBeNull()
+    expect(store.state.isGenerating).toBe(true)
+    expect(store.isSessionGenerating('session-b')).toBe(true)
   })
 
   it('publishes pipeline pet control and TTS lifecycle with the originating interruption epoch', async () => {
@@ -237,6 +564,8 @@ describe('chatStore', () => {
     store.setRealtimePlayback(true)
     mocks.interruptionEpoch = 5
     store.setRealtimePlayback(false)
+    const identity = store.getCurrentRealtimeIdentity()
+    expect(identity).toBeTruthy()
     await store.completeRealtimeTurn({
       turnId: 'turn-1',
       userText: 'hello',
@@ -244,6 +573,9 @@ describe('chatStore', () => {
       model: 'realtime',
       workspaceId: 'default',
       sessionId: 'default',
+      interruptionEpoch: 4,
+      generationId: identity!.generationId,
+      requestId: identity!.requestId,
     })
 
     const lifecycle = mocks.publishRuntime.mock.calls.map(([payload]) => payload)
@@ -261,52 +593,19 @@ describe('chatStore', () => {
     expect(store.state.messages.at(-1)?.role).toBe('user')
   })
 
-  it('waits for Agent turn preparation before sending chat', async () => {
+  it('keeps a dispatched turn bound to the session that started it', () => {
     mocks.connected = true
     const store = useChatStore()
-    let finishPreparation: (() => void) | undefined
-    const preparation = new Promise<void>((resolve) => {
-      finishPreparation = resolve
-    })
-    store.setAgentTurnPreparation(() => preparation)
-
-    store.sendChat('look at the screen')
-
-    expect(mocks.sendAgentChat).not.toHaveBeenCalled()
-    finishPreparation?.()
-    await vi.waitFor(() => expect(mocks.sendAgentChat).toHaveBeenCalledTimes(1))
-  })
-
-  it('keeps a prepared turn bound to the session that started it', async () => {
-    mocks.connected = true
-    const store = useChatStore()
-    let finishPreparation: (() => void) | undefined
-    const preparation = new Promise<void>((resolve) => {
-      finishPreparation = resolve
-    })
     store.setWorkspaceContext('workspace-a', 'session-a')
-    store.setAgentTurnPreparation(() => preparation)
-
-    store.sendChat('background request')
+    store.sendChat('look at the desktop')
     store.setWorkspaceContext('workspace-b', 'session-b')
-    finishPreparation?.()
 
-    await vi.waitFor(() => expect(mocks.sendAgentChat).toHaveBeenCalledTimes(1))
+    expect(mocks.sendAgentChat).toHaveBeenCalledTimes(1)
     expect(mocks.sendAgentChat.mock.calls[0][1]).toBe('session-a')
     expect(mocks.sendAgentChat.mock.calls[0][4]).toBe('workspace-a')
   })
 
-  it('still sends chat when Agent turn preparation fails', async () => {
-    mocks.connected = true
-    const store = useChatStore()
-    store.setAgentTurnPreparation(() => Promise.reject(new Error('capture failed')))
-
-    store.sendChat('continue without vision')
-
-    await vi.waitFor(() => expect(mocks.sendAgentChat).toHaveBeenCalledTimes(1))
-  })
-
-  it('sends chat synchronously without Agent turn preparation', () => {
+  it('sends chat synchronously before any backend visual handshake', () => {
     mocks.connected = true
     const store = useChatStore()
 
@@ -357,7 +656,9 @@ describe('chatStore', () => {
   })
 
   it('passes normalized sentence emotion cues to TTS playback events', () => {
+    mocks.connected = true
     const store = useChatStore()
+    store.sendChat('play reply')
     const ttsDetails: unknown[] = []
     const onTtsPlay = (event: Event) => {
       ttsDetails.push((event as CustomEvent<unknown>).detail)
@@ -386,7 +687,7 @@ describe('chatStore', () => {
     expect(store.state.isTTSPlaying).toBe(true)
     expect(store.state.isSpeaking).toBe(true)
     expect(ttsDetails).toEqual([
-      {
+      expect.objectContaining({
         audio_url: 'file:///tmp/reply.wav',
         text: '第一句。第二句。',
         sentenceEmotionCues: [
@@ -397,7 +698,7 @@ describe('chatStore', () => {
             durationMs: 900,
           },
         ],
-      },
+      }),
     ])
   })
 
@@ -490,6 +791,10 @@ describe('chatStore', () => {
       motionOptions: [{ group: 'TapBody', index: 0 }],
       expressions: ['smile'],
       parameters: [],
+      capabilityRevision: 'live2d:live2d-main:rev-1',
+      modelType: 'live2d',
+      modelId: 'live2d-main',
+      actions: { expression: true, viseme: true },
     })
     store.setPromptProfile({
       mode: 'daily',
@@ -507,7 +812,15 @@ describe('chatStore', () => {
       },
     })
 
-    mocks.handlers.get(SocketEvents.ASR_FINAL)?.({ text: '  语音问题  ' })
+    const voiceEnvelope = {
+      session_id: 'session-voice',
+      request_id: 'voice-request-1',
+      generation_id: 'voice-generation-1',
+      turn_id: 'voice-turn-1',
+      interruption_epoch: 4,
+      version: 1,
+    }
+    mocks.handlers.get(SocketEvents.ASR_FINAL)?.({ ...voiceEnvelope, text: '  语音问题  ' })
 
     expect(store.state.messages).toEqual([
       expect.objectContaining({ role: 'user', content: '语音问题' }),
@@ -520,8 +833,15 @@ describe('chatStore', () => {
     expect(mocks.sendAgentChat.mock.calls[0][2]).toMatchObject({
       emotions: ['happy'],
       expressions: ['smile'],
+      capabilityRevision: 'live2d:live2d-main:rev-1',
+      modelType: 'live2d',
+      modelId: 'live2d-main',
     })
     expect(mocks.sendAgentChat.mock.calls[0][4]).toBe('workspace-voice')
+    expect(mocks.sendAgentChat.mock.calls[0][3]).toBe(voiceEnvelope.request_id)
+    expect(mocks.sendAgentChat.mock.calls[0][6]).toBe(voiceEnvelope.interruption_epoch)
+    expect(mocks.sendAgentChat.mock.calls[0][7]).toBe(voiceEnvelope.generation_id)
+    expect(mocks.sendAgentChat.mock.calls[0][8]).toBe(voiceEnvelope.turn_id)
     expect(mocks.sendAgentChat.mock.calls[0][5]).toMatchObject({
       pet_link_enabled: true,
       web_search_enabled: true,
@@ -551,6 +871,9 @@ describe('chatStore', () => {
       model: 'realtime-test',
       workspaceId: 'workspace-old',
       sessionId: 'session-old',
+      interruptionEpoch: 0,
+      generationId: 'generation-old',
+      requestId: 'request-old',
     })
 
     expect(mocks.requestJson).toHaveBeenCalledWith(
@@ -560,6 +883,8 @@ describe('chatStore', () => {
       }),
     )
     expect(mocks.requestJson.mock.calls[0][1].body).toContain('"session_id":"session-old"')
+    expect(store.state.messages).toEqual([])
+    expect(store.sessionRuntime['session-old']).toMatchObject({ unread: true, isGenerating: false })
   })
 
   it('keeps MCP available while migrating old web-search defaults', () => {
@@ -761,6 +1086,8 @@ describe('chatStore', () => {
   it('drops TTS audio while interrupt is pending and from the interrupted generation', () => {
     mocks.connected = true
     const store = useChatStore()
+    store.sendChat('old request')
+    const oldEnvelope = agentCallEnvelope()
     const ttsDetails: unknown[] = []
     const onTtsPlay = (event: Event) => ttsDetails.push((event as CustomEvent<unknown>).detail)
     window.addEventListener('pet:tts-play-url', onTtsPlay)
@@ -770,26 +1097,25 @@ describe('chatStore', () => {
       const requestId = mocks.sendInterrupt.mock.calls.at(-1)?.[1]
 
       mocks.handlers.get(SocketEvents.TTS_CHUNK)?.({
+        ...oldEnvelope,
         audio_url: '/audio/late-before-ack.wav',
-        session_id: store.state.currentSessionId,
-        generation_id: 'generation-old',
         sequence: 0,
       })
       mocks.handlers.get(SocketEvents.INTERRUPT_ACK)?.({
         request_id: requestId,
         session_id: store.state.currentSessionId,
-        generation_id: 'generation-old',
+        generation_id: oldEnvelope.generation_id,
       })
       mocks.handlers.get(SocketEvents.TTS_CHUNK)?.({
+        ...oldEnvelope,
         audio_url: '/audio/late-after-ack.wav',
-        session_id: store.state.currentSessionId,
-        generation_id: 'generation-old',
         sequence: 1,
       })
+      store.sendChat('new request')
+      const newEnvelope = agentCallEnvelope()
       mocks.handlers.get(SocketEvents.TTS_CHUNK)?.({
+        ...newEnvelope,
         audio_url: '/audio/new-generation.wav',
-        session_id: store.state.currentSessionId,
-        generation_id: 'generation-new',
         sequence: 0,
       })
     } finally {
@@ -799,14 +1125,81 @@ describe('chatStore', () => {
     expect(ttsDetails).toEqual([
       expect.objectContaining({
         audio_url: '/audio/new-generation.wav',
-        generationId: 'generation-new',
+        generationId: agentCallEnvelope().generation_id,
       }),
+    ])
+  })
+
+  it('cleans up a completed TTS request after its session becomes inactive', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.setWorkspaceContext('workspace-a', 'session-a')
+    store.sendChat('request A')
+    const envelopeA = agentCallEnvelope()
+    mocks.handlers.get(SocketEvents.LLM_FINAL)?.({ ...envelopeA, text: 'reply A' })
+
+    store.setWorkspaceContext('workspace-b', 'session-b')
+    mocks.handlers.get(SocketEvents.TTS_DONE)?.({
+      ...envelopeA,
+      audio_url: '/audio/reply-a.wav',
+    })
+
+    expect(store.sessionRuntime['session-a']).toMatchObject({
+      requestId: null,
+      isGenerating: false,
+    })
+    expect(store.state.currentSessionId).toBe('session-b')
+    expect(store.state.isTTSPlaying).toBe(false)
+  })
+
+  it('preserves the full generation envelope in Avatar and TTS playback details', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.sendChat('animate and speak')
+    const envelope = agentCallEnvelope()
+    const avatarDetails: unknown[] = []
+    const ttsDetails: unknown[] = []
+    const onAvatar = (event: Event) => avatarDetails.push((event as CustomEvent<unknown>).detail)
+    const onTts = (event: Event) => ttsDetails.push((event as CustomEvent<unknown>).detail)
+    window.addEventListener('pet:llm-control', onAvatar)
+    window.addEventListener('pet:tts-play-url', onTts)
+
+    try {
+      mocks.handlers.get(SocketEvents.PET_CONTROL)?.({
+        ...envelope,
+        pet_control: { emotion_id: 'happy' },
+      })
+      mocks.handlers.get(SocketEvents.TTS_CHUNK)?.({
+        ...envelope,
+        audio_url: '/audio/reply.wav',
+        sequence: 0,
+      })
+    } finally {
+      window.removeEventListener('pet:llm-control', onAvatar)
+      window.removeEventListener('pet:tts-play-url', onTts)
+    }
+
+    const expectedDetailEnvelope = {
+      version: 1,
+      sessionId: envelope.session_id,
+      generationId: envelope.generation_id,
+      turnId: envelope.turn_id,
+      requestId: envelope.request_id,
+      interruptionEpoch: envelope.interruption_epoch,
+    }
+    expect(avatarDetails).toEqual([
+      expect.objectContaining(expectedDetailEnvelope),
+    ])
+    expect(ttsDetails).toEqual([
+      expect.objectContaining({ ...expectedDetailEnvelope, sequence: 0 }),
     ])
   })
 
   it('forwards binary PCM TTS chunks to the in-memory player contract', () => {
     mocks.connected = true
     const store = useChatStore()
+    store.sendChat('pcm reply')
+    const generationId = mocks.sendAgentChat.mock.calls[0][7]
     const pcmDetails: unknown[] = []
     const onPcm = (event: Event) => pcmDetails.push((event as CustomEvent<unknown>).detail)
     window.addEventListener('pet:tts-play-pcm', onPcm)
@@ -820,7 +1213,6 @@ describe('chatStore', () => {
         channels: 1,
         sample_width_bytes: 2,
         session_id: store.state.currentSessionId,
-        generation_id: 'generation-pcm',
         sequence: 0,
         chunk_index: 0,
         visemes: [
@@ -840,7 +1232,7 @@ describe('chatStore', () => {
       sampleRate: 32_000,
       channels: 1,
       sampleWidthBytes: 2,
-      generationId: 'generation-pcm',
+      generationId,
       sequence: 0,
       visemeCues: [
         { viseme: 'aa', offsetMs: 0, durationMs: 30 },
@@ -895,11 +1287,17 @@ describe('chatStore', () => {
 
     expect(petControls).toEqual([])
     expect(ttsDetails).toEqual([
-      {
+      expect.objectContaining({
         audio_url: 'file:///tmp/reply.wav',
         text: '第一句。',
         petLinkEnabled: false,
-      },
+        version: 1,
+        sessionId: store.state.currentSessionId,
+        generationId: expect.any(String),
+        turnId: expect.any(String),
+        requestId: expect.any(String),
+        interruptionEpoch: 0,
+      }),
     ])
     expect(mocks.petSetBehaviorState).not.toHaveBeenCalled()
   })
@@ -946,7 +1344,9 @@ describe('chatStore', () => {
   })
 
   it('clears speaking state when audio playback ends', () => {
+    mocks.connected = true
     const store = useChatStore()
+    store.sendChat('speak')
 
     mocks.handlers.get(SocketEvents.TTS_DONE)?.({ audio_url: 'file:///tmp/reply.wav' })
     expect(store.state.isTTSPlaying).toBe(true)
@@ -959,9 +1359,10 @@ describe('chatStore', () => {
   })
 
   it('records backend errors and clears active generation state', () => {
+    mocks.connected = true
     const store = useChatStore()
-    store.state.currentText = '半截回复'
-    store.state.isGenerating = true
+    store.sendChat('fail')
+    mocks.handlers.get(SocketEvents.LLM_DELTA)?.({ token: '半截回复' })
 
     mocks.handlers.get(SocketEvents.ERROR)?.({ code: 'LLM_ERROR', message: '模型请求失败' })
 
@@ -1244,6 +1645,160 @@ describe('chatStore', () => {
     expect(store.state.messages.filter((message) => message.id === 32)).toHaveLength(1)
     expect(store.state.currentText).toBe('')
     expect(store.state.isGenerating).toBe(false)
+  })
+
+  it('keeps the generation envelope alive until matching TTS completes', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    const played: unknown[] = []
+    const onPlay = (event: Event) => played.push((event as CustomEvent<unknown>).detail)
+    window.addEventListener('pet:tts-play-url', onPlay)
+
+    try {
+      store.sendChat('speak this')
+      const call = mocks.sendAgentChat.mock.calls[0]
+      const envelope = {
+        session_id: 'default',
+        request_id: call[3],
+        interruption_epoch: call[6],
+        generation_id: call[7],
+        turn_id: call[8],
+        version: 1,
+      }
+
+      mocks.handlers.get(SocketEvents.LLM_FINAL)?.({
+        ...envelope,
+        envelope_version: 1,
+        sequence: 0,
+        text: 'spoken reply',
+      })
+      mocks.handlers.get(SocketEvents.TTS_CHUNK)?.({
+        ...envelope,
+        sequence: 0,
+        is_final: false,
+        audio_url: '/audio/reply.wav',
+        text: 'spoken reply',
+      })
+      mocks.handlers.get(SocketEvents.TTS_DONE)?.({
+        ...envelope,
+        sequence: 1,
+        is_final: true,
+        complete: true,
+      })
+      mocks.handlers.get(SocketEvents.TTS_CHUNK)?.({
+        ...envelope,
+        sequence: 2,
+        is_final: false,
+        audio_url: '/audio/late.wav',
+        text: 'late',
+      })
+    } finally {
+      window.removeEventListener('pet:tts-play-url', onPlay)
+    }
+
+    expect(played).toEqual([
+      expect.objectContaining({
+        audio_url: '/audio/reply.wav',
+        generationId: expect.stringMatching(/^gen_/),
+      }),
+    ])
+  })
+
+  it('releases the generation envelope when the backend cannot produce TTS', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    const played: unknown[] = []
+    const onPlay = (event: Event) => played.push((event as CustomEvent<unknown>).detail)
+    window.addEventListener('pet:tts-play-url', onPlay)
+
+    try {
+      store.sendChat('text only')
+      const call = mocks.sendAgentChat.mock.calls[0]
+      const envelope = {
+        session_id: 'default',
+        request_id: call[3],
+        interruption_epoch: call[6],
+        generation_id: call[7],
+        turn_id: call[8],
+        version: 1,
+      }
+      mocks.handlers.get(SocketEvents.LLM_FINAL)?.({
+        ...envelope,
+        envelope_version: 1,
+        sequence: 0,
+        text: 'text reply',
+        tts_expected: false,
+      })
+      mocks.handlers.get(SocketEvents.TTS_CHUNK)?.({
+        ...envelope,
+        sequence: 0,
+        audio_url: '/audio/late.wav',
+        text: 'late',
+      })
+    } finally {
+      window.removeEventListener('pet:tts-play-url', onPlay)
+    }
+
+    expect(played).toEqual([])
+  })
+
+  it('rejects stale generation events and duplicate LLM sequences after interruption', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    const petControls: unknown[] = []
+    const played: unknown[] = []
+    const onPetControl = (event: Event) => petControls.push((event as CustomEvent<unknown>).detail)
+    const onPlay = (event: Event) => played.push((event as CustomEvent<unknown>).detail)
+    window.addEventListener('pet:llm-control', onPetControl)
+    window.addEventListener('pet:tts-play-url', onPlay)
+
+    try {
+      store.sendChat('turn A')
+      const first = mocks.sendAgentChat.mock.calls[0]
+      const firstEnvelope = {
+        session_id: 'default',
+        request_id: first[3],
+        interruption_epoch: first[6],
+        generation_id: first[7],
+        turn_id: first[8],
+        version: 1,
+      }
+      store.interrupt()
+      const interruptRequestId = mocks.sendInterrupt.mock.calls.at(-1)?.[1]
+      mocks.handlers.get(SocketEvents.INTERRUPT_ACK)?.({
+        request_id: interruptRequestId,
+        session_id: 'default',
+        generation_id: firstEnvelope.generation_id,
+      })
+
+      mocks.interruptionEpoch = 1
+      store.sendChat('turn B')
+      const second = mocks.sendAgentChat.mock.calls[1]
+      const secondEnvelope = {
+        session_id: 'default',
+        request_id: second[3],
+        interruption_epoch: second[6],
+        generation_id: second[7],
+        turn_id: second[8],
+        version: 1,
+      }
+
+      mocks.handlers.get(SocketEvents.LLM_DELTA)?.({ ...firstEnvelope, envelope_version: 1, sequence: 0, token: 'stale' })
+      mocks.handlers.get(SocketEvents.LLM_FINAL)?.({ ...firstEnvelope, envelope_version: 1, sequence: 1, text: 'stale reply' })
+      mocks.handlers.get(SocketEvents.PET_CONTROL)?.({ ...firstEnvelope, pet_control: { emotion_id: 'angry' } })
+      mocks.handlers.get(SocketEvents.TTS_CHUNK)?.({ ...firstEnvelope, sequence: 0, audio_url: '/audio/stale.wav', text: 'stale' })
+      mocks.handlers.get(SocketEvents.LLM_DELTA)?.({ ...secondEnvelope, envelope_version: 1, sequence: 0, token: 'fresh' })
+      mocks.handlers.get(SocketEvents.LLM_DELTA)?.({ ...secondEnvelope, envelope_version: 1, sequence: 0, token: 'duplicate' })
+      mocks.handlers.get(SocketEvents.LLM_DELTA)?.({ ...secondEnvelope, envelope_version: 1, sequence: 1, token: ' reply' })
+    } finally {
+      window.removeEventListener('pet:llm-control', onPetControl)
+      window.removeEventListener('pet:tts-play-url', onPlay)
+    }
+
+    expect(store.state.currentText).toBe('fresh reply')
+    expect(store.state.messages.some((message) => message.content === 'stale reply')).toBe(false)
+    expect(petControls).toEqual([])
+    expect(played).toEqual([])
   })
 
   it('does not persist hidden reasoning returned by final socket events', () => {

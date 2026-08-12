@@ -106,6 +106,7 @@ def test_companion_runtime_empty_snapshot_matches_frontend_memory_contract():
 
     assert snapshot["active_workspace_id"] == "workspace-1"
     assert snapshot["active_companion"] is None
+    assert snapshot["jobs"] == {"events": [], "active_job_ids": []}
     assert snapshot["memory_state"] == {
         "profile_count": 0,
         "semantic_count": 0,

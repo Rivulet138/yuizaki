@@ -22,6 +22,7 @@ def _build_test_client() -> TestClient:
             system_status_handler=lambda: None,
             heartbeat_status_handler=lambda: {"running": True},
             companion_runtime_handler=lambda limit: {"limit": limit, "companion": "demo"},
+            companion_opportunity_outcome_handler=lambda job_id, payload: {"ok": True, "job_id": job_id, **payload},
             capabilities_state_handler=lambda: {"capabilities": [], "summary": {"total": 0}},
             orchestration_state_handler=lambda: {"skills": [], "commands": [], "hooks": []},
             active_workspace_handler=lambda payload: {"ok": True, "workspace_id": payload.get("workspace_id")},
@@ -47,6 +48,21 @@ def test_system_router_exposes_companion_runtime_wrapper_route_with_limit_param(
 
     assert response.status_code == 200
     assert response.json() == {"limit": 11, "companion": "demo"}
+
+
+def test_system_router_exposes_companion_opportunity_outcome_route():
+    client = _build_test_client()
+    response = client.post(
+        "/api/system/companion-runtime/opportunities/outcome/heartbeat%2Fjob",
+        json={"request_id": "request-1", "outcome": "delivered"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "job_id": "heartbeat/job",
+        "request_id": "request-1",
+        "outcome": "delivered",
+    }
 
 
 def test_system_router_exposes_capabilities_and_orchestration_routes():
@@ -317,6 +333,9 @@ def _build_schedule_test_client() -> TestClient:
     async def _run_schedule(task_id: str) -> dict[str, Any]:
         return {"ok": True, "task": {"id": task_id, "ran": True}}
 
+    async def _cancel_schedule(task_id: str) -> dict[str, Any]:
+        return {"ok": True, "task_id": task_id}
+
     app = FastAPI()
     app.include_router(
         _create_system_router(
@@ -328,6 +347,7 @@ def _build_schedule_test_client() -> TestClient:
             remove_schedule_handler=_remove_schedule,
             toggle_schedule_handler=_toggle_schedule,
             run_schedule_now_handler=_run_schedule,
+            cancel_schedule_handler=_cancel_schedule,
         )
     )
     return TestClient(app)
@@ -364,11 +384,14 @@ def test_schedule_mutation_routes_accept_encoded_slash_ids():
 
     toggled = client.post("/api/system/schedules/daily%2Freview/toggle", json={"enabled": False})
     ran = client.post("/api/system/schedules/daily%2Freview/run")
+    cancelled = client.post("/api/system/schedules/daily%2Freview/cancel")
     removed = client.delete("/api/system/schedules/daily%2Freview")
 
     assert toggled.status_code == 200
     assert toggled.json()["task"] == {"id": "daily/review", "enabled": False}
     assert ran.status_code == 200
     assert ran.json()["task"] == {"id": "daily/review", "ran": True}
+    assert cancelled.status_code == 200
+    assert cancelled.json()["task_id"] == "daily/review"
     assert removed.status_code == 200
     assert removed.json()["task_id"] == "daily/review"

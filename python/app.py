@@ -61,6 +61,7 @@ from modules.system.logging_config import configure_application_logging
 from modules.memory.pipeline import RetrievalPipeline
 from modules.memory.backend_factory import create_memory_backend
 from modules.system.heartbeat import HeartbeatScheduler, DEFAULT_HEARTBEAT_INTERVAL_SECONDS
+from modules.system.heartbeat_goal_store import HeartbeatGoalStore
 from modules.system.health_providers import build_app_runtime_health_providers, register_app_runtime_health_checks
 from modules.system.runtime_config import RuntimeConfig, apply_runtime_config
 from modules.system.settings_schema import validate_runtime_patch
@@ -390,6 +391,9 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
         relationship_memory_writer=lambda payload: _write_relationship_memory(payload),
         relationship_history_provider=lambda: _recent_relationship_history(),
         relationship_summary_provider=lambda: _relationship_evolution_summary(),
+        workspace_id_provider=_get_active_workspace_id,
+        job_event_log=sio_server.job_events,
+        goal_store=HeartbeatGoalStore(),
     )
     await _heartbeat_scheduler.start()
 
@@ -537,6 +541,8 @@ def _companion_runtime_snapshot(limit: int = 8) -> dict[str, Any]:
         summarize_relationship_events=summarize_relationship_events,
         is_relationship_milestone=is_relationship_milestone,
         limit=limit,
+        scheduler=sio_server.scheduler,
+        job_event_log=sio_server.job_events,
     )
 
 

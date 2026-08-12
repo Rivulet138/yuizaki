@@ -11,6 +11,11 @@ export interface MemoryDocListOptions {
 
 export interface MemoryMetadata extends Record<string, unknown> {
   expires_at?: string | null
+  source_kind?: string
+  source_id?: string
+  turn_id?: string
+  evidence?: unknown
+  confidence_history?: Array<Record<string, unknown>>
 }
 
 export interface MemoryDocWritePayload {
@@ -25,6 +30,10 @@ export interface MemoryDocWritePayload {
   importance?: number
   confidence?: number
   confidence_source?: string
+  source_kind?: string
+  source_id?: string
+  turn_id?: string
+  evidence?: unknown
 }
 
 export interface MemoryMaintenancePolicyPayload {
@@ -94,6 +103,14 @@ export const memoryClient = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+    }),
+  correctDoc: async (id: string, payload: { text: string; reason?: string; turn_id?: string; evidence?: unknown }) =>
+    requestJson<{ status: string; id: string; action?: string }>(`${CONTROL_ORIGIN}/memory/docs/${encodeURIComponent(id)}/correction`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    }),
+  softForgetDoc: async (id: string, payload?: { reason?: string; turn_id?: string }) =>
+    requestJson<{ status: string; id: string; action?: string }>(`${CONTROL_ORIGIN}/memory/docs/${encodeURIComponent(id)}/soft-forget`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload || {}),
     }),
   getIndexStatus: async () => requestJson<MemoryIndexStatus>(`${CONTROL_ORIGIN}/memory/index/status`),
   rebuildIndex: async () => requestJson<{ status: string; backend?: string; document_count?: number; indexed_count?: number; skipped_count?: number; message?: string }>(`${CONTROL_ORIGIN}/memory/index/rebuild`, {

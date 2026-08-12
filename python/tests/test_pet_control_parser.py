@@ -326,3 +326,17 @@ def test_legacy_pet_control_converts_to_avatar_command_v1():
             {"type": "motion", "group": "TapBody", "index": 2, "intensity": 0.8},
         ],
     }
+
+
+def test_legacy_pet_control_carries_runtime_capability_revision():
+    command = legacy_pet_control_to_avatar_command(
+        {"motion_group": "TapBody"},
+        command_id="cmd-revision",
+        stream_id="python:test",
+        sequence=1,
+        issued_at=1000,
+        capability_revision="live2d:model-1:rev-2",
+    )
+
+    assert command is not None
+    assert command["capabilityRevision"] == "live2d:model-1:rev-2"

@@ -28,7 +28,7 @@ export type HeartbeatCorrelationAudit = {
   echo_count: 1;
   correlation: { timestamp: number; request_id: '[verified]'; client_id: '[verified]' };
 };
-type ScreenshotMode = 'observe' | 'frame' | 'vision' | 'ocr';
+type ScreenshotMode = 'observe' | 'frame' | 'vision' | 'ocr' | 'discard';
 type ScreenshotOptions = {
   displayIndex?: number;
   mode?: ScreenshotMode;
@@ -39,6 +39,19 @@ type ScreenshotOptions = {
   frameId?: string;
   changeScore?: number;
   captureReason?: 'initial' | 'change' | 'voice_change' | 'heartbeat' | 'manual' | 'agent_turn';
+  workspaceId?: string;
+  sessionId?: string;
+  turnId?: string;
+  jobId?: string;
+  requestId?: string;
+  interruptionEpoch?: number;
+};
+export type ToolCallOptions = {
+  requestId?: string;
+  runId?: string;
+  jobId?: string;
+  source?: string;
+  retry?: boolean;
 };
 
 export class SocketClient {
@@ -259,34 +272,52 @@ export class SocketClient {
   // ─── 便捷方法 ──────────────────────────────
 
   /** 发送 LLM 请求 */
-  sendLLMRequest(messages: Array<{ role: string; content: string }>, sessionId?: string, requestId?: string, workspaceId?: string, chatOptions?: ChatOptions): void {
+  sendLLMRequest(messages: Array<{ role: string; content: string }>, sessionId?: string, requestId?: string, workspaceId?: string, chatOptions?: ChatOptions, generationId?: string, turnId?: string, interruptionEpoch?: number): void {
     this.emit(SocketEvents.LLM_REQUEST, {
       messages,
       session_id: sessionId || '',
       request_id: requestId || '',
+      generation_id: generationId || '',
+      turn_id: turnId || '',
+      interruption_epoch: interruptionEpoch ?? 0,
+      version: 1,
       workspace_id: workspaceId || '',
       chat_options: chatOptions,
     });
   }
 
   /** 发送 Agent 对话请求（规则驱动，内部可调用 RAG/工具） */
-  sendAgentChat(messages: Array<{ role: string; content: string }>, sessionId?: string, petControlContext?: unknown, requestId?: string, workspaceId?: string, chatOptions?: ChatOptions): void {
+  sendAgentChat(messages: Array<{ role: string; content: string }>, sessionId?: string, petControlContext?: unknown, requestId?: string, workspaceId?: string, chatOptions?: ChatOptions, interruptionEpoch?: number, generationId?: string, turnId?: string, runtimeIdentity?: { conversationId?: string; operationId?: string; stepIndex?: number; runId?: string }): void {
     this.emit(SocketEvents.AGENT_CHAT, {
       messages,
       session_id: sessionId || '',
       workspace_id: workspaceId || '',
       pet_control_context: petControlContext,
       request_id: requestId || '',
+      generation_id: generationId || '',
+      turn_id: turnId || '',
+      ...(runtimeIdentity?.conversationId ? { conversation_id: runtimeIdentity.conversationId } : {}),
+      ...(runtimeIdentity?.operationId ? { operation_id: runtimeIdentity.operationId } : {}),
+      ...(runtimeIdentity?.stepIndex !== undefined ? { step_index: runtimeIdentity.stepIndex } : {}),
+      ...(runtimeIdentity?.runId ? { run_id: runtimeIdentity.runId } : {}),
+      version: 1,
       chat_options: chatOptions,
+      interruption_epoch: interruptionEpoch ?? 0,
     });
   }
 
   /** 发送音频块 */
-  sendAudioChunk(chunk: string, sampleRate: number = 16000, isFinal: boolean = false): void {
+  sendAudioChunk(chunk: string, sampleRate: number = 16000, isFinal: boolean = false, envelope?: { sessionId: string; generationId: string; turnId: string; requestId: string; interruptionEpoch: number; version: 1 }): void {
     this.emit(SocketEvents.AUDIO_CHUNK, {
       chunk,
       sample_rate: sampleRate,
       is_final: isFinal,
+      session_id: envelope?.sessionId || '',
+      generation_id: envelope?.generationId || '',
+      turn_id: envelope?.turnId || '',
+      request_id: envelope?.requestId || '',
+      interruption_epoch: envelope?.interruptionEpoch ?? 0,
+      version: envelope?.version ?? 1,
     });
   }
 
@@ -303,6 +334,12 @@ export class SocketClient {
     if (options.frameId) payload.frame_id = options.frameId;
     if (options.changeScore !== undefined) payload.change_score = options.changeScore;
     if (options.captureReason) payload.capture_reason = options.captureReason;
+    if (options.workspaceId) payload.workspace_id = options.workspaceId;
+    if (options.sessionId) payload.session_id = options.sessionId;
+    if (options.turnId) payload.turn_id = options.turnId;
+    if (options.jobId) payload.job_id = options.jobId;
+    if (options.requestId) payload.request_id = options.requestId;
+    if (options.interruptionEpoch !== undefined) payload.interruption_epoch = options.interruptionEpoch;
     this.emit(SocketEvents.SCREENSHOT_REQUEST, payload);
   }
 
@@ -310,9 +347,29 @@ export class SocketClient {
     this.emit(SocketEvents.SCREENSHOT_REQUEST, { mode: 'clear' });
   }
 
+  discardScreenshotRequest(request: Record<string, unknown>, reason: string): void {
+    this.emit(SocketEvents.SCREENSHOT_REQUEST, {
+      mode: 'discard',
+      workspace_id: request['workspaceId'],
+      session_id: request['sessionId'],
+      turn_id: request['turnId'],
+      job_id: request['jobId'],
+      request_id: request['requestId'],
+      frame_id: request['frameId'],
+      interruption_epoch: request['interruptionEpoch'],
+      reason,
+    });
+  }
+
   /** 发送工具调用 */
-  sendToolCall(id: string, name: string, args: Record<string, unknown>): void {
-    this.emit(SocketEvents.TOOL_CALL, { id, name, args });
+  sendToolCall(id: string, name: string, args: Record<string, unknown>, options: ToolCallOptions = {}): void {
+    const payload: Record<string, unknown> = { id, name, args };
+    if (options.requestId) payload.request_id = options.requestId;
+    if (options.runId) payload.run_id = options.runId;
+    if (options.jobId) payload.job_id = options.jobId;
+    if (options.source) payload.source = options.source;
+    if (options.retry !== undefined) payload.retry = options.retry;
+    this.emit(SocketEvents.TOOL_CALL, payload);
   }
 
   /** 发送 RAG 查询 */

@@ -1,6 +1,7 @@
 import { reactive, ref, type Ref } from 'vue';
 import { SocketClient } from '../net/socketClient';
 import { chatClient } from '@/api/client';
+import pcmCaptureWorkletUrl from './pcm-capture.worklet.ts?worker&url';
 
 type BrowserWindowWithAudioContext = Window & typeof globalThis & {
   webkitAudioContext?: typeof AudioContext;
@@ -31,9 +32,12 @@ export interface AudioCaptureStatus {
 
 interface AudioCaptureStartOptions {
   maxDurationMs?: number;
+  sessionId?: string;
+  interruptionEpoch?: number;
 }
 
 const DEFAULT_MAX_RECORDING_MS = 120_000;
+const createEnvelopeId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 const normalizeMicrophoneError = (error: unknown): string => {
   if (error instanceof DOMException) {
@@ -152,6 +156,7 @@ export class AudioCapture {
   private audioContext: AudioContext | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
   private processor: ScriptProcessorNode | null = null;
+  private worklet: AudioWorkletNode | null = null;
   private zeroGain: GainNode | null = null;
   private pcmNormalizer: StreamingPcmNormalizer | null = null;
   private isRecording: Ref<boolean> = ref(false);
@@ -159,6 +164,7 @@ export class AudioCapture {
   private maxDurationTimer: ReturnType<typeof setTimeout> | null = null;
   private sampleRate = 16000;
   private chunkSize = 512; // samples per chunk (32ms @ 16kHz)
+  private envelope: { sessionId: string; generationId: string; turnId: string; requestId: string; interruptionEpoch: number; version: 1 } | null = null;
   private readonly status = reactive<AudioCaptureStatus>({
     phase: 'idle',
     permission: 'unknown',
@@ -206,6 +212,15 @@ export class AudioCapture {
       }
 
       this.resetStatusForStart();
+      const generationId = createEnvelopeId('gen_voice');
+      this.envelope = {
+        sessionId: options.sessionId?.trim() || 'default',
+        generationId,
+        turnId: createEnvelopeId('turn_voice'),
+        requestId: `voice_${generationId}`,
+        interruptionEpoch: options.interruptionEpoch ?? 0,
+        version: 1,
+      };
       this.status.phase = 'requesting';
       await this.queryMicrophonePermission();
 
@@ -226,27 +241,33 @@ export class AudioCapture {
       }
       this.audioContext = new AudioContextConstructor({
         sampleRate: this.sampleRate,
+        latencyHint: 'interactive',
       });
       const inputSampleRate = this.audioContext.sampleRate || audioTrackSettings?.sampleRate || this.sampleRate;
       this.pcmNormalizer = new StreamingPcmNormalizer(inputSampleRate, this.sampleRate, this.chunkSize);
 
       this.source = this.audioContext.createMediaStreamSource(this.mediaStream);
-      this.processor = this.audioContext.createScriptProcessor(this.chunkSize, 1, 1);
       this.zeroGain = this.audioContext.createGain();
       this.zeroGain.gain.value = 0;
-
-      this.source.connect(this.processor);
-      this.processor.connect(this.zeroGain);
+      if (this.audioContext.audioWorklet && typeof AudioWorkletNode !== 'undefined') {
+        await this.audioContext.audioWorklet.addModule(pcmCaptureWorkletUrl);
+        this.worklet = new AudioWorkletNode(this.audioContext, 'yuizaki-pcm-capture');
+        this.worklet.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+          if (!this.isRecording.value || !(event.data instanceof ArrayBuffer)) return;
+          this.processInputSamples(new Float32Array(event.data), socketClient);
+        };
+        this.source.connect(this.worklet);
+        this.worklet.connect(this.zeroGain);
+      } else {
+        this.processor = this.audioContext.createScriptProcessor(this.chunkSize, 1, 1);
+        this.processor.onaudioprocess = (event) => {
+          if (!this.isRecording.value) return;
+          this.processInputSamples(event.inputBuffer.getChannelData(0), socketClient);
+        };
+        this.source.connect(this.processor);
+        this.processor.connect(this.zeroGain);
+      }
       this.zeroGain.connect(this.audioContext.destination);
-
-      this.processor.onaudioprocess = (event) => {
-        if (!this.isRecording.value) return;
-        const inputData = event.inputBuffer.getChannelData(0);
-        // Normalize the device rate before emitting exact backend-sized chunks.
-        for (const chunk of this.pcmNormalizer?.push(inputData) ?? []) {
-          this.sendAudioChunk(chunk, socketClient);
-        }
-      };
 
       this.isRecording.value = true;
       this.status.phase = 'recording';
@@ -280,13 +301,20 @@ export class AudioCapture {
       for (const chunk of this.pcmNormalizer?.flush() ?? []) {
         this.sendAudioChunk(chunk, socketClient);
       }
-      socketClient.sendAudioChunk('', this.sampleRate, true);
+      socketClient.sendAudioChunk('', this.sampleRate, true, this.envelope ?? undefined);
     }
     this.pcmNormalizer = null;
+    this.envelope = null;
 
     if (this.processor) {
       this.processor.disconnect();
       this.processor = null;
+    }
+
+    if (this.worklet) {
+      this.worklet.port.onmessage = null;
+      this.worklet.disconnect();
+      this.worklet = null;
     }
 
     if (this.zeroGain) {
@@ -329,9 +357,15 @@ export class AudioCapture {
     const int16Data = this.float32ToInt16(pcmData);
     const base64 = this.arrayBufferToBase64(int16Data);
 
-    socketClient.sendAudioChunk(base64, this.sampleRate, false);
+    socketClient.sendAudioChunk(base64, this.sampleRate, false, this.envelope ?? undefined);
     this.status.chunksSent += 1;
     this.status.bytesSent += int16Data.byteLength;
+  }
+
+  private processInputSamples(inputData: Float32Array, socketClient: SocketClient): void {
+    for (const chunk of this.pcmNormalizer?.push(inputData) ?? []) {
+      this.sendAudioChunk(chunk, socketClient);
+    }
   }
 
   private float32ToInt16(float32Array: Float32Array): Int16Array {

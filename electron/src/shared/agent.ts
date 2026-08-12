@@ -1,6 +1,27 @@
 import type { CapabilitiesSnapshot } from './capability'
 import type { PetControlState } from './pet-control'
 
+/** Versioned identity shared by ASR, generation and TTS events. */
+export interface GenerationEnvelope {
+  version: 1
+  /** Stable conversation identity shared across turns and background jobs. */
+  conversationId?: string
+  /** Logical Agent operation containing one or more steps/jobs. */
+  operationId?: string
+  /** Zero-based or one-based step position supplied by the producer. */
+  stepIndex?: number
+  generationId?: string
+  turnId?: string
+  sequence?: number
+  interruptionEpoch?: number
+  requestId?: string
+}
+
+export interface VoiceTurnEnvelope extends GenerationEnvelope {
+  workspaceId: string
+  sessionId: string
+}
+
 export type CharacterActionType = 'reply' | 'pet_control' | 'tool_trace'
 
 export interface CharacterAction {
@@ -49,6 +70,11 @@ export interface PlannerTrace {
   mode: string
   steps: Array<{ id?: string; title: string; kind: string; description: string; depends_on?: string[]; condition?: StepConditionRecord | null }>
   request_id?: string | null
+  conversation_id?: string | null
+  operation_id?: string | null
+  turn_id?: string | null
+  run_id?: string | null
+  step_index?: number | null
 }
 
 export interface ToolTrace {
@@ -149,11 +175,17 @@ export interface SchedulerRunRecord {
   task_name: string
   mode: string
   status: string
+  run_id?: string | null
+  job_id?: string | null
   summary?: string | null
   request_id?: string | null
   owner_agent_id?: string | null
   owner_agent_role?: string | null
   route_reason?: string | null
+  conversation_id?: string | null
+  operation_id?: string | null
+  turn_id?: string | null
+  step_index?: number | null
 }
 
 export interface RuntimeLoopRecord {
@@ -166,6 +198,11 @@ export interface RuntimeLoopRecord {
   agent_id?: string | null
   agent_role?: string | null
   data?: Record<string, unknown> | null
+  conversation_id?: string | null
+  operation_id?: string | null
+  turn_id?: string | null
+  run_id?: string | null
+  step_index?: number | null
 }
 
 export interface ScheduleTask {
@@ -181,6 +218,8 @@ export interface ScheduleTask {
   next_run_at?: number | null
   last_run_at?: number | null
   last_status?: string | null
+  last_run_id?: string | null
+  last_job_id?: string | null
   last_request_id?: string | null
   last_run_summary?: string | null
   owner_agent_id?: string | null
@@ -459,6 +498,25 @@ export interface SchedulesSnapshot {
 export interface ScheduleMutationResponse {
   ok: boolean
   task: ScheduleTask | null
+  run?: ScheduleRunIdentity | null
+}
+
+export interface ScheduleRunIdentity {
+  taskId: string
+  runId: string
+  jobId: string
+  requestId: string
+  workspaceId: string
+  sessionId: string
+  turnId: string
+  status: string
+  createdAt: number
+  finishedAt?: number | null
+}
+
+export interface ScheduleCancellationResponse {
+  ok: boolean
+  run: ScheduleRunIdentity | null
 }
 
 export interface HeartbeatSnapshot {
@@ -469,6 +527,7 @@ export interface HeartbeatSnapshot {
   persona: HeartbeatPersona
   events: HeartbeatTickEvent[]
   behavior_events: HeartbeatBehaviorEvent[]
+  goals?: HeartbeatGoalSnapshot[]
   proactive_state?: {
     can_proactively_reach_out: boolean
     suppression_reasons?: string[]
@@ -492,6 +551,20 @@ export interface HeartbeatSnapshot {
     affinity_state?: number | null
     energy_state?: number | null
   } | null
+}
+
+export interface HeartbeatGoalSnapshot {
+  goal_id: string
+  kind: string
+  due_at: number
+  priority: number
+  cooldown_seconds: number
+  expires_at?: number | null
+  state: 'pending' | 'completed' | 'suppressed' | 'cancelled' | 'expired' | 'failed' | string
+  created_at: number
+  updated_at: number
+  reason?: string
+  payload?: Record<string, unknown>
 }
 
 export interface RelationshipSummarySnapshot {
@@ -526,6 +599,10 @@ export interface CompanionRuntimeSnapshot {
   active_workspace_id?: string
   active_companion?: HeartbeatSnapshot['active_companion']
   heartbeat: Omit<HeartbeatSnapshot, 'active_workspace_id' | 'active_companion'>
+  jobs?: {
+    events: import('./companion-event').CompanionEventEnvelope[]
+    active_job_ids: string[]
+  }
   companion_state?: {
     mood: string
     energy: number
@@ -600,6 +677,10 @@ export interface HeartbeatBehaviorEvent {
   prompt: string
   tick: number
   at: string
+  job_id?: string
+  request_id?: string
+  goal_id?: string
+  expires_at?: number
   trigger_reason?: string
   proactive_state?: {
     can_proactively_reach_out: boolean

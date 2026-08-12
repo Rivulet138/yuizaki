@@ -6,6 +6,8 @@ import {
 import type { Live2DCoreModel } from './live2d-core-model'
 
 const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value))
+const RELEASE_DURATION_MS = 200
+const RELEASE_FRAME_MS = 16
 
 export class Live2DLipSyncController {
   private ticker: ((ticker: PIXI.Ticker) => void) | null = null
@@ -14,12 +16,16 @@ export class Live2DLipSyncController {
   private analyser: AnalyserNode | null = null
   private buffer: Uint8Array | null = null
   private externalLevel: number | null = null
+  private externalVisemeLevel: number | null = null
   private profile: PetLipSyncProfile = normalizePetLipSyncProfile()
   private parameterIds = ['ParamMouthOpenY']
   private mouthOpen = 0
   private unavailableParams = new Set<string>()
   private startGeneration = 0
   private readyCleanup: (() => void) | null = null
+  private releaseTimer: number | null = null
+  private releaseStartedAt = 0
+  private releaseStartValue = 0
 
   constructor(
     private readonly app: PIXI.Application,
@@ -29,6 +35,7 @@ export class Live2DLipSyncController {
 
   async start(audioUrl: string, onReady?: () => void): Promise<void> {
     this.stop()
+    this.cancelRelease()
     const generation = this.startGeneration
     if (!audioUrl.trim()) {
       return
@@ -114,16 +121,35 @@ export class Live2DLipSyncController {
       this.startTicker()
     }
     this.externalLevel = clamp(level, 0, 1)
+    this.externalVisemeLevel = null
+  }
+
+  setExternalViseme(weight: number, active: boolean): void {
+    if (active) {
+      if (this.externalLevel !== null) this.stopExternal()
+      if (!this.ticker) this.startTicker()
+      this.externalVisemeLevel = clamp(weight, 0, 1)
+      return
+    }
+    this.externalVisemeLevel = null
+    this.stopTicker()
+    this.cancelRelease()
+    this.resetMouth(this.getCoreModel())
   }
 
   stopExternal(): void {
     if (this.externalLevel !== null) {
       this.stop()
+      // External realtime level updates are already frame-bounded by the
+      // caller; keep their explicit inactive transition immediate.
+      this.cancelRelease()
+      this.resetMouth(this.getCoreModel())
     }
   }
 
   stop(): void {
     this.startGeneration += 1
+    const releaseValue = this.mouthOpen
     this.readyCleanup?.()
     this.readyCleanup = null
     this.stopTicker()
@@ -146,13 +172,10 @@ export class Live2DLipSyncController {
     this.analyser = null
     this.buffer = null
     this.externalLevel = null
-    this.mouthOpen = 0
+    this.externalVisemeLevel = null
     const coreModel = this.getCoreModel()
-    if (coreModel) {
-      for (const parameterId of this.parameterIds) {
-        this.setParameter(coreModel, parameterId, 0, 1)
-      }
-    }
+    if (coreModel && releaseValue > 0.005) this.startRelease(coreModel, releaseValue)
+    else this.resetMouth(coreModel)
   }
 
   private stopResources(audio: HTMLAudioElement, context: AudioContext): void {
@@ -163,6 +186,40 @@ export class Live2DLipSyncController {
     context.close().catch((error) => {
       console.debug('[Live2DLipSync] audio context close failed:', error)
     })
+  }
+
+  private startRelease(coreModel: Live2DCoreModel, value: number): void {
+    this.cancelRelease()
+    this.releaseStartedAt = performance.now()
+    this.releaseStartValue = value
+    const tick = () => {
+      const elapsed = Math.max(0, performance.now() - this.releaseStartedAt)
+      const progress = clamp(elapsed / RELEASE_DURATION_MS, 0, 1)
+      const remaining = this.releaseStartValue * (1 - progress) * (1 - progress)
+      this.mouthOpen = remaining
+      for (const parameterId of this.parameterIds) this.setParameter(coreModel, parameterId, remaining, 1)
+      this.setParameter(coreModel, 'ParamMouthForm', 0.18 + remaining * 0.34, 0.35)
+      if (progress >= 1) {
+        this.cancelRelease()
+        this.resetMouth(coreModel)
+      }
+    }
+    tick()
+    this.releaseTimer = window.setInterval(tick, RELEASE_FRAME_MS)
+  }
+
+  private cancelRelease(): void {
+    if (this.releaseTimer !== null) {
+      window.clearInterval(this.releaseTimer)
+      this.releaseTimer = null
+    }
+  }
+
+  private resetMouth(coreModel: Live2DCoreModel | null): void {
+    this.mouthOpen = 0
+    if (!coreModel) return
+    for (const parameterId of this.parameterIds) this.setParameter(coreModel, parameterId, 0, 1)
+    this.setParameter(coreModel, 'ParamMouthForm', 0.18, 0.35)
   }
 
   private startTicker(): void {
@@ -190,6 +247,8 @@ export class Live2DLipSyncController {
     let inputLevel: number
     if (this.externalLevel !== null) {
       inputLevel = this.externalLevel
+    } else if (this.externalVisemeLevel !== null) {
+      inputLevel = this.externalVisemeLevel
     } else {
       if (!this.analyser || !this.buffer) return
       this.analyser.getByteTimeDomainData(this.buffer)

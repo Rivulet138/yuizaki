@@ -15,6 +15,7 @@ import type {
   PermissionMutationSnapshot,
   PermissionStateSnapshot,
   ScheduleMutationResponse,
+  ScheduleCancellationResponse,
   SchedulesSnapshot,
   SystemLogsSnapshot,
 } from '@/../shared/agent'
@@ -73,6 +74,7 @@ export const systemClient = {
   removeSchedule: async (taskId: string) => requestJson<{ ok: boolean }>(`${CONTROL_ORIGIN}/api/system/schedules/${encodeURIComponent(taskId)}`, { method: 'DELETE' }),
   toggleSchedule: async (taskId: string, enabled: boolean) => requestJson<ScheduleMutationResponse>(`${CONTROL_ORIGIN}/api/system/schedules/${encodeURIComponent(taskId)}/toggle`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }),
   runScheduleNow: async (taskId: string) => requestJson<ScheduleMutationResponse>(`${CONTROL_ORIGIN}/api/system/schedules/${encodeURIComponent(taskId)}/run`, { method: 'POST' }),
+  cancelSchedule: async (taskJobOrRunId: string) => requestJson<ScheduleCancellationResponse>(`${CONTROL_ORIGIN}/api/system/schedules/${encodeURIComponent(taskJobOrRunId)}/cancel`, { method: 'POST' }),
   logs: async () => requestJson<SystemLogsSnapshot>(`${CONTROL_ORIGIN}/api/system/logs`),
   backupTargets: async () => requestJson<BackupTargetsSnapshot>(`${CONTROL_ORIGIN}/api/system/backup/targets`),
   createBackup: async () => requestJson<{ ok: boolean; backupDir: string }>(`${CONTROL_ORIGIN}/api/system/backup/create`, { method: 'POST', timeoutMs: SYSTEM_MAINTENANCE_TIMEOUT_MS }),
@@ -84,6 +86,12 @@ export const systemClient = {
   }),
   heartbeat: async () => requestJson<HeartbeatSnapshot>(`${CONTROL_ORIGIN}/api/system/heartbeat`),
   companionRuntime: async (limit = 8) => requestJson<CompanionRuntimeSnapshot>(`${CONTROL_ORIGIN}/api/system/companion-runtime?limit=${encodeURIComponent(String(limit))}`),
+  resolveCompanionOpportunity: async (jobId: string, payload: { request_id: string; outcome: 'delivered' | 'suppressed' | 'expired' | 'cancelled' | 'failed'; reason?: string }) => requestJson<{ ok: boolean }>(`${CONTROL_ORIGIN}/api/system/companion-runtime/opportunities/outcome/${encodeURIComponent(jobId)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }),
+  cancelHeartbeatGoal: async (goalId: string, reason = 'cancelled') => requestJson<{ ok: boolean; goal_id: string }>(`${CONTROL_ORIGIN}/api/system/heartbeat/goals/${encodeURIComponent(goalId)}/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) }),
   capabilities: async () => requestJson<CapabilitiesSnapshot>(`${CONTROL_ORIGIN}/api/system/capabilities`),
   orchestration: async () => requestJson<OrchestrationSnapshot>(`${CONTROL_ORIGIN}/api/system/orchestration`),
   importedSkills: async () => requestJson<SkillCatalogSnapshot>(`${CONTROL_ORIGIN}/api/system/skills/imported`),

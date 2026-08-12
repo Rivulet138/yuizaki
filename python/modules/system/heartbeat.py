@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import logging
+import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from threading import Lock
 from typing import Any
 
+from ..agent.companion_events import CompanionJobCapacityError, CompanionJobEventLog
 from .companion_policy import apply_behavior_modifiers, build_base_behavior_event, build_behavior_profile, evaluate_proactive_policy
+from .heartbeat_goal_store import HeartbeatGoalStore
 
 logger = logging.getLogger(__name__)
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 60
+MAX_HEARTBEAT_GOALS = 32
 
 
 @dataclass
@@ -26,24 +33,39 @@ class HeartbeatState:
         'affinity': 0.5,
     })
     last_relationship_snapshot: dict[str, Any] | None = None
+    goals: list[dict[str, Any]] = field(default_factory=list)
 
 
 class HeartbeatScheduler:
-    def __init__(self, interval_seconds: int = DEFAULT_HEARTBEAT_INTERVAL_SECONDS, trace_provider=None, companion_provider=None, companion_persist=None, relationship_memory_writer=None, relationship_history_provider=None, relationship_summary_provider=None):
+    def __init__(self, interval_seconds: int = DEFAULT_HEARTBEAT_INTERVAL_SECONDS, trace_provider=None, companion_provider=None, companion_persist=None, relationship_memory_writer=None, relationship_history_provider=None, relationship_summary_provider=None, workspace_id_provider=None, job_event_log: CompanionJobEventLog | None = None, opportunity_ttl_seconds: float | None = None, goal_store: HeartbeatGoalStore | None = None):
         self.state = HeartbeatState(interval_seconds=interval_seconds)
         self._task: asyncio.Task[Any] | None = None
+        self._expiry_task: asyncio.Task[Any] | None = None
+        self._expiry_wakeup = asyncio.Event()
         self._trace_provider = trace_provider
         self._companion_provider = companion_provider
         self._companion_persist = companion_persist
         self._relationship_memory_writer = relationship_memory_writer
         self._relationship_history_provider = relationship_history_provider
         self._relationship_summary_provider = relationship_summary_provider
+        self._workspace_id_provider = workspace_id_provider
+        self._job_events = job_event_log
+        self._opportunities: dict[str, dict[str, Any]] = {}
+        self._resolved_opportunities: dict[str, tuple[str, str]] = {}
+        self._opportunity_lock = Lock()
+        self._goals: dict[str, dict[str, Any]] = {}
+        self._goal_lock = Lock()
+        self._goal_store = goal_store
+        self._opportunity_ttl_seconds = opportunity_ttl_seconds
+        self._load_goals()
+        self.state.goals = self.goal_snapshot()
 
     async def start(self):
         if self._task and not self._task.done():
             return
         self.state.running = True
         self._task = asyncio.create_task(self._run())
+        self._expiry_task = asyncio.create_task(self._run_opportunity_expiry())
 
     async def stop(self):
         self.state.running = False
@@ -54,6 +76,15 @@ class HeartbeatScheduler:
             except asyncio.CancelledError:
                 pass
         self._task = None
+        if self._expiry_task and not self._expiry_task.done():
+            self._expiry_task.cancel()
+            try:
+                await self._expiry_task
+            except asyncio.CancelledError:
+                pass
+        self._expiry_task = None
+        self.cancel_opportunities(reason='heartbeat_stopped')
+        self._persist_goals()
 
     async def _run(self):
         while self.state.running:
@@ -71,6 +102,23 @@ class HeartbeatScheduler:
                 'persona': dict(self.state.persona),
             })
             self.state.events = self.state.events[-50:]
+
+    async def _run_opportunity_expiry(self) -> None:
+        while self.state.running:
+            with self._opportunity_lock:
+                self._expiry_wakeup.clear()
+                next_expiry = min(
+                    (float(item['expires_at']) for item in self._opportunities.values()),
+                    default=None,
+                )
+            if next_expiry is None:
+                await self._expiry_wakeup.wait()
+                continue
+            timeout = max(0.0, next_expiry - time.time())
+            try:
+                await asyncio.wait_for(self._expiry_wakeup.wait(), timeout=timeout)
+            except TimeoutError:
+                self.expire_opportunities()
 
     def _sync_companion_defaults(self):
         companion = self._companion_provider() if self._companion_provider else None
@@ -208,13 +256,315 @@ class HeartbeatScheduler:
         if event and event['type'] != recent_same_type:
             event['tick'] = self.state.tick_count
             event['at'] = self.state.last_tick_at
-            self.state.behavior_events.append(event)
-            self.state.behavior_events = self.state.behavior_events[-20:]
+            if self._emit_opportunity_job(event):
+                self.state.behavior_events.append(event)
+                self.state.behavior_events = self.state.behavior_events[-20:]
             self.state.last_relationship_snapshot = {
                 **(self.state.last_relationship_snapshot or {}),
                 'proactive_state': proactive_state,
                 'behavior_profile': behavior_profile,
             }
+
+    def _emit_opportunity_job(self, event: dict[str, Any]) -> bool:
+        if self._job_events is None:
+            return True
+        workspace_id = 'default'
+        if self._workspace_id_provider is not None:
+            try:
+                workspace_id = str(self._workspace_id_provider() or 'default').strip() or 'default'
+            except Exception:
+                logger.exception('Failed to resolve heartbeat workspace id')
+        job_id = f"heartbeatjob_{uuid.uuid4().hex[:12]}"
+        request_id = f"heartbeatreq_{uuid.uuid4().hex[:12]}"
+        goal_id = self.register_goal(
+            kind=str(event.get('type') or 'proactive'),
+            due_at=time.time(),
+            priority=self._goal_priority(event),
+            expires_at=None,
+            payload={'trigger_reason': event.get('trigger_reason')},
+        )
+        if not goal_id:
+            logger.warning('Heartbeat opportunity skipped because the goal queue is at capacity')
+            return False
+        common = {
+            'workspace_id': workspace_id,
+            'session_id': 'heartbeat',
+            'turn_id': f"heartbeat:{self.state.tick_count}",
+            'job_id': job_id,
+            'request_id': request_id,
+            'interruption_epoch': 0,
+            'source': 'heartbeat',
+            'timestamp': time.time(),
+            'conversation_id': f'conversation:{workspace_id}',
+            'operation_id': f'heartbeat:{self.state.tick_count}',
+            'step_index': 0,
+        }
+        data = {
+            'behaviorType': event.get('type'),
+            'tick': self.state.tick_count,
+            'triggerReason': event.get('trigger_reason'),
+            'goalId': goal_id,
+        }
+        ttl_seconds = self._opportunity_ttl_seconds
+        if ttl_seconds is None:
+            ttl_seconds = max(60.0, float(self.state.interval_seconds) * 2.0)
+        expires_at = time.time() + max(0.01, float(ttl_seconds))
+        try:
+            self._job_events.append(status='created', data={**data, 'phase': 'opportunity_requested'}, **common)
+        except CompanionJobCapacityError:
+            logger.warning('Heartbeat opportunity skipped because the job event log is at active capacity')
+            self._finish_goal(goal_id, 'failed', 'job_event_capacity')
+            return False
+        event['job_id'] = job_id
+        event['request_id'] = request_id
+        event['goal_id'] = goal_id
+        event['expires_at'] = expires_at
+        with self._opportunity_lock:
+            self._opportunities[job_id] = {
+                **common,
+                'expires_at': expires_at,
+                'goal_id': goal_id,
+                'data': data,
+            }
+        self._expiry_wakeup.set()
+        return True
+
+    def resolve_opportunity(self, *, job_id: str, request_id: str, outcome: str, reason: str | None = None) -> bool:
+        normalized = str(outcome or '').strip().lower()
+        if normalized not in {'delivered', 'suppressed', 'expired', 'cancelled', 'failed'}:
+            return False
+        with self._opportunity_lock:
+            resolved = self._resolved_opportunities.get(job_id)
+            if resolved is not None:
+                return resolved == (request_id, normalized)
+            pending = self._opportunities.get(job_id)
+            if pending is None or pending.get('request_id') != request_id:
+                return False
+            if self._job_events is None or not self._job_events.is_active(job_id):
+                return False
+            if normalized == 'cancelled':
+                status = 'cancelled'
+            elif normalized == 'failed':
+                status = 'failed'
+            else:
+                status = 'completed'
+            common = {key: pending[key] for key in (
+                'workspace_id', 'session_id', 'turn_id', 'job_id', 'request_id',
+                'interruption_epoch', 'source',
+            )}
+            for key in ('conversation_id', 'operation_id', 'run_id', 'step_index'):
+                if key in pending:
+                    common[key] = pending[key]
+            try:
+                self._job_events.append(
+                    status=status,
+                    timestamp=time.time(),
+                    data={
+                        **pending['data'],
+                        'phase': 'opportunity_resolved',
+                        'outcome': normalized,
+                        **({'reason': reason} if reason else {}),
+                    },
+                    **common,
+                )
+            except (CompanionJobCapacityError, KeyError, ValueError):
+                logger.exception('Failed to append heartbeat opportunity terminal event')
+                return False
+            self._opportunities.pop(job_id, None)
+            self._resolved_opportunities[job_id] = (request_id, normalized)
+            if len(self._resolved_opportunities) > MAX_HEARTBEAT_GOALS * 4:
+                self._resolved_opportunities.pop(next(iter(self._resolved_opportunities)))
+            self._finish_goal(str(pending.get('goal_id') or ''), normalized, reason)
+        return True
+
+    @staticmethod
+    def _goal_priority(event: dict[str, Any]) -> int:
+        kind = str(event.get('type') or '').lower()
+        if kind in {'reminder', 'care_signal'}:
+            return 2
+        if kind in {'suggestion', 'idle_prompt'}:
+            return 1
+        return 0
+
+    def register_goal(
+        self,
+        *,
+        kind: str,
+        due_at: float | None = None,
+        priority: int = 0,
+        cooldown_seconds: float = 0.0,
+        expires_at: float | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> str:
+        now = time.time()
+        goal_id = f"heartbeatgoal_{uuid.uuid4().hex[:12]}"
+        raw_due = now if due_at is None else float(due_at)
+        raw_expiry = None if expires_at is None else float(expires_at)
+        raw_cooldown = float(cooldown_seconds)
+        if not math.isfinite(raw_due) or (raw_expiry is not None and not math.isfinite(raw_expiry)) or not math.isfinite(raw_cooldown):
+            return ''
+        due = max(0.0, raw_due)
+        expiry = None if raw_expiry is None else max(due, raw_expiry)
+        cooldown = max(0.0, raw_cooldown)
+        goal = {
+            'goal_id': goal_id,
+            'kind': str(kind or 'proactive'),
+            'due_at': due,
+            'priority': max(-10, min(10, int(priority))),
+            'cooldown_seconds': cooldown,
+            'expires_at': expiry,
+            'state': 'pending',
+            'created_at': now,
+            'updated_at': now,
+            'payload': dict(payload or {}),
+        }
+        snapshot: list[dict[str, Any]] = []
+        with self._goal_lock:
+            if len(self._goals) >= MAX_HEARTBEAT_GOALS:
+                terminal_id = next((key for key, value in self._goals.items() if value['state'] in {'completed', 'cancelled', 'expired', 'failed'}), None)
+                if terminal_id is None:
+                    return ''
+                self._goals.pop(terminal_id, None)
+            self._goals[goal_id] = goal
+            snapshot = self._goal_snapshot_unlocked()
+            self.state.goals = snapshot
+        self._persist_goal_snapshot(snapshot)
+        return goal_id
+
+    def _finish_goal(self, goal_id: str, outcome: str, reason: str | None = None) -> None:
+        if not goal_id:
+            return
+        snapshot: list[dict[str, Any]] = []
+        with self._goal_lock:
+            goal = self._goals.get(goal_id)
+            if goal is None:
+                return
+            if str(goal.get('state') or '') in {'completed', 'cancelled', 'expired', 'failed', 'interrupted'}:
+                return
+            state = 'completed' if outcome in {'delivered', 'suppressed'} else outcome
+            goal['state'] = state
+            goal['updated_at'] = time.time()
+            if reason:
+                goal['reason'] = reason
+            snapshot = self._goal_snapshot_unlocked()
+            self.state.goals = snapshot
+        self._persist_goal_snapshot(snapshot)
+
+    def cancel_goal(self, goal_id: str, reason: str = 'cancelled') -> bool:
+        """Cancel a goal exactly once and resolve any linked opportunity job.
+
+        The operation is idempotent: cancelling an already-cancelled goal succeeds,
+        while terminal goals with another outcome are left unchanged.
+        """
+        normalized_id = str(goal_id or '').strip()
+        if not normalized_id:
+            return False
+        with self._goal_lock:
+            goal = self._goals.get(normalized_id)
+            if goal is None:
+                return False
+            current_state = str(goal.get('state') or 'pending')
+            if current_state == 'cancelled':
+                return True
+            if current_state in {'completed', 'failed', 'expired', 'interrupted'}:
+                return False
+        with self._opportunity_lock:
+            linked = next(
+                (
+                    (job_id, str(item.get('request_id') or ''))
+                    for job_id, item in self._opportunities.items()
+                    if str(item.get('goal_id') or '') == normalized_id
+                ),
+                None,
+            )
+        if linked is not None and linked[1]:
+            resolved = self.resolve_opportunity(
+                job_id=linked[0],
+                request_id=linked[1],
+                outcome='cancelled',
+                reason=reason,
+            )
+            if resolved:
+                return True
+            with self._goal_lock:
+                return str(self._goals.get(normalized_id, {}).get('state') or '') == 'cancelled'
+        self._finish_goal(normalized_id, 'cancelled', reason)
+        return True
+
+    def _load_goals(self) -> None:
+        if self._goal_store is None:
+            return
+        try:
+            loaded = self._goal_store.load()
+        except Exception:
+            logger.exception('Failed to load heartbeat goals')
+            return
+        changed = False
+        now = time.time()
+        with self._goal_lock:
+            for goal in loaded[-MAX_HEARTBEAT_GOALS:]:
+                goal_id = str(goal.get('goal_id') or '').strip()
+                if goal_id:
+                    restored = dict(goal)
+                    if str(restored.get('state') or 'pending') not in {
+                        'completed', 'cancelled', 'expired', 'failed', 'interrupted',
+                    }:
+                        restored['state'] = 'interrupted'
+                        restored['reason'] = 'runtime_restart'
+                        restored['updated_at'] = now
+                        changed = True
+                    self._goals[goal_id] = restored
+            snapshot = self._goal_snapshot_unlocked()
+        if changed:
+            self._persist_goal_snapshot(snapshot)
+
+    def _persist_goal_snapshot(self, goals: list[dict[str, Any]]) -> None:
+        if self._goal_store is None:
+            return
+        try:
+            self._goal_store.save(goals)
+        except Exception:
+            logger.exception('Failed to persist heartbeat goals')
+
+    def _persist_goals(self) -> None:
+        self._persist_goal_snapshot(self.goal_snapshot())
+
+    def _goal_snapshot_unlocked(self) -> list[dict[str, Any]]:
+        goals = []
+        for goal in self._goals.values():
+            try:
+                priority = max(-10, min(10, int(goal.get('priority', 0))))
+                due_at = max(0.0, float(goal.get('due_at', 0.0)))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            goals.append({**goal, 'priority': priority, 'due_at': due_at, 'payload': dict(goal.get('payload') or {})})
+        goals.sort(key=lambda goal: (-int(goal.get('priority', 0)), float(goal.get('due_at', 0.0)), str(goal.get('goal_id'))))
+        return goals[:MAX_HEARTBEAT_GOALS]
+
+    def goal_snapshot(self) -> list[dict[str, Any]]:
+        with self._goal_lock:
+            return self._goal_snapshot_unlocked()
+
+    def expire_opportunities(self, now: float | None = None) -> int:
+        current = time.time() if now is None else float(now)
+        with self._opportunity_lock:
+            expired = [
+                (job_id, str(item['request_id']))
+                for job_id, item in self._opportunities.items()
+                if current >= float(item['expires_at'])
+            ]
+        for job_id, request_id in expired:
+            self.resolve_opportunity(job_id=job_id, request_id=request_id, outcome='expired', reason='delivery_window_elapsed')
+        return len(expired)
+
+    def cancel_opportunities(self, *, reason: str) -> int:
+        with self._opportunity_lock:
+            pending = [(job_id, str(item['request_id'])) for job_id, item in self._opportunities.items()]
+        resolved = 0
+        for job_id, request_id in pending:
+            if self.resolve_opportunity(job_id=job_id, request_id=request_id, outcome='cancelled', reason=reason):
+                resolved += 1
+        return resolved
 
     def _persist_companion_state(self):
         companion = self._companion_provider() if self._companion_provider else None

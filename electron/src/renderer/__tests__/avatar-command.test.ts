@@ -102,6 +102,27 @@ describe('AvatarCommand v1', () => {
     expect(unsupported.unsupportedActionIndexes).toEqual([0])
   })
 
+  it('matches named motion capabilities without requiring index zero', () => {
+    const result = validateAvatarCommandAgainstCapabilities({
+      version: 1,
+      id: 'cmd-motion-name',
+      streamId: 'test-stream',
+      sequence: 5,
+      capabilityRevision: capabilities.revision,
+      issuedAt: 1000,
+      priority: 10,
+      interrupt: 'queue',
+      actions: [{ type: 'motion', group: 'Wave', intensity: 0.8 }],
+    }, {
+      ...capabilities,
+      actions: { ...capabilities.actions, motion: true },
+      motions: [{ group: 'Wave', index: 2, label: 'Wave' }],
+    })
+
+    expect(result.status).toBe('accepted')
+    expect(result.unsupportedActionIndexes).toEqual([])
+  })
+
   it('converts legacy pet directives without changing their intent', () => {
     const command = legacyDirectiveToAvatarCommand({
       expressionMix: [{ expression: 'happy', weight: 0.7 }],

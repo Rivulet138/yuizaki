@@ -15,7 +15,8 @@ import {
   type PetLipSyncViseme,
   type PetRendererStatePayload,
 } from '../../shared/pet-control'
-import type { PetRuntimeAdapter } from './pet-runtime-adapter'
+import type { PetRuntimeAdapter, PetRuntimeRenderPolicy } from './pet-runtime-adapter'
+import { resolvePetRenderBudget } from '../pet-render-budget'
 
 interface VrmHostContext {
   container: HTMLElement
@@ -23,6 +24,7 @@ interface VrmHostContext {
     modelId: string | null
     modelType: 'live2d' | 'vrm'
     modelPath: string
+    animationPaths: string[]
     scale: number
     positionX: number | null
     positionY: number | null
@@ -46,7 +48,14 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
   private ambientLight: THREE.AmbientLight | null = null
   private timer = new THREE.Timer()
   private vrm: VRM | null = null
+  private animationMixer: THREE.AnimationMixer | null = null
+  private animationClips: THREE.AnimationClip[] = []
+  private activeAnimationAction: THREE.AnimationAction | null = null
   private rafId: number | null = null
+  private renderLoopGeneration = 0
+  private targetFps = 60
+  private renderPaused = false
+  private lastRenderedAt = 0
   private lipSyncOpen = 0
   private activeLipSyncViseme: PetLipSyncViseme | null = null
   private activeLipSyncVisemeWeight = 1
@@ -64,15 +73,26 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
   private readonly lookAtTarget = new THREE.Vector3()
   private behavior: AvatarBehavior = 'idle'
   private behaviorStartedAt = performance.now()
+  private loadGeneration = 0
+  private readonly renderBudget = resolvePetRenderBudget({
+    hardwareConcurrency: navigator.hardwareConcurrency,
+    deviceMemory: (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
+  })
 
   constructor(private readonly host: VrmHostContext) {}
 
   getCapabilities(): AvatarCapabilitySnapshot {
     const expressions = Object.keys(this.vrm?.expressionManager?.expressionMap ?? {})
     const gaze = Boolean(this.vrm?.lookAt)
+    const motions = this.animationClips.map((clip, index) => ({
+      group: clip.name || `clip-${index}`,
+      index,
+      ...(clip.name ? { label: clip.name } : {}),
+    }))
     const revision = createAvatarCapabilityRevision('vrm', this.host.config.modelId, [
       ...expressions,
       gaze ? 'lookAt' : 'no-lookAt',
+      ...motions.map((motion) => `${motion.group}:${motion.index}`),
     ])
     return {
       revision,
@@ -83,14 +103,14 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
         behavior: true,
         affect: expressions.length > 0,
         gaze,
-        motion: false,
+        motion: motions.length > 0,
         expression: expressions.length > 0,
         parameterPatch: false,
         viseme: expressions.some((name) => ['aa', 'ih', 'ou', 'ee', 'oh'].includes(name)),
         cancel: true,
       },
       expressions,
-      motions: [],
+      motions,
       parameters: [],
     }
   }
@@ -117,7 +137,7 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
         }
         return { status: 'completed' }
       case 'motion':
-        return { status: 'degraded', message: 'No VRM animation clip source is loaded' }
+        return this.playAnimation(action.group, action.index ?? 0, action.intensity ?? 1)
       case 'expression': {
         const expression = this.resolveVrmExpression(action.name)
         if (!expression) return { status: 'degraded', message: `VRM expression not available: ${action.name}` }
@@ -142,6 +162,10 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
           this.behavior = 'idle'
           return { status: 'completed' }
         }
+        if (action.channel === 'motion') {
+          this.stopAnimation()
+          return { status: 'completed' }
+        }
         if (action.channel === 'expression' || action.channel === 'affect') {
           this.expressionStates.forEach((state) => {
             state.target = 0
@@ -161,11 +185,16 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
   }
 
   async loadModel(config: PetControlConfigPatch): Promise<void> {
+    const generation = ++this.loadGeneration
     const modelPath = config.modelPath ?? this.host.config.modelPath
     this.host.config.modelPath = modelPath
+    if (Array.isArray(config.animationPaths)) {
+      this.host.config.animationPaths = [...config.animationPaths]
+    }
 
     this.ensureRenderer()
-    await this.loadVrm(modelPath)
+    const loaded = await this.loadVrm(modelPath, generation, this.host.config.animationPaths)
+    if (!loaded || generation !== this.loadGeneration) return
     this.applyConfig(config)
     this.startLoop()
     this.host.hideNotice()
@@ -225,7 +254,22 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
     }
   }
 
+  setRenderPolicy(policy: PetRuntimeRenderPolicy): void {
+    this.targetFps = Math.max(1, Math.min(120, Math.round(policy.targetFps)))
+    this.renderPaused = policy.paused
+    if (this.renderPaused) {
+      this.renderLoopGeneration += 1
+      if (this.rafId !== null) window.cancelAnimationFrame(this.rafId)
+      this.rafId = null
+      this.lastRenderedAt = 0
+      return
+    }
+    if (this.rafId === null && this.renderer && this.scene && this.camera) this.startLoop()
+  }
+
   destroy(): void {
+    this.loadGeneration += 1
+    this.renderLoopGeneration += 1
     if (this.rafId !== null) {
       window.cancelAnimationFrame(this.rafId)
       this.rafId = null
@@ -233,6 +277,7 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
 
     if (this.vrm) {
       this.setLipSyncLevel(0, false)
+      this.disposeAnimationState()
       VRMUtils.deepDispose(this.vrm.scene)
       this.scene?.remove(this.vrm.scene)
       this.vrm = null
@@ -263,7 +308,7 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
     }
 
     this.renderer.setSize(width, height, false)
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.renderBudget.dprCap))
     this.camera.aspect = width / Math.max(height, 1)
     this.camera.updateProjectionMatrix()
   }
@@ -285,7 +330,7 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
       alpha: true,
-      antialias: true,
+      antialias: this.renderBudget.antialias,
       preserveDrawingBuffer: false,
     })
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
@@ -301,16 +346,12 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
     this.resize(window.innerWidth, window.innerHeight)
   }
 
-  private async loadVrm(modelPath: string): Promise<void> {
+  private async loadVrm(modelPath: string, generation: number, animationPaths: string[]): Promise<boolean> {
     if (!this.scene || !this.renderer) {
       throw new Error('VRM renderer not initialized')
     }
 
-    if (this.vrm) {
-      VRMUtils.deepDispose(this.vrm.scene)
-      this.scene.remove(this.vrm.scene)
-      this.vrm = null
-    }
+    const scene = this.scene
 
     const loader = new GLTFLoader()
     loader.register((parser) => new VRMLoaderPlugin(parser))
@@ -321,29 +362,83 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
       throw new Error('Loaded glTF does not contain VRM data')
     }
 
+    if (generation !== this.loadGeneration || this.scene !== scene) {
+      VRMUtils.deepDispose(vrm.scene)
+      return false
+    }
+
     VRMUtils.rotateVRM0(vrm)
-    this.scene.add(vrm.scene)
+    const previousVrm = this.vrm
+    this.disposeAnimationState()
     this.vrm = vrm
+    const externalClips = await this.loadExternalAnimationClips(animationPaths, generation, scene)
+    if (generation !== this.loadGeneration || this.scene !== scene) {
+      VRMUtils.deepDispose(vrm.scene)
+      return false
+    }
+    this.animationClips = [
+      ...(Array.isArray(gltf.animations) ? gltf.animations : []),
+      ...externalClips,
+    ]
+    this.animationMixer = this.animationClips.length > 0 ? new THREE.AnimationMixer(vrm.scene) : null
+    scene.add(vrm.scene)
+    if (previousVrm) {
+      VRMUtils.deepDispose(previousVrm.scene)
+      scene.remove(previousVrm.scene)
+    }
+    return true
+  }
+
+  private async loadExternalAnimationClips(
+    animationPaths: string[],
+    generation: number,
+    scene: THREE.Scene,
+  ): Promise<THREE.AnimationClip[]> {
+    if (animationPaths.length === 0) return []
+    const clips: THREE.AnimationClip[] = []
+    for (const animationPath of animationPaths.slice(0, 32)) {
+      if (generation !== this.loadGeneration || this.scene !== scene) return clips
+      try {
+        const loader = new GLTFLoader()
+        const gltf = await loader.loadAsync(animationPath)
+        if (generation !== this.loadGeneration || this.scene !== scene) return clips
+        if (Array.isArray(gltf.animations)) clips.push(...gltf.animations)
+      } catch (error) {
+        console.warn(`[VrmRuntimeAdapter] failed to load VRMA animation: ${animationPath}`, error)
+      }
+    }
+    return clips
   }
 
   private startLoop(): void {
+    const generation = ++this.renderLoopGeneration
     if (this.rafId !== null) {
       window.cancelAnimationFrame(this.rafId)
       this.rafId = null
     }
 
     this.timer.reset()
+    this.lastRenderedAt = 0
+
+    if (this.renderPaused) return
 
     const tick = (timestamp?: number) => {
+      if (generation !== this.renderLoopGeneration || this.renderPaused) return
       this.rafId = window.requestAnimationFrame(tick)
       if (!this.renderer || !this.scene || !this.camera) {
         return
       }
 
+      const frameAt = typeof timestamp === 'number' ? timestamp : performance.now()
+      const minimumFrameInterval = 1000 / this.targetFps
+      if (this.lastRenderedAt > 0 && frameAt - this.lastRenderedAt < minimumFrameInterval) return
+      this.lastRenderedAt = frameAt
+
       this.timer.update(timestamp)
       const delta = this.timer.getDelta()
       this.updateExpressionBlend(delta)
       this.updateGaze(delta)
+      this.animationMixer?.update(delta)
       this.vrm?.update(delta)
       this.renderer.render(this.scene, this.camera)
     }
@@ -369,6 +464,47 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
     if (nextExpression) {
       expressionManager.setValue(nextExpression, this.lipSyncOpen * this.activeLipSyncVisemeWeight)
     }
+  }
+
+  private playAnimation(group: string | undefined, index: number, intensity: number): AvatarActionExecutionResult {
+    if (!this.animationMixer || this.animationClips.length === 0) {
+      return { status: 'degraded', message: 'No VRM animation clip source is loaded' }
+    }
+    const normalizedGroup = group?.trim().toLowerCase()
+    const clip = normalizedGroup
+      ? this.animationClips.find((candidate, candidateIndex) => (
+        candidate.name.toLowerCase() === normalizedGroup || `clip-${candidateIndex}` === normalizedGroup
+      ))
+      : this.animationClips[index]
+    if (!clip) {
+      return { status: 'degraded', message: `VRM animation clip not available: ${group || index}` }
+    }
+    this.activeAnimationAction?.fadeOut(0.12)
+    const action = this.animationMixer.clipAction(clip)
+    action.reset()
+    action.setLoop(THREE.LoopOnce, 1)
+    action.clampWhenFinished = true
+    action.setEffectiveWeight(Math.max(0, Math.min(1, intensity)))
+    action.fadeIn(0.12)
+    action.play()
+    this.activeAnimationAction = action
+    this.host.markActivity(`vrm-motion:${clip.name || index}`)
+    return { status: 'completed' }
+  }
+
+  private stopAnimation(): void {
+    this.activeAnimationAction?.stop()
+    this.activeAnimationAction = null
+    this.animationMixer?.stopAllAction()
+  }
+
+  private disposeAnimationState(): void {
+    this.stopAnimation()
+    if (this.animationMixer && this.vrm) {
+      this.animationMixer.uncacheRoot(this.vrm.scene)
+    }
+    this.animationMixer = null
+    this.animationClips = []
   }
 
   private clearAppliedLipSyncExpression(): void {

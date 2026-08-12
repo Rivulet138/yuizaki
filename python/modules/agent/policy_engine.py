@@ -181,7 +181,7 @@ class PolicyEngine:
                 ),
             )
 
-        if force_confirm or (tool.require_confirm and tool.risk_level in {"medium", "high", "critical"}):
+        if force_confirm or tool.require_confirm or tool.risk_level in {"medium", "high", "critical"}:
             reason_code = "untrusted_mcp_followup_requires_confirmation" if force_confirm else "permission_required"
             with self._store_lock:
                 self._permission_metadata[permission_request_id] = {

@@ -23,6 +23,8 @@ def create_system_router(
     system_status_handler: Callable[[], Any],
     heartbeat_status_handler: Callable[[], Any] | None = None,
     companion_runtime_handler: Callable[[int], Any] | None = None,
+    companion_opportunity_outcome_handler: Callable[[str, dict[str, Any]], Any] | None = None,
+    heartbeat_goal_cancel_handler: Callable[[str, dict[str, Any]], Any] | None = None,
     capabilities_state_handler: Callable[[], Any] | None = None,
     orchestration_state_handler: Callable[[], Any] | None = None,
     active_workspace_handler: Callable[[dict[str, Any]], Any] | None = None,
@@ -35,6 +37,7 @@ def create_system_router(
     remove_schedule_handler: Callable[[str], Any] | None = None,
     toggle_schedule_handler: Callable[[str, bool], Any] | None = None,
     run_schedule_now_handler: Callable[[str], Any] | None = None,
+    cancel_schedule_handler: Callable[[str], Any] | None = None,
     agent_trace_handler: Callable[[], Any] | None = None,
     experience_metrics_handler: Callable[[], Any] | None = None,
     mcp_state_handler: Callable[[], Any] | None = None,
@@ -196,6 +199,16 @@ def create_system_router(
         async def companion_runtime_status(limit: int = 8):
             return await _call_handler(companion_runtime_handler, limit, offload=True)
 
+    if companion_opportunity_outcome_handler is not None:
+        @router.post("/api/system/companion-runtime/opportunities/outcome/{job_id:path}")
+        async def companion_opportunity_outcome(job_id: str, payload: dict[str, Any]):
+            return await _call_handler(companion_opportunity_outcome_handler, job_id, payload, offload=True)
+
+    if heartbeat_goal_cancel_handler is not None:
+        @router.post("/api/system/heartbeat/goals/{goal_id:path}/cancel")
+        async def heartbeat_goal_cancel(goal_id: str, payload: dict[str, Any] | None = None):
+            return await _call_handler(heartbeat_goal_cancel_handler, goal_id, payload or {}, offload=True)
+
     if capabilities_state_handler is not None:
         @router.get("/api/system/capabilities")
         async def capabilities_state():
@@ -284,6 +297,14 @@ def create_system_router(
             if auth_error is not None:
                 return auth_error
             return await _call_handler(run_schedule_now_handler, task_id, offload=True)
+
+    if cancel_schedule_handler is not None:
+        @router.post("/api/system/schedules/{task_id:path}/cancel")
+        async def cancel_schedule(task_id: str, authorization: str | None = Depends(resolve_admin_authorization)):
+            auth_error = _require_admin(authorization)
+            if auth_error is not None:
+                return auth_error
+            return await _call_handler(cancel_schedule_handler, task_id, offload=True)
 
     if agent_trace_handler is not None:
         @router.get("/api/system/agent-trace")

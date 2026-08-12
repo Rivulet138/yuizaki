@@ -1,12 +1,19 @@
 import { computed, reactive, shallowRef, watch, type ComputedRef } from 'vue'
 import type { CompanionRuntimeSnapshot, HeartbeatBehaviorEvent } from '@/../shared/agent'
+import {
+  createCompanionEventGate,
+  isTerminalCompanionJobStatus,
+  type CompanionEventEnvelope,
+  type CompanionEventScope,
+  type CompanionEventSource,
+} from '@/../shared/companion-event'
 import type { PetBehaviorState } from '@/utils/petControl'
 import { createReducedMotionObserver, type ReducedMotionObserver } from './reducedMotion'
 
 export type CompanionActivity = 'idle' | 'listening' | 'thinking' | 'speaking' | 'executing'
 export type CompanionAvailability = 'online' | 'offline' | 'degraded' | 'error'
 export type CompanionPermission = 'none' | 'waiting'
-export type CompanionRuntimeSource = 'chat' | 'voice' | 'heartbeat' | 'permission' | 'health'
+export type CompanionRuntimeSource = CompanionEventSource
 export type CompanionPresentationState = CompanionActivity | 'offline' | 'error' | 'waiting-for-permission' | 'interrupted'
 export type ProactiveSuppressionReason = 'duplicate_or_invalid' | 'unavailable' | 'dnd' | 'ineligible' | 'cooldown' | 'frequency_budget'
 export type CompanionRuntimeSinkName = 'behavior' | 'emotion' | 'motion' | 'advice' | 'notification'
@@ -19,6 +26,13 @@ export interface ProactiveDeliveryResult {
   attempted: CompanionRuntimeSinkName[]
   succeeded: CompanionRuntimeSinkName[]
   failed: Array<{ sink: CompanionRuntimeSinkName; message: string }>
+}
+type OpportunityOutcome = 'delivered' | 'suppressed' | 'expired' | 'cancelled' | 'failed'
+interface PendingOpportunityOutcome {
+  jobId: string
+  requestId: string
+  outcome: OpportunityOutcome
+  reason?: string
 }
 export type ProactivePollResult = ProactiveSuppressionReason | ProactiveDeliveryResult | 'empty' | 'in_flight' | 'stopped'
 
@@ -69,6 +83,7 @@ export interface CompanionRuntimeDependencies {
   reducedMotionObserver?: ReducedMotionObserver
   onSinkError?: (failure: { sink: CompanionRuntimeSinkName; message: string }) => void
   onPollResult?: (result: ProactivePollResult) => void
+  reportOpportunityOutcome?: (jobId: string, requestId: string, outcome: OpportunityOutcome, reason?: string) => void | Promise<void>
 }
 
 const activityPriority: Record<CompanionActivity, number> = {
@@ -132,10 +147,14 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
   const deliveredIdentities = new Set<string>()
   const categoryDeliveredAt = new Map<string, number>()
   const deliveredAt: number[] = []
+  const pendingOpportunityOutcomes = new Map<string, PendingOpportunityOutcome>()
+  const jobEventGate = createCompanionEventGate()
+  const activeJobIdsBySource = new Map<CompanionRuntimeSource, Set<string>>()
   let timer: ReturnType<typeof setInterval> | null = null
   let started = false
   let pollingEnabled = true
   let pollInFlight = false
+  let activeOpportunityCandidate: HeartbeatBehaviorEvent | null = null
   let lifecycleEpoch = 0
   let healthEpoch = 0
   let lastBehavior: PetBehaviorState | null = 'idle'
@@ -213,11 +232,9 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
       abortActivePoll()
     }
     if (event.permission !== undefined) state.permission = event.permission
-    if (event.requestId !== undefined) {
-      state.lastRequestId = event.requestId
-      if (event.activity === 'idle') sourceRequestIds.delete(event.source)
-      else sourceRequestIds.set(event.source, event.requestId)
-    }
+    if (event.requestId !== undefined) state.lastRequestId = event.requestId
+    if (event.activity === 'idle') sourceRequestIds.delete(event.source)
+    else if (event.requestId !== undefined) sourceRequestIds.set(event.source, event.requestId)
     scheduleActivityExpiry(event)
     await applyPresentation(event.durationMs)
     return true
@@ -230,18 +247,98 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     for (const activeSource of activityExpiryTimers.keys()) clearActivityExpiry(activeSource)
     sourceActivities.clear()
     sourceRequestIds.clear()
+    activeJobIdsBySource.clear()
+    jobEventGate.clear()
     state.lastRequestId = null
     recomputeActivity()
     state.interruptionEpoch += 1
     abortActivePoll()
+    if (activeOpportunityCandidate) {
+      await reportOpportunity(activeOpportunityCandidate, 'cancelled', `interrupted_by_${source}`)
+    }
     state.interruptedAtEpoch = state.interruptionEpoch
     await applyPresentation()
     return true
   }
 
+  const publishJob = async (event: CompanionEventEnvelope, scope: CompanionEventScope = {}): Promise<boolean> => {
+    const decision = jobEventGate.accept(event, {
+      ...scope,
+      interruptionEpoch: scope.interruptionEpoch ?? state.interruptionEpoch,
+    })
+    if (!decision.accepted) return false
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent<CompanionEventEnvelope>('companion:job', { detail: event }))
+    }
+    if (event.source === 'heartbeat') return true
+    const activeJobs = activeJobIdsBySource.get(event.source) ?? new Set<string>()
+    if (isTerminalCompanionJobStatus(event.status)) activeJobs.delete(event.jobId)
+    else activeJobs.add(event.jobId)
+    if (activeJobs.size > 0) activeJobIdsBySource.set(event.source, activeJobs)
+    else activeJobIdsBySource.delete(event.source)
+    const activeRequestId = [...activeJobs].at(-1)
+    return publish({
+      source: event.source,
+      sequence: nextCompanionRuntimeSequence(event.source),
+      activity: activeRequestId ? 'executing' : 'idle',
+      requestId: activeRequestId ?? event.jobId,
+      interruptionEpoch: event.interruptionEpoch,
+    })
+  }
+
+  const ingestSnapshotJobs = async (snapshot: CompanionRuntimeSnapshot) => {
+    const events = Array.isArray(snapshot.jobs?.events) ? snapshot.jobs.events : []
+    for (const event of events) {
+      // A snapshot may have been fetched before an interrupt and delivered
+      // afterwards. Never let its event epoch become the acceptance scope.
+      if (event.interruptionEpoch !== state.interruptionEpoch) continue
+      await publishJob(event, {
+        workspaceId: snapshot.active_workspace_id,
+        interruptionEpoch: state.interruptionEpoch,
+      })
+    }
+    const activeJobIds = new Set(snapshot.jobs?.active_job_ids ?? [])
+    for (const [jobId, pending] of pendingOpportunityOutcomes) {
+      if (!activeJobIds.has(jobId)) {
+        pendingOpportunityOutcomes.delete(jobId)
+        continue
+      }
+      await sendOpportunityOutcome(pending)
+    }
+  }
+
   const suppress = (reason: ProactiveSuppressionReason): ProactiveSuppressionReason => {
     state.suppressionCounts[reason] += 1
     return reason
+  }
+
+  const sendOpportunityOutcome = async (pending: PendingOpportunityOutcome): Promise<void> => {
+    if (!dependencies.reportOpportunityOutcome) return
+    try {
+      await dependencies.reportOpportunityOutcome(
+        pending.jobId,
+        pending.requestId,
+        pending.outcome,
+        pending.reason,
+      )
+      pendingOpportunityOutcomes.delete(pending.jobId)
+    } catch {
+      pendingOpportunityOutcomes.set(pending.jobId, pending)
+    }
+  }
+
+  const reportOpportunity = async (
+    candidate: HeartbeatBehaviorEvent,
+    outcome: OpportunityOutcome,
+    reason?: string,
+  ) => {
+    if (!candidate.job_id || !candidate.request_id) return
+    await sendOpportunityOutcome({
+      jobId: candidate.job_id,
+      requestId: candidate.request_id,
+      outcome,
+      ...(reason ? { reason } : {}),
+    })
   }
 
   const rememberDeliveredIdentity = (identity: string) => {
@@ -255,6 +352,10 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
       deliveredIdentities.delete(oldest)
     }
     deliveredIdentities.add(identity)
+  }
+
+  const rememberResolvedOpportunity = (candidate: HeartbeatBehaviorEvent, identity: string) => {
+    if (candidate.job_id && candidate.request_id) rememberDeliveredIdentity(identity)
   }
 
   const invokeSink = async (
@@ -312,11 +413,20 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
       }
       lastSnapshot.value = snapshot
       state.availability = 'online'
+      await ingestSnapshotJobs(snapshot)
+      if (!isRequestCurrent()) return 'stopped'
       const events = Array.isArray(snapshot.heartbeat?.behavior_events) ? snapshot.heartbeat.behavior_events : []
-      const candidate = events.at(-1)
+      const activeJobIds = snapshot.jobs ? new Set(snapshot.jobs.active_job_ids ?? []) : null
+      const candidate = events.findLast((event) => !event.job_id || activeJobIds === null || activeJobIds.has(event.job_id))
       if (!candidate) return 'empty'
+      activeOpportunityCandidate = candidate
       const identity = eventIdentity(candidate)
       if (!identity || deliveredIdentities.has(identity)) return suppress('duplicate_or_invalid')
+      if (candidate.expires_at && (dependencies.now ?? Date.now)() / 1000 >= candidate.expires_at) {
+        rememberResolvedOpportunity(candidate, identity)
+        await reportOpportunity(candidate, 'expired', 'delivery_window_elapsed')
+        return suppress('ineligible')
+      }
       const sinkContext: ProactiveSinkContext = {
         signal: requestAbortController.signal,
         eventVersion: identity,
@@ -324,20 +434,34 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
       if (!dependencies.isAvailable()) return suppress('unavailable')
       const doNotDisturb = await dependencies.readDoNotDisturb()
       if (!isRequestCurrent()) return 'stopped'
-      if (doNotDisturb) return suppress('dnd')
+      if (doNotDisturb) {
+        rememberResolvedOpportunity(candidate, identity)
+        await reportOpportunity(candidate, 'suppressed', 'dnd')
+        return suppress('dnd')
+      }
       const proactive = candidate.proactive_state ?? snapshot.companion_state?.proactive_state
       const interruptibility = snapshot.companion_state?.interruptibility
       const contextInterruptible = state.activity === 'idle' || state.activity === 'listening'
       if (proactive?.can_proactively_reach_out !== true || (typeof interruptibility === 'number' && interruptibility <= 0) || !contextInterruptible) {
+        rememberResolvedOpportunity(candidate, identity)
+        await reportOpportunity(candidate, 'suppressed', 'ineligible')
         return suppress('ineligible')
       }
       const now = (dependencies.now ?? Date.now)()
       const category = candidate.type || 'unknown'
       const cooldownMs = dependencies.cooldownMs ?? 60_000
-      if (now - (categoryDeliveredAt.get(category) ?? Number.NEGATIVE_INFINITY) < cooldownMs) return suppress('cooldown')
+      if (now - (categoryDeliveredAt.get(category) ?? Number.NEGATIVE_INFINITY) < cooldownMs) {
+        rememberResolvedOpportunity(candidate, identity)
+        await reportOpportunity(candidate, 'suppressed', 'cooldown')
+        return suppress('cooldown')
+      }
       const frequencyWindowMs = dependencies.frequencyWindowMs ?? 60 * 60_000
       while (deliveredAt.length > 0 && now - (deliveredAt[0] ?? now) >= frequencyWindowMs) deliveredAt.shift()
-      if (deliveredAt.length >= (dependencies.frequencyBudget ?? 3)) return suppress('frequency_budget')
+      if (deliveredAt.length >= (dependencies.frequencyBudget ?? 3)) {
+        rememberResolvedOpportunity(candidate, identity)
+        await reportOpportunity(candidate, 'suppressed', 'frequency_budget')
+        return suppress('frequency_budget')
+      }
 
       const result: ProactiveDeliveryResult = { status: 'delivered', attempted: [], succeeded: [], failed: [] }
       if (candidate.emotion_id) {
@@ -358,7 +482,14 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
       rememberDeliveredIdentity(identity)
       categoryDeliveredAt.set(category, now)
       deliveredAt.push(now)
-      result.status = result.failed.length === 0 ? 'delivered' : result.succeeded.length === 0 ? 'failed' : 'partial'
+      if (result.failed.length === 0) {
+        result.status = 'delivered'
+      } else if (result.succeeded.length === 0) {
+        result.status = 'failed'
+      } else {
+        result.status = 'partial'
+      }
+      await reportOpportunity(candidate, result.status === 'failed' ? 'failed' : 'delivered', result.status)
       return result
     } catch {
       if (!isRequestCurrent()) return 'stopped'
@@ -367,6 +498,7 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
       if (!isRequestCurrent()) return 'stopped'
       return suppress('unavailable')
     } finally {
+      activeOpportunityCandidate = null
       if (activePollAbortController === requestAbortController) activePollAbortController = null
       pollInFlight = false
     }
@@ -409,9 +541,12 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     started = false
     lifecycleEpoch += 1
     abortActivePoll()
+    if (activeOpportunityCandidate) void reportOpportunity(activeOpportunityCandidate, 'cancelled', 'runtime_stopped')
     for (const source of activityExpiryTimers.keys()) clearActivityExpiry(source)
     sourceActivities.clear()
     sourceRequestIds.clear()
+    activeJobIdsBySource.clear()
+    jobEventGate.clear()
     state.lastRequestId = null
     state.interruptedAtEpoch = null
     recomputeActivity()
@@ -428,6 +563,7 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     deliveredIdentities,
     configure,
     publish,
+    publishJob,
     interrupt,
     pollOnce,
     start,
@@ -454,6 +590,9 @@ export const nextCompanionRuntimeSequence = (source: CompanionRuntimeSource): nu
 
 export const publishCompanionRuntimeEvent = (event: Omit<CompanionRuntimeEvent, 'sequence'> & { sequence?: number }) =>
   installedController?.publish({ ...event, sequence: event.sequence ?? nextCompanionRuntimeSequence(event.source) }) ?? Promise.resolve(false)
+
+export const publishCompanionJobEvent = (event: CompanionEventEnvelope, scope?: CompanionEventScope) =>
+  installedController?.publishJob(event, scope ?? {}) ?? Promise.resolve(false)
 
 export const publishCompanionInterrupt = (source: CompanionRuntimeSource) =>
   installedController?.interrupt(source, nextCompanionRuntimeSequence(source)) ?? Promise.resolve(false)

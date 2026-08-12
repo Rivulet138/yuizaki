@@ -61,6 +61,7 @@ class AgentEvents:
 
 
 class ScreenshotEvents:
+    CAPTURE_REQUEST = "screenshot:capture-request"
     REQUEST = "screenshot:request"
     RESULT = "screenshot:result"
 
@@ -127,6 +128,12 @@ class LLMDeltaData:
     token: str
     index: int = 0
     session_id: str = ""
+    generation_id: str = ""
+    turn_id: str = ""
+    request_id: str = ""
+    interruption_epoch: int = 0
+    version: int = 1
+    sequence: int = 0
 
 
 @dataclass
@@ -138,6 +145,13 @@ class LLMFinalData:
     finish_reason: str = "stop"
     user_message_id: Optional[int] = None
     assistant_message_id: Optional[int] = None
+    generation_id: str = ""
+    turn_id: str = ""
+    request_id: str = ""
+    interruption_epoch: int = 0
+    version: int = 1
+    sequence: int = 0
+    tts_expected: Optional[bool] = None
 
 
 @dataclass
@@ -159,6 +173,10 @@ class TTSChunkData:
     duration_ms: Optional[float] = None
     session_id: str = ""
     generation_id: str = ""
+    turn_id: str = ""
+    request_id: str = ""
+    interruption_epoch: int = 0
+    version: int = 1
     sequence: int = 0
     chunk_index: int = 0
     is_final: bool = False
@@ -172,6 +190,11 @@ class ToolCallData:
     id: str
     name: str
     args: Dict[str, Any] = field(default_factory=dict)
+    request_id: Optional[str] = None
+    run_id: Optional[str] = None
+    job_id: Optional[str] = None
+    source: Optional[str] = None
+    retry: bool = False
 
 
 @dataclass

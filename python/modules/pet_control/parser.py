@@ -675,6 +675,14 @@ def build_pet_control_prompt(control_context: Optional[dict[str, Any]] = None) -
         "source": "pet_runtime",
         "trust": "constrained",
         "instruction_authority": "none",
+        "capability_revision": str(control_context.get("capabilityRevision") or "") or None,
+        "model_type": str(control_context.get("modelType") or "") or None,
+        "model_id": str(control_context.get("modelId") or "") or None,
+        "actions": {
+            str(key): bool(value)
+            for key, value in (control_context.get("actions") or {}).items()
+            if key in {"behavior", "affect", "gaze", "motion", "expression", "parameterPatch", "viseme", "cancel"}
+        },
         "models": [
             {"id": str(item.get("id")), "type": str(item.get("type") or "unknown")}
             for item in models[:40]

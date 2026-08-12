@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from difflib import SequenceMatcher
 import logging
+import re
 import time
 from datetime import datetime
 from typing import Any
@@ -24,23 +25,26 @@ logger = logging.getLogger(__name__)
 
 _SPECULATIVE_CONTEXT_TTL_SECONDS = 8.0
 _SPECULATIVE_CONTEXT_MAX_ENTRIES = 32
-_VISUAL_QUERY_MARKERS = (
-    "屏幕",
-    "画面",
-    "窗口",
-    "桌面",
-    "显示器",
-    "截图",
-    "这个页面",
+_VISUAL_QUERY_PHRASES = (
     "你看到",
     "看一下这个",
     "看看这个",
-    "screen",
-    "window",
-    "desktop",
-    "screenshot",
     "what do you see",
     "look at this",
+)
+_CHINESE_VISUAL_REQUEST = re.compile(
+    r"(?:(?:请|帮我|你能)?(?:看|看看|看一下|查看|检查|识别|读取|分析|描述)"
+    r".{0,12}(?:屏幕|画面|窗口|桌面|显示器|截图|这个页面))|"
+    r"(?:(?:屏幕|画面|窗口|桌面|显示器|截图|页面)(?:上|里|中|现在)"
+    r".{0,10}(?:有什么|是什么|显示什么|怎么了))"
+)
+_ENGLISH_VISUAL_REQUEST = re.compile(
+    r"\b(?:(?:look at|check|inspect|read|analy[sz]e|describe)"
+    r".{0,48}(?:screen|desktop|window|screenshot|page)|"
+    r"(?:can|could) you see.{0,32}(?:screen|desktop|window|screenshot|page)|"
+    r"what changed.{0,24}(?:screen|desktop|window|screenshot|page)|"
+    r"(?:what(?:'s| is)|tell me what(?:'s| is))\s+(?:currently\s+)?on\s+"
+    r"(?:my|the|this)\s+(?:screen|desktop|window|screenshot|page))\b"
 )
 
 
@@ -65,7 +69,11 @@ def _query_matches_partial(
 
 def _visual_context_requested(query: str) -> bool:
     normalized = _normalize_query(query)
-    return any(marker in normalized for marker in _VISUAL_QUERY_MARKERS)
+    return bool(
+        any(phrase in normalized for phrase in _VISUAL_QUERY_PHRASES)
+        or _CHINESE_VISUAL_REQUEST.search(normalized)
+        or _ENGLISH_VISUAL_REQUEST.search(normalized)
+    )
 
 
 def visual_context_requested(query: str) -> bool:
@@ -662,7 +670,8 @@ class AgentPipeline:
                     clean_text = " ".join(text.split())
                     if not doc_id or not clean_text or len(memory_sources) >= 5:
                         continue
-                    metadata = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
+                    raw_metadata = doc.get("metadata")
+                    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
                     layer = str(doc.get("layer") or metadata.get("layer") or "").strip()
                     source = str(doc.get("source") or metadata.get("source") or "").strip()
                     score = item.get("score")

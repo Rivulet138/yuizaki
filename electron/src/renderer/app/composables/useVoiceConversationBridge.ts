@@ -1,5 +1,5 @@
 import { ElMessage } from 'element-plus'
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, watch } from 'vue'
 import type { PetExpressionMixPayload } from '@/../shared/pet-control'
 import { legacyDirectiveToAvatarCommand, type AvatarAction, type AvatarCommand } from '@/../shared/avatar-command'
 import { audioCapture } from '@/audio/audio-capture'
@@ -8,9 +8,13 @@ import { PetSentenceEmotionScheduler, type PetTtsPlaybackStartedDetail } from '@
 import { useChatStore } from '@/stores/chatStore'
 import { petControl } from '@/utils/petControl'
 import { chatClient, shortcutClient } from '@/api/client'
-import { getCompanionInterruptionEpoch, publishCompanionRuntimeEvent } from '../runtime/companionRuntime'
+import {
+  getCompanionInterruptionEpoch,
+  publishCompanionJobEvent,
+  publishCompanionRuntimeEvent,
+} from '../runtime/companionRuntime'
 import { VoiceEventBridge } from '../runtime/voiceEventBridge'
-import { RealtimeVoiceEventBridge } from '../runtime/realtimeVoiceEventBridge'
+import { matchesRealtimeVoiceScope, matchesRealtimeVoiceTurnScope, RealtimeVoiceEventBridge } from '../runtime/realtimeVoiceEventBridge'
 
 interface PetControlPayload {
   emotion_id?: string
@@ -61,6 +65,52 @@ export function useVoiceConversationBridge() {
   let avatarCommandSequence = 0
   const avatarCommandStreamId = `voice:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
   const realtimeEventBridge = new RealtimeVoiceEventBridge(realtimeVoiceSession)
+  const isCurrentRealtimeScope = (scope: { workspaceId: string; sessionId: string; interruptionEpoch: number }) =>
+    matchesRealtimeVoiceScope(scope, {
+      workspaceId: chatState.currentWorkspaceId,
+      sessionId: chatState.currentSessionId,
+      interruptionEpoch: getCompanionInterruptionEpoch(),
+    })
+
+  const refreshPetControlContext = async (): Promise<void> => {
+    try {
+      const [catalog, runtime] = await Promise.all([
+        petControl.getCatalog(),
+        petControl.getAvatarCapabilities().catch(() => null),
+      ])
+      const models = catalog.models.map((model) => ({ id: model.id, type: model.type }))
+      const emotions = Array.from(new Set(catalog.models.flatMap((model) => model.emotions.map((emotion) => emotion.id))))
+      const motionGroups = Array.from(new Set(catalog.models.flatMap((model) => model.motions.map((motion) => motion.group))))
+      const motionOptions = catalog.models.flatMap((model) => model.motions.map((motion) => ({ group: motion.group, index: motion.index })))
+      const expressions = Array.from(new Set(catalog.models.flatMap((model) => model.expressions.map((expression) => expression.name))))
+      const activeModel = catalog.models.find((model) => model.id === catalog.activeModelId) ?? catalog.models[0]
+      const capabilities = runtime?.success ? runtime.capabilities : null
+      const runtimeModel = capabilities?.modelId ? { id: capabilities.modelId, type: capabilities.modelType } : null
+      const runtimeModels = runtimeModel && !models.some((model) => model.id === runtimeModel.id) ? [...models, runtimeModel] : models
+      const avatarPrompt = capabilities
+        ? (activeModel?.id === capabilities.modelId ? activeModel.promptContext ?? '' : '')
+        : activeModel?.promptContext ?? ''
+
+      chatStore.setPetControlContext({
+        models: runtimeModels,
+        emotions,
+        motionGroups: capabilities?.motions.map((motion) => motion.group) ?? motionGroups,
+        motionOptions: capabilities?.motions.map((motion) => ({ group: motion.group, index: motion.index })) ?? motionOptions,
+        expressions: capabilities?.expressions ?? expressions,
+        parameters: capabilities?.parameters.map((parameter) => ({ id: parameter.id, min: parameter.min, max: parameter.max })) ?? LIVE2D_PARAMETER_CONTEXT,
+        ...(capabilities ? {
+          capabilityRevision: capabilities.revision,
+          modelType: capabilities.modelType,
+          modelId: capabilities.modelId,
+          actions: capabilities.actions,
+          viseme: capabilities.actions.viseme,
+        } : {}),
+        avatarPrompt,
+      })
+    } catch (error) {
+      console.warn('[LLM Pet Control] failed to load pet control context:', error)
+    }
+  }
 
   const onLlmControl = async (event: Event) => {
     if (chatStore.chatOptions.pet_link_enabled === false) return
@@ -98,6 +148,7 @@ export function useVoiceConversationBridge() {
 
       if (payload.model_id || payload.model_type) {
         await petControl.setModelSelection(payload.model_id ?? null, payload.model_type)
+        await refreshPetControlContext()
       }
 
       if (payload.emotion_id) {
@@ -128,6 +179,7 @@ export function useVoiceConversationBridge() {
                 streamId: avatarCommandStreamId,
                 sequence,
                 issuedAt: Date.now(),
+                capabilityRevision: chatStore.getPetControlContext()?.capabilityRevision,
                 interrupt: 'replace',
               })
         if (!payload.avatar_command && payload.emotion_id && command) {
@@ -205,6 +257,9 @@ export function useVoiceConversationBridge() {
     const sessionContext = {
       workspaceId: chatState.currentWorkspaceId,
       sessionId: chatState.currentSessionId,
+      mcpEnabled: chatStore.chatOptions.mcp_enabled,
+      webSearchEnabled: chatStore.chatOptions.web_search_enabled,
+      petControlContext: chatStore.getPetControlContext(),
     }
     if (
       chatStore.chatOptions.response_mode !== 'instant' ||
@@ -260,9 +315,13 @@ export function useVoiceConversationBridge() {
         await realtimeVoiceSession.startPushToTalk({
           workspaceId: chatState.currentWorkspaceId,
           sessionId: chatState.currentSessionId,
+          interruptionEpoch: voiceRuntimeEpoch,
+          mcpEnabled: chatStore.chatOptions.mcp_enabled,
+          webSearchEnabled: chatStore.chatOptions.web_search_enabled,
+          petControlContext: chatStore.getPetControlContext(),
         })
         activeVoiceTransport = 'realtime'
-        chatStore.setRealtimeRecording(true)
+        chatStore.setRealtimeRecording(true, realtimeVoiceSession.getCurrentTurnIdentity())
         if (chatStore.chatOptions.pet_link_enabled !== false) {
           void publishCompanionRuntimeEvent({
             source: 'voice',
@@ -284,7 +343,10 @@ export function useVoiceConversationBridge() {
       return
     }
     try {
-      await audioCapture.start()
+      await audioCapture.start({
+        sessionId: chatState.currentSessionId,
+        interruptionEpoch: voiceRuntimeEpoch,
+      })
       activeVoiceTransport = 'pipeline'
     } catch {
       ElMessage.error(audioCaptureState.error || '麦克风启动失败')
@@ -314,7 +376,7 @@ export function useVoiceConversationBridge() {
     const socketClient = chatClient.getSocketClient()
     realtimeEventBridge.listen('status', ({ status }) => {
       if (status === 'recording') {
-        chatStore.setRealtimeRecording(true)
+        chatStore.setRealtimeRecording(true, realtimeVoiceSession.getCurrentTurnIdentity())
         return
       }
       if (status === 'responding') {
@@ -347,14 +409,49 @@ export function useVoiceConversationBridge() {
         chatState.isGenerating = false
       }
     })
-    realtimeEventBridge.listen('input-partial', ({ text }) => {
+    realtimeEventBridge.listen('input-partial', (payload) => {
+      if (!isCurrentRealtimeScope(payload)) return
+      const { text } = payload
       chatStore.applyRealtimeInputPartial(text)
     })
-    realtimeEventBridge.listen('assistant-delta', ({ text }) => {
+    realtimeEventBridge.listen('assistant-delta', (payload) => {
+      if (!isCurrentRealtimeScope(payload)) return
+      const { text } = payload
       chatStore.applyRealtimeAssistantDelta(text)
     })
     realtimeEventBridge.listen('turn-complete', (turn) => {
+      const identity = chatStore.getCurrentRealtimeIdentity()
+      if (!identity || !matchesRealtimeVoiceTurnScope(turn, {
+        workspaceId: chatState.currentWorkspaceId,
+        sessionId: chatState.currentSessionId,
+        interruptionEpoch: getCompanionInterruptionEpoch(),
+        ...identity,
+      })) return
       void chatStore.completeRealtimeTurn(turn)
+    })
+    realtimeEventBridge.listen('agent-result', ({ petControl, ...scope }) => {
+      if (!isCurrentRealtimeScope(scope)) return
+      if (!petControl || typeof petControl !== 'object') return
+      window.dispatchEvent(new CustomEvent('pet:llm-control', { detail: petControl }))
+    })
+    watch(
+      () => [chatState.currentWorkspaceId, chatState.currentSessionId] as const,
+      ([workspaceId, sessionId], [previousWorkspaceId, previousSessionId]) => {
+        if (workspaceId === previousWorkspaceId && sessionId === previousSessionId) return
+        if (!realtimeVoiceSession.isConnected() || realtimeVoiceSession.isConnectedFor({ workspaceId, sessionId })) return
+        realtimeVoiceSession.close()
+        activeVoiceTransport = null
+        chatStore.setRealtimeRecording(false)
+        chatStore.setRealtimePlayback(false)
+        void publishCompanionRuntimeEvent({ source: 'voice', activity: 'idle' })
+      },
+    )
+    realtimeEventBridge.listen('companion-event', (event) => {
+      void publishCompanionJobEvent(event, {
+        workspaceId: chatState.currentWorkspaceId,
+        sessionId: chatState.currentSessionId,
+        interruptionEpoch: getCompanionInterruptionEpoch(),
+      })
     })
     realtimeEventBridge.listen('connect', ({ elapsedMs }) => {
       if (socketClient.isConnected()) {
@@ -409,37 +506,7 @@ export function useVoiceConversationBridge() {
     void prewarmRealtimeVoice()
     voiceEventBridge.attach(window, shortcutClient)
 
-    void petControl
-      .getCatalog()
-      .then((catalog) => {
-        const models = catalog.models.map((model) => ({
-          id: model.id,
-          type: model.type,
-        }))
-        const emotions = Array.from(new Set(catalog.models.flatMap((model) => model.emotions.map((emotion) => emotion.id))))
-        const motionGroups = Array.from(new Set(catalog.models.flatMap((model) => model.motions.map((motion) => motion.group))))
-        const motionOptions = catalog.models.flatMap((model) =>
-          model.motions.map((motion) => ({
-            group: motion.group,
-            index: motion.index,
-          })),
-        )
-        const expressions = Array.from(new Set(catalog.models.flatMap((model) => model.expressions.map((expression) => expression.name))))
-        const activeModel = catalog.models.find((model) => model.id === catalog.activeModelId) ?? catalog.models[0]
-
-        chatStore.setPetControlContext({
-          models,
-          emotions,
-          motionGroups,
-          motionOptions,
-          expressions,
-          parameters: LIVE2D_PARAMETER_CONTEXT,
-          avatarPrompt: activeModel?.promptContext ?? '',
-        })
-      })
-      .catch((error) => {
-        console.warn('[LLM Pet Control] failed to load pet control context:', error)
-      })
+    void refreshPetControlContext()
   })
 
   onUnmounted(() => {

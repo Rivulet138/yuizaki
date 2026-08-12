@@ -68,6 +68,122 @@ describe('companion runtime controller', () => {
     expect(controller.state.activity).toBe('thinking')
   })
 
+  it('consumes unified Agent job events without allowing late progress to reopen a terminal job', async () => {
+    const controller = createCompanionRuntimeController({
+      pollSnapshot: vi.fn(),
+      isAvailable: () => true,
+      readDoNotDisturb: async () => false,
+      sinks: {},
+    })
+    const base = {
+      version: 1 as const,
+      workspaceId: 'default',
+      sessionId: 'voice',
+      turnId: 'turn-1',
+      jobId: 'job-1',
+      requestId: 'request-1',
+      interruptionEpoch: 0,
+      source: 'voice' as const,
+      timestamp: 1_000,
+    }
+
+    expect(await controller.publishJob({
+      ...base,
+      type: 'AgentJobCreated',
+      revision: 1,
+      status: 'created',
+    })).toBe(true)
+    expect(controller.state.activity).toBe('executing')
+
+    expect(await controller.publishJob({
+      ...base,
+      type: 'AgentJobCompleted',
+      revision: 2,
+      status: 'completed',
+    })).toBe(true)
+    expect(controller.state.activity).toBe('idle')
+
+    expect(await controller.publishJob({
+      ...base,
+      type: 'AgentJobProgress',
+      revision: 3,
+      status: 'progress',
+    })).toBe(false)
+    expect(controller.state.activity).toBe('idle')
+  })
+
+  it('stays executing until every active job for a source reaches a terminal state', async () => {
+    const controller = createCompanionRuntimeController({
+      pollSnapshot: vi.fn(),
+      isAvailable: () => true,
+      readDoNotDisturb: async () => false,
+      sinks: {},
+    })
+    const eventFor = (jobId: string, revision: number, status: 'created' | 'completed') => ({
+      version: 1 as const,
+      type: status === 'created' ? 'AgentJobCreated' as const : 'AgentJobCompleted' as const,
+      workspaceId: 'default',
+      sessionId: 'voice',
+      turnId: `turn-${jobId}`,
+      jobId,
+      requestId: `request-${jobId}`,
+      revision,
+      interruptionEpoch: 0,
+      source: 'voice' as const,
+      timestamp: 1_000 + revision,
+      status,
+    })
+
+    expect(await controller.publishJob(eventFor('a', 1, 'created'))).toBe(true)
+    expect(await controller.publishJob(eventFor('b', 1, 'created'))).toBe(true)
+    expect(await controller.publishJob(eventFor('a', 2, 'completed'))).toBe(true)
+    expect(controller.state.activity).toBe('executing')
+    expect(await controller.publishJob(eventFor('b', 2, 'completed'))).toBe(true)
+    expect(controller.state.activity).toBe('idle')
+  })
+
+  it('ingests scheduler job events from the existing runtime snapshot', async () => {
+    const events = [{
+      version: 1 as const,
+      type: 'AgentJobCreated' as const,
+      workspaceId: 'default',
+      sessionId: 'schedule:task-1',
+      turnId: 'job-1',
+      jobId: 'job-1',
+      requestId: 'request-1',
+      revision: 1,
+      interruptionEpoch: 0,
+      source: 'scheduler' as const,
+      timestamp: 1_000,
+      status: 'created' as const,
+      data: { taskId: 'task-1' },
+    }]
+    const pollSnapshot = vi.fn(async () => ({
+      heartbeat: { behavior_events: [] },
+      jobs: { events, active_job_ids: ['job-1'] },
+    } as never))
+    const controller = createCompanionRuntimeController({
+      pollSnapshot,
+      isAvailable: () => true,
+      readDoNotDisturb: async () => false,
+      sinks: {},
+    })
+
+    expect(await controller.pollOnce()).toBe('empty')
+    expect(controller.state.activity).toBe('executing')
+
+    events.push({
+      ...events[0],
+      type: 'AgentJobCompleted',
+      revision: 2,
+      timestamp: 2_000,
+      status: 'completed',
+    })
+
+    expect(await controller.pollOnce()).toBe('empty')
+    expect(controller.state.activity).toBe('idle')
+  })
+
   it('globally invalidates cross-source activity and rejects old playback completion after interrupt', async () => {
     const advice = vi.fn()
     const controller = createCompanionRuntimeController({
@@ -418,6 +534,25 @@ describe('companion runtime controller', () => {
     controller.stop()
   })
 
+  it('does not replay a resolved heartbeat opportunity after remount', async () => {
+    const notification = vi.fn()
+    const controller = createCompanionRuntimeController({
+      pollSnapshot: async () => ({
+        heartbeat: { behavior_events: [event({
+          job_id: 'resolved-job',
+          request_id: 'resolved-request',
+        })] },
+        jobs: { events: [], active_job_ids: [] },
+      } as never),
+      isAvailable: () => true,
+      readDoNotDisturb: async () => false,
+      sinks: { notification },
+    })
+
+    expect(await controller.pollOnce()).toBe('empty')
+    expect(notification).not.toHaveBeenCalled()
+  })
+
   it('bounds delivered identity history while retaining recent duplicate suppression', async () => {
     let tick = 0
     const controller = createCompanionRuntimeController({
@@ -487,6 +622,108 @@ describe('companion runtime controller', () => {
     })
     expect(await frequency.pollOnce()).toMatchObject({ status: 'delivered' })
     expect(await frequency.pollOnce()).toBe('frequency_budget')
+  })
+
+  it('reports delivery and suppression against the heartbeat opportunity identity', async () => {
+    const reportOpportunityOutcome = vi.fn(async () => undefined)
+    let dnd = true
+    let tick = 0
+    const controller = createCompanionRuntimeController({
+      pollSnapshot: async () => ({
+        heartbeat: { behavior_events: [event({
+          tick: ++tick,
+          at: `t${tick}`,
+          job_id: `heartbeat-job-${tick}`,
+          request_id: `heartbeat-request-${tick}`,
+        })] },
+        companion_state: { interruptibility: 1 },
+      } as never),
+      isAvailable: () => true,
+      readDoNotDisturb: async () => dnd,
+      sinks: {},
+      reportOpportunityOutcome,
+      cooldownMs: 0,
+      frequencyBudget: 10,
+    })
+
+    expect(await controller.pollOnce()).toBe('dnd')
+    expect(reportOpportunityOutcome).toHaveBeenLastCalledWith(
+      'heartbeat-job-1', 'heartbeat-request-1', 'suppressed', 'dnd',
+    )
+    dnd = false
+    expect(await controller.pollOnce()).toMatchObject({ status: 'delivered' })
+    expect(reportOpportunityOutcome).toHaveBeenLastCalledWith(
+      'heartbeat-job-2', 'heartbeat-request-2', 'delivered', 'delivered',
+    )
+  })
+
+  it('does not repeat proactive effects when outcome reporting temporarily fails', async () => {
+    const reportOpportunityOutcome = vi.fn()
+      .mockRejectedValueOnce(new Error('control server unavailable'))
+      .mockResolvedValue(undefined)
+    const notification = vi.fn()
+    const job = {
+      version: 1 as const,
+      type: 'AgentJobCreated' as const,
+      workspaceId: 'default',
+      sessionId: 'heartbeat',
+      turnId: 'heartbeat:1',
+      jobId: 'heartbeat-job-retry',
+      requestId: 'heartbeat-request-retry',
+      revision: 1,
+      interruptionEpoch: 0,
+      source: 'heartbeat' as const,
+      timestamp: 1_000,
+      status: 'created' as const,
+      data: { behaviorType: 'suggestion', tick: 1 },
+    }
+    const snapshot = {
+      active_workspace_id: 'default',
+      heartbeat: { behavior_events: [event({
+        job_id: job.jobId,
+        request_id: job.requestId,
+      })] },
+      jobs: { events: [job], active_job_ids: [job.jobId] },
+      companion_state: { interruptibility: 1 },
+    }
+    const controller = createCompanionRuntimeController({
+      pollSnapshot: async () => snapshot as never,
+      isAvailable: () => true,
+      readDoNotDisturb: async () => false,
+      sinks: { notification },
+      reportOpportunityOutcome,
+      cooldownMs: 0,
+      frequencyBudget: 10,
+    })
+
+    expect(await controller.pollOnce()).toMatchObject({ status: 'delivered' })
+    expect(notification).toHaveBeenCalledOnce()
+    expect(await controller.pollOnce()).toBe('duplicate_or_invalid')
+    expect(notification).toHaveBeenCalledOnce()
+    expect(reportOpportunityOutcome).toHaveBeenCalledTimes(2)
+  })
+
+  it('expires an opportunity before invoking proactive sinks', async () => {
+    const reportOpportunityOutcome = vi.fn(async () => undefined)
+    const emotion = vi.fn()
+    const controller = createCompanionRuntimeController({
+      pollSnapshot: async () => ({ heartbeat: { behavior_events: [event({
+        job_id: 'heartbeat-job-expired',
+        request_id: 'heartbeat-request-expired',
+        expires_at: 1,
+      })] } } as never),
+      isAvailable: () => true,
+      readDoNotDisturb: async () => false,
+      sinks: { emotion },
+      reportOpportunityOutcome,
+      now: () => 2_000,
+    })
+
+    expect(await controller.pollOnce()).toBe('ineligible')
+    expect(emotion).not.toHaveBeenCalled()
+    expect(reportOpportunityOutcome).toHaveBeenCalledWith(
+      'heartbeat-job-expired', 'heartbeat-request-expired', 'expired', 'delivery_window_elapsed',
+    )
   })
 
   it('expires timed activity only while its sequence, request, and interruption epoch are current', async () => {
@@ -574,6 +811,26 @@ describe('companion runtime controller', () => {
       { sink: 'motion', message: 'motion unavailable' },
       { sink: 'advice', message: 'advice unavailable' },
     ])
+  })
+
+  it('terminates the heartbeat job as failed when every attempted sink fails', async () => {
+    const reportOpportunityOutcome = vi.fn(async () => undefined)
+    const controller = createCompanionRuntimeController({
+      pollSnapshot: async () => ({
+        heartbeat: { behavior_events: [event({ job_id: 'heartbeat-failed', request_id: 'request-failed', emotion_id: 'sad' })] },
+        companion_state: { interruptibility: 1 },
+      } as never),
+      isAvailable: () => true,
+      readDoNotDisturb: async () => false,
+      sinks: { emotion: vi.fn().mockRejectedValue(new Error('sink unavailable')) },
+      reportOpportunityOutcome,
+      cooldownMs: 0,
+    })
+
+    expect(await controller.pollOnce()).toMatchObject({ status: 'failed' })
+    expect(reportOpportunityOutcome).toHaveBeenCalledWith(
+      'heartbeat-failed', 'request-failed', 'failed', 'failed',
+    )
   })
 
   it('does not report absent sinks as attempted deliveries', async () => {

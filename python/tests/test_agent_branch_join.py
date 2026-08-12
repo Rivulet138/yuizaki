@@ -138,6 +138,8 @@ def test_trace_store_preserves_scheduler_route_metadata(tmp_path):
         "task_name": "Demo task",
         "mode": "once",
         "status": "ok",
+        "run_id": "schedrun-1",
+        "job_id": "schedjob-1",
         "request_id": "req-1",
         "owner_agent_id": "yuizaki.task-router",
         "owner_agent_role": "router",
@@ -146,6 +148,8 @@ def test_trace_store_preserves_scheduler_route_metadata(tmp_path):
 
     stored = trace_store.snapshot()["scheduler"][0]
     assert stored["owner_agent_id"] == "yuizaki.task-router"
+    assert stored["run_id"] == "schedrun-1"
+    assert stored["job_id"] == "schedjob-1"
     assert stored["owner_agent_role"] == "router"
     assert stored["route_reason"] == "Scheduled task owned by task-router"
 

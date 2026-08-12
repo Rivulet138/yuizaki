@@ -195,6 +195,7 @@ class E2EState:
     accepted_socket_token_hash: str = ""
     accepted_socket_origin: str = ""
     pending_proactive_event: str | None = None
+    active_generation_id: str = ""
     entries: list[dict[str, Any]] = field(default_factory=list)
 
     def start_case(self, case_id: str) -> None:
@@ -431,8 +432,16 @@ def create_app(state: E2EState) -> FastAPI:
             return JSONResponse({"error": "e2e_case_mismatch"}, status_code=409)
         state.record("http", "main->fixture", "POST /__e2e__/voice-sequence")
         speech_start = {"session_id": body["session_id"], "confirmed_ms": 120}
-        partial = {"session_id": body["session_id"], "text": body["partial_text"], "confidence": 0.82, "lang": "zh-CN"}
-        final = {"session_id": body["session_id"], "text": body["final_text"], "confidence": 0.97, "lang": "zh-CN"}
+        voice_identity = {
+            "session_id": body["session_id"],
+            "generation_id": f"voice-{body['request_id']}",
+            "turn_id": f"voice-turn-{body['request_id']}",
+            "request_id": body["request_id"],
+            "interruption_epoch": 0,
+            "version": 1,
+        }
+        partial = {**voice_identity, "text": body["partial_text"], "confidence": 0.82, "lang": "zh-CN"}
+        final = {**voice_identity, "text": body["final_text"], "confidence": 0.97, "lang": "zh-CN"}
         for name, payload in [
             ("asr:speech-start", speech_start),
             ("asr:partial", partial),
@@ -758,15 +767,22 @@ def create_asgi_app(state: E2EState) -> socketio.ASGIApp:
         state.record("socket", "renderer->fixture", "agent:chat")
         state.agent_chat_count += 1
         session_id = payload["session_id"]
+        runtime_identity = {
+            "session_id": session_id,
+            "generation_id": payload["generation_id"],
+            "turn_id": payload["turn_id"],
+            "request_id": payload["request_id"],
+            "interruption_epoch": payload["interruption_epoch"],
+            "version": payload["version"],
+        }
+        state.active_generation_id = str(payload["generation_id"])
         state.record("socket", "fixture->renderer", "llm:delta")
-        await sio.emit("llm:delta", {"token": "ok", "index": 0, "session_id": session_id}, to=sid)
+        await sio.emit("llm:delta", {**runtime_identity, "token": "ok", "index": 0, "sequence": 0}, to=sid)
         if state.case_id == "E2E-02":
-            generation_id = f"e2e-generation-{state.agent_chat_count}"
             if not state.fixture_origin:
                 raise RuntimeError("fixture origin is unavailable")
             chunk = {
-                "session_id": session_id,
-                "generation_id": generation_id,
+                **runtime_identity,
                 "sequence": 0,
                 "is_final": False,
                 "audio_url": f"{state.fixture_origin}/audio.wav?token={state.token}",
@@ -778,15 +794,15 @@ def create_asgi_app(state: E2EState) -> socketio.ASGIApp:
                 return
             state.record("socket", "fixture->renderer", "llm:final")
             await sio.emit("llm:final", {
+                **runtime_identity,
                 "text": "fixture voice response",
-                "session_id": session_id,
                 "total_tokens": 1,
                 "finish_reason": "stop",
+                "sequence": 1,
             }, to=sid)
             state.record("socket", "fixture->renderer", "tts:done")
             await sio.emit("tts:done", {
-                "session_id": session_id,
-                "generation_id": generation_id,
+                **runtime_identity,
                 "sequence": 1,
                 "is_final": True,
                 "complete": True,
@@ -798,6 +814,10 @@ def create_asgi_app(state: E2EState) -> socketio.ASGIApp:
                 "sid": sid,
                 "session_id": session_id,
                 "request_id": payload.get("request_id", ""),
+                "generation_id": payload.get("generation_id", ""),
+                "turn_id": payload.get("turn_id", ""),
+                "interruption_epoch": payload.get("interruption_epoch", 0),
+                "version": payload.get("version", 1),
             }
             request = {
                 "request_id": permission_id,
@@ -816,7 +836,13 @@ def create_asgi_app(state: E2EState) -> socketio.ASGIApp:
         if state.case_id == "E2E-01" and state.agent_chat_count == 2:
             return
         state.record("socket", "fixture->renderer", "llm:final")
-        await sio.emit("llm:final", {"text": "fixture response", "session_id": session_id, "total_tokens": 1, "finish_reason": "stop"}, to=sid)
+        await sio.emit("llm:final", {
+            **runtime_identity,
+            "text": "fixture response",
+            "total_tokens": 1,
+            "finish_reason": "stop",
+            "sequence": 1,
+        }, to=sid)
 
     @sio.on("interrupt")
     async def interrupt(sid: str, payload: dict[str, Any]) -> None:
@@ -825,7 +851,7 @@ def create_asgi_app(state: E2EState) -> socketio.ASGIApp:
             "request_id": payload.get("request_id", ""),
             "session_id": payload.get("session_id", ""),
             "source": payload.get("source", "manual"),
-            "generation_id": "e2e-generation-2",
+            "generation_id": state.active_generation_id,
             "hit_active_generation": True,
             "server_processing_ms": 0,
         }
@@ -849,14 +875,24 @@ def create_asgi_app(state: E2EState) -> socketio.ASGIApp:
         text = "permission allowed receipt" if allowed else "permission denied receipt"
         state.record("socket", "fixture->renderer", "llm:final")
         await sio.emit("llm:final", {
+            "generation_id": pending["generation_id"],
+            "turn_id": pending["turn_id"],
+            "request_id": pending["request_id"],
+            "interruption_epoch": pending["interruption_epoch"],
+            "version": pending["version"],
             "text": text,
             "session_id": pending["session_id"],
             "total_tokens": 1,
             "finish_reason": "stop",
+            "sequence": 1,
         }, to=sid)
         envelope = {
             "version": 1,
             "request_id": pending["request_id"],
+            "session_id": pending["session_id"],
+            "generation_id": pending["generation_id"],
+            "turn_id": pending["turn_id"],
+            "interruption_epoch": pending["interruption_epoch"],
             "source": "fixture-permission",
             "reply": text,
             "actions": [{

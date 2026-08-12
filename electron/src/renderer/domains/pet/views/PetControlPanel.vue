@@ -31,6 +31,13 @@
             <span>类型：{{ currentModel?.type.toUpperCase() ?? '未知' }} · {{ currentModelSourceLabel }}</span>
             <span>动作 {{ currentModel?.motions.length ?? 0 }} · 表情 {{ currentModel?.expressions.length ?? 0 }}</span>
           </div>
+          <div v-if="avatarCapabilities" class="model-meta runtime-capabilities" data-testid="avatar-capabilities">
+            <span>运行时 {{ avatarCapabilities.modelType.toUpperCase() }}</span>
+            <span>表达 {{ avatarCapabilities.actions.expression ? '✓' : '—' }}</span>
+            <span>注视 {{ avatarCapabilities.actions.gaze ? '✓' : '—' }}</span>
+            <span>动作 {{ avatarCapabilities.actions.motion ? '✓' : '—' }}</span>
+            <span>嘴型 {{ avatarCapabilities.actions.viseme ? '✓' : '—' }}</span>
+          </div>
           <small v-if="modelSyncHint" class="field-hint warning-hint">{{ modelSyncHint }}</small>
           <div class="button-row">
             <el-button type="primary" :loading="operationLoading" :disabled="operationLoading || refreshingPet || !selectedModelId" @click="applyModel">切换模型</el-button>
@@ -347,12 +354,14 @@ import {
   type PetPlacementPreset,
 } from '../../../../shared/pet-control'
 import type { PetImportableModelType, PetModelImportMode } from '../../../../shared/resource-manager'
+import type { AvatarCapabilitySnapshot } from '../../../../shared/avatar-command'
 
 type PlacementPreset = Exclude<PetPlacement, 'free'>
 
 const { t } = useI18n()
 const state = reactive<PetControlState>({ ...DEFAULT_PET_CONTROL_STATE })
 const catalog = reactive<PetModelCatalogPayload>({ activeModelId: null, models: [] })
+const avatarCapabilities = ref<AvatarCapabilitySnapshot | null>(null)
 const displays = reactive<{ activeDisplayId: number | null; items: PetDisplayInfo[] }>({ activeDisplayId: null, items: [] })
 const placementPresets = ref<PetPlacementPreset[]>([])
 const selectedModelId = ref<string | null>(null)
@@ -724,7 +733,7 @@ const refresh = async () => {
   const requestId = ++refreshSequence
   refreshingPet.value = true
   try {
-    const [nextState, nextCatalog, nextDisplays, nextPresets] = await Promise.all([
+    const [nextState, nextCatalog, nextDisplays, nextPresets, nextCapabilities] = await Promise.all([
       petControl.getState(),
       petControl.getCatalog(),
       petControl.getDisplays(),
@@ -734,6 +743,9 @@ const refresh = async () => {
             return null
           })
         : Promise.resolve(null),
+      typeof petControl.getAvatarCapabilities === 'function'
+        ? petControl.getAvatarCapabilities().catch(() => null)
+        : Promise.resolve(null),
     ])
     if (requestId !== refreshSequence) return
     Object.assign(state, nextState)
@@ -741,6 +753,7 @@ const refresh = async () => {
     catalog.models = nextCatalog.models
     displays.activeDisplayId = nextDisplays.activeDisplayId
     displays.items = nextDisplays.displays
+    avatarCapabilities.value = nextCapabilities?.capabilities ?? null
     hasLoadedState.value = true
     if (nextPresets) {
       placementPresets.value = nextPresets.presets

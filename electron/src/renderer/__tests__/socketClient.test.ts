@@ -82,6 +82,30 @@ describe('SocketClient contract helpers', () => {
     })
   })
 
+  it('sends tool job identity and retry metadata', () => {
+    const client = new SocketClient()
+    const emitSpy = vi.spyOn(client, 'emit').mockImplementation(() => undefined)
+
+    client.sendToolCall('call-retry', 'read_file', { path: 'readme.txt' }, {
+      requestId: 'request-retry',
+      runId: 'run-original',
+      jobId: 'job-original',
+      source: 'desktop',
+      retry: true,
+    })
+
+    expect(emitSpy).toHaveBeenCalledWith(SocketEvents.TOOL_CALL, {
+      id: 'call-retry',
+      name: 'read_file',
+      args: { path: 'readme.txt' },
+      request_id: 'request-retry',
+      run_id: 'run-original',
+      job_id: 'job-original',
+      source: 'desktop',
+      retry: true,
+    })
+  })
+
   it('waits for one exact heartbeat echo and returns a redacted audit', async () => {
     const { client, socket } = createConnectedClient()
     const correlation = { timestamp: 123, request_id: 'request-1', client_id: 'sid-test' }
@@ -142,12 +166,25 @@ describe('SocketClient contract helpers', () => {
     const client = new SocketClient()
     const emitSpy = vi.spyOn(client, 'emit').mockImplementation(() => undefined)
 
-    client.sendLLMRequest([{ role: 'user', content: 'hello' }], 'session-1', 'req-1', 'workspace-1', { model: 'gpt-test' })
+    client.sendLLMRequest(
+      [{ role: 'user', content: 'hello' }],
+      'session-1',
+      'req-1',
+      'workspace-1',
+      { model: 'gpt-test' },
+      'generation-1',
+      'turn-1',
+      6,
+    )
 
     expect(emitSpy).toHaveBeenCalledWith(SocketEvents.LLM_REQUEST, {
       messages: [{ role: 'user', content: 'hello' }],
       session_id: 'session-1',
       request_id: 'req-1',
+      generation_id: 'generation-1',
+      turn_id: 'turn-1',
+      interruption_epoch: 6,
+      version: 1,
       workspace_id: 'workspace-1',
       chat_options: { model: 'gpt-test' },
     })
@@ -164,6 +201,9 @@ describe('SocketClient contract helpers', () => {
       'req-1',
       'workspace-1',
       { reasoning_effort: 'high', mcp_enabled: false },
+      5,
+      'generation-1',
+      'turn-1',
     )
 
     expect(emitSpy).toHaveBeenCalledWith(SocketEvents.AGENT_CHAT, {
@@ -172,7 +212,37 @@ describe('SocketClient contract helpers', () => {
       workspace_id: 'workspace-1',
       pet_control_context: { expressions: [] },
       request_id: 'req-1',
+      generation_id: 'generation-1',
+      turn_id: 'turn-1',
+      version: 1,
       chat_options: { reasoning_effort: 'high', mcp_enabled: false },
+      interruption_epoch: 5,
+    })
+  })
+
+  it('includes the complete generation envelope in ASR audio chunks', () => {
+    const client = new SocketClient()
+    const emitSpy = vi.spyOn(client, 'emit').mockImplementation(() => undefined)
+
+    client.sendAudioChunk('base64-audio', 24_000, true, {
+      sessionId: 'session-voice',
+      generationId: 'generation-voice',
+      turnId: 'turn-voice',
+      requestId: 'request-voice',
+      interruptionEpoch: 7,
+      version: 1,
+    })
+
+    expect(emitSpy).toHaveBeenCalledWith(SocketEvents.AUDIO_CHUNK, {
+      chunk: 'base64-audio',
+      sample_rate: 24_000,
+      is_final: true,
+      session_id: 'session-voice',
+      generation_id: 'generation-voice',
+      turn_id: 'turn-voice',
+      request_id: 'request-voice',
+      interruption_epoch: 7,
+      version: 1,
     })
   })
 
@@ -211,6 +281,35 @@ describe('SocketClient contract helpers', () => {
       image: 'data:image/png;base64,cG5n',
       display_index: 1,
       mode: 'ocr',
+    })
+  })
+
+  it('carries the visual Job identity with an explicit Agent frame', () => {
+    const client = new SocketClient()
+    const emitSpy = vi.spyOn(client, 'emit').mockImplementation(() => undefined)
+
+    client.requestScreenshot('data:image/png;base64,cG5n', {
+      mode: 'vision',
+      frameId: 'frame-agent',
+      workspaceId: 'workspace-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      jobId: 'vision-job-1',
+      requestId: 'request-1',
+      interruptionEpoch: 3,
+    })
+
+    expect(emitSpy).toHaveBeenCalledWith(SocketEvents.SCREENSHOT_REQUEST, {
+      image: 'data:image/png;base64,cG5n',
+      display_index: 0,
+      mode: 'vision',
+      frame_id: 'frame-agent',
+      workspace_id: 'workspace-1',
+      session_id: 'session-1',
+      turn_id: 'turn-1',
+      job_id: 'vision-job-1',
+      request_id: 'request-1',
+      interruption_epoch: 3,
     })
   })
 

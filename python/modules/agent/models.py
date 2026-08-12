@@ -101,6 +101,8 @@ class SchedulerRunRecord:
     task_name: str
     mode: str
     status: str
+    run_id: str | None = None
+    job_id: str | None = None
     summary: str | None = None
     request_id: str | None = None
     owner_agent_id: str | None = None

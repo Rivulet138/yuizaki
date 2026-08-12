@@ -16,7 +16,7 @@ import type {
   LocalModelPickerResponse,
   PetModelImportMode,
 } from '../../shared/resource-manager'
-import type { AvatarCommand, AvatarCommandResult } from '../../shared/avatar-command'
+import type { AvatarCapabilitySnapshot, AvatarCommand, AvatarCommandResult } from '../../shared/avatar-command'
 import {
   CONTROL_AUTH_MISSING_MESSAGE,
   CONTROL_ORIGIN,
@@ -181,6 +181,10 @@ export const petControl = {
     }
 
     return requestJson<PetPlacementPresetsPayload>('/api/pet/presets')
+  },
+
+  async getAvatarCapabilities(): Promise<{ success: boolean; capabilities: AvatarCapabilitySnapshot }> {
+    return requestJson<{ success: boolean; capabilities: AvatarCapabilitySnapshot }>('/api/pet/avatar-capabilities')
   },
 
   async getModelCatalog(): Promise<PetModelCatalogPayload> {

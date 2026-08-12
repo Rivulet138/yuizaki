@@ -28,6 +28,23 @@ def test_agent_pet_control_prompt_reuses_complete_action_contract():
     assert "Output expressionMix only." in prompt
 
 
+def test_agent_pet_control_prompt_includes_runtime_revision_and_action_support():
+    prompt = inject_pet_control_prompt({
+        "capabilityRevision": "vrm:model-1:rev-7",
+        "modelType": "vrm",
+        "modelId": "model-1",
+        "actions": {"gaze": True, "viseme": False, "motion": True},
+        "motions": [{"group": "idle", "index": 0}],
+        "expressions": ["happy"],
+    })
+
+    assert '"capability_revision":"vrm:model-1:rev-7"' in prompt
+    assert '"model_type":"vrm"' in prompt
+    assert '"model_id":"model-1"' in prompt
+    assert '"gaze":true' in prompt
+    assert '"viseme":false' in prompt
+
+
 def test_prompt_assembly_defaults_project_workspace_to_work_mode():
     messages = build_prompt_assembly(
         db_repo=_NoopRepo(),

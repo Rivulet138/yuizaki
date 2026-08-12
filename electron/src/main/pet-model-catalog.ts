@@ -478,6 +478,9 @@ export class PetModelCatalog {
           ? `./vrm/${model.assetPath}`
           : `./live2d/${model.assetPath}`
       config.modelManifest = model.manifest ?? null
+      if (model.animationPaths?.length) {
+        config.animationPaths = [...model.animationPaths]
+      }
     }
 
     return config
@@ -857,6 +860,11 @@ export class PetModelCatalog {
     const assetPath = source === 'local'
       ? `${USER_VRM_ASSET_PREFIX}${encodeAssetPath(relativeModelPath)}`
       : relativeModelPath
+    const animationPaths = this.collectFilesBySuffix(path.dirname(vrmFilePath), '.vrma')
+      .map((animationPath) => this.getManagedRelativePath(rootDir, animationPath))
+      .map((relativePath) => source === 'local'
+        ? `${USER_VRM_ASSET_PREFIX}${encodeAssetPath(relativePath)}`
+        : relativePath)
 
     if (source === 'local') {
       this.localModelDirs.set(id, {
@@ -874,6 +882,7 @@ export class PetModelCatalog {
       motions: [],
       expressions: [],
       emotions: [],
+      ...(animationPaths.length > 0 ? { animationPaths } : {}),
     }
   }
 

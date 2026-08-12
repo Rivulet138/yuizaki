@@ -11,6 +11,7 @@ import pytest
 import socket_server
 from socket_events import AudioEvents, AgentEvents, LLMEvents, MemoryEvents, ScreenshotEvents, SystemEvents, ToolEvents, TTSEvents
 from socket_server import DesktopPetSocketServer, _parse_socket_allowed_origins, _socket_auth_allowed
+from modules.agent.companion_events import CompanionJobEventLog
 from modules.core.state import GenerationManager
 
 
@@ -25,6 +26,14 @@ def test_socket_server_restricts_default_cors_origins() -> None:
         "http://127.0.0.1:5173",
         "http://localhost:5173",
     ]
+
+
+def test_socket_server_wires_scheduler_to_live_interruption_epoch() -> None:
+    server = DesktopPetSocketServer()
+    assert server.scheduler.interruption_epoch_provider is not None
+    assert server.scheduler.interruption_epoch_provider() == 0
+    server._interruption_epoch = 3
+    assert server.scheduler.interruption_epoch_provider() == 3
 
 
 def test_socket_origin_parser_preserves_packaged_electron_file_origin() -> None:
@@ -162,6 +171,10 @@ class _FakeGeneration:
     generation_id: str = "gen-test"
 
     def __init__(self) -> None:
+        self.turn_id = ""
+        self.request_id = ""
+        self.interruption_epoch = 0
+        self.envelope_version = 1
         self.tokens: list[str] = []
         self.llm_task: asyncio.Task[None] | None = None
         self.tts_task: asyncio.Task[None] | None = None
@@ -177,8 +190,13 @@ class _FakeGenerationManager:
         self.history: list[tuple[str, str, str]] = []
         self.session_id: str = ""
 
-    def start(self, session_id: str) -> _FakeGeneration:
+    def start(self, session_id: str, **envelope: object) -> _FakeGeneration:
         self.session_id = session_id
+        self.generation.generation_id = str(envelope.get("generation_id") or self.generation.generation_id)
+        self.generation.turn_id = str(envelope.get("turn_id") or "")
+        self.generation.request_id = str(envelope.get("request_id") or "")
+        self.generation.interruption_epoch = int(envelope.get("interruption_epoch") or 0)
+        self.generation.envelope_version = int(envelope.get("version") or 1)
         return self.generation
 
     def get(self, session_id: str) -> _FakeGeneration | None:
@@ -408,10 +426,43 @@ class _FakeVoicePreparationTts:
 
 
 @pytest.mark.asyncio
+async def test_plugin_proactive_dispatch_preserves_generation_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    server = DesktopPetSocketServer()
+    generation_mgr = _FakeGenerationManager()
+    emitted: list[tuple[str, object, str | None]] = []
+
+    async def _emit(event: str, data: object = None, to: str | None = None, **_: object) -> None:
+        emitted.append((event, data, to))
+
+    monkeypatch.setattr(server, "llm_client", object())
+    monkeypatch.setattr(server, "generation_mgr", generation_mgr)
+    monkeypatch.setattr(server, "agent_pipeline", _FakeAgentPipeline())
+    monkeypatch.setattr(server, "tts_client", None)
+    monkeypatch.setattr(server.sio, "emit", _emit)
+    server.sessions["sid-1"] = {"id": "sid-1"}
+
+    result = await server._dispatch_plugin_proactive_message(
+        plugin_id="plugin-1",
+        message="hello",
+        sid="sid-1",
+    )
+
+    final_payload = next(cast(dict[str, object], data) for event, data, _sid in emitted if event == LLMEvents.FINAL)
+    assert final_payload["generation_id"] == "gen-test"
+    assert final_payload["request_id"] == result["request_id"]
+    assert final_payload["turn_id"] == f"turn_{result['request_id']}"
+    assert final_payload["version"] == 1
+    assert final_payload["tts_expected"] is False
+
+
+@pytest.mark.asyncio
 async def test_tts_is_skipped_with_error_when_llm_reply_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     server = DesktopPetSocketServer()
     generation_mgr = _FakeGenerationManager()
     generation = generation_mgr.start("session-1")
+    generation.turn_id = "turn-1"
+    generation.request_id = "request-1"
+    generation.interruption_epoch = 2
     generation.tokens = ["   "]
     emitted: list[tuple[str, object, str | None]] = []
 
@@ -431,6 +482,12 @@ async def test_tts_is_skipped_with_error_when_llm_reply_is_empty(monkeypatch: py
             "code": "LLM_EMPTY_RESPONSE",
             "message": "模型没有返回可朗读内容，请重试，或把最大输出 tokens 调高到 256 以上。",
             "session_id": "session-1",
+            "generation_id": "gen-test",
+            "turn_id": "turn-1",
+            "request_id": "request-1",
+            "step_index": 0,
+            "interruption_epoch": 2,
+            "version": 1,
         },
         "sid-1",
     )]
@@ -452,6 +509,11 @@ async def test_agent_chat_reads_autonomy_mode_from_socket_payload(monkeypatch: p
     monkeypatch.setattr(server, "generation_mgr", generation_mgr)
     monkeypatch.setattr(server, "agent_pipeline", pipeline)
     monkeypatch.setattr(server.sio, "emit", _emit)
+    monkeypatch.setattr(
+        server,
+        "_request_visual_capture",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("ordinary chat must not request a screen capture")),
+    )
     server.inject_runtime_context(db_repo=repository)
 
     handlers = cast(_SocketServerWithHandlers, cast(object, server.sio)).handlers
@@ -477,7 +539,15 @@ async def test_agent_chat_reads_autonomy_mode_from_socket_payload(monkeypatch: p
         ("session-1", "user", "hello", "", "workspace-1"),
         ("session-1", "assistant", "ok", "deepseek-v4-flash", "workspace-1"),
     ]
-    assert emitted[-1] == (LLMEvents.FINAL, {"text": "ok", "session_id": "session-1", "total_tokens": 0, "finish_reason": "stop"}, "sid-1")
+    assert emitted[-1][0] == LLMEvents.FINAL
+    assert emitted[-1][2] == "sid-1"
+    expected_final = {
+        "text": "ok",
+        "session_id": "session-1",
+        "total_tokens": 0,
+        "finish_reason": "stop",
+    }
+    assert expected_final.items() <= cast(dict[str, object], emitted[-1][1]).items()
 
 
 @pytest.mark.asyncio
@@ -530,11 +600,21 @@ async def test_agent_chat_silent_mode_completes_with_zero_runtime_side_effects(m
 
     assert generation_starts == []
     assert [event for event, _, _ in emitted] == [LLMEvents.FINAL, AgentEvents.RESULT]
-    assert emitted[0] == (
-        LLMEvents.FINAL,
-        {"text": "", "session_id": "session-silent", "total_tokens": 0, "finish_reason": "stop"},
-        "sid-silent",
-    )
+    assert emitted[0][0] == LLMEvents.FINAL
+    assert emitted[0][2] == "sid-silent"
+    assert cast(dict[str, object], emitted[0][1]) == {
+        "text": "",
+        "session_id": "session-silent",
+        "total_tokens": 0,
+        "finish_reason": "stop",
+        "generation_id": "",
+        "turn_id": "",
+        "request_id": "agent-silent-socket",
+        "interruption_epoch": 0,
+        "version": 1,
+        "sequence": 0,
+        "tts_expected": False,
+    }
     assert isinstance(emitted[1][1], dict)
     assert emitted[1][1]["session_id"] == "session-silent"
     assert "silent_autonomy_mode" in str(emitted[1][1])
@@ -556,6 +636,11 @@ async def test_agent_chat_includes_latest_visual_frame_context_without_persistin
     monkeypatch.setattr(server, "generation_mgr", generation_mgr)
     monkeypatch.setattr(server, "agent_pipeline", pipeline)
     monkeypatch.setattr(server.sio, "emit", _emit)
+
+    async def _reuse_correlated_frame(**_: object) -> str:
+        return "frame-vision"
+
+    monkeypatch.setattr(server, "_request_visual_capture", _reuse_correlated_frame)
     server.inject_runtime_context(db_repo=repository)
 
     handlers = cast(_SocketServerWithHandlers, cast(object, server.sio)).handlers
@@ -598,6 +683,45 @@ async def test_agent_chat_includes_latest_visual_frame_context_without_persistin
 
 
 @pytest.mark.asyncio
+async def test_agent_chat_does_not_reuse_an_old_frame_when_capture_handshake_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    server = DesktopPetSocketServer()
+    generation_mgr = _FakeGenerationManager()
+    pipeline = _FakeAgentPipeline()
+    server._record_visual_frame(
+        "sid-old-frame",
+        base64.b64encode(b"old").decode("ascii"),
+        {"frame_id": "frame-old", "session_id": "session-other"},
+        estimated_bytes=3,
+    )
+
+    async def _emit(_event: str, _data: object = None, _to: str | None = None, **_: object) -> None:
+        return None
+
+    async def _failed_capture(**_: object) -> None:
+        return None
+
+    monkeypatch.setattr(server, "llm_client", object())
+    monkeypatch.setattr(server, "generation_mgr", generation_mgr)
+    monkeypatch.setattr(server, "agent_pipeline", pipeline)
+    monkeypatch.setattr(server.sio, "emit", _emit)
+    monkeypatch.setattr(server, "_request_visual_capture", _failed_capture)
+
+    handlers = cast(_SocketServerWithHandlers, cast(object, server.sio)).handlers
+    handler = cast(Callable[[str, dict[str, object]], Awaitable[None]], handlers["/"][AgentEvents.CHAT])
+    await handler("sid-old-frame", {
+        "messages": [{"role": "user", "content": "Check what is on my screen"}],
+        "session_id": "session-current",
+        "workspace_id": "default",
+    })
+    assert generation_mgr.generation.llm_task is not None
+    await generation_mgr.generation.llm_task
+
+    assert pipeline.messages == [{"role": "user", "content": "Check what is on my screen"}]
+    assert "latest_visual_frame" not in pipeline.extra
+    assert "additional_prompt_blocks" not in pipeline.extra
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("visual_requested", [False, True])
 async def test_voice_agent_chat_only_carries_visual_frame_when_final_query_requests_it(
     monkeypatch: pytest.MonkeyPatch,
@@ -630,6 +754,11 @@ async def test_voice_agent_chat_only_carries_visual_frame_when_final_query_reque
     monkeypatch.setattr(server, "generation_mgr", generation_mgr)
     monkeypatch.setattr(server, "agent_pipeline", pipeline)
     monkeypatch.setattr(server.sio, "emit", _emit)
+
+    async def _capture_voice_frame(**_: object) -> str:
+        return "frame-voice"
+
+    monkeypatch.setattr(server, "_request_visual_capture", _capture_voice_frame)
 
     handlers = cast(_SocketServerWithHandlers, cast(object, server.sio)).handlers
     handler = cast(Callable[[str, dict[str, object]], Awaitable[None]], handlers["/"][AgentEvents.CHAT])
@@ -896,7 +1025,15 @@ async def test_agent_chat_skips_tts_when_chat_option_is_disabled(monkeypatch: py
 
     assert generation_mgr.generation.tts_task is None
     assert tts_client.calls == 0
-    assert emitted[-1] == (LLMEvents.FINAL, {"text": "ok", "session_id": "session-1", "total_tokens": 0, "finish_reason": "stop"}, "sid-1")
+    assert emitted[-1][0] == LLMEvents.FINAL
+    assert emitted[-1][2] == "sid-1"
+    expected_final = {
+        "text": "ok",
+        "session_id": "session-1",
+        "total_tokens": 0,
+        "finish_reason": "stop",
+    }
+    assert expected_final.items() <= cast(dict[str, object], emitted[-1][1]).items()
 
 
 @pytest.mark.asyncio
@@ -998,6 +1135,11 @@ async def test_agent_chat_emits_first_tts_sentence_before_llm_final(monkeypatch:
     await handler("sid-1", {
         "messages": [{"role": "user", "content": "hello"}],
         "session_id": "session-stream",
+        "request_id": "request-stream",
+        "generation_id": "generation-stream",
+        "turn_id": "turn-stream",
+        "interruption_epoch": 3,
+        "version": 1,
         "chat_options": {"tts_enabled": True},
     })
     assert generation_mgr.generation.llm_task is not None
@@ -1007,6 +1149,16 @@ async def test_agent_chat_emits_first_tts_sentence_before_llm_final(monkeypatch:
     assert event_names.index("tts:chunk") < event_names.index(LLMEvents.FINAL)
     assert "tts:done" in event_names
     first_tts_payload = next(data for event, data, _sid in emitted if event == "tts:chunk")
+    expected_envelope = {
+        "generation_id": "generation-stream",
+        "turn_id": "turn-stream",
+        "request_id": "request-stream",
+        "interruption_epoch": 3,
+    }
+    for event_name in (LLMEvents.DELTA, LLMEvents.FINAL, "tts:chunk", "tts:done"):
+        event_payloads = [cast(dict[str, object], data) for event, data, _sid in emitted if event == event_name]
+        assert event_payloads
+        assert all({key: payload[key] for key in expected_envelope} == expected_envelope for payload in event_payloads)
     assert cast(dict[str, object], first_tts_payload)["text"] == "第一句。"
 
 
@@ -1071,12 +1223,26 @@ async def test_llm_request_rejects_workspace_mismatch_before_generation(monkeypa
         "messages": [{"role": "user", "content": "hello"}],
         "session_id": "session-1",
         "workspace_id": "workspace-other",
+        "generation_id": "generation-1",
+        "turn_id": "turn-1",
+        "request_id": "request-1",
+        "interruption_epoch": 3,
+        "version": 1,
     })
 
     assert generation_mgr.session_id == ""
     assert emitted == [(
         SystemEvents.ERROR,
-        {"code": "WORKSPACE_MISMATCH", "message": "Socket request workspace does not match the active workspace"},
+        {
+            "code": "WORKSPACE_MISMATCH",
+            "message": "Socket request workspace does not match the active workspace",
+            "session_id": "session-1",
+            "generation_id": "generation-1",
+            "turn_id": "turn-1",
+            "request_id": "request-1",
+            "interruption_epoch": 3,
+            "version": 1,
+        },
         "sid-1",
     )]
 
@@ -1101,12 +1267,26 @@ async def test_agent_chat_rejects_workspace_mismatch_before_generation(monkeypat
         "messages": [{"role": "user", "content": "hello"}],
         "session_id": "session-1",
         "workspace_id": "workspace-other",
+        "generation_id": "generation-1",
+        "turn_id": "turn-1",
+        "request_id": "request-1",
+        "interruption_epoch": 3,
+        "version": 1,
     })
 
     assert generation_mgr.session_id == ""
     assert emitted == [(
         SystemEvents.ERROR,
-        {"code": "WORKSPACE_MISMATCH", "message": "Socket request workspace does not match the active workspace"},
+        {
+            "code": "WORKSPACE_MISMATCH",
+            "message": "Socket request workspace does not match the active workspace",
+            "session_id": "session-1",
+            "generation_id": "generation-1",
+            "turn_id": "turn-1",
+            "request_id": "request-1",
+            "interruption_epoch": 3,
+            "version": 1,
+        },
         "sid-1",
     )]
 
@@ -1161,6 +1341,126 @@ async def test_direct_tool_permission_response_is_bound_to_requesting_sid(monkey
         {"code": "PERMISSION_SESSION_MISMATCH", "message": "Permission response did not come from the requesting client"},
         "sid-2",
     ) in emitted
+
+
+@pytest.mark.asyncio
+async def test_direct_tool_call_forwards_job_metadata_to_current_executor(monkeypatch: pytest.MonkeyPatch) -> None:
+    server = DesktopPetSocketServer()
+
+    class RecordingToolExecutor:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        async def execute(
+            self,
+            _name: str,
+            _args: dict[str, object],
+            permission_request_cb: Callable[..., Awaitable[None]],
+            request_id: str | None = None,
+            run_id: str | None = None,
+            job_id: str | None = None,
+            source: str | None = None,
+            retry: bool = False,
+        ) -> _FakeToolOutcome:
+            self.calls.append({
+                "permission_request_cb": permission_request_cb,
+                "request_id": request_id,
+                "run_id": run_id,
+                "job_id": job_id,
+                "source": source,
+                "retry": retry,
+            })
+            return _FakeToolOutcome()
+
+    fake_executor = RecordingToolExecutor()
+
+    async def _emit(_event: str, _data: object = None, to: str | None = None, **_: object) -> None:
+        return None
+
+    monkeypatch.setattr(server, "tool_executor", fake_executor)
+    monkeypatch.setattr(server.sio, "emit", _emit)
+
+    handlers = cast(_SocketServerWithHandlers, cast(object, server.sio)).handlers
+    tool_handler = cast(Callable[[str, dict[str, object]], Awaitable[None]], handlers["/"][ToolEvents.CALL])
+    await tool_handler("sid-1", {
+        "id": "call-1",
+        "name": "read_file",
+        "args": {},
+        "requestId": "request-1",
+        "runId": "run-1",
+        "jobId": "job-1",
+        "source": "direct",
+        "retry": True,
+    })
+
+    assert len(fake_executor.calls) == 1
+    assert fake_executor.calls[0] == {
+        "permission_request_cb": fake_executor.calls[0]["permission_request_cb"],
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "job_id": "job-1",
+        "source": "direct",
+        "retry": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_direct_tool_call_uses_request_scoped_cancellation_signal(monkeypatch: pytest.MonkeyPatch) -> None:
+    server = DesktopPetSocketServer()
+    emitted: list[tuple[str, object, str | None]] = []
+    started = asyncio.Event()
+
+    class CancellationAwareExecutor:
+        def __init__(self) -> None:
+            self.policy_engine = _FakePolicyEngine()
+
+        async def execute(
+            self,
+            _name: str,
+            _args: dict[str, object],
+            permission_request_cb: Callable[..., Awaitable[None]],
+            cancellation_signal: asyncio.Event,
+            **_: object,
+        ) -> _FakeToolOutcome:
+            del permission_request_cb
+            started.set()
+            await cancellation_signal.wait()
+            outcome = _FakeToolOutcome()
+            outcome.success = False
+            outcome.error = "Tool execution cancelled"
+            return outcome
+
+    async def _emit(event: str, data: object = None, to: str | None = None, **_: object) -> None:
+        emitted.append((event, data, to))
+
+    monkeypatch.setattr(server, "tool_executor", CancellationAwareExecutor())
+    monkeypatch.setattr(server.sio, "emit", _emit)
+
+    handlers = cast(_SocketServerWithHandlers, cast(object, server.sio)).handlers
+    tool_handler = cast(Callable[[str, dict[str, object]], Awaitable[None]], handlers["/"][ToolEvents.CALL])
+    interrupt_handler = cast(Callable[[str, dict[str, object]], Awaitable[None]], handlers["/"][SystemEvents.INTERRUPT])
+
+    execution = asyncio.create_task(tool_handler("sid-1", {
+        "id": "call-cancel",
+        "name": "read_file",
+        "args": {},
+        "request_id": "request-cancel",
+    }))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    await interrupt_handler("sid-2", {"session_id": "sid-1", "request_id": "request-cancel"})
+    assert execution.done() is False
+    await interrupt_handler("sid-1", {"session_id": "sid-1", "request_id": "request-cancel"})
+    await asyncio.wait_for(execution, timeout=1)
+
+    assert server._tool_cancellation_signals == {}
+    assert any(
+        event == SystemEvents.INTERRUPT_ACK
+        and isinstance(payload, dict)
+        and payload.get("hit_active_tool") is True
+        and target == "sid-1"
+        for event, payload, target in emitted
+    )
+    assert any(event == ToolEvents.ERROR and target == "sid-1" for event, _payload, target in emitted)
 
 
 @pytest.mark.asyncio
@@ -1312,6 +1612,174 @@ async def test_socket_observe_frame_is_stored_without_automatic_analysis(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_visual_capture_capacity_failure_leaves_no_pending_or_image_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    server = DesktopPetSocketServer()
+    server.job_events = CompanionJobEventLog(max_jobs=1)
+    server.job_events.append(
+        workspace_id="workspace-active",
+        session_id="session-active",
+        turn_id="turn-active",
+        job_id="job-active",
+        request_id="request-active",
+        interruption_epoch=0,
+        source="agent",
+        timestamp=time.time(),
+        status="created",
+    )
+    emitted: list[str] = []
+
+    async def _emit(event: str, _data: object = None, _to: str | None = None, **_: object) -> None:
+        emitted.append(event)
+
+    monkeypatch.setattr(server.sio, "emit", _emit)
+
+    result = await server._request_visual_capture(
+        sid="sid-capacity",
+        workspace_id="workspace-capacity",
+        session_id="session-capacity",
+        request_id="request-capacity",
+        interruption_epoch=1,
+    )
+
+    assert result is None
+    assert emitted == []
+    assert server._visual_capture_requests == {}
+    assert server._visual_capture_waiters == {}
+    assert server._latest_visual_frames == {}
+    assert server.job_events.active_job_ids() == ["job-active"]
+
+
+@pytest.mark.asyncio
+async def test_backend_visual_capture_handshake_resolves_only_for_the_correlated_frame(monkeypatch: pytest.MonkeyPatch) -> None:
+    server = DesktopPetSocketServer()
+    image = base64.b64encode(b"png").decode("ascii")
+    emitted: list[tuple[str, object, str | None]] = []
+
+    class VisionClient:
+        model = "vision-handshake"
+
+        async def complete_chat(self, _messages: list[dict[str, Any]], **_: object) -> dict[str, object]:
+            return {"reply": "A settings window is visible."}
+
+    async def _emit(event: str, data: object = None, to: str | None = None, **_: object) -> None:
+        emitted.append((event, data, to))
+
+    monkeypatch.setattr(server.sio, "emit", _emit)
+    server.vision_llm_client = cast(Any, VisionClient())
+    request_task = asyncio.create_task(server._request_visual_capture(
+        sid="sid-handshake",
+        workspace_id="workspace-handshake",
+        session_id="session-handshake",
+        request_id="request-handshake",
+        interruption_epoch=4,
+    ))
+    await asyncio.sleep(0)
+
+    capture_requests = [item for item in emitted if item[0] == ScreenshotEvents.CAPTURE_REQUEST]
+    assert len(capture_requests) == 1
+    payload = cast(dict[str, object], capture_requests[0][1])
+    assert payload["jobId"] == "vision:request-handshake"
+    assert payload["frameId"] == "frame:request-handshake"
+    assert request_task.done() is False
+
+    handlers = cast(_SocketServerWithHandlers, cast(object, server.sio)).handlers
+    screenshot_handler = cast(Callable[[str, dict[str, object]], Awaitable[None]], handlers["/"][ScreenshotEvents.REQUEST])
+    await screenshot_handler("sid-handshake", {
+        "image": image,
+        "mode": "vision",
+        "frame_id": payload["frameId"],
+        "workspace_id": payload["workspaceId"],
+        "session_id": payload["sessionId"],
+        "turn_id": payload["turnId"],
+        "job_id": payload["jobId"],
+        "request_id": payload["requestId"],
+        "interruption_epoch": payload["interruptionEpoch"],
+    })
+
+    assert await request_task == "frame:request-handshake"
+    await asyncio.sleep(0)
+    assert [event["data"]["phase"] for event in server.job_events.snapshot()] == [
+        "requested",
+        "captured",
+        "completed",
+    ]
+    assert "image" not in server._latest_visual_frames["sid-handshake"]
+
+
+@pytest.mark.asyncio
+async def test_late_visual_frame_is_rejected_without_replacing_cached_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    server = DesktopPetSocketServer()
+    emitted: list[tuple[str, object, str | None]] = []
+
+    async def _emit(event: str, data: object = None, to: str | None = None, **_: object) -> None:
+        emitted.append((event, data, to))
+
+    monkeypatch.setattr(server.sio, "emit", _emit)
+    request_task = asyncio.create_task(server._request_visual_capture(
+        sid="sid-late",
+        workspace_id="workspace-late",
+        session_id="session-late",
+        request_id="request-late",
+        interruption_epoch=2,
+    ))
+    await asyncio.sleep(0)
+    payload = cast(dict[str, object], next(
+        item[1] for item in emitted if item[0] == ScreenshotEvents.CAPTURE_REQUEST
+    ))
+    server._discard_pending_visual_requests("sid-late", reason="agent_interrupted")
+    assert await request_task is None
+
+    handlers = cast(_SocketServerWithHandlers, cast(object, server.sio)).handlers
+    screenshot_handler = cast(Callable[[str, dict[str, object]], Awaitable[None]], handlers["/"][ScreenshotEvents.REQUEST])
+    await screenshot_handler("sid-late", {
+        "image": base64.b64encode(b"late").decode("ascii"),
+        "mode": "vision",
+        "frame_id": payload["frameId"],
+        "workspace_id": payload["workspaceId"],
+        "session_id": payload["sessionId"],
+        "turn_id": payload["turnId"],
+        "job_id": payload["jobId"],
+        "request_id": payload["requestId"],
+        "interruption_epoch": payload["interruptionEpoch"],
+    })
+
+    assert "sid-late" not in server._latest_visual_frames
+    assert any(
+        event == ScreenshotEvents.RESULT
+        and isinstance(result, dict)
+        and result.get("error") == "CAPTURE_REQUEST_STALE"
+        for event, result, _ in emitted
+    )
+
+
+@pytest.mark.asyncio
+async def test_disconnect_discards_pending_visual_capture(monkeypatch: pytest.MonkeyPatch) -> None:
+    server = DesktopPetSocketServer()
+
+    async def _emit(_event: str, _data: object = None, _to: str | None = None, **_: object) -> None:
+        return None
+
+    monkeypatch.setattr(server.sio, "emit", _emit)
+    request_task = asyncio.create_task(server._request_visual_capture(
+        sid="sid-disconnect-capture",
+        workspace_id="workspace-disconnect",
+        session_id="session-disconnect",
+        request_id="request-disconnect",
+        interruption_epoch=1,
+    ))
+    await asyncio.sleep(0)
+
+    handlers = cast(_SocketServerWithHandlers, cast(object, server.sio)).handlers
+    disconnect_handler = cast(Callable[[str], Awaitable[None]], handlers["/"]["disconnect"])
+    await disconnect_handler("sid-disconnect-capture")
+
+    assert await request_task is None
+    assert server._visual_capture_requests == {}
+    assert server._visual_capture_waiters == {}
+    assert server.job_events.snapshot()[-1]["data"]["reason"] == "visual_context_cleared"
+
+
+@pytest.mark.asyncio
 async def test_socket_visual_clear_removes_frame_and_observation(monkeypatch: pytest.MonkeyPatch) -> None:
     server = DesktopPetSocketServer()
     emitted: list[tuple[str, object, str | None]] = []
@@ -1398,6 +1866,9 @@ async def test_visual_analysis_emits_final_frame_status_and_records_metrics(monk
         "frame_id": "frame-final",
         "change_score": 1.0,
         "capture_reason": "initial",
+        "workspace_id": "workspace-vision",
+        "session_id": "session-vision",
+        "turn_id": "turn-vision",
     })
     await server._visual_analysis_tasks["sid-visual-final"]
 
@@ -1410,6 +1881,7 @@ async def test_visual_analysis_emits_final_frame_status_and_records_metrics(monk
     assert results[1]["frame_id"] == "frame-final"
     assert results[1]["analysis_status"] == "ready"
     assert results[1]["analysis_latency_ms"] >= 0
+    assert results[1]["job_id"] is None
 
     metrics = server.experience_metrics.snapshot()
     assert metrics["visual"]["frames"] == 1
@@ -1466,12 +1938,28 @@ async def test_audio_chunk_routes_pcm16_bytes_to_asr_and_emits_transcript(monkey
         "chunk": base64.b64encode(pcm16_bytes).decode("ascii"),
         "sample_rate": 16000,
         "is_final": True,
+        "session_id": "session-voice",
+        "generation_id": "generation-voice",
+        "turn_id": "turn-voice",
+        "request_id": "request-voice",
+        "interruption_epoch": 4,
+        "version": 1,
     })
 
     assert asr_manager.calls == [("sid-voice", pcm16_bytes, True)]
     assert emitted == [(
         AudioEvents.ASR_FINAL,
-        {"text": "voice text", "confidence": 0.0, "lang": "zh"},
+        {
+            "text": "voice text",
+            "confidence": 0.0,
+            "lang": "zh",
+            "session_id": "session-voice",
+            "generation_id": "generation-voice",
+            "turn_id": "turn-voice",
+            "request_id": "request-voice",
+            "interruption_epoch": 4,
+            "version": 1,
+        },
         "sid-voice",
     )]
     prepared = server.agent_pipeline.take_speculative_context_prefetch(

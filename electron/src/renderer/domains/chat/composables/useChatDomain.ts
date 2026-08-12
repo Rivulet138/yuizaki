@@ -36,7 +36,9 @@ export function useChatDomain() {
     }
 
     try {
-      await audioCapture.start()
+      await audioCapture.start({
+        sessionId: chatState.currentSessionId,
+      })
     } catch {
       ElMessage.error(audioCaptureState.error || '麦克风启动失败')
     }

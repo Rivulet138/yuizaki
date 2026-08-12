@@ -43,6 +43,10 @@ async def test_run_now_queues_background_execution_without_waiting(tmp_path):
 
     assert returned is task
     assert store.tasks[task.id].last_status == "queued"
+    assert store.tasks[task.id].last_run_id is not None
+    assert store.tasks[task.id].last_run_id.startswith("schedrun_")
+    assert store.tasks[task.id].last_job_id is not None
+    assert store.tasks[task.id].last_job_id.startswith("schedjob_")
     await asyncio.wait_for(pipeline.started.wait(), timeout=1)
     assert pipeline.run_count == 1
 
@@ -53,5 +57,6 @@ async def test_run_now_queues_background_execution_without_waiting(tmp_path):
         await asyncio.sleep(0.05)
 
     assert store.tasks[task.id].last_status == "ok"
-    assert store.tasks[task.id].last_request_id == f"req-{task.id}"
+    assert store.tasks[task.id].last_request_id is not None
+    assert store.tasks[task.id].last_request_id.startswith("schedreq_")
     assert store.tasks[task.id].enabled is False

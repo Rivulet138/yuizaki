@@ -245,6 +245,7 @@ export interface PetModelDefinition {
   motions: PetModelMotionOption[]
   expressions: PetModelExpressionOption[]
   emotions: PetEmotionPreset[]
+  animationPaths?: string[]
   manifest?: AvatarManifest
   promptContext?: string
 }
@@ -301,6 +302,7 @@ export interface PetControlConfigPatch {
   modelId?: string | null
   modelPath?: string | undefined
   modelManifest?: AvatarManifest | null
+  animationPaths?: string[]
   displayId?: number | null
   scale?: number
   positionX?: number | null

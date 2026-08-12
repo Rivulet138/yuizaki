@@ -44,6 +44,32 @@ describe('realtime pet lip sync', () => {
     expect(app.ticker.remove).toHaveBeenCalled()
   })
 
+  it('maps protocol visemes to the local Live2D mouth controller and releases immediately', () => {
+    let ticker: (() => void) | null = null
+    const app = {
+      ticker: {
+        add: vi.fn((callback: () => void) => { ticker = callback }),
+        remove: vi.fn(() => { ticker = null }),
+      },
+    }
+    const values = new Map<string, number>()
+    const coreModel = {
+      getParameterValueById: vi.fn((id: string) => values.get(id) ?? 0),
+      setParameterValueById: vi.fn((id: string, value: number) => values.set(id, value)),
+      addParameterValueById: vi.fn(),
+    }
+    const controller = new Live2DLipSyncController(app as never, () => coreModel)
+    controller.configure(undefined, ['ParamMouthOpenY'])
+
+    controller.setExternalViseme(0.75, true)
+    ticker?.()
+    expect(values.get('ParamMouthOpenY')).toBeGreaterThan(0)
+
+    controller.setExternalViseme(0, false)
+    expect(values.get('ParamMouthOpenY')).toBe(0)
+    expect(app.ticker.remove).toHaveBeenCalled()
+  })
+
   it('maps bounded realtime levels to the VRM aa expression', () => {
     const expressionManager = {
       getExpression: vi.fn(() => ({})),

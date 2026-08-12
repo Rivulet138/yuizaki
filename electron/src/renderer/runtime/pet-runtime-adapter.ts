@@ -5,6 +5,11 @@ import type {
   AvatarCapabilitySnapshot,
 } from '../../shared/avatar-command'
 
+export interface PetRuntimeRenderPolicy {
+  targetFps: number
+  paused: boolean
+}
+
 export interface PetRuntimeAdapter {
   readonly modelType: 'live2d' | 'vrm'
   loadModel(config: PetControlConfigPatch): Promise<void>
@@ -20,6 +25,8 @@ export interface PetRuntimeAdapter {
   triggerRandomMotion?(): void
   setLipSyncLevel?(level: number, active: boolean): void
   setLipSyncViseme?(viseme: PetLipSyncViseme, weight: number, active: boolean): void
+  setExternalViseme?(weight: number, active: boolean): void
+  setRenderPolicy?(policy: PetRuntimeRenderPolicy): void
   getState(): PetRendererStatePayload
   destroy(): void
 }

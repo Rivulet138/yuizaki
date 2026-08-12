@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from modules.agent.pipeline import AgentPipeline
+from modules.agent.pipeline import AgentPipeline, visual_context_requested
 from modules.agent.tool_loop import run_tool_loop
 from modules.agent.tool_registry import ToolDefinition, ToolRegistry
 from modules.agent.tool_result import ToolResultEnvelope
@@ -114,6 +114,26 @@ def test_confirmed_visual_query_preserves_candidate_frame_id() -> None:
     assert prepared is not None
     assert prepared["visual_requested"] is True
     assert prepared["visual_frame_id"] == "frame-screen"
+
+
+@pytest.mark.parametrize("query", [
+    "如何开发 desktop app",
+    "窗口函数是什么",
+    "Explain the browser window lifecycle",
+    "screen reader accessibility patterns",
+])
+def test_visual_request_detection_ignores_technical_discussion(query: str) -> None:
+    assert visual_context_requested(query) is False
+
+
+@pytest.mark.parametrize("query", [
+    "帮我看看屏幕上显示了什么",
+    "检查一下这个窗口",
+    "Can you see my screen?",
+    "Tell me what is on this screenshot",
+])
+def test_visual_request_detection_requires_explicit_observation(query: str) -> None:
+    assert visual_context_requested(query) is True
 
 
 @pytest.mark.asyncio

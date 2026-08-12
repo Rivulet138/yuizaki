@@ -27,6 +27,8 @@ class ScheduledTask:
     next_run_at: float | None = None
     last_run_at: float | None = None
     last_status: str | None = None
+    last_run_id: str | None = None
+    last_job_id: str | None = None
     last_request_id: str | None = None
     last_run_summary: str | None = None
     owner_agent_id: str | None = None

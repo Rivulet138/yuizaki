@@ -230,6 +230,30 @@ describe('petControl', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('reads runtime avatar capabilities from the current pet renderer', async () => {
+    setControlToken()
+    const capabilities = {
+      revision: 'vrm:model-1:abc',
+      modelType: 'vrm',
+      modelId: 'model-1',
+      generatedAt: Date.now(),
+      actions: { behavior: true, affect: true, gaze: true, motion: true, expression: true, parameterPatch: false, viseme: true, cancel: true },
+      expressions: ['happy'],
+      motions: [{ group: 'idle', index: 0 }],
+      parameters: [],
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ success: true, capabilities }),
+    }))
+
+    await expect(petControl.getAvatarCapabilities()).resolves.toEqual({ success: true, capabilities })
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/pet/avatar-capabilities'), expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: 'Bearer pet-token' }),
+    }))
+  })
+
   it('updates model placement and transforms through Electron config IPC when available', async () => {
     const updateConfig = vi.fn().mockResolvedValue({ placement: 'free', positionX: 42, positionY: 64 })
     const place = vi.fn().mockResolvedValue({ placement: 'bottom-right', displayId: 2 })

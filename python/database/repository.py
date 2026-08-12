@@ -196,6 +196,8 @@ class DatabaseRepository:
         *,
         model: str = "",
         workspace_id: str = "default",
+        tool_trace: list[dict[str, Any]] | None = None,
+        memory_trace: list[dict[str, Any]] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Persist one user/assistant turn atomically and in conversation order."""
         session = self.SessionLocal()
@@ -233,6 +235,8 @@ class DatabaseRepository:
                 content=assistant_content,
                 tokens_used=0,
                 model=model,
+                tool_trace=json.dumps(tool_trace, ensure_ascii=False) if tool_trace else None,
+                memory_trace=json.dumps(memory_trace, ensure_ascii=False) if memory_trace else None,
             )
             session.add_all([user_message, assistant_message])
             chat_session.message_count = (chat_session.message_count or 0) + 2

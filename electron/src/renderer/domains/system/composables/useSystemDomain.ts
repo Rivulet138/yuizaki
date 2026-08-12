@@ -6,6 +6,7 @@ import type {
   AgentPluginsSnapshot,
   BackupRestoreResponse,
   AgentTraceSnapshot,
+  CompanionRuntimeSnapshot,
   ExperienceMetricsSnapshot,
   BackupTarget,
   DiagnosticsSnapshot,
@@ -30,6 +31,7 @@ export function useSystemDomain() {
   const agentPlugins = ref<AgentPluginsSnapshot | null>(null)
   const schedules = ref<ScheduleTask[]>([])
   const agentTrace = ref<AgentTraceSnapshot | null>(null)
+  const companionRuntime = ref<CompanionRuntimeSnapshot | null>(null)
   const experienceMetrics = ref<ExperienceMetricsSnapshot | null>(null)
 
   const diagnosticsRequest = useDomainRequest<DiagnosticsSnapshot>()
@@ -55,7 +57,11 @@ export function useSystemDomain() {
   const removeScheduleRequest = useDomainRequest<{ ok: boolean }>()
   const toggleScheduleRequest = useDomainRequest<ScheduleMutationResponse>()
   const runScheduleNowRequest = useDomainRequest<ScheduleMutationResponse>()
+  const cancelScheduleRequest = useDomainRequest<{ ok: boolean }>()
   const agentTraceRequest = useDomainRequest<AgentTraceSnapshot>()
+  const companionRuntimeRequest = useDomainRequest<CompanionRuntimeSnapshot>()
+  const resolveCompanionOpportunityRequest = useDomainRequest<{ ok: boolean }>()
+  const cancelHeartbeatGoalRequest = useDomainRequest<{ ok: boolean; goal_id: string }>()
   const experienceMetricsRequest = useDomainRequest<ExperienceMetricsSnapshot>()
 
   const loadDiagnostics = async () => {
@@ -186,6 +192,32 @@ export function useSystemDomain() {
     }
   }
 
+  const loadCompanionRuntime = async () => {
+    const result = await companionRuntimeRequest.execute(() => systemClient.companionRuntime(32))
+    if (result) {
+      companionRuntime.value = result
+    }
+    return result
+  }
+
+  const resolveCompanionOpportunity = async (jobId: string, payload: {
+    request_id: string
+    outcome: 'delivered' | 'suppressed' | 'expired' | 'cancelled' | 'failed'
+    reason?: string
+  }) => {
+    const result = await resolveCompanionOpportunityRequest.execute(() => systemClient.resolveCompanionOpportunity(jobId, payload))
+    if (result?.ok) {
+      await loadCompanionRuntime()
+    }
+    return result
+  }
+
+  const cancelHeartbeatGoal = async (goalId: string, reason = 'cancelled') => {
+    const result = await cancelHeartbeatGoalRequest.execute(() => systemClient.cancelHeartbeatGoal(goalId, reason))
+    if (result?.ok) await loadCompanionRuntime()
+    return result
+  }
+
   const loadExperienceMetrics = async () => {
     const result = await experienceMetricsRequest.execute(() => systemClient.experienceMetrics())
     if (result) {
@@ -256,6 +288,14 @@ export function useSystemDomain() {
     return result
   }
 
+  const cancelSchedule = async (taskOrJobId: string) => {
+    const result = await cancelScheduleRequest.execute(() => systemClient.cancelSchedule(taskOrJobId))
+    if (result?.ok) {
+      await loadSchedules()
+    }
+    return result
+  }
+
   return {
     diagnostics,
     logs,
@@ -266,6 +306,7 @@ export function useSystemDomain() {
     agentPlugins,
     schedules,
     agentTrace,
+    companionRuntime,
     experienceMetrics,
     diagnosticsRequest,
     logsRequest,
@@ -290,7 +331,11 @@ export function useSystemDomain() {
     removeScheduleRequest,
     toggleScheduleRequest,
     runScheduleNowRequest,
+    cancelScheduleRequest,
     agentTraceRequest,
+    companionRuntimeRequest,
+    resolveCompanionOpportunityRequest,
+    cancelHeartbeatGoalRequest,
     experienceMetricsRequest,
     loadDiagnostics,
     loadLogs,
@@ -311,11 +356,15 @@ export function useSystemDomain() {
     updateAgentPluginConfig,
     loadSchedules,
     loadAgentTrace,
+    loadCompanionRuntime,
     loadExperienceMetrics,
     createOnceSchedule,
     createIntervalSchedule,
     removeSchedule,
     toggleSchedule,
-    runScheduleNow
+    runScheduleNow,
+    cancelSchedule,
+    resolveCompanionOpportunity,
+    cancelHeartbeatGoal,
   }
 }

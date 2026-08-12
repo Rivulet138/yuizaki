@@ -1284,13 +1284,16 @@ const handleCorrectMemory = (source: ChatMemorySource) => {
 
 const handleForgetMemory = async (source: ChatMemorySource) => {
   try {
-    await ElMessageBox.confirm('这条记忆将从本地记忆库永久删除。', '忘记这条记忆', {
-      confirmButtonText: '忘记',
+    await ElMessageBox.confirm('这条记忆将从后续检索中隐藏，可在记忆面板中恢复。', '忘记这条记忆', {
+      confirmButtonText: '隐藏',
       cancelButtonText: '取消',
       type: 'warning',
       confirmButtonClass: 'el-button--danger',
     })
-    await memoryClient.removeDoc(source.id)
+    await memoryClient.softForgetDoc(source.id, {
+      reason: 'chat_memory_feedback',
+      turn_id: source.traceId,
+    })
     for (const message of chatState.messages) {
       if (!message.memorySources?.length) continue
       message.memorySources = message.memorySources.filter((item) => item.id !== source.id)
@@ -1303,7 +1306,7 @@ const handleForgetMemory = async (source: ChatMemorySource) => {
         })
       }
     }
-    ElMessage.success('已忘记这条记忆')
+    ElMessage.success('已隐藏这条记忆')
   } catch (error) {
     if (error === 'cancel' || error === 'close') return
     console.warn('[ChatPanel] failed to forget memory:', error)

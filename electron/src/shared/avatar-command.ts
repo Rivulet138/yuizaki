@@ -336,8 +336,11 @@ export const validateAvatarCommandAgainstCapabilities = (
     if (!capabilities.actions[action.type]) return [index]
     if (action.type === 'expression' && !capabilities.expressions.includes(action.name)) return [index]
     if (action.type === 'motion' && action.group) {
-      const motionIndex = action.index ?? 0
-      if (!capabilities.motions.some((motion) => motion.group === action.group && motion.index === motionIndex)) return [index]
+      const hasMatchingMotion = capabilities.motions.some((motion) => (
+        motion.group === action.group
+        && (action.index === undefined || motion.index === action.index)
+      ))
+      if (!hasMatchingMotion) return [index]
     }
     if (action.type === 'parameterPatch') {
       const supported = new Map(capabilities.parameters.map((parameter) => [parameter.id, parameter]))

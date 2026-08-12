@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .agent_trace_store import AgentTraceStore
+from .companion_events import CompanionJobEventLog
 from .default_tools import register_default_tools
 from .mcp_manager import MCPManager
 from .pipeline import AgentPipeline
@@ -33,9 +34,12 @@ class AgentRuntime:
 def create_agent_runtime(
     *,
     schedule_context_factory: Callable[[Any], Any],
+    schedule_workspace_id_provider: Callable[[], str] | None = None,
+    schedule_interruption_epoch_provider: Callable[[], int] | None = None,
     trace_store: AgentTraceStore | None = None,
     policy_engine: PolicyEngine | None = None,
     tool_outcome_observer: Callable[[bool], None] | None = None,
+    job_event_log: CompanionJobEventLog | None = None,
 ) -> AgentRuntime:
     tool_registry = ToolRegistry()
     register_default_tools(tool_registry)
@@ -54,6 +58,9 @@ def create_agent_runtime(
         store=schedule_store,
         pipeline=agent_pipeline,
         context_factory=schedule_context_factory,
+        workspace_id_provider=schedule_workspace_id_provider,
+        interruption_epoch_provider=schedule_interruption_epoch_provider,
+        job_event_log=job_event_log,
     )
 
     return AgentRuntime(

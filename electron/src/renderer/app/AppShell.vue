@@ -327,7 +327,6 @@ const handlePermissionRequest = (data: PermissionRequestPayload) => {
 
 const stopAppRuntime = () => {
   visualCaptureRuntime.stop()
-  chatStore.setAgentTurnPreparation(null)
   window.removeEventListener('keydown', handleGlobalKeydown)
   petApi?.off?.('panel:open-tab', handlePanelOpenTab)
   petApi?.off?.('shortcut:toggle-vision', handleToggleVisionShortcut)
@@ -337,6 +336,7 @@ const stopAppRuntime = () => {
   const socketClient = getSocketClient()
   socketClient.off(SocketEvents.PERMISSION_REQUEST, handlePermissionRequest)
   socketClient.off(SocketEvents.SCREENSHOT_RESULT, visualCaptureRuntime.handleResult)
+  socketClient.off(SocketEvents.SCREENSHOT_CAPTURE_REQUEST, visualCaptureRuntime.handleCaptureRequest)
   disposeE2EControls?.()
   disposeE2EControls = null
 }
@@ -459,7 +459,7 @@ onMounted(() => {
   }
   socketClient.on(SocketEvents.PERMISSION_REQUEST, handlePermissionRequest)
   socketClient.on(SocketEvents.SCREENSHOT_RESULT, visualCaptureRuntime.handleResult)
-  chatStore.setAgentTurnPreparation(visualCaptureRuntime.prepareAgentVisualContext)
+  socketClient.on(SocketEvents.SCREENSHOT_CAPTURE_REQUEST, visualCaptureRuntime.handleCaptureRequest)
   systemStore.setVisualPerceptionEnabled(activeVisionSettings.value.enabled)
 
   if (companionScheduleEnabled) {
