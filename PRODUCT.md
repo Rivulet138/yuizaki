@@ -1,39 +1,30 @@
-# Product
+# Product scope
 
-## Register
+## Core promise
 
-product
+Yuizaki provides a local-first AI companion that can talk, listen, remember, use tools, and express the result through a Live2D or VRM desktop avatar.
 
-## Users
+## Completed core loop
 
-Yuizaki serves people who want a local AI desktop companion during everyday computer use, privacy-conscious users who prefer local models and explicit sensing boundaries, and advanced users who configure models, voices, memory, skills, MCP connections, and automation.
+`user input -> session-scoped Agent turn -> optional tool/memory/vision Job -> streamed response -> TTS or text -> avatar state feedback`
 
-The primary daily job is to talk to the companion, understand what it is doing, interrupt it immediately, and control whether it can speak, observe, remember, or act without entering an administration workflow.
+Voice turns support push-to-talk and continuous capture, provider VAD, barge-in cancellation, ordered TTS, and lip-sync cleanup. The pet restores its last selected model at startup and maps high-level Agent state to local animation behavior.
 
-## Product Purpose
+## AIRI alignment
 
-Yuizaki is a local-first desktop-pet Agent that connects a Live2D or VRM character with text and voice conversation, bounded visual context, memory, and tool use. The product succeeds when the companion feels present and responsive while remaining lightweight, interruptible, truthful about its state, and fully controlled by the user.
+Yuizaki already covers the local desktop pet, chat, voice, memory, tools, MCP, visual traces, and Live2D/VRM embodiment portions of the AIRI direction. The implementation deliberately keeps animation local and perception request-scoped. AIRI-style integrations that remain open are external messaging connectors, browser/mobile clients, and game-specific adapters.
 
-## Brand Personality
+## Non-goals for the current release
 
-Quiet, capable, and warm. The companion is observant without pretending to be human, expressive without becoming distracting, and candid about uncertainty, sensing, permissions, and degraded states.
+- Always-on screen or camera capture.
+- A cloud-hosted multi-user service.
+- Shipping third-party model weights or character assets without their licenses.
+- Claiming real hardware or provider quality from unit tests alone.
 
-## Anti-references
+## Next product increments
 
-- A settings dashboard presented as the daily home surface.
-- Decorative card grids, oversized marketing composition, or one-hue purple and beige themes.
-- Always-on microphone, camera, or screen capture that is hidden behind a generic online indicator.
-- Manipulative relationship scores, guilt prompts, streak pressure, or claims that the Agent has human feelings.
-- Dense developer telemetry, raw model parameters, or security ceremony in the ordinary conversation path.
-
-## Design Principles
-
-1. Make the desktop pet and its current conversational turn the daily entry point; do not place a separate dashboard between the user and conversation.
-2. Keep every voice, animation, task, and proactive interaction immediately interruptible.
-3. Use visible, time-bounded sensing states; visual context is enabled only for an Agent request or an explicit user action.
-4. Keep daily controls direct and move model, provider, protocol, and diagnostic detail behind progressive disclosure.
-5. Preserve one authoritative companion state across avatar, voice, Agent execution, memory, and permissions.
-
-## Accessibility & Inclusion
-
-Target WCAG 2.2 AA for the control panel where practical. Daily actions are keyboard reachable with visible focus, semantic state never depends on color alone, compact layouts remain usable at 200% zoom, and important status is communicated visually as well as audibly. Reduced-motion preferences disable nonessential avatar and interface motion while preserving state feedback.
+1. More full-duplex voice providers and automatic VAD tuning.
+2. Finer pet-to-Job state transitions and user-visible artifacts.
+3. Discord/Telegram connectors with the same cancellable Job protocol.
+4. Optional browser/PWA runtime.
+5. Separate game-agent integrations.

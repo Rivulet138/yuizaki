@@ -30,3 +30,15 @@ def test_unknown_provider_does_not_inherit_genie_capabilities():
     assert capabilities["output_transport"] == "unavailable"
     assert capabilities["warmup"] is False
     assert capabilities["cancellation"] == "unavailable"
+
+
+def test_declared_remote_and_local_provider_contracts_are_discoverable():
+    openai = resolve_tts_provider_capabilities("openai-compatible")
+    assert openai["input_text_streaming"] is False
+    assert openai["output_transport"] == "unavailable"
+    assert openai["cancellation"] == "cooperative"
+
+    unsupported = resolve_tts_provider_capabilities("elevenlabs")
+    assert unsupported["locality"] == "unknown"
+    assert unsupported["output_transport"] == "unavailable"
+    assert unsupported["cancellation"] == "unavailable"

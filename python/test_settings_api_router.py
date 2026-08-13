@@ -134,6 +134,35 @@ def test_settings_router_persists_provider_aware_llm_settings():
         assert store.get("llm.model") == "claude-sonnet-4-5"
 
 
+def test_settings_router_masks_tts_api_key_and_preserves_masked_patch():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        client, store = _build_client(tmpdir)
+
+        response = client.patch(
+            "/api/settings/",
+            json={
+                "tts": {
+                    "provider": "openai-compatible",
+                    "base_url": "http://127.0.0.1:8000/v1",
+                    "api_key": "tts-secret",
+                    "model": "tts-1",
+                    "voice": "alloy",
+                }
+            },
+        )
+        assert response.status_code == 200
+
+        settings = client.get("/api/settings/")
+        assert settings.status_code == 200
+        assert settings.json()["tts"]["api_key"] == "********"
+        assert store.get("tts.api_key") == "tts-secret"
+
+        masked_patch = client.patch("/api/settings/", json={"tts": {"api_key": "********", "voice": "nova"}})
+        assert masked_patch.status_code == 200
+        assert store.get("tts.api_key") == "tts-secret"
+        assert store.get("tts.voice") == "nova"
+
+
 def test_settings_router_persists_provider_scoped_llm_profiles_and_clears_local_keys():
     with tempfile.TemporaryDirectory() as tmpdir:
         client, store = _build_client(tmpdir)
@@ -178,7 +207,7 @@ def test_settings_router_persists_provider_scoped_llm_profiles_and_clears_local_
         assert store.get("llm.profiles.lm-studio") is None
 
 
-def test_settings_router_rejects_removed_tts_fields():
+def test_settings_router_rejects_removed_tts_fields_but_accepts_openai_provider_fields():
     with tempfile.TemporaryDirectory() as tmpdir:
         client, store = _build_client(tmpdir)
 
@@ -186,9 +215,9 @@ def test_settings_router_rejects_removed_tts_fields():
             "/api/settings/",
             json={
                 "tts": {
-                    "provider": "legacy-tts",
+                    "provider": "openai-compatible",
                     "genie_character": "feibi",
-                    "base_url": "http://127.0.0.1:9880",
+                    "base_url": "http://127.0.0.1:9880/v1",
                     "timeout": 45,
                     "speed": 1.25,
                     "volume": 2,

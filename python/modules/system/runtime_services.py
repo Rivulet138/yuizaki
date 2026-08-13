@@ -11,7 +11,7 @@ from ..asr import ASRManager
 from ..llm import LLMClient
 from ..ocr import OCRClient
 from ..svc import SVCClient
-from ..tts import TTSClient
+from ..tts import TTSProviderClient, create_tts_client
 
 
 class LLMServiceConfig(Protocol):
@@ -64,6 +64,18 @@ class TTSServiceConfig(Protocol):
     def mode(self) -> str: ...
     @property
     def save_mode(self) -> str: ...
+    @property
+    def provider(self) -> str: ...
+    @property
+    def base_url(self) -> str: ...
+    @property
+    def api_key(self) -> str: ...
+    @property
+    def model(self) -> str: ...
+    @property
+    def voice(self) -> str: ...
+    @property
+    def timeout(self) -> float: ...
     @property
     def audio_cache_dir(self) -> Path: ...
 
@@ -189,8 +201,14 @@ async def cleanup_llm(client: LLMClient | None) -> None:
         await client.disconnect()
 
 
-async def initialize_tts(service_config: ServiceConfig, logger: logging.Logger) -> TTSClient:
-    client = TTSClient(
+async def initialize_tts(service_config: ServiceConfig, logger: logging.Logger) -> TTSProviderClient:
+    client = create_tts_client(
+        provider=service_config.tts.provider,
+        base_url=service_config.tts.base_url,
+        api_key=service_config.tts.api_key,
+        model=service_config.tts.model,
+        voice=service_config.tts.voice,
+        timeout=service_config.tts.timeout,
         genie_character=service_config.tts.genie_character,
         genie_model_dir=service_config.tts.genie_model_dir or None,
             language=service_config.tts.lang,
@@ -214,17 +232,17 @@ async def initialize_tts(service_config: ServiceConfig, logger: logging.Logger) 
         if warmup_enabled:
             await client.warmup(background=True)
     if client.is_enabled:
-        logger.info("TTS client initialized (Genie-TTS, character=%s)", service_config.tts.genie_character)
+        logger.info("TTS client initialized (provider=%s)", service_config.tts.provider)
     elif client.is_warming_up:
-        logger.info("TTS client warming in background (Genie-TTS, character=%s)", service_config.tts.genie_character)
+        logger.info("TTS client warming in background (provider=%s)", service_config.tts.provider)
     elif startup_mode == "lazy":
-        logger.info("TTS client configured for lazy loading (Genie-TTS, character=%s)", service_config.tts.genie_character)
+        logger.info("TTS client configured for lazy loading (provider=%s)", service_config.tts.provider)
     else:
-        logger.warning("TTS client not available; genie-tts may not be installed")
+        logger.warning("TTS client not available (provider=%s)", service_config.tts.provider)
     return client
 
 
-async def cleanup_tts(client: TTSClient | None) -> None:
+async def cleanup_tts(client: TTSProviderClient | None) -> None:
     if client is not None:
         await client.disconnect()
 

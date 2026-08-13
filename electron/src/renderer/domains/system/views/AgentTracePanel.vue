@@ -81,7 +81,7 @@
                 <el-progress v-if="companionJobProgress(job) !== null" class="job-progress" :percentage="companionJobProgress(job) || 0" :show-text="false" :status="job.status === 'failed' ? 'exception' : undefined" />
                 <p v-if="companionJobResultSummary(job)" class="job-result">{{ companionJobResultSummary(job) }}</p>
                 <p v-if="companionJobOutcome(job)" class="job-outcome">{{ companionJobOutcome(job) }}</p>
-                <p v-if="companionJobDuration(job)" class="job-meta">耗时 {{ companionJobDuration(job) }}<span v-if="job.data?.artifactCount"> · 产物 {{ String(job.data.artifactCount) }}</span></p>
+                <p v-if="companionJobDuration(job)" class="job-meta">耗时 {{ companionJobDuration(job) }}<span v-if="projectCompanionJob(job).artifactCount !== null"> · 产物 {{ projectCompanionJob(job).artifactCount }}</span></p>
               </div>
               <div class="job-card-actions">
                 <el-button v-if="canRetryCompanionJob(job)" size="small" type="warning" plain :loading="retryingJobIds.has(job.jobId)" :disabled="retryingJobIds.has(job.jobId)" @click="retryCompanionJob(job)">重试</el-button>
@@ -358,6 +358,7 @@ import { getSocketClient } from '@/net/socketClient'
 import { useSystemDomain } from '../composables/useSystemDomain'
 import type { PlannerTrace, RuntimeLoopRecord, ScheduleTask, SchedulerRunRecord, StepConditionRecord, StepExecutionRecord } from '@/../shared/agent'
 import type { CompanionEventEnvelope, CompanionJobStatus } from '@/../shared/companion-event'
+import { isTerminalCompanionJob, projectCompanionJob } from '@/app/runtime/companionJobProjection'
 
 type TagType = 'success' | 'warning' | 'danger' | 'info' | 'primary'
 type TraceFilter = 'all' | 'planner' | 'steps' | 'scheduler' | 'runtime_loop'
@@ -517,39 +518,26 @@ const companionJobs = computed<CompanionEventEnvelope[]>(() => {
 })
 const activeCompanionJobs = computed(() => companionJobs.value.filter(job => !isTerminalCompanionJob(job.status)))
 
-function isTerminalCompanionJob(status: CompanionJobStatus) {
-  return status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'interrupted'
-}
-
 function companionJobTitle(job: CompanionEventEnvelope) {
-  const data = job.data || {}
-  for (const key of ['title', 'task_name', 'taskName', 'behaviorType', 'summary', 'phase']) {
-    const value = data[key]
-    if (typeof value === 'string' && value.trim()) return value
-  }
-  return `${job.source} job`
+  return projectCompanionJob(job).title
 }
 
 function companionJobProgress(job: CompanionEventEnvelope) {
-  const data = job.data || {}
-  const value = data.progress ?? data.percent
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null
-  return Math.max(0, Math.min(100, Math.round(value <= 1 ? value * 100 : value)))
+  const value = projectCompanionJob(job).progress
+  return value === null ? null : Math.round(value * 100)
 }
 
 function companionJobResultSummary(job: CompanionEventEnvelope) {
-  const value = job.data?.resultSummary
-  return typeof value === 'string' ? value.trim() : ''
+  return projectCompanionJob(job).resultSummary
 }
 
 function companionJobDuration(job: CompanionEventEnvelope) {
-  const value = job.data?.durationMs
-  return typeof value === 'number' && Number.isFinite(value) ? `${Math.max(0, Math.round(value))} ms` : ''
+  const value = projectCompanionJob(job).durationMs
+  return value === null ? '' : `${value} ms`
 }
 
 function companionJobOutcome(job: CompanionEventEnvelope) {
-  const value = job.data?.error ?? job.data?.cancellationReason
-  return typeof value === 'string' ? value.trim() : ''
+  return projectCompanionJob(job).error
 }
 
 function companionJobTagType(status: CompanionJobStatus): TagType {
@@ -569,8 +557,7 @@ function companionJobStatusLabel(status: CompanionJobStatus) {
 }
 
 function companionToolName(job: CompanionEventEnvelope) {
-  const toolName = job.data?.toolName
-  return typeof toolName === 'string' ? toolName.trim() : ''
+  return projectCompanionJob(job).tool
 }
 
 function companionToolArgs(job: CompanionEventEnvelope) {

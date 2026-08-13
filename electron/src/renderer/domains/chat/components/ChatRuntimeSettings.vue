@@ -22,6 +22,16 @@
       />
 
       <label class="runtime-field">
+        <span>语音</span>
+        <el-segmented
+          :model-value="modelValue.voice_mode"
+          :options="voiceModeOptions"
+          size="small"
+          @update:model-value="emitField('voice_mode', $event)"
+        />
+      </label>
+
+      <label class="runtime-field">
         <span>模型</span>
         <el-select
           :model-value="modelValue.model"
@@ -86,6 +96,7 @@ import ChatAdvancedOptions, { type ChatAdvancedOptionsModel } from './ChatAdvanc
 export type ChatRuntimeSettingsModel = ChatAdvancedOptionsModel & {
   model: string
   response_mode: string
+  voice_mode: 'push-to-talk' | 'continuous'
   reasoning_effort: string
   mcp_enabled: boolean
   pet_link_enabled: boolean
@@ -93,6 +104,11 @@ export type ChatRuntimeSettingsModel = ChatAdvancedOptionsModel & {
 }
 
 type SelectOption = { label: string; value: string }
+
+const voiceModeOptions = [
+  { label: '按键', value: 'push-to-talk' },
+  { label: '连续', value: 'continuous' },
+]
 
 defineProps<{
   modelValue: ChatRuntimeSettingsModel

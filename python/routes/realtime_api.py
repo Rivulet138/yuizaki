@@ -41,6 +41,8 @@ REALTIME_AGENT_INTENTS = ["tool", "memory", "vision", "task", "deep_answer"]
 class RealtimeSessionRequest(BaseModel):
     workspace_id: str | None = None
     session_id: str | None = None
+    voice_mode: str = "push-to-talk"
+    vad_eagerness: str = "auto"
 
     model_config = ConfigDict(extra="forbid")
 
@@ -131,7 +133,9 @@ def resolve_realtime_safety_identifier(api_key: str) -> str:
     return f"yuizaki_{digest[:32]}"
 
 
-def build_realtime_session_config(*, model: str, voice: str, instructions: str) -> dict[str, Any]:
+def build_realtime_session_config(*, model: str, voice: str, instructions: str, voice_mode: str = "push-to-talk", vad_eagerness: str = "auto") -> dict[str, Any]:
+    continuous = voice_mode == "continuous"
+    eagerness = vad_eagerness if vad_eagerness in {"low", "medium", "high", "auto"} else "auto"
     return {
         "type": "realtime",
         "model": model,
@@ -174,7 +178,16 @@ def build_realtime_session_config(*, model: str, voice: str, instructions: str) 
                     "language": "zh",
                 },
                 "noise_reduction": {"type": "near_field"},
-                "turn_detection": None,
+                "turn_detection": (
+                    {
+                        "type": "semantic_vad",
+                        "create_response": True,
+                        "interrupt_response": True,
+                        "eagerness": eagerness,
+                    }
+                    if continuous
+                    else None
+                ),
             },
             "output": {
                 "voice": voice,
@@ -190,8 +203,10 @@ async def mint_realtime_client_secret(
     model: str,
     voice: str,
     instructions: str,
+    voice_mode: str = "push-to-talk",
+    vad_eagerness: str = "auto",
 ) -> dict[str, Any]:
-    session = build_realtime_session_config(model=model, voice=voice, instructions=instructions)
+    session = build_realtime_session_config(model=model, voice=voice, instructions=instructions, voice_mode=voice_mode, vad_eagerness=vad_eagerness)
     async with httpx.AsyncClient(
         base_url=OPENAI_REALTIME_ORIGIN,
         timeout=httpx.Timeout(15.0, connect=5.0),
@@ -278,6 +293,8 @@ def create_realtime_router(
                 model=model,
                 voice=voice,
                 instructions=instructions,
+                voice_mode=payload.voice_mode,
+                vad_eagerness=payload.vad_eagerness,
             )
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text[:300] if exc.response.text else ""

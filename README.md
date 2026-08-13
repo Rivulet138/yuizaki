@@ -1,87 +1,72 @@
 # Yuizaki
 
-Yuizaki is a local-first desktop AI companion agent. It combines a transparent Live2D or VRM pet window with chat, realtime voice, optional on-demand vision, memory, tools, MCP, scheduling, and visible Agent Job traces.
+Yuizaki is a local-first AI desktop companion agent. It combines a transparent desktop pet (Live2D or VRM) with chat, realtime voice, optional vision, memory, tools, MCP, scheduled jobs, and visible Agent traces.
 
-The project is designed around three separate runtime lanes:
+## Current capabilities
 
-- **Audio**: microphone capture and playback stay on the realtime audio path. AudioWorklet is used when available, with a ScriptProcessor fallback for older runtimes.
-- **Interaction**: ASR, LLM, TTS, tool calls, cancellation, and interruption are bound to `sessionId`, `turnId`, `requestId`, and `interruptionEpoch`.
-- **Presentation**: Live2D/VRM animation, lip-sync, gaze, expressions, and idle behavior are driven locally from high-level targets. The model is not asked to generate animation frames.
+- Transparent, draggable pet window with Live2D and VRM runtime adapters.
+- Automatic restoration of the last selected model during startup.
+- Live2D/VRM high-level behavior mapping: idle profiles, gaze, expressions, motion, lip-sync, fatigue, affinity, trust, mood, and relationship trend. Frame-level animation remains local to the renderer.
+- Push-to-talk and continuous realtime voice sessions.
+- Streaming ASR, incremental LLM responses, Genie TTS, OpenAI-compatible `/v1/audio/speech` TTS, ordered segment playback, lip-sync, barge-in interruption, stale-event rejection, and turn cancellation.
+- Independent chat-session runtime identity, background completion, unread state, and visible Job/Trace steps.
+- MCP (enabled by the normal launcher), built-in tools, plugins, scheduler, heartbeat, and visual capture represented as cancellable Job events.
+- Local memory with confidence, source/trace identity, model version, correction, and forget operations.
+- Request-scoped vision only: an Agent request captures and analyzes one current frame, then releases it. There is no permanent screenshot loop.
+- Hardware-aware rendering: device-pixel-ratio cap, power preference, active/idle FPS tiers, hidden-window pause, and coalesced pointer input.
 
-## What Works
+## Runtime layout
 
-- Transparent, draggable desktop pet window with Live2D and VRM adapters.
-- Startup restoration of the last selected pet model.
-- Push-to-talk and realtime voice turns with streaming ASR, incremental responses, ordered TTS playback, lip-sync, and barge-in cancellation.
-- Chat sessions with independent generation identity, background completion, unread state, and visible Agent steps.
-- MCP, built-in tools, plugins, scheduler, heartbeat, and visual capture represented as cancellable Job events.
-- Job trace details: status, progress, tool name, result summary, duration, artifact references, failure, cancellation, and retry state.
-- Local memory with confidence, trace identity, model version, correction, and forget actions.
-- Vision is opt-in and request-scoped: no permanent screenshot loop is started by default.
-- Hardware-aware pet rendering: DPR cap, power preference, active/idle FPS tiers, hidden-window pause, and coalesced pointer input.
-- MCP starts by default from the normal launcher. Use `--no-mcp` only when explicitly needed.
-
-## Architecture
-
-```mermaid
-flowchart LR
-  U[User] --> PET[Live2D / VRM Pet]
-  U --> CHAT[Vue Chat and Control Panels]
-  PET --> E[Electron Runtime]
-  CHAT --> E
-  E --> S[FastAPI + Socket.IO]
-  S --> A[Agent Pipeline]
-  A --> L[LLM / VLM Providers]
-  A --> V[ASR / TTS]
-  A --> M[SQLite / Optional Vector Memory]
-  A --> J[Tools / MCP / Plugins / Scheduler]
-  J --> TRACE[Companion Job Event Log]
-  TRACE --> CHAT
+```text
+Electron/Vue renderer
+  chat, voice transport, pet rendering, settings, Job/Trace projection
+        |
+FastAPI + Socket.IO backend
+  Agent, provider adapters, memory, vision, tools, scheduler, heartbeat
+        |
+optional node-mcp service, Qdrant, local or remote model providers
 ```
 
-`electron/` owns windows, input, rendering, audio transport, and UI. `python/` owns the Agent pipeline, model routing, voice, vision, memory, tools, and scheduling. `node-mcp/` is the optional browser/MCP service.
+The Electron process owns windows, input, rendering, audio transport, and UI state. The Python process owns Agent orchestration and persistence. `node-mcp` is started by default by `start.bat` and `start.sh`; pass `--no-mcp` only for an intentional reduced startup.
 
 ## Requirements
 
-- Windows 10/11 or x86_64 Linux
-- Python 3.11-3.13
-- Node.js 22.13 or newer
-- 8 GiB RAM minimum; 16 GiB recommended for local models
-- Docker is optional for Qdrant or external voice services
+- Windows 10/11 or x86_64 Linux.
+- Python 3.11, 3.12, or 3.13 in `python/.venv`.
+- Node.js 22.13 or newer.
+- 8 GiB RAM minimum; 16 GiB is recommended for local ASR, TTS, or embedding models.
+- Docker is optional and only needed when Qdrant auto-start is requested.
 
-Older compatible dependency versions are preferred where they do not remove required runtime behavior. The repository keeps platform-specific Python lockfiles and a resource lock at `resources.lock.json`.
+## Quick start
 
-## Quick Start
-
-### Windows
+Windows:
 
 ```powershell
 .\install.bat core
 .\start.bat
 ```
 
-The normal launcher performs a full startup and enables MCP. Useful options:
-
-```powershell
-.\start.bat --check          # preflight only
-.\start.bat --verify         # type checks, build, and tests without launching
-.\start.bat --dev-renderer   # run the renderer through Vite
-.\start.bat --with-qdrant   # start Qdrant when Docker is available
-.\start.bat --no-mcp         # opt out of the default MCP service
-```
-
-### Linux
+Linux:
 
 ```bash
 ./install.sh core
 ./start.sh
 ```
 
-The Linux launcher also starts MCP by default. Use `./start.sh --check` for a non-launching preflight.
+Useful launcher flags:
 
-### Model configuration
+```text
+--check          preflight without launching services
+--verify         run the supported verification suite without launching services
+--dev-renderer   use the Vite renderer during development
+--smoke          run lightweight health/pet/MCP endpoint checks after startup
+--with-qdrant    start Qdrant through Docker when available (Windows launcher)
+--no-mcp         opt out of the default MCP service
+--no-show-pet    leave the pet layer hidden after startup (Windows launcher)
+--no-open        do not open the control panel automatically (Windows launcher)
+```
 
-Copy `python/.env.example` to `python/.env` and configure at least one text provider:
+Copy `python/.env.example` to `python/.env` and configure a text provider. OpenAI-compatible local servers such as Ollama and LM Studio use the same fields:
 
 ```dotenv
 LLM_PROVIDER=custom
@@ -90,45 +75,33 @@ LLM_API_KEY=local
 LLM_MODEL=your-model
 ```
 
-OpenAI-compatible local servers such as Ollama or LM Studio can use the same shape. Never commit real API keys.
+## Interaction and latency model
 
-## Runtime Behavior
+Voice uses one microphone capture path. Local audio processing can emit an immediate speech-start signal while the provider owns turn finalization. On barge-in, the renderer invalidates the old output generation, stops queued audio, resets lip-sync, cancels the provider response, and ignores late chunks. Session, turn, request, and interruption identifiers prevent cross-session or stale-result updates.
 
-### Voice and latency
+TTS chunks are ordered by sequence number. WAV duration is supplied by the backend when known and falls back to browser media duration for legacy payloads. Audio, Agent work, and pet animation are asynchronous lanes; a slow tool or TTS segment does not freeze the chat input.
 
-Microphone capture uses 16 kHz mono PCM in approximately 32 ms batches. The audio worklet only buffers and transfers samples; network and UI work stay outside the realtime audio thread. TTS lip-sync follows the audio playback clock through `requestAnimationFrame`.
+## Vision boundary
 
-Interruption immediately cancels the active turn, clears queued audio, returns lip-sync to neutral, increments `interruptionEpoch`, and rejects late ASR/LLM/TTS results.
+Vision is disabled unless enabled in settings and requested by an Agent turn. The lifecycle is `requested -> captured -> analyzed -> completed` or `discarded`. Frames are held in memory for the request and are not written to chat history by default.
 
-### Vision
+## Data locations
 
-Vision is explicit and request-scoped. A screenshot is captured only after an Agent turn requests visual context, analyzed once, and then released. There is no always-on desktop capture loop.
-
-### Job and trace visibility
-
-Every tool, scheduler, heartbeat, and visual operation has a bounded Job lifecycle:
-
-`created -> running/progress -> completed | failed | cancelled | interrupted`
-
-Progress events are coalesced within a short window to reduce socket and UI pressure. Terminal events are never coalesced. Chat messages show the user-facing summary; the Agent Trace panel provides the global view.
-
-## Data and Privacy
-
-Default local data locations:
-
-| Data | Location | Behavior |
+| Data | Default location | Notes |
 | --- | --- | --- |
-| Chat history | `python/data/chat.db` | Local persistent storage |
-| Long-term memory | `python/data/memory.db` | Local, correctable, forgettable |
-| Settings | `python/config/settings.json` | Local runtime settings |
-| TTS cache | `python/audio_cache/` | Temporary and removable |
-| Vision frames | memory | Request-scoped; no default history |
+| Chat database | `python/data/chat.db` | Local SQLite persistence |
+| Memory database | `python/data/memory.db` | Correctable and forgettable records |
+| Settings | `python/config/settings.json` | Local runtime configuration |
+| TTS cache | `python/audio_cache/` | Removable temporary artifacts |
+| Vision frames | process memory | Request-scoped by default |
 
-When a cloud model is selected, the configured provider receives the corresponding text, image, or audio payload. Local models can keep those payloads on the device.
+Cloud providers receive only the payloads required by the selected feature. Local providers keep those payloads on the machine.
 
-## Verification
+## Verification status
 
-Electron focused checks:
+The latest verified Electron baseline is 133 test files and 793 tests, plus TypeScript type-check, ESLint, production build, renderer bundle audit, and `git diff --check`. Python targeted settings/TTS/realtime tests previously passed (75 tests). A socket contract test remains environment-limited when `python-socketio` is absent; real microphone, speaker, provider credentials, and multiple hardware models still require machine-level validation.
+
+Run the checks locally:
 
 ```powershell
 cd electron
@@ -136,37 +109,18 @@ npm run type-check
 npm run lint
 npm test
 npm run build
-```
 
-Python checks should use explicit test paths when the workspace contains restricted temporary directories:
-
-```powershell
-cd python
-python -m pytest -q tests python/test_*.py
+cd ..\python
+python -m pytest -q tests test_*.py
 python -m compileall -q modules app.py socket_server.py
 ```
 
-The launcher also supports `--verify` for the supported end-to-end preflight path.
+## Status and non-goals
 
-## Project Status
+The core local companion loop is implemented. Discord/Telegram connectors, PWA/mobile clients, browser extensions, game-specific agents, and a broad external TTS catalog remain future integrations. They are not advertised as completed features.
 
-Yuizaki is an active development project intended for local deployment and experimentation. The core companion loop is implemented, while provider-specific model quality, packaging, and broad hardware coverage still require machine-level validation.
-
-## References
-
-The current interaction and latency direction is informed by active upstream projects and 2024-2026 research, including:
-
-- [Project AIRI](https://github.com/moeru-ai/airi)
-- [AIRI DevLog](https://airi.moeru.ai/docs/en/blog/DevLog-2026.03.14/)
-- [W3C Web Audio API](https://www.w3.org/TR/webaudio-1.1/)
-- [MDN AudioWorklet](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorklet)
-- [LTS-VoiceAgent (2026)](https://arxiv.org/abs/2601.19952)
-- [Endpoint Anticipation for Low-Latency Spoken Dialogue (2026)](https://arxiv.org/abs/2606.13450)
-- [HumDial Full-Duplex Study (2026)](https://arxiv.org/abs/2604.21406)
-- [Moshi-Face (2026)](https://arxiv.org/abs/2606.21970)
-
-See `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/QUICKSTART.md`, and `SECURITY.md` for implementation and operational details.
+The design direction is informed by AIRI (pinned implementation reference), OpenAI Realtime WebRTC/VAD guidance, MDN Web Audio APIs, LiveKit turn-taking guidance, and 2024-2026 work on low-latency voice, interruption handling, asynchronous tools, visual memory, and embodied agents. See the linked design and API documents for source URLs and boundaries.
 
 ## License
 
-Source code is released under the [MIT License](LICENSE). Live2D/VRM models, voices, fonts, artwork, and downloaded model weights may have separate licenses; review `THIRD_PARTY_NOTICES.md` before redistribution.
+Source code is MIT-licensed. Live2D/VRM models, voices, fonts, artwork, and downloaded model weights may have separate licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) before redistribution.

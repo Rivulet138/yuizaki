@@ -113,7 +113,12 @@ export interface TtsSettingsResponse {
     split: string
     mode: string
     save_mode: string
-    provider: string
+    provider: 'genie-tts' | 'openai-compatible'
+    base_url: string
+    api_key: string
+    model: string
+    voice: string
+    timeout: number
 }
 
 export interface SettingsMutationResponse {

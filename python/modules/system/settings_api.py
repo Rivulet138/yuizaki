@@ -42,7 +42,11 @@ _RUNTIME_RELOAD_FIELDS: dict[str, set[str]] = {
         "provider", "base_url", "api_key", "model", "timeout",
         "vision_enabled", "vision_provider", "vision_base_url", "vision_api_key", "vision_model", "vision_timeout",
     },
-    "tts": {"genie_character", "genie_model_dir", "lang", "ref_audio", "ref_text", "device", "quality", "split", "mode", "save_mode"},
+    "tts": {
+        "provider", "base_url", "api_key", "model", "voice", "timeout",
+        "genie_character", "genie_model_dir", "lang", "ref_audio", "ref_text",
+        "device", "quality", "split", "mode", "save_mode",
+    },
     "asr": {
         "provider",
         "base_url",

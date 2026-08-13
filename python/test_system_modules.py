@@ -408,7 +408,7 @@ class TestSettingsApiValidation:
 
             assert store.get("tts.voice") is None
             assert app_config.tts.provider == "genie-tts"
-            assert not hasattr(app_config.tts, "voice")
+            assert app_config.tts.voice == "alloy"
             assert dynamic.get("tts") is None
             assert reloaded_sections == []
 

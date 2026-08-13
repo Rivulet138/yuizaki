@@ -37,6 +37,13 @@ TTS_PROVIDER_CAPABILITY_REGISTRY: dict[str, _TTSProviderCapabilitySpec] = {
         "warmup": True,
         "cancellation": "cooperative",
     },
+    # This provider has a runtime adapter; other integrations stay undisclosed until implemented.
+    "openai-compatible": {
+        "locality": "unknown",
+        "input_text_streaming": False,
+        "warmup": False,
+        "cancellation": "cooperative",
+    },
 }
 
 

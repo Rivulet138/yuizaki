@@ -18,6 +18,7 @@ from ..llm.providers import normalize_llm_base_url, normalize_llm_provider
 LLMProvider = Literal["deepseek", "qwen", "gemini", "chatgpt", "claude", "grok", "ollama", "lmstudio", "custom"]
 KEYLESS_LLM_PROVIDERS = {"ollama", "lmstudio"}
 TTS_PROVIDER = "genie-tts"
+TTSProvider = Literal["genie-tts", "openai-compatible"]
 TTS_SAVE_MODE = "禁用自动保存"
 
 
@@ -193,12 +194,16 @@ class TTSSettingsModel(BaseModel):
     split: str = Field(default_factory=lambda: env_config.tts.split)
     mode: str = Field(default_factory=lambda: env_config.tts.mode)
     save_mode: str = Field(default=TTS_SAVE_MODE)
-    provider: str = Field(default=TTS_PROVIDER)
+    provider: TTSProvider = Field(default_factory=lambda: env_config.tts.provider if env_config.tts.provider in {"genie-tts", "openai-compatible"} else TTS_PROVIDER)  # type: ignore[arg-type]
+    base_url: str = Field(default_factory=lambda: env_config.tts.base_url)
+    api_key: str = Field(default_factory=lambda: env_config.tts.api_key)
+    model: str = Field(default_factory=lambda: env_config.tts.model)
+    voice: str = Field(default_factory=lambda: env_config.tts.voice)
+    timeout: float = Field(default_factory=lambda: env_config.tts.timeout, gt=0)
 
     model_config = ConfigDict(extra="forbid")
 
     def model_post_init(self, __context: Any) -> None:
-        self.provider = TTS_PROVIDER
         self.save_mode = TTS_SAVE_MODE
 
 
@@ -354,13 +359,16 @@ class TTSSettingsPatchModel(BaseModel):
     split: str | None = None
     mode: str | None = None
     save_mode: str | None = None
-    provider: str | None = None
+    provider: TTSProvider | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    model: str | None = None
+    voice: str | None = None
+    timeout: float | None = Field(default=None, gt=0)
 
     model_config = ConfigDict(extra="forbid")
 
     def model_post_init(self, __context: Any) -> None:
-        if self.provider is not None:
-            self.provider = TTS_PROVIDER
         if self.save_mode is not None:
             self.save_mode = TTS_SAVE_MODE
 

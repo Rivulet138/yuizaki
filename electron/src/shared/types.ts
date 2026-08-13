@@ -57,6 +57,7 @@ export type ChatReasoningEffort =
 
 export type ChatPromptMode = 'auto' | 'work' | 'daily';
 export type ChatResponseMode = 'instant' | 'balanced' | 'deep';
+export type ChatVoiceMode = 'push-to-talk' | 'continuous';
 
 export interface ChatPromptRoleCard {
   enabled?: boolean;
@@ -115,6 +116,7 @@ export interface ChatOptions {
   max_tokens?: number;
   reasoning_effort?: ChatReasoningEffort;
   response_mode?: ChatResponseMode;
+  voice_mode?: ChatVoiceMode;
   mcp_enabled?: boolean;
   web_search_enabled?: boolean;
   tts_enabled?: boolean;

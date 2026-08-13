@@ -1,4 +1,4 @@
-import type { AvatarManifest, ExpressionLayer, PetControlConfigPatch, PetExpressionMixPayload, PetLipSyncViseme, PetParameterOverrideItem, PetRendererStatePayload } from '../../shared/pet-control'
+import type { AvatarManifest, ExpressionLayer, PetCompanionIdleProfile, PetControlConfigPatch, PetExpressionMixPayload, PetLipSyncViseme, PetParameterOverrideItem, PetRendererStatePayload } from '../../shared/pet-control'
 import type {
   AvatarAction,
   AvatarActionExecutionResult,
@@ -16,6 +16,7 @@ export interface PetRuntimeAdapter {
   applyConfig(config: PetControlConfigPatch): void
   getCapabilities(): AvatarCapabilitySnapshot
   executeAvatarAction(action: AvatarAction): AvatarActionExecutionResult
+  setCompanionIdleProfile?(profile: PetCompanionIdleProfile): void
   triggerExpression?(name: string): void
   triggerExpressionMix?(payload: PetExpressionMixPayload): void
   applyExpressionMix?(layers: ExpressionLayer[]): void

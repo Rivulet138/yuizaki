@@ -52,6 +52,8 @@ class TTSRuntimeConfig(Protocol):
     mode: str
     save_mode: str
     provider: str
+    api_key: str
+    model: str
     voice: str
 
 
@@ -267,7 +269,16 @@ def apply_runtime_config(config: RuntimeConfig, updates: RuntimeUpdates) -> set[
             config.tts.lang = str(tts_updates["lang"])
             changed.add("tts")
         if "provider" in tts_updates and tts_updates["provider"] is not None:
-            config.tts.provider = str(tts_updates["provider"])
+            provider = str(tts_updates["provider"]).strip().lower()
+            if provider in {"genie-tts", "openai-compatible"}:
+                config.tts.provider = provider
+                changed.add("tts")
+        for field in ("base_url", "api_key", "model", "voice"):
+            if field in tts_updates and tts_updates[field] is not None:
+                setattr(config.tts, field, str(tts_updates[field]).strip())
+                changed.add("tts")
+        if "timeout" in tts_updates and tts_updates["timeout"] is not None:
+            config.tts.timeout = max(1.0, _to_float(tts_updates["timeout"]))
             changed.add("tts")
 
     asr_updates = _section(updates, "asr")

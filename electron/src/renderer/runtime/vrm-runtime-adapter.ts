@@ -10,6 +10,7 @@ import {
 } from '../../shared/avatar-command'
 import {
   normalizePetLipSyncProfile,
+  type PetCompanionIdleProfile,
   type PetControlConfigPatch,
   type PetLipSyncProfile,
   type PetLipSyncViseme,
@@ -35,6 +36,64 @@ interface VrmHostContext {
   hideNotice(): void
   reportState(force?: boolean): void
   markActivity(reason: string): void
+}
+
+export interface VrmBehaviorProfile {
+  gazeAmplitude: number
+  swayAmplitude: number
+  breathAmplitude: number
+  breathSpeed: number
+  expressionWeight: number
+  motionFadeMs: number
+  motionLoop: boolean
+}
+
+const clampUnit = (value: unknown, fallback: number): number => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : fallback
+}
+
+const normalizeVrmBehaviorProfile = (behavior: AvatarBehavior): VrmBehaviorProfile => {
+  switch (behavior) {
+    case 'listen':
+      return { gazeAmplitude: 0.05, swayAmplitude: 0.028, breathAmplitude: 0.045, breathSpeed: 0.85, expressionWeight: 0.34, motionFadeMs: 180, motionLoop: true }
+    case 'think':
+      return { gazeAmplitude: 0.12, swayAmplitude: 0.035, breathAmplitude: 0.04, breathSpeed: 0.72, expressionWeight: 0.28, motionFadeMs: 220, motionLoop: true }
+    case 'speak':
+      return { gazeAmplitude: 0.04, swayAmplitude: 0.022, breathAmplitude: 0.045, breathSpeed: 0.92, expressionWeight: 0.3, motionFadeMs: 140, motionLoop: true }
+    case 'backchannel':
+      return { gazeAmplitude: 0.1, swayAmplitude: 0.05, breathAmplitude: 0.055, breathSpeed: 1.08, expressionWeight: 0.48, motionFadeMs: 120, motionLoop: false }
+    case 'react':
+      return { gazeAmplitude: 0.16, swayAmplitude: 0.085, breathAmplitude: 0.065, breathSpeed: 1.25, expressionWeight: 0.7, motionFadeMs: 100, motionLoop: false }
+    case 'idle':
+    default:
+      return { gazeAmplitude: 0.025, swayAmplitude: 0.018, breathAmplitude: 0.04, breathSpeed: 0.7, expressionWeight: 0.22, motionFadeMs: 240, motionLoop: true }
+  }
+}
+
+export const resolveVrmBehaviorProfile = (
+  behavior: AvatarBehavior,
+  companion: PetCompanionIdleProfile = {},
+): VrmBehaviorProfile => {
+  const profile = normalizeVrmBehaviorProfile(behavior)
+  const energy = clampUnit(companion.energy, 0.5)
+  const warmth = (clampUnit(companion.affinity, 0.5) + clampUnit(companion.trust, 0.5) + clampUnit(companion.intimacy, 0.5)) / 3
+  const trend = companion.relationshipTrend === 'rising' ? 0.08 : companion.relationshipTrend === 'flat' ? -0.04 : 0
+  const curious = companion.mood === 'curious' || companion.supportStyle === 'analytical'
+  const cheerful = companion.mood === 'warm' || companion.supportStyle === 'cheerful'
+  const fatigue = clampUnit(companion.fatigue, 0)
+  const activity = Math.max(0.45, Math.min(1.2, 0.72 + energy * 0.42 + trend - fatigue * 0.32))
+  const gazeBias = curious ? 0.05 : cheerful ? 0.015 : 0
+  const expressionBias = cheerful ? 0.08 : curious ? 0.03 : 0
+  return {
+    gazeAmplitude: Math.max(0, Math.min(0.3, profile.gazeAmplitude * activity + gazeBias)),
+    swayAmplitude: Math.max(0, Math.min(0.18, profile.swayAmplitude * activity + (cheerful ? 0.012 : 0))),
+    breathAmplitude: Math.max(0, Math.min(0.14, profile.breathAmplitude * activity)),
+    breathSpeed: Math.max(0.2, Math.min(2, profile.breathSpeed * activity)),
+    expressionWeight: Math.max(0, Math.min(1, profile.expressionWeight * (0.75 + warmth * 0.35) + expressionBias)),
+    motionFadeMs: profile.motionFadeMs,
+    motionLoop: profile.motionLoop,
+  }
 }
 
 export class VrmRuntimeAdapter implements PetRuntimeAdapter {
@@ -73,6 +132,8 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
   private readonly lookAtTarget = new THREE.Vector3()
   private behavior: AvatarBehavior = 'idle'
   private behaviorStartedAt = performance.now()
+  private companionIdleProfile: PetCompanionIdleProfile = {}
+  private behaviorProfile: VrmBehaviorProfile = resolveVrmBehaviorProfile('idle')
   private loadGeneration = 0
   private readonly renderBudget = resolvePetRenderBudget({
     hardwareConcurrency: navigator.hardwareConcurrency,
@@ -120,11 +181,12 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
       case 'behavior':
         this.behavior = action.behavior
         this.behaviorStartedAt = performance.now()
+        this.behaviorProfile = resolveVrmBehaviorProfile(this.behavior, this.companionIdleProfile)
         return { status: 'completed' }
       case 'affect': {
         const expression = this.resolveVrmExpression(action.emotion)
         if (!expression) return { status: 'degraded', message: `VRM expression not available: ${action.emotion}` }
-        this.setExpressionTarget(expression, action.intensity ?? 1, 160, action.decayMs ?? 1800)
+        this.setExpressionTarget(expression, (action.intensity ?? 1) * this.behaviorProfile.expressionWeight, 160, action.decayMs ?? 1800)
         return { status: 'completed' }
       }
       case 'gaze':
@@ -141,7 +203,7 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
       case 'expression': {
         const expression = this.resolveVrmExpression(action.name)
         if (!expression) return { status: 'degraded', message: `VRM expression not available: ${action.name}` }
-        this.setExpressionTarget(expression, action.weight ?? 1, action.fadeInMs ?? 160, action.fadeOutMs ?? 1200)
+        this.setExpressionTarget(expression, (action.weight ?? 1) * this.behaviorProfile.expressionWeight, action.fadeInMs ?? 160, action.fadeOutMs ?? 1200)
         return { status: 'completed' }
       }
       case 'parameterPatch':
@@ -160,6 +222,7 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
         }
         if (action.channel === 'behavior') {
           this.behavior = 'idle'
+          this.behaviorProfile = resolveVrmBehaviorProfile('idle', this.companionIdleProfile)
           return { status: 'completed' }
         }
         if (action.channel === 'motion') {
@@ -179,8 +242,28 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
         })
         this.gazeTarget = null
         this.behavior = 'idle'
+        this.behaviorProfile = resolveVrmBehaviorProfile('idle', this.companionIdleProfile)
         this.setLipSyncViseme('sil', 0, false)
         return { status: 'completed' }
+    }
+  }
+
+  setCompanionIdleProfile(profile: PetCompanionIdleProfile): void {
+    this.companionIdleProfile = { ...profile }
+    this.behaviorProfile = resolveVrmBehaviorProfile(this.behavior, this.companionIdleProfile)
+  }
+
+  setAttentionTarget(target: { x: number; y: number; strength?: number; durationMs?: number } | null): void {
+    if (!target) {
+      this.gazeTarget = null
+      return
+    }
+    const strength = clampUnit(target.strength, 0.75)
+    this.gazeTarget = {
+      x: Math.max(-1, Math.min(1, Number.isFinite(target.x) ? target.x : 0)),
+      y: Math.max(-1, Math.min(1, Number.isFinite(target.y) ? target.y : 0)),
+      strength,
+      expiresAt: target.durationMs && target.durationMs > 0 ? performance.now() + Math.min(4_000, target.durationMs) : null,
     }
   }
 
@@ -195,6 +278,7 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
     this.ensureRenderer()
     const loaded = await this.loadVrm(modelPath, generation, this.host.config.animationPaths)
     if (!loaded || generation !== this.loadGeneration) return
+    this.behaviorProfile = resolveVrmBehaviorProfile(this.behavior, this.companionIdleProfile)
     this.applyConfig(config)
     this.startLoop()
     this.host.hideNotice()
@@ -479,13 +563,13 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
     if (!clip) {
       return { status: 'degraded', message: `VRM animation clip not available: ${group || index}` }
     }
-    this.activeAnimationAction?.fadeOut(0.12)
+    this.activeAnimationAction?.fadeOut(this.behaviorProfile.motionFadeMs / 1000)
     const action = this.animationMixer.clipAction(clip)
     action.reset()
-    action.setLoop(THREE.LoopOnce, 1)
-    action.clampWhenFinished = true
+    action.setLoop(this.behaviorProfile.motionLoop ? THREE.LoopRepeat : THREE.LoopOnce, this.behaviorProfile.motionLoop ? Infinity : 1)
+    action.clampWhenFinished = !this.behaviorProfile.motionLoop
     action.setEffectiveWeight(Math.max(0, Math.min(1, intensity)))
-    action.fadeIn(0.12)
+    action.fadeIn(this.behaviorProfile.motionFadeMs / 1000)
     action.play()
     this.activeAnimationAction = action
     this.host.markActivity(`vrm-motion:${clip.name || index}`)
@@ -569,9 +653,11 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
       this.gazeTarget = null
     }
     const elapsed = (now - this.behaviorStartedAt) / 1000
-    const idleAmplitude = this.behavior === 'think' ? 0.12 : this.behavior === 'listen' ? 0.05 : 0.025
-    const desiredX = this.gazeTarget?.x ?? Math.sin(elapsed * 0.55) * idleAmplitude
-    const desiredY = this.gazeTarget?.y ?? Math.sin(elapsed * 0.38) * idleAmplitude * 0.5
+    const profile = this.behaviorProfile
+    const idleX = Math.sin(elapsed * (0.38 + profile.breathSpeed * 0.18)) * profile.gazeAmplitude
+    const idleY = Math.sin(elapsed * (0.27 + profile.breathSpeed * 0.12)) * profile.gazeAmplitude * 0.5
+    const desiredX = this.gazeTarget?.x ?? idleX
+    const desiredY = this.gazeTarget?.y ?? idleY
     const strength = this.gazeTarget?.strength ?? 1
     const alpha = 1 - Math.exp(-Math.max(0, deltaSeconds) * 8)
     this.smoothedGaze.x += (desiredX * strength - this.smoothedGaze.x) * alpha
@@ -582,5 +668,15 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
     this.lookAtTarget.y += this.smoothedGaze.y * 1.2
     this.lookAtTarget.z += 3
     lookAt.lookAt(this.lookAtTarget)
+    const avatarScene = this.vrm?.scene
+    if (!avatarScene) return
+    if (this.behavior === 'idle' || this.behavior === 'listen' || this.behavior === 'think') {
+      const breath = Math.sin(elapsed * Math.PI * 2 * profile.breathSpeed) * profile.breathAmplitude
+      avatarScene.position.y = -1.35 + breath
+      avatarScene.rotation.z = Math.sin(elapsed * 0.7) * profile.swayAmplitude
+    } else {
+      avatarScene.position.y = -1.35
+      avatarScene.rotation.z = 0
+    }
   }
 }

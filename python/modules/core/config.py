@@ -79,6 +79,11 @@ class TTSConfig(BaseModel):
     mode: str = Field(default="串行推理")
     save_mode: str = Field(default="禁用自动保存")
     provider: str = Field(default="genie-tts")
+    base_url: str = Field(default="")
+    api_key: str = Field(default="")
+    model: str = Field(default="tts-1")
+    voice: str = Field(default="alloy")
+    timeout: float = Field(default=60.0)
     audio_cache_dir: Path = Field(default=DEFAULT_AUDIO_CACHE_DIR)
 
 
@@ -175,6 +180,7 @@ def public_config_snapshot(value: AppConfig) -> dict[str, object]:
     secret_fields = {
         "llm": ("api_key", "vision_api_key"),
         "asr": ("api_key",),
+        "tts": ("api_key",),
         "summary": ("admin_token",),
         "memory": ("qdrant_api_key",),
     }
@@ -226,6 +232,11 @@ def _load_config_from_env() -> AppConfig:
             mode=os.getenv("TTS_MODE", "串行推理"),
             save_mode=os.getenv("TTS_SAVE_MODE", "禁用自动保存"),
             provider=os.getenv("TTS_PROVIDER", "genie-tts"),
+            base_url=os.getenv("TTS_BASE_URL", "").rstrip("/"),
+            api_key=os.getenv("TTS_API_KEY", ""),
+            model=os.getenv("TTS_MODEL", "tts-1"),
+            voice=os.getenv("TTS_VOICE", "alloy"),
+            timeout=float(os.getenv("TTS_TIMEOUT", "60")),
             audio_cache_dir=audio_cache_dir_from_env(),
         ),
         asr=ASRConfig(

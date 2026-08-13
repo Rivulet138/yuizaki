@@ -1173,6 +1173,7 @@ describe('chatStore', () => {
         ...envelope,
         audio_url: '/audio/reply.wav',
         sequence: 0,
+        duration_ms: 1_234.6,
       })
     } finally {
       window.removeEventListener('pet:llm-control', onAvatar)
@@ -1191,8 +1192,32 @@ describe('chatStore', () => {
       expect.objectContaining(expectedDetailEnvelope),
     ])
     expect(ttsDetails).toEqual([
-      expect.objectContaining({ ...expectedDetailEnvelope, sequence: 0 }),
+      expect.objectContaining({ ...expectedDetailEnvelope, sequence: 0, durationMs: 1_235 }),
     ])
+  })
+
+  it('preserves playback compatibility when a legacy TTS payload omits duration', () => {
+    mocks.connected = true
+    const store = useChatStore()
+    store.sendChat('legacy tts')
+    const details: unknown[] = []
+    const onTts = (event: Event) => details.push((event as CustomEvent<unknown>).detail)
+    window.addEventListener('pet:tts-play-url', onTts)
+
+    try {
+      mocks.handlers.get(SocketEvents.TTS_DONE)?.({
+        session_id: store.state.currentSessionId,
+        audio_url: '/audio/legacy.wav',
+        text: 'legacy reply',
+      })
+    } finally {
+      window.removeEventListener('pet:tts-play-url', onTts)
+    }
+
+    expect(details).toEqual([
+      expect.objectContaining({ audio_url: '/audio/legacy.wav', text: 'legacy reply' }),
+    ])
+    expect((details[0] as { durationMs?: number }).durationMs).toBeUndefined()
   })
 
   it('forwards binary PCM TTS chunks to the in-memory player contract', () => {

@@ -1,45 +1,31 @@
-# 系统组成
+# Architecture
 
-## 应用层
+## Process boundaries
 
-| 层 | 职责 |
+| Process | Responsibility |
 | --- | --- |
-| 桌宠 | Live2D/VRM 展示、动作、表情、语音反馈和直接互动 |
-| 控制面板 | 对话、记忆、技能、资源和设置 |
-| 桌面运行时 | 窗口、快捷键、屏幕、文件、进程和权限 |
-| Agent 服务 | 模型路由、Prompt、工具、记忆、语音和视觉 |
-| 扩展服务 | MCP、插件、Qdrant、SoulX 和外部模型服务 |
+| Electron main | Windows, control proxy, preload bridge, native input, lifecycle |
+| Electron renderer | Vue panels, chat state, audio transport, Live2D/VRM rendering |
+| Python backend | FastAPI/Socket.IO, Agent orchestration, providers, memory, tools, scheduler |
+| node-mcp | MCP HTTP service and configured MCP tools |
 
-## 核心链路
+## Runtime lanes
 
-### 语音
+1. **Interaction**: chat or voice creates a session-scoped turn.
+2. **Agent**: the backend streams text and emits tool, memory, and perception events.
+3. **Jobs**: tools, MCP, heartbeat, scheduler, and visual capture expose created/running/progress/terminal states with cancellation and stale-result protection.
+4. **Embodiment**: the renderer maps high-level states to a local avatar state machine.
 
-麦克风输入 → 语音端点检测 → 流式识别 → Agent → 稳定句段 → TTS → 播放。
+Voice keeps capture and playback asynchronous. A barge-in invalidates the current output generation, cancels provider work, clears TTS queues, releases lip-sync, and preserves the new microphone turn.
 
-打断会停止模型生成、语音合成和未播放音频。
+## Avatar runtime
 
-### 视觉
+The Agent sends intent-level targets such as `listen`, `think`, `speak`, gaze, expression, motion, and idle profile. Live2D and VRM adapters apply smoothing, TTL, fade, looping, and relationship-aware strength locally. This avoids asking an LLM to emit animation frames and keeps pointer-follow and idle animation responsive.
 
-用户启用视觉并发起 Agent 回合 → Electron 按需采集当前单帧 → 独立低延迟 VLM →（VLM 不可用、失败或返回空结果时）本地 OCR → 带时间的视觉证据 → Agent。
+## Perception
 
-视觉默认关闭，后台不持续采集屏幕。VLM 和 OCR 结果都以不可信 evidence block 注入；一次 Agent 回合只消费当前请求对应的视觉帧，不阻塞桌宠输入和主对话流。
+Vision is a request-scoped Job: `requested -> captured -> analyzed -> completed` or `discarded`. The backend never starts a permanent screenshot loop. OCR/VLM results are attached to the corresponding Agent turn and are not written to history unless explicitly requested.
 
-### 记忆
+## Persistence
 
-对话 → 记忆候选 → 规则与来源校验 → SQLite 持久化 → 按场景召回。
-
-Qdrant 用于可选语义检索，不替代默认持久数据。召回后先做语义、词法、时间和质量混排；显式启用时再对候选集使用 CrossEncoder reranker，不对全库直接加载或推理。
-
-### 工具
-
-Agent 请求 → 权限判断 → 用户确认 → 工具或插件执行 → 结果返回 Agent。
-
-## 数据边界
-
-- 对话和长期记忆默认保存在本地 SQLite。
-- 按需视觉帧仅保存于内存并按会话替换。
-- 临时音频和运行缓存可永久清理。
-- 模型资源不进入常规用户数据备份。
-- 自定义外部数据路径由用户单独备份。
-
-技术组件见 [TECH_STACK.md](TECH_STACK.md)，接口见 [API.md](API.md)。
+SQLite stores chat, settings metadata, and memory. Qdrant is optional for semantic retrieval. Session runtime state remains isolated by `sessionId`; background completion updates unread state rather than switching the active session.

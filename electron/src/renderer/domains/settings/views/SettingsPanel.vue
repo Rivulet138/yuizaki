@@ -264,6 +264,31 @@
 
                   <div class="subsection-title">{{ t('settings.tts.sectionCharacter') }}</div>
                   <div class="form-grid">
+                    <el-form-item :label="t('settings.tts.provider')">
+                      <el-select v-model="form.tts.provider" class="full-width" @change="saveTtsField('provider', $event, { flush: true })">
+                        <el-option :label="t('settings.tts.provider.genie')" value="genie-tts" />
+                        <el-option :label="t('settings.tts.provider.openai')" value="openai-compatible" />
+                      </el-select>
+                    </el-form-item>
+                    <template v-if="form.tts.provider === 'openai-compatible'">
+                      <el-form-item :label="t('settings.tts.baseUrl')">
+                        <el-input v-model="form.tts.base_url" @input="saveTtsField('base_url', $event)" @change="flushTtsSave" />
+                      </el-form-item>
+                      <el-form-item :label="t('settings.tts.apiKey')">
+                        <el-input v-model="form.tts.api_key" type="password" show-password autocomplete="off" @input="saveTtsField('api_key', $event)" @change="flushTtsSave" />
+                      </el-form-item>
+                      <el-form-item :label="t('settings.tts.model')">
+                        <el-input v-model="form.tts.model" @input="saveTtsField('model', $event)" @change="flushTtsSave" />
+                      </el-form-item>
+                      <el-form-item :label="t('settings.tts.voice')">
+                        <el-input v-model="form.tts.voice" @input="saveTtsField('voice', $event)" @change="flushTtsSave" />
+                      </el-form-item>
+                      <el-form-item :label="t('settings.tts.timeout')">
+                        <el-input-number v-model="form.tts.timeout" :min="1" :max="300" @change="saveTtsField('timeout', $event, { flush: true })" />
+                      </el-form-item>
+                    </template>
+                  </div>
+                  <div class="form-grid">
                     <el-form-item :label="t('settings.tts.character')">
                       <el-input v-model="form.tts.genie_character" @input="saveTtsField('genie_character', $event)" @change="flushTtsSave" />
                     </el-form-item>
@@ -532,7 +557,7 @@ type LlmVisionPatch = Partial<{
   detail: 'low' | 'high' | 'auto' | 'original'
 }>
 type ProviderStatusClass = 'ready' | 'warning' | 'muted'
-type TtsProviderPreset = 'genie-tts'
+type TtsProviderPreset = 'genie-tts' | 'openai-compatible'
 type SaveFieldOptions = {
   flush?: boolean
 }
@@ -549,6 +574,11 @@ type TtsProfile = {
   mode: string
   save_mode: string
   provider: TtsProviderPreset
+  base_url: string
+  api_key: string
+  model: string
+  voice: string
+  timeout: number
 }
 type TtsProfileField = keyof TtsProfile
 
@@ -618,6 +648,11 @@ const form = reactive({
     mode: '串行推理',
     save_mode: '禁用自动保存',
     provider: TTS_PROVIDER,
+    base_url: '',
+    api_key: '',
+    model: 'tts-1',
+    voice: 'alloy',
+    timeout: 60,
   },
   asr: {
     provider: 'sherpa-onnx-online',
@@ -766,7 +801,9 @@ const saveSummaryField = (field: keyof SummarySettings, value: number | string) 
   Object.assign(form.summary, { [field]: value })
   debouncedSave({ summary: { [field]: value } })
 }
-const activeTtsProviderLabel = computed(() => t('settings.tts.genieProvider'))
+const activeTtsProviderLabel = computed(() => form.tts.provider === 'openai-compatible'
+  ? t('settings.tts.provider.openai')
+  : t('settings.tts.genieProvider'))
 const formatTtsDuration = (value?: number | null): string => {
   const numericValue = Number(value)
   if (!Number.isFinite(numericValue)) return t('settings.tts.metric.empty')
@@ -1011,6 +1048,11 @@ const defaultTtsProfile = (): TtsProfile => {
     mode: '串行推理',
     save_mode: '禁用自动保存',
     provider: TTS_PROVIDER,
+    base_url: '',
+    api_key: '',
+    model: 'tts-1',
+    voice: 'alloy',
+    timeout: 60,
   }
 }
 
@@ -1028,7 +1070,12 @@ const sanitizeTtsProfile = (value?: Partial<TtsProfile> | null): TtsProfile => {
     split: stringValue(value?.split, defaults.split),
     mode: stringValue(value?.mode, defaults.mode),
     save_mode: '禁用自动保存',
-    provider: TTS_PROVIDER,
+    provider: value?.provider === 'openai-compatible' ? 'openai-compatible' : TTS_PROVIDER,
+    base_url: stringValue(value?.base_url, defaults.base_url),
+    api_key: stringValue(value?.api_key, defaults.api_key),
+    model: stringValue(value?.model, defaults.model),
+    voice: stringValue(value?.voice, defaults.voice),
+    timeout: Number.isFinite(Number(value?.timeout)) ? Math.max(1, Number(value?.timeout)) : defaults.timeout,
   }
 }
 
@@ -1048,6 +1095,11 @@ const applyTtsProfileToForm = (profile: TtsProfile) => {
   form.tts.mode = profile.mode
   form.tts.save_mode = profile.save_mode
   form.tts.provider = profile.provider
+  form.tts.base_url = profile.base_url
+  form.tts.api_key = profile.api_key
+  form.tts.model = profile.model
+  form.tts.voice = profile.voice
+  form.tts.timeout = profile.timeout
 }
 
 const ttsRuntimePatchFromProfile = (profile: TtsProfile): SettingsPatch => ({
@@ -1062,16 +1114,21 @@ const ttsRuntimePatchFromProfile = (profile: TtsProfile): SettingsPatch => ({
   mode: profile.mode,
   save_mode: profile.save_mode,
   provider: profile.provider,
+  base_url: profile.base_url,
+  api_key: profile.api_key,
+  model: profile.model,
+  voice: profile.voice,
+  timeout: profile.timeout,
 })
 
 const saveActiveTtsPatch = (patch: SettingsPatch) => {
   const activeProfile = snapshotTtsProfile()
-  debouncedSave({ tts: { ...ttsRuntimePatchFromProfile(activeProfile), ...patch, provider: TTS_PROVIDER, save_mode: '禁用自动保存' } })
+  debouncedSave({ tts: { ...ttsRuntimePatchFromProfile(activeProfile), ...patch, save_mode: '禁用自动保存' } })
 }
 
 const setTtsFormField = (field: TtsProfileField, value: unknown) => {
   if (field === 'provider') {
-    form.tts.provider = TTS_PROVIDER
+    form.tts.provider = value === 'openai-compatible' ? 'openai-compatible' : 'genie-tts'
     return
   }
   if (field === 'device') {
@@ -2616,7 +2673,12 @@ const hydrateForm = () => {
       split: s.tts.split || '智能切分',
       mode: s.tts.mode || '串行推理',
       save_mode: s.tts.save_mode || '禁用自动保存',
-      provider: TTS_PROVIDER,
+      provider: s.tts.provider === 'openai-compatible' ? 'openai-compatible' : TTS_PROVIDER,
+      base_url: s.tts.base_url || '',
+      api_key: s.tts.api_key || '',
+      model: s.tts.model || 'tts-1',
+      voice: s.tts.voice || 'alloy',
+      timeout: s.tts.timeout ?? 60,
     })
     applyTtsProfileToForm(activeProfile)
   }

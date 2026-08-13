@@ -19,6 +19,6 @@ describe('AgentTracePanel tool jobs', () => {
     expect(panel).toContain('function companionJobResultSummary(job: CompanionEventEnvelope)')
     expect(panel).toContain('function companionJobDuration(job: CompanionEventEnvelope)')
     expect(panel).toContain('function companionJobOutcome(job: CompanionEventEnvelope)')
-    expect(panel).toContain('job.data.artifactCount')
+    expect(panel).toContain('projectCompanionJob(job).artifactCount')
   })
 })

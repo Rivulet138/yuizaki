@@ -1,0 +1,33 @@
+from __future__ import annotations
+
+from typing import Any, Protocol
+
+
+class TTSProviderClient(Protocol):
+    @property
+    def is_enabled(self) -> bool: ...
+
+    @property
+    def is_warming_up(self) -> bool: ...
+
+    async def connect(self, *, background: bool = False) -> None: ...
+
+    async def disconnect(self) -> None: ...
+
+    async def warmup(self, *, background: bool = False, force: bool = False) -> bool: ...
+
+    def status_snapshot(self) -> dict[str, Any]: ...
+
+    async def synthesize(self, ws: Any, gen: Any) -> None: ...
+
+    async def synthesize_stream_segment(
+        self,
+        ws: Any,
+        gen: Any,
+        text: str,
+        sequence: int,
+    ) -> bool: ...
+
+    async def complete_stream(self, ws: Any, gen: Any, sequence: int) -> None: ...
+
+    async def test_connection(self) -> dict[str, Any]: ...

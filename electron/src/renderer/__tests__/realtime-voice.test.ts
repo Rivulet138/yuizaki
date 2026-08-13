@@ -156,6 +156,64 @@ describe('RealtimeVoiceSession', () => {
     session.close()
   })
 
+  it('requests continuous semantic VAD and forwards provider speech boundaries', async () => {
+    const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
+    const session = new RealtimeVoiceSession()
+    await session.connect({ workspaceId: 'default', sessionId: 'voice', voiceMode: 'continuous', vadEagerness: 'high' })
+
+    const request = JSON.parse(String(requestJsonMock.mock.calls[0]?.[1]?.body))
+    expect(request).toMatchObject({ voice_mode: 'continuous', vad_eagerness: 'high' })
+    const peer = MockPeerConnection.latest!
+    const starts: unknown[] = []
+    const ends: unknown[] = []
+    session.on('speech-start', payload => starts.push(payload))
+    session.on('speech-end', payload => ends.push(payload))
+    peer.channel.serverEvent({ type: 'input_audio_buffer.speech_started' })
+    peer.channel.serverEvent({ type: 'input_audio_buffer.speech_stopped' })
+    expect(starts).toHaveLength(1)
+    expect(ends).toHaveLength(1)
+    session.close()
+  })
+
+  it('keeps the microphone enabled for continuous mode and only stops on explicit continuous stop', async () => {
+    const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
+    const session = new RealtimeVoiceSession()
+    await session.connect({ workspaceId: 'default', sessionId: 'voice', voiceMode: 'continuous' })
+
+    expect(audioTrack.enabled).toBe(true)
+    expect(session.isMicrophoneActive()).toBe(true)
+    expect(session.stopPushToTalk()).toBe(false)
+    expect(audioTrack.enabled).toBe(true)
+
+    session.stopContinuous()
+    expect(audioTrack.enabled).toBe(false)
+    expect(session.isMicrophoneActive()).toBe(false)
+    const sentTypes = MockPeerConnection.latest!.channel.sent.map(payload => JSON.parse(payload).type)
+    expect(sentTypes).toContain('input_audio_buffer.clear')
+    session.close()
+  })
+
+  it('associates provider-created VAD items and responses with the active continuous turn', async () => {
+    const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
+    const session = new RealtimeVoiceSession()
+    const partials: string[] = []
+    const responseStarts: number[] = []
+    session.on('input-partial', ({ text }) => partials.push(text))
+    session.on('response-start', ({ elapsedMs }) => responseStarts.push(elapsedMs))
+    await session.connect({ workspaceId: 'default', sessionId: 'voice', voiceMode: 'continuous' })
+
+    const channel = MockPeerConnection.latest!.channel
+    channel.serverEvent({ type: 'input_audio_buffer.speech_started' })
+    channel.serverEvent({ type: 'input_audio_buffer.speech_stopped' })
+    channel.serverEvent({ type: 'input_audio_buffer.committed', item_id: 'continuous-item' })
+    channel.serverEvent({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'continuous-item', transcript: 'hello' })
+    channel.serverEvent({ type: 'response.created', response: { id: 'continuous-response' } })
+
+    expect(partials).toEqual(['hello'])
+    expect(responseStarts).toHaveLength(1)
+    session.close()
+  })
+
   it('keeps a session alive when a transient disconnect recovers within the grace period', async () => {
     const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
     const session = new RealtimeVoiceSession()

@@ -39,6 +39,8 @@ export interface RealtimeVoiceSessionOptions {
   petControlContext?: PetControlContextPayload | null
   mcpEnabled?: boolean
   webSearchEnabled?: boolean
+  voiceMode?: 'push-to-talk' | 'continuous'
+  vadEagerness?: 'low' | 'medium' | 'high' | 'auto'
 }
 
 export interface RealtimeVoiceEventMap {
@@ -48,10 +50,13 @@ export interface RealtimeVoiceEventMap {
   'turn-complete': RealtimeVoiceTurn
   connect: { elapsedMs: number }
   'speech-end': { elapsedMs: number }
+  'speech-start': { elapsedMs: number }
   'transcript-stable': { elapsedMs: number }
   'response-start': { elapsedMs: number }
   'playback-start': { elapsedMs: number }
   'playback-end': Record<string, never>
+  'playback-stop': { elapsedMs: number }
+  'provider-cancel': { elapsedMs: number }
   'lip-sync-level': { level: number; active: boolean }
   'interrupt-ack': { elapsedMs: number }
   'agent-result': RealtimeVoiceScope & { callId: string; turnId: string; reply: string; petControl?: unknown; actionEnvelope?: unknown }
@@ -233,6 +238,9 @@ export class RealtimeVoiceSession {
   private delegatedActionEnvelope: unknown
   private agentMcpEnabled = true
   private agentWebSearchEnabled = false
+  private voiceMode: 'push-to-talk' | 'continuous' = 'push-to-talk'
+  private vadEagerness: 'low' | 'medium' | 'high' | 'auto' = 'auto'
+  private speechStartedAt: number | null = null
 
   on<K extends keyof RealtimeVoiceEventMap>(
     event: K,
@@ -255,10 +263,11 @@ export class RealtimeVoiceSession {
       && Date.now() - this.connectedAt < MAX_REUSABLE_SESSION_MS
   }
 
-  isConnectedFor(options: { workspaceId: string; sessionId: string }): boolean {
+  isConnectedFor(options: { workspaceId: string; sessionId: string; voiceMode?: 'push-to-talk' | 'continuous' }): boolean {
     return this.isConnected()
       && this.workspaceId === options.workspaceId
       && this.sessionId === options.sessionId
+      && (options.voiceMode === undefined || this.voiceMode === options.voiceMode)
   }
 
   getCurrentTurnIdentity(): Pick<RealtimeVoiceScope, 'turnId' | 'generationId' | 'requestId' | 'interruptionEpoch'> {
@@ -271,13 +280,16 @@ export class RealtimeVoiceSession {
   }
 
   async connect(options: RealtimeVoiceSessionOptions): Promise<void> {
-    this.agentMcpEnabled = options.mcpEnabled !== false
-    this.agentWebSearchEnabled = options.webSearchEnabled === true
+    const voiceMode = options.voiceMode === 'continuous' ? 'continuous' : 'push-to-talk'
     this.petControlContext = options.petControlContext ?? null
     if (
-      this.isConnectedFor(options)
+      this.isConnectedFor({ ...options, voiceMode })
     ) return
     if (this.connectionPromise) return this.connectionPromise
+    this.agentMcpEnabled = options.mcpEnabled !== false
+    this.agentWebSearchEnabled = options.webSearchEnabled === true
+    this.voiceMode = voiceMode
+    this.vadEagerness = options.vadEagerness ?? 'auto'
 
     this.connectionPromise = this.openConnection(options)
       .catch((error) => {
@@ -317,10 +329,33 @@ export class RealtimeVoiceSession {
     track.enabled = true
     this.pressStartedAt = performance.now()
     this.setStatus('recording')
+    if (this.voiceMode === 'continuous') return
+  }
+
+  isContinuousMode(): boolean {
+    return this.voiceMode === 'continuous'
+  }
+
+  isMicrophoneActive(): boolean {
+    return this.mediaStream?.getAudioTracks().some(track => track.enabled && track.readyState !== 'ended') === true
+  }
+
+  stopContinuous(): void {
+    if (this.voiceMode !== 'continuous') return
+    const track = this.mediaStream?.getAudioTracks()[0]
+    if (track) track.enabled = false
+    this.pressStartedAt = null
+    this.speechStartedAt = null
+    this.sendEvent({ type: 'input_audio_buffer.clear' })
+    this.setStatus('ready')
   }
 
   stopPushToTalk(): boolean {
     if (this.pressStartedAt === null) return false
+    if (this.voiceMode === 'continuous') {
+      this.setStatus('recording')
+      return false
+    }
     const track = this.mediaStream?.getAudioTracks()[0]
     if (track) track.enabled = false
     const elapsedMs = Math.max(0, performance.now() - this.pressStartedAt)
@@ -366,9 +401,11 @@ export class RealtimeVoiceSession {
     this.clearInterruptAckTimer()
     this.interruptStartedAt = performance.now()
     this.sendEvent({ type: 'response.cancel' })
+    this.emit('provider-cancel', { elapsedMs: Math.max(0, performance.now() - this.interruptStartedAt) })
     this.sendEvent({ type: 'output_audio_buffer.clear' })
     this.responseActive = false
     this.audioElement?.pause()
+    this.emit('playback-stop', { elapsedMs: Math.max(0, performance.now() - this.interruptStartedAt) })
     this.stopOutputLipSync()
     this.setStatus('ready')
     this.interruptAckTimer = window.setTimeout(() => {
@@ -395,6 +432,8 @@ export class RealtimeVoiceSession {
       body: JSON.stringify({
         workspace_id: options.workspaceId,
         session_id: options.sessionId,
+        voice_mode: this.voiceMode,
+        vad_eagerness: this.vadEagerness,
       }),
     })
     if (!secret.client_secret.startsWith('ek_')) {
@@ -488,6 +527,14 @@ export class RealtimeVoiceSession {
     await channelReady
     this.connectedAt = Date.now()
     this.setStatus('ready')
+    if (this.voiceMode === 'continuous') {
+      const track = this.mediaStream?.getAudioTracks()[0]
+      if (track) {
+        track.enabled = true
+        this.pressStartedAt = performance.now()
+        this.setStatus('recording')
+      }
+    }
     this.emit('connect', { elapsedMs: Math.max(0, performance.now() - connectStartedAt) })
   }
 
@@ -501,12 +548,35 @@ export class RealtimeVoiceSession {
       return
     }
     const type = readString(event.type)
+    if (this.voiceMode === 'continuous' && type === 'input_audio_buffer.speech_started') {
+      const startedAt = performance.now()
+      if (this.responseActive || this.outputLipSyncActive) {
+        this.interrupt()
+        this.resetTurn()
+      } else if (this.responseDone || this.currentTurnCancelled) {
+        this.resetTurn()
+      }
+      this.speechStartedAt = startedAt
+      this.emit('speech-start', { elapsedMs: this.speechEndedAt === null ? 0 : Math.max(0, startedAt - this.speechEndedAt) })
+      this.setStatus('recording')
+      return
+    }
+    if (this.voiceMode === 'continuous' && type === 'input_audio_buffer.speech_stopped') {
+      this.speechEndedAt = performance.now()
+      this.emit('speech-end', { elapsedMs: this.speechStartedAt === null ? 0 : Math.max(0, this.speechEndedAt - this.speechStartedAt) })
+      this.setStatus('responding')
+      return
+    }
     if (!type) return
 
     if (type === 'input_audio_buffer.committed') {
       const itemId = readString(event.item_id).trim()
       const pending = this.pendingInputCommits.shift()
       if (!itemId || this.retiredInputItemIds.has(itemId)) return
+      if (this.voiceMode === 'continuous' && !pending) {
+        this.currentInputItemId = itemId
+        return
+      }
       const belongsToCurrentTurn = pending
         && pending.generationId === this.currentGenerationId
         && pending.turnId === this.currentTurnId
@@ -988,6 +1058,7 @@ export class RealtimeVoiceSession {
     this.currentTurnCancelled = false
     this.playbackReported = false
     this.speechEndedAt = null
+    this.speechStartedAt = null
     this.delegatedActionEnvelope = undefined
     this.currentTurnId = createTurnId()
     this.currentGenerationId = createTurnId()
@@ -1000,6 +1071,10 @@ export class RealtimeVoiceSession {
     const responseId = readString(value.id).trim()
     if (responseId && this.retiredResponseIds.has(responseId)) return false
     const metadata = isRecord(value.metadata) ? value.metadata : null
+    if (this.voiceMode === 'continuous' && !metadata) {
+      if (responseId) this.currentResponseId = responseId
+      return true
+    }
     const generationId = readString(metadata?.generation_id).trim()
     const turnId = readString(metadata?.turn_id).trim()
     const requestId = readString(metadata?.request_id).trim()
@@ -1156,6 +1231,7 @@ export class RealtimeVoiceSession {
       this.audioElement = null
     }
     this.pressStartedAt = null
+    this.speechStartedAt = null
     this.connectedAt = 0
     this.agentModel = ''
     this.petControlContext = null

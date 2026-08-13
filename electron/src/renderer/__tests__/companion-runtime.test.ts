@@ -112,6 +112,55 @@ describe('companion runtime controller', () => {
     expect(controller.state.activity).toBe('idle')
   })
 
+  it('shows bounded terminal job feedback and restores idle without reopening stale jobs', async () => {
+    vi.useFakeTimers()
+    const behavior = vi.fn()
+    const controller = createCompanionRuntimeController({
+      pollSnapshot: vi.fn(),
+      isAvailable: () => true,
+      readDoNotDisturb: async () => false,
+      sinks: { behavior },
+    })
+    const base = {
+      version: 1 as const, workspaceId: 'default', sessionId: 'voice', turnId: 'turn-feedback',
+      jobId: 'job-feedback', requestId: 'request-feedback', interruptionEpoch: 0,
+      source: 'voice' as const, timestamp: 1_000,
+    }
+
+    await controller.publishJob({ ...base, type: 'AgentJobCreated', revision: 1, status: 'created' })
+    await controller.publishJob({ ...base, type: 'AgentJobCompleted', revision: 2, status: 'completed' })
+    expect(controller.presentationState.value).toBe('job-success')
+    expect(behavior).toHaveBeenLastCalledWith('curious', 1_200)
+
+    await vi.advanceTimersByTimeAsync(1_200)
+    expect(controller.presentationState.value).toBe('idle')
+    expect(behavior).toHaveBeenLastCalledWith('idle', undefined)
+  })
+
+  it('clears terminal feedback when a newer job starts', async () => {
+    vi.useFakeTimers()
+    const behavior = vi.fn()
+    const controller = createCompanionRuntimeController({
+      pollSnapshot: vi.fn(), isAvailable: () => true, readDoNotDisturb: async () => false, sinks: { behavior },
+    })
+    const eventFor = (jobId: string, revision: number, status: 'created' | 'failed') => ({
+      version: 1 as const,
+      type: status === 'created' ? 'AgentJobCreated' as const : 'AgentJobFailed' as const,
+      workspaceId: 'default', sessionId: 'voice', turnId: `turn-${jobId}`, jobId,
+      requestId: `request-${jobId}`, revision, interruptionEpoch: 0, source: 'voice' as const,
+      timestamp: 1_000 + revision, status,
+    })
+
+    await controller.publishJob(eventFor('old', 1, 'created'))
+    await controller.publishJob(eventFor('old', 2, 'failed'))
+    expect(controller.presentationState.value).toBe('job-error')
+    await controller.publishJob(eventFor('new', 1, 'created'))
+    expect(controller.presentationState.value).toBe('executing')
+    expect(behavior).toHaveBeenLastCalledWith('focused', undefined)
+    await vi.advanceTimersByTimeAsync(1_200)
+    expect(controller.presentationState.value).toBe('executing')
+  })
+
   it('stays executing until every active job for a source reaches a terminal state', async () => {
     const controller = createCompanionRuntimeController({
       pollSnapshot: vi.fn(),

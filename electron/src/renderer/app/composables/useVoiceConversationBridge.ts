@@ -259,6 +259,8 @@ export function useVoiceConversationBridge() {
       sessionId: chatState.currentSessionId,
       mcpEnabled: chatStore.chatOptions.mcp_enabled,
       webSearchEnabled: chatStore.chatOptions.web_search_enabled,
+      voiceMode: chatStore.chatOptions.voice_mode,
+      vadEagerness: 'auto',
       petControlContext: chatStore.getPetControlContext(),
     }
     if (
@@ -276,6 +278,13 @@ export function useVoiceConversationBridge() {
         if (permission.state !== 'granted') return
       }
       await realtimeVoiceSession.connect(sessionContext)
+      if (chatStore.chatOptions.voice_mode === 'continuous') {
+        activeVoiceTransport = 'realtime'
+        chatStore.setRealtimeRecording(true, realtimeVoiceSession.getCurrentTurnIdentity())
+        if (chatStore.chatOptions.pet_link_enabled !== false) {
+          void publishCompanionRuntimeEvent({ source: 'voice', activity: 'listening', interruptionEpoch: voiceRuntimeEpoch })
+        }
+      }
     } catch (error) {
       console.debug('[VoiceBridge] realtime voice prewarm skipped:', error)
     }
@@ -283,7 +292,8 @@ export function useVoiceConversationBridge() {
 
   const stopMic = () => {
     if (activeVoiceTransport === 'realtime') {
-      realtimeVoiceSession.stopPushToTalk()
+      if (realtimeVoiceSession.isContinuousMode()) realtimeVoiceSession.stopContinuous()
+      else realtimeVoiceSession.stopPushToTalk()
       activeVoiceTransport = null
       chatStore.setRealtimeRecording(false)
       return
@@ -309,6 +319,7 @@ export function useVoiceConversationBridge() {
       realtimeVoiceSession.isConnectedFor({
         workspaceId: chatState.currentWorkspaceId,
         sessionId: chatState.currentSessionId,
+        voiceMode: chatStore.chatOptions.voice_mode,
       })
     ) {
       try {
@@ -318,6 +329,8 @@ export function useVoiceConversationBridge() {
           interruptionEpoch: voiceRuntimeEpoch,
           mcpEnabled: chatStore.chatOptions.mcp_enabled,
           webSearchEnabled: chatStore.chatOptions.web_search_enabled,
+          voiceMode: chatStore.chatOptions.voice_mode,
+          vadEagerness: 'auto',
           petControlContext: chatStore.getPetControlContext(),
         })
         activeVoiceTransport = 'realtime'
@@ -377,6 +390,9 @@ export function useVoiceConversationBridge() {
     realtimeEventBridge.listen('status', ({ status }) => {
       if (status === 'recording') {
         chatStore.setRealtimeRecording(true, realtimeVoiceSession.getCurrentTurnIdentity())
+        if (chatStore.chatOptions.pet_link_enabled !== false) {
+          void publishCompanionRuntimeEvent({ source: 'voice', activity: 'listening', interruptionEpoch: voiceRuntimeEpoch })
+        }
         return
       }
       if (status === 'responding') {
@@ -391,12 +407,13 @@ export function useVoiceConversationBridge() {
         return
       }
       if (status === 'ready') {
-        chatStore.setRealtimeRecording(false)
+        const continuousListening = realtimeVoiceSession.isContinuousMode() && realtimeVoiceSession.isMicrophoneActive()
+        chatStore.setRealtimeRecording(continuousListening, continuousListening ? realtimeVoiceSession.getCurrentTurnIdentity() : undefined)
         chatState.isGenerating = false
         if (chatStore.chatOptions.pet_link_enabled !== false) {
           void publishCompanionRuntimeEvent({
             source: 'voice',
-            activity: 'idle',
+            activity: continuousListening ? 'listening' : 'idle',
             interruptionEpoch: voiceRuntimeEpoch,
           })
         }
@@ -413,6 +430,11 @@ export function useVoiceConversationBridge() {
       if (!isCurrentRealtimeScope(payload)) return
       const { text } = payload
       chatStore.applyRealtimeInputPartial(text)
+    })
+    realtimeEventBridge.listen('speech-start', () => {
+      if (chatStore.chatOptions.pet_link_enabled !== false) {
+        void publishCompanionRuntimeEvent({ source: 'voice', activity: 'listening', interruptionEpoch: voiceRuntimeEpoch })
+      }
     })
     realtimeEventBridge.listen('assistant-delta', (payload) => {
       if (!isCurrentRealtimeScope(payload)) return
@@ -453,6 +475,18 @@ export function useVoiceConversationBridge() {
         void publishCompanionRuntimeEvent({ source: 'voice', activity: 'idle' })
       },
     )
+    watch(
+      () => [chatStore.chatOptions.response_mode, chatStore.chatOptions.voice_mode] as const,
+      ([responseMode, voiceMode], [previousResponseMode, previousVoiceMode]) => {
+        if (responseMode === previousResponseMode && voiceMode === previousVoiceMode) return
+        if (realtimeVoiceSession.isConnected()) realtimeVoiceSession.close()
+        activeVoiceTransport = null
+        chatStore.setRealtimeRecording(false)
+        chatStore.setRealtimePlayback(false)
+        void publishCompanionRuntimeEvent({ source: 'voice', activity: 'idle' })
+        if (responseMode === 'instant') void prewarmRealtimeVoice()
+      },
+    )
     realtimeEventBridge.listen('companion-event', (event) => {
       void publishCompanionJobEvent(event, {
         workspaceId: chatState.currentWorkspaceId,
@@ -487,6 +521,13 @@ export function useVoiceConversationBridge() {
     })
     realtimeEventBridge.listen('playback-end', () => {
       chatStore.setRealtimePlayback(false)
+    })
+    realtimeEventBridge.listen('playback-stop', ({ elapsedMs }) => {
+      chatStore.setRealtimePlayback(false)
+      if (socketClient.isConnected()) socketClient.sendClientTiming('realtime_playback_stop', { elapsedMs })
+    })
+    realtimeEventBridge.listen('provider-cancel', ({ elapsedMs }) => {
+      if (socketClient.isConnected()) socketClient.sendClientTiming('realtime_provider_cancel', { elapsedMs })
     })
     realtimeEventBridge.listen('lip-sync-level', ({ level, active }) => {
       const petLinkEnabled = chatStore.chatOptions.pet_link_enabled !== false

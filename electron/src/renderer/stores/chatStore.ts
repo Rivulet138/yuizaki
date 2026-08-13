@@ -9,7 +9,6 @@ import { isPetLipSyncViseme, type PetSentenceEmotionCue, type PetVisemeCue } fro
 import { isCompanionEventEnvelope, type CompanionEventEnvelope } from '../../shared/companion-event'
 import type {
   ChatAgentStep,
-  ChatArtifactRef,
   ChatMemorySource,
   ChatMessage,
   ChatOptions,
@@ -25,6 +24,7 @@ import {
   publishCompanionInterrupt,
   publishCompanionRuntimeEvent,
 } from '@/app/runtime/companionRuntime'
+import { companionJobToAgentStep } from '@/app/runtime/companionJobProjection'
 
 export interface ChatStoreState {
   messages: ChatMessage[]
@@ -142,7 +142,7 @@ const CHAT_OPTIONS_MAX_OUTPUT_TOKENS = 65535
 const createTtsStopEvent = (detail?: { interrupted?: boolean; petLipSyncHandled?: boolean }) =>
   new CustomEvent('pet:tts-stop', { detail })
 
-const DEFAULT_CHAT_OPTIONS: Required<Pick<ChatOptions, 'temperature' | 'top_p' | 'top_k' | 'min_p' | 'frequency_penalty' | 'presence_penalty' | 'repetition_penalty' | 'max_tokens' | 'reasoning_effort' | 'response_mode' | 'mcp_enabled' | 'web_search_enabled' | 'tts_enabled' | 'pet_link_enabled' | 'translation_target' | 'prompt_mode'>> & Pick<ChatOptions, 'model'> = {
+const DEFAULT_CHAT_OPTIONS: Required<Pick<ChatOptions, 'temperature' | 'top_p' | 'top_k' | 'min_p' | 'frequency_penalty' | 'presence_penalty' | 'repetition_penalty' | 'max_tokens' | 'reasoning_effort' | 'response_mode' | 'voice_mode' | 'mcp_enabled' | 'web_search_enabled' | 'tts_enabled' | 'pet_link_enabled' | 'translation_target' | 'prompt_mode'>> & Pick<ChatOptions, 'model'> = {
   model: '',
   temperature: 1.2,
   top_p: 0.9,
@@ -154,6 +154,7 @@ const DEFAULT_CHAT_OPTIONS: Required<Pick<ChatOptions, 'temperature' | 'top_p' |
   max_tokens: 8192,
   reasoning_effort: 'default',
   response_mode: 'balanced',
+  voice_mode: 'push-to-talk',
   mcp_enabled: true,
   web_search_enabled: false,
   tts_enabled: true,
@@ -376,6 +377,7 @@ const normalizeChatOptions = (value: unknown): ChatOptions => {
     response_mode: ['instant', 'balanced', 'deep'].includes(String(source.response_mode || ''))
       ? source.response_mode as ChatOptions['response_mode']
       : DEFAULT_CHAT_OPTIONS.response_mode,
+    voice_mode: source.voice_mode === 'continuous' ? 'continuous' : DEFAULT_CHAT_OPTIONS.voice_mode,
     mcp_enabled: typeof source.mcp_enabled === 'boolean' ? source.mcp_enabled : DEFAULT_CHAT_OPTIONS.mcp_enabled,
     web_search_enabled: typeof source.web_search_enabled === 'boolean' ? source.web_search_enabled : DEFAULT_CHAT_OPTIONS.web_search_enabled,
     tts_enabled: typeof source.tts_enabled === 'boolean' ? source.tts_enabled : DEFAULT_CHAT_OPTIONS.tts_enabled,
@@ -496,44 +498,6 @@ export const useChatStore = defineStore('chat', () => {
     }]
   })
 
-  const companionJobToStep = (event: CompanionEventEnvelope): ChatAgentStep => {
-    const data = event.data || {}
-    const text = (value: unknown) => typeof value === 'string' ? value.trim() : ''
-    const title = text(data.title) || text(data.task_name) || text(data.taskName) || text(data.phase) || `${event.source} job`
-    const tool = text(data.toolName) || text(data.tool_name) || text(data.tool)
-    const resultSummary = text(data.resultSummary ?? data.result_summary).replace(/\s+/g, ' ').slice(0, 360)
-    const error = text(data.error ?? data.cancellationReason ?? data.cancellation_reason)
-    const durationMs = typeof data.durationMs === 'number' && Number.isFinite(data.durationMs) ? Math.max(0, Math.round(data.durationMs)) : undefined
-    const artifactCount = typeof data.artifactCount === 'number' && Number.isFinite(data.artifactCount) ? Math.max(0, Math.round(data.artifactCount)) : undefined
-    const progressRaw = typeof data.progress === 'number' && Number.isFinite(data.progress) ? data.progress : undefined
-    const progress = progressRaw === undefined ? undefined : Math.max(0, Math.min(1, progressRaw > 1 ? progressRaw / 100 : progressRaw))
-    const artifacts: ChatArtifactRef[] = Array.isArray(data.artifacts)
-      ? data.artifacts.flatMap((artifact) => {
-        if (!isRecord(artifact)) return []
-        const id = String(artifact.id ?? artifact.artifactId ?? '').trim()
-        const name = String(artifact.name ?? artifact.filename ?? '').trim()
-        const type = String(artifact.type ?? artifact.mimeType ?? '').trim()
-        const url = String(artifact.url ?? artifact.path ?? '').trim()
-        if (!id && !name && !url) return []
-        return [{ ...(id ? { id } : {}), ...(name ? { name } : {}), ...(type ? { type } : {}), ...(url ? { url } : {}) }]
-      })
-      : []
-    return {
-      id: event.jobId,
-      title,
-      status: event.status,
-      ...(tool ? { tool } : {}),
-      ...(error ? { error } : {}),
-      jobId: event.jobId,
-      ...(event.runId ? { runId: event.runId } : {}),
-      ...(resultSummary ? { resultSummary } : {}),
-      ...(durationMs !== undefined ? { durationMs } : {}),
-      ...(artifactCount !== undefined ? { artifactCount } : {}),
-      ...(artifacts.length ? { artifacts } : {}),
-      ...(progress !== undefined ? { progress } : {}),
-    }
-  }
-
   const mergeAgentStep = (target: ChatAgentStep[] | null | undefined, next: ChatAgentStep) => {
     const steps = target ? [...target] : []
     const index = steps.findIndex((step) => (next.jobId && step.jobId === next.jobId) || step.id === next.id)
@@ -605,7 +569,7 @@ export const useChatStore = defineStore('chat', () => {
     if (event.conversationId !== undefined && event.conversationId !== request.conversationId) return
     if (event.operationId !== undefined && event.operationId !== request.operationId) return
     if (event.stepIndex !== undefined && event.stepIndex !== request.stepIndex) return
-    const step = companionJobToStep(event)
+    const step = companionJobToAgentStep(event)
     const existing = pendingMessageTraces.get(event.requestId) || {}
     const assistant = state.messages.find((message) => message.role === 'assistant' && message.request_id === event.requestId)
     if (assistant) {
@@ -1077,7 +1041,7 @@ export const useChatStore = defineStore('chat', () => {
           interruptionEpoch: currentRuntimeRequest?.interruptionEpoch,
         })
       }
-      const eventDetail: { text?: string; sentenceEmotionCues?: PetSentenceEmotionCue[]; visemeCues?: PetVisemeCue[]; petLinkEnabled?: boolean; sessionId?: string; generationId?: string; turnId?: string; requestId?: string; conversationId?: string; operationId?: string; runId?: string; stepIndex?: number; interruptionEpoch?: number; version?: 1; sequence?: number; isFinal?: boolean } = {
+      const eventDetail: { text?: string; sentenceEmotionCues?: PetSentenceEmotionCue[]; visemeCues?: PetVisemeCue[]; petLinkEnabled?: boolean; sessionId?: string; generationId?: string; turnId?: string; requestId?: string; conversationId?: string; operationId?: string; runId?: string; stepIndex?: number; interruptionEpoch?: number; version?: 1; sequence?: number; isFinal?: boolean; durationMs?: number } = {
         sessionId,
         turnId: readString(data, 'turn_id'),
         requestId: requestIdFromEvent,
@@ -1095,6 +1059,10 @@ export const useChatStore = defineStore('chat', () => {
       if (hasFinalField) eventDetail.isFinal = isFinal
       if (generationId) eventDetail.generationId = generationId
       if (sequence !== undefined) eventDetail.sequence = sequence
+      const durationMs = readNumber(data, 'duration_ms') ?? readNumber(data, 'durationMs')
+      if (durationMs !== undefined && durationMs > 0) {
+        eventDetail.durationMs = Math.round(durationMs)
+      }
       if (!petLinkEnabled) {
         eventDetail.petLinkEnabled = false
       }

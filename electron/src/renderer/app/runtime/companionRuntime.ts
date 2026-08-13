@@ -14,7 +14,7 @@ export type CompanionActivity = 'idle' | 'listening' | 'thinking' | 'speaking' |
 export type CompanionAvailability = 'online' | 'offline' | 'degraded' | 'error'
 export type CompanionPermission = 'none' | 'waiting'
 export type CompanionRuntimeSource = CompanionEventSource
-export type CompanionPresentationState = CompanionActivity | 'offline' | 'error' | 'waiting-for-permission' | 'interrupted'
+export type CompanionPresentationState = CompanionActivity | 'offline' | 'error' | 'waiting-for-permission' | 'interrupted' | 'job-success' | 'job-error' | 'job-cancelled'
 export type ProactiveSuppressionReason = 'duplicate_or_invalid' | 'unavailable' | 'dnd' | 'ineligible' | 'cooldown' | 'frequency_budget'
 export type CompanionRuntimeSinkName = 'behavior' | 'emotion' | 'motion' | 'advice' | 'notification'
 export interface ProactiveSinkContext {
@@ -38,6 +38,7 @@ export type ProactivePollResult = ProactiveSuppressionReason | ProactiveDelivery
 
 const DEFAULT_COMPANION_POLL_INTERVAL_MS = 60_000
 const DEFAULT_DELIVERED_IDENTITY_LIMIT = 256
+const JOB_TERMINAL_FEEDBACK_MS = 1_200
 
 export interface CompanionRuntimeEvent {
   source: CompanionRuntimeSource
@@ -102,6 +103,9 @@ const behaviorForPresentation = (state: CompanionPresentationState): PetBehavior
     case 'executing': return 'focused'
     case 'waiting-for-permission': return 'waiting'
     case 'interrupted': return 'interrupted'
+    case 'job-success': return 'curious'
+    case 'job-error': return 'reacting'
+    case 'job-cancelled': return 'interrupted'
     case 'offline': return 'sleepy'
     case 'error': return 'reacting'
     default: return 'idle'
@@ -133,10 +137,13 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
       frequency_budget: 0,
     },
   })
+  const terminalJobPresentation = shallowRef<{ jobId: string; state: CompanionPresentationState; epoch: number } | null>(null)
   const presentationState: ComputedRef<CompanionPresentationState> = computed(() => {
     if (state.availability === 'offline' || state.availability === 'error') return state.availability
     if (state.permission === 'waiting') return 'waiting-for-permission'
     if (state.interruptedAtEpoch === state.interruptionEpoch) return 'interrupted'
+    if (state.activity !== 'idle') return state.activity
+    if (terminalJobPresentation.value) return terminalJobPresentation.value.state
     return state.activity
   })
   const sourceSequences = new Map<CompanionRuntimeSource, number>()
@@ -150,6 +157,7 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
   const pendingOpportunityOutcomes = new Map<string, PendingOpportunityOutcome>()
   const jobEventGate = createCompanionEventGate()
   const activeJobIdsBySource = new Map<CompanionRuntimeSource, Set<string>>()
+  let terminalJobTimer: ReturnType<typeof setTimeout> | null = null
   let timer: ReturnType<typeof setInterval> | null = null
   let started = false
   let pollingEnabled = true
@@ -162,6 +170,12 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
 
   const abortActivePoll = () => {
     activePollAbortController?.abort()
+  }
+
+  const clearTerminalJobPresentation = () => {
+    if (terminalJobTimer !== null) clearTimeout(terminalJobTimer)
+    terminalJobTimer = null
+    terminalJobPresentation.value = null
   }
 
   watch(reducedMotionObserver.reduced, (reduced) => {
@@ -181,6 +195,24 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     } catch (error) {
       dependencies.onSinkError?.({ sink: 'behavior', message: error instanceof Error ? error.message : String(error) })
     }
+  }
+
+  const showTerminalJobPresentation = async (event: CompanionEventEnvelope) => {
+    const terminalState: CompanionPresentationState = event.status === 'completed'
+      ? 'job-success'
+      : event.status === 'failed'
+        ? 'job-error'
+        : 'job-cancelled'
+    clearTerminalJobPresentation()
+    terminalJobPresentation.value = { jobId: event.jobId, state: terminalState, epoch: state.interruptionEpoch }
+    await applyPresentation(JOB_TERMINAL_FEEDBACK_MS)
+    terminalJobTimer = setTimeout(() => {
+      terminalJobTimer = null
+      const current = terminalJobPresentation.value
+      if (!current || current.jobId !== event.jobId || current.epoch !== state.interruptionEpoch) return
+      terminalJobPresentation.value = null
+      void applyPresentation()
+    }, JOB_TERMINAL_FEEDBACK_MS)
   }
 
   const recomputeActivity = () => {
@@ -222,6 +254,7 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     if (event.activity === 'idle' && event.requestId && currentRequestId && event.requestId !== currentRequestId) return false
     sourceSequences.set(event.source, event.sequence)
     if (event.activity !== undefined) {
+      if (event.activity !== 'idle') clearTerminalJobPresentation()
       sourceActivities.set(event.source, event.activity)
       recomputeActivity()
       state.interruptedAtEpoch = null
@@ -248,6 +281,7 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     sourceActivities.clear()
     sourceRequestIds.clear()
     activeJobIdsBySource.clear()
+    clearTerminalJobPresentation()
     jobEventGate.clear()
     state.lastRequestId = null
     recomputeActivity()
@@ -277,13 +311,17 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     if (activeJobs.size > 0) activeJobIdsBySource.set(event.source, activeJobs)
     else activeJobIdsBySource.delete(event.source)
     const activeRequestId = [...activeJobs].at(-1)
-    return publish({
+    const accepted = await publish({
       source: event.source,
       sequence: nextCompanionRuntimeSequence(event.source),
       activity: activeRequestId ? 'executing' : 'idle',
       requestId: activeRequestId ?? event.jobId,
       interruptionEpoch: event.interruptionEpoch,
     })
+    if (accepted && isTerminalCompanionJobStatus(event.status) && activeJobIdsBySource.size === 0 && state.activity === 'idle') {
+      await showTerminalJobPresentation(event)
+    }
+    return accepted
   }
 
   const ingestSnapshotJobs = async (snapshot: CompanionRuntimeSnapshot) => {
@@ -546,6 +584,7 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     sourceActivities.clear()
     sourceRequestIds.clear()
     activeJobIdsBySource.clear()
+    clearTerminalJobPresentation()
     jobEventGate.clear()
     state.lastRequestId = null
     state.interruptedAtEpoch = null

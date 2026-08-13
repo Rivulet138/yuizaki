@@ -54,6 +54,11 @@ const state = reactive<SettingsState>({
     mode: '串行推理',
     save_mode: '禁用自动保存',
     provider: 'genie-tts',
+    base_url: '',
+    api_key: '',
+    model: 'tts-1',
+    voice: 'alloy',
+    timeout: 60,
   },
   asr: {
     provider: 'sherpa-onnx-online',

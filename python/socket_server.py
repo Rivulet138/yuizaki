@@ -1737,6 +1737,7 @@ class DesktopPetSocketServer:
                 "sequence": _as_int(msg.get("sequence"), 0),
                 "is_final": is_final,
                 "text": _as_text(msg.get("text")),
+                "duration_ms": msg.get("duration_ms"),
             }
             await self.sio.emit(event_name, payload, to=target_sid)
         elif msg_type == "tts_complete":

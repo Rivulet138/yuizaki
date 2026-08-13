@@ -387,6 +387,7 @@ class PetRenderer {
 				if (loadGeneration !== this.modelLoadGeneration) {
 					return;
 				}
+				runtime.setCompanionIdleProfile?.(this.companionIdleProfile);
 				this.applyRuntimePerformancePolicy();
 				this.publishAvatarCapabilities();
 				this.reportState(true);
@@ -995,10 +996,8 @@ class PetRenderer {
 
 	setCompanionIdleProfile(profile: PetCompanionIdleProfile): void {
 		this.companionIdleProfile = { ...profile };
-		if (this.config.modelType !== "live2d") {
-			return;
-		}
 		this.live2dRuntime?.setCompanionIdleProfile(profile);
+		this.vrmRuntime?.setCompanionIdleProfile?.(profile);
 	}
 
 	private setAttentionFromClientPoint(
@@ -1006,7 +1005,7 @@ class PetRenderer {
 		strength: number,
 		durationMs: number,
 	): void {
-		if (!clientPoint || this.config.modelType !== "live2d") {
+		if (!clientPoint) {
 			return;
 		}
 
@@ -1019,6 +1018,7 @@ class PetRenderer {
 			durationMs,
 		};
 		this.live2dRuntime?.setAttentionTarget(target);
+		this.vrmRuntime?.setAttentionTarget(target);
 	}
 
 	async startLipSync(audioUrl: string, requestId?: string): Promise<void> {
