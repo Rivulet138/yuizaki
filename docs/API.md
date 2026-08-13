@@ -18,6 +18,10 @@ The default Python service is `http://127.0.0.1:8001`. Electron exposes a local 
 
 `/api/ping` is the lightweight liveness probe. `/health` reports component state. `/api/readiness` is protected and should be called with the backend token.
 
+## 中文说明
+
+本页描述本地控制面、后端 HTTP 接口、Socket.IO 事件和 MCP 边界。受保护接口需要启动器生成的控制令牌；`/api/ping` 仅用于存活探测，不能代替鉴权。具体路由和事件名称以当前源码及契约测试为准。API 变更必须同步增加或更新契约测试，并更新本文件。
+
 ## Voice events
 
 Realtime voice uses Socket.IO for session configuration, audio input, ASR partial/final transcripts, response deltas, TTS chunks, playback completion, and interruption. Events carry session/turn/request/generation identity where applicable. Late events are ignored after cancellation or interruption.

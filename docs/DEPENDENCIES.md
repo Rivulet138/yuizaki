@@ -25,3 +25,7 @@ Keep Python 3.11 compatibility and Node 22.13+ support. Prefer a compatible exis
 ## License review
 
 Package metadata is not a substitute for the upstream license. Review [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) and the exact lock files before shipping a binary.
+
+## 中文说明
+
+Electron、node-mcp 和 Python 的锁文件是可复现安装的权威输入。提交依赖升级时必须同时更新锁文件，并运行安装、审计、类型检查、测试和构建。ASR、TTS、嵌入、Qdrant、SoulX 及模型权重属于可选能力，可能有平台、GPU、模型卡或独立许可证限制；不要把用户下载的模型、声音、Live2D/VRM 文件或缓存放入源码归档。

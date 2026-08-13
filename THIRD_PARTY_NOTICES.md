@@ -28,3 +28,6 @@ The downloadable resources in `resources.lock.json` have the following release b
 
 These are the declared upstream terms, not a legal opinion. Before publishing a binary, generate a license report from the exact lock files and ship the corresponding notices. Do not include downloaded model weights, user-provided voices, Live2D/VRM files, fonts, artwork, or reference audio unless their separate licenses explicitly permit redistribution.
 
+## 中文说明
+
+Yuizaki 源代码采用 MIT 许可证，但角色模型、声音、字体、艺术素材、下载权重和外部服务不自动继承该许可证。发布二进制前，应根据精确锁文件生成许可证报告并附带相应声明。Live2D/VRM、音频、字体、图片和模型可能有单独的署名、非商业或再分发限制；除非许可证明确允许，否则不要打包。Ollama、Qdrant、SoulX、MCP 服务和 Hugging Face 模型也各自拥有独立条款。esources.lock.json 中的许可证是上游声明，不构成法律意见。

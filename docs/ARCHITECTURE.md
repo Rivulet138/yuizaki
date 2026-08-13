@@ -49,3 +49,7 @@ SQLite stores chat, settings metadata, and memory. Qdrant is optional for semant
 ## Failure and trust boundaries
 
 Loopback services use a per-run token. Provider failures and missing optional dependencies are surfaced as degraded capabilities. Prompt content, OCR, screenshots, web pages, and MCP output are untrusted evidence and cannot authorize policy changes. See [SECURITY.md](../SECURITY.md) for the public-release boundary.
+
+## 中文说明
+
+Yuizaki 由 Electron 主进程、Vue 渲染器、FastAPI/Socket.IO 后端以及可选的 node-mcp、Qdrant 和外部模型服务组成。主进程负责窗口、preload 桥接、控制代理和生命周期；渲染器负责聊天、设置、音频传输、Live2D/VRM 与任务/追踪界面；后端负责 Agent、提供商、记忆、视觉、工具、调度和心跳。启动器统一负责进程启动、端口选择、控制令牌传递和关闭顺序。

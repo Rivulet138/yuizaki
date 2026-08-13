@@ -29,3 +29,11 @@ Do not expose the backend or Electron control proxy to the public internet witho
 ## Issue reporting
 
 Include the commit, OS, runtime versions, launcher flags, and a redacted log. Never include API keys, control tokens, personal chat history, or captured screens. Report security-sensitive issues privately to the maintainers.
+
+## 中文说明
+
+Yuizaki 是本地桌面应用，不是经过加固的公共服务。默认服务绑定回环地址，启动器为每次运行创建控制令牌；API 密钥只能放在 `python/.env` 或本地设置中，禁止提交或写入日志。视觉按请求启用，麦克风需要显式语音模式和桌面权限。
+
+MCP、插件、Shell 工具、浏览器自动化和远程模型可能按配置读取或修改数据。请审查工具权限，将敏感目录置于工具作用域之外，并把提示、OCR、截图、网页和 MCP 结果视为不可信证据。聊天、记忆、设置和缓存默认保存在本地；服务运行时不要直接编辑 SQLite。
+
+未经认证、来源策略、限流、密钥、沙箱、工具审批、租户隔离和审计日志审查，不得将后端或控制代理暴露到公网。报告安全问题时请提供 commit、系统、运行时版本、启动参数和脱敏日志，绝不要附带密钥、令牌、私人聊天记录或截图。
