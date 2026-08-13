@@ -118,6 +118,7 @@ const MIN_PUSH_TO_TALK_MS = 120
 // Keep a short tail for provider transcript ordering without adding a full
 // second of dead air after audio has already finished.
 const TRANSCRIPT_GRACE_MS = 600
+const INTERRUPT_ACK_FALLBACK_MS = 250
 const ICE_GATHER_TIMEOUT_MS = 2_000
 const DISCONNECT_GRACE_MS = 5_000
 const MAX_REUSABLE_SESSION_MS = 55 * 60 * 1_000
@@ -199,6 +200,7 @@ export class RealtimeVoiceSession {
   private pressStartedAt: number | null = null
   private speechEndedAt: number | null = null
   private interruptStartedAt: number | null = null
+  private interruptAckTimer: number | null = null
   private responseActive = false
   private playbackReported = false
   private inputTranscript = ''
@@ -358,6 +360,7 @@ export class RealtimeVoiceSession {
     this.operationEpoch += 1
     this.currentTurnCancelled = true
     this.abortPendingToolCalls()
+    this.clearInterruptAckTimer()
     this.interruptStartedAt = performance.now()
     this.sendEvent({ type: 'response.cancel' })
     this.sendEvent({ type: 'output_audio_buffer.clear' })
@@ -365,6 +368,10 @@ export class RealtimeVoiceSession {
     this.audioElement?.pause()
     this.stopOutputLipSync()
     this.setStatus('ready')
+    this.interruptAckTimer = window.setTimeout(() => {
+      this.interruptAckTimer = null
+      this.acknowledgeInterrupt()
+    }, INTERRUPT_ACK_FALLBACK_MS)
   }
 
   close(): void {
@@ -584,9 +591,7 @@ export class RealtimeVoiceSession {
     }
     if (type === 'output_audio_buffer.cleared' && this.interruptStartedAt !== null) {
       this.stopOutputLipSync()
-      const elapsedMs = Math.max(0, performance.now() - this.interruptStartedAt)
-      this.interruptStartedAt = null
-      this.emit('interrupt-ack', { elapsedMs })
+      this.acknowledgeInterrupt()
       return
     }
     if (type === 'error') {
@@ -1086,6 +1091,20 @@ export class RealtimeVoiceSession {
     this.disconnectTimer = null
   }
 
+  private clearInterruptAckTimer(): void {
+    if (this.interruptAckTimer === null) return
+    window.clearTimeout(this.interruptAckTimer)
+    this.interruptAckTimer = null
+  }
+
+  private acknowledgeInterrupt(): void {
+    if (this.interruptStartedAt === null) return
+    this.clearInterruptAckTimer()
+    const elapsedMs = Math.max(0, performance.now() - this.interruptStartedAt)
+    this.interruptStartedAt = null
+    this.emit('interrupt-ack', { elapsedMs })
+  }
+
   private failConnection(peer: RTCPeerConnection): void {
     if (this.peer !== peer) return
     this.clearDisconnectTimer()
@@ -1106,6 +1125,8 @@ export class RealtimeVoiceSession {
   private disposeConnection(): void {
     this.operationEpoch += 1
     this.abortPendingToolCalls()
+    this.clearInterruptAckTimer()
+    this.interruptStartedAt = null
     this.completedToolCallIds.clear()
     this.clearDisconnectTimer()
     if (this.finalizeTimer !== null) {

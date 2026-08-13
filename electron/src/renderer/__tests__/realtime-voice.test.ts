@@ -305,6 +305,51 @@ describe('RealtimeVoiceSession', () => {
     session.close()
   })
 
+  it('acknowledges interruption locally when the provider omits the audio-clear event', async () => {
+    vi.useFakeTimers()
+    try {
+      const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
+      const session = new RealtimeVoiceSession()
+      const acknowledgements: number[] = []
+      session.on('interrupt-ack', ({ elapsedMs }) => acknowledgements.push(elapsedMs))
+      vi.spyOn(performance, 'now').mockReturnValue(2_000)
+
+      await session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })
+      session.stopPushToTalk()
+      session.interrupt()
+      vi.advanceTimersByTime(249)
+      expect(acknowledgements).toEqual([])
+      vi.advanceTimersByTime(1)
+      expect(acknowledgements).toHaveLength(1)
+      expect(acknowledgements[0]).toBeGreaterThanOrEqual(0)
+      session.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not duplicate interruption acknowledgement after provider confirmation', async () => {
+    vi.useFakeTimers()
+    try {
+      const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
+      const session = new RealtimeVoiceSession()
+      const acknowledgements: number[] = []
+      session.on('interrupt-ack', ({ elapsedMs }) => acknowledgements.push(elapsedMs))
+      vi.spyOn(performance, 'now').mockReturnValue(2_000)
+
+      await session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })
+      session.stopPushToTalk()
+      const channel = MockPeerConnection.latest!.channel
+      session.interrupt()
+      channel.serverEvent({ type: 'output_audio_buffer.cleared' })
+      vi.advanceTimersByTime(250)
+      expect(acknowledgements).toHaveLength(1)
+      session.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('rejects identified events from an interrupted response after a new turn starts', async () => {
     const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
     const session = new RealtimeVoiceSession()
