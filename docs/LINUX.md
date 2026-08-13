@@ -2,9 +2,9 @@
 
 ## Supported shape
 
-The launcher targets x86_64 Linux with Python 3.11-3.13, Node.js 22.13+, a desktop session, and an Electron-compatible X11 or Wayland environment.
+The Linux launcher targets x86_64 systems with Python 3.11-3.13, Node.js 22.13+, a graphical desktop session, and an Electron-compatible X11 or Wayland environment.
 
-## Start
+## Install and start
 
 ```bash
 ./install.sh core
@@ -12,12 +12,16 @@ The launcher targets x86_64 Linux with Python 3.11-3.13, Node.js 22.13+, a deskt
 ./start.sh
 ```
 
-MCP starts by default. Pass `--no-mcp` for a backend/Electron-only run. `--dev-renderer` serves Vite separately.
+MCP starts by default. Use `--no-mcp` for a reduced run and `--dev-renderer` to serve the renderer through Vite.
 
 ## Audio and input
 
-Check the default PipeWire/PulseAudio device and grant microphone permission to the desktop session. Global mouse/keyboard hooks may be limited under Wayland; normal window interaction remains available. Realtime voice still requires a secure Electron context and a user-granted microphone stream.
+Verify the PipeWire or PulseAudio input/output device and grant microphone permission to the desktop session. Global mouse/keyboard hooks may be limited under Wayland; ordinary window interaction remains available. Realtime voice also requires a secure Electron context and a user-granted microphone stream.
 
 ## GPU and pet rendering
 
-If the pet is blank or unstable, try a lower performance profile, disable hardware acceleration for diagnosis, verify the model asset, and inspect Electron logs. Hidden windows pause rendering work; this is expected.
+If the pet is blank or unstable, verify the asset path, try a lower performance profile, and inspect Electron logs. Disabling hardware acceleration can help isolate driver problems. Hidden windows pause rendering work by design.
+
+## Evidence boundary
+
+Linux CI can validate builds and scripted smoke paths, but it cannot represent every desktop compositor, audio device, GPU driver, or avatar asset. Record the OS, desktop session, provider, model, and hardware when reporting an issue.

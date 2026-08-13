@@ -1,48 +1,51 @@
 # Yuizaki
 
-Yuizaki is a local-first AI desktop companion agent. It combines a transparent desktop pet (Live2D or VRM) with chat, realtime voice, optional vision, memory, tools, MCP, scheduled jobs, and visible Agent traces.
+Yuizaki is a local-first AI desktop companion for Windows and Linux. It combines a transparent Live2D/VRM pet with text chat, optional realtime voice, request-scoped vision, local memory, tools, MCP, scheduled jobs, and visible Agent traces.
 
-## Current capabilities
+## What is ready
 
-- Transparent, draggable pet window with Live2D and VRM runtime adapters.
-- Automatic restoration of the last selected model during startup.
-- Live2D/VRM high-level behavior mapping: idle profiles, gaze, expressions, motion, lip-sync, fatigue, affinity, trust, mood, and relationship trend. Frame-level animation remains local to the renderer.
-- Push-to-talk and continuous realtime voice sessions.
-- Streaming ASR, incremental LLM responses, Genie TTS, OpenAI-compatible `/v1/audio/speech` TTS, ordered segment playback, lip-sync, barge-in interruption, stale-event rejection, and turn cancellation.
-- Independent chat-session runtime identity, background completion, unread state, and visible Job/Trace steps.
-- MCP (enabled by the normal launcher), built-in tools, plugins, scheduler, heartbeat, and visual capture represented as cancellable Job events.
-- Local memory with confidence, source/trace identity, model version, correction, and forget operations.
-- Request-scoped vision only: an Agent request captures and analyzes one current frame, then releases it. There is no permanent screenshot loop.
-- Hardware-aware rendering: device-pixel-ratio cap, power preference, active/idle FPS tiers, hidden-window pause, and coalesced pointer input.
+- Desktop pet window with Live2D and VRM adapters.
+- Text Agent turns with streaming responses, session isolation, tools, memory, cancellation, and trace events.
+- Push-to-talk and continuous voice lanes, when a compatible provider, model, microphone, and speaker are configured.
+- Optional ASR, TTS, vision, Qdrant retrieval, plugins, MCP, heartbeat, and scheduler integrations.
+- Request-scoped vision only. Yuizaki does not run a permanent screenshot or camera loop.
+- Local SQLite persistence for chat and memory.
 
-## Runtime layout
+The source tree and automated tests are public-facing engineering artifacts. Real microphone, speaker, provider, GPU, model, and avatar quality still require machine-level validation.
+
+## Runtime shape
 
 ```text
+Electron main process
+  windows, preload bridge, control proxy, lifecycle
+        |
 Electron/Vue renderer
-  chat, voice transport, pet rendering, settings, Job/Trace projection
+  chat, settings, audio transport, Live2D/VRM, Job/Trace UI
         |
 FastAPI + Socket.IO backend
-  Agent, provider adapters, memory, vision, tools, scheduler, heartbeat
+  Agent, providers, memory, vision, tools, scheduler, heartbeat
         |
-optional node-mcp service, Qdrant, local or remote model providers
+optional node-mcp, Qdrant, local or remote providers
 ```
 
-The Electron process owns windows, input, rendering, audio transport, and UI state. The Python process owns Agent orchestration and persistence. `node-mcp` is started by default by `start.bat` and `start.sh`; pass `--no-mcp` only for an intentional reduced startup.
+The launcher binds local services to loopback and creates a per-run control token. Yuizaki is a desktop application, not a hardened public service.
 
 ## Requirements
 
-- Windows 10/11 or x86_64 Linux.
-- Python 3.11, 3.12, or 3.13 in `python/.venv`.
-- Node.js 22.13 or newer.
-- 8 GiB RAM minimum; 16 GiB is recommended for local ASR, TTS, or embedding models.
-- Docker is optional and only needed when Qdrant auto-start is requested.
+- Windows 10/11 or x86_64 Linux with a graphical desktop session.
+- Python 3.11-3.13 in `python/.venv`.
+- Node.js 22.13+ and npm.
+- 8 GiB RAM minimum; 16 GiB is recommended for local audio and embedding models.
+- Docker only for optional Qdrant or SoulX service workflows.
 
-## Quick start
+## Install and start
 
 Windows:
 
 ```powershell
 .\install.bat core
+Copy-Item python/.env.example python/.env
+# Edit python/.env and configure an LLM provider.
 .\start.bat
 ```
 
@@ -50,23 +53,28 @@ Linux:
 
 ```bash
 ./install.sh core
+cp python/.env.example python/.env
+# Edit python/.env and configure an LLM provider.
 ./start.sh
 ```
 
-Useful launcher flags:
+Use `full` instead of `core` for optional ASR, Genie-TTS, Qdrant, embedding, and related packages. See [docs/ENVIRONMENT_SETUP.md](docs/ENVIRONMENT_SETUP.md) for provider setup and [docs/LINUX.md](docs/LINUX.md) for desktop/audio notes.
 
-```text
---check          preflight without launching services
---verify         run the supported verification suite without launching services
---dev-renderer   use the Vite renderer during development
---smoke          run lightweight health/pet/MCP endpoint checks after startup
---with-qdrant    start Qdrant through Docker when available (Windows launcher)
---no-mcp         opt out of the default MCP service
---no-show-pet    leave the pet layer hidden after startup (Windows launcher)
---no-open        do not open the control panel automatically (Windows launcher)
-```
+## Useful launcher modes
 
-Copy `python/.env.example` to `python/.env` and configure a text provider. OpenAI-compatible local servers such as Ollama and LM Studio use the same fields:
+| Mode | Purpose |
+| --- | --- |
+| `--check` | Validate paths, runtimes, dependencies, and startup configuration without launching services |
+| `--verify` | Run the supported type-check/build/test verification path without launching services |
+| `--smoke` | Run lightweight health, pet, and MCP checks after startup |
+| `--dev-renderer` | Serve the renderer through Vite during development |
+| `--no-mcp` | Start a reduced backend/Electron run without the default MCP service |
+| `--with-qdrant` | Request Docker-backed Qdrant on Windows |
+| `--no-show-pet` / `--no-open` | Suppress the pet window or control-panel opening on Windows |
+
+## Provider example
+
+OpenAI-compatible local servers such as Ollama and LM Studio use the same fields:
 
 ```dotenv
 LLM_PROVIDER=custom
@@ -75,52 +83,30 @@ LLM_API_KEY=local
 LLM_MODEL=your-model
 ```
 
-## Interaction and latency model
+Keep keys in `python/.env` or local settings. Do not commit them or put them in logs.
 
-Voice uses one microphone capture path. Local audio processing can emit an immediate speech-start signal while the provider owns turn finalization. On barge-in, the renderer invalidates the old output generation, stops queued audio, resets lip-sync, cancels the provider response, and ignores late chunks. Session, turn, request, and interruption identifiers prevent cross-session or stale-result updates.
+## Data and privacy
 
-TTS chunks are ordered by sequence number. WAV duration is supplied by the backend when known and falls back to browser media duration for legacy payloads. Audio, Agent work, and pet animation are asynchronous lanes; a slow tool or TTS segment does not freeze the chat input.
-
-## Vision boundary
-
-Vision is disabled unless enabled in settings and requested by an Agent turn. The lifecycle is `requested -> captured -> analyzed -> completed` or `discarded`. Frames are held in memory for the request and are not written to chat history by default.
-
-## Data locations
-
-| Data | Default location | Notes |
+| Data | Default location | Boundary |
 | --- | --- | --- |
-| Chat database | `python/data/chat.db` | Local SQLite persistence |
-| Memory database | `python/data/memory.db` | Correctable and forgettable records |
+| Chat | `python/data/chat.db` | Local SQLite |
+| Memory | `python/data/memory.db` | Correctable and forgettable records |
 | Settings | `python/config/settings.json` | Local runtime configuration |
-| TTS cache | `python/audio_cache/` | Removable temporary artifacts |
-| Vision frames | process memory | Request-scoped by default |
+| TTS cache | `python/audio_cache/` | Temporary audio artifacts |
+| Vision frame | Process memory | One request by default; not written to history |
 
-Cloud providers receive only the payloads required by the selected feature. Local providers keep those payloads on the machine.
+Cloud providers receive only the payload required by the selected feature. MCP servers, plugins, shell tools, and remote providers can read or change data within their configured capabilities. Read [SECURITY.md](SECURITY.md) before enabling them.
 
-## Verification status
+## Verification
 
-The latest verified Electron baseline is 133 test files and 793 tests, plus TypeScript type-check, ESLint, production build, renderer bundle audit, and `git diff --check`. Python targeted settings/TTS/realtime tests previously passed (75 tests). A socket contract test remains environment-limited when `python-socketio` is absent; real microphone, speaker, provider credentials, and multiple hardware models still require machine-level validation.
+The repository CI covers documentation, dependency locks, Electron type-check/lint/tests/build, Python tests/type checks, Node MCP tests, and offline fixture evaluation. Run the local checks described in [docs/MODEL_EVALUATION.md](docs/MODEL_EVALUATION.md) and [python/tests/README.md](python/tests/README.md).
 
-Run the checks locally:
+Passing automated tests does not certify a particular microphone, speaker, GPU, provider, model weight, or avatar asset.
 
-```powershell
-cd electron
-npm run type-check
-npm run lint
-npm test
-npm run build
+## Scope and non-goals
 
-cd ..\python
-python -m pytest -q tests test_*.py
-python -m compileall -q modules app.py socket_server.py
-```
-
-## Status and non-goals
-
-The core local companion loop is implemented. Discord/Telegram connectors, PWA/mobile clients, browser extensions, game-specific agents, and a broad external TTS catalog remain future integrations. They are not advertised as completed features.
-
-The design direction is informed by AIRI (pinned implementation reference), OpenAI Realtime WebRTC/VAD guidance, MDN Web Audio APIs, LiveKit turn-taking guidance, and 2024-2026 work on low-latency voice, interruption handling, asynchronous tools, visual memory, and embodied agents. See the linked design and API documents for source URLs and boundaries.
+The current release targets a local desktop companion. Discord/Telegram connectors, browser/mobile clients, browser extensions, game-specific agents, and a cloud multi-user service are not part of the supported core release.
 
 ## License
 
-Source code is MIT-licensed. Live2D/VRM models, voices, fonts, artwork, and downloaded model weights may have separate licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) before redistribution.
+Yuizaki source code is MIT-licensed. Character models, voices, fonts, artwork, downloaded weights, and external services have separate terms. Read [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) before redistributing a build.

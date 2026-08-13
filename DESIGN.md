@@ -1,30 +1,34 @@
-# Yuizaki design principles
+# Design principles
 
 ## Product shape
 
-Yuizaki is a desktop companion first and a control panel second. The pet should remain visible, calm, and interactive while chat, Agent work, and settings stay available without competing for attention.
+Yuizaki is a desktop companion first and a control panel second. The pet should remain visible and calm while chat, Agent work, and settings stay usable without competing for attention.
 
-## Interaction principles
+## Interaction
 
-- Keep the chat input usable while a response or background Job is running.
-- Use explicit states: listening, thinking, executing, speaking, success, error, interrupted, and sleep.
-- Show what the Agent is doing and the resulting artifact; collapse implementation diagnostics.
-- Keep model, provider, MCP, TTS, and pet controls in settings rather than repeating them in every message.
-- Preserve per-session drafts, generation identity, unread completion, and cancellation semantics.
-- Support reduced motion and avoid animation work when the window is hidden.
+- Keep chat input usable while a response or background Job runs.
+- Represent explicit states: listening, thinking, executing, speaking, success, error, interrupted, and sleep.
+- Show the current action and resulting artifact at the point of action; keep implementation diagnostics collapsible.
+- Keep provider, MCP, TTS, pet, and model controls in settings.
+- Preserve session drafts, generation identity, unread completion, and cancellation semantics.
+- Respect reduced motion and pause hidden-window rendering work.
 
-## Visual principles
+## Embodiment
 
-- Transparent pet surface; no mandatory glassmorphism or opaque decorative shell.
-- High contrast text and controls with restrained spacing and compact repeated items.
-- Pet motion is expressive but bounded: local state machines smooth gaze, expression, motion, idle breathing, and lip-sync.
-- Avoid always-on status prose, duplicate badges, and panels that explain their own controls.
-- Error, progress, and completion should be visible at the point of action.
+The Agent emits intent-level commands such as `listen`, `think`, `speak`, gaze, expression, motion, and lip-sync. Live2D and VRM adapters own smoothing, TTL, fade, looping, and release timing. The LLM never emits frame-level animation instructions.
 
-## Performance principles
+## Privacy and perception
 
-- Audio work stays off the UI thread where possible.
-- Pointer events are coalesced before reaching the renderer.
-- Active and idle FPS tiers, DPR caps, hidden-window pause, and TTL-based lip-sync prevent runaway work.
-- Vision captures one frame only when an Agent request needs it.
-- Job progress is coalesced; terminal events are never dropped.
+Vision is an explicit one-shot capability. A request moves through `requested -> captured -> analyzed -> completed` or `discarded`; frames are released after the request and are not persisted by default.
+
+## Performance
+
+- Keep audio work off the UI thread where possible.
+- Coalesce pointer and progress events, but never drop terminal Job events.
+- Cap device-pixel ratio and active/idle frame rates.
+- Pause hidden-window rendering.
+- Use lazy model startup on constrained hardware.
+
+## Failure behavior
+
+Cancellation, interruption, stale results, provider errors, and missing assets are visible states. A slow tool or TTS segment must not freeze chat input. A missing optional provider should degrade the feature rather than silently fabricate a result.

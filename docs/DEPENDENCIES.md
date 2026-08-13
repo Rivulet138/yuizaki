@@ -1,19 +1,27 @@
 # Dependencies
 
-## Source of truth
+## Authoritative files
 
-- Electron versions: `electron/package.json` and `electron/package-lock.json`.
+- Electron versions and resolutions: `electron/package.json` and `electron/package-lock.json`.
+- Node MCP versions and resolutions: `node-mcp/package.json` and `node-mcp/package-lock.json`.
 - Python compatible ranges: `python/requirements-core.txt` and `python/requirements.txt`.
-- Platform resolutions: `python/requirements-core-lock-windows.txt`, `requirements-core-lock-linux.txt`, and full/dev variants.
+- Tested platform resolutions: `python/requirements-*-lock-windows.txt` and `python/requirements-*-lock-linux.txt`.
+- Downloadable model/resource checksums and declared licenses: `resources.lock.json`.
+
+## Installation profiles
+
+| Profile | Intended use |
+| --- | --- |
+| `core` | Chat, SQLite, OCR foundation, server, Electron, and MCP |
+| `full` | Core plus ASR, Genie-TTS, Qdrant, embeddings, and model helpers |
+| development locks | Tests, lint, type checks, and build verification |
+
+Optional native model backends are not installed by default because CUDA and platform builds vary. Do not add a dependency when a local adapter or browser API already covers the behavior.
 
 ## Compatibility policy
 
-Keep the lower bounds compatible with Python 3.11 and Node 22.13. Prefer an existing slightly older compatible version over a major upgrade unless the current runtime or security fix requires it. Do not add a dependency for a feature already covered by local adapters or browser APIs.
+Keep Python 3.11 compatibility and Node 22.13+ support. Prefer a compatible existing version over a major upgrade unless a security or runtime requirement justifies the change. Run `pip check`, the installed-lock validator, Electron `npm ci`, and the relevant test suites after dependency changes.
 
-## Install profiles
+## License review
 
-- `core`: FastAPI, SQLite, OCR foundation, and server runtime.
-- `full`: core plus ASR, Genie-TTS, Qdrant, embeddings, and model helpers.
-- `dev`: test, lint, and build tooling.
-
-Optional native model backends are intentionally not installed by default because CUDA and platform builds vary widely.
+Package metadata is not a substitute for the upstream license. Review [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) and the exact lock files before shipping a binary.

@@ -1,13 +1,13 @@
 # SoulX SVC service
 
-This directory contains the optional HTTP voice-conversion service. Core chat, ASR, and TTS do not require it.
+SoulX SVC is an optional local HTTP voice-conversion service. It is not required for text chat, ASR, or the default TTS path.
 
 ## Start
 
 Windows:
 
 ```powershell
-.\\start_soulx_svc.bat
+.\start_soulx_svc.bat
 ```
 
 Linux:
@@ -27,4 +27,6 @@ Set `SVC_BASE_URL` in `python/.env`; the default is `http://127.0.0.1:7861`.
 
 ## Models and hardware
 
-Model downloads are large and provider-specific. Keep checkpoints and reference audio outside Git, review their licenses, and use the repository resource lock when one is provided. NVIDIA GPU, a compatible driver, and CUDA may be required by the selected image. This service is local by default and should not be exposed publicly without an independent deployment review.
+Model downloads are large and provider-specific. Keep checkpoints and reference audio outside Git. Review the upstream license and the repository `resources.lock.json` entry before downloading or redistributing anything. NVIDIA GPU, a compatible driver, and CUDA may be required by the selected image.
+
+The service binds locally by default. Do not expose it publicly without a separate review of authentication, origin policy, resource limits, and model licensing.

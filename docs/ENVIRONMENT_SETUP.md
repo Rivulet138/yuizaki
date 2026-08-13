@@ -1,35 +1,52 @@
 # Environment setup
 
-## Runtime versions
+## Supported runtime
 
 - Python 3.11-3.13, preferably in `python/.venv`.
 - Node.js 22.13+ and npm.
-- Windows 10/11 or x86_64 Linux.
-- Docker only for optional Qdrant auto-start.
+- Windows 10/11 or x86_64 Linux with a desktop session.
+- Docker only for optional Qdrant or SoulX workflows.
 
-## Python environment
+## Install profiles
 
-Install a core runtime for chat, SQLite, OCR, and server features:
+`core` installs the server, SQLite, OCR foundation, and required runtime. `full` adds optional ASR, Genie-TTS, Qdrant, embedding, and model helpers. Platform lock files record tested resolutions; native model packages can still vary by CPU, GPU, and operating system.
+
+Windows:
 
 ```powershell
-python -m venv python/.venv
-python/.venv/Scripts/python -m pip install -r python/requirements-core.txt
+.\install.bat core
+# or
+.\install.bat full
 ```
 
-Use `requirements.txt` or `install.bat full` for Sherpa ONNX, Genie-TTS, Qdrant, embeddings, and related optional stacks. Platform lock files pin the tested resolution; the manifests keep compatible lower and upper bounds for slightly older environments.
+Linux:
 
-## `.env`
+```bash
+./install.sh core
+# or
+./install.sh full
+```
 
-Copy `python/.env.example` to `python/.env`. Configure a text provider, then optionally configure TTS, ASR, memory, Qdrant, and vision. Keep `VISION_LLM_ENABLED=0` unless a visual Agent workflow is needed. Set `TTS_STARTUP_MODE=lazy` and `TTS_WARMUP_ENABLED=0` on constrained hardware.
+## Local environment file
 
-## Providers
+```powershell
+Copy-Item python/.env.example python/.env
+```
 
-`LLM_PROVIDER=custom` targets OpenAI-compatible chat endpoints. TTS supports `genie-tts` and `openai-compatible`. ASR defaults to Sherpa ONNX when the optional package/model is available. SoulX-SVC is an HTTP service and is not installed by the core dependency set.
+Configure an LLM first. Then configure TTS, ASR, memory, Qdrant, and vision only as needed. Keep `VISION_LLM_ENABLED=0` unless a visual Agent workflow is deliberate. On constrained hardware use `TTS_STARTUP_MODE=lazy`, `TTS_WARMUP_ENABLED=0`, and `ASR_STARTUP_MODE=lazy`.
+
+## Provider boundaries
+
+- `LLM_PROVIDER=custom` targets OpenAI-compatible chat endpoints.
+- `TTS_PROVIDER=genie-tts` uses the optional local Genie runtime.
+- `TTS_PROVIDER=openai-compatible` targets `/v1/audio/speech`.
+- `ASR_PROVIDER=sherpa-onnx-online` uses a local model when installed and configured.
+- SoulX-SVC is an external HTTP service and is not part of the core install.
 
 ## Frontend variables
 
-The launcher exports `VITE_YUIZAKI_API_ORIGIN`, `VITE_YUIZAKI_CONTROL_ORIGIN`, `SERVER_PORT`, `CONTROL_SERVER_PORT`, `RENDERER_PORT`, and `MCP_PORT`. Avoid hard-coding fallback ports in application code.
+The launcher exports `VITE_YUIZAKI_API_ORIGIN`, `VITE_YUIZAKI_CONTROL_ORIGIN`, `SERVER_PORT`, `CONTROL_SERVER_PORT`, `RENDERER_PORT`, and `MCP_PORT`. Keep port selection in the launcher rather than hard-coding fallback ports in application code.
 
-## Model assets
+## Assets and caches
 
-Store Live2D/VRM assets and local model caches outside Git. The startup path restores the saved model reference when the file is present; missing assets are reported in the pet/resource panel.
+Store Live2D/VRM assets and model caches outside Git. Startup restores the saved model reference when the asset exists; missing assets are reported in the pet/resource panel. Read [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) before redistributing any asset or weight.

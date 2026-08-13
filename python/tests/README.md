@@ -1,12 +1,14 @@
-# Python tests
+# Python verification
 
-The Python suite covers settings, authentication boundaries, memory, summaries, realtime events, vision, audio, tools, plugins, resource cleanup, and cross-layer contracts.
+The Python suite is a contract suite for settings, authentication, memory, summaries, realtime events, vision, audio, tools, plugins, storage cleanup, and cross-layer behavior.
 
-Run from the repository root:
+## Run the suite
+
+From the repository root:
 
 ```powershell
 cd python
-.\\.venv\\Scripts\\python.exe -m pytest -q --tb=short
+.\.venv\Scripts\python.exe -m pytest -q --tb=short
 ```
 
 Linux:
@@ -16,7 +18,7 @@ cd python
 .venv/bin/python -m pytest -q --tb=short
 ```
 
-Targeted examples:
+## Targeted checks
 
 ```bash
 python -m pytest -q tests/test_settings_api_router.py
@@ -24,4 +26,8 @@ python -m pytest -q tests/test_realtime_session_config.py
 python -m pytest -q tests/test_tts_openai_compatible.py
 ```
 
-Tests that require external models, Docker, network services, microphone, speakers, or GPU must be marked or mocked explicitly. Do not write fixtures into `python/data`; use a temporary directory. Changes to Socket.IO events, permanent deletion, restore, or cancellation semantics require contract coverage.
+## Test boundary
+
+External models, Docker, network services, microphones, speakers, and GPUs must be mocked or explicitly provisioned. A passing test suite verifies software contracts; it does not certify a particular provider, audio device, model, or avatar asset.
+
+Do not write fixtures into `python/data`. Use temporary directories. Changes to Socket.IO events, deletion, restore, or cancellation semantics require contract coverage.
