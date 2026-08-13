@@ -28,6 +28,3 @@ The downloadable resources in `resources.lock.json` have the following release b
 
 These are the declared upstream terms, not a legal opinion. Before publishing a binary, generate a license report from the exact lock files and ship the corresponding notices. Do not include downloaded model weights, user-provided voices, Live2D/VRM files, fonts, artwork, or reference audio unless their separate licenses explicitly permit redistribution.
 
-## AIRI and research references
-
-Project AIRI is an external reference implementation. Yuizaki does not copy AIRI source code. Research links and upstream references are provided for design provenance, not as bundled dependencies.
