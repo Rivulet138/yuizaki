@@ -864,6 +864,8 @@ describe('RealtimeVoiceSession', () => {
     peer.channel.serverEvent({ type: 'output_audio_buffer.started' })
 
     expect(levels[0]).toEqual({ level: 0, active: true })
+    expect(audioContext.createAnalyser).toHaveBeenCalledTimes(1)
+    expect(analyser.fftSize).toBe(256)
     now = 5_340
     animationFrame?.(now)
     expect(levels.at(-1)?.active).toBe(true)

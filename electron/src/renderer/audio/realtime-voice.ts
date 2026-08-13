@@ -123,6 +123,7 @@ const DISCONNECT_GRACE_MS = 5_000
 const MAX_REUSABLE_SESSION_MS = 55 * 60 * 1_000
 const OUTPUT_ANALYSIS_INTERVAL_MS = 33
 const OUTPUT_ANALYSIS_KEEPALIVE_MS = 120
+const OUTPUT_ANALYSIS_FFT_SIZE = 256
 const REALTIME_AGENT_TOOL_NAME = 'delegate_to_agent'
 const REALTIME_AGENT_TIMEOUT_MS = 120_000
 const MAX_COMPLETED_TOOL_CALL_IDS = 128
@@ -192,6 +193,7 @@ export class RealtimeVoiceSession {
   private outputLipSyncActive = false
   private outputLevelReportedAt = 0
   private outputLevelReported = 0
+  private outputSampledAt = 0
   private connectionPromise: Promise<void> | null = null
   private listeners = new Map<keyof RealtimeVoiceEventMap, Set<(payload: never) => void>>()
   private pressStartedAt: number | null = null
@@ -829,10 +831,10 @@ export class RealtimeVoiceSession {
     this.disposeOutputAnalysis()
     if (typeof window.AudioContext !== 'function') return
     try {
-      const context = new AudioContext()
+      const context = new AudioContext({ latencyHint: 'interactive' })
       const source = context.createMediaStreamSource(stream)
       const analyser = context.createAnalyser()
-      analyser.fftSize = 512
+      analyser.fftSize = OUTPUT_ANALYSIS_FFT_SIZE
       source.connect(analyser)
       this.outputAudioContext = context
       this.outputAudioSource = source
@@ -851,6 +853,7 @@ export class RealtimeVoiceSession {
     this.outputLipSyncActive = true
     this.outputLevelReported = 0
     this.outputLevelReportedAt = performance.now()
+    this.outputSampledAt = this.outputLevelReportedAt - OUTPUT_ANALYSIS_INTERVAL_MS
     this.emit('lip-sync-level', { level: 0, active: true })
     this.scheduleOutputAnalysis()
   }
@@ -863,6 +866,7 @@ export class RealtimeVoiceSession {
     if (!this.outputLipSyncActive) return
     this.outputLipSyncActive = false
     this.outputLevelReported = 0
+    this.outputSampledAt = 0
     this.emit('lip-sync-level', { level: 0, active: false })
     this.emit('playback-end', {})
   }
@@ -878,6 +882,9 @@ export class RealtimeVoiceSession {
 
   private sampleOutputLevel(): void {
     if (!this.outputLipSyncActive) return
+    const now = performance.now()
+    if (now - this.outputSampledAt < OUTPUT_ANALYSIS_INTERVAL_MS) return
+    this.outputSampledAt = now
     const analyser = this.outputAnalyser
     const samples = this.outputSamples
     let level = 0
@@ -890,7 +897,6 @@ export class RealtimeVoiceSession {
       level = Math.max(0, Math.min(1, Math.sqrt(sumSquares / samples.length)))
     }
 
-    const now = performance.now()
     const elapsed = now - this.outputLevelReportedAt
     if (
       elapsed >= OUTPUT_ANALYSIS_INTERVAL_MS
