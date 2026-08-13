@@ -350,6 +350,28 @@ describe('RealtimeVoiceSession', () => {
     }
   })
 
+  it('settles an interrupted turn before accepting the next push-to-talk turn', async () => {
+    vi.useFakeTimers()
+    try {
+      const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
+      const session = new RealtimeVoiceSession()
+      const acknowledgements: number[] = []
+      session.on('interrupt-ack', ({ elapsedMs }) => acknowledgements.push(elapsedMs))
+      vi.spyOn(performance, 'now').mockReturnValue(2_000)
+
+      await session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })
+      session.stopPushToTalk()
+      session.interrupt()
+      await session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })
+      expect(acknowledgements).toHaveLength(1)
+      vi.advanceTimersByTime(250)
+      expect(acknowledgements).toHaveLength(1)
+      session.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('rejects identified events from an interrupted response after a new turn starts', async () => {
     const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
     const session = new RealtimeVoiceSession()

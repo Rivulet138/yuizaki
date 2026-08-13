@@ -298,6 +298,9 @@ export class RealtimeVoiceSession {
   async startPushToTalk(options: RealtimeVoiceSessionOptions): Promise<void> {
     await this.connect(options)
     void this.outputAudioContext?.resume().catch(() => undefined)
+    if (this.interruptStartedAt !== null) {
+      this.acknowledgeInterrupt()
+    }
     if (this.responseActive) {
       this.interrupt()
       throw new Error('Previous realtime response is being interrupted')
