@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { PetModelCatalog } from '../pet-model-catalog'
+import { isSafeArchiveEntry, PetModelCatalog } from '../pet-model-catalog'
 import { DEFAULT_PET_CONTROL_STATE } from '../../shared/pet-control'
 import type { PluginRegistry } from '../plugin-registry'
 
@@ -101,6 +101,17 @@ const writeLive2dFixture = (modelDir: string, modelName: string): string => {
 }
 
 describe('PetModelCatalog', () => {
+  it.each([
+    ['models/hero.model3.json', true],
+    ['models\\hero.model3.json', true],
+    ['../outside.txt', false],
+    ['models/../../outside.txt', false],
+    ['/absolute/path.txt', false],
+    ['C:/absolute/path.txt', false],
+  ])('validates ZIP entry path %s', (entryName, expected) => {
+    expect(isSafeArchiveEntry(entryName)).toBe(expected)
+  })
+
   it('never chooses a plugin provider as the implicit default model', () => {
     const pluginRegistry = {
       snapshot: () => ({

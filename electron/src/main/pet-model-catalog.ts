@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import extractZip from 'extract-zip'
+import yauzl from 'yauzl'
 import type {
   PetControlConfigPatch,
   PetControlState,
@@ -84,6 +84,79 @@ const basenameWithoutExt = (filePath: string): string =>
 
 const isZipArchivePath = (filePath: string): boolean =>
   path.extname(filePath).toLowerCase() === '.zip'
+
+export const isSafeArchiveEntry = (entryName: string): boolean => {
+  if (!entryName || entryName.includes('\0')) return false
+  const normalized = entryName.replace(/\\/g, '/')
+  if (normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)) return false
+  return normalized.split('/').every((segment) => segment.length > 0 && segment !== '..')
+}
+
+const extractZipSafely = (sourcePath: string, targetDir: string): Promise<void> =>
+  new Promise((resolve, reject) => {
+    yauzl.open(sourcePath, { lazyEntries: true }, (openError, zipFile) => {
+      if (openError || !zipFile) {
+        reject(openError ?? new Error('Failed to open ZIP archive'))
+        return
+      }
+
+      let settled = false
+      const fail = (error: unknown): void => {
+        if (settled) return
+        settled = true
+        zipFile.close()
+        reject(error instanceof Error ? error : new Error(String(error)))
+      }
+      const finish = (): void => {
+        if (settled) return
+        settled = true
+        zipFile.close()
+        resolve()
+      }
+      const readNext = (): void => zipFile.readEntry()
+
+      zipFile.on('error', fail)
+      zipFile.on('end', finish)
+      zipFile.on('entry', (entry: yauzl.Entry) => {
+        if (!isSafeArchiveEntry(entry.fileName)) {
+          fail(new Error(`Unsafe ZIP entry path: ${entry.fileName}`))
+          return
+        }
+
+        const relativeName = entry.fileName.replace(/\\/g, '/')
+        const destination = path.resolve(targetDir, relativeName)
+        if (!isPathInsideRealBase(path.resolve(targetDir), destination)) {
+          fail(new Error(`ZIP entry escapes target directory: ${entry.fileName}`))
+          return
+        }
+        const isDirectory = relativeName.endsWith('/')
+        if (isDirectory) {
+          fs.mkdirSync(destination, { recursive: true })
+          readNext()
+          return
+        }
+
+        fs.mkdirSync(path.dirname(destination), { recursive: true })
+        zipFile.openReadStream(entry, (streamError, readStream) => {
+          if (streamError || !readStream) {
+            fail(streamError ?? new Error(`Failed to read ZIP entry: ${entry.fileName}`))
+            return
+          }
+          const output = fs.createWriteStream(destination, { flags: 'wx' })
+          const closeWithError = (error: Error): void => {
+            output.destroy()
+            fail(error)
+          }
+          readStream.on('error', closeWithError)
+          output.on('error', closeWithError)
+          output.on('finish', readNext)
+          readStream.pipe(output)
+        })
+      })
+
+      readNext()
+    })
+  })
 
 const sanitizeImportFolderName = (value: string): string =>
   value
@@ -299,7 +372,7 @@ export class PetModelCatalog {
       createdTargetDir = targetDir
       fs.mkdirSync(targetDir, { recursive: true })
       try {
-        await extractZip(source, { dir: targetDir })
+        await extractZipSafely(source, targetDir)
         importedModelFile = this.findFirstModelFile(targetDir)
       } catch (error) {
         fs.rmSync(targetDir, { recursive: true, force: true })
