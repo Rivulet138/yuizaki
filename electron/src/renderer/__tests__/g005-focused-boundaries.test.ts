@@ -170,6 +170,22 @@ describe('G005 focused presentation boundaries', () => {
     expect(wrapper.emitted('interrupt')).toEqual([[]])
   })
 
+  it('keeps voice synthesis interruptible before audio playback starts', async () => {
+    const wrapper = mount(ChatPlaybackBar, {
+      props: {
+        playing: false,
+        speaking: true,
+        petLinkEnabled: true,
+      },
+      global: { stubs: { 'el-icon': { template: '<i><slot /></i>' } } },
+    })
+
+    const stop = wrapper.get('.chat-playback-bar__stop')
+    expect(stop.attributes('disabled')).toBeUndefined()
+    await stop.trigger('click')
+    expect(wrapper.emitted('interrupt')).toEqual([[]])
+  })
+
   it.each(['pointerup', 'pointercancel'])('forwards the pointer event through %s so hold-to-talk stops and releases capture', async (endEvent) => {
     const start = vi.fn()
     const stop = vi.fn()

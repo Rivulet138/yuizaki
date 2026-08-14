@@ -22,7 +22,7 @@
       <button
         class="chat-playback-bar__stop"
         type="button"
-        :disabled="!playing"
+        :disabled="!playing && !speaking"
         :aria-label="t('chat.playback.stop')"
         :title="t('chat.playback.stop')"
         @click="$emit('interrupt')"
