@@ -246,21 +246,6 @@
   display: none;
 }
 
-.tts-indicator {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border: 1px solid rgba(226, 232, 240, 0.72);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.68);
-  padding: 10px 12px;
-  color: #475569;
-}
-
-.tts-indicator {
-  color: #6d28d9;
-}
-
 .attachment-strip {
   display: flex;
   gap: 8px;
@@ -304,87 +289,6 @@
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
-}
-
-.advice-strip {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  border: 1px solid rgba(226, 232, 240, 0.9);
-  border-radius: 10px;
-  background: #fff;
-  padding: 8px;
-}
-
-.advice-strip__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  color: #475569;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.advice-strip__head button,
-.advice-actions button {
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: #64748b;
-  cursor: pointer;
-  font-size: 12px;
-  padding: 4px 6px;
-}
-
-.advice-strip__head button:hover,
-.advice-actions button:hover {
-  background: #f1f5f9;
-  color: #0f172a;
-}
-
-.advice-list {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.advice-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  border-radius: 8px;
-  background: #f8fafc;
-  padding: 7px 8px;
-}
-
-.advice-copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.advice-copy small {
-  color: #64748b;
-  font-size: 10.5px;
-  font-weight: 700;
-}
-
-.advice-copy span {
-  overflow: hidden;
-  color: #334155;
-  font-size: 12px;
-  line-height: 1.45;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.advice-actions {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 2px;
 }
 
 .composer-box {
@@ -638,20 +542,6 @@
   background: #fff;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
 }
-
-.waveform { display: flex; align-items: flex-end; gap: 2px; height: 18px; }
-.wave-bar {
-  width: 3px;
-  height: 80%;
-  border-radius: 2px;
-  background: linear-gradient(to top, #8b5cf6, #a78bfa);
-  animation: wave 0.6s ease-in-out infinite alternate;
-}
-.wave-bar:nth-child(2) { height: 50%; }
-.wave-bar:nth-child(3) { height: 100%; }
-.wave-bar:nth-child(4) { height: 60%; }
-.wave-bar:nth-child(5) { height: 40%; }
-@keyframes wave { from { transform: scaleY(1); } to { transform: scaleY(0.4); } }
 
 .drop-overlay {
   position: absolute;
@@ -1015,7 +905,6 @@
   background: #f59e0b;
 }
 
-.tts-indicator,
 .attachment-chip,
 .permission-card,
 .asr-partial-card {

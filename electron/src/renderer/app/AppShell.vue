@@ -41,25 +41,6 @@
           />
 
           <main class="app-main" :class="activeTab === 'chat' ? 'chat-mode' : 'panel-mode'">
-            <div v-if="activeTab !== 'chat'" class="chat-bar">
-              <div v-if="chatState.isGenerating || chatState.currentText" class="chat-status">
-                <span class="status-dot" :class="{ active: chatState.isGenerating }"></span>
-                <span class="status-text">
-                  {{ chatState.isGenerating ? t('shell.status.thinking') : chatState.isSpeaking ? t('shell.status.speaking') : t('shell.status.idle') }}
-                </span>
-                <button v-if="chatState.isGenerating" class="interrupt-btn" type="button" @click="chatStore.interrupt()">{{ t('shell.status.interrupt') }}</button>
-              </div>
-
-              <div v-if="chatState.currentText" class="streaming-bubble animate-fade-in">
-                <div class="streaming-avatar">結</div>
-                <div class="streaming-content">
-                  {{ chatState.currentText }}
-                  <span v-if="chatState.isGenerating" class="cursor-blink">▍</span>
-                </div>
-              </div>
-
-            </div>
-
             <div class="view-host">
               <router-view v-slot="{ Component, route }">
                 <keep-alive>
@@ -612,96 +593,6 @@ watch(
 
 .main--chat .wallpaper-blur {
   display: none;
-}
-
-.chat-bar {
-  flex-shrink: 0;
-  margin-bottom: 16px;
-}
-
-.chat-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  max-width: min(2020px, calc(100vw - 590px));
-  margin-bottom: 8px;
-  padding: 8px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.58);
-  border-radius: 999px;
-  color: #4d5274;
-  background: rgba(255, 255, 255, 0.14);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  font-size: 14px;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #94a3b8;
-}
-
-.status-dot.active {
-  background: #f59e0b;
-  animation: pulse-dot 1.5s infinite;
-}
-
-.status-text {
-  flex: 1;
-}
-
-.interrupt-btn {
-  border: none;
-  border-radius: 10px;
-  padding: 4px 12px;
-  color: #dc2626;
-  background: rgba(255, 242, 242, 0.48);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.streaming-bubble {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  width: 100%;
-  max-width: 780px;
-  margin-bottom: 10px;
-  padding: 14px 18px;
-  border: 1px solid rgba(255, 255, 255, 0.62);
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.14);
-  box-shadow: 0 16px 38px rgba(82, 82, 130, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.7);
-}
-
-.streaming-avatar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  color: transparent;
-  background: #fff url('../assets/yuizaki/icons/yuizaki-icon.png') center / cover no-repeat;
-  box-shadow: 0 8px 24px rgba(169, 102, 255, 0.32);
-  font-size: 0;
-  font-weight: 700;
-}
-
-.streaming-content {
-  flex: 1;
-  color: #1e293b;
-  font-size: 15px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-}
-
-.cursor-blink {
-  display: inline-block;
-  color: #6366f1;
-  font-weight: 700;
-  animation: blink 1s step-end infinite;
 }
 
 .view-host {

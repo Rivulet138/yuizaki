@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 
 import ChatComposerStatusLine from '../domains/chat/components/ChatComposerStatusLine.vue'
 import ChatVoiceStatus from '../domains/chat/components/ChatVoiceStatus.vue'
+import ChatPlaybackBar from '../domains/chat/components/ChatPlaybackBar.vue'
 import SettingsAsrSection from '../domains/settings/components/SettingsAsrSection.vue'
 import SettingsSectionHeader from '../domains/settings/components/SettingsSectionHeader.vue'
 import { syncLocaleFromSettings } from '../i18n'
@@ -148,6 +149,25 @@ describe('G005 focused presentation boundaries', () => {
     expect(wrapper.emitted('update:mode')).toEqual([['hold']])
     expect(wrapper.emitted('interrupt')).toEqual([[]])
     expect(wrapper.emitted('toggle-mic')).toBeUndefined()
+  })
+
+  it('keeps TTS playback and pet linkage actionable in one compact control', async () => {
+    const wrapper = mount(ChatPlaybackBar, {
+      props: {
+        playing: true,
+        speaking: true,
+        petLinkEnabled: true,
+        text: 'A short assistant response',
+      },
+      global: { stubs: { 'el-icon': { template: '<i><slot /></i>' } } },
+    })
+
+    expect(wrapper.text()).toContain('播放中')
+    expect(wrapper.text()).toContain('A short assistant response')
+    await wrapper.get('.chat-playback-bar__pet').trigger('click')
+    await wrapper.get('.chat-playback-bar__stop').trigger('click')
+    expect(wrapper.emitted('toggle-pet-link')).toEqual([[false]])
+    expect(wrapper.emitted('interrupt')).toEqual([[]])
   })
 
   it.each(['pointerup', 'pointercancel'])('forwards the pointer event through %s so hold-to-talk stops and releases capture', async (endEvent) => {

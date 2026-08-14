@@ -85,6 +85,13 @@ describe('responsive shell and chat contracts', () => {
     expect(source).toContain('/pet`')
   })
 
+  it('keeps playback controls in the composer and removes the redundant advice strip', () => {
+    const source = readRendererSource('domains/chat/views/ChatPanel.vue')
+    expect(source).toContain('<ChatPlaybackBar')
+    expect(source).toContain('@toggle-pet-link="togglePetLink"')
+    expect(source).not.toContain('advice-strip')
+  })
+
   it('uses a stable chat surface and disables the unused wallpaper blur layer', () => {
     const source = readRendererSource('app/AppShell.vue')
 

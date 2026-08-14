@@ -79,6 +79,10 @@ Use `full` instead of `core` for optional ASR, Genie-TTS, Qdrant, embedding, and
 
 需要可选 ASR、Genie-TTS、Qdrant、嵌入及相关软件包时，请将 `core` 替换为 `full`。服务商配置请参阅 [docs/ENVIRONMENT_SETUP.md](docs/ENVIRONMENT_SETUP.md)，桌面和音频说明请参阅 [docs/LINUX.md](docs/LINUX.md)。
 
+For the chat/pet interaction rationale, repository evidence, and public-release gate, see [docs/RESEARCH_AND_RELEASE.md](docs/RESEARCH_AND_RELEASE.md).
+
+有关聊天/桌宠交互依据、仓库核验结果和公开发布门槛，请参阅 [docs/RESEARCH_AND_RELEASE.md](docs/RESEARCH_AND_RELEASE.md)。
+
 ## Useful launcher modes / 常用启动模式
 
 | Mode | Purpose |

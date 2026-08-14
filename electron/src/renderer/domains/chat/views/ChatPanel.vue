@@ -151,12 +151,14 @@
         <div class="composer-panel shrink-0" :class="{ 'composer-panel--tools-open': toolsExpanded }">
           <input ref="fileInput" class="hidden-file-input" type="file" multiple @change="handleFileInputChange" />
 
-          <div v-if="chatState.isTTSPlaying" class="tts-indicator">
-            <div class="waveform">
-              <span v-for="n in 5" :key="n" class="wave-bar" :style="{ animationDelay: `${n * 0.12}s` }"></span>
-            </div>
-            <span>播放中</span>
-          </div>
+          <ChatPlaybackBar
+            :playing="chatState.isTTSPlaying"
+            :speaking="chatState.isSpeaking"
+            :pet-link-enabled="chatOptions.pet_link_enabled !== false"
+            :text="playbackText"
+            @interrupt="handleInterrupt"
+            @toggle-pet-link="togglePetLink"
+          />
 
           <div v-if="attachments.length" class="attachment-strip">
             <div v-for="attachment in attachments" :key="attachment.id" class="attachment-chip" :title="attachment.name">
@@ -164,26 +166,6 @@
               <span>{{ attachment.name }}</span>
               <small>{{ formatBytes(attachment.size) }}</small>
               <button type="button" @click="removeAttachment(attachment.id)">×</button>
-            </div>
-          </div>
-
-          <div v-if="chatState.adviceFeed.length" class="advice-strip" @click.stop>
-            <div class="advice-strip__head">
-              <span>行为建议</span>
-              <button type="button" @click="handleClearAdvice">清空</button>
-            </div>
-            <div class="advice-list">
-              <div v-for="item in visibleAdviceItems" :key="item.id" class="advice-item">
-                <div class="advice-copy">
-                  <small>{{ adviceSourceLabel(item.source) }}</small>
-                  <span>{{ item.content }}</span>
-                </div>
-                <div class="advice-actions">
-                  <button type="button" @click="applyAdviceToInput(item.id)">填入</button>
-                  <button type="button" @click="showAdviceInConversation(item.id)">显示</button>
-                  <button type="button" @click="chatStore.dismissAdvice(item.id)">忽略</button>
-                </div>
-              </div>
             </div>
           </div>
 
@@ -409,6 +391,7 @@ import { useSessionViewState } from '../composables/useSessionViewState'
 import ChatMessageList from '../components/ChatMessageList.vue'
 import SessionRail from '../components/SessionRail.vue'
 import ChatComposerStatusLine from '../components/ChatComposerStatusLine.vue'
+import ChatPlaybackBar from '../components/ChatPlaybackBar.vue'
 import ChatRuntimeSettings, { type ChatRuntimeSettingsModel } from '../components/ChatRuntimeSettings.vue'
 import ChatVoiceStatus from '../components/ChatVoiceStatus.vue'
 import { useChatStore } from '@/stores/chatStore'
@@ -652,12 +635,15 @@ const responseModeOptions: Array<{ label: string; value: ResponseModeOption }> =
 ]
 
 const lastAssistantMessage = computed(() => [...chatState.messages].reverse().find((message) => message.role === 'assistant') ?? null)
+const playbackText = computed(() => {
+  const text = lastAssistantMessage.value?.content?.replace(/\s+/g, ' ').trim() ?? ''
+  return text.length > 120 ? `${text.slice(0, 120)}…` : text
+})
 const pendingAssistantLabel = computed(() => {
   if (chatOptions.reasoning_effort && !['none', 'default'].includes(chatOptions.reasoning_effort)) return '思考中'
   return '等待模型输出'
 })
 const hasConversationContent = computed(() => Boolean(chatState.messages.length || chatState.currentText || chatState.asrPartialText))
-const visibleAdviceItems = computed(() => chatState.adviceFeed.slice(0, 3))
 const workspaceNameMap = computed(() => Object.fromEntries(workspaceStore.workspaces.map((workspace) => [workspace.id, workspace.name])))
 const effectiveModelLabel = computed(() => chatOptions.model || settingsStore.state.llm.model || '默认模型')
 const webSearchLabel = computed(() => chatOptions.web_search_enabled ? '联网搜索开启' : '联网搜索关闭')
@@ -700,6 +686,9 @@ const maxChatOutputTokens = computed(() => {
 })
 const updateRuntimeChatOption = (field: keyof ChatRuntimeSettingsModel, value: string | number | boolean) => {
   chatStore.setChatOptions({ [field]: value } as Partial<ChatOptions>)
+}
+const togglePetLink = (enabled: boolean) => {
+  chatStore.setChatOptions({ pet_link_enabled: enabled })
 }
 const canSendComposer = computed(() => Boolean(inputText.value.trim() || attachments.value.length))
 const resolvedTheme = computed(() => {
@@ -1235,33 +1224,6 @@ const handleTopMoreCommand = (command: string) => {
     default:
       break
   }
-}
-
-const adviceSourceLabel = (source: string) => {
-  if (source === 'heartbeat') return '心跳'
-  if (source === 'persona-debug') return '调试'
-  return '行为'
-}
-
-const applyAdviceToInput = (adviceId: string) => {
-  const item = chatState.adviceFeed.find((advice) => advice.id === adviceId)
-  if (!item) return
-  inputText.value = inputText.value.trim()
-    ? `${inputText.value.trim()}\n${item.content}`
-    : item.content
-  chatStore.dismissAdvice(adviceId)
-  ElMessage.success('已填入输入框')
-}
-
-const showAdviceInConversation = (adviceId: string) => {
-  if (chatStore.promoteAdviceToMessage(adviceId)) {
-    ElMessage.success('已显示到当前对话视图')
-  }
-}
-
-const handleClearAdvice = () => {
-  chatStore.clearAdviceFeed()
-  ElMessage.info('已清空本地建议')
 }
 
 const openSettings = () => {
