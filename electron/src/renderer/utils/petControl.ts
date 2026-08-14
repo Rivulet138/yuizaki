@@ -242,6 +242,27 @@ export const petControl = {
     })
   },
 
+  async beginAdjustment(): Promise<PetControlState> {
+    if (window.petApi?.pet?.beginAdjustment) {
+      return window.petApi.pet.beginAdjustment()
+    }
+    throw new Error('全屏位置调整仅在 Electron 桌面窗口中可用。')
+  },
+
+  async completeAdjustment(): Promise<PetControlState> {
+    if (window.petApi?.pet?.completeAdjustment) {
+      return window.petApi.pet.completeAdjustment()
+    }
+    throw new Error('无法完成位置调整：请从 Electron 桌面窗口操作。')
+  },
+
+  async cancelAdjustment(): Promise<PetControlState> {
+    if (window.petApi?.pet?.cancelAdjustment) {
+      return window.petApi.pet.cancelAdjustment()
+    }
+    throw new Error('无法取消位置调整：请从 Electron 桌面窗口操作。')
+  },
+
   async setDoNotDisturb(doNotDisturb: boolean): Promise<PetControlState> {
     return petControl.updateConfig({ doNotDisturb })
   },

@@ -441,6 +441,8 @@ function registerWindowControlHandlers(ctx: IpcContext): void {
 }
 
 function registerPetControlHandlers(ctx: IpcContext): void {
+  let adjustmentSnapshot: PetControlState | null = null
+
   const createModelMutationContext = (): PetModelMutationContext => ({
     petModelCatalog: ctx.petModelCatalog,
     petStateStore: ctx.petStateStore,
@@ -581,6 +583,82 @@ function registerPetControlHandlers(ctx: IpcContext): void {
       state = ctx.petStateStore.applyConfigPatch({ visible: true, locked: false, clickThrough: false })
       ctx.applyPetStateToRenderer(state)
     }
+    return state
+  })
+
+  ipcMain.handle('pet:begin-adjustment', (event) => {
+    assertTrustedIpcSender(event)
+    if (!adjustmentSnapshot) {
+      adjustmentSnapshot = ctx.petStateStore.getState()
+    }
+
+    ctx.live2dWindow.show()
+    ctx.live2dWindow.setLocked(false)
+    ctx.live2dWindow.setClickThrough(false)
+    ctx.live2dWindow.setInteractMode(true)
+    ctx.petStateStore.applyConfigPatch({
+      visible: true,
+      locked: false,
+      clickThrough: false,
+    })
+    const state = ctx.petStateStore.setInteractMode(true)
+    ctx.applyPetStateToRenderer(state)
+    return state
+  })
+
+  ipcMain.handle('pet:complete-adjustment', (event) => {
+    assertTrustedIpcSender(event)
+    const previous = adjustmentSnapshot
+    adjustmentSnapshot = null
+    const clickThrough = previous?.clickThrough ?? true
+    const locked = previous?.locked ?? false
+
+    ctx.live2dWindow.setInteractMode(false)
+    ctx.live2dWindow.setLocked(locked)
+    ctx.live2dWindow.setClickThrough(clickThrough)
+    ctx.petStateStore.setInteractMode(false)
+    const state = ctx.petStateStore.applyConfigPatch({ clickThrough, locked })
+    ctx.applyPetStateToRenderer(state)
+    return state
+  })
+
+  ipcMain.handle('pet:cancel-adjustment', (event) => {
+    assertTrustedIpcSender(event)
+    const previous = adjustmentSnapshot
+    adjustmentSnapshot = null
+    if (!previous) {
+      ctx.live2dWindow.setInteractMode(false)
+      const state = ctx.petStateStore.setInteractMode(false)
+      ctx.applyPetStateToRenderer(state)
+      return state
+    }
+
+    const restorePatch: PetControlConfigPatch = {
+      displayId: previous.displayId,
+      scale: previous.scale,
+      placement: previous.placement,
+      visible: previous.visible,
+      clickThrough: previous.clickThrough,
+      locked: previous.locked,
+      opacity: previous.opacity,
+    }
+    if (
+      previous.placement === 'free' &&
+      typeof previous.positionX === 'number' &&
+      typeof previous.positionY === 'number'
+    ) {
+      restorePatch.positionX = previous.positionX
+      restorePatch.positionY = previous.positionY
+    }
+
+    ctx.live2dWindow.setInteractMode(false)
+    ctx.live2dWindow.setLocked(previous.locked)
+    ctx.live2dWindow.setClickThrough(previous.clickThrough)
+    if (previous.visible) ctx.live2dWindow.show()
+    else ctx.live2dWindow.hide()
+    ctx.petStateStore.applyConfigPatch(restorePatch)
+    const state = ctx.petStateStore.setInteractMode(false)
+    ctx.applyPetStateToRenderer(state)
     return state
   })
 

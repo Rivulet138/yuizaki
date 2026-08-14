@@ -208,6 +208,33 @@ describe('petControl', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('routes the full adjustment lifecycle only through Electron IPC', async () => {
+    const beginAdjustment = vi.fn().mockResolvedValue({ interactMode: true })
+    const completeAdjustment = vi.fn().mockResolvedValue({ interactMode: false })
+    const cancelAdjustment = vi.fn().mockResolvedValue({ interactMode: false })
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    Object.defineProperty(window, 'petApi', {
+      configurable: true,
+      value: { pet: { beginAdjustment, completeAdjustment, cancelAdjustment } },
+    })
+
+    await petControl.beginAdjustment()
+    await petControl.completeAdjustment()
+    await petControl.cancelAdjustment()
+
+    expect(beginAdjustment).toHaveBeenCalledOnce()
+    expect(completeAdjustment).toHaveBeenCalledOnce()
+    expect(cancelAdjustment).toHaveBeenCalledOnce()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('fails clearly when fullscreen adjustment is requested in browser mode', async () => {
+    await expect(petControl.beginAdjustment()).rejects.toThrow(/Electron/)
+    await expect(petControl.completeAdjustment()).rejects.toThrow(/Electron/)
+    await expect(petControl.cancelAdjustment()).rejects.toThrow(/Electron/)
+  })
+
   it('reads display and placement presets through Electron IPC when available', async () => {
     const getDisplays = vi.fn().mockResolvedValue({ activeDisplayId: 1, displays: [] })
     const getPlacementPresets = vi.fn().mockResolvedValue({ presets: [] })

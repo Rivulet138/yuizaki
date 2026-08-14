@@ -11,90 +11,39 @@
       <el-alert v-if="operationMessage" :title="operationMessage" :type="operationAlertType" show-icon @close="operationMessage = ''" />
 
       <section class="pet-workspace">
-        <el-card class="control-card model-card" shadow="never">
-          <template #header>
-            <div class="card-heading">
-              <span>角色模型</span>
-              <div class="card-heading__actions">
-                <el-tag size="small" :type="catalog.models.length > 0 ? 'success' : 'warning'">{{ catalog.models.length }} 个模型</el-tag>
-                <el-button size="small" type="primary" :loading="operationLoading" :disabled="operationLoading || refreshingPet" @click="oneClickImportModelFolder">
-                  <el-icon><Upload /></el-icon>
-                  <span>导入</span>
-                </el-button>
-              </div>
-            </div>
-          </template>
-          <el-select v-model="selectedModelId" class="full-field" placeholder="选择模型" :disabled="catalog.models.length === 0 || operationLoading || refreshingPet">
-            <el-option v-for="model in catalog.models" :key="model.id" :label="modelOptionLabel(model)" :value="model.id" />
-          </el-select>
-          <div class="model-meta">
-            <span>类型：{{ currentModel?.type.toUpperCase() ?? '未知' }} · {{ currentModelSourceLabel }}</span>
-            <span>动作 {{ currentModel?.motions.length ?? 0 }} · 表情 {{ currentModel?.expressions.length ?? 0 }}</span>
-          </div>
-          <div v-if="avatarCapabilities" class="model-meta runtime-capabilities" data-testid="avatar-capabilities">
-            <span>运行时 {{ avatarCapabilities.modelType.toUpperCase() }}</span>
-            <span>表达 {{ avatarCapabilities.actions.expression ? '✓' : '—' }}</span>
-            <span>注视 {{ avatarCapabilities.actions.gaze ? '✓' : '—' }}</span>
-            <span>动作 {{ avatarCapabilities.actions.motion ? '✓' : '—' }}</span>
-            <span>嘴型 {{ avatarCapabilities.actions.viseme ? '✓' : '—' }}</span>
-          </div>
-          <small v-if="modelSyncHint" class="field-hint warning-hint">{{ modelSyncHint }}</small>
-          <div class="button-row">
-            <el-button type="primary" :loading="operationLoading" :disabled="operationLoading || refreshingPet || !selectedModelId" @click="applyModel">切换模型</el-button>
-            <el-button plain :loading="refreshingPet" :disabled="refreshingPet" @click="refresh">刷新</el-button>
-          </div>
-          <div class="import-mode-row compact-import-row">
-            <el-radio-group v-model="localModelType" size="small">
-              <el-radio-button label="live2d">Live2D</el-radio-button>
-              <el-radio-button label="vrm">VRM</el-radio-button>
-            </el-radio-group>
-          </div>
-          <div class="model-import-row">
-            <el-input v-model="localModelSourcePath" :placeholder="localModelPlaceholder" clearable />
-            <el-button plain :loading="operationLoading" :disabled="operationLoading || refreshingPet" @click="pickAndImportLocalModel">浏览</el-button>
-            <el-button plain :loading="operationLoading" :disabled="operationLoading || refreshingPet" @click="importLocalModel()">导入</el-button>
-          </div>
-          <div class="button-row">
-            <el-button plain type="danger" :loading="operationLoading" :disabled="operationLoading || refreshingPet || currentModel?.source !== 'local'" @click="deleteCurrentLocalModel">删除本地模型</el-button>
-          </div>
-        </el-card>
+        <PetModelManager
+          v-model:selected-model-id="selectedModelId"
+          v-model:local-model-type="localModelType"
+          v-model:source-path="localModelSourcePath"
+          :models="catalog.models"
+          :current-model="currentModel"
+          :source-label="currentModelSourceLabel"
+          :capabilities="avatarCapabilities"
+          :sync-hint="modelSyncHint"
+          :source-placeholder="localModelPlaceholder"
+          :loading="operationLoading"
+          :pending-action="pendingAction"
+          :refreshing="refreshingPet"
+          :option-label="modelOptionLabel"
+          @apply="applyModel"
+          @refresh="refresh"
+          @import-picker="oneClickImportModelFolder"
+          @browse="pickAndImportLocalModel"
+          @import-path="importLocalModel"
+          @delete="deleteCurrentLocalModel"
+        />
 
-        <el-card class="control-card safety-card" shadow="never">
-          <template #header>
-            <div class="card-heading">
-              <span>桌面驻留</span>
-              <el-tag size="small" :type="state.clickThrough ? 'success' : 'info'">{{ state.clickThrough ? '不拦截鼠标' : '可直接操作' }}</el-tag>
-            </div>
-          </template>
-          <div class="switch-row primary-switch">
-            <div>
-              <strong>鼠标穿透</strong>
-            </div>
-            <el-switch :model-value="state.clickThrough" inline-prompt active-text="开" inactive-text="关" @change="setClickThrough" />
-          </div>
-          <div class="switch-row">
-            <div>
-              <strong>锁定位置</strong>
-            </div>
-            <el-switch :model-value="state.locked" inline-prompt active-text="锁" inactive-text="解" @change="setLocked" />
-          </div>
-          <div class="switch-row">
-            <div>
-              <strong>拖动模式</strong>
-            </div>
-            <el-switch :model-value="state.interactMode" inline-prompt active-text="开" inactive-text="关" @change="setInteractMode" />
-          </div>
-          <div class="switch-row">
-            <div>
-              <strong>免打扰</strong>
-            </div>
-            <el-switch :model-value="state.doNotDisturb" inline-prompt active-text="开" inactive-text="关" @change="setDoNotDisturb" />
-          </div>
-          <div class="button-row">
-            <el-button type="primary" plain :loading="operationLoading" @click="enterAdjustmentMode">拖动调整</el-button>
-            <el-button plain :loading="operationLoading" @click="restoreResidentMode">常驻</el-button>
-          </div>
-        </el-card>
+        <PetResidenceControls
+          :state="state"
+          :display-label="activeDisplayLabel"
+          :loading="operationLoading"
+          :pending-action="pendingAction"
+          @begin-adjustment="enterAdjustmentMode"
+          @restore-resident="restoreResidentMode"
+          @update-click-through="setClickThrough"
+          @update-locked="setLocked"
+          @update-dnd="setDoNotDisturb"
+        />
 
         <el-card class="control-card appearance-card" shadow="never">
           <template #header>
@@ -336,8 +285,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Upload } from '@element-plus/icons-vue'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
+import PetModelManager from '../components/PetModelManager.vue'
+import PetResidenceControls from '../components/PetResidenceControls.vue'
 import { useI18n } from '@/i18n'
 import { petControl, type PetBehaviorState } from '@/utils/petControl'
 import { CONTROL_AUTH_MISSING_MESSAGE, isAuthMissingError } from '@/api/clients/http-client'
@@ -393,6 +343,7 @@ const positionXDraft = ref(100)
 const positionYDraft = ref(100)
 const lipSyncAudioUrl = ref('')
 const operationLoading = ref(false)
+const pendingAction = ref<string | null>(null)
 const refreshingPet = ref(false)
 const hasLoadedState = ref(false)
 const operationMessage = ref('')
@@ -677,9 +628,11 @@ const runPetOperation = async <T,>(
   task: () => Promise<T>,
   successMessage?: string,
   failureMessage = '桌宠操作失败',
+  action = 'other',
 ): Promise<T | null> => {
   if (operationLoading.value) return null
   operationLoading.value = true
+  pendingAction.value = action
   operationMessage.value = ''
   try {
     const result = await task()
@@ -695,6 +648,7 @@ const runPetOperation = async <T,>(
     return null
   } finally {
     operationLoading.value = false
+    pendingAction.value = null
   }
 }
 
@@ -778,7 +732,12 @@ const refresh = async () => {
 
 const applyModel = async () => {
   if (!selectedModelId.value) return
-  const result = await runPetOperation(() => petControl.setModel(selectedModelId.value), '模型已切换')
+  const result = await runPetOperation(
+    () => petControl.setModel(selectedModelId.value),
+    '模型已切换',
+    '切换模型失败',
+    'model-apply',
+  )
   if (!result) return
   applyState(result)
   await showPetLayerAfterModelChange()
@@ -820,6 +779,8 @@ const setDoNotDisturb = async (enabled: string | number | boolean) => {
     () => petControl.setDoNotDisturb(isEnabled),
     // eslint-disable-next-line no-extra-boolean-cast -- keep the status branch tied to the normalized boolean value.
     Boolean(enabled) ? '免打扰已开启' : '免打扰已关闭',
+    '更新免打扰失败',
+    'dnd',
   ))
 }
 
@@ -833,6 +794,8 @@ const importLocalModel = async (sourceOverride?: string, modelTypeOverride?: Pet
   const result = await runPetOperation(
     () => petControl.importLocalModel(sourcePath, modelType),
     modelType === 'live2d' ? 'Live2D 模型已导入' : 'VRM 模型已导入',
+    '导入模型失败',
+    'model-import',
   )
   if (!result) return
   applyModelImportResult(result)
@@ -845,6 +808,7 @@ const oneClickImportModelFolder = async () => {
     () => petControl.importLocalModelFromPicker('auto'),
     undefined,
     '模型文件夹导入失败',
+    'model-import',
   )
   if (!result || result.canceled) return
   applyModelImportResult(result)
@@ -862,6 +826,7 @@ const pickAndImportLocalModel = async () => {
     () => petControl.pickLocalModel(localModelType.value),
     undefined,
     '打开模型选择器失败',
+    'model-browse',
   )
   if (!picked || picked.canceled || !picked.sourcePath) return
   localModelSourcePath.value = picked.sourcePath
@@ -885,7 +850,12 @@ const deleteCurrentLocalModel = async () => {
     return
   }
 
-  const result = await runPetOperation(() => petControl.deleteLocalModel(model.id), '本地模型已删除')
+  const result = await runPetOperation(
+    () => petControl.deleteLocalModel(model.id),
+    '本地模型已删除',
+    '删除本地模型失败',
+    'model-delete',
+  )
   if (!result) return
   applyState(result.state)
   catalog.activeModelId = result.catalog.activeModelId
@@ -973,47 +943,42 @@ const setClickThrough = async (enabled: string | number | boolean) => {
       await petControl.setVisible(true)
     }
     return petControl.setClickThrough(clickThrough)
-  })
+  }, undefined, '更新鼠标穿透失败', 'click-through')
   applyState(result)
   if (result !== null) await refresh()
 }
 
 const setLocked = async (enabled: string | number | boolean) => {
-  applyState(await runPetOperation(() => petControl.setLocked(Boolean(enabled))))
-}
-
-const setInteractMode = async (enabled: string | number | boolean) => {
-  const interactMode = Boolean(enabled)
-  const result = await runPetOperation(async () => {
-    if (interactMode) {
-      await petControl.setVisible(true)
-      applyState(await petControl.setLocked(false))
-      applyState(await petControl.setClickThrough(false))
-    }
-    return petControl.setInteractMode(interactMode)
-  })
-  applyState(result)
-  if (result !== null) await refresh()
+  applyState(await runPetOperation(
+    () => petControl.setLocked(Boolean(enabled)),
+    undefined,
+    '更新位置锁定失败',
+    'lock',
+  ))
 }
 
 const enterAdjustmentMode = async () => {
-  const result = await runPetOperation(async () => {
-    await petControl.setVisible(true)
-    applyState(await petControl.setLocked(false))
-    applyState(await petControl.setClickThrough(false))
-    applyState(await petControl.setInteractMode(true))
-  }, '已进入拖动调整模式')
+  const result = await runPetOperation(
+    () => petControl.beginAdjustment(),
+    '已进入全屏位置调整',
+    '无法进入全屏位置调整',
+    'adjustment',
+  )
+  applyState(result)
   if (result !== null) await refresh()
 }
 
 const restoreResidentMode = async () => {
   const result = await runPetOperation(async () => {
+    if (state.interactMode) {
+      await petControl.completeAdjustment()
+    }
     await petControl.setVisible(true)
-    applyState(await petControl.setInteractMode(false))
-    applyState(await petControl.setLocked(false))
-    applyState(await petControl.setClickThrough(true))
-    applyState(await petControl.snapBottomRight())
-  }, '已恢复穿透常驻')
+    await petControl.setLocked(false)
+    await petControl.setClickThrough(true)
+    return petControl.snapBottomRight()
+  }, '已恢复穿透常驻', '恢复桌宠常驻失败', 'restore')
+  applyState(result)
   if (result !== null) await refresh()
 }
 

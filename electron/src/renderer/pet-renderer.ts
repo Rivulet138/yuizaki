@@ -198,6 +198,9 @@ class PetRenderer {
 
 	private noticeEl: HTMLDivElement | null = null;
 	private quickMenuEl: HTMLDivElement | null = null;
+	private adjustmentSaveButton: HTMLButtonElement | null = null;
+	private adjustmentCancelButton: HTMLButtonElement | null = null;
+	private adjustmentActionPending = false;
 	private mousePassthrough = true;
 	private lastPassthroughSwitchAt = 0;
 	private passthroughTimer: number | null = null;
@@ -343,6 +346,7 @@ class PetRenderer {
 		this.container.appendChild(this.canvas);
 
 		this.setupGlobalListeners();
+		this.setupAdjustmentControls();
 		this.setupIPCListeners();
 		this.showNotice("正在恢复上次桌宠模型...");
 		window.live2dApi?.pet.rendererReady();
@@ -1753,7 +1757,7 @@ class PetRenderer {
 	): void {
 		if (!this.lastMouseClientPoint) {
 			if (!this.isDraggingWindow) {
-				this.requestMousePassthrough(true, reason, immediate);
+				this.requestMousePassthrough(!this.interactMode, reason, immediate);
 			}
 			this.updateCursor(false);
 			return;
@@ -1851,6 +1855,7 @@ class PetRenderer {
 			}
 
 			document.body.classList.toggle("interact-mode", this.interactMode);
+			this.syncAdjustmentControls();
 			this.syncMouseCaptureFromLastPoint("interact-toggle", true);
 		});
 
@@ -1944,6 +1949,57 @@ class PetRenderer {
 			}
 		});
 	}
+
+	private setupAdjustmentControls(): void {
+		this.adjustmentSaveButton = document.getElementById("pet-adjustment-save") as HTMLButtonElement | null;
+		this.adjustmentCancelButton = document.getElementById("pet-adjustment-cancel") as HTMLButtonElement | null;
+		this.adjustmentSaveButton?.addEventListener("click", this.handleAdjustmentSave);
+		this.adjustmentCancelButton?.addEventListener("click", this.handleAdjustmentCancel);
+		window.addEventListener("keydown", this.handleAdjustmentKeyDown);
+		this.syncAdjustmentControls();
+	}
+
+	private syncAdjustmentControls(): void {
+		const disabled = !this.interactMode || this.adjustmentActionPending;
+		if (this.adjustmentSaveButton) this.adjustmentSaveButton.disabled = disabled;
+		if (this.adjustmentCancelButton) this.adjustmentCancelButton.disabled = disabled;
+	}
+
+	private runAdjustmentAction(action: "save" | "cancel"): void {
+		if (!this.interactMode || this.adjustmentActionPending) return;
+		const task = action === "save"
+			? window.live2dApi?.pet.completeAdjustment?.()
+			: window.live2dApi?.pet.cancelAdjustment?.();
+		if (!task) return;
+
+		this.adjustmentActionPending = true;
+		this.syncAdjustmentControls();
+		void task.catch((error: unknown) => {
+			logger.error(`[PetRenderer] failed to ${action} adjustment:`, error);
+			this.showNotice(action === "save" ? "位置保存失败" : "取消调整失败");
+		}).finally(() => {
+			this.adjustmentActionPending = false;
+			this.syncAdjustmentControls();
+		});
+	}
+
+	private readonly handleAdjustmentSave = (event: MouseEvent): void => {
+		event.stopPropagation();
+		this.runAdjustmentAction("save");
+	};
+
+	private readonly handleAdjustmentCancel = (event: MouseEvent): void => {
+		event.stopPropagation();
+		this.runAdjustmentAction("cancel");
+	};
+
+	private readonly handleAdjustmentKeyDown = (event: KeyboardEvent): void => {
+		if (!this.interactMode || this.adjustmentActionPending) return;
+		if (event.key === "Escape") {
+			event.preventDefault();
+			this.runAdjustmentAction("cancel");
+		}
+	};
 
 	private triggerModelClick(): void {
 		if (this.isDraggingWindow || this.dragMoved) {
@@ -2439,6 +2495,9 @@ class PetRenderer {
 			this.singleClickTimer = null;
 		}
 		this.clearLongPressTimer();
+		this.adjustmentSaveButton?.removeEventListener("click", this.handleAdjustmentSave);
+		this.adjustmentCancelButton?.removeEventListener("click", this.handleAdjustmentCancel);
+		window.removeEventListener("keydown", this.handleAdjustmentKeyDown);
 
 		if (this.passthroughTimer !== null) {
 			window.clearTimeout(this.passthroughTimer);

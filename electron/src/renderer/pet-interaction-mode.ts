@@ -1,4 +1,4 @@
-export type PetInteractionModeState = 'locked' | 'dragging' | 'interactive' | 'passthrough'
+export type PetInteractionModeState = 'locked' | 'dragging' | 'adjusting' | 'interactive' | 'passthrough'
 
 export interface PetInteractionModeContext {
   locked: boolean
@@ -29,6 +29,14 @@ export const resolveInteractionMode = (
       state: 'dragging',
       shouldIgnoreMouse: false,
       cursor: 'grabbing',
+    }
+  }
+
+  if (context.interactMode) {
+    return {
+      state: 'adjusting',
+      shouldIgnoreMouse: false,
+      cursor: context.hoveringInteractionArea ? 'grab' : 'default',
     }
   }
 

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Live2DWindow } from '../live2d-window'
+import { DEFAULT_PET_CONTROL_STATE } from '../../shared/pet-control'
 
 const fsMock = vi.hoisted(() => ({
   mkdir: vi.fn(async () => undefined),
@@ -29,6 +30,8 @@ const electronMock = vi.hoisted(() => {
       show: vi.fn(),
       hide: vi.fn(),
       close: vi.fn(),
+      getBounds: vi.fn(() => ({ x: 0, y: 0, width: 1920, height: 1080 })),
+      setBounds: vi.fn(),
       on: vi.fn((event: string, handler: (...args: unknown[]) => void) => windowHandlers.set(event, handler)),
     }
     instances.push(instance)
@@ -39,8 +42,10 @@ const electronMock = vi.hoisted(() => {
     instances,
     screen: {
       getPrimaryDisplay: vi.fn(() => ({
+        id: 1,
         workArea: { x: 0, y: 0, width: 1920, height: 1080 },
       })),
+      getAllDisplays: vi.fn(() => []),
     },
   }
 })
@@ -109,6 +114,46 @@ describe('Live2DWindow hardware lifecycle', () => {
 
     live2dWindow.close()
     expect(clearIntervalSpy).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(100)
+  })
+
+  it('creates a physical fullscreen work-area window and follows the selected display', async () => {
+    electronMock.screen.getPrimaryDisplay.mockReturnValue({
+      id: 1,
+      workArea: { x: 0, y: 0, width: 1920, height: 1040 },
+    })
+    electronMock.screen.getAllDisplays.mockReturnValue([
+      {
+        id: 2,
+        workArea: { x: -1600, y: 40, width: 1600, height: 900 },
+      },
+    ])
+    const live2dWindow = new Live2DWindow()
+    live2dWindow.create()
+
+    expect(electronMock.BrowserWindow).toHaveBeenCalledWith(expect.objectContaining({
+      x: 0,
+      y: 0,
+      width: 1920,
+      height: 1040,
+      transparent: true,
+      frame: false,
+    }))
+
+    const instance = electronMock.instances[0]
+    instance?.getBounds.mockReturnValue({ x: 0, y: 0, width: 1920, height: 1040 })
+    const layout = live2dWindow.applyWindowLayout({
+      ...DEFAULT_PET_CONTROL_STATE,
+      displayId: 2,
+    })
+
+    expect(instance?.setBounds).toHaveBeenCalledWith({
+      x: -1600,
+      y: 40,
+      width: 1600,
+      height: 900,
+    }, false)
+    expect(layout?.displayId).toBe(2)
     await vi.advanceTimersByTimeAsync(100)
   })
 

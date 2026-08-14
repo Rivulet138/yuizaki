@@ -65,4 +65,22 @@ describe('real preload E2E activation wiring', () => {
       undefined,
     )
   })
+
+  it('wires the desktop adjustment lifecycle to explicit IPC channels', async () => {
+    const api = await loadPreload(undefined) as {
+      pet: {
+        beginAdjustment: () => Promise<unknown>
+        completeAdjustment: () => Promise<unknown>
+        cancelAdjustment: () => Promise<unknown>
+      }
+    }
+
+    await api.pet.beginAdjustment()
+    await api.pet.completeAdjustment()
+    await api.pet.cancelAdjustment()
+
+    expect(electron.invoke).toHaveBeenCalledWith('pet:begin-adjustment')
+    expect(electron.invoke).toHaveBeenCalledWith('pet:complete-adjustment')
+    expect(electron.invoke).toHaveBeenCalledWith('pet:cancel-adjustment')
+  })
 })

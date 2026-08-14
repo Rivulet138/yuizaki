@@ -5,6 +5,7 @@ const electronMock = vi.hoisted(() => ({
   send: vi.fn(),
   on: vi.fn(),
   removeListener: vi.fn(),
+  invoke: vi.fn(),
 }))
 
 vi.mock('electron', () => ({
@@ -14,7 +15,7 @@ vi.mock('electron', () => ({
     },
   },
   ipcRenderer: {
-    invoke: vi.fn(),
+    invoke: electronMock.invoke,
     send: electronMock.send,
     on: electronMock.on,
     removeListener: electronMock.removeListener,
@@ -47,5 +48,21 @@ describe('live2d preload subscriptions', () => {
 
     api.off('pet:apply-config', callback)
     expect(electronMock.removeListener).toHaveBeenCalledWith('pet:apply-config', wrapped)
+  })
+
+  it('wires overlay save and cancel to the adjustment session IPC', async () => {
+    await import('../live2d-preload')
+    const api = electronMock.exposed['live2dApi'] as {
+      pet: {
+        completeAdjustment: () => Promise<unknown>
+        cancelAdjustment: () => Promise<unknown>
+      }
+    }
+
+    await api.pet.completeAdjustment()
+    await api.pet.cancelAdjustment()
+
+    expect(electronMock.invoke).toHaveBeenCalledWith('pet:complete-adjustment')
+    expect(electronMock.invoke).toHaveBeenCalledWith('pet:cancel-adjustment')
   })
 })

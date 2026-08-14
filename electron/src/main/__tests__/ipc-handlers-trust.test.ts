@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IpcContext } from '../ipc-handlers'
 import { buildPackagedRendererUrl } from '../renderer-protocol'
+import { DEFAULT_PET_CONTROL_STATE } from '../../shared/pet-control'
 
 const electronMock = vi.hoisted(() => {
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
@@ -49,8 +50,7 @@ vi.mock('../http/python-origin', () => pythonOriginMock)
 
 const buildIpcContext = (): IpcContext => {
   const state = {
-    modelId: null,
-    locked: false,
+    ...DEFAULT_PET_CONTROL_STATE,
     positionX: 100,
     positionY: 100,
   }
@@ -73,11 +73,20 @@ const buildIpcContext = (): IpcContext => {
       window: null,
     },
     petStateStore: {
-      getState: vi.fn(() => state as never),
-      applyConfigPatch: vi.fn((patch: Record<string, unknown>) => Object.assign(state, patch)),
+      getState: vi.fn(() => ({ ...state, lipSyncProfile: { ...state.lipSyncProfile } }) as never),
+      applyConfigPatch: vi.fn((patch: Record<string, unknown>) => {
+        Object.assign(state, patch)
+        return { ...state, lipSyncProfile: { ...state.lipSyncProfile } }
+      }),
       setReady: vi.fn(),
-      setInteractMode: vi.fn((enabled: boolean) => Object.assign(state, { interactMode: enabled })),
-      setVisible: vi.fn((visible: boolean) => Object.assign(state, { visible })),
+      setInteractMode: vi.fn((enabled: boolean) => {
+        Object.assign(state, { interactMode: enabled })
+        return { ...state, lipSyncProfile: { ...state.lipSyncProfile } }
+      }),
+      setVisible: vi.fn((visible: boolean) => {
+        Object.assign(state, { visible })
+        return { ...state, lipSyncProfile: { ...state.lipSyncProfile } }
+      }),
     },
     petModelCatalog: {
       refresh: vi.fn(),
@@ -218,6 +227,100 @@ describe('IPC handler sender trust', () => {
     expect(() => handler?.(untrustedEvent, true)).toThrow(/Blocked IPC from untrusted renderer/)
     expect(ctx.live2dWindow.show).not.toHaveBeenCalled()
   })
+
+  it('starts and completes an adjustment while preserving the new transform', async () => {
+    const { registerIpcHandlers } = await import('../ipc-handlers')
+    const ctx = buildIpcContext()
+    ctx.petStateStore.applyConfigPatch({ locked: true, clickThrough: false })
+    registerIpcHandlers(ctx)
+
+    const started = electronMock.handlers.get('pet:begin-adjustment')?.(trustedEvent)
+    expect(started).toEqual(expect.objectContaining({
+      visible: true,
+      locked: false,
+      clickThrough: false,
+      interactMode: true,
+    }))
+    expect(ctx.live2dWindow.show).toHaveBeenCalledOnce()
+    expect(ctx.live2dWindow.setInteractMode).toHaveBeenCalledWith(true)
+
+    ctx.petStateStore.applyConfigPatch({
+      displayId: 8,
+      placement: 'free',
+      positionX: 640,
+      positionY: 420,
+      scale: 0.4,
+    })
+    const completed = electronMock.handlers.get('pet:complete-adjustment')?.(trustedEvent)
+
+    expect(completed).toEqual(expect.objectContaining({
+      displayId: 8,
+      placement: 'free',
+      positionX: 640,
+      positionY: 420,
+      scale: 0.4,
+      locked: true,
+      clickThrough: false,
+      interactMode: false,
+    }))
+    expect(ctx.live2dWindow.setLocked).toHaveBeenLastCalledWith(true)
+    expect(ctx.live2dWindow.setClickThrough).toHaveBeenLastCalledWith(false)
+  })
+
+  it('cancels an adjustment by restoring the first session snapshot', async () => {
+    const { registerIpcHandlers } = await import('../ipc-handlers')
+    const ctx = buildIpcContext()
+    ctx.petStateStore.applyConfigPatch({
+      displayId: 3,
+      placement: 'free',
+      positionX: 120,
+      positionY: 240,
+      scale: 0.25,
+      opacity: 0.65,
+      visible: false,
+      locked: true,
+      clickThrough: true,
+    })
+    registerIpcHandlers(ctx)
+
+    electronMock.handlers.get('pet:begin-adjustment')?.(trustedEvent)
+    electronMock.handlers.get('pet:begin-adjustment')?.(trustedEvent)
+    ctx.petStateStore.applyConfigPatch({
+      displayId: 9,
+      positionX: 900,
+      positionY: 700,
+      scale: 0.52,
+      opacity: 1,
+    })
+    const canceled = electronMock.handlers.get('pet:cancel-adjustment')?.(trustedEvent)
+
+    expect(canceled).toEqual(expect.objectContaining({
+      displayId: 3,
+      placement: 'free',
+      positionX: 120,
+      positionY: 240,
+      scale: 0.25,
+      opacity: 0.65,
+      visible: false,
+      locked: true,
+      clickThrough: true,
+      interactMode: false,
+    }))
+    expect(ctx.live2dWindow.hide).toHaveBeenCalledOnce()
+    expect(ctx.applyPetStateToRenderer).toHaveBeenCalledWith(expect.objectContaining({ visible: false }))
+  })
+
+  it.each(['pet:begin-adjustment', 'pet:complete-adjustment', 'pet:cancel-adjustment'])(
+    'rejects untrusted adjustment IPC on %s',
+    async (channel) => {
+      const { registerIpcHandlers } = await import('../ipc-handlers')
+      const ctx = buildIpcContext()
+      registerIpcHandlers(ctx)
+
+      expect(() => electronMock.handlers.get(channel)?.(untrustedEvent)).toThrow(/Blocked IPC/)
+      expect(ctx.applyPetStateToRenderer).not.toHaveBeenCalled()
+    },
+  )
 
   it('routes trusted window control invokes to the workbench window', async () => {
     const { registerIpcHandlers } = await import('../ipc-handlers')

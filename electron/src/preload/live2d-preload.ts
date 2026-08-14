@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AvatarCapabilitySnapshot, AvatarCommandResult } from '../shared/avatar-command'
-import type { PetRendererStatePayload } from '../shared/pet-control'
+import type { PetControlState, PetRendererStatePayload } from '../shared/pet-control'
 import type { DesktopPetEventDispatchResult, DesktopPetEventRecord } from '../shared/plugin'
 
 type ListenerCallback = (...args: unknown[]) => void
@@ -26,6 +26,10 @@ const live2dApi = {
       ipcRenderer.invoke('pet:set-locked', locked),
     setClickThrough: (clickThrough: boolean) =>
       ipcRenderer.invoke('pet:set-click-through', clickThrough),
+    completeAdjustment: () =>
+      ipcRenderer.invoke('pet:complete-adjustment') as Promise<PetControlState>,
+    cancelAdjustment: () =>
+      ipcRenderer.invoke('pet:cancel-adjustment') as Promise<PetControlState>,
     snapBottomRight: () => ipcRenderer.invoke('pet:snap-bottom-right'),
     reloadRenderer: () => ipcRenderer.invoke('pet:reload-renderer'),
     savePosition: (x: number, y: number) =>

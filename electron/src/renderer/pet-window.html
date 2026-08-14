@@ -60,6 +60,139 @@
       cursor: grabbing;
     }
 
+    .pet-adjustment-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 160;
+      display: none;
+      border: 2px solid rgba(37, 99, 235, 0.72);
+      background:
+        linear-gradient(rgba(37, 99, 235, 0.09) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(37, 99, 235, 0.09) 1px, transparent 1px);
+      background-size: 48px 48px;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.72);
+      pointer-events: none;
+    }
+
+    .interact-mode .pet-adjustment-overlay {
+      display: block;
+    }
+
+    .pet-adjustment-toolbar {
+      position: absolute;
+      top: 18px;
+      left: 50%;
+      display: flex;
+      width: min(560px, calc(100vw - 32px));
+      min-height: 52px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 8px 9px 8px 16px;
+      border: 1px solid rgba(148, 163, 184, 0.58);
+      border-radius: 8px;
+      background: rgba(248, 250, 252, 0.96);
+      box-shadow: 0 14px 34px rgba(15, 23, 42, 0.2);
+      color: #172033;
+      transform: translateX(-50%);
+      pointer-events: auto;
+    }
+
+    .pet-adjustment-status {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .pet-adjustment-status::before {
+      width: 8px;
+      height: 8px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: #2563eb;
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14);
+      content: '';
+    }
+
+    .pet-adjustment-status strong {
+      overflow: hidden;
+      font-size: 14px;
+      line-height: 1.4;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .pet-adjustment-actions {
+      display: flex;
+      flex: 0 0 auto;
+      gap: 7px;
+    }
+
+    .pet-adjustment-actions button {
+      min-height: 34px;
+      border: 1px solid rgba(148, 163, 184, 0.72);
+      border-radius: 7px;
+      background: #fff;
+      color: #334155;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 0 13px;
+      transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+    }
+
+    .pet-adjustment-actions button:hover:not(:disabled) {
+      border-color: #64748b;
+      background: #f8fafc;
+      color: #0f172a;
+    }
+
+    .pet-adjustment-actions button:active:not(:disabled) {
+      transform: translateY(1px);
+    }
+
+    .pet-adjustment-actions button:focus-visible {
+      outline: 3px solid rgba(37, 99, 235, 0.3);
+      outline-offset: 2px;
+    }
+
+    .pet-adjustment-actions button:disabled {
+      cursor: wait;
+      opacity: 0.56;
+    }
+
+    .pet-adjustment-actions .is-primary {
+      border-color: #2563eb;
+      background: #2563eb;
+      color: #fff;
+    }
+
+    .pet-adjustment-actions .is-primary:hover:not(:disabled) {
+      border-color: #1d4ed8;
+      background: #1d4ed8;
+      color: #fff;
+    }
+
+    @media (max-width: 560px) {
+      .pet-adjustment-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 8px;
+        padding: 11px;
+      }
+
+      .pet-adjustment-actions button {
+        flex: 1 1 0;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .pet-adjustment-actions button {
+        transition: none;
+      }
+    }
+
     button,
     input,
     textarea,
@@ -117,6 +250,17 @@
 </head>
 <body>
   <div id="pet-canvas"></div>
+  <div id="pet-adjustment-overlay" class="pet-adjustment-overlay" role="dialog" aria-modal="true" aria-label="调整桌宠位置">
+    <div class="pet-adjustment-toolbar">
+      <div class="pet-adjustment-status">
+        <strong>位置调整中</strong>
+      </div>
+      <div class="pet-adjustment-actions">
+        <button id="pet-adjustment-cancel" type="button">取消调整</button>
+        <button id="pet-adjustment-save" class="is-primary" type="button">保存位置</button>
+      </div>
+    </div>
+  </div>
   <script type="module" src="./pet-renderer-entry.ts"></script>
 </body>
 </html>

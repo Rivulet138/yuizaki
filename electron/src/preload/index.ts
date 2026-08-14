@@ -130,6 +130,12 @@ const api = {
       ipcRenderer.invoke('pet:place', { placement, displayId }) as Promise<PetControlState>,
     setInteractMode: (enabled: boolean) =>
       ipcRenderer.invoke('pet:set-interact-mode', enabled) as Promise<PetControlState>,
+    beginAdjustment: () =>
+      ipcRenderer.invoke('pet:begin-adjustment') as Promise<PetControlState>,
+    completeAdjustment: () =>
+      ipcRenderer.invoke('pet:complete-adjustment') as Promise<PetControlState>,
+    cancelAdjustment: () =>
+      ipcRenderer.invoke('pet:cancel-adjustment') as Promise<PetControlState>,
     setLocked: (enabled: boolean) =>
       ipcRenderer.invoke('pet:set-locked', enabled) as Promise<PetControlState>,
     setClickThrough: (enabled: boolean) =>
