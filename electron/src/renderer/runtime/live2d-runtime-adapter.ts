@@ -97,6 +97,7 @@ interface Live2DHostContext {
   installEasyLive2DInteractivity(): void
   setupModelInteractivity(): void
   applyModelTransform(): void
+  scheduleVisualCalibration?(): void
   reportState(force?: boolean): void
   syncMouseCaptureFromLastPoint(reason: string, immediate?: boolean): void
   markActivity(reason: string): void
@@ -327,6 +328,7 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
     this.host.setupModelInteractivity()
     viewport.addChild(model)
     this.host.applyModelTransform()
+    this.host.scheduleVisualCalibration?.()
     this.host.hideNotice()
     this.host.markActivity('model-loaded')
     this.host.reportState(true)

@@ -83,8 +83,13 @@ import {
 	detachWindowListeners,
 } from "./pet-renderer-runtime";
 import {
+	clampVisualAnchorToViewport,
 	computeModelTransform,
-	resolveModelAnchor,
+	mapAlphaBoundsToLocalBounds,
+	projectLocalVisualBounds,
+	resolveVisualPlacementOffset,
+	scanAlphaBounds,
+	type VisualBounds,
 } from "./pet-renderer-transform";
 import {
 	DEFAULT_PET_TEST_STATE,
@@ -192,6 +197,9 @@ class PetRenderer {
 	private canvas: HTMLCanvasElement | null = null;
 	private model: Live2DSprite | null = null;
 	private live2dViewport: PIXI.Container | null = null;
+	private live2dVisualLocalBounds: VisualBounds | null = null;
+	private visualCalibrationFrame: number | null = null;
+	private visualCalibrationGeneration = 0;
 	private readonly container: HTMLElement;
 	private config: PetConfig;
 	private destroyed = false;
@@ -364,6 +372,7 @@ class PetRenderer {
 		const loadGeneration = this.beginModelLoadGeneration();
 
 		this.avatarCapabilities = null;
+		this.invalidateLive2DVisualCalibration();
 		window.live2dApi?.pet.reportAvatarCapabilities(null);
 		this.clearAvatarScheduling();
 		this.live2dRuntime?.destroy();
@@ -439,6 +448,7 @@ class PetRenderer {
 					this.installEasyLive2DInteractivity(),
 				setupModelInteractivity: () => this.setupModelInteractivity(),
 				applyModelTransform: () => this.applyModelTransform(),
+				scheduleVisualCalibration: () => this.scheduleLive2DVisualCalibration(),
 				reportState: (force) => this.reportState(force),
 				syncMouseCaptureFromLastPoint: (reason, immediate) =>
 					this.syncMouseCaptureFromLastPoint(reason, immediate),
@@ -454,6 +464,7 @@ class PetRenderer {
 				return;
 			}
 			this.live2dRuntime.setCompanionIdleProfile(this.companionIdleProfile);
+			this.scheduleLive2DVisualCalibration();
 			this.publishAvatarCapabilities();
 			console.info("[PetRenderer] model loaded:", modelPath);
 		} catch (error) {
@@ -1318,21 +1329,42 @@ class PetRenderer {
 		this.live2dViewport.position.set(transform.anchorX, transform.anchorY);
 		this.live2dViewport.scale.set(transform.nextScale);
 		this.model.position.set(0, 0);
-		const placementAdjustment = this.resolveVisualPlacementAdjustment(
+		const provisionalVisualBounds = this.getLive2DVisualBounds();
+		const desiredAnchor = this.config.placement === "free"
+			? clampVisualAnchorToViewport({
+				candidateX:
+					typeof this.config.positionX === "number"
+						? this.config.positionX
+						: transform.anchorX,
+				candidateY:
+					typeof this.config.positionY === "number"
+						? this.config.positionY
+						: transform.anchorY,
+				visualWidth: provisionalVisualBounds.width,
+				visualHeight: provisionalVisualBounds.height,
+				viewportWidth,
+				viewportHeight,
+			})
+			: { x: transform.anchorX, y: transform.anchorY };
+		if (this.config.placement === "free") {
+			this.config.positionX = desiredAnchor.x;
+			this.config.positionY = desiredAnchor.y;
+		}
+		const placementAdjustment = resolveVisualPlacementOffset({
+			placement: this.config.placement,
+			visualBounds: provisionalVisualBounds,
 			viewportWidth,
 			viewportHeight,
-		);
+			desiredX: desiredAnchor.x,
+			desiredY: desiredAnchor.y,
+		});
 		if (placementAdjustment.x !== 0 || placementAdjustment.y !== 0) {
 			this.live2dViewport.position.set(
 				transform.anchorX + placementAdjustment.x,
 				transform.anchorY + placementAdjustment.y,
 			);
 		}
-		const interactionBounds = {
-			...transform.interactionBounds,
-			x: transform.interactionBounds.x + placementAdjustment.x,
-			y: transform.interactionBounds.y + placementAdjustment.y,
-		};
+		const interactionBounds = this.getLive2DVisualBounds();
 
 		const modelCanvasSize =
 			"getModelCanvasSize" in this.model &&
@@ -1365,6 +1397,8 @@ class PetRenderer {
 				x: "anchor" in this.model ? this.model.anchor?.x : undefined,
 				y: "anchor" in this.model ? this.model.anchor?.y : undefined,
 			},
+			visualCalibration: this.live2dVisualLocalBounds,
+			interactionBounds,
 		});
 
 		this.testState.interactionBounds = interactionBounds;
@@ -1393,56 +1427,153 @@ class PetRenderer {
 		};
 	}
 
-	private resolveVisualPlacementAdjustment(
-		viewportWidth: number,
-		viewportHeight: number,
-	): { x: number; y: number } {
-		if (!this.live2dViewport || this.config.placement === "free") {
-			return { x: 0, y: 0 };
+	private getLive2DVisualBounds(): VisualBounds {
+		if (!this.live2dViewport) {
+			return { x: 0, y: 0, width: 1, height: 1 };
 		}
 
-		const bounds = this.live2dViewport.getBounds();
+		const localBounds = this.live2dVisualLocalBounds ?? this.live2dViewport.getLocalBounds();
+		return projectLocalVisualBounds({
+			localBounds,
+			positionX: this.live2dViewport.position.x,
+			positionY: this.live2dViewport.position.y,
+			scaleX: this.live2dViewport.scale.x,
+			scaleY: this.live2dViewport.scale.y,
+		});
+	}
+
+	private invalidateLive2DVisualCalibration(): void {
+		this.visualCalibrationGeneration += 1;
+		this.live2dVisualLocalBounds = null;
+		if (this.visualCalibrationFrame !== null) {
+			window.cancelAnimationFrame(this.visualCalibrationFrame);
+			this.visualCalibrationFrame = null;
+		}
+	}
+
+	private scheduleLive2DVisualCalibration(): void {
+		if (!this.app || !this.model || !this.live2dViewport || this.destroyed) {
+			return;
+		}
+
+		this.visualCalibrationGeneration += 1;
+		const generation = this.visualCalibrationGeneration;
+		if (this.visualCalibrationFrame !== null) {
+			window.cancelAnimationFrame(this.visualCalibrationFrame);
+		}
+
+		const waitForStableFrame = () => {
+			if (generation !== this.visualCalibrationGeneration || this.destroyed) {
+				return;
+			}
+			this.visualCalibrationFrame = null;
+			this.app?.ticker.addOnce(
+				() => this.calibrateLive2DVisualBounds(generation),
+				this,
+				PIXI.UPDATE_PRIORITY.UTILITY,
+			);
+		};
+
+		this.visualCalibrationFrame = window.requestAnimationFrame(waitForStableFrame);
+	}
+
+	private calibrateLive2DVisualBounds(generation: number): void {
 		if (
-			!Number.isFinite(bounds.x) ||
-			!Number.isFinite(bounds.y) ||
-			!Number.isFinite(bounds.width) ||
-			!Number.isFinite(bounds.height) ||
-			bounds.width <= 0 ||
-			bounds.height <= 0
+			generation !== this.visualCalibrationGeneration ||
+			!this.app ||
+			!this.model ||
+			!this.live2dViewport
 		) {
-			return { x: 0, y: 0 };
+			return;
 		}
 
-		const margin = Math.min(
-			32,
-			Math.max(12, Math.min(viewportWidth, viewportHeight) * 0.04),
-		);
-		const left = bounds.x;
-		const top = bounds.y;
-		const right = bounds.x + bounds.width;
-		const bottom = bounds.y + bounds.height;
-		const centerX = bounds.x + bounds.width / 2;
-		const centerY = bounds.y + bounds.height / 2;
-		const adjustment = { x: 0, y: 0 };
-
-		if (this.config.placement === "bottom-right") {
-			adjustment.x = viewportWidth - margin - right;
-			adjustment.y = viewportHeight - margin - bottom;
-		} else if (this.config.placement === "bottom-left") {
-			adjustment.x = margin - left;
-			adjustment.y = viewportHeight - margin - bottom;
-		} else if (this.config.placement === "top-right") {
-			adjustment.x = viewportWidth - margin - right;
-			adjustment.y = margin - top;
-		} else if (this.config.placement === "top-left") {
-			adjustment.x = margin - left;
-			adjustment.y = margin - top;
-		} else if (this.config.placement === "center") {
-			adjustment.x = viewportWidth / 2 - centerX;
-			adjustment.y = viewportHeight / 2 - centerY;
+		const nominal = this.live2dViewport.getLocalBounds();
+		if (
+			!Number.isFinite(nominal.x) ||
+			!Number.isFinite(nominal.y) ||
+			!Number.isFinite(nominal.width) ||
+			!Number.isFinite(nominal.height) ||
+			nominal.width <= 0 ||
+			nominal.height <= 0
+		) {
+			return;
 		}
 
-		return adjustment;
+		try {
+			// easy-live2d renders its Cubism pass into Pixi's default framebuffer,
+			// so sample after the ticker render instead of extracting a new texture.
+			const webGlRenderer = this.app.renderer as typeof this.app.renderer & {
+				gl?: WebGLRenderingContext | WebGL2RenderingContext;
+			};
+			const gl = webGlRenderer.gl;
+			if (!gl) {
+				throw new Error("WebGL framebuffer is unavailable");
+			}
+			const pixelWidth = gl.drawingBufferWidth;
+			const pixelHeight = gl.drawingBufferHeight;
+			const pixels = new Uint8Array(pixelWidth * pixelHeight * 4);
+			gl.readPixels(
+				0,
+				0,
+				pixelWidth,
+				pixelHeight,
+				gl.RGBA,
+				gl.UNSIGNED_BYTE,
+				pixels,
+			);
+			const framebufferAlphaBounds = scanAlphaBounds({
+				pixels,
+				width: pixelWidth,
+				height: pixelHeight,
+			});
+			if (!framebufferAlphaBounds) {
+				logger.warn("[PetRenderer] Live2D visual calibration returned no visible pixels");
+				return;
+			}
+			if (generation !== this.visualCalibrationGeneration) {
+				return;
+			}
+
+			const topDownAlphaBounds = {
+				...framebufferAlphaBounds,
+				y: pixelHeight - framebufferAlphaBounds.y - framebufferAlphaBounds.height,
+			};
+			const screenBounds = mapAlphaBoundsToLocalBounds({
+				extractionFrame: {
+					x: 0,
+					y: 0,
+					width: window.innerWidth,
+					height: window.innerHeight,
+				},
+				pixelWidth,
+				pixelHeight,
+				alphaBounds: topDownAlphaBounds,
+			});
+			const scaleX = this.live2dViewport.scale.x;
+			const scaleY = this.live2dViewport.scale.y;
+			this.live2dVisualLocalBounds = {
+				x: (screenBounds.x - this.live2dViewport.position.x) / scaleX,
+				y: (screenBounds.y - this.live2dViewport.position.y) / scaleY,
+				width: screenBounds.width / Math.abs(scaleX),
+				height: screenBounds.height / Math.abs(scaleY),
+			};
+			this.applyModelTransform();
+			logger.info("[PetRenderer] Live2D visual calibration complete", JSON.stringify({
+				nominal: {
+					x: nominal.x,
+					y: nominal.y,
+					width: nominal.width,
+					height: nominal.height,
+				},
+				framebufferAlphaBounds,
+				visualLocalBounds: this.live2dVisualLocalBounds,
+				finalVisualBounds: this.getLive2DVisualBounds(),
+				viewport: { width: window.innerWidth, height: window.innerHeight },
+				framebuffer: { width: pixelWidth, height: pixelHeight },
+			}));
+		} catch (error) {
+			logger.warn("[PetRenderer] Live2D visual calibration failed:", error);
+		}
 	}
 
 	private reportState(force = false): void {
@@ -1475,6 +1606,7 @@ class PetRenderer {
 
 		this.model.onLive2D("ready", () => {
 			this.hideNotice();
+			this.scheduleLive2DVisualCalibration();
 			this.reportState(true);
 		});
 
@@ -2135,19 +2267,24 @@ class PetRenderer {
 
 			if (dragDelta) {
 				const wasMoved = this.dragMoved;
-				const currentAnchor = resolveModelAnchor({
+				const visualBounds = this.getLive2DVisualBounds();
+				const currentAnchor = {
+					x:
+						typeof this.config.positionX === "number"
+							? this.config.positionX
+							: visualBounds.x + visualBounds.width / 2,
+					y:
+						typeof this.config.positionY === "number"
+							? this.config.positionY
+							: visualBounds.y + visualBounds.height,
+				};
+				const nextAnchor = clampVisualAnchorToViewport({
+					candidateX: currentAnchor.x + dragDelta.deltaX,
+					candidateY: currentAnchor.y + dragDelta.deltaY,
+					visualWidth: visualBounds.width,
+					visualHeight: visualBounds.height,
 					viewportWidth: window.innerWidth,
 					viewportHeight: window.innerHeight,
-					positionX: this.config.positionX,
-					positionY: this.config.positionY,
-					placement: this.config.placement,
-				});
-				const nextAnchor = resolveModelAnchor({
-					viewportWidth: window.innerWidth,
-					viewportHeight: window.innerHeight,
-					positionX: currentAnchor.x + dragDelta.deltaX,
-					positionY: currentAnchor.y + dragDelta.deltaY,
-					placement: "free",
 				});
 				this.config.positionX = nextAnchor.x;
 				this.config.positionY = nextAnchor.y;
@@ -2503,6 +2640,7 @@ class PetRenderer {
 
 	destroy(): void {
 		this.destroyed = true;
+		this.invalidateLive2DVisualCalibration();
 		this.modelLoadGeneration += 1;
 		this.cancelModelLoadRetry();
 		this.embodiment.destroy();

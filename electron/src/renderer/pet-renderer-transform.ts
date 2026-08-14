@@ -5,6 +5,13 @@ const INTERACTION_WIDTH_RATIO = 0.28
 const INTERACTION_HEIGHT_RATIO = 0.72
 const EDGE_MARGIN = 32
 
+export interface VisualBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export function computeBaseModelScale(options: {
   cachedBaseScale: number | null
   model: {
@@ -159,5 +166,155 @@ export function resolveViewportAnchorOffset(options: {
   return {
     x: (anchor.x / width - 0.5) * 2,
     y: (0.5 - anchor.y / height) * 2,
+  }
+}
+
+export function clampVisualAnchorToViewport(options: {
+  candidateX: number
+  candidateY: number
+  visualWidth: number
+  visualHeight: number
+  viewportWidth: number
+  viewportHeight: number
+  minimumVisible?: number
+}): { x: number; y: number } {
+  const viewportWidth = Math.max(1, options.viewportWidth)
+  const viewportHeight = Math.max(1, options.viewportHeight)
+  const visualWidth = Math.max(1, options.visualWidth)
+  const visualHeight = Math.max(1, options.visualHeight)
+  const minimumVisible = clamp(
+    options.minimumVisible ?? 48,
+    1,
+    Math.max(viewportWidth, viewportHeight),
+  )
+
+  const minX = visualWidth <= viewportWidth
+    ? visualWidth / 2
+    : minimumVisible - visualWidth / 2
+  const maxX = visualWidth <= viewportWidth
+    ? viewportWidth - visualWidth / 2
+    : viewportWidth - minimumVisible + visualWidth / 2
+  const minY = visualHeight <= viewportHeight ? visualHeight : minimumVisible
+  const maxY = visualHeight <= viewportHeight
+    ? viewportHeight
+    : viewportHeight - minimumVisible + visualHeight
+
+  return {
+    x: clamp(options.candidateX, minX, Math.max(minX, maxX)),
+    y: clamp(options.candidateY, minY, Math.max(minY, maxY)),
+  }
+}
+
+export function resolveVisualPlacementOffset(options: {
+  placement: PetPlacement
+  visualBounds: VisualBounds
+  viewportWidth: number
+  viewportHeight: number
+  desiredX: number
+  desiredY: number
+}): { x: number; y: number } {
+  const bounds = options.visualBounds
+  const centerX = bounds.x + bounds.width / 2
+  const centerY = bounds.y + bounds.height / 2
+  const right = bounds.x + bounds.width
+  const bottom = bounds.y + bounds.height
+
+  switch (options.placement) {
+    case 'bottom-left':
+      return { x: -bounds.x, y: options.viewportHeight - bottom }
+    case 'top-right':
+      return { x: options.viewportWidth - right, y: -bounds.y }
+    case 'top-left':
+      return { x: -bounds.x, y: -bounds.y }
+    case 'center':
+      return {
+        x: options.viewportWidth / 2 - centerX,
+        y: options.viewportHeight / 2 - centerY,
+      }
+    case 'free':
+      return {
+        x: options.desiredX - centerX,
+        y: options.desiredY - bottom,
+      }
+    case 'bottom-right':
+    default:
+      return {
+        x: options.viewportWidth - right,
+        y: options.viewportHeight - bottom,
+      }
+  }
+}
+
+export function scanAlphaBounds(options: {
+  pixels: ArrayLike<number>
+  width: number
+  height: number
+  alphaThreshold?: number
+}): VisualBounds | null {
+  const width = Math.floor(options.width)
+  const height = Math.floor(options.height)
+  if (width <= 0 || height <= 0 || options.pixels.length < width * height * 4) {
+    return null
+  }
+
+  const threshold = clamp(options.alphaThreshold ?? 8, 0, 255)
+  let minX = width
+  let minY = height
+  let maxX = -1
+  let maxY = -1
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const alpha = options.pixels[(y * width + x) * 4 + 3] ?? 0
+      if (alpha <= threshold) continue
+      minX = Math.min(minX, x)
+      minY = Math.min(minY, y)
+      maxX = Math.max(maxX, x)
+      maxY = Math.max(maxY, y)
+    }
+  }
+
+  return maxX < minX || maxY < minY
+    ? null
+    : {
+        x: minX,
+        y: minY,
+        width: maxX - minX + 1,
+        height: maxY - minY + 1,
+      }
+}
+
+export function mapAlphaBoundsToLocalBounds(options: {
+  extractionFrame: VisualBounds
+  pixelWidth: number
+  pixelHeight: number
+  alphaBounds: VisualBounds
+}): VisualBounds {
+  const scaleX = options.extractionFrame.width / Math.max(1, options.pixelWidth)
+  const scaleY = options.extractionFrame.height / Math.max(1, options.pixelHeight)
+  return {
+    x: options.extractionFrame.x + options.alphaBounds.x * scaleX,
+    y: options.extractionFrame.y + options.alphaBounds.y * scaleY,
+    width: options.alphaBounds.width * scaleX,
+    height: options.alphaBounds.height * scaleY,
+  }
+}
+
+export function projectLocalVisualBounds(options: {
+  localBounds: VisualBounds
+  positionX: number
+  positionY: number
+  scaleX: number
+  scaleY: number
+}): VisualBounds {
+  const x1 = options.positionX + options.localBounds.x * options.scaleX
+  const x2 = options.positionX + (options.localBounds.x + options.localBounds.width) * options.scaleX
+  const y1 = options.positionY + options.localBounds.y * options.scaleY
+  const y2 = options.positionY + (options.localBounds.y + options.localBounds.height) * options.scaleY
+  return {
+    x: Math.min(x1, x2),
+    y: Math.min(y1, y2),
+    width: Math.abs(x2 - x1),
+    height: Math.abs(y2 - y1),
   }
 }

@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  clampVisualAnchorToViewport,
   computeBaseModelScale,
   computeModelTransform,
+  mapAlphaBoundsToLocalBounds,
+  projectLocalVisualBounds,
   resolveModelAnchor,
+  resolveVisualPlacementOffset,
   resolveViewportAnchorOffset,
+  scanAlphaBounds,
 } from '../pet-renderer-transform'
 
 describe('pet-renderer-transform', () => {
@@ -147,5 +152,90 @@ describe('pet-renderer-transform', () => {
       positionX: 500,
       positionY: 400,
     })).toEqual({ x: 0, y: 0 })
+  })
+
+  it('should clamp the visual bottom-center anchor to the viewport instead of the Pixi container origin', () => {
+    expect(clampVisualAnchorToViewport({
+      candidateX: 1200,
+      candidateY: 1600,
+      visualWidth: 400,
+      visualHeight: 600,
+      viewportWidth: 1000,
+      viewportHeight: 1200,
+    })).toEqual({ x: 800, y: 1200 })
+  })
+
+  it('should keep an oversized model recoverable while still allowing edge docking', () => {
+    expect(clampVisualAnchorToViewport({
+      candidateX: -9999,
+      candidateY: 9999,
+      visualWidth: 1200,
+      visualHeight: 1600,
+      viewportWidth: 1000,
+      viewportHeight: 1200,
+      minimumVisible: 48,
+    })).toEqual({ x: -552, y: 2752 })
+  })
+
+  it('should align free and docked placement to the measured visual bounds', () => {
+    const visualBounds = { x: 300, y: 200, width: 400, height: 600 }
+    expect(resolveVisualPlacementOffset({
+      placement: 'free',
+      visualBounds,
+      viewportWidth: 1000,
+      viewportHeight: 1200,
+      desiredX: 600,
+      desiredY: 1200,
+    })).toEqual({ x: 100, y: 400 })
+    expect(resolveVisualPlacementOffset({
+      placement: 'bottom-right',
+      visualBounds,
+      viewportWidth: 1000,
+      viewportHeight: 1200,
+      desiredX: 0,
+      desiredY: 0,
+    })).toEqual({ x: 300, y: 400 })
+  })
+
+  it('should scan visible alpha while ignoring fully transparent padding', () => {
+    const pixels = new Uint8ClampedArray(6 * 5 * 4)
+    const setAlpha = (x: number, y: number, alpha: number) => {
+      pixels[(y * 6 + x) * 4 + 3] = alpha
+    }
+    setAlpha(1, 1, 3)
+    setAlpha(2, 2, 255)
+    setAlpha(4, 3, 64)
+
+    expect(scanAlphaBounds({
+      pixels,
+      width: 6,
+      height: 5,
+      alphaThreshold: 8,
+    })).toEqual({ x: 2, y: 2, width: 3, height: 2 })
+  })
+
+  it('should return no visual bounds for an entirely transparent extraction', () => {
+    expect(scanAlphaBounds({
+      pixels: new Uint8ClampedArray(4 * 3 * 4),
+      width: 4,
+      height: 3,
+    })).toBeNull()
+  })
+
+  it('should map extracted pixels back to local coordinates and scale the cached bounds', () => {
+    const localBounds = mapAlphaBoundsToLocalBounds({
+      extractionFrame: { x: -200, y: -900, width: 400, height: 900 },
+      pixelWidth: 200,
+      pixelHeight: 450,
+      alphaBounds: { x: 20, y: 30, width: 160, height: 370 },
+    })
+    expect(localBounds).toEqual({ x: -160, y: -840, width: 320, height: 740 })
+    expect(projectLocalVisualBounds({
+      localBounds,
+      positionX: 500,
+      positionY: 1000,
+      scaleX: 0.5,
+      scaleY: 0.5,
+    })).toEqual({ x: 420, y: 580, width: 160, height: 370 })
   })
 })
