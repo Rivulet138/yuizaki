@@ -109,6 +109,10 @@ export function resolveModelAnchor(options: {
   const rightAnchor = options.viewportWidth - debugWidth / 2 - safeMargin
   const bottomAnchor = options.viewportHeight - safeMargin
   const topAnchor = debugHeight + safeMargin
+  const freeMinX = safeMargin
+  const freeMaxX = Math.max(freeMinX, options.viewportWidth - safeMargin)
+  const freeMinY = safeMargin
+  const freeMaxY = Math.max(freeMinY, options.viewportHeight - safeMargin)
   const centerAnchorY = clamp(options.viewportHeight / 2 + debugHeight / 2, topAnchor, bottomAnchor)
   const placement = options.placement ?? 'bottom-right'
   const presetAnchor = (() => {
@@ -130,10 +134,30 @@ export function resolveModelAnchor(options: {
 
   return {
     x: typeof options.positionX === 'number'
-      ? clamp(options.positionX, leftAnchor, rightAnchor)
+      ? clamp(options.positionX, freeMinX, freeMaxX)
       : presetAnchor.x,
     y: typeof options.positionY === 'number'
-      ? clamp(options.positionY, topAnchor, bottomAnchor)
+      ? clamp(options.positionY, freeMinY, freeMaxY)
       : presetAnchor.y,
+  }
+}
+
+export function resolveViewportAnchorOffset(options: {
+  viewportWidth: number
+  viewportHeight: number
+  positionX?: number | null
+  positionY?: number | null
+  placement?: PetPlacement
+}): { x: number; y: number } {
+  const width = Math.max(1, options.viewportWidth)
+  const height = Math.max(1, options.viewportHeight)
+  const anchor = resolveModelAnchor({
+    ...options,
+    viewportWidth: width,
+    viewportHeight: height,
+  })
+  return {
+    x: (anchor.x / width - 0.5) * 2,
+    y: (0.5 - anchor.y / height) * 2,
   }
 }

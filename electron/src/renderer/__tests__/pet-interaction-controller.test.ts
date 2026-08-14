@@ -7,6 +7,7 @@ import {
   resolveMouseLeave,
   resolveMouseMove,
   resolveMouseUp,
+  resolvePointerDragStart,
   resolveWheel,
 } from '../pet-interaction-controller'
 
@@ -32,6 +33,37 @@ describe('pet-interaction-controller', () => {
 
     expect(result?.deltaX).toBe(40)
     expect(result?.deltaY).toBe(40)
+  })
+
+  it('should allow adjustment drags to start anywhere in the work area', () => {
+    expect(resolvePointerDragStart({
+      button: 0,
+      hitModel: false,
+      interactMode: true,
+      locked: false,
+    })).toEqual({ shouldStart: true, modelInteraction: false })
+
+    expect(resolvePointerDragStart({
+      button: 0,
+      hitModel: false,
+      interactMode: false,
+      locked: false,
+    })).toEqual({ shouldStart: false, modelInteraction: false })
+  })
+
+  it('should keep locked, right-button, and normal blank-area input from starting a drag', () => {
+    expect(resolvePointerDragStart({
+      button: 0,
+      hitModel: true,
+      interactMode: true,
+      locked: true,
+    }).shouldStart).toBe(false)
+    expect(resolvePointerDragStart({
+      button: 2,
+      hitModel: true,
+      interactMode: true,
+      locked: false,
+    }).shouldStart).toBe(false)
   })
 
   it('should resolve mouse move only when dragging', () => {

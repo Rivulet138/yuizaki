@@ -57,6 +57,22 @@ export interface DragDeltaResult {
   nextClient: { x: number; y: number }
 }
 
+export function resolvePointerDragStart(options: {
+  button: number
+  hitModel: boolean
+  interactMode: boolean
+  locked: boolean
+}): { shouldStart: boolean; modelInteraction: boolean } {
+  const modelInteraction = options.button === 0 && options.hitModel
+  return {
+    shouldStart:
+      options.button === 0 &&
+      !options.locked &&
+      (options.hitModel || options.interactMode),
+    modelInteraction,
+  }
+}
+
 export function computeDragDelta(
   state: DragState,
   event: MouseEvent,

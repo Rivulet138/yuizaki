@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { computeBaseModelScale, computeModelTransform, resolveModelAnchor } from '../pet-renderer-transform'
+import {
+  computeBaseModelScale,
+  computeModelTransform,
+  resolveModelAnchor,
+  resolveViewportAnchorOffset,
+} from '../pet-renderer-transform'
 
 describe('pet-renderer-transform', () => {
   it('should reuse cached base scale when available', () => {
@@ -106,13 +111,41 @@ describe('pet-renderer-transform', () => {
     })).toEqual({ x: 420, y: 620 })
   })
 
-  it('should clamp explicit positions into the visible interaction area', () => {
+  it('should clamp explicit free positions to the full work area instead of the model-sized interaction box', () => {
     expect(resolveModelAnchor({
       viewportWidth: 1000,
       viewportHeight: 800,
       placement: 'free',
       positionX: 9999,
       positionY: -50,
-    })).toEqual({ x: 828, y: 608 })
+    })).toEqual({ x: 968, y: 32 })
+
+    expect(resolveModelAnchor({
+      viewportWidth: 1000,
+      viewportHeight: 800,
+      placement: 'free',
+      positionX: 40,
+      positionY: 740,
+    })).toEqual({ x: 40, y: 740 })
+  })
+
+  it('should normalize free anchors for screen-space runtimes such as VRM', () => {
+    const corner = resolveViewportAnchorOffset({
+      viewportWidth: 1000,
+      viewportHeight: 800,
+      placement: 'free',
+      positionX: 968,
+      positionY: 32,
+    })
+    expect(corner.x).toBeCloseTo(0.936)
+    expect(corner.y).toBeCloseTo(0.92)
+
+    expect(resolveViewportAnchorOffset({
+      viewportWidth: 1000,
+      viewportHeight: 800,
+      placement: 'free',
+      positionX: 500,
+      positionY: 400,
+    })).toEqual({ x: 0, y: 0 })
   })
 })

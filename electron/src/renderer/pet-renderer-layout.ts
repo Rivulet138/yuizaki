@@ -42,7 +42,15 @@ export function isPointInsideInteractionArea(options: {
 
 export function getCanvasPointFromClient(options: {
   canvas: HTMLCanvasElement | null
-  app: { renderer: { width: number; height: number } } | null
+  app: {
+    screen?: { width: number; height: number }
+    renderer: {
+      width: number
+      height: number
+      resolution?: number
+      screen?: { width: number; height: number }
+    }
+  } | null
   clientX: number
   clientY: number
 }): { x: number; y: number } | null {
@@ -55,8 +63,17 @@ export function getCanvasPointFromClient(options: {
     return null
   }
 
-  const scaleX = options.app.renderer.width / rect.width
-  const scaleY = options.app.renderer.height / rect.height
+  const resolution = Number.isFinite(options.app.renderer.resolution) && Number(options.app.renderer.resolution) > 0
+    ? Number(options.app.renderer.resolution)
+    : 1
+  const logicalWidth = options.app.screen?.width
+    ?? options.app.renderer.screen?.width
+    ?? options.app.renderer.width / resolution
+  const logicalHeight = options.app.screen?.height
+    ?? options.app.renderer.screen?.height
+    ?? options.app.renderer.height / resolution
+  const scaleX = logicalWidth / rect.width
+  const scaleY = logicalHeight / rect.height
 
   return {
     x: (options.clientX - rect.left) * scaleX,

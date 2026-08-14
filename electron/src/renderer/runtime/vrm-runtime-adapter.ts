@@ -12,12 +12,19 @@ import {
   normalizePetLipSyncProfile,
   type PetCompanionIdleProfile,
   type PetControlConfigPatch,
+  type PetPlacement,
   type PetLipSyncProfile,
   type PetLipSyncViseme,
   type PetRendererStatePayload,
 } from '../../shared/pet-control'
 import type { PetRuntimeAdapter, PetRuntimeRenderPolicy } from './pet-runtime-adapter'
 import { resolvePetRenderBudget } from '../pet-render-budget'
+import { resolveViewportAnchorOffset } from '../pet-renderer-transform'
+
+const VRM_BASE_SCENE_Y = -1.35
+const VRM_CAMERA_Y = 1.35
+const VRM_CAMERA_Z = 3.1
+const VRM_CAMERA_TARGET_Y = 1.2
 
 interface VrmHostContext {
   container: HTMLElement
@@ -29,7 +36,7 @@ interface VrmHostContext {
     scale: number
     positionX: number | null
     positionY: number | null
-    placement: 'bottom-right' | 'free'
+    placement: PetPlacement
     lipSyncProfile: PetLipSyncProfile
   }
   showNotice(text: string): void
@@ -293,13 +300,14 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
 
     const normalizedScale = Math.max(0.2, Math.min(0.8, this.host.config.scale))
     this.vrm.scene.scale.setScalar(normalizedScale)
-    this.vrm.scene.position.set(0, -1.35, 0)
 
     if (this.camera) {
-      this.camera.position.set(0, 1.35, 3.1)
-      this.camera.lookAt(0, 1.2, 0)
+      this.camera.position.set(0, VRM_CAMERA_Y, VRM_CAMERA_Z)
+      this.camera.lookAt(0, VRM_CAMERA_TARGET_Y, 0)
       this.camera.updateProjectionMatrix()
     }
+
+    this.applyScreenPlacement()
   }
 
   setLipSyncLevel(level: number, active: boolean): void {
@@ -395,6 +403,32 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.renderBudget.dprCap))
     this.camera.aspect = width / Math.max(height, 1)
     this.camera.updateProjectionMatrix()
+    this.applyScreenPlacement()
+  }
+
+  private applyScreenPlacement(): void {
+    if (!this.vrm) return
+
+    const width = Math.max(1, window.innerWidth)
+    const height = Math.max(1, window.innerHeight)
+    const offset = resolveViewportAnchorOffset({
+      viewportWidth: width,
+      viewportHeight: height,
+      positionX: this.host.config.positionX,
+      positionY: this.host.config.positionY,
+      placement: this.host.config.placement,
+    })
+    const cameraDistance = Math.hypot(
+      this.camera?.position.z ?? VRM_CAMERA_Z,
+      (this.camera?.position.y ?? VRM_CAMERA_Y) - VRM_CAMERA_TARGET_Y,
+    )
+    const halfHeight = Math.tan(THREE.MathUtils.degToRad((this.camera?.fov ?? 30) / 2)) * cameraDistance
+    const halfWidth = halfHeight * (this.camera?.aspect ?? width / height)
+    this.vrm.scene.position.set(
+      offset.x * halfWidth,
+      VRM_BASE_SCENE_Y + offset.y * halfHeight,
+      0,
+    )
   }
 
   private ensureRenderer(): void {

@@ -40,6 +40,7 @@ import {
 	resolveMouseLeave,
 	resolveMouseMove,
 	resolveMouseUp,
+	resolvePointerDragStart,
 	resolveWheel,
 } from "./pet-interaction-controller";
 import { PointerMoveCoalescer } from "./pet-pointer-coalescer";
@@ -215,6 +216,7 @@ class PetRenderer {
 	});
 	private mouseDownOnModel = false;
 	private modelHovering = false;
+	private modelInteractivityInstalled = false;
 
 	private lastClickAt = 0;
 	private singleClickTimer: number | null = null;
@@ -346,6 +348,7 @@ class PetRenderer {
 		this.container.appendChild(this.canvas);
 
 		this.setupGlobalListeners();
+		this.setupModelInteractivity();
 		this.setupAdjustmentControls();
 		this.setupIPCListeners();
 		this.showNotice("正在恢复上次桌宠模型...");
@@ -1487,9 +1490,10 @@ class PetRenderer {
 	}
 
 	private setupModelInteractivity(): void {
-		if (!this.model) {
+		if (this.modelInteractivityInstalled) {
 			return;
 		}
+		this.modelInteractivityInstalled = true;
 
 		const safeHitTest = (event: Event): boolean => {
 			const clientPoint = extractClientPoint(event);
@@ -1516,12 +1520,14 @@ class PetRenderer {
 			this.testState.lastPointerDownHit = hit;
 			this.syncTestState();
 
-			if (!hit) {
-				return;
-			}
-
 			const button = extractMouseButton(event);
-			if (button !== 0) {
+			const dragStart = resolvePointerDragStart({
+				button,
+				hitModel: hit,
+				interactMode: this.interactMode,
+				locked: this.config.locked,
+			});
+			if (!dragStart.modelInteraction && !dragStart.shouldStart) {
 				return;
 			}
 
@@ -1530,18 +1536,24 @@ class PetRenderer {
 				this.lastMouseClientPoint = clientPoint;
 			}
 
-			this.mouseDownOnModel = true;
+			this.mouseDownOnModel = dragStart.modelInteraction;
 			this.dragMoved = false;
-			this.modelHovering = true;
-			this.setAttentionFromClientPoint(clientPoint, 0.9, 1700);
-			this.setBehaviorState("curious", 1400);
-			if (clientPoint) {
-				this.scheduleLongPressMenu(clientPoint);
+			if (dragStart.modelInteraction) {
+				this.modelHovering = true;
+				this.setAttentionFromClientPoint(clientPoint, 0.9, 1700);
+				this.setBehaviorState("curious", 1400);
+				if (clientPoint) {
+					this.scheduleLongPressMenu(clientPoint);
+				}
+				this.markActivity("model-mousedown");
+			} else {
+				this.modelHovering = false;
+				this.clearLongPressTimer();
+				this.markActivity("adjustment-mousedown");
 			}
-			this.markActivity("model-mousedown");
 			this.requestMousePassthrough(false, "model-mousedown", true);
 
-			if (this.config.locked) {
+			if (!dragStart.shouldStart) {
 				event.stopPropagation?.();
 				event.preventDefault?.();
 				return;
@@ -2130,8 +2142,15 @@ class PetRenderer {
 					positionY: this.config.positionY,
 					placement: this.config.placement,
 				});
-				this.config.positionX = currentAnchor.x + dragDelta.deltaX;
-				this.config.positionY = currentAnchor.y + dragDelta.deltaY;
+				const nextAnchor = resolveModelAnchor({
+					viewportWidth: window.innerWidth,
+					viewportHeight: window.innerHeight,
+					positionX: currentAnchor.x + dragDelta.deltaX,
+					positionY: currentAnchor.y + dragDelta.deltaY,
+					placement: "free",
+				});
+				this.config.positionX = nextAnchor.x;
+				this.config.positionY = nextAnchor.y;
 				this.config.placement = "free";
 				this.applyModelTransform();
 				this.schedulePersistPosition();
