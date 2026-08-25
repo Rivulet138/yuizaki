@@ -26,15 +26,24 @@ const createRequest = (
   url: string,
   headers: IncomingMessage['headers'] = {},
   method = 'GET',
+  body?: unknown,
 ): IncomingMessage => {
   const request = new EventEmitter() as EventEmitter & {
     method: string
     url: string
     headers: IncomingMessage['headers']
+    setEncoding: (encoding: BufferEncoding) => IncomingMessage
   }
   request.method = method
   request.url = url
   request.headers = headers
+  request.setEncoding = () => request as unknown as IncomingMessage
+  if (body !== undefined) {
+    queueMicrotask(() => {
+      request.emit('data', Buffer.from(JSON.stringify(body)))
+      request.emit('end')
+    })
+  }
   return request as unknown as IncomingMessage
 }
 
@@ -77,7 +86,7 @@ const createJsonResponse = (): {
 }
 
 const createServer = async (): Promise<ControlServer> => {
-  process.env['YUIZAKI_CONTROL_TOKEN'] = 'test-control-token'
+  process.env['YUIZAKI_BACKEND_API_TOKEN'] = 'test-control-token'
   const { ControlServer } = await import('../control-server')
   return new ControlServer(
     {} as never,
@@ -85,13 +94,12 @@ const createServer = async (): Promise<ControlServer> => {
     {} as never,
     {} as never,
     { snapshot: () => ({ plugins: [] }) } as never,
-    {} as never,
     'dist/renderer',
   )
 }
 
 const createServerWithRendererRoot = async (rendererRoot: string): Promise<ControlServer> => {
-  process.env['YUIZAKI_CONTROL_TOKEN'] = 'test-control-token'
+  process.env['YUIZAKI_BACKEND_API_TOKEN'] = 'test-control-token'
   const { ControlServer } = await import('../control-server')
   return new ControlServer(
     {} as never,
@@ -99,13 +107,12 @@ const createServerWithRendererRoot = async (rendererRoot: string): Promise<Contr
     {} as never,
     {} as never,
     { snapshot: () => ({ plugins: [] }) } as never,
-    {} as never,
     rendererRoot,
   )
 }
 
 const createServerWithPetCatalog = async (petModelCatalog: unknown): Promise<ControlServer> => {
-  process.env['YUIZAKI_CONTROL_TOKEN'] = 'test-control-token'
+  process.env['YUIZAKI_BACKEND_API_TOKEN'] = 'test-control-token'
   const { ControlServer } = await import('../control-server')
   return new ControlServer(
     {} as never,
@@ -113,27 +120,26 @@ const createServerWithPetCatalog = async (petModelCatalog: unknown): Promise<Con
     {} as never,
     petModelCatalog as never,
     { snapshot: () => ({ plugins: [] }) } as never,
-    {} as never,
     'dist/renderer',
   )
 }
 
-describe('ControlServer API auth', () => {
+describe('ControlServer local API boundary', () => {
   afterEach(() => {
-    delete process.env['YUIZAKI_CONTROL_TOKEN']
     delete process.env['YUIZAKI_BACKEND_API_TOKEN']
+    vi.unstubAllEnvs()
     handleSystemRoutesMock.mockReset()
     vi.resetModules()
   })
 
-  it('rejects API requests without the control token', async () => {
+  it('allows loopback API requests without a control token', async () => {
     const server = await createServer()
     const { response, getStatus, getJson } = createJsonResponse()
 
     await (server as unknown as RequestHandler).handleRequest(createRequest('/api/plugin/list'), response)
 
-    expect(getStatus()).toBe(401)
-    expect(getJson()).toEqual({ error: 'Unauthorized' })
+    expect(getStatus()).toBe(200)
+    expect(getJson()).toEqual({ plugins: [] })
   }, 15000)
 
   it('allows the public Python ping probe without the control token', async () => {
@@ -151,18 +157,18 @@ describe('ControlServer API auth', () => {
     expect(getJson()).toEqual({ ok: true, path: '/api/ping' })
   })
 
-  it('keeps CORS headers on unauthorized requests from allowed browser origins', async () => {
+  it('allows API requests from any loopback browser port', async () => {
     const server = await createServer()
     const { response, getStatus, getJson, getHeader } = createJsonResponse()
 
     await (server as unknown as RequestHandler).handleRequest(
-      createRequest('/api/plugin/list', { origin: 'http://127.0.0.1:5173' }),
+      createRequest('/api/plugin/list', { origin: 'http://127.0.0.1:43127' }),
       response,
     )
 
-    expect(getStatus()).toBe(401)
-    expect(getJson()).toEqual({ error: 'Unauthorized' })
-    expect(getHeader('Access-Control-Allow-Origin')).toBe('http://127.0.0.1:5173')
+    expect(getStatus()).toBe(200)
+    expect(getJson()).toEqual({ plugins: [] })
+    expect(getHeader('Access-Control-Allow-Origin')).toBe('http://127.0.0.1:43127')
   })
 
   it('allows the trusted packaged renderer origin through API preflight', async () => {
@@ -178,17 +184,18 @@ describe('ControlServer API auth', () => {
     expect(getHeader('Access-Control-Allow-Origin')).toBe('yuizaki-app://renderer')
   })
 
-  it('allows API requests with the control token', async () => {
+  it('rejects remote, file, and null origins through API preflight', async () => {
     const server = await createServer()
-    const { response, getStatus, getJson } = createJsonResponse()
 
-    await (server as unknown as RequestHandler).handleRequest(
-      createRequest('/api/plugin/list', { authorization: 'Bearer test-control-token' }),
-      response,
-    )
-
-    expect(getStatus()).toBe(200)
-    expect(getJson()).toEqual({ plugins: [] })
+    for (const origin of ['https://example.com', 'file:///C:/app/index.html', 'null']) {
+      const { response, getStatus, getHeader } = createJsonResponse()
+      await (server as unknown as RequestHandler).handleRequest(
+        createRequest('/api/ping', { origin }, 'OPTIONS'),
+        response,
+      )
+      expect(getStatus()).toBe(403)
+      expect(getHeader('Access-Control-Allow-Origin')).toBeUndefined()
+    }
   })
 
   it('does not expose the deprecated workbench module inventory', async () => {
@@ -204,7 +211,7 @@ describe('ControlServer API auth', () => {
     expect(getJson()).toEqual({ error: 'Not found' })
   })
 
-  it('routes protected backend proxy paths outside /api through API auth', async () => {
+  it('routes backend proxy paths outside /api without control auth', async () => {
     handleSystemRoutesMock.mockImplementation(async (_req, res, _method, url) => {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
       res.end(JSON.stringify({ path: url.pathname }))
@@ -213,17 +220,13 @@ describe('ControlServer API auth', () => {
     const server = await createServer()
 
     for (const pathname of ['/health', '/memory/docs', '/system/status', '/v1/models']) {
-      const unauthorized = createJsonResponse()
-      await (server as unknown as RequestHandler).handleRequest(createRequest(pathname), unauthorized.response)
-      expect(unauthorized.getStatus()).toBe(401)
-
-      const authorized = createJsonResponse()
+      const routed = createJsonResponse()
       await (server as unknown as RequestHandler).handleRequest(
-        createRequest(pathname, { authorization: 'Bearer test-control-token' }),
-        authorized.response,
+        createRequest(pathname),
+        routed.response,
       )
-      expect(authorized.getStatus()).toBe(200)
-      expect(authorized.getJson()).toEqual({ path: pathname })
+      expect(routed.getStatus()).toBe(200)
+      expect(routed.getJson()).toEqual({ path: pathname })
     }
 
     expect(handleSystemRoutesMock).toHaveBeenCalledTimes(4)
@@ -246,7 +249,6 @@ describe('ControlServer API auth', () => {
   })
 
   it('uses the backend API token as the shared panel token when no control token is configured', async () => {
-    delete process.env['YUIZAKI_CONTROL_TOKEN']
     process.env['YUIZAKI_BACKEND_API_TOKEN'] = 'shared-backend-token'
     const { ControlServer } = await import('../control-server')
     const server = new ControlServer(
@@ -255,7 +257,6 @@ describe('ControlServer API auth', () => {
       {} as never,
       {} as never,
       { snapshot: () => ({ plugins: [] }) } as never,
-      {} as never,
       'dist/renderer',
     )
 
@@ -335,5 +336,41 @@ describe('ControlServer API auth', () => {
     } finally {
       fs.rmSync(rendererRoot, { recursive: true, force: true })
     }
+  })
+
+  it('serves onboarding routes without control auth', async () => {
+    const server = await createServer()
+    const snapshot = { schemaVersion: 1, runId: 'run-1', revision: 2, state: 'blocked', readyForText: false, startedAt: null, completedAt: null, probes: [] }
+    server.setOnboardingCoordinator({ snapshot: vi.fn(() => snapshot) } as never)
+
+    const result = createJsonResponse()
+    await (server as unknown as RequestHandler).handleRequest(createRequest('/api/onboarding/snapshot'), result.response)
+    expect(result.getStatus()).toBe(200)
+    expect(result.getJson()).toEqual(snapshot)
+    expect(handleSystemRoutesMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects command-bearing onboarding HTTP payloads before dispatch', async () => {
+    const server = await createServer()
+    const startBackend = vi.fn()
+    const cancelRun = vi.fn()
+    server.setOnboardingCoordinator({ startBackend, cancelRun } as never)
+    const headers = { authorization: 'Bearer test-control-token', 'content-type': 'application/json' }
+
+    const maliciousStart = createJsonResponse()
+    await (server as unknown as RequestHandler).handleRequest(
+      createRequest('/api/onboarding/backend/start', headers, 'POST', { command: 'python', env: { TOKEN: 'x' } }),
+      maliciousStart.response,
+    )
+    expect(maliciousStart.getStatus()).toBe(400)
+
+    const maliciousCancel = createJsonResponse()
+    await (server as unknown as RequestHandler).handleRequest(
+      createRequest('/api/onboarding/cancel', headers, 'POST', { runId: 'run-1', args: ['--kill'] }),
+      maliciousCancel.response,
+    )
+    expect(maliciousCancel.getStatus()).toBe(400)
+    expect(startBackend).not.toHaveBeenCalled()
+    expect(cancelRun).not.toHaveBeenCalled()
   })
 })

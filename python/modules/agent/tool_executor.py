@@ -5,21 +5,21 @@ import inspect
 import re
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import replace
-from datetime import datetime
-from typing import Any, Callable
+from datetime import UTC, datetime
+from typing import Any
 
-from .policy_engine import PolicyEngine
-from .context import get_runtime_bindings
-from ..system.relationship_policy import summarize_relationship_events
 from ..system.memory_write_pipeline import build_tool_success_event
-from .tool_registry import ToolRegistry
-from .tool_result import ToolResultEnvelope
+from ..system.relationship_policy import summarize_relationship_events
+from .companion_events import CompanionJobCapacityError, CompanionJobEventLog
+from .context import get_runtime_bindings
 from .models import RuntimeLoopRecord
 from .permission_receipt import build_permission_receipt
+from .policy_engine import PolicyEngine
 from .route_policy import memory_reflector_route
-from .companion_events import CompanionJobEventLog, CompanionJobCapacityError
-
+from .tool_registry import ToolRegistry, _mint_execution_permit
+from .tool_result import ToolResultEnvelope
 
 PermissionRequestCallback = Any
 _RESULT_SUMMARY_LIMIT = 360
@@ -53,7 +53,7 @@ class ToolExecutor:
             return False
         try:
             return bool(signal.is_set()) if hasattr(signal, "is_set") else bool(signal()) if callable(signal) else bool(signal)
-        except Exception:
+        except Exception:  # noqa: BLE001 - a broken cancellation signal fails closed
             # A broken cancellation signal must fail closed.
             return True
 
@@ -140,8 +140,8 @@ class ToolExecutor:
             return
         try:
             self.outcome_observer(success)
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001 - metrics observers cannot affect execution
+            return
 
     def _evaluate_policy(
         self,
@@ -163,6 +163,40 @@ class ToolExecutor:
             "permission_scope": permission_scope,
             "parameters": parameters,
             "force_confirm": force_confirm,
+        }
+        kwargs = {
+            key: value
+            for key, value in candidates.items()
+            if accepts_kwargs or key in signature.parameters
+        }
+        return evaluator(tool, **kwargs)
+
+    def preview_policy(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        *,
+        ctx: Any = None,
+        force_confirmation: bool = False,
+    ) -> Any:
+        """Evaluate an explicit tool step without audit, receipt, or pending state."""
+
+        tool = self.registry.get(tool_name)
+        if tool is None:
+            raise RuntimeError(f"Unknown tool: {tool_name}")
+        evaluator = getattr(self.policy_engine, "preview_tool", None)
+        if not callable(evaluator):
+            raise TypeError("policy engine does not provide side-effect-free preview")
+        signature = inspect.signature(evaluator)
+        accepts_kwargs = any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        )
+        candidates = {
+            "request_id": getattr(ctx, "request_id", None),
+            "permission_scope": getattr(ctx, "permission_scope", None),
+            "parameters": args,
+            "force_confirm": force_confirmation,
         }
         kwargs = {
             key: value
@@ -283,14 +317,22 @@ class ToolExecutor:
             )
             self._observe(False)
             raise
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - policy providers fail before dispatch
             self._job_event(
                 ctx=ctx, status="failed", job_id=job_id, run_id=run_id,
                 request_id=request_id, source=event_source, tool_name=tool_name,
-                error=str(exc), data=job_data,
+                error=str(exc), data={**job_data, "retryable": True, "dispatchStarted": False},
             )
-            self._observe(False)
-            raise
+            return self._finish(ToolResultEnvelope(
+                success=False,
+                content="",
+                source=tool.source,
+                tool_name=tool_name,
+                error=f"Tool pre-dispatch policy failure: {exc}",
+                data={"code": "TOOL_PRE_DISPATCH_FAILURE"},
+                outcome="known_failure",
+                retryable=True,
+            ))
         allowed_by_policy = bool(getattr(decision, "allowed", False))
         require_confirm = bool(getattr(decision, "require_confirm", False))
         decision_request_id = getattr(decision, "request_id", None)
@@ -299,7 +341,7 @@ class ToolExecutor:
         if receipt is None:
             synthesized_decision = "required" if require_confirm else ("allowed" if allowed_by_policy else "denied")
             receipt = build_permission_receipt(
-                agent_request_id=str(request_id or f"agent_{datetime.now().timestamp():.6f}"),
+                agent_request_id=str(request_id or f"agent_{datetime.now(UTC).timestamp():.6f}"),
                 permission_request_id=decision_request_id,
                 decision=synthesized_decision,
                 reason_code=(
@@ -429,7 +471,7 @@ class ToolExecutor:
                         decision="denied",
                         reason_code="user_denied",
                         retryable=False,
-                        decided_at=datetime.now().isoformat(),
+                        decided_at=datetime.now(UTC).isoformat(),
                     ) if receipt is not None else None,
                 ))
             receipt = replace(
@@ -437,7 +479,7 @@ class ToolExecutor:
                 decision="allowed",
                 reason_code="user_allowed",
                 retryable=True,
-                decided_at=datetime.now().isoformat(),
+                decided_at=datetime.now(UTC).isoformat(),
             ) if receipt is not None else None
 
         if not allowed_by_policy and not (require_confirm and receipt and receipt.decision == "allowed"):
@@ -459,7 +501,7 @@ class ToolExecutor:
             ctx.trace_store.append(
                 "runtime_loop",
                 RuntimeLoopRecord(
-                    timestamp=datetime.now().isoformat(),
+                    timestamp=datetime.now(UTC).isoformat(),
                     session_id=getattr(ctx, 'session_id', ''),
                     request_id=getattr(ctx, 'request_id', None),
                     stage="ask_act",
@@ -485,6 +527,8 @@ class ToolExecutor:
             "retryable": not bool(getattr(receipt, "redacted_paths", [])),
         }
         started_at = time.perf_counter()
+        dispatched = False
+        handler_result: ToolResultEnvelope | None = None
         self._job_event(
             ctx=ctx,
             status="running",
@@ -497,12 +541,37 @@ class ToolExecutor:
         )
 
         async def _run_tool() -> Any:
-            if inspect.iscoroutinefunction(tool.handler):
-                tool_result = await tool.handler(args)
+            nonlocal dispatched, handler_result
+            execution_permit = None
+            if tool.execution_permit_claims is not None:
+                if receipt is None:
+                    raise RuntimeError("execution permit requires a permission receipt")
+                claims = tool.execution_permit_claims(args, ctx)
+                execution_permit = _mint_execution_permit(
+                    tool_name=tool.name,
+                    parameters=args,
+                    ctx=ctx,
+                    receipt=receipt,
+                    claims=claims,
+                )
+            if tool.context_handler is not None:
+                context_handler = tool.context_handler
+                dispatched = True
+                if inspect.iscoroutinefunction(context_handler):
+                    tool_result = await context_handler(args, ctx, receipt, execution_permit)
+                else:
+                    tool_result = await asyncio.to_thread(context_handler, args, ctx, receipt, execution_permit)
             else:
-                tool_result = await asyncio.to_thread(tool.handler, args)
-                if inspect.isawaitable(tool_result):
-                    tool_result = await tool_result
+                handler = tool.handler
+                dispatched = True
+                if inspect.iscoroutinefunction(handler):
+                    tool_result = await handler(args)
+                else:
+                    tool_result = await asyncio.to_thread(handler, args)
+            if inspect.isawaitable(tool_result):
+                tool_result = await tool_result
+            if isinstance(tool_result, ToolResultEnvelope):
+                handler_result = tool_result
             if plugin_manager is not None:
                 tool_result = await plugin_manager.after_tool(tool_result, tool.name, args, ctx)
             return tool_result
@@ -512,31 +581,90 @@ class ToolExecutor:
             # worker thread. Await it to a real terminal state before reporting
             # cancellation, so the job never claims a side effect stopped while
             # it is still executing.
-            if not inspect.iscoroutinefunction(tool.handler):
+            if not inspect.iscoroutinefunction(tool.context_handler or tool.handler):
                 result = await _run_tool()
                 cancelled = self._cancelled(cancellation_signal)
             else:
                 result, cancelled = await self._await_with_cancellation(_run_tool(), cancellation_signal)
         except asyncio.CancelledError:
-            terminal_data = {**terminal_data, "durationMs": round((time.perf_counter() - started_at) * 1000)}
+            terminal_data = {
+                **terminal_data,
+                "durationMs": round((time.perf_counter() - started_at) * 1000),
+                "effectOutcome": "unknown_effect" if dispatched else "known_failure",
+            }
             self._job_event(
                 ctx=ctx, status="cancelled", job_id=job_id, run_id=run_id,
                 request_id=request_id, source=event_source, tool_name=tool_name,
                 error="cancelled", data=terminal_data,
             )
-            self._observe(False)
-            raise
+            if not dispatched:
+                return self._finish(ToolResultEnvelope(
+                    success=False,
+                    content="",
+                    source=tool.source,
+                    tool_name=tool_name,
+                    error="Tool execution cancelled before dispatch",
+                    permission_receipt=receipt,
+                    outcome="known_failure",
+                    retryable=True,
+                ))
+            return self._finish(ToolResultEnvelope(
+                success=False,
+                content="",
+                source=tool.source,
+                tool_name=tool_name,
+                error="Tool execution cancelled after dispatch; effect is unknown",
+                permission_receipt=receipt,
+                outcome="unknown_effect",
+                retryable=False,
+                data={"code": "TOOL_OUTCOME_UNKNOWN"},
+            ))
         except Exception as exc:
-            terminal_data = {**terminal_data, "durationMs": round((time.perf_counter() - started_at) * 1000)}
-            self._job_event(
-                ctx=ctx, status="failed", job_id=job_id, run_id=run_id,
-                request_id=request_id, source=event_source, tool_name=tool_name,
-                error=str(exc), data=terminal_data,
-            )
-            self._observe(False)
-            raise
+            if handler_result is not None:
+                result = handler_result
+                cancelled = False
+            elif dispatched:
+                terminal_data = {
+                    **terminal_data,
+                    "durationMs": round((time.perf_counter() - started_at) * 1000),
+                    "effectOutcome": "unknown_effect",
+                    "retryable": False,
+                }
+                self._job_event(
+                    ctx=ctx, status="failed", job_id=job_id, run_id=run_id,
+                    request_id=request_id, source=event_source, tool_name=tool_name,
+                    error=str(exc), data=terminal_data,
+                )
+                return self._finish(ToolResultEnvelope(
+                    success=False,
+                    content="",
+                    source=tool.source,
+                    tool_name=tool_name,
+                    error="Tool execution failed after dispatch; effect is unknown",
+                    permission_receipt=receipt,
+                    outcome="unknown_effect",
+                    retryable=False,
+                    data={"code": "TOOL_OUTCOME_UNKNOWN"},
+                ))
+            else:
+                terminal_data = {
+                    **terminal_data,
+                    "durationMs": round((time.perf_counter() - started_at) * 1000),
+                }
+                self._job_event(
+                    ctx=ctx, status="failed", job_id=job_id, run_id=run_id,
+                    request_id=request_id, source=event_source, tool_name=tool_name,
+                    error=str(exc), data=terminal_data,
+                )
+                self._observe(False)
+                raise
         if cancelled:
-            terminal_data = {**terminal_data, "durationMs": round((time.perf_counter() - started_at) * 1000), "cancellationReason": "cancelled"}
+            terminal_data = {
+                **terminal_data,
+                "durationMs": round((time.perf_counter() - started_at) * 1000),
+                "cancellationReason": "cancelled",
+                "effectOutcome": "unknown_effect" if dispatched else "known_failure",
+            }
             self._job_event(
                 ctx=ctx, status="cancelled", job_id=job_id, run_id=run_id,
                 request_id=request_id, source=event_source, tool_name=tool_name,
@@ -547,8 +675,14 @@ class ToolExecutor:
                 content="",
                 source=tool.source,
                 tool_name=tool_name,
-                error="Tool execution cancelled",
+                error=(
+                    "Tool execution cancelled after dispatch; effect is unknown"
+                    if dispatched else "Tool execution cancelled before dispatch"
+                ),
                 permission_receipt=receipt,
+                outcome="unknown_effect" if dispatched else "known_failure",
+                retryable=not dispatched,
+                data={"code": "TOOL_OUTCOME_UNKNOWN"} if dispatched else None,
             ))
         result_summary = _bounded_result_summary(getattr(result, "content", ""))
         terminal_data = {
@@ -559,15 +693,23 @@ class ToolExecutor:
         }
         self._job_event(
             ctx=ctx,
-            status="completed" if result.success else "failed",
+            status="completed" if result.outcome == "known_success" else "failed",
             job_id=job_id,
             run_id=run_id,
             request_id=request_id,
             source=event_source,
             tool_name=tool_name,
             progress=1.0,
-            error=str(result.error) if not result.success else None,
-            data=terminal_data,
+            error=str(result.error) if result.outcome != "known_success" else None,
+            data={
+                **terminal_data,
+                "effectOutcome": result.outcome,
+                "retryable": (
+                    terminal_data["retryable"]
+                    if result.outcome == "known_success"
+                    else bool(result.retryable)
+                ),
+            },
         )
         result.permission_receipt = receipt
         bindings = get_runtime_bindings(ctx) if ctx is not None else None
@@ -588,7 +730,7 @@ class ToolExecutor:
                 proactive_budget = float(summary.get('proactive_budget') or 0.9)
                 support_style = None
                 if db_repo is not None and ctx is not None and getattr(ctx, 'workspace_id', None):
-                    companion = await asyncio.to_thread(db_repo.get_workspace_companion, getattr(ctx, 'workspace_id'))
+                    companion = await asyncio.to_thread(db_repo.get_workspace_companion, ctx.workspace_id)
                     if companion:
                         support_style = companion.get('support_style')
                 text = f"結崎通过工具 {tool.name} 成功完成了一次帮助。"
@@ -617,13 +759,15 @@ class ToolExecutor:
                         importance=importance,
                         owner_agent_id=reflector_route.owner_agent_id,
                         owner_agent_role=reflector_route.owner_agent_role,
+                        turn_id=getattr(ctx, 'turn_id', None) if ctx is not None else None,
+                        tool_source=tool.source,
                     ),
                 )
                 if ctx is not None and getattr(ctx, 'trace_store', None) is not None:
                     ctx.trace_store.append(
                         "runtime_loop",
                         RuntimeLoopRecord(
-                            timestamp=datetime.now().isoformat(),
+                            timestamp=datetime.now(UTC).isoformat(),
                             session_id=getattr(ctx, 'session_id', ''),
                             request_id=getattr(ctx, 'request_id', None),
                             stage="update_relationship",
@@ -638,6 +782,6 @@ class ToolExecutor:
                             },
                         ).to_dict(),
                     )
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - relationship projection is best-effort
+                return self._finish(result)
         return self._finish(result)

@@ -8,7 +8,10 @@ from pathlib import Path
 import httpx
 import pytest
 
-from modules.tts.openai_compatible import OpenAICompatibleTTSClient, normalize_speech_endpoint
+from modules.tts.openai_compatible import (
+    OpenAICompatibleTTSClient,
+    normalize_speech_endpoint,
+)
 
 
 class FakeGeneration:
@@ -105,5 +108,7 @@ async def test_openai_compatible_cancellation_stops_inflight_request(tmp_path: P
     generation.invalidated = True
     await client.disconnect()
     assert await task is False
+    assert request_cancelled.is_set()
     assert client.status_snapshot()["cancel_count"] >= 1
+    assert client.diagnostics.snapshot()["stages"]["interruption"]["recovery_successes"] >= 1
     assert not socket.messages

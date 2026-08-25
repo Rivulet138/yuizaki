@@ -1,0 +1,62 @@
+name: Release Packages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-installer:
+    name: Windows NSIS installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13'
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.22.x'
+          cache: false
+      - working-directory: electron
+        run: npm ci
+      - working-directory: electron
+        run: npm run package:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yuizaki-windows-installer
+          path: release/*.exe
+
+  linux-packages:
+    name: Linux AppImage and deb
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13'
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.22.x'
+          cache: false
+      - name: Install Linux packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby-full
+          sudo gem install --no-document fpm
+      - working-directory: electron
+        run: npm ci
+      - working-directory: electron
+        run: npm run package:linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yuizaki-linux-packages
+          path: |
+            YuizakiLauncher
+            release/*.AppImage
+            release/*.deb

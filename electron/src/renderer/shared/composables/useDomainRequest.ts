@@ -35,8 +35,9 @@ export function useDomainRequest<T>(): DomainRequestState<T> {
       }
       return result
     } catch (err: unknown) {
-      console.error('[DomainRequest Error]:', err)
       const httpError = err as Partial<HttpClientError>
+      const requestLabel = httpError.requestPath ? ` ${httpError.requestPath}` : ''
+      console.error(`[DomainRequest Error]${requestLabel}:`, err)
       if (requestId === requestSequence) {
         error.value = httpError.message || '请求失败，请稍后重试'
       }

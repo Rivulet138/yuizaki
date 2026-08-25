@@ -56,6 +56,7 @@ export interface RealtimeVoiceEventMap {
   'playback-start': { elapsedMs: number }
   'playback-end': Record<string, never>
   'playback-stop': { elapsedMs: number }
+  'playback-recovery': { elapsedMs: number; ok: boolean; recovered: boolean; recoveryLatencyMs: number; playbackUnderruns: number }
   'provider-cancel': { elapsedMs: number }
   'lip-sync-level': { level: number; active: boolean }
   'interrupt-ack': { elapsedMs: number }
@@ -200,6 +201,7 @@ export class RealtimeVoiceSession {
   private outputLevelReportedAt = 0
   private outputLevelReported = 0
   private outputSampledAt = 0
+  private playbackRecoveryInFlight = false
   private connectionPromise: Promise<void> | null = null
   private listeners = new Map<keyof RealtimeVoiceEventMap, Set<(payload: never) => void>>()
   private pressStartedAt: number | null = null
@@ -925,7 +927,18 @@ export class RealtimeVoiceSession {
   }
 
   private startOutputLipSync(): void {
-    void this.audioElement?.play().catch(() => undefined)
+    const audioElement = this.audioElement
+    if (audioElement) {
+      void audioElement.play().catch(() => this.recoverPlayback(audioElement))
+    } else {
+      this.emit('playback-recovery', {
+        elapsedMs: 0,
+        ok: false,
+        recovered: false,
+        recoveryLatencyMs: 0,
+        playbackUnderruns: 1,
+      })
+    }
     void this.outputAudioContext?.resume().catch(() => undefined)
     if (this.outputLipSyncActive) return
     this.outputLipSyncActive = true
@@ -934,6 +947,38 @@ export class RealtimeVoiceSession {
     this.outputSampledAt = this.outputLevelReportedAt - OUTPUT_ANALYSIS_INTERVAL_MS
     this.emit('lip-sync-level', { level: 0, active: true })
     this.scheduleOutputAnalysis()
+  }
+
+  private async recoverPlayback(audioElement: HTMLAudioElement): Promise<void> {
+    if (this.playbackRecoveryInFlight) return
+    this.playbackRecoveryInFlight = true
+    const startedAt = performance.now()
+    const epoch = this.operationEpoch
+    try {
+      audioElement.pause()
+      await audioElement.play()
+      if (epoch !== this.operationEpoch) return
+      const recoveryLatencyMs = Math.max(0, performance.now() - startedAt)
+      this.emit('playback-recovery', {
+        elapsedMs: recoveryLatencyMs,
+        ok: true,
+        recovered: true,
+        recoveryLatencyMs,
+        playbackUnderruns: 1,
+      })
+    } catch {
+      if (epoch !== this.operationEpoch) return
+      const recoveryLatencyMs = Math.max(0, performance.now() - startedAt)
+      this.emit('playback-recovery', {
+        elapsedMs: recoveryLatencyMs,
+        ok: false,
+        recovered: false,
+        recoveryLatencyMs,
+        playbackUnderruns: 1,
+      })
+    } finally {
+      this.playbackRecoveryInFlight = false
+    }
   }
 
   private stopOutputLipSync(): void {

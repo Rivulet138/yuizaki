@@ -8,7 +8,6 @@ from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 
 from .paths import DEFAULT_AUDIO_CACHE_DIR, audio_cache_dir_from_env, data_dir_from_env
-SUMMARY_ADMIN_TOKEN_PLACEHOLDERS = {"your-admin-token-here"}
 DEFAULT_TTS_LANG = "ja"
 DEFAULT_EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-0.6B"
 DEFAULT_QDRANT_DOCKER_IMAGE = "qdrant/qdrant:v1.18.3"
@@ -136,7 +135,6 @@ class SummaryConfig(BaseModel):
     keep_recent_messages: int = Field(default=8)
     item_max_chars: int = Field(default=140)
     rewrite_interval_messages: int = Field(default=6)
-    admin_token: str = Field(default="")
     quality_scorer_mode: str = Field(default="rule")
     quality_score_cooldown_seconds: int = Field(default=300)
     quality_score_budget_per_hour: int = Field(default=20)
@@ -181,7 +179,6 @@ def public_config_snapshot(value: AppConfig) -> dict[str, object]:
         "llm": ("api_key", "vision_api_key"),
         "asr": ("api_key",),
         "tts": ("api_key",),
-        "summary": ("admin_token",),
         "memory": ("qdrant_api_key",),
     }
     for section_name, fields in secret_fields.items():
@@ -271,7 +268,6 @@ def _load_config_from_env() -> AppConfig:
             keep_recent_messages=int(os.getenv("SUMMARY_KEEP_RECENT_MESSAGES", "8")),
             item_max_chars=int(os.getenv("SUMMARY_ITEM_MAX_CHARS", "140")),
             rewrite_interval_messages=int(os.getenv("SUMMARY_REWRITE_INTERVAL_MESSAGES", "6")),
-            admin_token=_clean_optional_secret(os.getenv("SUMMARY_ADMIN_TOKEN", ""), SUMMARY_ADMIN_TOKEN_PLACEHOLDERS),
             quality_scorer_mode=os.getenv("SUMMARY_QUALITY_SCORER_MODE", "rule").strip().lower(),
             quality_score_cooldown_seconds=int(os.getenv("SUMMARY_QUALITY_SCORE_COOLDOWN_SECONDS", "300")),
             quality_score_budget_per_hour=int(os.getenv("SUMMARY_QUALITY_SCORE_BUDGET_PER_HOUR", "20")),

@@ -66,6 +66,71 @@ async def test_tool_job_converges_from_created_to_running_to_terminal(success: b
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("exception_type", [RuntimeError, asyncio.TimeoutError])
+async def test_tool_job_exception_after_dispatch_is_unknown_effect(
+    exception_type: type[Exception],
+) -> None:
+    effects: list[str] = []
+
+    async def _handler(_args: dict[str, object]) -> ToolResultEnvelope:
+        effects.append("external-effect")
+        raise exception_type("handler failed after effect")
+
+    registry = ToolRegistry()
+    registry.register(_tool("effect_tool", _handler))
+    events = CompanionJobEventLog()
+
+    outcome = await ToolExecutor(registry, job_event_log=events).execute(
+        "effect_tool", {}, request_id="request-effect", run_id="run-effect", job_id="job-effect",
+    )
+
+    assert effects == ["external-effect"]
+    assert outcome.success is False
+    assert outcome.outcome == "unknown_effect"
+    assert outcome.retryable is False
+    assert outcome.data == {"code": "TOOL_OUTCOME_UNKNOWN"}
+    snapshot = events.snapshot()
+    assert [event["status"] for event in snapshot] == ["created", "running", "failed"]
+    assert snapshot[-1]["data"]["effectOutcome"] == "unknown_effect"
+    assert snapshot[-1]["data"]["retryable"] is False
+
+
+@pytest.mark.asyncio
+async def test_post_handler_failure_preserves_explicit_known_outcome() -> None:
+    registry = ToolRegistry()
+    registry.register(_tool(
+        "known_tool",
+        lambda _args: ToolResultEnvelope(
+            success=True,
+            content="effect completed",
+            source="builtin",
+            tool_name="known_tool",
+        ),
+    ))
+    events = CompanionJobEventLog()
+
+    class BrokenPluginManager:
+        async def before_tool(
+            self,
+            _name: str,
+            args: dict[str, object],
+            _ctx: object,
+        ) -> dict[str, object]:
+            return args
+
+        async def after_tool(self, *_args: object) -> ToolResultEnvelope:
+            raise RuntimeError("post-handler projection failed")
+
+    outcome = await ToolExecutor(registry, job_event_log=events).execute(
+        "known_tool", {}, plugin_manager=BrokenPluginManager(),
+    )
+
+    assert outcome.success is True
+    assert outcome.outcome == "known_success"
+    assert [event["status"] for event in events.snapshot()] == ["created", "running", "completed"]
+
+
+@pytest.mark.asyncio
 async def test_tool_job_result_summary_is_bounded_and_normalized() -> None:
     registry = ToolRegistry()
     registry.register(_tool(
@@ -122,7 +187,9 @@ async def test_tool_job_cancellation_stops_async_handler_and_converges() -> None
     outcome = await asyncio.wait_for(execution, timeout=1)
 
     assert outcome.success is False
-    assert outcome.error == "Tool execution cancelled"
+    assert outcome.error == "Tool execution cancelled after dispatch; effect is unknown"
+    assert outcome.outcome == "unknown_effect"
+    assert outcome.retryable is False
     assert handler_cancelled.is_set()
     assert [event["status"] for event in events.snapshot()] == ["created", "running", "cancelled"]
     assert events.active_job_ids() == []
@@ -154,7 +221,9 @@ async def test_sync_tool_cancellation_waits_for_worker_terminal_state() -> None:
     assert not execution.done()
     release.set()
     outcome = await asyncio.wait_for(execution, timeout=1)
-    assert outcome.error == "Tool execution cancelled"
+    assert outcome.error == "Tool execution cancelled after dispatch; effect is unknown"
+    assert outcome.outcome == "unknown_effect"
+    assert outcome.retryable is False
     assert [event["status"] for event in events.snapshot()] == ["created", "running", "cancelled"]
 
 

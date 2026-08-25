@@ -1,0 +1,19 @@
+{
+  "type": "completed_turn_followup",
+  "tick": 17,
+  "at": "2026-08-15T07:00:00Z",
+  "job_id": "activityframejob_contract17",
+  "request_id": "activityframereq_contract17",
+  "source_kind": "completed_turn_followup",
+  "source_id": "turn-contract-17",
+  "trigger_reason": "completed_turn_followup",
+  "frame_id": "af_contract17",
+  "expires_at": 1800000000,
+  "content_code": "completed_turn_followup",
+  "content_params": {},
+  "message": "Would you like to continue where we left off?",
+  "proactive_state": {
+    "can_proactively_reach_out": true,
+    "trigger_reason": "completed_turn_followup"
+  }
+}

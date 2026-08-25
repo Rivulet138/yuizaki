@@ -65,6 +65,23 @@ describe('settingsClient', () => {
     }))
   })
 
+  it('reads the LLM runtime status endpoint', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ available: true, provider: 'ollama', model: 'qwen3' }),
+    }))
+
+    const result = await settingsClient.llmStatus()
+
+    expect(result.available).toBe(true)
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/settings/llm/status'), expect.objectContaining({
+      headers: expect.objectContaining({
+        'x-trace-id': expect.stringMatching(/^trace_/),
+      }),
+    }))
+  })
+
   it('imports a JSON settings payload through the control server', async () => {
     window.sessionStorage.setItem('yuizaki.control.token', 'settings-token')
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -87,8 +104,7 @@ describe('settingsClient', () => {
     }))
   })
 
-  it('exports settings through the authenticated control server request', async () => {
-    window.sessionStorage.setItem('yuizaki.control.token', 'settings-token')
+  it('exports settings through the control server request', async () => {
     const blob = new Blob(['{"ok":true}'], { type: 'application/json' })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -102,14 +118,12 @@ describe('settingsClient', () => {
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/settings/export'), expect.objectContaining({
       cache: 'no-store',
       headers: expect.objectContaining({
-        Authorization: 'Bearer settings-token',
         'x-trace-id': expect.stringMatching(/^trace_/),
       }),
     }))
   })
 
-  it('queues TTS warmup through the authenticated control server', async () => {
-    window.sessionStorage.setItem('yuizaki.control.token', 'tts-warmup-token')
+  it('queues TTS warmup through the control server', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -122,7 +136,6 @@ describe('settingsClient', () => {
     expect(fetch).toHaveBeenCalledWith(`${CONTROL_ORIGIN}/api/settings/tts/warmup`, expect.objectContaining({
       method: 'POST',
       headers: expect.objectContaining({
-        Authorization: 'Bearer tts-warmup-token',
         'x-trace-id': expect.stringMatching(/^trace_/),
       }),
     }))

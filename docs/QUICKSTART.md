@@ -4,28 +4,32 @@ This guide gets a local text-chat installation running. Voice, vision, semantic 
 
 本指南用于启动本地文字聊天安装。语音、视觉、语义检索和 SoulX 均为可选扩展。
 
+The launcher binaries are generated and are not stored in Git. For a source
+checkout, install Node.js 22.13+ and Go 1.22+, then run `npm ci` and
+`npm run prepare:launcher` in `electron`. This creates
+`YuizakiLauncher.exe` and `YuizakiLauncher` in the repository root.
+
+启动器二进制不存入 Git。源码检出后，请安装 Node.js 22.13+ 与 Go 1.22+，在
+`electron` 目录运行 `npm ci` 和 `npm run prepare:launcher`，随后根目录会生成
+`YuizakiLauncher.exe` 与 `YuizakiLauncher`。
+
 ## Windows / Windows
 
 ```powershell
-.\install.bat core
-Copy-Item python/.env.example python/.env
-notepad python/.env
-.\start.bat --check --no-pause
-.\start.bat
+YuizakiLauncher.exe --check
+YuizakiLauncher.exe
 ```
 
-Use `.\install.bat full` when you need the optional ASR, Genie-TTS, Qdrant, embedding, and model helper packages.
+Set `YUIZAKI_INSTALL_PROFILE=full` before first launch when you need optional
+ASR, Genie-TTS, Qdrant, embedding, and model helper packages.
 
-需要可选 ASR、Genie-TTS、Qdrant、嵌入和模型辅助软件包时，请使用 `.`\install.bat full`。
+需要可选 ASR、Genie-TTS、Qdrant、嵌入和模型辅助软件包时，请在首次启动前设置 `YUIZAKI_INSTALL_PROFILE=full`。
 
 ## Linux / Linux
 
 ```bash
-./install.sh core
-cp python/.env.example python/.env
-$EDITOR python/.env
-./start.sh --check
-./start.sh
+./YuizakiLauncher --check
+./YuizakiLauncher
 ```
 
 See [LINUX.md](LINUX.md) before troubleshooting audio, Wayland, or GPU behavior.
@@ -49,9 +53,9 @@ The endpoint must implement the OpenAI-compatible chat contract expected by the 
 
 ## Launcher modes / 启动模式
 
-`--check` performs preflight only. `--verify` runs the supported verification suite. `--smoke` adds health, pet, and MCP checks after startup. `--dev-renderer` uses Vite. MCP is enabled by default; `--no-mcp` opts out. Windows also supports `--with-qdrant`, `--no-show-pet`, and `--no-open`.
+`--check` performs preflight only. `--verify` runs the supported verification suite. `--dev-renderer` uses Vite. MCP is enabled by default; `--no-mcp` opts out. Windows also supports `--with-qdrant`, `--no-show-pet`, and `--no-open`.
 
-`--check` 只执行启动前检查。`--verify` 运行受支持的验证套件。`--smoke` 在启动后增加健康、桌宠和 MCP 检查。`--dev-renderer` 使用 Vite。MCP 默认启用，可用 `--no-mcp` 退出。Windows 还支持 `--with-qdrant`、`--no-show-pet` 和 `--no-open`。
+`--check` 只执行启动前检查。`--verify` 运行受支持的验证套件。`--dev-renderer` 使用 Vite。MCP 默认启用，可用 `--no-mcp` 退出。Windows 还支持 `--with-qdrant`、`--no-show-pet` 和 `--no-open`。
 
 ## First checks after startup / 启动后首次检查
 

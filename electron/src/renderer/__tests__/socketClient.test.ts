@@ -296,6 +296,7 @@ describe('SocketClient contract helpers', () => {
       turnId: 'turn-1',
       jobId: 'vision-job-1',
       requestId: 'request-1',
+      generationId: 'generation-1',
       interruptionEpoch: 3,
     })
 
@@ -309,6 +310,7 @@ describe('SocketClient contract helpers', () => {
       turn_id: 'turn-1',
       job_id: 'vision-job-1',
       request_id: 'request-1',
+      generation_id: 'generation-1',
       interruption_epoch: 3,
     })
   })

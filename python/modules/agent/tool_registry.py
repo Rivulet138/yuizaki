@@ -1,13 +1,88 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import hashlib
+import hmac
 import re
-from typing import Any, Awaitable, Callable
+import secrets
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import Any
 
-from .tool_result import RiskLevel, ToolSource, ToolResultEnvelope
-
+from .permission_receipt import PermissionReceipt
+from .planner import canonical_json_bytes
+from .tool_result import RiskLevel, ToolResultEnvelope, ToolSource
 
 ToolHandler = Callable[[dict[str, Any]], ToolResultEnvelope | Awaitable[ToolResultEnvelope]]
+ContextToolHandler = Callable[
+    [dict[str, Any], Any, PermissionReceipt | None, Any],
+    ToolResultEnvelope | Awaitable[ToolResultEnvelope],
+]
+ExecutionPermitClaims = Callable[[dict[str, Any], Any], str]
+_EXECUTION_PERMIT_KEY = secrets.token_bytes(32)
+
+
+@dataclass(frozen=True)
+class _ToolExecutionPermit:
+    payload: str
+    seal: str
+    nonce: str
+
+
+def _canonical_parameters(parameters: dict[str, Any]) -> str:
+    return canonical_json_bytes(parameters, path="tool parameters").decode("utf-8")
+
+
+def _mint_execution_permit(  # pyright: ignore[reportUnusedFunction]
+    *,
+    tool_name: str,
+    parameters: dict[str, Any],
+    ctx: Any,
+    receipt: PermissionReceipt,
+    claims: str,
+) -> _ToolExecutionPermit:
+    if (
+        receipt.decision != "allowed"
+        or receipt.reason_code != "user_allowed"
+        or receipt.decided_at is None
+        or receipt.capability_id != tool_name
+    ):
+        raise RuntimeError("execution permit requires a fresh matching user decision")
+    nonce = secrets.token_urlsafe(18)
+    payload = _canonical_parameters({
+        "tool_name": tool_name,
+        "parameters_sha256": hashlib.sha256(_canonical_parameters(parameters).encode("utf-8")).hexdigest(),
+        "context_id": id(ctx),
+        "capability_call_id": receipt.capability_call_id,
+        "claims": claims,
+        "nonce": nonce,
+    })
+    seal = hmac.new(_EXECUTION_PERMIT_KEY, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return _ToolExecutionPermit(payload=payload, seal=seal, nonce=nonce)
+
+
+def _verify_execution_permit(  # pyright: ignore[reportUnusedFunction]
+    permit: object,
+    *,
+    tool_name: str,
+    parameters: dict[str, Any],
+    ctx: Any,
+    receipt: PermissionReceipt | None,
+    claims: str,
+) -> str | None:
+    if not isinstance(permit, _ToolExecutionPermit) or receipt is None:
+        return None
+    expected_seal = hmac.new(_EXECUTION_PERMIT_KEY, permit.payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected_seal, permit.seal):
+        return None
+    expected_payload = _canonical_parameters({
+        "tool_name": tool_name,
+        "parameters_sha256": hashlib.sha256(_canonical_parameters(parameters).encode("utf-8")).hexdigest(),
+        "context_id": id(ctx),
+        "capability_call_id": receipt.capability_call_id,
+        "claims": claims,
+        "nonce": permit.nonce,
+    })
+    return permit.nonce if hmac.compare_digest(expected_payload, permit.payload) else None
 
 _QUERY_SYNONYMS: dict[str, tuple[str, ...]] = {
     "浏览器": ("browser", "web", "open"),
@@ -50,20 +125,32 @@ class ToolDefinition:
     risk_level: RiskLevel = "safe"
     tags: list[str] | None = None
     scopes: list[str] | None = None
+    # High-consequence tools may require a fresh interactive decision for
+    # every call instead of accepting a persisted tool/scope grant.
+    allow_remembered_decision: bool = True
+    context_handler: ContextToolHandler | None = None
+    execution_permit_claims: ExecutionPermitClaims | None = None
 
 
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, ToolDefinition] = {}
+        self._revision = 0
+
+    @property
+    def revision(self) -> int:
+        return self._revision
 
     def register(self, definition: ToolDefinition) -> None:
         self._tools[definition.name] = definition
+        self._revision += 1
 
     def get(self, name: str) -> ToolDefinition | None:
         return self._tools.get(name)
 
     def unregister(self, name: str) -> None:
-        self._tools.pop(name, None)
+        if self._tools.pop(name, None) is not None:
+            self._revision += 1
 
     def list(self) -> list[ToolDefinition]:
         return list(self._tools.values())
@@ -125,6 +212,7 @@ class ToolRegistry:
                 "source": tool.source,
                 "riskLevel": tool.risk_level,
                 "requiresApproval": bool(tool.require_confirm),
+                "allowRememberedDecision": bool(tool.allow_remembered_decision),
                 "tags": list(tool.tags or []),
                 "scopes": list(tool.scopes or []),
                 "parameters": tool.parameters,

@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="工具权限" tone="admin">
+  <PanelShell title="工具权限" subtitle="查看授权记录，撤销工具权限，启停 MCP 与插件" tone="admin">
     <div class="governance-console">
       <section class="governance-toolbar" aria-label="治理操作">
         <div>

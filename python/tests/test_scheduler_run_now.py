@@ -10,6 +10,11 @@ from modules.agent.schedule_store import ScheduleStore
 from modules.agent.scheduler import AgentScheduler
 
 
+@pytest.fixture(autouse=True)
+def _enable_explicit_legacy_turn_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YUIZAKI_ALLOW_LEGACY_TURN_PIPELINE", "1")
+
+
 class _SlowPipeline:
     def __init__(self) -> None:
         self.started = asyncio.Event()

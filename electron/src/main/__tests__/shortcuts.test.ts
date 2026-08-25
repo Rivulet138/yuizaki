@@ -46,6 +46,7 @@ const createShortcuts = () => {
     startVoice: vi.fn(),
     stopVoice: vi.fn(),
     toggleVision: vi.fn(),
+    emergencyStop: vi.fn(),
   }
   const shortcuts = new PetShortcuts(
     { toggleInteract: handlers.toggleInteract } as never,
@@ -54,6 +55,7 @@ const createShortcuts = () => {
     handlers.startVoice,
     handlers.stopVoice,
     handlers.toggleVision,
+    handlers.emergencyStop,
   )
   return { shortcuts, handlers }
 }
@@ -98,11 +100,13 @@ describe('PetShortcuts', () => {
     hookMock.callbacks.get('mousedown')?.({ button: 4 })
     electronMock.callbacks.get('Control+Alt+Y')?.()
     electronMock.callbacks.get(DEFAULT_INPUT_BINDINGS.keyboard.toggleVision)?.()
+    electronMock.callbacks.get(DEFAULT_INPUT_BINDINGS.keyboard.emergencyStop)?.()
 
     expect(status.keyboard.openPanel).toBe(true)
     expect(handlers.startVoice).toHaveBeenCalledOnce()
     expect(handlers.openPanel).toHaveBeenCalledOnce()
     expect(handlers.toggleVision).toHaveBeenCalledOnce()
+    expect(handlers.emergencyStop).toHaveBeenCalledOnce()
   })
 
   it('reports occupied keyboard accelerators without disabling push-to-talk', () => {
@@ -147,6 +151,6 @@ describe('PetShortcuts', () => {
 
     expect(handlers.stopVoice).toHaveBeenCalledOnce()
     expect(hookMock.stop).toHaveBeenCalledOnce()
-    expect(electronMock.unregister).toHaveBeenCalledTimes(4)
+    expect(electronMock.unregister).toHaveBeenCalledTimes(5)
   })
 })

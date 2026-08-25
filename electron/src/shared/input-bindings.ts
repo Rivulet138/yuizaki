@@ -1,5 +1,5 @@
 export type MouseSideButton = 4 | 5
-export type KeyboardShortcutAction = 'interact' | 'lock' | 'openPanel' | 'toggleVision'
+export type KeyboardShortcutAction = 'interact' | 'lock' | 'openPanel' | 'toggleVision' | 'emergencyStop'
 
 export interface InputBindingSettings {
   pushToTalk: {
@@ -36,6 +36,7 @@ export const DEFAULT_INPUT_BINDINGS: InputBindingSettings = {
     lock: 'Control+Shift+L',
     openPanel: 'Control+Shift+O',
     toggleVision: 'Control+Alt+V',
+    emergencyStop: 'Control+Shift+Escape',
   },
 }
 
@@ -67,6 +68,7 @@ export const normalizeInputBindingSettings = (value: unknown): InputBindingSetti
       lock: normalizeAccelerator(keyboard['lock'], DEFAULT_INPUT_BINDINGS.keyboard.lock),
       openPanel: normalizeAccelerator(keyboard['openPanel'], DEFAULT_INPUT_BINDINGS.keyboard.openPanel),
       toggleVision: normalizeAccelerator(keyboard['toggleVision'], DEFAULT_INPUT_BINDINGS.keyboard.toggleVision),
+      emergencyStop: normalizeAccelerator(keyboard['emergencyStop'], DEFAULT_INPUT_BINDINGS.keyboard.emergencyStop),
     },
   }
 }

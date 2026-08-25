@@ -33,7 +33,6 @@ describe('api clients', () => {
   })
 
   it('encodes plugin execution cancellation routes', async () => {
-    window.sessionStorage.setItem('yuizaki.control.token', 'plugin-token')
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -45,7 +44,6 @@ describe('api clients', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(`${CONTROL_ORIGIN}/api/plugin/voice%2Ftools/route%20alpha%2Fstop?runId=run%2F1`, expect.objectContaining({
       method: 'DELETE',
-      headers: expect.objectContaining({ Authorization: 'Bearer plugin-token' }),
     }))
   })
 

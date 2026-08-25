@@ -18,11 +18,6 @@ export interface HttpRouteContext {
   backendApiToken: string
   backendApiTokenStore: BackendApiTokenStoreLike
   providerCredentialStore: ProviderCredentialStore
-  adminTokenStore: {
-    getSummaryAdminToken: () => string
-    setSummaryAdminToken: (token: string) => { ok: boolean; hasToken: boolean }
-    clearSummaryAdminToken: () => { ok: boolean }
-  }
   applyPetStateToRenderer: ((state: PetControlState) => void) | undefined
   applyStateToLive2D: (state: PetControlState) => PetControlState
   getAvatarCapabilities?: () => AvatarCapabilitySnapshot | null

@@ -8,15 +8,25 @@
 - Tested platform resolutions: `python/requirements-*-lock-windows.txt` and `python/requirements-*-lock-linux.txt`.
 - Downloadable model/resource checksums and declared licenses: `resources.lock.json`.
 
+The Go launcher is the executable source for profile behavior: it selects
+`requirements-core-lock-*` or `requirements-lock-*`, runs `npm ci` for Electron
+and node-mcp, creates the Python venv, runs `pip check`, and invokes
+`python/scripts/check_installed_lock.py`. The manifests describe allowed ranges;
+the platform lock files describe the tested resolution.
+
 ## Installation profiles
 
 | Profile | Intended use |
 | --- | --- |
-| `core` | Chat, SQLite, OCR foundation, server, Electron, and MCP |
-| `full` | Core plus ASR, Genie-TTS, Qdrant, embeddings, and model helpers |
+| `core` | The dependency set selected by `requirements-core-lock-*`; excludes the full optional audio/vector/model stack |
+| `full` | The dependency set selected by `requirements-lock-*`; adds optional ASR, Genie-TTS, Qdrant, embeddings, and model helpers |
 | development locks | Tests, lint, type checks, and build verification |
 
-Optional native model backends are not installed by default because CUDA and platform builds vary. Do not add a dependency when a local adapter or browser API already covers the behavior.
+Optional native model backends are not installed by default because CUDA and
+platform builds vary. Runtime feature gates are visible in
+`python/modules/core/config.py`, `python/modules/system/runtime_services.py`,
+and the provider modules under `python/modules/{asr,tts,ocr,llm}`. Do not add a
+dependency when a local adapter or browser API already covers the behavior.
 
 ## Compatibility policy
 

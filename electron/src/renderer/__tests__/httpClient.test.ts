@@ -4,6 +4,7 @@ import { API_ORIGIN, clearControlAuthToken, CONTROL_ORIGIN, requestJson } from '
 describe('requestJson error normalization', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
     clearControlAuthToken()
     delete (window as Window & { __YUIZAKI_CONTROL_TOKEN__?: string }).__YUIZAKI_CONTROL_TOKEN__
     document.querySelectorAll('meta[name="yuizaki-control-token"]').forEach((item) => item.remove())
@@ -51,7 +52,7 @@ describe('requestJson error normalization', () => {
     }))
   })
 
-  it('attaches the control token to ControlServer requests and strips it from the URL', async () => {
+  it('consumes the backend token from the URL without attaching it to ControlServer requests', async () => {
     window.history.replaceState({}, '', '/?tab=settings&control_token=secret-control-token')
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -62,9 +63,7 @@ describe('requestJson error normalization', () => {
     await requestJson(`${CONTROL_ORIGIN}/api/settings/`)
 
     expect(fetch).toHaveBeenCalledWith(`${CONTROL_ORIGIN}/api/settings/`, expect.objectContaining({
-      headers: expect.objectContaining({
-        Authorization: 'Bearer secret-control-token',
-      }),
+      headers: expect.not.objectContaining({ Authorization: expect.anything() }),
     }))
     expect(window.location.href).not.toContain('control_token')
     expect(window.sessionStorage.getItem('yuizaki.control.token')).toBe('secret-control-token')
@@ -106,7 +105,7 @@ describe('requestJson error normalization', () => {
     expect(window.sessionStorage.getItem('yuizaki.control.token')).toBe('injected-token')
   })
 
-  it('uses the injected token for bare ControlServer pages without a query token', async () => {
+  it('does not attach the injected backend token to ControlServer requests', async () => {
     const meta = document.createElement('meta')
     meta.name = 'yuizaki-control-token'
     meta.content = 'bare-page-token'
@@ -120,9 +119,7 @@ describe('requestJson error normalization', () => {
     await requestJson(`${CONTROL_ORIGIN}/api/pet/catalog`)
 
     expect(fetch).toHaveBeenCalledWith(`${CONTROL_ORIGIN}/api/pet/catalog`, expect.objectContaining({
-      headers: expect.objectContaining({
-        Authorization: 'Bearer bare-page-token',
-      }),
+      headers: expect.not.objectContaining({ Authorization: expect.anything() }),
     }))
   })
 
@@ -235,22 +232,24 @@ describe('requestJson error normalization', () => {
     await expect(requestJson(`${API_ORIGIN}/api/workspaces`)).rejects.toThrow('重新打开界面')
   })
 
-  it('normalizes CORS-like control failures without a token', async () => {
-    window.history.replaceState({}, '', `/?control_origin=${encodeURIComponent(CONTROL_ORIGIN)}`)
+  it('sends control requests without bootstrapping or attaching a token', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(requestJson(`${CONTROL_ORIGIN}/api/pet/catalog`)).rejects.toThrow('重新打开界面')
+    await expect(requestJson(`${CONTROL_ORIGIN}/api/pet/catalog`)).rejects.toThrow('本地服务')
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock).toHaveBeenCalledWith(`${CONTROL_ORIGIN}/`, expect.objectContaining({ cache: 'no-store' }))
+    expect(fetchMock).toHaveBeenCalledWith(`${CONTROL_ORIGIN}/api/pet/catalog`, expect.objectContaining({
+      headers: expect.not.objectContaining({ Authorization: expect.anything() }),
+    }))
   })
 
-  it('does not probe the fallback control origin from standalone browser pages', async () => {
+  it('reports direct control connection failures from standalone browser pages', async () => {
+    vi.stubEnv('VITE_YUIZAKI_CONTROL_ORIGIN', CONTROL_ORIGIN)
     const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(requestJson(`${CONTROL_ORIGIN}/api/pet/catalog`)).rejects.toThrow('重新打开界面')
-    expect(fetchMock).not.toHaveBeenCalled()
+    await expect(requestJson(`${CONTROL_ORIGIN}/api/pet/catalog`)).rejects.toThrow('无法连接本地服务')
+    expect(fetchMock).toHaveBeenCalledOnce()
   })
 
   it('bounds local requests with a readable timeout error', async () => {

@@ -6,18 +6,6 @@ SoulX SVC is an optional local HTTP voice-conversion service. It is not required
 
 ## Start / 启动
 
-Windows:
-
-```powershell
-.\start_soulx_svc.bat
-```
-
-Linux:
-
-```bash
-./start_soulx_svc.sh
-```
-
 Docker:
 
 ```bash

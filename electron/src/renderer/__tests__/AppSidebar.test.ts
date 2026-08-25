@@ -34,8 +34,6 @@ describe('AppSidebar', () => {
       { id: 'infrastructure', title: 'Infrastructure', icon },
       { id: 'deploy', title: 'Deployment', icon },
     ])
-    await wrapper.get('.admin-toggle').trigger('click')
-
     expect(wrapper.get('a[href="/w/default/tool"]').text()).toContain('Capabilities')
     expect(wrapper.get('a[href="/w/default/agent-trace"]').text()).toContain('Tasks')
     expect(wrapper.get('a[href="/w/default/infrastructure"]').text()).toContain('Infrastructure')
@@ -48,17 +46,17 @@ describe('AppSidebar', () => {
     expect(relatedRoutes[1].get('a[href="/w/default/deploy"]').text()).toContain('Deployment')
   })
 
-  it('keeps advanced tools collapsed until the user opens them', async () => {
+  it('shows advanced tools by default and allows collapsing them', async () => {
     const wrapper = mountSidebar()
 
-    expect(wrapper.text()).not.toContain('运行总览')
-    const toggle = wrapper.get('button[aria-expanded="false"]')
+    expect(wrapper.text()).toContain('运行总览')
+    const toggle = wrapper.get('button[aria-expanded="true"]')
     expect(toggle.attributes('aria-label')).toBe('高级工具')
     expect(toggle.attributes('title')).toBe('高级工具')
     await toggle.trigger('click')
 
-    expect(wrapper.text()).toContain('运行总览')
-    expect(wrapper.get('button').attributes('aria-expanded')).toBe('true')
+    expect(wrapper.text()).not.toContain('运行总览')
+    expect(wrapper.get('.admin-toggle').attributes('aria-expanded')).toBe('false')
   })
 
   it('opens desktop pet scene settings from the persistent sidebar', async () => {
@@ -77,8 +75,6 @@ describe('AppSidebar', () => {
       { id: 'plugins', title: '桌宠技能', icon },
       { id: 'agent-governance', title: 'Agent 治理', icon },
     ])
-    await wrapper.get('.admin-toggle').trigger('click')
-
     const permissions = wrapper.get('section[aria-label="技能、连接与权限"]')
     expect(permissions.text()).toContain('本地能力')
     expect(permissions.text()).toContain('桌宠技能')

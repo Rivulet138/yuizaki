@@ -140,4 +140,32 @@ describe('Settings LLM presentation sections', () => {
     expect(css).toContain('@media (hover: none), (pointer: coarse)')
     expect(css).toMatch(/\.llm-settings-card[\s\S]*min-height: 44px/)
   })
+
+  it('exposes backend-backed runtime status and explicit voice warmup actions', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/renderer/domains/settings/views/SettingsPanel.vue'), 'utf8')
+
+    expect(source).toContain('loadLlmStatus')
+    expect(source).toContain('refreshLlmStatus')
+    expect(source).toContain('llmRuntimeLabel')
+    expect(source).toContain('handleWarmupTts')
+    expect(source).toContain('warmupTtsRequest.loading')
+  })
+
+  it('keeps provider choices selectable with an explicit active state', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/renderer/domains/settings/views/SettingsPanel.vue'), 'utf8')
+    const css = readFileSync(resolve(process.cwd(), 'src/renderer/domains/settings/views/SettingsPanel.css'), 'utf8')
+
+    expect(source).toContain('role="radiogroup"')
+    expect(source).toContain("option.value === llmProviderPreset")
+    expect(source).toContain('@click="applyLlmProviderPreset(option.value)"')
+    expect(source).toContain(':aria-label="`${option.label}: ${option.status}`"')
+    expect(css).toContain('.provider-option.is-active')
+  })
+
+  it('keeps ASR copy aligned with the available local-discovery boundary', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/renderer/domains/settings/components/SettingsAsrSection.vue'), 'utf8')
+    expect(source).toContain("settings.asr.actionHint")
+    expect(source).toContain("@click=\"$emit('discover-local')\"")
+    expect(source).not.toContain('microphone is ready')
+  })
 })

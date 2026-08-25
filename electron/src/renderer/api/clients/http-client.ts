@@ -73,7 +73,6 @@ const CONTROL_TOKEN_PARAM = 'control_token'
 const CONTROL_TOKEN_REFRESH_RETRY_MS = 3_000
 const RUNTIME_API_ORIGIN_CACHE_MS = 10_000
 const LOCAL_REQUEST_TIMEOUT_MS = 12_000
-export const CONTROL_AUTH_MISSING_MESSAGE = '控制服务未授权：请刷新控制页，或从 Electron 应用入口重新打开界面。'
 export const BACKEND_AUTH_MISSING_MESSAGE = '后端服务未授权：请刷新控制页，或从 Electron 应用入口重新打开界面。'
 const LOCAL_SERVICE_UNAVAILABLE_MESSAGE = '无法连接本地服务：请确认 Yuizaki 后端和 Electron 控制服务正在运行，然后重启 Electron 窗口重试。'
 const localServiceTimeoutMessage = (timeoutMs: number): string =>
@@ -230,13 +229,12 @@ const hasStaticControlToken = (): boolean => {
   return Boolean(globalToken || metaToken || readStoredControlToken())
 }
 
-const hasExplicitControlOriginHint = (): boolean =>
-  Boolean(env.VITE_YUIZAKI_CONTROL_ORIGIN?.trim()) ||
+const hasRuntimeControlOriginHint = (): boolean =>
   Boolean(readRuntimeOriginHint('control_origin', 'yuizaki-control-origin', '__YUIZAKI_CONTROL_ORIGIN__'))
 
 const canBootstrapControlTokenFromServer = (): boolean => {
   if (typeof window === 'undefined') return true
-  if (hasStaticControlToken() || hasExplicitControlOriginHint()) return true
+  if (hasStaticControlToken() || hasRuntimeControlOriginHint()) return true
   return currentHttpPageOrigin() === CONTROL_ORIGIN
 }
 
@@ -321,11 +319,6 @@ const getControlToken = (): string => {
     return storedToken
   }
   return inMemoryControlToken
-}
-
-const isControlRequest = (url: string): boolean => {
-  if (typeof window === 'undefined') return url.startsWith(CONTROL_ORIGIN)
-  return new URL(url, window.location.href).origin === CONTROL_ORIGIN
 }
 
 const isBackendRequest = (url: string): boolean => {
@@ -434,6 +427,7 @@ export interface HttpClientError extends Error {
   status?: number
   payload?: unknown
   code?: 'auth_missing' | 'service_unavailable' | 'request_timeout'
+  requestPath?: string
 }
 
 const payloadMessage = (payload: unknown): string | null => {
@@ -457,13 +451,19 @@ const payloadMessage = (payload: unknown): string | null => {
   return null
 }
 
-const getAuthMissingMessage = (url: string): string =>
-  isControlRequest(url) ? CONTROL_AUTH_MISSING_MESSAGE : BACKEND_AUTH_MISSING_MESSAGE
-
 const createClientError = (
   message: string,
-  patch: Partial<Pick<HttpClientError, 'status' | 'payload' | 'code'>> = {},
+  patch: Partial<Pick<HttpClientError, 'status' | 'payload' | 'code' | 'requestPath'>> = {},
 ): HttpClientError => Object.assign(new Error(message) as HttpClientError, patch)
+
+const requestPath = (url: string): string => {
+  try {
+    const parsed = new URL(url, CONTROL_ORIGIN)
+    return parsed.pathname
+  } catch {
+    return ''
+  }
+}
 
 const sendJsonRequest = async (
   url: string,
@@ -505,6 +505,7 @@ export const isAuthMissingError = (error: unknown): boolean => {
 }
 
 export const requestJson = async <T>(url: string, init?: LocalRequestInit): Promise<T> => {
+  consumeControlTokenFromUrl()
   const ensureRequestActive = () => {
     if (init?.signal?.aborted) {
       throw new DOMException('Request aborted', 'AbortError')
@@ -512,7 +513,7 @@ export const requestJson = async <T>(url: string, init?: LocalRequestInit): Prom
   }
   ensureRequestActive()
   const traceId = createTraceId()
-  const needsLocalAuth = isControlRequest(url) || isBackendRequest(url)
+  const needsLocalAuth = isBackendRequest(url)
   let authHeaders = needsLocalAuth ? getControlAuthHeaders() : {}
   let hasAuthHeader = Boolean(authHeaders['Authorization'])
   if (needsLocalAuth && !hasAuthHeader) {
@@ -524,7 +525,7 @@ export const requestJson = async <T>(url: string, init?: LocalRequestInit): Prom
     }
   }
   if (needsLocalAuth && !hasAuthHeader) {
-    throw createClientError(getAuthMissingMessage(url), { code: 'auth_missing' })
+    throw createClientError(BACKEND_AUTH_MISSING_MESSAGE, { code: 'auth_missing' })
   }
   let requestUrl = await rewriteBackendRequestUrl(url, authHeaders)
   ensureRequestActive()
@@ -533,7 +534,7 @@ export const requestJson = async <T>(url: string, init?: LocalRequestInit): Prom
     response = await sendJsonRequest(requestUrl, init, traceId, authHeaders)
   } catch (error) {
     if (needsLocalAuth && !hasAuthHeader) {
-      throw createClientError(getAuthMissingMessage(url), { code: 'auth_missing' })
+      throw createClientError(BACKEND_AUTH_MISSING_MESSAGE, { code: 'auth_missing' })
     }
     if (error instanceof LocalRequestTimeoutError) {
       throw createClientError(error.message, { code: 'request_timeout' })
@@ -561,7 +562,10 @@ export const requestJson = async <T>(url: string, init?: LocalRequestInit): Prom
     }
   }
   if (!response.ok) {
-    const error = createClientError(`HTTP ${response.status}`, { status: response.status })
+    const error = createClientError(`HTTP ${response.status}`, {
+      status: response.status,
+      requestPath: requestPath(requestUrl),
+    })
     try {
       error.payload = await response.json()
       const message = payloadMessage(error.payload)
@@ -572,7 +576,7 @@ export const requestJson = async <T>(url: string, init?: LocalRequestInit): Prom
       // ignore non-json payloads
     }
     if (needsLocalAuth && response.status === 401 && !hasAuthHeader) {
-      error.message = getAuthMissingMessage(url)
+      error.message = BACKEND_AUTH_MISSING_MESSAGE
       error.code = 'auth_missing'
     }
     throw error
@@ -581,8 +585,9 @@ export const requestJson = async <T>(url: string, init?: LocalRequestInit): Prom
 }
 
 export const requestBlob = async (url: string, init?: LocalRequestInit): Promise<Blob> => {
+  consumeControlTokenFromUrl()
   const traceId = createTraceId()
-  const needsLocalAuth = isControlRequest(url) || isBackendRequest(url)
+  const needsLocalAuth = isBackendRequest(url)
   let authHeaders = needsLocalAuth ? getControlAuthHeaders() : {}
   let hasAuthHeader = Boolean(authHeaders['Authorization'])
   if (needsLocalAuth && !hasAuthHeader) {
@@ -593,7 +598,7 @@ export const requestBlob = async (url: string, init?: LocalRequestInit): Promise
     }
   }
   if (needsLocalAuth && !hasAuthHeader) {
-    throw createClientError(getAuthMissingMessage(url), { code: 'auth_missing' })
+    throw createClientError(BACKEND_AUTH_MISSING_MESSAGE, { code: 'auth_missing' })
   }
   let requestUrl = await rewriteBackendRequestUrl(url, authHeaders)
   let response: Response
@@ -601,7 +606,7 @@ export const requestBlob = async (url: string, init?: LocalRequestInit): Promise
     response = await sendAuthedRequest(requestUrl, init, traceId, authHeaders)
   } catch (error) {
     if (needsLocalAuth && !hasAuthHeader) {
-      throw createClientError(getAuthMissingMessage(url), { code: 'auth_missing' })
+      throw createClientError(BACKEND_AUTH_MISSING_MESSAGE, { code: 'auth_missing' })
     }
     if (error instanceof LocalRequestTimeoutError) {
       throw createClientError(error.message, { code: 'request_timeout' })
@@ -627,7 +632,10 @@ export const requestBlob = async (url: string, init?: LocalRequestInit): Promise
     }
   }
   if (!response.ok) {
-    const error = createClientError(`HTTP ${response.status}`, { status: response.status })
+    const error = createClientError(`HTTP ${response.status}`, {
+      status: response.status,
+      requestPath: requestPath(requestUrl),
+    })
     try {
       const contentType = response.headers.get('Content-Type') || ''
       if (contentType.includes('application/json')) {
@@ -647,7 +655,7 @@ export const requestBlob = async (url: string, init?: LocalRequestInit): Promise
       // ignore unreadable error payloads
     }
     if (needsLocalAuth && response.status === 401 && !hasAuthHeader) {
-      error.message = getAuthMissingMessage(url)
+      error.message = BACKEND_AUTH_MISSING_MESSAGE
       error.code = 'auth_missing'
     }
     throw error

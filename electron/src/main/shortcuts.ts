@@ -23,6 +23,7 @@ export class PetShortcuts {
     private readonly startVoiceHandler: () => void,
     private readonly stopVoiceHandler: () => void,
     private readonly toggleVisionHandler: () => void,
+    private readonly emergencyStopHandler: () => void,
   ) {}
 
   register(settings: InputBindingSettings = DEFAULT_INPUT_BINDINGS): InputBindingRegistrationStatus {
@@ -41,6 +42,12 @@ export class PetShortcuts {
         'toggleVision',
         this.settings.keyboard.toggleVision,
         this.toggleVisionHandler,
+        errors,
+      ),
+      emergencyStop: this.registerKeyboardShortcut(
+        'emergencyStop',
+        this.settings.keyboard.emergencyStop,
+        this.emergencyStopHandler,
         errors,
       ),
     }

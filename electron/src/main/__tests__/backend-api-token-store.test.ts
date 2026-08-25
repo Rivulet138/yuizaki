@@ -7,7 +7,6 @@ import { BackendApiTokenStore } from '../backend-api-token-store'
 
 const ORIGINAL_ENV = {
   YUIZAKI_BACKEND_API_TOKEN: process.env['YUIZAKI_BACKEND_API_TOKEN'],
-  YUIZAKI_CONTROL_TOKEN: process.env['YUIZAKI_CONTROL_TOKEN'],
 }
 
 const restoreEnv = () => {
@@ -22,7 +21,6 @@ const restoreEnv = () => {
 
 const clearTokenEnv = () => {
   delete process.env['YUIZAKI_BACKEND_API_TOKEN']
-  delete process.env['YUIZAKI_CONTROL_TOKEN']
 }
 
 const createStorageDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'yuizaki-backend-token-'))

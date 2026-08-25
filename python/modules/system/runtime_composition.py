@@ -4,25 +4,28 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from ..agent.skill_store import SkillCatalogStore
 from .active_workspace_state import ActiveWorkspaceState
 from .runtime_endpoints import (
     build_active_workspace_endpoint,
+    build_activity_frame_endpoints,
     build_add_mcp_endpoint,
     build_agent_plugin_state_endpoint,
     build_agent_trace_state_endpoint,
-    build_experience_metrics_endpoint,
+    build_cancel_schedule_endpoint,
     build_capabilities_state_endpoint,
     build_capability_snapshot,
-    build_cancel_schedule_endpoint,
     build_clear_permissions_endpoint,
     build_companion_opportunity_outcome_endpoint,
-    build_heartbeat_goal_cancel_endpoint,
     build_create_interval_schedule_endpoint,
     build_create_once_schedule_endpoint,
+    build_experience_metrics_endpoint,
     build_health_endpoint,
+    build_heartbeat_goal_cancel_endpoint,
+    build_heartbeat_opportunity_accept_endpoint,
     build_heartbeat_status_endpoint,
-    build_install_mcp_preset_endpoint,
     build_imported_skills_state_endpoint,
+    build_install_mcp_preset_endpoint,
     build_mcp_state_endpoint,
     build_memory_pipeline_query_endpoint,
     build_orchestration_snapshot,
@@ -30,8 +33,8 @@ from .runtime_endpoints import (
     build_permissions_state_endpoint,
     build_readiness_endpoint,
     build_refresh_mcp_endpoint,
-    build_remove_mcp_endpoint,
     build_remove_imported_skills_endpoint,
+    build_remove_mcp_endpoint,
     build_remove_schedule_endpoint,
     build_revoke_permission_endpoint,
     build_run_schedule_now_endpoint,
@@ -43,18 +46,29 @@ from .runtime_endpoints import (
     build_toggle_schedule_endpoint,
     build_update_agent_plugin_config_endpoint,
 )
-from ..agent.skill_store import SkillCatalogStore
 
 
 @dataclass(frozen=True)
 class RuntimeHandlers:
     health: Callable[..., Any]
     readiness: Callable[..., Any]
+    onboarding_readiness_state: Callable[..., Any]
+    onboarding_readiness_run: Callable[..., Any]
+    onboarding_readiness_retry: Callable[..., Any]
+    onboarding_readiness_cancel: Callable[..., Any]
+    onboarding_readiness_action: Callable[..., Any]
     system_status: Callable[..., Any]
     heartbeat_status: Callable[..., Any]
     companion_runtime_status: Callable[..., Any]
     companion_opportunity_outcome: Callable[..., Any]
+    heartbeat_opportunity_accept: Callable[..., Any]
     heartbeat_goal_cancel: Callable[..., Any]
+    proactive_settings_get: Callable[..., Any]
+    proactive_settings_patch: Callable[..., Any]
+    activity_frames_list: Callable[..., Any]
+    activity_frames_rebuild: Callable[..., Any]
+    activity_frame_delete: Callable[..., Any]
+    proactive_feedback: Callable[..., Any]
     capabilities_state: Callable[..., Any]
     orchestration_state: Callable[..., Any]
     active_workspace: Callable[..., Any]
@@ -71,6 +85,8 @@ class RuntimeHandlers:
     cancel_schedule: Callable[..., Any]
     agent_trace_state: Callable[..., Any]
     experience_metrics_state: Callable[..., Any]
+    product_metrics_consent_state: Callable[..., Any]
+    product_metrics_consent_patch: Callable[..., Any]
     mcp_state: Callable[..., Any]
     toggle_mcp: Callable[..., Any]
     add_mcp: Callable[..., Any]
@@ -83,6 +99,19 @@ class RuntimeHandlers:
     imported_skills_state: Callable[..., Any]
     save_imported_skills: Callable[..., Any]
     remove_imported_skills: Callable[..., Any]
+
+
+def product_metrics_consent_snapshot(product_metrics_consent_store: Any) -> dict[str, Any]:
+    """Project durable consent without allowing corrupt state to enable collection."""
+    try:
+        consented = bool(product_metrics_consent_store.load())
+    except (OSError, TypeError, ValueError):
+        consented = False
+    return {
+        "consented": consented,
+        "scope": "local_product_metrics",
+        "transport": "not_configured",
+    }
 
 
 def build_runtime_handlers(
@@ -109,9 +138,22 @@ def build_runtime_handlers(
     generation_manager_provider: Callable[[], Any],
     svc_client_provider: Callable[[], Any],
     memory_status_provider: Callable[[], Any],
+    onboarding_readiness: Any,
+    product_metrics_consent_store: Any,
 ) -> RuntimeHandlers:
-    runtime = sio_server.runtime
     skill_store = SkillCatalogStore()
+    activity_endpoints = build_activity_frame_endpoints(
+        service_provider=lambda: sio_server.runtime.activity_frame_service if sio_server.runtime else None,
+        active_workspace_id_provider=active_workspace_id_provider,
+    )
+
+    def product_metrics_consent_state() -> dict[str, Any]:
+        return product_metrics_consent_snapshot(product_metrics_consent_store)
+
+    def product_metrics_consent_patch(consented: bool) -> dict[str, Any]:
+        product_metrics_consent_store.save(consented)
+        return product_metrics_consent_state()
+
     return RuntimeHandlers(
         health=build_health_endpoint(health_handler=health_checker.check_all),
         readiness=build_readiness_endpoint(
@@ -123,7 +165,13 @@ def build_runtime_handlers(
             memory_health_provider=memory_health_provider,
             generation_manager_provider=generation_manager_provider,
             svc_client_provider=svc_client_provider,
+            onboarding_readiness=onboarding_readiness,
         ),
+        onboarding_readiness_state=onboarding_readiness.snapshot,
+        onboarding_readiness_run=onboarding_readiness.start,
+        onboarding_readiness_retry=onboarding_readiness.retry,
+        onboarding_readiness_cancel=onboarding_readiness.cancel,
+        onboarding_readiness_action=onboarding_readiness.execute_action,
         system_status=build_system_status_endpoint(
             service_manager=service_manager,
             health_checker=health_checker,
@@ -139,9 +187,24 @@ def build_runtime_handlers(
         companion_opportunity_outcome=build_companion_opportunity_outcome_endpoint(
             heartbeat_scheduler_provider=heartbeat_scheduler_provider,
         ),
+        heartbeat_opportunity_accept=build_heartbeat_opportunity_accept_endpoint(
+            heartbeat_scheduler_provider=heartbeat_scheduler_provider,
+            turn_service_provider=lambda: sio_server.runtime.turn_service if sio_server.runtime else None,
+            authorization_callback=lambda acceptance, _pending: (
+                sio_server.runtime is not None
+                and sio_server.runtime.turn_service is not None
+                and acceptance.workspace_id == active_workspace_id_provider()
+            ),
+        ),
         heartbeat_goal_cancel=build_heartbeat_goal_cancel_endpoint(heartbeat_scheduler_provider=heartbeat_scheduler_provider),
+        proactive_settings_get=activity_endpoints["get_settings"],
+        proactive_settings_patch=activity_endpoints["patch_settings"],
+        activity_frames_list=activity_endpoints["list_frames"],
+        activity_frames_rebuild=activity_endpoints["rebuild"],
+        activity_frame_delete=activity_endpoints["delete_frame"],
+        proactive_feedback=activity_endpoints["feedback"],
         capabilities_state=build_capabilities_state_endpoint(
-            tool_registry_provider=lambda: runtime.tool_registry if runtime else None,
+            tool_registry_provider=lambda: sio_server.runtime.tool_registry if sio_server.runtime else None,
             capability_snapshot_builder=build_capability_snapshot,
         ),
         orchestration_state=build_orchestration_state_endpoint(
@@ -171,6 +234,8 @@ def build_runtime_handlers(
         cancel_schedule=build_cancel_schedule_endpoint(sio_server.scheduler),
         agent_trace_state=build_agent_trace_state_endpoint(sio_server.trace_store),
         experience_metrics_state=build_experience_metrics_endpoint(sio_server.experience_metrics),
+        product_metrics_consent_state=product_metrics_consent_state,
+        product_metrics_consent_patch=product_metrics_consent_patch,
         mcp_state=build_mcp_state_endpoint(sio_server.mcp_manager),
         toggle_mcp=build_toggle_mcp_endpoint(sio_server.mcp_manager),
         add_mcp=build_add_mcp_endpoint(sio_server.mcp_manager),
@@ -190,16 +255,27 @@ def build_system_router_from_handlers(
     *,
     create_system_router: Callable[..., Any],
     handlers: RuntimeHandlers,
-    admin_token_provider: Callable[[], str],
 ) -> Any:
     return create_system_router(
         health_handler=handlers.health,
         readiness_handler=handlers.readiness,
+        onboarding_readiness_state_handler=handlers.onboarding_readiness_state,
+        onboarding_readiness_run_handler=handlers.onboarding_readiness_run,
+        onboarding_readiness_retry_handler=handlers.onboarding_readiness_retry,
+        onboarding_readiness_cancel_handler=handlers.onboarding_readiness_cancel,
+        onboarding_readiness_action_handler=handlers.onboarding_readiness_action,
         system_status_handler=handlers.system_status,
         heartbeat_status_handler=handlers.heartbeat_status,
         companion_runtime_handler=handlers.companion_runtime_status,
         companion_opportunity_outcome_handler=handlers.companion_opportunity_outcome,
+        heartbeat_opportunity_accept_handler=handlers.heartbeat_opportunity_accept,
         heartbeat_goal_cancel_handler=handlers.heartbeat_goal_cancel,
+        proactive_settings_get_handler=handlers.proactive_settings_get,
+        proactive_settings_patch_handler=handlers.proactive_settings_patch,
+        activity_frames_list_handler=handlers.activity_frames_list,
+        activity_frames_rebuild_handler=handlers.activity_frames_rebuild,
+        activity_frame_delete_handler=handlers.activity_frame_delete,
+        proactive_feedback_handler=handlers.proactive_feedback,
         capabilities_state_handler=handlers.capabilities_state,
         orchestration_state_handler=handlers.orchestration_state,
         active_workspace_handler=handlers.active_workspace,
@@ -215,6 +291,8 @@ def build_system_router_from_handlers(
         cancel_schedule_handler=handlers.cancel_schedule,
         agent_trace_handler=handlers.agent_trace_state,
         experience_metrics_handler=handlers.experience_metrics_state,
+        product_metrics_consent_handler=handlers.product_metrics_consent_state,
+        product_metrics_consent_patch_handler=handlers.product_metrics_consent_patch,
         mcp_state_handler=handlers.mcp_state,
         toggle_mcp_handler=handlers.toggle_mcp,
         add_mcp_handler=handlers.add_mcp,
@@ -227,5 +305,4 @@ def build_system_router_from_handlers(
         imported_skills_state_handler=handlers.imported_skills_state,
         save_imported_skills_handler=handlers.save_imported_skills,
         remove_imported_skills_handler=handlers.remove_imported_skills,
-        get_admin_token=admin_token_provider,
     )

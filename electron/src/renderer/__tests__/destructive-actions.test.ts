@@ -25,7 +25,6 @@ const settingsDomainMocks = vi.hoisted(() => ({
 }))
 
 const settingsClientMocks = vi.hoisted(() => ({
-  adminTokenStatus: vi.fn(),
   metadata: vi.fn(),
   history: vi.fn(),
   importPayload: vi.fn(),
@@ -33,7 +32,6 @@ const settingsClientMocks = vi.hoisted(() => ({
   clearHistory: vi.fn(),
   rollback: vi.fn(),
   deleteSetting: vi.fn(),
-  clearAdminToken: vi.fn(),
   backendTokenStatus: vi.fn(),
   ttsStatus: vi.fn(),
 }))
@@ -151,6 +149,7 @@ const settingsResponse = {
 }
 
 const settingsState = ref(settingsResponse)
+const llmStatusState = ref({ available: true, provider: 'custom', model: 'test-model', preconnect_running: false, last_preconnect_ok: true })
 const ttsStatusState = ref({
   available: true,
   loading: false,
@@ -210,6 +209,8 @@ vi.mock('../domains/settings/composables/useSettingsDomain', () => ({
     updateRequest: emptyRequest(),
     llmModels: ref([]),
     llmModelsRequest: emptyRequest(),
+    llmStatus: llmStatusState,
+    llmStatusRequest: emptyRequest(),
     testLlmRequest: emptyRequest(),
     testTtsRequest: emptyRequest(),
     warmupTtsRequest: emptyRequest(),
@@ -218,6 +219,7 @@ vi.mock('../domains/settings/composables/useSettingsDomain', () => ({
     loadSettings: settingsDomainMocks.loadSettings,
     patchSettings: settingsDomainMocks.patchSettings,
     loadLlmModels: settingsDomainMocks.loadLlmModels,
+    loadLlmStatus: vi.fn().mockResolvedValue(llmStatusState.value),
     testLlm: settingsDomainMocks.testLlm,
     testTts: settingsDomainMocks.testTts,
     warmupTts: settingsDomainMocks.warmupTts,
@@ -395,7 +397,6 @@ describe('destructive action confirmation', () => {
       },
       ready: true,
     })
-    settingsClientMocks.adminTokenStatus.mockResolvedValue({ hasToken: true })
     settingsClientMocks.backendTokenStatus.mockResolvedValue({ hasToken: true, source: 'environment', requiresRestart: false })
     settingsClientMocks.ttsStatus.mockResolvedValue(ttsStatusState.value)
     settingsDomainMocks.warmupTts.mockResolvedValue({ ok: true, queued: true, runtime: ttsStatusState.value })

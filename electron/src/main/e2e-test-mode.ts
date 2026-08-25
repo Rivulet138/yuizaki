@@ -385,6 +385,35 @@ const invokeRendererControl = (window: BrowserWindow, method: E2ERendererControl
   window.webContents.executeJavaScript(`window.petApi.e2e[${JSON.stringify(method)}]()`, true)
 )
 
+const enableTtsThroughUserPreference = (window: BrowserWindow) => window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+  const deadline = Date.now() + 5000;
+  let settingsOpened = false;
+  let toggleClicked = false;
+  const poll = () => {
+    if (!settingsOpened) {
+      const settingsButton = document.querySelector('.runtime-settings-button');
+      if (settingsButton instanceof HTMLButtonElement) {
+        settingsButton.click();
+        settingsOpened = true;
+      }
+    }
+    const toggles = document.querySelectorAll('.runtime-toggles label');
+    const ttsToggle = toggles.item(2)?.querySelector('.el-switch');
+    const input = ttsToggle?.querySelector('input[type="checkbox"]');
+    const enabled = input instanceof HTMLInputElement
+      ? input.checked
+      : ttsToggle?.getAttribute('aria-checked') === 'true';
+    if (enabled) return resolve(true);
+    if (!toggleClicked && ttsToggle instanceof HTMLElement) {
+      toggleClicked = true;
+      ttsToggle.click();
+    }
+    if (Date.now() >= deadline) return reject(new Error('TTS user preference did not enable'));
+    setTimeout(poll, 25);
+  };
+  poll();
+})`, true)
+
 const assertNonblankCapture = (bitmap: Buffer): void => {
   let visible = 0
   let colored = 0
@@ -542,21 +571,38 @@ const runE2E07 = async (options: E2ESuiteOptions): Promise<void> => {
 const runE2E08 = async (options: E2ESuiteOptions): Promise<void> => {
   for (const module of staticNavigationModuleRecords) {
     const route = `/w/default/${module.id}`
+    const expectedRouteName = module.id === 'companion' ? 'chat' : module.id
     const result = await options.panelWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
       location.hash = ${JSON.stringify(`#${route}`)};
       const deadline = Date.now() + 5000;
       const poll = () => {
-        const host = document.querySelector('.view-host');
-        const component = host?.querySelector('.view-component');
-        if (location.hash.endsWith(${JSON.stringify(route)}) && component && component.getBoundingClientRect().height > 0 && component.textContent?.trim()) {
-          return resolve({ hash: location.hash, textLength: component.textContent.trim().length });
+        const host = document.querySelector(${JSON.stringify(`[data-testid="route-view"][data-route-name="${expectedRouteName}"]`)});
+        const component = ${JSON.stringify(module.id)} === 'companion' || ${JSON.stringify(module.id)} === 'chat'
+          ? host?.querySelector('[data-e2e-chat-ready]')
+          : host?.firstElementChild;
+        const expectedHash = ${JSON.stringify(module.id)} === 'companion' ? '#/w/default/chat' : ${JSON.stringify(`#${route}`)};
+        if (${JSON.stringify(module.id)} === 'companion' && location.hash === expectedHash && host) {
+          return resolve({ hash: location.hash, routeName: host.getAttribute('data-route-name'), textLength: 0, ready: true });
         }
-        if (Date.now() >= deadline) return reject(new Error(${JSON.stringify(`route ${module.id} did not render`)}));
+        if (${JSON.stringify(module.id)} === 'chat' && location.hash === expectedHash && component?.getAttribute('data-e2e-chat-ready') === 'true' && component.getBoundingClientRect().height > 0) {
+          return resolve({ hash: location.hash, routeName: host?.getAttribute('data-route-name'), textLength: 0, ready: true });
+        }
+        if (location.hash === expectedHash && component && component.getBoundingClientRect().height > 0 && component.textContent?.trim()) {
+          return resolve({ hash: location.hash, routeName: host.getAttribute('data-route-name'), textLength: component.textContent.trim().length });
+        }
+        if (Date.now() >= deadline) return reject(new Error(${JSON.stringify(`route ${module.id} did not render`)} + ': ' + JSON.stringify({
+          hash: location.hash,
+          routeName: document.querySelector('[data-testid="route-view"]')?.getAttribute('data-route-name'),
+          chatReady: Boolean(document.querySelector('[data-e2e-chat-ready]')),
+        })));
         setTimeout(poll, 25);
       };
       poll();
-    })`, true) as { hash: string; textLength: number }
-    assert.ok(result.textLength > 0, `${module.id} rendered empty content`)
+    })`, true) as { hash: string; routeName: string; textLength: number; ready?: boolean }
+    assert.equal(result.routeName, expectedRouteName)
+    if (module.id === 'companion') assert.equal(result.hash, '#/w/default/chat')
+    else if (module.id === 'chat') assert.equal(result.ready, true)
+    else assert.ok(result.textLength > 0, `${module.id} rendered empty content`)
   }
 
   await options.panelWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
@@ -601,7 +647,7 @@ const sendChatMessage = async (window: BrowserWindow, text: string): Promise<voi
     const poll = () => {
       const input = document.querySelector('.chat-input textarea');
       const send = document.querySelector('.send-button:not(.is-warning)');
-      const connected = document.body.textContent?.includes('实时通道已连接');
+      const connected = Boolean(document.querySelector('[data-e2e-chat-ready="true"]'));
       if (connected && input instanceof HTMLTextAreaElement && send instanceof HTMLButtonElement) {
         input.value = ${JSON.stringify(text)};
         input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -674,12 +720,13 @@ const runE2E02 = async (options: E2ESuiteOptions): Promise<void> => {
     }
     const deadline = Date.now() + 5000;
     const poll = () => {
-      if (document.body.textContent?.includes('实时通道已连接')) return resolve(true);
+      if (document.querySelector('[data-e2e-chat-ready="true"]')) return resolve(true);
       if (Date.now() >= deadline) return reject(new Error('voice Chat route did not connect'));
       setTimeout(poll, 25);
     };
     poll();
   })`, true)
+  assert.equal(await enableTtsThroughUserPreference(options.panelWindow), true)
   const voiceResult = await options.panelWindow.webContents.executeJavaScript(`window.petApi.e2e.voiceSequence({
     case_id: 'E2E-02',
     session_id: 'e2e-voice-session',
@@ -694,7 +741,7 @@ const runE2E02 = async (options: E2ESuiteOptions): Promise<void> => {
     const deadline = Date.now() + 5000;
     const poll = () => {
       const observations = window.__yuizakiE2EVoiceObservations || [];
-      if (observations.some(item => item.name === 'pet:audio-started' && item.detail?.generationId === 'e2e-generation-1')) return resolve(true);
+      if (observations.some(item => item.name === 'pet:audio-started' && item.detail?.requestId === 'e2e-voice-request-1')) return resolve(true);
       if (Date.now() >= deadline) return reject(new Error('first voice generation did not start playback'));
       setTimeout(poll, 25);
     };
@@ -702,12 +749,16 @@ const runE2E02 = async (options: E2ESuiteOptions): Promise<void> => {
   })`, true)
   await new Promise(resolve => setTimeout(resolve, 250))
 
+  const priorPlaybackStarts = await options.panelWindow.webContents.executeJavaScript(
+    `(window.__yuizakiE2EVoiceObservations || []).filter(item => item.name === 'pet:audio-started').length`,
+    true,
+  ) as number
   await sendChatMessage(options.panelWindow, 'E2E second voice generation')
   await options.panelWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
     const deadline = Date.now() + 5000;
     const poll = () => {
       const observations = window.__yuizakiE2EVoiceObservations || [];
-      const started = observations.some(item => item.name === 'pet:audio-started' && item.detail?.generationId === 'e2e-generation-2');
+      const started = observations.filter(item => item.name === 'pet:audio-started').length > ${JSON.stringify(priorPlaybackStarts)};
       const interrupt = document.querySelector('.send-button.is-warning');
       if (started && interrupt instanceof HTMLButtonElement) {
         interrupt.click();
@@ -769,10 +820,9 @@ const resolvePermissionCard = async (window: BrowserWindow, allowed: boolean): P
   await window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
     const deadline = Date.now() + 5000;
     const poll = () => {
-      const card = document.querySelector('.permission-card');
-      const buttons = [...(card?.querySelectorAll('button') || [])];
-      const button = buttons.find((item) => item.textContent?.trim() === ${JSON.stringify(allowed ? '允许' : '拒绝')});
-      if (card?.textContent?.includes('fixture.write') && button instanceof HTMLButtonElement) {
+      const dialog = document.querySelector('[data-testid="permission-dialog"], [role="alertdialog"]');
+      const button = document.querySelector(${JSON.stringify(allowed ? '[data-testid="permission-allow"]' : '[data-testid="permission-deny"]')});
+      if (dialog?.textContent?.includes('fixture.write') && button instanceof HTMLButtonElement) {
         button.click();
         return resolve(true);
       }
@@ -860,7 +910,6 @@ const runE2E04 = async (options: E2ESuiteOptions): Promise<void> => {
       }, 'button did not become enabled: ' + selector);
       element(selector).click();
     };
-
     await waitFor(() => document.querySelector('[data-testid="memory-refresh"]') instanceof HTMLButtonElement, 'Memory panel did not render');
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     await waitFor(() => !element('[data-testid="memory-refresh"]').classList.contains('is-loading'), 'initial Memory list did not settle');
@@ -883,8 +932,22 @@ const runE2E04 = async (options: E2ESuiteOptions): Promise<void> => {
     await clickEnabled('[data-testid="memory-document-submit"]');
     await waitFor(() => document.querySelector('[data-memory-id="memory-e2e-1"]') instanceof HTMLElement, 'created Memory document did not render');
     const createdText = element('[data-memory-id="memory-e2e-1"]').textContent || '';
-    for (const expected of ['E2E durable memory original', '0.9100', '手动', '工作区', '2027-08-04', '2026-08-04']) {
-      if (!createdText.includes(expected)) throw new Error('created Memory metadata missing: ' + expected);
+    if (!createdText.includes('E2E durable memory original')) throw new Error('created Memory text did not render');
+    const inspector = element('[data-testid="memory-inspector"]');
+    const inspectorValue = (selector) => {
+      const root = element(selector);
+      const input = root.matches('input, textarea') ? root : root.querySelector('input, textarea');
+      return input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement ? input.value : '';
+    };
+    const metadataExpectations = [
+      ['confidence', element('[data-testid="memory-inspector-confidence"]').textContent || '', '0.91'],
+      ['source', element('[data-testid="memory-inspector-source"]').textContent || '', '手动'],
+      ['scope', element('[data-testid="memory-inspector-scope"]').textContent || '', '工作区'],
+      ['expiry', inspectorValue('[data-testid="memory-expires-at"]'), '2027-08-04'],
+      ['timestamp', inspector.textContent || '', '2026-08-04'],
+    ];
+    for (const [field, actual, expected] of metadataExpectations) {
+      if (!actual.includes(expected)) throw new Error('created Memory metadata missing: ' + field + '=' + expected);
     }
 
     setInput('[data-testid="memory-inspector-text"]', 'E2E durable memory corrected');
@@ -895,11 +958,11 @@ const runE2E04 = async (options: E2ESuiteOptions): Promise<void> => {
     }, 'corrected Memory document did not persist after reload');
 
     setInput('[data-testid="memory-query-input"]', 'E2E-memory');
-    await clickEnabled('[data-testid="memory-query-submit"]');
-    await waitFor(() => document.querySelector('.query-result-card')?.textContent?.includes('E2E durable memory corrected') === true, 'corrected Memory document was not retrievable');
+    await clickEnabled('[data-testid="memory-raw-query-submit"]');
+    await waitFor(() => document.querySelector('[data-memory-query-id="memory-e2e-1"]')?.textContent?.includes('E2E durable memory corrected') === true, 'corrected Memory document was not retrievable');
 
     await clickEnabled('[data-testid="memory-maintenance-preview"]');
-    await waitFor(() => document.querySelector('.maintenance-summary') instanceof HTMLElement && !element('[data-testid="memory-maintenance-preview"]').classList.contains('is-loading'), 'Memory maintenance preview did not render');
+    await waitFor(() => element('[data-testid="memory-maintenance-summary"]').textContent?.includes('0 条待清理') === true && !element('[data-testid="memory-maintenance-preview"]').classList.contains('is-loading'), 'Memory maintenance preview did not render');
 
     await clickEnabled('[data-testid="memory-inspector-delete"]');
     await waitFor(() => document.querySelector('.el-message-box') instanceof HTMLElement, 'permanent delete confirmation did not render');
@@ -911,7 +974,7 @@ const runE2E04 = async (options: E2ESuiteOptions): Promise<void> => {
 
     await clickEnabled('[data-testid="memory-query-submit"]');
     await waitFor(() => !element('[data-testid="memory-query-submit"]').classList.contains('is-loading'), 'post-delete Memory query did not settle');
-    if (document.querySelector('.query-result-card')) throw new Error('deleted Memory document remained retrievable');
+    if (document.querySelector('[data-testid="memory-query-results"] [data-memory-query-id]')) throw new Error('deleted Memory document remained retrievable');
   })()`, true)
 }
 
@@ -928,20 +991,19 @@ const assertDeliveredProactiveResult = (value: unknown, eventId: 'A' | 'C'): voi
   assert.ok(value && typeof value === 'object', `proactive ${eventId} returned no delivery result`)
   const result = value as { status?: unknown; attempted?: unknown; succeeded?: unknown; failed?: unknown }
   assert.equal(result.status, 'delivered', JSON.stringify(result))
-  assert.deepEqual(result.attempted, ['motion', 'advice', 'notification'])
-  assert.deepEqual(result.succeeded, ['motion', 'advice', 'notification'])
+  assert.deepEqual(result.attempted, ['advice', 'notification'])
+  assert.deepEqual(result.succeeded, ['advice', 'notification'])
   assert.deepEqual(result.failed, [])
 }
 
 const runE2E05 = async (options: E2ESuiteOptions): Promise<void> => {
   await options.panelWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
-    location.hash = '#/w/default/companion';
+    location.hash = '#/w/default/pet';
     const deadline = Date.now() + 5000;
     const poll = () => {
-      const preset = document.querySelector('[data-testid="companion-proactivity-preset"]');
-      const dnd = document.querySelector('[data-testid="companion-dnd-toggle"]');
-      if (preset && dnd) return resolve(true);
-      if (Date.now() >= deadline) return reject(new Error('Companion controls did not render'));
+      const dnd = document.querySelector('[data-testid="pet-dnd-toggle"]');
+      if (document.querySelector('[data-testid="route-view"][data-route-name="pet"]') && dnd) return resolve(true);
+      if (Date.now() >= deadline) return reject(new Error('Desktop pet DND control did not render'));
       setTimeout(poll, 25);
     };
     poll();
@@ -955,11 +1017,11 @@ const runE2E05 = async (options: E2ESuiteOptions): Promise<void> => {
   await options.panelWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
     location.hash = '#/w/default/chat';
     requestAnimationFrame(() => {
-      location.hash = '#/w/default/companion';
+      location.hash = '#/w/default/pet';
       const deadline = Date.now() + 5000;
       const poll = () => {
-        if (document.querySelector('[data-testid="companion-dnd-toggle"]')) return resolve(true);
-        if (Date.now() >= deadline) return reject(new Error('Companion route did not remount'));
+        if (document.querySelector('[data-testid="route-view"][data-route-name="pet"] [data-testid="pet-dnd-toggle"]')) return resolve(true);
+        if (Date.now() >= deadline) return reject(new Error('Desktop pet route did not remount'));
         setTimeout(poll, 25);
       };
       poll();
@@ -969,7 +1031,7 @@ const runE2E05 = async (options: E2ESuiteOptions): Promise<void> => {
   assert.equal(await invokeRendererControl(options.panelWindow, 'pollCompanionOnce'), 'duplicate_or_invalid')
 
   await options.panelWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
-    const toggle = document.querySelector('[data-testid="companion-dnd-toggle"]');
+    const toggle = document.querySelector('[data-testid="pet-dnd-toggle"]');
     if (!(toggle instanceof HTMLElement)) return reject(new Error('DND toggle is missing'));
     const control = toggle.querySelector('input,button,[role="switch"]') || toggle;
     if (!(control instanceof HTMLElement)) return reject(new Error('DND native control is missing'));
@@ -987,7 +1049,7 @@ const runE2E05 = async (options: E2ESuiteOptions): Promise<void> => {
   assert.equal(await invokeRendererControl(options.panelWindow, 'pollCompanionOnce'), 'dnd')
 
   await options.panelWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
-    const toggle = document.querySelector('[data-testid="companion-dnd-toggle"]');
+    const toggle = document.querySelector('[data-testid="pet-dnd-toggle"]');
     if (!(toggle instanceof HTMLElement)) return reject(new Error('DND toggle is missing'));
     const control = toggle.querySelector('input,button,[role="switch"]') || toggle;
     if (!(control instanceof HTMLElement)) return reject(new Error('DND native control is missing'));
@@ -1005,12 +1067,11 @@ const runE2E05 = async (options: E2ESuiteOptions): Promise<void> => {
   await scheduleProactiveEvent(options, 'C')
   assertDeliveredProactiveResult(await invokeRendererControl(options.panelWindow, 'pollCompanionOnce'), 'C')
 
-  const motion = await options.live2dWindow.webContents.executeJavaScript(`(() => {
-    const state = window.__petTestState || {};
-    return { group: state.lastMotionGroup || null, index: state.lastMotionIndex ?? null };
-  })()`, true) as Record<string, unknown>
-  assert.deepEqual(motion, { group: 'Tap@Body', index: 0 })
-  writeE2EJsonArtifact(options, 'avatar-motion-audit.json', { model: modelAudit, motion })
+  writeE2EJsonArtifact(options, 'proactive-delivery-audit.json', {
+    model: modelAudit,
+    trustedSinks: ['advice', 'notification'],
+    ignoredUntrustedMotion: true,
+  })
 }
 
 const runE2E05T = async (options: E2ESuiteOptions): Promise<void> => {

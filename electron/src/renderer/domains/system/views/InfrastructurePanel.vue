@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="基础设施" tone="admin">
+  <PanelShell title="服务与数据" subtitle="检查健康状态、运行资源、接口响应并执行备份恢复" tone="admin">
     <div class="infra-console">
       <section class="infra-hero">
         <div class="hero-copy">
@@ -7,7 +7,7 @@
           <span>{{ serviceStatusLabel }}，{{ envStatusLabel }}</span>
         </div>
         <div class="hero-actions">
-          <el-button type="primary" :loading="refreshing" @click="refreshAll">刷新全部</el-button>
+          <el-button type="primary" :loading="refreshing" @click="refreshAll">刷新状态</el-button>
           <span>{{ controlServerLabel }}</span>
         </div>
       </section>
@@ -49,9 +49,9 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>环境检查 · {{ envStatusLabel }}</strong>
+                <strong>环境依赖 · {{ envStatusLabel }}</strong>
               </div>
-              <el-button plain size="small" :loading="diagnosticsRequest.loading" @click="loadDiagnostics">刷新诊断</el-button>
+              <el-button plain size="small" :loading="diagnosticsRequest.loading" @click="loadDiagnostics">重新检查</el-button>
             </div>
           </template>
           <AsyncState :loading="diagnosticsRequest.loading" :error="diagnosticsRequest.error" @retry="loadDiagnostics">
@@ -102,7 +102,7 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>接口快照</strong>
+                <strong>接口响应</strong>
               </div>
               <div class="action-row">
                 <el-button plain size="small" :loading="apiGapLoading" @click="loadApiGaps">读取快照</el-button>
@@ -151,10 +151,10 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>数据备份 · {{ backupTargets.length }} 个目标</strong>
+                <strong>备份与恢复 · {{ backupTargets.length }} 个目标</strong>
               </div>
               <div class="action-row">
-                <el-button plain size="small" :loading="backupTargetsRequest.loading" @click="loadBackupTargets">刷新目标</el-button>
+                <el-button plain size="small" :loading="backupTargetsRequest.loading" @click="loadBackupTargets">检查目标</el-button>
                 <el-button size="small" type="primary" :loading="createBackupRequest.loading" @click="createAndSelectBackup">创建备份</el-button>
               </div>
             </div>
@@ -241,7 +241,7 @@
       </section>
 
       <details class="logs-disclosure" @toggle="handleLogsToggle">
-        <summary>按需查看日志追踪</summary>
+<summary>按需查看日志追踪</summary>
         <el-card class="panel-card logs-card" shadow="never">
           <template #header>
             <div class="card-head">

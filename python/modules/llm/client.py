@@ -15,6 +15,7 @@ import httpx
 
 from ..core.config import config
 from ..core.state import Generation, GenerationManager
+from ..system.voice_diagnostics import VoiceDiagnostics
 from .providers import (
     build_llm_auth_headers,
     is_claude_provider,
@@ -971,14 +972,19 @@ class LLMClient:
         timeout: float = 60.0,
         provider: str = "custom",
         image_detail: str = "auto",
+        diagnostics: VoiceDiagnostics | None = None,
     ):
         self.provider = normalize_llm_provider(provider, base_url)
+        # Native streaming tool-call framing is provider-specific and is
+        # opt-in until an adapter implements the protocol.
+        self.streaming_tool_calls_supported = False
         self.base_url = normalize_llm_base_url(base_url, self.provider)
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
         normalized_detail = str(image_detail or "auto").strip().lower()
         self.image_detail = normalized_detail if normalized_detail in {"low", "high", "auto", "original"} else "auto"
+        self.diagnostics = diagnostics or VoiceDiagnostics()
         self._http: Optional[httpx.AsyncClient] = None
         self._tool_calls_supported: bool | None = None
         self._preconnect_lock = asyncio.Lock()
@@ -1156,6 +1162,7 @@ class LLMClient:
             return
 
         sid, gid = gen.session_id, gen.generation_id
+        stream_started_at = time.monotonic()
 
         headers = build_llm_auth_headers(self.api_key, self.provider)
 
@@ -1231,10 +1238,20 @@ class LLMClient:
         reply_decoder = IncrementalJsonReplyDecoder() if pet_control_context else None
         raw_stream_parts: list[str] = []
         streamed_reply_parts: list[str] = []
+        first_token_recorded = False
 
         async def _emit_visible_reply(content: str) -> None:
+            nonlocal first_token_recorded
             if not content:
                 return
+            if not first_token_recorded:
+                self.diagnostics.record_elapsed(
+                    "first_token",
+                    stream_started_at,
+                    provider=self.provider,
+                    request_id=gid,
+                )
+                first_token_recorded = True
             gen.mark("llm_first_token")
             gen.tokens.append(content)
             streamed_reply_parts.append(content)

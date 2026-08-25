@@ -15,8 +15,12 @@ import { handlePetRoutes } from './http/routes/pet-routes'
 import { handleModelRoutes } from './http/routes/model-routes'
 import { handleSystemRoutes } from './http/routes/system-routes'
 import { handlePluginRoutes } from './http/routes/plugin-routes'
+import { handlePerceptionRoutes } from './http/routes/perception-routes'
+import type { AuthorizedPerceptionBridge } from './authorized-perception-bridge'
 import { createTransientBackendApiTokenStore, type BackendApiTokenStoreLike } from './backend-api-token-store'
 import { ProviderCredentialStore } from './provider-credential-store'
+import type { OnboardingReadinessCoordinator } from './onboarding-readiness-coordinator'
+import { handleOnboardingRoutes } from './http/routes/onboarding-routes'
 
 const parseLocalPort = (value: string | undefined, fallback: number): number => {
   const port = Number.parseInt(String(value || '').trim(), 10)
@@ -24,25 +28,8 @@ const parseLocalPort = (value: string | undefined, fallback: number): number => 
 }
 
 const DEFAULT_PORT = parseLocalPort(process.env['CONTROL_SERVER_PORT'], 38945)
-const DEFAULT_RENDERER_DEV_PORT = parseLocalPort(process.env['VITE_DEV_SERVER_PORT'], 5173)
-const DEFAULT_API_ALLOWED_ORIGINS = [
-  `http://127.0.0.1:${DEFAULT_PORT}`,
-  `http://localhost:${DEFAULT_PORT}`,
-  `http://127.0.0.1:${DEFAULT_RENDERER_DEV_PORT}`,
-  `http://localhost:${DEFAULT_RENDERER_DEV_PORT}`,
-  'yuizaki-app://renderer',
-]
+const TRUSTED_PACKAGED_RENDERER_ORIGIN = 'yuizaki-app://renderer'
 const CONTROL_CORS_METHODS = 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
-
-const parseAllowedOrigins = (value: string | undefined): Set<string> => {
-  const origins = value
-    ?.split(',')
-    .map((origin) => origin.trim().replace(/\/$/, ''))
-    .filter(Boolean)
-  return new Set(origins?.length ? origins : DEFAULT_API_ALLOWED_ORIGINS)
-}
-
-const API_ALLOWED_ORIGINS = parseAllowedOrigins(process.env['YUIZAKI_ALLOWED_ORIGINS'])
 
 const MIME_TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
@@ -78,6 +65,8 @@ const injectRuntimeMetadata = (
 export class ControlServer {
   private server: http.Server | null = null
   private port = DEFAULT_PORT
+  private perceptionBridge: AuthorizedPerceptionBridge | null = null
+  private onboardingCoordinator: OnboardingReadinessCoordinator | null = null
 
   constructor(
     private readonly live2dWindow: Live2DWindow,
@@ -85,22 +74,29 @@ export class ControlServer {
     private readonly petStateStore: PetStateStore,
     private readonly petModelCatalog: PetModelCatalog,
     private readonly pluginRegistry: PluginRegistry,
-    private readonly adminTokenStore: { getSummaryAdminToken: () => string; setSummaryAdminToken: (token: string) => { ok: boolean; hasToken: boolean }; clearSummaryAdminToken: () => { ok: boolean } },
     private readonly rendererDistDir: string,
     private readonly applyPetStateToRenderer: ((state: PetControlState) => void) | undefined,
     private readonly providerCredentialStore: ProviderCredentialStore,
     private readonly backendApiTokenStore: BackendApiTokenStoreLike = createTransientBackendApiTokenStore(),
+    private readonly hostPerceptionToken: string = '',
   ) {}
 
-  private resolveAllowedOrigin(originHeader: string | undefined, allowNullOrigin = false): string | null {
+  private resolveAllowedOrigin(originHeader: string | undefined): string | null {
     const origin = String(originHeader || '').trim()
     if (!origin) {
       return null
     }
-    if (allowNullOrigin && origin === 'null') {
-      return 'null'
+    if (origin === TRUSTED_PACKAGED_RENDERER_ORIGIN) {
+      return origin
     }
-    return API_ALLOWED_ORIGINS.has(origin) ? origin : null
+    try {
+      const parsed = new URL(origin)
+      const isLoopbackHost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1'
+      const isHttpOrigin = parsed.protocol === 'http:' || parsed.protocol === 'https:'
+      return isLoopbackHost && isHttpOrigin && parsed.origin === origin ? origin : null
+    } catch {
+      return null
+    }
   }
 
   private isPetAssetPath(pathname: string): boolean {
@@ -121,6 +117,14 @@ export class ControlServer {
 
   getControlToken(): string {
     return this.backendApiTokenStore.getBackendApiToken()
+  }
+
+  setPerceptionBridge(bridge: AuthorizedPerceptionBridge): void {
+    this.perceptionBridge = bridge
+  }
+
+  setOnboardingCoordinator(coordinator: OnboardingReadinessCoordinator): void {
+    this.onboardingCoordinator = coordinator
   }
 
   authorizePanelUrl(url: URL): URL {
@@ -174,7 +178,7 @@ export class ControlServer {
       const method = req.method ?? 'GET'
       const url = new URL(req.url ?? '/', this.panelUrl)
       const isPetAssetPath = this.isPetAssetPath(url.pathname)
-      const allowedOrigin = this.resolveAllowedOrigin(req.headers.origin, isPetAssetPath)
+      const allowedOrigin = this.resolveAllowedOrigin(req.headers.origin)
       const hasOrigin = Boolean(String(req.headers.origin || '').trim())
 
       if (method === 'OPTIONS') {
@@ -184,7 +188,7 @@ export class ControlServer {
           return
         }
         const headers: Record<string, string> = {
-          'Access-Control-Allow-Headers': 'Authorization, Content-Type, x-trace-id, x-yuizaki-backend-token',
+          'Access-Control-Allow-Headers': 'Content-Type, x-trace-id',
           'Access-Control-Allow-Methods': CONTROL_CORS_METHODS,
         }
         if (allowedOrigin) {
@@ -203,7 +207,7 @@ export class ControlServer {
         }
         if (allowedOrigin) {
           res.setHeader('Access-Control-Allow-Origin', allowedOrigin)
-          res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, x-trace-id, x-yuizaki-backend-token')
+          res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-trace-id')
           res.setHeader('Access-Control-Allow-Methods', CONTROL_CORS_METHODS)
           res.setHeader('Vary', 'Origin')
         }
@@ -218,13 +222,9 @@ export class ControlServer {
         }
         if (allowedOrigin) {
           res.setHeader('Access-Control-Allow-Origin', allowedOrigin)
-          res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, x-trace-id, x-yuizaki-backend-token')
+          res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-trace-id')
           res.setHeader('Access-Control-Allow-Methods', CONTROL_CORS_METHODS)
           res.setHeader('Vary', 'Origin')
-        }
-        if (!this.isAuthorizedApiRequest(req, url)) {
-          sendJson(res, 401, { error: 'Unauthorized' })
-          return
         }
         await this.handleApiRequest(req, res, method, url)
         return
@@ -236,7 +236,7 @@ export class ControlServer {
       }
       if (allowedOrigin) {
         res.setHeader('Access-Control-Allow-Origin', allowedOrigin)
-        res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, x-trace-id, x-yuizaki-backend-token')
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-trace-id')
         res.setHeader('Access-Control-Allow-Methods', CONTROL_CORS_METHODS)
         res.setHeader('Vary', 'Origin')
       }
@@ -252,24 +252,15 @@ export class ControlServer {
     }
   }
 
-  private isAuthorizedApiRequest(req: IncomingMessage, url: URL): boolean {
-    if (url.pathname === '/api/health' || url.pathname === '/api/ping') {
-      return true
-    }
-    const authorization = String(req.headers.authorization || '').trim()
-    if (!authorization.startsWith('Bearer ')) {
-      return false
-    }
-    const providedToken = authorization.slice('Bearer '.length).trim()
-    return providedToken.length > 0 && providedToken === this.getControlToken()
-  }
-
   private async handleApiRequest(
     req: IncomingMessage,
     res: ServerResponse,
     method: string,
     url: URL,
   ): Promise<void> {
+    if (this.onboardingCoordinator && await handleOnboardingRoutes(req, res, method, url, this.onboardingCoordinator)) {
+      return
+    }
     const routeContext = {
       live2dWindow: this.live2dWindow,
       petWindow: this.petWindow,
@@ -279,12 +270,15 @@ export class ControlServer {
       backendApiToken: this.getControlToken(),
       backendApiTokenStore: this.backendApiTokenStore,
       providerCredentialStore: this.providerCredentialStore,
-      adminTokenStore: this.adminTokenStore,
       applyPetStateToRenderer: this.applyPetStateToRenderer,
       applyStateToLive2D: (state: PetControlState) => this.applyStateToLive2D(state),
     }
 
     if (await handleSystemRoutes(req, res, method, url, routeContext)) {
+      return
+    }
+
+    if (await handlePerceptionRoutes(req, res, method, url, this.perceptionBridge, this.hostPerceptionToken)) {
       return
     }
 

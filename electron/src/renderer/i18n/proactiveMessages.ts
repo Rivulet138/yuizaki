@@ -1,0 +1,166 @@
+import {
+  isProactiveContentCode,
+  isProactiveSource,
+  type ProactiveContentCode,
+  type ProactiveSource,
+} from '@/../shared/proactive'
+
+type ProactiveDeliveryLocale = 'zh-CN' | 'en-US' | 'ja-JP'
+
+const proactiveDeliveryMessages: Record<ProactiveDeliveryLocale, Record<ProactiveContentCode, string>> = {
+  'zh-CN': {
+    completed_turn_followup: '之前的任务已经完成，我来提醒你查看结果。',
+  },
+  'en-US': {
+    completed_turn_followup: 'Your previous task is complete. You can review the result now.',
+  },
+  'ja-JP': {
+    completed_turn_followup: '先ほどのタスクが完了しました。結果を確認できます。',
+  },
+}
+
+const normalizeDeliveryLocale = (locale: string): ProactiveDeliveryLocale => {
+  const normalized = locale.trim().toLowerCase()
+  if (normalized.startsWith('en')) return 'en-US'
+  if (normalized.startsWith('ja') || normalized.startsWith('jp')) return 'ja-JP'
+  return 'zh-CN'
+}
+
+export const resolveProactiveDeliveryMessage = (
+  source: unknown,
+  contentCode: unknown,
+  locale: string,
+): string | null => {
+  if (!isProactiveSource(source) || !isProactiveContentCode(contentCode)) return null
+  const compatibleCode: Record<ProactiveSource, ProactiveContentCode> = {
+    completed_turn_followup: 'completed_turn_followup',
+  }
+  if (compatibleCode[source] !== contentCode) return null
+  return proactiveDeliveryMessages[normalizeDeliveryLocale(locale)][contentCode]
+}
+
+export const proactiveMessages = {
+  'zh-CN': {
+    'proactive.title': '主动陪伴',
+    'proactive.enabled': '允许主动陪伴',
+    'proactive.enabledHint': '默认关闭；启用后仍受免打扰、静默时段和预算限制。',
+    'proactive.dnd': '免打扰',
+    'proactive.dndHint': '立即阻止所有主动消息。',
+    'proactive.source.completed_turn_followup': '任务完成后的跟进',
+    'proactive.sourceHint': '可单独关闭这一类主动消息。',
+    'proactive.quiet.enabled': '静默时段',
+    'proactive.quiet.start': '开始',
+    'proactive.quiet.end': '结束',
+    'proactive.quiet.timezone': '时区',
+    'proactive.dailyBudget': '每日上限',
+    'proactive.cooldown': '冷却时间（秒）',
+    'proactive.retention': '活动摘要保留天数',
+    'proactive.status.loading': '正在读取后端策略',
+    'proactive.status.ready': '后端策略已同步',
+    'proactive.status.closed': '主动行为已安全关闭；请重试同步。',
+    'proactive.status.saving': '正在保存',
+    'proactive.retry': '重试同步',
+    'proactive.opportunity.title': '最近一次触发',
+    'proactive.opportunity.empty': '暂无可反馈的主动消息',
+    'proactive.opportunity.source': '来源',
+    'proactive.opportunity.reason': '触发原因',
+    'proactive.opportunity.expires': '失效时间',
+    'proactive.reason.completed_turn_followup': '一个较长任务已经完成',
+    'proactive.reason.unknown': '符合已启用的本地触发条件',
+    'proactive.feedback.useful': '有帮助',
+    'proactive.feedback.not_useful': '没帮助',
+    'proactive.feedback.too_frequent': '太频繁',
+    'proactive.feedback.wrong_time': '时机不对',
+    'proactive.feedback.never_source': '不再显示此来源',
+    'proactive.feedback.saved': '反馈已保存',
+    'proactive.feedback.confirmTitle': '关闭此来源？',
+    'proactive.feedback.confirmBody': '以后不再显示“任务完成后的跟进”。可在这里重新开启。',
+    'proactive.feedback.confirm': '关闭来源',
+    'proactive.frames.title': '本地活动摘要',
+    'proactive.frames.empty': '暂无保留的活动摘要',
+    'proactive.frames.expires': '到期',
+    'proactive.frames.delete': '删除活动摘要',
+  },
+  'en-US': {
+    'proactive.title': 'Proactive companion',
+    'proactive.enabled': 'Allow proactive companion',
+    'proactive.enabledHint': 'Off by default. DND, quiet hours, and budgets still apply.',
+    'proactive.dnd': 'Do not disturb',
+    'proactive.dndHint': 'Immediately blocks all proactive messages.',
+    'proactive.source.completed_turn_followup': 'Completed-task follow-up',
+    'proactive.sourceHint': 'Turn this proactive source off independently.',
+    'proactive.quiet.enabled': 'Quiet hours',
+    'proactive.quiet.start': 'Start',
+    'proactive.quiet.end': 'End',
+    'proactive.quiet.timezone': 'Time zone',
+    'proactive.dailyBudget': 'Daily limit',
+    'proactive.cooldown': 'Cooldown (seconds)',
+    'proactive.retention': 'Activity summary retention (days)',
+    'proactive.status.loading': 'Reading backend policy',
+    'proactive.status.ready': 'Backend policy synchronized',
+    'proactive.status.closed': 'Proactive behavior is safely closed. Retry synchronization.',
+    'proactive.status.saving': 'Saving',
+    'proactive.retry': 'Retry sync',
+    'proactive.opportunity.title': 'Latest trigger',
+    'proactive.opportunity.empty': 'No proactive message is available for feedback',
+    'proactive.opportunity.source': 'Source',
+    'proactive.opportunity.reason': 'Trigger reason',
+    'proactive.opportunity.expires': 'Expires',
+    'proactive.reason.completed_turn_followup': 'A longer task has completed',
+    'proactive.reason.unknown': 'An enabled local trigger condition was met',
+    'proactive.feedback.useful': 'Useful',
+    'proactive.feedback.not_useful': 'Not useful',
+    'proactive.feedback.too_frequent': 'Too frequent',
+    'proactive.feedback.wrong_time': 'Wrong time',
+    'proactive.feedback.never_source': 'Never this source',
+    'proactive.feedback.saved': 'Feedback saved',
+    'proactive.feedback.confirmTitle': 'Disable this source?',
+    'proactive.feedback.confirmBody': 'Completed-task follow-ups will stop. You can enable them here again.',
+    'proactive.feedback.confirm': 'Disable source',
+    'proactive.frames.title': 'Local activity summaries',
+    'proactive.frames.empty': 'No retained activity summaries',
+    'proactive.frames.expires': 'Expires',
+    'proactive.frames.delete': 'Delete activity summary',
+  },
+  'ja-JP': {
+    'proactive.title': 'プロアクティブなコンパニオン',
+    'proactive.enabled': 'プロアクティブな通知を許可',
+    'proactive.enabledHint': '既定ではオフです。おやすみモード、静かな時間帯、上限が適用されます。',
+    'proactive.dnd': 'おやすみモード',
+    'proactive.dndHint': 'すべてのプロアクティブな通知を直ちに停止します。',
+    'proactive.source.completed_turn_followup': 'タスク完了後のフォロー',
+    'proactive.sourceHint': 'この通知元だけを個別に無効化できます。',
+    'proactive.quiet.enabled': '静かな時間帯',
+    'proactive.quiet.start': '開始',
+    'proactive.quiet.end': '終了',
+    'proactive.quiet.timezone': 'タイムゾーン',
+    'proactive.dailyBudget': '1 日の上限',
+    'proactive.cooldown': 'クールダウン（秒）',
+    'proactive.retention': 'アクティビティ要約の保持日数',
+    'proactive.status.loading': 'バックエンドのポリシーを読み込み中',
+    'proactive.status.ready': 'バックエンドのポリシーと同期済み',
+    'proactive.status.closed': '安全のためプロアクティブ動作を停止しました。再同期してください。',
+    'proactive.status.saving': '保存中',
+    'proactive.retry': '再同期',
+    'proactive.opportunity.title': '最新のトリガー',
+    'proactive.opportunity.empty': 'フィードバックできる通知はありません',
+    'proactive.opportunity.source': '通知元',
+    'proactive.opportunity.reason': 'トリガー理由',
+    'proactive.opportunity.expires': '有効期限',
+    'proactive.reason.completed_turn_followup': '長いタスクが完了しました',
+    'proactive.reason.unknown': '有効なローカルトリガー条件に一致しました',
+    'proactive.feedback.useful': '役に立った',
+    'proactive.feedback.not_useful': '役に立たない',
+    'proactive.feedback.too_frequent': '頻度が高い',
+    'proactive.feedback.wrong_time': 'タイミングが悪い',
+    'proactive.feedback.never_source': 'この通知元を停止',
+    'proactive.feedback.saved': 'フィードバックを保存しました',
+    'proactive.feedback.confirmTitle': 'この通知元を無効にしますか？',
+    'proactive.feedback.confirmBody': 'タスク完了後のフォローを停止します。ここから再度有効にできます。',
+    'proactive.feedback.confirm': '通知元を無効化',
+    'proactive.frames.title': 'ローカルアクティビティ要約',
+    'proactive.frames.empty': '保持中のアクティビティ要約はありません',
+    'proactive.frames.expires': '期限',
+    'proactive.frames.delete': 'アクティビティ要約を削除',
+  },
+} as const

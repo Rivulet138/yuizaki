@@ -1,6 +1,7 @@
 <template>
-  <PanelShell title="运行总览" tone="admin">
+  <PanelShell title="运行状态" subtitle="读取服务、摘要和桌宠状态；异常项提供可执行入口" tone="admin">
     <template #actions>
+      <el-button plain @click="openOnboarding">{{ t('onboarding.reopen') }}</el-button>
       <el-button plain :loading="overviewRefreshLoading" @click="refreshOverview">刷新</el-button>
     </template>
     <div class="overview-console">
@@ -20,7 +21,7 @@
       <section class="ops-card chain-card">
         <div class="ops-card-head">
           <div>
-            <h3>链路自检</h3>
+            <h3>依赖检查</h3>
           </div>
         </div>
         <div class="chain-grid">
@@ -43,7 +44,7 @@
         <article class="ops-card governance-card">
           <div class="ops-card-head">
             <div>
-              <h3>摘要状态</h3>
+              <h3>摘要统计</h3>
             </div>
             <div class="action-row">
               <el-button type="primary" size="small" @click="exportGovernanceJson">JSON</el-button>
@@ -70,7 +71,7 @@
         <article class="ops-card summary-watch-card">
           <div class="ops-card-head">
             <div>
-              <h3>会话摘要</h3>
+              <h3>会话摘要操作</h3>
             </div>
             <div class="action-row">
               <el-button
@@ -79,7 +80,7 @@
                 :disabled="!selectedSummarySessionId || !summaryReady"
                 @click="rewriteSummary"
               >
-                重写摘要
+                立即重写
               </el-button>
             </div>
           </div>
@@ -140,11 +141,11 @@
 
         <div class="pet-control-grid">
           <div class="control-block model-block">
-            <label>模型</label>
+            <label>当前模型</label>
             <el-select
               v-model="selectedModelId"
               class="field"
-              placeholder="选择 Live2D / VRM 模型"
+              placeholder="选择可用模型"
               :disabled="petCatalog.models.length === 0"
             >
               <el-option
@@ -156,13 +157,13 @@
             </el-select>
             <div class="row action-row compact-actions">
               <el-button type="primary" :disabled="!selectedModelId" @click="applyModel">
-                切换模型
+                应用模型
               </el-button>
             </div>
           </div>
 
           <div class="control-block scale-block">
-            <label>大小 · {{ scaleDraft.toFixed(2) }}</label>
+            <label>缩放比例 · {{ scaleDraft.toFixed(2) }}</label>
             <el-slider
               v-model="scaleDraft"
               :min="0.12"
@@ -184,19 +185,19 @@
           </div>
 
           <div class="control-block">
-            <label>拖动模式</label>
+            <label>允许拖动</label>
             <div class="row">
               <el-switch
                 :model-value="petState.interactMode"
-                active-text="开启"
-                inactive-text="关闭"
+                active-text="允许"
+                inactive-text="禁止"
                 @change="setInteractMode"
               />
             </div>
           </div>
 
           <div class="control-block emphasis-block">
-            <label>显示状态</label>
+            <label>桌宠可见性</label>
             <div class="row">
               <el-switch
                 :model-value="petState.visible"
@@ -208,7 +209,7 @@
           </div>
 
           <div class="control-block emphasis-block">
-            <label>免打扰</label>
+            <label>免打扰模式</label>
             <div class="row">
               <el-switch
                 :model-value="petState.doNotDisturb"
@@ -220,19 +221,19 @@
           </div>
 
           <div class="control-block emphasis-block">
-            <label>鼠标穿透</label>
+            <label>鼠标事件</label>
             <div class="row">
               <el-switch
                 :model-value="petState.clickThrough"
                 active-text="穿透"
-                inactive-text="交互"
+                inactive-text="接收"
                 @change="setClickThrough"
               />
             </div>
           </div>
 
           <div class="control-block emphasis-block">
-            <label>锁定位置</label>
+            <label>位置锁定</label>
             <div class="row">
               <el-switch
                 :model-value="petState.locked"
@@ -244,8 +245,8 @@
           </div>
 
           <div class="control-block dock-block">
-            <label>位置 · {{ petState.placement === 'bottom-right' ? '右下角' : '自由' }}</label>
-            <el-button type="primary" @click="dockBottomRight">贴到右下角</el-button>
+            <label>位置 · {{ petState.placement === 'bottom-right' ? '右下角' : '自由定位' }}</label>
+            <el-button type="primary" @click="dockBottomRight">定位到右下角</el-button>
           </div>
         </div>
       </section>
@@ -264,6 +265,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { inferLlmProviderPreset } from '@/domains/settings/llmProviders'
 import { normalizeOpenAiBaseUrl } from '@/domains/settings/llmDiscovery'
 import { useI18n } from '@/i18n'
+import { openOnboarding } from '@/domains/onboarding/onboardingEvents'
 
 const governanceData = ref<any>(null)
 const governanceReq = reactive({ loading: false, error: '' })
@@ -789,6 +791,10 @@ onDeactivated(() => {
   color: var(--yui-muted);
   font-size: 12px;
   font-weight: 650;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .chain-issue.online { background: var(--yui-success-soft); }

@@ -42,6 +42,7 @@ export interface VisualCaptureRequest {
   jobId: string
   requestId: string
   frameId: string
+  generationId: string
   interruptionEpoch: number
 }
 
@@ -183,6 +184,7 @@ export const createVisualCaptureRuntime = (options: VisualCaptureRuntimeOptions)
           turnId: request.turnId,
           jobId: request.jobId,
           requestId: request.requestId,
+          generationId: request.generationId,
           interruptionEpoch: request.interruptionEpoch,
         } : {}),
       })
@@ -255,7 +257,7 @@ export const createVisualCaptureRuntime = (options: VisualCaptureRuntimeOptions)
   const isCaptureRequest = (value: unknown): value is VisualCaptureRequest => {
     if (!value || typeof value !== 'object') return false
     const request = value as Record<string, unknown>
-    return ['workspaceId', 'sessionId', 'turnId', 'jobId', 'requestId', 'frameId']
+    return ['workspaceId', 'sessionId', 'turnId', 'jobId', 'requestId', 'frameId', 'generationId']
       .every(key => typeof request[key] === 'string' && request[key] !== '')
       && Number.isInteger(request['interruptionEpoch'])
       && Number(request['interruptionEpoch']) >= 0

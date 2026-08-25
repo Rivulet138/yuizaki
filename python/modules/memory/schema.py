@@ -69,3 +69,5 @@ class RetrievalTrace:
     complete: bool = True
     error_code: str | None = None
     scan_limit_reached: bool = False
+    ranking_strategy: str = "hybrid_semantic_lexical"
+    score_weights: dict[str, float] = field(default_factory=dict)

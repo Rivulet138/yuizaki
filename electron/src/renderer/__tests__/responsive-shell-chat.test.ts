@@ -92,6 +92,13 @@ describe('responsive shell and chat contracts', () => {
     expect(source).not.toContain('advice-strip')
   })
 
+  it('exposes connected Chat readiness only through the trusted E2E activation', () => {
+    const source = readRendererSource('domains/chat/views/ChatPanel.vue')
+
+    expect(source).toContain('const e2eMode = Boolean(window.petApi?.e2e)')
+    expect(source).toContain(':data-e2e-chat-ready="e2eMode ? String(socketDomain.isConnected.value) : undefined"')
+  })
+
   it('uses a stable chat surface and disables the unused wallpaper blur layer', () => {
     const source = readRendererSource('app/AppShell.vue')
 
@@ -124,7 +131,7 @@ describe('responsive shell and chat contracts', () => {
     const source = readRendererSource('domains/settings/views/SettingsPanel.vue')
     const tabPanes = source.match(/<el-tab-pane\b[^>]*>/g) || []
 
-    expect(tabPanes).toHaveLength(8)
+    expect(tabPanes).toHaveLength(9)
     expect(tabPanes.every((pane) => /\slazy(?:\s|>)/.test(pane))).toBe(true)
   })
 })

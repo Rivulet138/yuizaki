@@ -157,7 +157,7 @@ const DEFAULT_CHAT_OPTIONS: Required<Pick<ChatOptions, 'temperature' | 'top_p' |
   voice_mode: 'push-to-talk',
   mcp_enabled: true,
   web_search_enabled: false,
-  tts_enabled: true,
+  tts_enabled: false,
   pet_link_enabled: true,
   translation_target: 'zh-CN',
   prompt_mode: 'auto',

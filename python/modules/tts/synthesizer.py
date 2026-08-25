@@ -19,6 +19,7 @@ from typing import Any
 
 from modules.core.paths import DEFAULT_AUDIO_CACHE_DIR
 from modules.system.experience_metrics import percentile
+from modules.system.voice_diagnostics import VoiceDiagnostics
 from modules.tts.capabilities import (
     TTSAlignmentMode,
     TTSOutputTransport,
@@ -112,6 +113,7 @@ class TTSClient:
         mode: str = "串行推理",
         save_mode: str = "禁用自动保存",
         audio_cache_dir: Path = DEFAULT_AUDIO_CACHE_DIR,
+        diagnostics: VoiceDiagnostics | None = None,
     ) -> None:
         self._character = genie_character.strip()
         self._model_dir = genie_model_dir
@@ -126,6 +128,7 @@ class TTSClient:
         self._save_mode = save_mode.strip() or "禁用自动保存"
         self._split_sentence = _split_sentence_enabled(self._split)
         self.audio_cache_dir = audio_cache_dir
+        self.diagnostics = diagnostics or VoiceDiagnostics()
         self._genie: Any = None
         self._available = False
         self._load_lock = asyncio.Lock()
@@ -259,6 +262,7 @@ class TTSClient:
             "cancel_latency_summary": _latency_summary(_CANCEL_LATENCY_SAMPLES)["total"],
             "cancel_count": self._cancel_count,
             "last_error": self._last_error,
+            "voice_diagnostics": self.diagnostics.snapshot(),
             "message": message,
         }
 
@@ -363,7 +367,7 @@ class TTSClient:
                     self._last_warmup_inference_ms or 0,
                 )
                 return True
-            except Exception as exc:
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
                 self._last_warmup_ms = (time.perf_counter() - started) * 1000
                 self._warmup_done = False
                 self._last_error = f"Genie-TTS warmup failed: {exc}"
@@ -492,6 +496,8 @@ class TTSClient:
                 if sequence == 0 and hasattr(gen, "mark"):
                     gen.mark("tts_first_chunk")
                     gen.mark("tts_first_audio_ready")
+                if sequence == 0:
+                    self.diagnostics.record_elapsed("first_audio", generation_started)
                 if is_final and hasattr(gen, "mark"):
                     gen.mark("tts_completed")
 
@@ -519,6 +525,7 @@ class TTSClient:
                 total=self._last_generation_ms,
             )
         except Exception as exc:
+            self.diagnostics.record_elapsed("tts", generation_started, ok=False, error_kind="generation_failed")
             self._last_generation_ms = (time.perf_counter() - generation_started) * 1000
             self._last_error = f"TTS generation failed: {exc}"
             logger.error("[%s/%s] TTS generation failed: %s", sid, gid, exc)
@@ -591,6 +598,8 @@ class TTSClient:
             if sequence == 0 and hasattr(gen, "mark"):
                 gen.mark("tts_first_chunk")
                 gen.mark("tts_first_audio_ready")
+            if sequence == 0:
+                self.diagnostics.record_elapsed("first_audio", started)
             payload = {
                 "type": "tts_audio",
                 "session_id": gen.session_id,
@@ -609,6 +618,7 @@ class TTSClient:
             )
             return True
         except Exception as exc:
+            self.diagnostics.record_elapsed("tts", started, ok=False, error_kind="generation_failed")
             self._last_generation_ms = (time.perf_counter() - started) * 1000
             self._last_error = f"TTS generation failed: {exc}"
             logger.error(
@@ -814,9 +824,24 @@ class TTSClient:
                     _CANCEL_LATENCY_SAMPLES,
                     total=self._last_cancel_ms,
                 )
+                self.diagnostics.record(
+                    "interruption",
+                    self._last_cancel_ms,
+                    ok=True,
+                    recovered=True,
+                    recovery_latency_ms=self._last_cancel_ms,
+                )
                 return True
-            except Exception as exc:
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
                 self._last_cancel_ms = (time.perf_counter() - started) * 1000
+                self.diagnostics.record(
+                    "interruption",
+                    self._last_cancel_ms,
+                    ok=False,
+                    error_kind="cancel_failed",
+                    recovered=False,
+                    recovery_latency_ms=self._last_cancel_ms,
+                )
                 logger.warning("Failed to stop active Genie-TTS inference: %s", exc)
                 return False
 

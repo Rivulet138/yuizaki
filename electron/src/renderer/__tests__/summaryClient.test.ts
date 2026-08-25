@@ -9,8 +9,7 @@ describe('summaryClient exports', () => {
     window.sessionStorage.clear()
   })
 
-  it('attaches the backend bearer token to governance report downloads', async () => {
-    window.sessionStorage.setItem('yuizaki.control.token', 'backend-token')
+  it('downloads governance reports through the control server', async () => {
     const reportBlob = new Blob(['session_id,total\n'], { type: 'text/csv' })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -23,7 +22,6 @@ describe('summaryClient exports', () => {
     expect(blob).toBe(reportBlob)
     expect(fetch).toHaveBeenCalledWith(`${CONTROL_ORIGIN}/api/summary/report/csv?days=3`, expect.objectContaining({
       headers: expect.objectContaining({
-        Authorization: 'Bearer backend-token',
         'x-trace-id': expect.stringMatching(/^trace_/),
       }),
     }))

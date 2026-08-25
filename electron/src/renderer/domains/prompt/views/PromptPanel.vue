@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="人格提示词" tone="companion">
+  <PanelShell title="提示词设置" subtitle="编辑当前工作区和桌宠使用的提示词" tone="companion">
     <div class="prompt-panel">
       <section class="prompt-status-grid" aria-label="提示词状态">
         <article v-for="item in promptStatusItems" :key="item.key" class="prompt-status-item" :class="`is-${item.tone}`">
@@ -11,10 +11,10 @@
       <section class="prompt-card prompt-card--split">
         <header class="prompt-card-header">
           <div>
-            <h3>场景系统提示词</h3>
+        <h3>工作区系统提示词</h3>
             <span>{{ activeWorkspace.name }}</span>
           </div>
-          <el-button size="small" type="primary" :disabled="!workspacePromptDirty" :loading="savingWorkspacePrompt" @click="saveWorkspaceSystemPrompt">保存</el-button>
+            <el-button size="small" type="primary" :disabled="!workspacePromptDirty" :loading="savingWorkspacePrompt" @click="saveWorkspaceSystemPrompt">保存工作区提示词</el-button>
         </header>
         <el-input
           v-model="workspaceSystemPrompt"
@@ -27,12 +27,12 @@
       <section class="prompt-card prompt-card--split">
         <header class="prompt-card-header">
           <div>
-            <h3>桌宠人格提示词</h3>
+        <h3>桌宠人格提示词</h3>
             <span>{{ activeCompanion?.name || '未加载桌宠档案' }}</span>
           </div>
           <div class="prompt-card-actions">
-            <el-button size="small" plain :loading="companionStore.loading" @click="loadCompanions">刷新</el-button>
-            <el-button size="small" type="primary" :disabled="!activeCompanion || !companionPromptDirty" :loading="savingCompanionPrompt" @click="saveCompanionPersonaPrompt">保存</el-button>
+          <el-button size="small" plain :loading="companionStore.loading" @click="loadCompanions">刷新桌宠档案</el-button>
+          <el-button size="small" type="primary" :disabled="!activeCompanion || !companionPromptDirty" :loading="savingCompanionPrompt" @click="saveCompanionPersonaPrompt">保存人格提示词</el-button>
           </div>
         </header>
         <el-input

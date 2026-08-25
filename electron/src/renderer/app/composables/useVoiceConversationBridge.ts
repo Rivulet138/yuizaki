@@ -526,6 +526,18 @@ export function useVoiceConversationBridge() {
       chatStore.setRealtimePlayback(false)
       if (socketClient.isConnected()) socketClient.sendClientTiming('realtime_playback_stop', { elapsedMs })
     })
+    realtimeEventBridge.listen('playback-recovery', ({ elapsedMs, ok, recovered, recoveryLatencyMs, playbackUnderruns }) => {
+      if (!ok) chatStore.setRealtimePlayback(false)
+      if (socketClient.isConnected()) {
+        socketClient.sendClientTiming('realtime_playback_recovery', {
+          elapsedMs,
+          ok,
+          recovered,
+          recoveryLatencyMs,
+          playbackUnderruns,
+        })
+      }
+    })
     realtimeEventBridge.listen('provider-cancel', ({ elapsedMs }) => {
       if (socketClient.isConnected()) socketClient.sendClientTiming('realtime_provider_cancel', { elapsedMs })
     })

@@ -2,6 +2,7 @@
   <PanelShell title="对话中心" tone="companion" density="compact" minimal>
     <div
       class="chat-workspace"
+      :data-e2e-chat-ready="e2eMode ? String(socketDomain.isConnected.value) : undefined"
       :class="{
         'chat-workspace--rail-hidden': !showSessionRail,
       }"

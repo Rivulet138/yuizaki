@@ -138,29 +138,16 @@ function assignSection<K extends keyof SettingsState>(key: K, value: SettingsSta
   }
 }
 
-const normalizeTtsSettings = (value: Partial<SettingsResponse['tts']>): Partial<SettingsResponse['tts']> => ({
-  ...value,
-  provider: 'genie-tts',
-})
-
-const normalizeSettingsPayload = (updates: Partial<SettingsState>): Partial<SettingsState> => {
-  if (!updates.tts || typeof updates.tts !== 'object') return updates
-  return {
-    ...updates,
-    tts: normalizeTtsSettings(updates.tts) as SettingsState['tts'],
-  }
-}
-
 export async function fetchSettings() {
   state.loading = true;
   state.error = null;
   try {
     const data = await settingsClient.load();
     if (data && typeof data === 'object') {
-      const normalized = normalizeSettingsPayload(data as Partial<SettingsState>)
-      for (const key of Object.keys(normalized) as Array<keyof SettingsState>) {
+      const updates = data as Partial<SettingsState>
+      for (const key of Object.keys(updates) as Array<keyof SettingsState>) {
         if (key in state) {
-          assignSection(key, normalized[key] as SettingsState[typeof key])
+          assignSection(key, updates[key] as SettingsState[typeof key])
         }
       }
     }
@@ -180,11 +167,10 @@ export async function saveSettings(updates: Partial<SettingsState>) {
   state.loading = true;
   state.error = null;
   try {
-    const normalized = normalizeSettingsPayload(updates)
-    await settingsClient.save(normalized as Record<string, unknown>);
-    for (const key of Object.keys(normalized) as Array<keyof SettingsState>) {
+    await settingsClient.save(updates as Record<string, unknown>);
+    for (const key of Object.keys(updates) as Array<keyof SettingsState>) {
       if (key in state) {
-        assignSection(key, normalized[key] as SettingsState[typeof key])
+        assignSection(key, updates[key] as SettingsState[typeof key])
       }
     }
   } catch (err: unknown) {

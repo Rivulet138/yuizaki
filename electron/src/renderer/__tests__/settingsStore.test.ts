@@ -60,7 +60,7 @@ describe('settingsStore', () => {
     expect(state.summary.trigger_messages).toBe(99)
   })
 
-  it('should normalize nested tts updates to Genie only', async () => {
+  it('preserves the selected TTS provider when saving nested settings', async () => {
     mockedSettingsClient.save.mockResolvedValue({ status: 'success', runtime_applied: ['tts'] })
 
     await saveSettings({
@@ -75,16 +75,26 @@ describe('settingsStore', () => {
         split: '智能切分',
         mode: '串行推理',
         save_mode: '禁用自动保存',
-        provider: 'azure',
+        provider: 'openai-compatible',
       },
     })
 
     const { state } = useSettingsStore()
     expect(mockedSettingsClient.save).toHaveBeenCalledWith(expect.objectContaining({
       tts: expect.objectContaining({
-        provider: 'genie-tts',
+        provider: 'openai-compatible',
       }),
     }))
-    expect(state.tts.provider).toBe('genie-tts')
+    expect(state.tts.provider).toBe('openai-compatible')
+  })
+
+  it('preserves the backend TTS provider when loading settings', async () => {
+    mockedSettingsClient.load.mockResolvedValue({
+      tts: { provider: 'openai-compatible', model: 'gpt-4o-mini-tts', voice: 'alloy' },
+    } as SettingsResponse)
+
+    await fetchSettings()
+
+    expect(useSettingsStore().state.tts.provider).toBe('openai-compatible')
   })
 })

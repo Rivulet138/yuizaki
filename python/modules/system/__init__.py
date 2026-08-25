@@ -5,8 +5,20 @@ from .health_check import HealthChecker, HealthStatus
 from .settings_store import SettingsStore
 from .dynamic_config import DynamicConfigManager, ConfigChangeListener, ConfigChangeEvent
 from .rate_limiter import SlidingWindowRateLimiter, RateLimitResult
-from .api_security import require_bearer_token, ensure_safe_relative_json_path
+from .api_security import ensure_safe_relative_json_path
 from .api_response import error_response
+from .runtime_context import (
+    RuntimeContext,
+    RuntimeContextConflictError,
+    RuntimeContextNotFoundError,
+    RuntimeContextRegistry,
+)
+from .voice_diagnostics import (
+    VoiceDiagnosticSample,
+    VoiceDiagnostics,
+    VoiceDiagnosticStore,
+    VoiceEvidenceProvenance,
+)
 
 __all__ = [
     "ServiceManager",
@@ -19,7 +31,14 @@ __all__ = [
     "ConfigChangeEvent",
     "SlidingWindowRateLimiter",
     "RateLimitResult",
-    "require_bearer_token",
     "ensure_safe_relative_json_path",
     "error_response",
+    "RuntimeContext",
+    "RuntimeContextConflictError",
+    "RuntimeContextNotFoundError",
+    "RuntimeContextRegistry",
+    "VoiceDiagnosticSample",
+    "VoiceDiagnostics",
+    "VoiceDiagnosticStore",
+    "VoiceEvidenceProvenance",
 ]

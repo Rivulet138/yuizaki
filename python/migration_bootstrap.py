@@ -81,4 +81,8 @@ def bootstrap_database() -> tuple[bool, str]:
         command.upgrade(cfg, "head")
         ok, message = check_database_at_head()
         return (True, f"empty database created from baseline {head}") if ok else (False, message)
+    if state["current_revision"] is not None:
+        command.upgrade(cfg, "head")
+        ok, message = check_database_at_head()
+        return (True, f"database upgraded to baseline {head}") if ok else (False, message)
     return check_database_at_head()

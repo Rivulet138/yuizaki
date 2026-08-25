@@ -1,4 +1,6 @@
 import importlib
+from types import SimpleNamespace
+from typing import ClassVar
 
 pytest = importlib.import_module("pytest")
 
@@ -11,10 +13,13 @@ pipeline_module = importlib.import_module("modules.agent.pipeline")
 state_module = importlib.import_module("modules.core.state")
 models_module = importlib.import_module("modules.agent.models")
 
+
+def _safe_policy_preview(*_args, **_kwargs):
+    return SimpleNamespace(allowed=True, require_confirm=False, reason="test_safe")
+
 AgentRequestContext = context_module.AgentRequestContext
 Planner = planner_module.Planner
 PlanResult = planner_module.PlanResult
-PlanStep = planner_module.PlanStep
 StepCondition = planner_module.StepCondition
 StepExecutor = step_executor_module.StepExecutor
 ToolResultEnvelope = tool_result_module.ToolResultEnvelope
@@ -22,6 +27,43 @@ AgentTraceStore = trace_store_module.AgentTraceStore
 AgentPipeline = pipeline_module.AgentPipeline
 Generation = state_module.Generation
 StepResultRecord = models_module.StepResultRecord
+
+
+class _PermissiveDefinition:
+    parameters: ClassVar[dict[str, object]] = {"type": "object", "additionalProperties": True}
+    risk_level = "safe"
+    require_confirm = False
+
+
+class _PermissiveRegistry:
+    revision = 0
+
+    def get(self, _name):
+        return _PermissiveDefinition()
+
+
+def PlanStep(*, kind="agent", **kwargs):
+    variants = {
+        "analysis": planner_module.AnalysisStep,
+        "agent": planner_module.AgentStep,
+        "join": planner_module.JoinStep,
+        "schedule": planner_module.ScheduleStep,
+    }
+    if kind != "tool":
+        return variants[kind](**kwargs)
+    payload = kwargs.get("payload") or {}
+    prompt = str(payload.get("prompt") or kwargs.get("description") or "")
+    if "http" in prompt:
+        url = next((token for token in prompt.split() if token.startswith("http")), "https://example.invalid")
+        kwargs.update(tool_name="browser.open_page", arguments={"url": url})
+    elif "good-app" in prompt or "bad-app" in prompt:
+        name = "bad-app" if "bad-app" in prompt else "good-app"
+        kwargs.update(tool_name="system.open_app", arguments={"name": name})
+    else:
+        kwargs.update(tool_name="test.tool", arguments={})
+    if "payload" in kwargs:
+        kwargs.setdefault("plan_version", 1)
+    return planner_module.ToolStep(**kwargs)
 
 
 def test_conditional_planner_adds_join_and_synthesis_step():
@@ -223,11 +265,11 @@ async def test_immediate_executor_merges_success_branch_and_skips_else(monkeypat
         session_id="sid",
         messages=[{"role": "user", "content": "test"}],
         llm_client=object(),
-        tool_registry=object(),
+        tool_registry=_PermissiveRegistry(),
         tool_executor=object(),
     )
 
-    result = await StepExecutor().execute_immediate_steps(ctx, [primary, success_branch, else_branch, join, final])
+    result = await StepExecutor().execute_plan(ctx, [primary, success_branch, else_branch, join, final])
 
     statuses = {item["step_id"]: item["status"] for item in result["step_results"]}
     assert result["reply"] == "reply-3"
@@ -246,6 +288,8 @@ async def test_immediate_executor_can_join_handled_failure_branch(monkeypatch):
     agent_calls = []
 
     class FailingToolExecutor:
+        preview_policy = staticmethod(_safe_policy_preview)
+
         async def execute(self, tool_name, _args, **_kwargs):
             return ToolResultEnvelope(
                 success=False,
@@ -298,11 +342,11 @@ async def test_immediate_executor_can_join_handled_failure_branch(monkeypatch):
         session_id="sid",
         messages=[{"role": "user", "content": "test"}],
         llm_client=object(),
-        tool_registry=object(),
+        tool_registry=_PermissiveRegistry(),
         tool_executor=FailingToolExecutor(),
     )
 
-    result = await StepExecutor().execute_immediate_steps(ctx, [primary, failure_branch, success_branch, join, final])
+    result = await StepExecutor().execute_plan(ctx, [primary, failure_branch, success_branch, join, final])
 
     statuses = {item["step_id"]: item["status"] for item in result["step_results"]}
     assert result["reply"] == "handled-2"
@@ -319,6 +363,8 @@ async def test_unmatched_error_contains_condition_does_not_handle_tool_failure(m
     agent_calls = []
 
     class FailingToolExecutor:
+        preview_policy = staticmethod(_safe_policy_preview)
+
         async def execute(self, tool_name, _args, **_kwargs):
             return ToolResultEnvelope(
                 success=False,
@@ -358,11 +404,11 @@ async def test_unmatched_error_contains_condition_does_not_handle_tool_failure(m
         session_id="sid",
         messages=[{"role": "user", "content": "test"}],
         llm_client=object(),
-        tool_registry=object(),
+        tool_registry=_PermissiveRegistry(),
         tool_executor=FailingToolExecutor(),
     )
 
-    result = await StepExecutor().execute_immediate_steps(ctx, [primary, failure_branch])
+    result = await StepExecutor().execute_plan(ctx, [primary, failure_branch])
 
     assert [item["step_id"] for item in result["step_results"]] == ["primary"]
     assert result["execution_summary"]["status"] == "failed"
@@ -377,6 +423,8 @@ async def test_one_sided_conditional_still_reaches_synthesis_when_branch_not_sel
     agent_calls = []
 
     class FailingToolExecutor:
+        preview_policy = staticmethod(_safe_policy_preview)
+
         async def execute(self, tool_name, _args, **_kwargs):
             return ToolResultEnvelope(
                 success=False,
@@ -398,11 +446,23 @@ async def test_one_sided_conditional_still_reaches_synthesis_when_branch_not_sel
         session_id="sid",
         messages=[{"role": "user", "content": "test"}],
         llm_client=object(),
-        tool_registry=object(),
+        tool_registry=_PermissiveRegistry(),
         tool_executor=FailingToolExecutor(),
     )
 
-    result = await StepExecutor().execute_immediate_steps(ctx, plan.immediate_steps)
+    executor = StepExecutor()
+    capability = executor.preflight_plan(ctx, plan.steps)
+    immediate_ids = {step.id for step in plan.immediate_steps}
+    await executor.execute_analysis_steps(
+        ctx,
+        [step for step in plan.steps if step.kind == "analysis" and step.id not in immediate_ids],
+        validation_capability=capability,
+    )
+    result = await executor.execute_immediate_steps(
+        ctx,
+        plan.immediate_steps,
+        validation_capability=capability,
+    )
 
     statuses = {item["title"]: item["status"] for item in result["step_results"]}
     assert result["reply"] == "fallback synthesis"
@@ -418,6 +478,8 @@ async def test_immediate_executor_stops_on_unhandled_tool_failure(monkeypatch):
     agent_calls = []
 
     class FailingToolExecutor:
+        preview_policy = staticmethod(_safe_policy_preview)
+
         async def execute(self, tool_name, _args, **_kwargs):
             return ToolResultEnvelope(
                 success=False,
@@ -452,11 +514,11 @@ async def test_immediate_executor_stops_on_unhandled_tool_failure(monkeypatch):
         session_id="sid",
         messages=[{"role": "user", "content": "test"}],
         llm_client=object(),
-        tool_registry=object(),
+        tool_registry=_PermissiveRegistry(),
         tool_executor=FailingToolExecutor(),
     )
 
-    result = await StepExecutor().execute_immediate_steps(ctx, [primary, unguarded_followup])
+    result = await StepExecutor().execute_plan(ctx, [primary, unguarded_followup])
 
     assert result["reply"] == "已执行工具步骤。"
     assert len(agent_calls) == 0
@@ -476,6 +538,8 @@ async def test_immediate_executor_stops_on_unhandled_tool_failure(monkeypatch):
 @pytest.mark.asyncio
 async def test_immediate_executor_reports_partial_completion_after_late_failure(monkeypatch):
     class SelectivelyFailingToolExecutor:
+        preview_policy = staticmethod(_safe_policy_preview)
+
         async def execute(self, tool_name, args, **_kwargs):
             name = str(args.get("name") or "")
             if name == "bad-app":
@@ -525,11 +589,11 @@ async def test_immediate_executor_reports_partial_completion_after_late_failure(
         session_id="sid",
         messages=[{"role": "user", "content": "test"}],
         llm_client=object(),
-        tool_registry=object(),
+        tool_registry=_PermissiveRegistry(),
         tool_executor=SelectivelyFailingToolExecutor(),
     )
 
-    result = await StepExecutor().execute_immediate_steps(ctx, [first, second, followup])
+    result = await StepExecutor().execute_plan(ctx, [first, second, followup])
 
     assert [item["step_id"] for item in result["step_results"]] == ["first", "second"]
     assert result["execution_summary"]["status"] == "partial"
@@ -581,11 +645,11 @@ async def test_condition_dsl_matches_content_and_error_filters(monkeypatch):
         session_id="sid",
         messages=[{"role": "user", "content": "test"}],
         llm_client=object(),
-        tool_registry=object(),
+        tool_registry=_PermissiveRegistry(),
         tool_executor=object(),
     )
 
-    result = await StepExecutor().execute_immediate_steps(ctx, [primary, content_branch, missing_content_branch])
+    result = await StepExecutor().execute_plan(ctx, [primary, content_branch, missing_content_branch])
 
     statuses = {item["step_id"]: item["status"] for item in result["step_results"]}
     assert statuses["primary"] == "ok"
@@ -620,11 +684,11 @@ async def test_condition_dsl_content_contains_uses_full_agent_reply(monkeypatch)
         session_id="sid",
         messages=[{"role": "user", "content": "test"}],
         llm_client=object(),
-        tool_registry=object(),
+        tool_registry=_PermissiveRegistry(),
         tool_executor=object(),
     )
 
-    result = await StepExecutor().execute_immediate_steps(ctx, [primary, branch])
+    result = await StepExecutor().execute_plan(ctx, [primary, branch])
 
     statuses = {item["step_id"]: item["status"] for item in result["step_results"]}
     assert statuses == {"primary": "ok", "branch": "ok"}
@@ -669,11 +733,11 @@ async def test_condition_dsl_supports_all_any_none_and_status_not_in(monkeypatch
         session_id="sid",
         messages=[{"role": "user", "content": "test"}],
         llm_client=object(),
-        tool_registry=object(),
+        tool_registry=_PermissiveRegistry(),
         tool_executor=object(),
     )
 
-    result = await StepExecutor().execute_immediate_steps(ctx, [source_a, source_b, branch])
+    result = await StepExecutor().execute_plan(ctx, [source_a, source_b, branch])
 
     statuses = {item["step_id"]: item["status"] for item in result["step_results"]}
     assert statuses == {"a": "ok", "b": "ok", "branch": "ok"}
@@ -688,7 +752,10 @@ async def test_streaming_pipeline_uses_structured_executor_for_join_steps():
         def __init__(self):
             self.called = False
 
-        async def execute_immediate_steps(self, _ctx, _steps):
+        def preflight_plan(self, _ctx, _steps):
+            return object()
+
+        async def execute_immediate_steps(self, _ctx, _steps, **_kwargs):
             self.called = True
             return {
                 "reply": "structured reply",
@@ -743,7 +810,10 @@ async def test_pipeline_action_envelope_includes_execution_summary():
     class FakeStepExecutor:
         max_tool_retries = 1
 
-        async def execute_immediate_steps(self, _ctx, _steps):
+        def preflight_plan(self, _ctx, _steps):
+            return object()
+
+        async def execute_plan(self, _ctx, _steps):
             return {
                 "reply": "partially done",
                 "tool_calls": [],
@@ -798,6 +868,9 @@ async def test_pipeline_action_envelope_includes_execution_summary():
 @pytest.mark.asyncio
 async def test_immediate_executor_preserves_partial_summary_on_missing_agent_runtime():
     class SuccessfulToolExecutor:
+        registry = _PermissiveRegistry()
+        preview_policy = staticmethod(_safe_policy_preview)
+
         async def execute(self, tool_name, args, **_kwargs):
             return ToolResultEnvelope(
                 success=True,
@@ -828,7 +901,7 @@ async def test_immediate_executor_preserves_partial_summary_on_missing_agent_run
         tool_executor=SuccessfulToolExecutor(),
     )
 
-    result = await StepExecutor().execute_immediate_steps(ctx, [first, followup])
+    result = await StepExecutor().execute_plan(ctx, [first, followup])
 
     assert [item["step_id"] for item in result["step_results"]] == ["first"]
     assert result["execution_summary"]["status"] == "partial"
@@ -847,31 +920,34 @@ async def test_pipeline_does_not_rollback_schedule_for_normal_condition_skip():
         def __init__(self):
             self.rollback_called = False
 
-        async def execute_schedule_steps(self, _ctx, _steps):
-            return [StepResultRecord(
-                step_id="schedule",
-                kind="schedule",
-                status="created",
-                title="Schedule",
-                task_id="task-1",
-                mode="once",
-                success=True,
-            )]
+        def preflight_plan(self, _ctx, _steps):
+            return object()
 
-        async def execute_immediate_steps(self, _ctx, _steps):
+        async def execute_plan(self, _ctx, _steps):
             return {
                 "reply": "done",
                 "tool_calls": [],
                 "pet_control": None,
-                "step_results": [{
-                    "step_id": "skipped",
-                    "kind": "agent",
-                    "status": "skipped",
-                    "title": "Skipped branch",
-                    "description": "",
-                    "depends_on": [],
-                    "error": "condition_not_met",
-                }],
+                "step_results": [
+                    StepResultRecord(
+                        step_id="schedule",
+                        kind="schedule",
+                        status="created",
+                        title="Schedule",
+                        task_id="task-1",
+                        mode="once",
+                        success=True,
+                    ).to_dict(),
+                    {
+                        "step_id": "skipped",
+                        "kind": "agent",
+                        "status": "skipped",
+                        "title": "Skipped branch",
+                        "description": "",
+                        "depends_on": [],
+                        "error": "condition_not_met",
+                    },
+                ],
                 "execution_summary": {
                     "status": "completed",
                     "total_steps": 1,
@@ -924,7 +1000,10 @@ async def test_streaming_envelope_includes_summary_without_step_results():
     class FakeStepExecutor:
         max_tool_retries = 1
 
-        async def execute_immediate_steps(self, _ctx, _steps):
+        def preflight_plan(self, _ctx, _steps):
+            return object()
+
+        async def execute_immediate_steps(self, _ctx, _steps, **_kwargs):
             return {
                 "reply": "silent summary",
                 "tool_calls": [],

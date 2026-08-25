@@ -55,7 +55,6 @@ const writeTokenFile = (filePath: string, token: string): void => {
 }
 
 const resolveEnvironmentToken = (): string =>
-  cleanToken(process.env['YUIZAKI_CONTROL_TOKEN'] || '') ||
   cleanToken(process.env['YUIZAKI_BACKEND_API_TOKEN'] || '')
 
 export class BackendApiTokenStore implements BackendApiTokenStoreLike {

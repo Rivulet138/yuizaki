@@ -74,6 +74,43 @@ def test_default_local_read_tools_do_not_require_confirmation(tmp_path):
         assert decision.require_confirm is False
 
 
+def test_local_summary_mutations_do_not_require_a_second_admin_token():
+    summary_api = importlib.import_module("routes.summary_api")
+    state = {"demo": {"acked": False}}
+    limiter = lambda: SimpleNamespace(check=lambda _key: SimpleNamespace(allowed=True, retry_after=0))
+    app = FastAPI()
+    app.include_router(summary_api.create_summary_router(
+        get_generation_mgr=lambda: None,
+        get_llm_client=lambda: None,
+        get_summary_list_limiter=limiter,
+        get_summary_detail_limiter=limiter,
+        get_summary_rewrite_limiter=limiter,
+        get_governance_alert_state=lambda: state,
+        save_governance_alert_state=lambda: None,
+    ))
+
+    response = TestClient(app).post("/api/summary/alerts/clear")
+
+    assert response.status_code == 200
+    assert state == {}
+
+
+def test_local_system_management_does_not_require_a_second_admin_token():
+    system_api = importlib.import_module("routes.system_api")
+    app = FastAPI()
+    app.include_router(system_api.create_system_router(
+        health_handler=lambda: {"ok": True},
+        readiness_handler=lambda: {"ready": True},
+        system_status_handler=lambda: {"status": "ok"},
+        permissions_handler=lambda: {"permissions": []},
+    ))
+
+    response = TestClient(app).get("/api/system/permissions")
+
+    assert response.status_code == 200
+    assert response.json() == {"permissions": []}
+
+
 def test_force_confirmation_overrides_remembered_allow(tmp_path):
     policy_module = importlib.import_module("modules.agent.policy_engine")
     registry_module = importlib.import_module("modules.agent.tool_registry")
@@ -386,7 +423,11 @@ async def test_permission_required_is_fail_closed_and_not_retried(tmp_path):
     monkeypatch.setattr(step_executor, "_infer_tool_call", lambda _prompt: (
         "write_file", {"path": "C:/tmp/a.txt", "content": "hello"}
     ))
-    result = await step_executor._execute_tool_step(ctx, step)
+    typed_step = step_executor.adapt_legacy_plan([step])[0]
+    capability = step_executor.preflight_plan(ctx, [typed_step])
+    result = (await step_executor.execute_tool_steps(
+        ctx, [typed_step], validation_capability=capability
+    ))[0]
     monkeypatch.undo()
 
     assert handler_calls == []
@@ -608,6 +649,135 @@ def test_agent_context_normalizes_legacy_autonomy_once_and_direct_field_wins():
     assert "autonomy_mode" not in direct.extra
 
 
+def test_selected_mcp_and_plugin_tools_are_pre_authorized(tmp_path, monkeypatch):
+    mcp_module = importlib.import_module("modules.agent.mcp_manager")
+    plugin_bridge = importlib.import_module("modules.agent.plugin_bridge")
+    policy_module = importlib.import_module("modules.agent.policy_engine")
+    registry_module = importlib.import_module("modules.agent.tool_registry")
+
+    monkeypatch.chdir(tmp_path)
+    registry = registry_module.ToolRegistry()
+    manager = mcp_module.MCPManager()
+    manager.servers = {
+        "selected": mcp_module.MCPServerConfig(
+            name="selected",
+            base_url="http://127.0.0.1:7777",
+            transport="http",
+            enabled=True,
+        ),
+    }
+    manager.status = {
+        "selected": {
+            "enabled": True,
+            "ok": True,
+            "tools": [{
+                "name": "workspace.inspect",
+                "description": "Inspect workspace",
+                "inputSchema": {"type": "object"},
+            }],
+        },
+    }
+    manager.register_tools(registry)
+    plugin_bridge.register_plugin_tools(registry, {
+        "plugins": [{
+            "id": "selected-plugin",
+            "permissions": {
+                "routes": ["execute"],
+                "toolScopes": ["summarize"],
+            },
+            "toolCapabilities": [{"id": "summarize", "name": "Summarize"}],
+        }],
+        "routes": [{"id": "execute"}],
+    })
+
+    policy = policy_module.PolicyEngine(store_file=tmp_path / "permissions.json")
+    for tool_name in (
+        "browser.open_page",
+        "mcp_selected_workspace_inspect",
+        "plugin.selected-plugin.summarize",
+    ):
+        tool = registry.get(tool_name)
+        assert tool is not None
+        assert tool.risk_level == "medium"
+        assert tool.require_confirm is False
+        decision = policy.evaluate_tool(tool, permission_scope="selected:local")
+        assert decision.allowed is True
+        assert decision.require_confirm is False
+
+    remembered_deny = registry.get("mcp_selected_workspace_inspect")
+    assert remembered_deny is not None
+    policy._remembered[f"{remembered_deny.name}::selected:local"] = False
+    assert policy.evaluate_tool(remembered_deny, permission_scope="selected:local").allowed is True
+
+
+@pytest.mark.asyncio
+async def test_selected_mcp_tools_can_run_consecutively_without_confirmation(tmp_path):
+    context_module = importlib.import_module("modules.agent.context")
+    policy_module = importlib.import_module("modules.agent.policy_engine")
+    result_module = importlib.import_module("modules.agent.tool_result")
+    registry_module = importlib.import_module("modules.agent.tool_registry")
+    tool_executor_module = importlib.import_module("modules.agent.tool_executor")
+    tool_loop = importlib.import_module("modules.agent.tool_loop")
+    executed: list[str] = []
+    registry = registry_module.ToolRegistry()
+    for name in ("remote.inspect", "remote.summarize"):
+        registry.register(registry_module.ToolDefinition(
+            name=name,
+            description=name,
+            source="mcp",
+            parameters={"type": "object"},
+            handler=lambda _args, tool_name=name: executed.append(tool_name) or result_module.ToolResultEnvelope(
+                success=True,
+                content=f"{tool_name} complete",
+                source="mcp",
+                tool_name=tool_name,
+            ),
+            require_confirm=False,
+            risk_level="medium",
+            tags=["mcp", "mcp-server:selected"],
+        ))
+    executor = tool_executor_module.ToolExecutor(
+        registry,
+        policy_module.PolicyEngine(store_file=tmp_path / "permissions.json"),
+    )
+    ctx = context_module.AgentRequestContext(
+        sid="selected",
+        session_id="session",
+        request_id="request",
+        messages=[],
+        permission_scope="socket:selected",
+    )
+
+    class FakeLLM:
+        def __init__(self):
+            self.call = 0
+
+        async def complete_chat(self, _messages, **_kwargs):
+            self.call += 1
+            if self.call <= 2:
+                name = "remote_inspect" if self.call == 1 else "remote_summarize"
+                return {
+                    "reply": "",
+                    "tool_calls": [{
+                        "id": f"call-{self.call}",
+                        "function": {"name": name, "arguments": "{}"},
+                    }],
+                }
+            return {"reply": "done", "tool_calls": []}
+
+    result = await tool_loop.run_tool_loop(
+        FakeLLM(),
+        [{"role": "user", "content": "inspect and summarize"}],
+        tool_registry=registry,
+        tool_executor=executor,
+        ctx=ctx,
+    )
+
+    assert executed == ["remote.inspect", "remote.summarize"]
+    assert result["reply"] == "done"
+    assert result.get("permission_receipt") is None
+
+
 @pytest.mark.asyncio
 async def test_mcp_result_stays_untrusted_tool_data_in_followup_prompt():
     tool_loop = importlib.import_module("modules.agent.tool_loop")
@@ -825,14 +995,14 @@ def test_rest_stream_and_nonstream_permission_receipts_are_fail_closed(tmp_path)
         get_config=lambda: SimpleNamespace(llm=SimpleNamespace(model="test")),
         get_generation_mgr=lambda: GenerationManager(),
         get_llm_client=lambda: object(),
-        get_ocr_client=lambda: None,
         get_svc_client=lambda: None,
         get_agent_runtime=lambda: runtime,
         get_db_repo=lambda: None,
         get_relationship_writer=lambda: relationship_calls.append,
-        get_relationship_history=lambda: [],
-        get_relationship_summary=lambda: {},
+        get_relationship_history=list,
+        get_relationship_summary=dict,
         logger=SimpleNamespace(error=lambda *_args, **_kwargs: None),
+        allow_legacy_turn_pipeline=True,
     ))
     client = TestClient(app)
     request = {
@@ -879,7 +1049,7 @@ def test_rest_stream_and_nonstream_permission_receipts_are_fail_closed(tmp_path)
     assert nonstream_receipt["decision"] == stream_receipt["decision"] == "required"
     assert nonstream_receipt["retryable"] is stream_receipt["retryable"] is False
     assert nonstream_receipt["permission_scope"] == "http:chat-completions"
-    assert stream_receipt["permission_scope"] == "http:chat-completions:stream"
+    assert stream_receipt["permission_scope"] == "http:chat-completions"
     serialized_responses = nonstream.text + stream.text
     for secret in ("rest.secret.value", "user:pass", "rest-secret-key", "rest-secret-cookie"):
         assert secret not in serialized_responses
@@ -910,7 +1080,6 @@ def test_rest_silent_mode_skips_relationship_and_runtime_binding():
         get_config=lambda: SimpleNamespace(llm=SimpleNamespace(model="test")),
         get_generation_mgr=lambda: GenerationManager(),
         get_llm_client=lambda: object(),
-        get_ocr_client=lambda: None,
         get_svc_client=lambda: None,
         get_agent_runtime=lambda: runtime,
         get_db_repo=lambda: (_ for _ in ()).throw(AssertionError("must not bind runtime")),
@@ -918,6 +1087,7 @@ def test_rest_silent_mode_skips_relationship_and_runtime_binding():
         get_relationship_history=lambda: (_ for _ in ()).throw(AssertionError("must not read relationship")),
         get_relationship_summary=lambda: (_ for _ in ()).throw(AssertionError("must not read relationship")),
         logger=SimpleNamespace(error=lambda *_args, **_kwargs: None),
+        allow_legacy_turn_pipeline=True,
     ))
     client = TestClient(app)
     payload = {

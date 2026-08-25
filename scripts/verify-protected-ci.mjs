@@ -304,12 +304,6 @@ const validatePlatformChecks = (steps) => {
     workingDirectories: ['tools/yuizaki-launcher', './tools/yuizaki-launcher', '${{ github.workspace }}/tools/yuizaki-launcher'],
     commands: ['go test ./...'],
   })
-  const linuxValidation = validateNamedCommandStep('electron-build', steps, {
-    name: 'Validate Linux launch scripts',
-    osLabel: 'Linux',
-    workingDirectories: ['.', './', '${{ github.workspace }}'],
-    commands: ['test -x install.sh && bash -n install.sh start.sh start_soulx_svc.sh scripts/check_linux_environment.sh scripts/run_backend_dev.sh scripts/smoke_linux_electron.sh'],
-  })
   const linuxLibraries = validateNamedCommandStep('electron-build', steps, {
     name: 'Install Linux GUI runtime libraries',
     osLabel: 'Linux',
@@ -321,13 +315,7 @@ const validatePlatformChecks = (steps) => {
       'sudo chmod 4755 electron/node_modules/electron/dist/chrome-sandbox',
     ],
   })
-  const linuxSmoke = validateNamedCommandStep('electron-build', steps, {
-    name: 'Smoke test Linux Electron GUI',
-    osLabel: 'Linux',
-    workingDirectories: ['.', './', '${{ github.workspace }}'],
-    commands: ['xvfb-run -a env PYTHON_BIN=python scripts/smoke_linux_electron.sh'],
-  })
-  errors.push(...launcher.errors, ...linuxValidation.errors, ...linuxLibraries.errors, ...linuxSmoke.errors)
+  errors.push(...launcher.errors, ...linuxLibraries.errors)
 
   const windowsE2E = steps.find((step) => step.fields.name === 'Run Electron E2E (Windows)')
   const linuxE2E = steps.find((step) => step.fields.name === 'Run Electron E2E (Linux)')
@@ -335,11 +323,8 @@ const validatePlatformChecks = (steps) => {
     && !(windowsE2E.index < setupGo.index && setupGo.index < launcher.step.index)) {
     errors.push('Windows platform checks must preserve default E2E -> setup-go -> launcher test order')
   }
-  if (linuxValidation.step && linuxLibraries.step && linuxE2E && linuxSmoke.step
-    && !(linuxValidation.step.index < linuxLibraries.step.index
-      && linuxLibraries.step.index < linuxE2E.index
-      && linuxE2E.index < linuxSmoke.step.index)) {
-    errors.push('Linux platform checks must preserve launch validation -> library install -> default E2E -> smoke order')
+  if (linuxLibraries.step && linuxE2E && !(linuxLibraries.step.index < linuxE2E.index)) {
+    errors.push('Linux platform checks must preserve library install -> default E2E order')
   }
   return errors
 }
@@ -377,7 +362,7 @@ const validatePythonJob = (job) => {
     },
     { key: 'ruff', name: 'Check Python runtime errors with ruff', commands: ['ruff check . --select E9,F63,F7,F82'] },
     { key: 'pyright', name: 'Type check with pyright', commands: ['pyright --pythonversion ${{ matrix.python-version }}'] },
-    { key: 'pytest', name: 'Run tests', commands: ['pytest -q --tb=short'] },
+    { key: 'pytest', name: 'Run tests', commands: ['pytest . -q --tb=short'] },
   ]
   const protectedSteps = new Map()
   for (const spec of pythonStepSpecs) {

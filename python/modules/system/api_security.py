@@ -1,47 +1,6 @@
 from __future__ import annotations
 
-import secrets
-
-from fastapi import HTTPException, Request
-
-from .api_response import error_response
-
-
-ADMIN_TOKEN_HEADER = "x-yuizaki-admin-token"
-
-
-def resolve_admin_authorization(request: Request) -> str | None:
-    admin_token = request.headers.get(ADMIN_TOKEN_HEADER)
-    if admin_token is not None:
-        return f"Bearer {admin_token.strip()}"
-    return request.headers.get("authorization")
-
-
-def require_bearer_token(
-    authorization: str | None,
-    expected_token: str,
-):
-    token = (expected_token or "").strip()
-    if not token:
-        return None
-
-    bearer = (authorization or "").strip()
-    if not bearer.startswith("Bearer "):
-        return error_response(
-            code="unauthorized",
-            message="Missing Bearer token",
-            status_code=401,
-        )
-
-    provided = bearer[7:].strip()
-    if not secrets.compare_digest(provided, token):
-        return error_response(
-            code="unauthorized",
-            message="Invalid admin token",
-            status_code=401,
-        )
-
-    return None
+from fastapi import HTTPException
 
 
 def ensure_safe_relative_json_path(filepath: str, *, field_name: str = "filepath") -> str:

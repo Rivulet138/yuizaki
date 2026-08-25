@@ -23,12 +23,19 @@ class ChatMessage(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     tokens_used: Mapped[int | None] = mapped_column(Integer, default=0)
     model: Mapped[str | None] = mapped_column(String(100))
+    turn_idempotency_key: Mapped[str | None] = mapped_column(String(80))
     # JSON payloads intentionally contain only user-visible tool/memory metadata.
     tool_trace: Mapped[str | None] = mapped_column(Text)
     memory_trace: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         Index('idx_session_timestamp', 'session_id', 'timestamp'),
+        Index(
+            'uq_chat_message_turn_role',
+            'turn_idempotency_key',
+            'role',
+            unique=True,
+        ),
     )
 
 

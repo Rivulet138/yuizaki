@@ -119,7 +119,6 @@ const runCase = async (caseId) => {
         YUIZAKI_E2E_TOKEN_HASH: identity.tokenHash,
         YUIZAKI_E2E_ARTIFACT_DIR: artifactDir,
         YUIZAKI_E2E_FAILURE_PROBE: failureProbe ?? '',
-        YUIZAKI_CONTROL_TOKEN: identity.backendToken,
         YUIZAKI_BACKEND_API_TOKEN: identity.backendToken,
       },
       stdio: ['ignore', 'pipe', 'pipe'],

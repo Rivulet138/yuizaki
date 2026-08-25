@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="桌宠模型与动作" tone="companion">
+  <PanelShell title="桌宠控制" subtitle="选择模型并修改显示、位置、交互和动作参数" tone="companion">
     <div class="pet-console">
       <section class="status-strip" aria-label="桌宠状态">
         <article v-for="item in statusCards" :key="item.label" class="status-card">
@@ -90,7 +90,7 @@
           <label class="field-label">闭合速度 {{ lipSyncDraft.release.toFixed(2) }}</label>
           <el-slider v-model="lipSyncDraft.release" :min="0.05" :max="1" :step="0.05" />
           <div class="button-row">
-            <el-button type="primary" plain :loading="operationLoading" @click="applyLipSyncProfile">应用</el-button>
+            <el-button type="primary" plain :loading="operationLoading" @click="applyLipSyncProfile">应用口型参数</el-button>
             <el-button plain :disabled="operationLoading" @click="resetLipSyncProfile">恢复默认</el-button>
           </div>
         </el-card>
@@ -136,7 +136,7 @@
             />
           </el-select>
           <div class="button-row">
-            <el-button type="primary" plain :disabled="!selectedEmotionId" @click="previewEmotionPreset">触发</el-button>
+            <el-button type="primary" plain :disabled="!selectedEmotionId" @click="previewEmotionPreset">播放情绪预设</el-button>
           </div>
 
           <label class="field-label">表情混合</label>
@@ -151,7 +151,7 @@
           <label class="field-label">权重 {{ expressionWeight.toFixed(2) }}</label>
           <el-slider v-model="expressionWeight" :min="0" :max="1" :step="0.05" />
           <div class="button-row">
-            <el-button type="primary" :disabled="!selectedExpressionId" @click="previewExpressionMix">预览</el-button>
+            <el-button type="primary" :disabled="!selectedExpressionId" @click="previewExpressionMix">预览表情</el-button>
           </div>
 
           <label class="field-label">参数覆盖</label>
@@ -166,7 +166,7 @@
           <label class="field-label">参数值 {{ parameterValue.toFixed(2) }}</label>
           <el-slider v-model="parameterValue" :min="selectedParameterRange.min" :max="selectedParameterRange.max" :step="selectedParameterStep" />
           <div class="button-row">
-            <el-button plain :disabled="!selectedParameterId" @click="previewParameterOverride">预览</el-button>
+            <el-button plain :disabled="!selectedParameterId" @click="previewParameterOverride">预览参数</el-button>
           </div>
         </el-card>
         </details>
@@ -203,8 +203,8 @@
             </label>
           </div>
           <div class="button-row">
-            <el-button plain :disabled="state.locked" @click="applyPosition">应用锚点</el-button>
-            <el-button plain :loading="refreshingPet" :disabled="refreshingPet" @click="refresh">同步</el-button>
+            <el-button plain :disabled="state.locked" @click="applyPosition">保存锚点</el-button>
+            <el-button plain :loading="refreshingPet" :disabled="refreshingPet" @click="refresh">刷新桌宠状态</el-button>
           </div>
           <label class="field-label">屏幕停靠</label>
           <div class="form-grid compact-grid">
@@ -234,7 +234,7 @@
             <el-option v-for="option in behaviorStateOptions" :key="option.value" :label="option.label" :value="option.value" />
           </el-select>
           <div class="button-row">
-            <el-button plain @click="applyBehaviorState">应用</el-button>
+            <el-button plain @click="applyBehaviorState">保存行为状态</el-button>
           </div>
           <div class="form-grid compact-grid">
             <el-input v-model="idleProfileDraft.mood" placeholder="心情，例如轻松、专注" clearable />
@@ -253,13 +253,13 @@
             <el-slider v-model="idleProfileDraft.intimacy" :min="0" :max="1" :step="0.05" />
           </div>
           <div class="button-row">
-            <el-button type="primary" plain @click="applyIdleProfile">同步待机人格</el-button>
+            <el-button type="primary" plain @click="applyIdleProfile">保存待机配置</el-button>
           </div>
         </el-card>
         <el-card class="control-card recovery-card" shadow="never">
           <template #header>
             <div class="card-heading">
-              <span>快速恢复</span>
+              <span>显示与渲染控制</span>
               <el-tag size="small" :type="state.ready ? 'success' : 'warning'">{{ state.ready ? '已加载' : '未就绪' }}</el-tag>
             </div>
           </template>
@@ -290,7 +290,6 @@ import PetModelManager from '../components/PetModelManager.vue'
 import PetResidenceControls from '../components/PetResidenceControls.vue'
 import { useI18n } from '@/i18n'
 import { petControl, type PetBehaviorState } from '@/utils/petControl'
-import { CONTROL_AUTH_MISSING_MESSAGE, isAuthMissingError } from '@/api/clients/http-client'
 import {
   DEFAULT_PET_CONTROL_STATE,
   type PetCompanionIdleProfile,
@@ -348,7 +347,6 @@ const refreshingPet = ref(false)
 const hasLoadedState = ref(false)
 const operationMessage = ref('')
 const operationAlertType = ref<'success' | 'warning' | 'info' | 'error'>('info')
-const petAuthRecoveryHint = '请从 Electron 主窗口进入控制面板；浏览器直开 Vite 地址无法操作桌宠。'
 const localModelRefreshHint = '如果模型文件是在资源管理器里删除或补齐的，请点击“刷新”同步列表。'
 const modelSourceLabels = {
   bundled: '内置',
@@ -588,9 +586,6 @@ const scheduleReadyRetry = () => {
 
 const errorMessage = (error: unknown, fallback: string): string => {
   const message = error instanceof Error && error.message ? error.message : fallback
-  if (isAuthMissingError(error)) {
-    return `${CONTROL_AUTH_MISSING_MESSAGE} ${petAuthRecoveryHint}`
-  }
   if (message.includes('Local model not found') || message.includes('Local VRM asset not found') || message.includes('Local model asset not found')) {
     return `${message}。${localModelRefreshHint}`
   }

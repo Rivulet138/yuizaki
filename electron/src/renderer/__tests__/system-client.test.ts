@@ -9,8 +9,7 @@ describe('systemClient exports', () => {
     window.sessionStorage.clear()
   })
 
-  it('downloads database exports through the authenticated control server', async () => {
-    window.sessionStorage.setItem('yuizaki.control.token', 'export-token')
+  it('downloads database exports through the control server', async () => {
     const exportBlob = new Blob(['session_id,total\n'], { type: 'text/csv' })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -24,14 +23,12 @@ describe('systemClient exports', () => {
     expect(fetch).toHaveBeenCalledWith(`${CONTROL_ORIGIN}/api/export/csv`, expect.objectContaining({
       method: 'POST',
       headers: expect.objectContaining({
-        Authorization: 'Bearer export-token',
         'x-trace-id': expect.stringMatching(/^trace_/),
       }),
     }))
   })
 
-  it('toggles agent plugins through the authenticated control server', async () => {
-    window.sessionStorage.setItem('yuizaki.control.token', 'agent-plugin-token')
+  it('toggles agent plugins through the control server', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -45,15 +42,13 @@ describe('systemClient exports', () => {
       method: 'POST',
       body: JSON.stringify({ enabled: false }),
       headers: expect.objectContaining({
-        Authorization: 'Bearer agent-plugin-token',
         'Content-Type': 'application/json',
         'x-trace-id': expect.stringMatching(/^trace_/),
       }),
     }))
   })
 
-  it('loads bounded experience metrics through the authenticated control server', async () => {
-    window.sessionStorage.setItem('yuizaki.control.token', 'metrics-token')
+  it('loads bounded experience metrics through the control server', async () => {
     const payload = { window: { generation_samples: 4 }, latency: {} }
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -64,8 +59,31 @@ describe('systemClient exports', () => {
     const result = await systemClient.experienceMetrics()
 
     expect(result).toBe(payload)
-    expect(fetch).toHaveBeenCalledWith(`${CONTROL_ORIGIN}/api/system/experience-metrics`, expect.objectContaining({
-      headers: expect.objectContaining({ Authorization: 'Bearer metrics-token' }),
+    expect(fetch).toHaveBeenCalledWith(`${CONTROL_ORIGIN}/api/system/experience-metrics`, expect.any(Object))
+  })
+
+  it('reads and patches product metrics consent through the control server', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({ consented: false, scope: 'local_product_metrics', transport: 'not_configured' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({ consented: true, scope: 'local_product_metrics', transport: 'not_configured' }),
+      }))
+
+    expect((await systemClient.productMetricsConsent()).consented).toBe(false)
+    expect((await systemClient.patchProductMetricsConsent(true)).consented).toBe(true)
+    expect(fetch).toHaveBeenNthCalledWith(1, `${CONTROL_ORIGIN}/api/system/product-metrics/consent`, expect.any(Object))
+    expect(fetch).toHaveBeenNthCalledWith(2, `${CONTROL_ORIGIN}/api/system/product-metrics/consent`, expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ consented: true }),
+      headers: expect.objectContaining({
+        'Content-Type': 'application/json',
+      }),
     }))
   })
 
@@ -165,8 +183,7 @@ describe('systemClient exports', () => {
     )
   })
 
-  it('saves agent plugin config through the authenticated control server', async () => {
-    window.sessionStorage.setItem('yuizaki.control.token', 'agent-plugin-config-token')
+  it('saves agent plugin config through the control server', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -181,15 +198,13 @@ describe('systemClient exports', () => {
       method: 'POST',
       body: JSON.stringify(config),
       headers: expect.objectContaining({
-        Authorization: 'Bearer agent-plugin-config-token',
         'Content-Type': 'application/json',
         'x-trace-id': expect.stringMatching(/^trace_/),
       }),
     }))
   })
 
-  it('previews backup restores through the authenticated control server by default', async () => {
-    window.sessionStorage.setItem('yuizaki.control.token', 'restore-token')
+  it('previews backup restores through the control server by default', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -208,7 +223,6 @@ describe('systemClient exports', () => {
       method: 'POST',
       body: JSON.stringify({ backupDir: 'E:/yuizaki/backups/backup-test', dryRun: true }),
       headers: expect.objectContaining({
-        Authorization: 'Bearer restore-token',
         'Content-Type': 'application/json',
         'x-trace-id': expect.stringMatching(/^trace_/),
       }),

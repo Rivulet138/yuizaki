@@ -1,6 +1,7 @@
 <template>
-  <PanelShell title="任务中心" tone="admin">
+  <PanelShell title="任务追踪" subtitle="查看任务执行结果、计划任务和请求链路" tone="admin">
     <template #actions>
+      <el-button size="small" plain :disabled="!selectedTrace" @click="downloadDiagnosticBundle">导出诊断</el-button>
       <el-button size="small" plain :loading="refreshLoading" @click="refreshAll">刷新</el-button>
     </template>
     <div class="trace-console">
@@ -16,7 +17,7 @@
       <section class="experience-panel panel-card">
         <div class="section-header compact">
           <div>
-            <h3>交互体验指标</h3>
+            <h3>运行指标</h3>
           </div>
         </div>
         <div class="experience-grid">
@@ -56,7 +57,7 @@
       <section class="jobs-panel panel-card">
         <div class="section-header compact">
           <div>
-            <h3>Agent Jobs</h3>
+            <h3>后台任务</h3>
           </div>
           <div class="job-summary">
             <el-tag size="small" type="success" effect="plain">{{ activeCompanionJobs.length }} active</el-tag>
@@ -78,13 +79,18 @@
                   <el-tag v-if="job.data?.goalId" size="small" type="success" effect="plain">goal {{ String(job.data.goalId) }}</el-tag>
                   <el-tag v-if="job.data?.phase" size="small" type="warning" effect="plain">{{ String(job.data.phase) }}</el-tag>
                 </div>
-                <el-progress v-if="companionJobProgress(job) !== null" class="job-progress" :percentage="companionJobProgress(job) || 0" :show-text="false" :status="job.status === 'failed' ? 'exception' : undefined" />
+                <el-progress v-if="companionJobProgress(job) !== null" class="job-progress" :percentage="companionJobProgress(job) || 0" :show-text="false" :status="job.status === 'failed' || job.status === 'unknown_effect' ? 'exception' : undefined" />
                 <p v-if="companionJobResultSummary(job)" class="job-result">{{ companionJobResultSummary(job) }}</p>
                 <p v-if="companionJobOutcome(job)" class="job-outcome">{{ companionJobOutcome(job) }}</p>
+                <ul v-if="failureEvidenceLines(job).length" class="job-failure-evidence" aria-label="失败证据">
+                  <li v-for="line in failureEvidenceLines(job)" :key="line">{{ line }}</li>
+                </ul>
                 <p v-if="companionJobDuration(job)" class="job-meta">耗时 {{ companionJobDuration(job) }}<span v-if="projectCompanionJob(job).artifactCount !== null"> · 产物 {{ projectCompanionJob(job).artifactCount }}</span></p>
               </div>
               <div class="job-card-actions">
+                <el-button v-if="canResumeCompanionJob(job)" size="small" type="primary" plain :loading="retryingJobIds.has(job.jobId)" :disabled="retryingJobIds.has(job.jobId)" @click="resumeCompanionJob(job)">从失败步骤继续</el-button>
                 <el-button v-if="canRetryCompanionJob(job)" size="small" type="warning" plain :loading="retryingJobIds.has(job.jobId)" :disabled="retryingJobIds.has(job.jobId)" @click="retryCompanionJob(job)">重试</el-button>
+                <el-button v-if="canConfirmUnknownEffectRetry(job)" size="small" type="danger" plain :loading="retryingJobIds.has(job.jobId)" :disabled="retryingJobIds.has(job.jobId)" @click="confirmUnknownEffectRetry(job)">检查后重试</el-button>
                 <el-button v-if="canCancelCompanionJob(job)" size="small" type="warning" plain :loading="cancellingJobIds.has(job.jobId)" :disabled="cancellingJobIds.has(job.jobId)" @click="cancelCompanionJob(job)">停止</el-button>
               </div>
             </article>
@@ -96,7 +102,7 @@
       <section class="runtime-strip panel-card">
         <div class="section-header compact">
           <div>
-            <h3>最近闭环阶段</h3>
+                <h3>最近执行阶段</h3>
           </div>
         </div>
         <div class="loop-stages" aria-label="最近运行时循环阶段">
@@ -355,10 +361,21 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import { getSocketClient } from '@/net/socketClient'
+import { systemClient } from '@/api/client'
 import { useSystemDomain } from '../composables/useSystemDomain'
 import type { PlannerTrace, RuntimeLoopRecord, ScheduleTask, SchedulerRunRecord, StepConditionRecord, StepExecutionRecord } from '@/../shared/agent'
 import type { CompanionEventEnvelope, CompanionJobStatus } from '@/../shared/companion-event'
-import { isTerminalCompanionJob, projectCompanionJob } from '@/app/runtime/companionJobProjection'
+import {
+  canCancelCompanionJob,
+  canConfirmUnknownEffectRetry,
+  canResumeCompanionJob,
+  canRetryCompanionJob,
+  companionJobToolArgs,
+  isTerminalCompanionJob,
+  isToolCompanionJob,
+  projectCompanionJob,
+} from '@/app/runtime/companionJobProjection'
+import { createRedactedDiagnosticBundle, serializeRedactedDiagnosticBundle } from '@/app/runtime/companionDiagnosticExport'
 
 type TagType = 'success' | 'warning' | 'danger' | 'info' | 'primary'
 type TraceFilter = 'all' | 'planner' | 'steps' | 'scheduler' | 'runtime_loop'
@@ -540,9 +557,21 @@ function companionJobOutcome(job: CompanionEventEnvelope) {
   return projectCompanionJob(job).error
 }
 
+function failureEvidenceLines(job: CompanionEventEnvelope) {
+  const projection = projectCompanionJob(job)
+  if (!isTerminalCompanionJob(job.status) || job.status === 'completed') return []
+  const lines: string[] = []
+  if (job.status === 'unknown_effect' || projection.effectOutcome === 'unknown_effect') lines.push('执行结果未知：该工具可能已经产生影响')
+  if (projection.failureCategory) lines.push(`失败类型：${projection.failureCategory}`)
+  if (projection.failedStep) lines.push(`失败步骤：${projection.failedStep}`)
+  if (projection.completedSteps.length) lines.push(`已完成：${projection.completedSteps.join('、')}`)
+  return lines
+}
+
 function companionJobTagType(status: CompanionJobStatus): TagType {
   if (status === 'completed') return 'success'
   if (status === 'failed') return 'danger'
+  if (status === 'unknown_effect') return 'danger'
   if (status === 'interrupted') return 'warning'
   if (status === 'cancelled') return 'info'
   if (status === 'progress') return 'warning'
@@ -551,7 +580,7 @@ function companionJobTagType(status: CompanionJobStatus): TagType {
 
 function companionJobStatusLabel(status: CompanionJobStatus) {
   const labels: Record<CompanionJobStatus, string> = {
-    created: 'created', running: 'running', progress: 'progress', completed: 'completed', failed: 'failed', cancelled: 'cancelled', interrupted: 'interrupted',
+    created: 'created', running: 'running', progress: 'progress', completed: 'completed', failed: 'failed', cancelled: 'cancelled', interrupted: 'interrupted', unknown_effect: 'unknown effect',
   }
   return labels[status]
 }
@@ -560,37 +589,38 @@ function companionToolName(job: CompanionEventEnvelope) {
   return projectCompanionJob(job).tool
 }
 
-function companionToolArgs(job: CompanionEventEnvelope) {
-  const args = job.data?.args
-  return args && typeof args === 'object' && !Array.isArray(args)
-    ? args as Record<string, unknown>
-    : null
-}
-
-function isToolCompanionJob(job: CompanionEventEnvelope) {
-  return Boolean(companionToolName(job))
-}
-
-function canCancelCompanionJob(job: CompanionEventEnvelope) {
-  return !isTerminalCompanionJob(job.status)
-    && (isToolCompanionJob(job) || job.source === 'scheduler' || job.source === 'heartbeat')
-}
-
-function canRetryCompanionJob(job: CompanionEventEnvelope) {
-  if (job.status !== 'failed' && job.status !== 'cancelled' && job.status !== 'interrupted') return false
-  if (isToolCompanionJob(job)) {
-    return job.data?.retryable !== false && companionToolArgs(job) !== null
+const resumeCompanionJob = async (job: CompanionEventEnvelope) => {
+  if (!canResumeCompanionJob(job)) return
+  const projection = projectCompanionJob(job)
+  addPending(retryingJobIds, job.jobId)
+  try {
+    const result = await systemClient.resumeAgentRecovery({
+      recovery_handle: projection.recoveryHandle,
+      ...(job.workspaceId ? { workspace_id: job.workspaceId } : {}),
+      session_id: job.sessionId,
+      turn_id: job.turnId,
+      failed_step_id: projection.failedStep,
+    })
+    if (result.ok === false) {
+      ElMessage.error('恢复句柄已失效，请重新执行任务')
+      return
+    }
+    ElMessage.success('已从失败步骤继续')
+    await loadCompanionRuntime()
+  } catch {
+    ElMessage.error('无法从失败步骤继续，请稍后重试')
+  } finally {
+    removePending(retryingJobIds, job.jobId)
   }
-  return job.source === 'scheduler' && typeof job.data?.taskId === 'string'
 }
 
-const retryCompanionJob = async (job: CompanionEventEnvelope) => {
-  if (!canRetryCompanionJob(job)) return
+const retryCompanionJob = async (job: CompanionEventEnvelope, unknownEffectAcknowledged = false) => {
+  if (!canRetryCompanionJob(job) && !(unknownEffectAcknowledged && canConfirmUnknownEffectRetry(job))) return
   addPending(retryingJobIds, job.jobId)
   try {
     if (isToolCompanionJob(job)) {
       const toolName = companionToolName(job)
-      const args = companionToolArgs(job)
+      const args = companionJobToolArgs(job)
       if (!toolName || !args) return
       const retryRequestId = `${job.requestId}:retry:${Date.now()}`
       getSocketClient().sendToolCall(retryRequestId, toolName, args, {
@@ -615,6 +645,46 @@ const retryCompanionJob = async (job: CompanionEventEnvelope) => {
   } finally {
     removePending(retryingJobIds, job.jobId)
   }
+}
+
+const confirmUnknownEffectRetry = async (job: CompanionEventEnvelope) => {
+  if (!canConfirmUnknownEffectRetry(job)) return
+  try {
+    await ElMessageBox.confirm(
+      '该工具可能已经产生影响。请先检查目标应用或外部系统的当前状态；仅在确认需要再次执行后继续。',
+      '确认未知执行结果',
+      {
+        confirmButtonText: '已检查，仍要重试',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+  await retryCompanionJob(job, true)
+}
+
+const downloadDiagnosticBundle = () => {
+  if (!selectedTrace.value) return
+  const relatedJobs = companionJobs.value.filter(job => job.requestId === selectedTrace.value?.requestId)
+  const bundle = createRedactedDiagnosticBundle({
+    trace: selectedTrace.value,
+    jobs: relatedJobs,
+  })
+  const serialized = serializeRedactedDiagnosticBundle(bundle)
+  if (!serialized.ok) {
+    ElMessage.error('诊断包含无法安全导出的内容，已阻止下载')
+    return
+  }
+  const blob = new Blob([serialized.json], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `yuizaki-diagnostic-${Date.now()}.json`
+  anchor.click()
+  URL.revokeObjectURL(url)
+  ElMessage.success('脱敏诊断已导出')
 }
 
 const cancelCompanionJob = async (job: CompanionEventEnvelope) => {
@@ -1298,6 +1368,14 @@ onMounted(() => {
 
 .job-progress {
   margin-top: 10px;
+}
+
+.job-failure-evidence {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--yui-text);
+  font-size: 11px;
+  line-height: 1.55;
 }
 
 .experience-grid {

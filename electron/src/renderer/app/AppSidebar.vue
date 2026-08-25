@@ -106,7 +106,9 @@ const props = defineProps<{
 defineEmits<{
   (e: 'open-workspace-settings'): void
 }>()
-const adminExpanded = ref(false)
+// Keep the full desktop tool index visible on first render. The toggle remains
+// available for users who prefer a compact primary-only sidebar.
+const adminExpanded = ref(true)
 
 const adminGroupDefinitions = [
   { id: 'permissions', labelKey: 'sidebar.groups.skillsConnectionsPermissions', canonicalIds: ['tool'], relatedIds: ['plugins', 'agent-governance'] },

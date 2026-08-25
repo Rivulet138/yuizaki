@@ -1,22 +1,137 @@
 from __future__ import annotations
 
 import asyncio
-import math
+import inspect
 import logging
+import math
 import time
 import uuid
+from collections.abc import Awaitable, Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from threading import Lock
 from typing import Any
 
 from ..agent.companion_events import CompanionJobCapacityError, CompanionJobEventLog
-from .companion_policy import apply_behavior_modifiers, build_base_behavior_event, build_behavior_profile, evaluate_proactive_policy
+from ..agent.turn_service import SemanticTurnRequest, TurnCommit, TurnService
+from .companion_policy import (
+    apply_behavior_modifiers,
+    build_base_behavior_event,
+    build_behavior_profile,
+    evaluate_proactive_policy,
+)
 from .heartbeat_goal_store import HeartbeatGoalStore
 
 logger = logging.getLogger(__name__)
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 60
 MAX_HEARTBEAT_GOALS = 32
+OPPORTUNITY_EXPIRY_RETRY_BASE_SECONDS = 0.05
+OPPORTUNITY_EXPIRY_RETRY_MAX_SECONDS = 5.0
+
+
+class HeartbeatOpportunityAcceptanceError(RuntimeError):
+    """Base error for a rejected explicit heartbeat acceptance."""
+
+
+class HeartbeatOpportunityAuthorizationError(HeartbeatOpportunityAcceptanceError):
+    """Raised when policy does not authorize an explicit acceptance."""
+
+
+class HeartbeatOpportunityConflictError(HeartbeatOpportunityAcceptanceError):
+    """Raised when the opportunity identity is stale, cancelled, or mismatched."""
+
+
+class HeartbeatOpportunityUnavailableError(HeartbeatOpportunityAcceptanceError):
+    """Raised when the acceptance bridge is missing a required authority."""
+
+
+@dataclass(frozen=True)
+class HeartbeatOpportunityAcceptance:
+    """Complete caller identity required to accept one heartbeat opportunity."""
+
+    job_id: str
+    request_id: str
+    workspace_id: str
+    session_id: str
+
+    @classmethod
+    def from_mapping(
+        cls,
+        job_id: str,
+        value: Mapping[str, Any],
+    ) -> HeartbeatOpportunityAcceptance:
+        acceptance = cls(
+            job_id=str(job_id or "").strip(),
+            request_id=str(value.get("request_id") or value.get("requestId") or "").strip(),
+            workspace_id=str(value.get("workspace_id") or value.get("workspaceId") or "").strip(),
+            session_id=str(value.get("session_id") or value.get("sessionId") or "").strip(),
+        )
+        if not all((
+            acceptance.job_id,
+            acceptance.request_id,
+            acceptance.workspace_id,
+            acceptance.session_id,
+        )):
+            raise ValueError(
+                "job_id, request_id, workspace_id, and session_id are required"
+            )
+        return acceptance
+
+    @property
+    def identity(self) -> tuple[str, str, str, str]:
+        return (self.job_id, self.request_id, self.workspace_id, self.session_id)
+
+
+HeartbeatOpportunityAuthorizer = Callable[
+    [HeartbeatOpportunityAcceptance, Mapping[str, Any]],
+    bool | Awaitable[bool],
+]
+
+
+@dataclass(frozen=True)
+class HeartbeatAcceptedTurn:
+    acceptance: HeartbeatOpportunityAcceptance
+    commit: TurnCommit
+    replayed_delivery: bool = False
+
+    def response(self) -> dict[str, Any]:
+        commit = self.commit
+        return {
+            "ok": True,
+            "accepted": True,
+            "job_id": self.acceptance.job_id,
+            "request_id": self.acceptance.request_id,
+            "workspace_id": self.acceptance.workspace_id,
+            "session_id": self.acceptance.session_id,
+            "commit_id": commit.idempotency_key,
+            "semantic_fingerprint": commit.semantic_fingerprint,
+            "turn_stage": "committed",
+            "trigger": commit.trigger,
+            "outcome": commit.outcome,
+            "retryable": commit.retryable,
+            "replayed": self.replayed_delivery or commit.replayed,
+            "configured_budget": dict(commit.configured_budget),
+            "consumed_usage": dict(commit.consumed_usage),
+        }
+
+
+@dataclass
+class _HeartbeatAcceptanceClaim:
+    identity: tuple[str, str, str, str]
+    cancellation_event: asyncio.Event = field(default_factory=asyncio.Event)
+    event_loop: asyncio.AbstractEventLoop | None = None
+    phase: str = "claimed"
+    cancellation_outcome: str | None = None
+    cancellation_reason: str | None = None
+
+    def request_cancellation(self, outcome: str, reason: str | None) -> None:
+        self.cancellation_outcome = outcome
+        self.cancellation_reason = reason
+        if self.event_loop is not None:
+            self.event_loop.call_soon_threadsafe(self.cancellation_event.set)
+        else:
+            self.cancellation_event.set()
 
 
 @dataclass
@@ -52,13 +167,22 @@ class HeartbeatScheduler:
         self._job_events = job_event_log
         self._opportunities: dict[str, dict[str, Any]] = {}
         self._resolved_opportunities: dict[str, tuple[str, str]] = {}
+        self._opportunity_acceptance_claims: dict[str, _HeartbeatAcceptanceClaim] = {}
+        self._resolved_acceptances: dict[str, dict[str, Any]] = {}
         self._opportunity_lock = Lock()
         self._goals: dict[str, dict[str, Any]] = {}
         self._goal_lock = Lock()
         self._goal_store = goal_store
         self._opportunity_ttl_seconds = opportunity_ttl_seconds
+        self._proactive_policy_authority = False
+        self._proactive_outcome_observer = None
         self._load_goals()
         self.state.goals = self.goal_snapshot()
+
+    def set_proactive_outcome_observer(self, observer) -> None:
+        """Bind the backend policy authority for proactive opportunity outcomes."""
+        self._proactive_policy_authority = observer is not None
+        self._proactive_outcome_observer = observer
 
     async def start(self):
         if self._task and not self._task.done():
@@ -71,17 +195,13 @@ class HeartbeatScheduler:
         self.state.running = False
         if self._task and not self._task.done():
             self._task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
         self._task = None
         if self._expiry_task and not self._expiry_task.done():
             self._expiry_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._expiry_task
-            except asyncio.CancelledError:
-                pass
         self._expiry_task = None
         self.cancel_opportunities(reason='heartbeat_stopped')
         self._persist_goals()
@@ -90,7 +210,7 @@ class HeartbeatScheduler:
         while self.state.running:
             await asyncio.sleep(self.state.interval_seconds)
             self.state.tick_count += 1
-            self.state.last_tick_at = datetime.now().isoformat()
+            self.state.last_tick_at = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
             self._sync_companion_defaults()
             self._update_persona_state()
             self._emit_behavior_events()
@@ -108,7 +228,13 @@ class HeartbeatScheduler:
             with self._opportunity_lock:
                 self._expiry_wakeup.clear()
                 next_expiry = min(
-                    (float(item['expires_at']) for item in self._opportunities.values()),
+                    (
+                        max(
+                            float(item['expires_at']),
+                            float(item.get('expiry_retry_at') or 0.0),
+                        )
+                        for item in self._opportunities.values()
+                    ),
                     default=None,
                 )
             if next_expiry is None:
@@ -256,7 +382,10 @@ class HeartbeatScheduler:
         if event and event['type'] != recent_same_type:
             event['tick'] = self.state.tick_count
             event['at'] = self.state.last_tick_at
-            if self._emit_opportunity_job(event):
+            # Once the durable proactive policy service is bound, legacy
+            # relationship behavior remains presentation-only and cannot emit
+            # a second, ungoverned proactive opportunity source.
+            if not self._proactive_policy_authority and self._emit_opportunity_job(event):
                 self.state.behavior_events.append(event)
                 self.state.behavior_events = self.state.behavior_events[-20:]
             self.state.last_relationship_snapshot = {
@@ -265,17 +394,52 @@ class HeartbeatScheduler:
                 'behavior_profile': behavior_profile,
             }
 
-    def _emit_opportunity_job(self, event: dict[str, Any]) -> bool:
+    def emit_proactive_opportunity(
+        self,
+        event: dict[str, Any],
+        *,
+        workspace_id: str,
+    ) -> bool:
+        if not self._proactive_policy_authority:
+            return False
+        if str(event.get('source_kind') or '') != 'completed_turn_followup':
+            return False
+        return self._emit_opportunity_job(event, workspace_id=workspace_id)
+
+    def proactive_opportunity_ttl_seconds(self) -> float:
+        if self._opportunity_ttl_seconds is not None:
+            return max(0.01, float(self._opportunity_ttl_seconds))
+        return max(60.0, float(self.state.interval_seconds) * 2.0)
+
+    def proactive_interruptible(self) -> bool:
         if self._job_events is None:
             return True
-        workspace_id = 'default'
-        if self._workspace_id_provider is not None:
+        active = self._job_events.active_job_ids()
+        return not any(job_id not in self._opportunities for job_id in active)
+
+    def _emit_opportunity_job(
+        self,
+        event: dict[str, Any],
+        *,
+        workspace_id: str | None = None,
+    ) -> bool:
+        if self._job_events is None:
+            return True
+        resolved_workspace_id = str(workspace_id or '').strip() or 'default'
+        if workspace_id is None and self._workspace_id_provider is not None:
             try:
-                workspace_id = str(self._workspace_id_provider() or 'default').strip() or 'default'
+                resolved_workspace_id = str(self._workspace_id_provider() or 'default').strip() or 'default'
             except Exception:
                 logger.exception('Failed to resolve heartbeat workspace id')
-        job_id = f"heartbeatjob_{uuid.uuid4().hex[:12]}"
-        request_id = f"heartbeatreq_{uuid.uuid4().hex[:12]}"
+        job_id = str(event.get('job_id') or f"heartbeatjob_{uuid.uuid4().hex[:12]}")
+        request_id = str(event.get('request_id') or f"heartbeatreq_{uuid.uuid4().hex[:12]}")
+        with self._opportunity_lock:
+            existing = self._opportunities.get(job_id)
+            if existing is not None:
+                matches = existing.get('request_id') == request_id
+                if matches:
+                    self._publish_proactive_behavior(existing)
+                return matches
         goal_id = self.register_goal(
             kind=str(event.get('type') or 'proactive'),
             due_at=time.time(),
@@ -286,18 +450,18 @@ class HeartbeatScheduler:
         if not goal_id:
             logger.warning('Heartbeat opportunity skipped because the goal queue is at capacity')
             return False
+        turn_id = f"heartbeat:{job_id}"
+        run_id = f"heartbeat-accept:{job_id}:{request_id}"
         common = {
-            'workspace_id': workspace_id,
-            'session_id': 'heartbeat',
-            'turn_id': f"heartbeat:{self.state.tick_count}",
+            'workspace_id': resolved_workspace_id,
+            'session_id': str(event.get('session_id') or 'heartbeat'),
+            'turn_id': turn_id,
             'job_id': job_id,
             'request_id': request_id,
             'interruption_epoch': 0,
             'source': 'heartbeat',
             'timestamp': time.time(),
-            'conversation_id': f'conversation:{workspace_id}',
-            'operation_id': f'heartbeat:{self.state.tick_count}',
-            'step_index': 0,
+            'run_id': run_id,
         }
         data = {
             'behaviorType': event.get('type'),
@@ -305,10 +469,22 @@ class HeartbeatScheduler:
             'triggerReason': event.get('trigger_reason'),
             'goalId': goal_id,
         }
-        ttl_seconds = self._opportunity_ttl_seconds
-        if ttl_seconds is None:
-            ttl_seconds = max(60.0, float(self.state.interval_seconds) * 2.0)
-        expires_at = time.time() + max(0.01, float(ttl_seconds))
+        for source_key, output_key in (
+            ('frame_id', 'frameId'),
+            ('source_kind', 'sourceKind'),
+            ('source_id', 'sourceId'),
+        ):
+            if event.get(source_key):
+                data[output_key] = event[source_key]
+        requested_expiry = event.get('expires_at')
+        expires_at = (
+            float(requested_expiry)
+            if requested_expiry is not None
+            else time.time() + self.proactive_opportunity_ttl_seconds()
+        )
+        if not math.isfinite(expires_at) or expires_at <= time.time():
+            self._finish_goal(goal_id, 'expired', 'delivery_window_elapsed')
+            return False
         try:
             self._job_events.append(status='created', data={**data, 'phase': 'opportunity_requested'}, **common)
         except CompanionJobCapacityError:
@@ -322,14 +498,178 @@ class HeartbeatScheduler:
         with self._opportunity_lock:
             self._opportunities[job_id] = {
                 **common,
+                'job_id': job_id,
                 'expires_at': expires_at,
                 'goal_id': goal_id,
+                'frame_id': event.get('frame_id'),
+                'source_kind': event.get('source_kind'),
+                'source_id': event.get('source_id'),
+                'content_code': 'completed_turn_followup',
+                'tick': event.get('tick', self.state.tick_count),
+                'at': event.get('at') or datetime.fromtimestamp(
+                    common['timestamp'],
+                    tz=timezone.utc,
+                ).isoformat().replace('+00:00', 'Z'),
                 'data': data,
+                'lifecycle_phase': 'created',
             }
+            pending = dict(self._opportunities[job_id])
+        self._publish_proactive_behavior(pending)
         self._expiry_wakeup.set()
         return True
 
-    def resolve_opportunity(self, *, job_id: str, request_id: str, outcome: str, reason: str | None = None) -> bool:
+    def _publish_proactive_behavior(self, pending: dict[str, Any]) -> None:
+        if pending.get('source_kind') != 'completed_turn_followup':
+            return
+        job_id = str(pending.get('job_id') or '')
+        if not job_id or any(item.get('job_id') == job_id for item in self.state.behavior_events):
+            return
+        behavior = {
+            'type': 'completed_turn_followup',
+            'tick': pending.get('tick', 0),
+            'at': str(pending.get('at') or ''),
+            'job_id': job_id,
+            'request_id': str(pending.get('request_id') or ''),
+            'source_kind': 'completed_turn_followup',
+            'source_id': str(pending.get('source_id') or ''),
+            'trigger_reason': 'completed_turn_followup',
+            'frame_id': str(pending.get('frame_id') or ''),
+            'expires_at': float(pending.get('expires_at') or 0.0),
+            'content_code': 'completed_turn_followup',
+            'content_params': {},
+            # Legacy sinks may still require text. This fixed compatibility
+            # fallback is never derived from a turn, model reply, or tool data;
+            # current renderers localize the closed content_code instead.
+            'message': 'Would you like to continue where we left off?',
+            'proactive_state': {
+                'can_proactively_reach_out': True,
+                'trigger_reason': 'completed_turn_followup',
+            },
+        }
+        self.state.behavior_events.append(behavior)
+        self.state.behavior_events = self.state.behavior_events[-20:]
+
+    def _remove_proactive_behavior(self, job_id: str) -> None:
+        self.state.behavior_events = [
+            item for item in self.state.behavior_events if item.get('job_id') != job_id
+        ]
+
+    def _append_opportunity_phase(
+        self,
+        pending: Mapping[str, Any],
+        *,
+        status: str,
+        phase: str,
+    ) -> None:
+        if self._job_events is None:
+            return
+        common = {
+            key: pending[key]
+            for key in (
+                'workspace_id', 'session_id', 'turn_id', 'job_id', 'request_id',
+                'interruption_epoch', 'source', 'run_id',
+            )
+        }
+        self._job_events.append(
+            status=status,
+            timestamp=time.time(),
+            data={**dict(pending['data']), 'phase': phase},
+            **common,
+        )
+
+    def claim_opportunity_acceptance(
+        self,
+        acceptance: HeartbeatOpportunityAcceptance,
+        *,
+        now: float | None = None,
+    ) -> dict[str, Any] | None:
+        """Atomically fence one accepted opportunity before semantic execution."""
+        current = time.time() if now is None else float(now)
+        with self._opportunity_lock:
+            pending = self._opportunities.get(acceptance.job_id)
+            if pending is None:
+                return None
+            if (
+                str(pending.get('request_id') or '') != acceptance.request_id
+                or str(pending.get('workspace_id') or '') != acceptance.workspace_id
+                or str(pending.get('session_id') or '') != acceptance.session_id
+                or current >= float(pending.get('expires_at') or 0.0)
+                or self._job_events is None
+            ):
+                return None
+            claimed = self._opportunity_acceptance_claims.get(acceptance.job_id)
+            if (
+                not self._job_events.is_active(acceptance.job_id, acceptance.workspace_id)
+                and (claimed is None or claimed.identity != acceptance.identity)
+            ):
+                return None
+            if claimed is not None and claimed.identity != acceptance.identity:
+                return None
+            if claimed is None:
+                self._opportunity_acceptance_claims[acceptance.job_id] = (
+                    _HeartbeatAcceptanceClaim(acceptance.identity)
+                )
+            return dict(pending)
+
+    def begin_opportunity_acceptance_execution(
+        self,
+        acceptance: HeartbeatOpportunityAcceptance,
+        event_loop: asyncio.AbstractEventLoop,
+    ) -> asyncio.Event | None:
+        with self._opportunity_lock:
+            claim = self._opportunity_acceptance_claims.get(acceptance.job_id)
+            if claim is None or claim.identity != acceptance.identity:
+                return None
+            claim.event_loop = event_loop
+            if claim.cancellation_outcome is not None:
+                return None
+            claim.phase = "executing"
+            pending = self._opportunities.get(acceptance.job_id)
+            if (
+                pending is not None
+                and self._job_events is not None
+                and self._job_events.is_active(acceptance.job_id, acceptance.workspace_id)
+                and pending.get('lifecycle_phase') != 'running'
+            ):
+                self._append_opportunity_phase(pending, status='progress', phase='offered')
+                self._append_opportunity_phase(pending, status='running', phase='accepted')
+                self._append_opportunity_phase(pending, status='progress', phase='running')
+                pending['lifecycle_phase'] = 'running'
+            return claim.cancellation_event
+
+    def replayable_opportunity_acceptance(
+        self,
+        acceptance: HeartbeatOpportunityAcceptance,
+    ) -> dict[str, Any] | None:
+        with self._opportunity_lock:
+            resolved = self._resolved_acceptances.get(acceptance.job_id)
+            if resolved is None:
+                return None
+            identity = resolved.get("acceptance_identity")
+            if identity != acceptance.identity:
+                return None
+            return dict(resolved)
+
+    def release_opportunity_acceptance(
+        self,
+        acceptance: HeartbeatOpportunityAcceptance,
+    ) -> bool:
+        with self._opportunity_lock:
+            claim = self._opportunity_acceptance_claims.get(acceptance.job_id)
+            if claim is None or claim.identity != acceptance.identity:
+                return False
+            self._opportunity_acceptance_claims.pop(acceptance.job_id, None)
+            return True
+
+    def resolve_opportunity(
+        self,
+        *,
+        job_id: str,
+        request_id: str,
+        outcome: str,
+        reason: str | None = None,
+        _acceptance_terminal: bool = False,
+    ) -> bool:
         normalized = str(outcome or '').strip().lower()
         if normalized not in {'delivered', 'suppressed', 'expired', 'cancelled', 'failed'}:
             return False
@@ -339,6 +679,14 @@ class HeartbeatScheduler:
                 return resolved == (request_id, normalized)
             pending = self._opportunities.get(job_id)
             if pending is None or pending.get('request_id') != request_id:
+                return False
+            acceptance_claim = self._opportunity_acceptance_claims.get(job_id)
+            if acceptance_claim is not None and not _acceptance_terminal:
+                if acceptance_claim.phase == "sealed":
+                    return False
+                if normalized in {'cancelled', 'expired'}:
+                    acceptance_claim.request_cancellation(normalized, reason)
+                    return True
                 return False
             if self._job_events is None or not self._job_events.is_active(job_id):
                 return False
@@ -355,6 +703,14 @@ class HeartbeatScheduler:
             for key in ('conversation_id', 'operation_id', 'run_id', 'step_index'):
                 if key in pending:
                     common[key] = pending[key]
+            observer = self._proactive_outcome_observer
+            if observer is not None and pending.get('source_kind'):
+                try:
+                    if observer(dict(pending), normalized) is False:
+                        return False
+                except Exception:
+                    logger.exception('Failed to persist proactive opportunity outcome')
+                    return False
             try:
                 self._job_events.append(
                     status=status,
@@ -371,11 +727,143 @@ class HeartbeatScheduler:
                 logger.exception('Failed to append heartbeat opportunity terminal event')
                 return False
             self._opportunities.pop(job_id, None)
+            self._opportunity_acceptance_claims.pop(job_id, None)
+            if _acceptance_terminal:
+                self._resolved_acceptances[job_id] = {
+                    **pending,
+                    "acceptance_identity": (
+                        job_id,
+                        request_id,
+                        str(pending.get("workspace_id") or ""),
+                        str(pending.get("session_id") or ""),
+                    ),
+                }
+                if len(self._resolved_acceptances) > MAX_HEARTBEAT_GOALS * 4:
+                    self._resolved_acceptances.pop(next(iter(self._resolved_acceptances)))
+            self._remove_proactive_behavior(job_id)
             self._resolved_opportunities[job_id] = (request_id, normalized)
             if len(self._resolved_opportunities) > MAX_HEARTBEAT_GOALS * 4:
                 self._resolved_opportunities.pop(next(iter(self._resolved_opportunities)))
             self._finish_goal(str(pending.get('goal_id') or ''), normalized, reason)
         return True
+
+    def finalize_opportunity_acceptance(
+        self,
+        acceptance: HeartbeatOpportunityAcceptance,
+        *,
+        outcome: str,
+        reason: str,
+    ) -> bool:
+        with self._opportunity_lock:
+            claim = self._opportunity_acceptance_claims.get(acceptance.job_id)
+            if claim is None or claim.identity != acceptance.identity:
+                return False
+            claim.phase = "sealed"
+        return self.resolve_opportunity(
+            job_id=acceptance.job_id,
+            request_id=acceptance.request_id,
+            outcome=outcome,
+            reason=reason,
+            _acceptance_terminal=True,
+        )
+
+    def acknowledge_committed_acceptance(
+        self,
+        acceptance: HeartbeatOpportunityAcceptance,
+        *,
+        outcome: str,
+        reason: str,
+    ) -> bool:
+        """Clean accepted opportunity state after the TurnService terminal projection."""
+        normalized = str(outcome or "").strip().lower()
+        if normalized not in {"delivered", "cancelled", "failed"}:
+            return False
+        with self._opportunity_lock:
+            resolved = self._resolved_acceptances.get(acceptance.job_id)
+            if resolved is not None:
+                return resolved.get("acceptance_identity") == acceptance.identity
+            claim = self._opportunity_acceptance_claims.get(acceptance.job_id)
+            pending = self._opportunities.get(acceptance.job_id)
+            if (
+                claim is None
+                or claim.identity != acceptance.identity
+                or pending is None
+                or str(pending.get("request_id") or "") != acceptance.request_id
+            ):
+                return False
+            claim.phase = "sealed"
+            observer = self._proactive_outcome_observer
+            if observer is not None and pending.get("source_kind"):
+                try:
+                    if observer(dict(pending), normalized) is False:
+                        return False
+                except Exception:
+                    logger.exception("Failed to persist proactive opportunity outcome")
+                    return False
+            self._opportunities.pop(acceptance.job_id, None)
+            self._opportunity_acceptance_claims.pop(acceptance.job_id, None)
+            self._resolved_acceptances[acceptance.job_id] = {
+                **pending,
+                "acceptance_identity": acceptance.identity,
+            }
+            if len(self._resolved_acceptances) > MAX_HEARTBEAT_GOALS * 4:
+                self._resolved_acceptances.pop(next(iter(self._resolved_acceptances)))
+            self._remove_proactive_behavior(acceptance.job_id)
+            self._resolved_opportunities[acceptance.job_id] = (
+                acceptance.request_id,
+                normalized,
+            )
+            if len(self._resolved_opportunities) > MAX_HEARTBEAT_GOALS * 4:
+                self._resolved_opportunities.pop(next(iter(self._resolved_opportunities)))
+            self._finish_goal(str(pending.get("goal_id") or ""), normalized, reason)
+        return True
+
+    def finalize_deferred_acceptance_cancellation(
+        self,
+        acceptance: HeartbeatOpportunityAcceptance,
+    ) -> bool:
+        with self._opportunity_lock:
+            claim = self._opportunity_acceptance_claims.get(acceptance.job_id)
+            if (
+                claim is None
+                or claim.identity != acceptance.identity
+                or claim.cancellation_outcome is None
+            ):
+                return False
+            outcome = claim.cancellation_outcome
+            reason = claim.cancellation_reason or "acceptance_cancelled"
+        return self.finalize_opportunity_acceptance(
+            acceptance,
+            outcome=outcome,
+            reason=reason,
+        )
+
+    def cancel_proactive_opportunities(
+        self,
+        *,
+        workspace_id: str,
+        source_kind: str,
+        reason: str,
+        frame_id: str | None = None,
+    ) -> int:
+        with self._opportunity_lock:
+            pending = [
+                (job_id, str(item.get('request_id') or ''))
+                for job_id, item in self._opportunities.items()
+                if item.get('workspace_id') == workspace_id
+                and item.get('source_kind') == source_kind
+                and (frame_id is None or item.get('frame_id') == frame_id)
+            ]
+        resolved = 0
+        for job_id, request_id in pending:
+            if self.resolve_opportunity(
+                job_id=job_id,
+                request_id=request_id,
+                outcome='cancelled',
+                reason=reason,
+            ):
+                resolved += 1
+        return resolved
 
     @staticmethod
     def _goal_priority(event: dict[str, Any]) -> int:
@@ -547,15 +1035,36 @@ class HeartbeatScheduler:
 
     def expire_opportunities(self, now: float | None = None) -> int:
         current = time.time() if now is None else float(now)
+        retry_clock = time.time()
         with self._opportunity_lock:
             expired = [
                 (job_id, str(item['request_id']))
                 for job_id, item in self._opportunities.items()
                 if current >= float(item['expires_at'])
+                and retry_clock >= float(item.get('expiry_retry_at') or 0.0)
             ]
+        resolved = 0
         for job_id, request_id in expired:
-            self.resolve_opportunity(job_id=job_id, request_id=request_id, outcome='expired', reason='delivery_window_elapsed')
-        return len(expired)
+            if self.resolve_opportunity(
+                job_id=job_id,
+                request_id=request_id,
+                outcome='expired',
+                reason='delivery_window_elapsed',
+            ):
+                resolved += 1
+                continue
+            with self._opportunity_lock:
+                pending = self._opportunities.get(job_id)
+                if pending is None or pending.get('request_id') != request_id:
+                    continue
+                attempts = int(pending.get('expiry_retry_attempts') or 0) + 1
+                backoff = min(
+                    OPPORTUNITY_EXPIRY_RETRY_MAX_SECONDS,
+                    OPPORTUNITY_EXPIRY_RETRY_BASE_SECONDS * (2 ** min(attempts, 7)),
+                )
+                pending['expiry_retry_attempts'] = attempts
+                pending['expiry_retry_at'] = retry_clock + backoff
+        return resolved
 
     def cancel_opportunities(self, *, reason: str) -> int:
         with self._opportunity_lock:
@@ -607,7 +1116,10 @@ class HeartbeatScheduler:
             elif current['energy'] <= 0.35:
                 event_kind = 'care_signal'
         self._relationship_memory_writer({
-            'text': f"結崎 {companion.get('name', companion.get('id'))} 产生了一次关系事件：kind={event_kind}, mood={current['mood']}, affinity={current['affinity']:.3f}, energy={current['energy']:.3f}",
+            'text': f"結崎 {companion.get('name', companion.get('id'))} 产生了一次关系事件: kind={event_kind}, mood={current['mood']}, affinity={current['affinity']:.3f}, energy={current['energy']:.3f}",
+            'kind': event_kind,
+            'source_id': str(companion['id']),
+            'evidence': current,
             'type': 'event',
             'layer': 'profile',
             'importance': 0.85,
@@ -624,3 +1136,201 @@ class HeartbeatScheduler:
             },
         })
         self.state.last_relationship_snapshot = current
+
+
+class HeartbeatOpportunityTurnBridge:
+    """Execute only explicitly accepted opportunities through TurnService."""
+
+    def __init__(
+        self,
+        *,
+        scheduler: HeartbeatScheduler | None,
+        turn_service: TurnService | None,
+        authorizer: HeartbeatOpportunityAuthorizer | None,
+    ) -> None:
+        self._scheduler = scheduler
+        self._turn_service = turn_service
+        self._authorizer = authorizer
+        self._lock = asyncio.Lock()
+        self._completed: dict[tuple[str, str, str, str], TurnCommit] = {}
+
+    async def accept(
+        self,
+        acceptance: HeartbeatOpportunityAcceptance,
+    ) -> HeartbeatAcceptedTurn:
+        if self._scheduler is None or self._turn_service is None:
+            raise HeartbeatOpportunityUnavailableError(
+                "heartbeat scheduler and TurnService are required"
+            )
+        if self._authorizer is None:
+            raise HeartbeatOpportunityUnavailableError(
+                "heartbeat opportunity authorization is required"
+            )
+
+        async with self._lock:
+            cached = self._completed.get(acceptance.identity)
+            if cached is not None:
+                self._finalize_commit(acceptance, cached)
+                return HeartbeatAcceptedTurn(
+                    acceptance=acceptance,
+                    commit=cached,
+                    replayed_delivery=True,
+                )
+
+            pending = self._scheduler.claim_opportunity_acceptance(acceptance)
+            if pending is None:
+                replayable = self._scheduler.replayable_opportunity_acceptance(acceptance)
+                if replayable is None:
+                    raise HeartbeatOpportunityConflictError(
+                        "heartbeat opportunity is not active for this identity"
+                    )
+                await self._authorize(acceptance, replayable)
+                commit = await self._turn_service.execute_heartbeat(
+                    self._turn_request(acceptance, replayable)
+                )
+                self._completed[acceptance.identity] = commit
+                return HeartbeatAcceptedTurn(
+                    acceptance=acceptance,
+                    commit=commit,
+                    replayed_delivery=True,
+                )
+
+            try:
+                await self._authorize(acceptance, pending)
+            except HeartbeatOpportunityAuthorizationError:
+                self._scheduler.release_opportunity_acceptance(acceptance)
+                raise
+
+            cancellation_event = self._scheduler.begin_opportunity_acceptance_execution(
+                acceptance,
+                asyncio.get_running_loop(),
+            )
+            if cancellation_event is None:
+                self._scheduler.finalize_deferred_acceptance_cancellation(acceptance)
+                raise HeartbeatOpportunityConflictError(
+                    "heartbeat opportunity expired or was cancelled"
+                )
+
+            semantic_request = self._turn_request(acceptance, pending)
+            execute_task = asyncio.create_task(
+                self._turn_service.execute_heartbeat(semantic_request)
+            )
+            cancellation_task = asyncio.create_task(cancellation_event.wait())
+            try:
+                done, _pending_tasks = await asyncio.wait(
+                    {execute_task, cancellation_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if cancellation_task in done and execute_task not in done:
+                    execute_task.cancel()
+                try:
+                    commit = await execute_task
+                except asyncio.CancelledError:
+                    # A cancellation can land after the durable commit while
+                    # its required projections are still acknowledging. The
+                    # same identity reloads that commit and resumes ACKs; it
+                    # must never rerun the semantic pipeline.
+                    commit = await self._turn_service.execute_heartbeat(
+                        semantic_request
+                    )
+            except BaseException:
+                self._scheduler.release_opportunity_acceptance(acceptance)
+                raise
+            finally:
+                cancellation_task.cancel()
+                await asyncio.gather(cancellation_task, return_exceptions=True)
+
+            self._completed[acceptance.identity] = commit
+            if len(self._completed) > MAX_HEARTBEAT_GOALS * 4:
+                self._completed.pop(next(iter(self._completed)))
+            self._finalize_commit(acceptance, commit)
+            return HeartbeatAcceptedTurn(acceptance=acceptance, commit=commit)
+
+    def _finalize_commit(
+        self,
+        acceptance: HeartbeatOpportunityAcceptance,
+        commit: TurnCommit,
+    ) -> None:
+        terminal_outcome = {
+            "completed": "delivered",
+            "cancelled": "cancelled",
+            "failed": "failed",
+            "unknown_effect": "failed",
+        }[commit.outcome]
+        if self._scheduler is None:
+            return
+        finalized = self._scheduler.acknowledge_committed_acceptance(
+            acceptance,
+            outcome=terminal_outcome,
+            reason=f"accepted_turn_{commit.outcome}",
+        )
+        if (
+            not finalized
+            and self._scheduler.replayable_opportunity_acceptance(acceptance) is None
+        ):
+            logger.warning(
+                "Heartbeat turn commit could not finalize its acceptance: %s",
+                acceptance.job_id,
+            )
+
+    async def _authorize(
+        self,
+        acceptance: HeartbeatOpportunityAcceptance,
+        pending: Mapping[str, Any],
+    ) -> None:
+        if self._authorizer is None:
+            raise HeartbeatOpportunityUnavailableError(
+                "heartbeat opportunity authorization is required"
+            )
+        try:
+            authorized = self._authorizer(acceptance, pending)
+            if inspect.isawaitable(authorized):
+                authorized = await authorized
+        except Exception as exc:
+            raise HeartbeatOpportunityAuthorizationError(
+                "heartbeat opportunity authorization failed"
+            ) from exc
+        if authorized is not True:
+            raise HeartbeatOpportunityAuthorizationError(
+                "heartbeat opportunity was denied by policy"
+            )
+
+    @staticmethod
+    def _turn_request(
+        acceptance: HeartbeatOpportunityAcceptance,
+        pending: Mapping[str, Any],
+    ) -> SemanticTurnRequest:
+        turn_id = f"heartbeat:{acceptance.job_id}"
+        run_id = f"heartbeat-accept:{acceptance.job_id}:{acceptance.request_id}"
+        permission_scope = f"heartbeat:{acceptance.workspace_id}"
+        return SemanticTurnRequest(
+            session_id=acceptance.session_id,
+            workspace_id=acceptance.workspace_id,
+            request_id=acceptance.request_id,
+            turn_id=turn_id,
+            generation_id=f"generation:{turn_id}",
+            messages=({
+                "role": "user",
+                "content": "Continue from the explicitly accepted heartbeat opportunity.",
+            },),
+            context_options={
+                "max_tokens": 512,
+                "permission_scope": permission_scope,
+            },
+            extra={
+                "job_id": acceptance.job_id,
+                "run_id": run_id,
+                "acceptance_id": run_id,
+                "permission_scope": permission_scope,
+                "heartbeat_opportunity": {
+                    "job_id": acceptance.job_id,
+                    "request_id": acceptance.request_id,
+                    "workspace_id": acceptance.workspace_id,
+                    "session_id": acceptance.session_id,
+                    "goal_id": str(pending.get("goal_id") or ""),
+                    "source_kind": str(pending.get("source_kind") or "heartbeat"),
+                    "source_id": str(pending.get("source_id") or ""),
+                },
+                "configured_budget": {"output_tokens": 512},
+            },
+        )

@@ -8,7 +8,6 @@ from .backend import MemoryBackend, MemoryBackendStatus
 from .schema import MemorySearchFilters
 from .vector_store import Document, is_memory_recallable
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -179,6 +178,26 @@ class IndexedMemoryBackend:
                 filters=filters,
             )
         return authoritative
+
+    def get_score_components(
+        self,
+        query: str,
+        doc_id: str,
+        recency_weight: float,
+        quality_weight: float,
+    ) -> dict[str, float] | None:
+        for backend in (self.index, self.authority):
+            getter = getattr(backend, "get_score_components", None)
+            if not callable(getter):
+                continue
+            components = getter(query, doc_id, recency_weight, quality_weight)
+            if isinstance(components, dict):
+                return {
+                    str(key): float(value)
+                    for key, value in components.items()
+                    if isinstance(value, (int, float))
+                }
+        return None
 
     def get_status(self) -> MemoryBackendStatus:
         authority_status = self.authority.get_status()

@@ -33,6 +33,35 @@ def test_update_workspace_rejects_missing_companion(tmp_path: Path) -> None:
         repo.close()
 
 
+def test_save_message_pair_is_idempotent_by_turn_identity(tmp_path: Path) -> None:
+    repo = _make_repo(tmp_path)
+    try:
+        first = repo.save_message_pair(
+            "session-1",
+            "hello",
+            "hi",
+            workspace_id="default",
+            turn_idempotency_key="turn:stable",
+        )
+        replay = repo.save_message_pair(
+            "session-1",
+            "hello",
+            "hi",
+            workspace_id="default",
+            turn_idempotency_key="turn:stable",
+        )
+        assert [record["id"] for record in first] == [record["id"] for record in replay]
+        loaded = repo.get_message_pair_by_turn_idempotency_key(
+            "turn:stable",
+            workspace_id="default",
+        )
+        assert loaded is not None
+        assert [record["id"] for record in loaded] == [record["id"] for record in first]
+        assert len(repo.get_chat_history("session-1")) == 2
+    finally:
+        repo.close()
+
+
 def test_update_workspace_accepts_existing_companion(tmp_path: Path) -> None:
     repo = _make_repo(tmp_path)
     try:

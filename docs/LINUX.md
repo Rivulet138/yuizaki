@@ -6,12 +6,25 @@ Linux 启动器面向 x86_64 系统，要求 Python 3.11-3.13、Node.js 22.13+�
 
 The Linux launcher targets x86_64 systems with Python 3.11-3.13, Node.js 22.13+, a graphical desktop session, and an Electron-compatible X11 or Wayland environment.
 
+On Wayland, the Electron shell selects Chromium's Ozone Wayland backend automatically when launched through the packaged app or Go supervisor. Native global input hooks and host-level desktop actions remain capability-gated because compositor policy may deny them; ordinary window interaction and the tray remain supported.
+
+在 Wayland 下，通过安装包或 Go 监督启动器启动时，Electron 外壳会自动选择 Chromium Ozone Wayland 后端。由于合成器策略可能拒绝全局输入钩子，宿主级桌面操作仍按能力检查失败关闭；普通窗口交互和托盘保持支持。
+
 ## Install and start / 安装与启动
 
+Build the native Linux executable from any supported development host. It is
+written to the Yuizaki repository root as `YuizakiLauncher`:
+
 ```bash
-./install.sh core
-./start.sh --check
-./start.sh
+cd electron
+npm run prepare:launcher:linux
+cd ..
+chmod +x YuizakiLauncher
+```
+
+```bash
+./YuizakiLauncher --check
+./YuizakiLauncher
 ```
 
 默认会启动 MCP。使用 `--no-mcp` 可运行精简模式，使用 `--dev-renderer` 可通过 Vite 提供渲染器服务。

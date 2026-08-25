@@ -3,6 +3,26 @@ from .capability_registry import CapabilityRegistry
 from .orchestration_registry import OrchestrationRegistry
 from .action_compiler import compile_action_envelope
 from .agent_trace_store import AgentTraceStore
+from .computer_use import (
+    ComputerUseAction,
+    ComputerUseAdapter,
+    ComputerUseAdapterResult,
+    ComputerUseController,
+    ComputerUseError,
+    ComputerUseScope,
+    ComputerUseStopFence,
+    register_computer_use_tools,
+)
+from .desktop_actions import (
+    DesktopActionAdapter,
+    DesktopActionController,
+    DesktopActionError,
+    DesktopActionScope,
+    DesktopActionStopFence,
+    NativeDesktopResult,
+    NativeWindowTarget,
+    register_desktop_action_tools,
+)
 from .context import AgentPipelineResult, AgentRequestContext, AgentRuntimeBindings, bind_runtime_bindings, get_runtime_bindings
 from .mcp_manager import MCPManager, MCPServerConfig
 from .planner import PlanResult, PlanStep, Planner
@@ -17,6 +37,40 @@ from .step_executor import StepExecutor
 from .tool_loop import run_tool_loop
 from .tool_registry import ToolDefinition, ToolRegistry
 from .tool_result import ToolResultEnvelope
+from .turn_service import (
+    SemanticTurnRequest,
+    TurnCommit,
+    TurnClaimLostError,
+    TurnIdentityConflictError,
+    TurnPorts,
+    TurnService,
+)
+from .turn_store import TurnCommitStore
+from .turn_outbox import TurnOutboxDispatcher, TurnOutboxWorker, TurnProjection
+from .perception import (
+    CallablePerceptionProvider,
+    PerceptionEvidence,
+    PerceptionPermissionError,
+    PerceptionCancelledError,
+    PerceptionConsentAuthority,
+    PerceptionProviderError,
+    PerceptionProviderRegistry,
+    PerceptionProviderSpec,
+    PerceptionRequest,
+    redact_sensitive_payload,
+)
+from .host_perception import (
+    AuthorizedHostPerceptionProvider,
+    CallableHostPerceptionCollector,
+    HostPerceptionCollector,
+    authorized_host_spec,
+)
+from .runtime_context import (
+    RuntimeContext,
+    RuntimeContextConflictError,
+    RuntimeContextNotFoundError,
+    RuntimeContextRegistry,
+)
 
 __all__ = [
     "ToolExecutor",
@@ -24,6 +78,22 @@ __all__ = [
     "OrchestrationRegistry",
     "compile_action_envelope",
     "AgentTraceStore",
+    "ComputerUseAction",
+    "ComputerUseAdapter",
+    "ComputerUseAdapterResult",
+    "ComputerUseController",
+    "ComputerUseError",
+    "ComputerUseScope",
+    "ComputerUseStopFence",
+    "register_computer_use_tools",
+    "DesktopActionAdapter",
+    "DesktopActionController",
+    "DesktopActionError",
+    "DesktopActionScope",
+    "DesktopActionStopFence",
+    "NativeDesktopResult",
+    "NativeWindowTarget",
+    "register_desktop_action_tools",
     "MCPManager",
     "MCPServerConfig",
     "AgentScheduler",
@@ -55,5 +125,33 @@ __all__ = [
     "ToolDefinition",
     "ToolRegistry",
     "ToolResultEnvelope",
+    "SemanticTurnRequest",
+    "TurnCommit",
+    "TurnClaimLostError",
+    "TurnIdentityConflictError",
+    "TurnPorts",
+    "TurnService",
+    "TurnCommitStore",
+    "TurnOutboxDispatcher",
+    "TurnOutboxWorker",
+    "TurnProjection",
+    "CallablePerceptionProvider",
+    "PerceptionEvidence",
+    "PerceptionPermissionError",
+    "PerceptionCancelledError",
+    "PerceptionConsentAuthority",
+    "PerceptionProviderError",
+    "PerceptionProviderRegistry",
+    "PerceptionProviderSpec",
+    "PerceptionRequest",
+    "redact_sensitive_payload",
+    "AuthorizedHostPerceptionProvider",
+    "CallableHostPerceptionCollector",
+    "HostPerceptionCollector",
+    "authorized_host_spec",
+    "RuntimeContext",
+    "RuntimeContextConflictError",
+    "RuntimeContextNotFoundError",
+    "RuntimeContextRegistry",
     "create_agent_runtime",
 ]

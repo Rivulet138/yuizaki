@@ -22,17 +22,8 @@ Do not commit API keys, personal data, chat history, screenshots, model weights,
 
 ## Development setup / 开发环境
 
-Windows:
-
-```powershell
-.\install.bat full
-```
-
-Linux:
-
-```bash
-./install.sh full
-```
+Build the root launcher from `electron` with `npm run prepare:launcher`; its
+first run installs the selected `core` or `full` profile automatically.
 
 Use the project Python environment in `python/.venv`. Keep provider credentials in the ignored `python/.env` file.
 

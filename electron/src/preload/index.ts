@@ -24,6 +24,24 @@ import type {
   InputBindingSnapshot,
 } from '../shared/input-bindings'
 import type { E2EActivationProof, E2ERendererControlRequest } from '../shared/e2e-preload'
+import type {
+  ComputerUseBridgeResult,
+  ComputerUseBackendResponse,
+  ComputerUsePreviewRequest,
+} from '../shared/computer-use'
+import type { PerceptionBridgeResult } from '../shared/authorized-perception'
+import type {
+  DesktopActionResult,
+  DesktopActionStatus,
+} from '../shared/desktop-action'
+import type {
+  OnboardingProbeRequest,
+  OnboardingReadinessSnapshot,
+  OnboardingRepairRequest,
+  OnboardingRetryRequest,
+  OnboardingCancelRunRequest,
+  OnboardingDeviceProbeReport,
+} from '../shared/onboarding-readiness'
 
 const callbackMap = new WeakMap<(...args: any[]) => void, (...args: any[]) => void>()
 
@@ -87,6 +105,21 @@ const createSandboxedE2EApi = () => {
 const e2eApi = createSandboxedE2EApi()
 
 const api = {
+  onboarding: Object.freeze({
+    snapshot: () => ipcRenderer.invoke('onboarding:snapshot') as Promise<OnboardingReadinessSnapshot>,
+    startBackend: () => ipcRenderer.invoke('onboarding:start-backend') as Promise<OnboardingReadinessSnapshot>,
+    cancelBackend: () => ipcRenderer.invoke('onboarding:cancel-backend') as Promise<OnboardingReadinessSnapshot>,
+    cancelRun: (request: OnboardingCancelRunRequest) =>
+      ipcRenderer.invoke('onboarding:cancel-run', request) as Promise<OnboardingReadinessSnapshot>,
+    reportDeviceProbe: (report: OnboardingDeviceProbeReport) =>
+      ipcRenderer.invoke('onboarding:report-device-probe', report) as Promise<OnboardingReadinessSnapshot>,
+    runProbe: (request: OnboardingProbeRequest = {}) =>
+      ipcRenderer.invoke('onboarding:run-probe', request) as Promise<OnboardingReadinessSnapshot>,
+    retry: (request: OnboardingRetryRequest) =>
+      ipcRenderer.invoke('onboarding:retry', request) as Promise<OnboardingReadinessSnapshot>,
+    runRepair: (request: OnboardingRepairRequest) =>
+      ipcRenderer.invoke('onboarding:run-repair', request) as Promise<OnboardingReadinessSnapshot>,
+  }),
   python: {
     start: () => ipcRenderer.invoke('python:start'),
     stop: () => ipcRenderer.invoke('python:stop'),
@@ -187,8 +220,6 @@ const api = {
     }>>,
     capture: (displayIndex: number = 0, options: ScreenCaptureEncodingOptions = {}) =>
       ipcRenderer.invoke('screen:capture', { displayIndex, ...options }),
-    ocr: (displayIndex: number = 0) =>
-      ipcRenderer.invoke('screen:ocr', { displayIndex }),
     captureRegion: (
       x: number,
       y: number,
@@ -209,12 +240,6 @@ const api = {
 
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
-  },
-
-  auth: {
-    hasSummaryAdminToken: () => ipcRenderer.invoke('auth:has-summary-admin-token') as Promise<{ hasToken: boolean }>,
-    setSummaryAdminToken: (token: string) => ipcRenderer.invoke('auth:set-summary-admin-token', token) as Promise<{ ok: boolean; hasToken: boolean }>,
-    clearSummaryAdminToken: () => ipcRenderer.invoke('auth:clear-summary-admin-token') as Promise<{ ok: boolean }>,
   },
 
   runtime: {
@@ -244,6 +269,35 @@ const api = {
       ipcRenderer.invoke('input-bindings:update', patch) as Promise<InputBindingSnapshot>,
     reset: () => ipcRenderer.invoke('input-bindings:reset') as Promise<InputBindingSnapshot>,
   },
+
+  computerUse: {
+    preview: (payload: ComputerUsePreviewRequest) =>
+      ipcRenderer.invoke('computer-use:preview', payload) as Promise<ComputerUseBridgeResult<ComputerUseBackendResponse>>,
+    emergencyStop: () =>
+      ipcRenderer.invoke('computer-use:emergency-stop') as Promise<ComputerUseBridgeResult<ComputerUseBackendResponse>>,
+    status: () =>
+      ipcRenderer.invoke('computer-use:status') as Promise<ComputerUseBridgeResult<ComputerUseBackendResponse>>,
+  },
+  desktopAction: Object.freeze({
+    status: () =>
+      ipcRenderer.invoke('desktop-action:status') as Promise<DesktopActionResult<DesktopActionStatus>>,
+    enable: () =>
+      ipcRenderer.invoke('desktop-action:enable') as Promise<DesktopActionResult<DesktopActionStatus>>,
+    disable: () =>
+      ipcRenderer.invoke('desktop-action:disable') as Promise<DesktopActionResult<DesktopActionStatus>>,
+    rearm: () =>
+      ipcRenderer.invoke('desktop-action:rearm') as Promise<DesktopActionResult<DesktopActionStatus>>,
+    manageAuthorization: () =>
+      ipcRenderer.invoke('desktop-action:manage-authorization') as Promise<DesktopActionResult<DesktopActionStatus>>,
+  }),
+  perception: Object.freeze({
+    collectScreenshot: (sessionId: string) => ipcRenderer.invoke('perception:collect-screenshot', sessionId) as Promise<PerceptionBridgeResult>,
+    collectTargetWindow: (sessionId: string) => ipcRenderer.invoke('perception:collect-target-window', sessionId) as Promise<PerceptionBridgeResult>,
+    collectActiveApplication: (sessionId: string) => ipcRenderer.invoke('perception:collect-active-application', sessionId) as Promise<PerceptionBridgeResult>,
+    collectSelectedFile: (sessionId: string) => ipcRenderer.invoke('perception:collect-selected-file', sessionId) as Promise<PerceptionBridgeResult>,
+    collectClipboard: (sessionId: string) => ipcRenderer.invoke('perception:collect-clipboard', sessionId) as Promise<PerceptionBridgeResult>,
+    collectOcr: (sessionId: string) => ipcRenderer.invoke('perception:collect-ocr', sessionId) as Promise<PerceptionBridgeResult>,
+  }),
 
   on: (channel: string, callback: (...args: any[]) => void) => {
     const validChannels = [

@@ -83,4 +83,67 @@ describe('real preload E2E activation wiring', () => {
     expect(electron.invoke).toHaveBeenCalledWith('pet:complete-adjustment')
     expect(electron.invoke).toHaveBeenCalledWith('pet:cancel-adjustment')
   })
+
+  it('exposes only explicit computer-use request methods', async () => {
+    const api = await loadPreload(undefined) as {
+      computerUse: {
+        preview: (payload: unknown) => Promise<unknown>
+        emergencyStop: () => Promise<unknown>
+        status: () => Promise<unknown>
+      }
+    }
+    const payload = { actions: [{ type: 'move', x: 10, y: 20 }] }
+
+    await api.computerUse.preview(payload)
+    await api.computerUse.emergencyStop()
+    await api.computerUse.status()
+
+    expect(electron.invoke).toHaveBeenCalledWith('computer-use:preview', payload)
+    expect(electron.invoke).toHaveBeenCalledWith('computer-use:emergency-stop')
+    expect(electron.invoke).toHaveBeenCalledWith('computer-use:status')
+    expect(api.computerUse).not.toHaveProperty('invoke')
+    expect(api.computerUse).not.toHaveProperty('on')
+  })
+
+  it('exposes only fixed opaque-session perception methods', async () => {
+    const api = await loadPreload(undefined) as {
+      perception: Record<string, (sessionId: string) => Promise<unknown>>
+    }
+    const calls = [
+      ['collectScreenshot', 'perception:collect-screenshot'],
+      ['collectTargetWindow', 'perception:collect-target-window'],
+      ['collectActiveApplication', 'perception:collect-active-application'],
+      ['collectSelectedFile', 'perception:collect-selected-file'],
+      ['collectClipboard', 'perception:collect-clipboard'],
+      ['collectOcr', 'perception:collect-ocr'],
+    ] as const
+    for (const [method, channel] of calls) {
+      await api.perception[method]?.('opaque-session')
+      expect(electron.invoke).toHaveBeenCalledWith(channel, 'opaque-session')
+    }
+    expect(api.perception).not.toHaveProperty('issue')
+    expect(api.perception).not.toHaveProperty('invoke')
+    expect(api.perception).not.toHaveProperty('collect')
+  })
+
+  it('does not expose the legacy screen OCR bypass', async () => {
+    const api = await loadPreload(undefined) as { screen: Record<string, unknown> }
+
+    expect(api.screen).not.toHaveProperty('ocr')
+  })
+
+  it('exposes a closed onboarding bootstrap surface', async () => {
+    const api = await loadPreload(undefined) as { onboarding: Record<string, (...args: unknown[]) => Promise<unknown>> }
+    expect(Object.keys(api.onboarding).sort()).toEqual([
+      'cancelBackend', 'cancelRun', 'reportDeviceProbe', 'retry', 'runProbe', 'runRepair', 'snapshot', 'startBackend',
+    ])
+    await api.onboarding.snapshot?.()
+    await api.onboarding.runProbe?.({ probeIds: ['host.runtime'] })
+    await api.onboarding.runRepair?.({ actionId: 'backend.retry' })
+    expect(electron.invoke).toHaveBeenCalledWith('onboarding:snapshot')
+    expect(electron.invoke).toHaveBeenCalledWith('onboarding:run-probe', { probeIds: ['host.runtime'] })
+    expect(electron.invoke).toHaveBeenCalledWith('onboarding:run-repair', { actionId: 'backend.retry' })
+    expect(api.onboarding).not.toHaveProperty('invoke')
+    expect(api.onboarding).not.toHaveProperty('command')
+  })
 })

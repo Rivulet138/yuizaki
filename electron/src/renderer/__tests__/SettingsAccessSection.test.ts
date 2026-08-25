@@ -18,9 +18,6 @@ const ElButtonStub = defineComponent({
 
 const mountSection = () => mount(SettingsAccessSection, {
   props: {
-    adminToken: '',
-    adminTokenConfigured: false,
-    adminTokenLoading: false,
     backendToken: '',
     backendTokenConfigured: true,
     backendTokenBusy: false,
@@ -44,18 +41,12 @@ describe('SettingsAccessSection', () => {
     const wrapper = mountSection()
     const inputs = wrapper.findAll('input')
 
-    await inputs[0].setValue('admin-secret')
+    await inputs[0].setValue('backend-secret')
     await inputs[0].trigger('keyup', { key: 'Enter' })
-    await inputs[1].setValue('backend-secret')
-    await inputs[1].trigger('keyup', { key: 'Enter' })
-    await wrapper.get('[data-testid="clear-admin-token"]').trigger('click')
     await wrapper.get('[data-testid="reset-backend-token"]').trigger('click')
 
-    expect(wrapper.emitted('update:adminToken')).toEqual([['admin-secret']])
-    expect(wrapper.emitted('save-admin-token')).toEqual([[]])
     expect(wrapper.emitted('update:backendToken')).toEqual([['backend-secret']])
     expect(wrapper.emitted('save-backend-token')).toEqual([[]])
-    expect(wrapper.emitted('clear-admin-token')).toEqual([[]])
     expect(wrapper.emitted('reset-backend-token')).toEqual([[]])
   })
 })

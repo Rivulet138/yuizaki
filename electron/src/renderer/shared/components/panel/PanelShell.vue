@@ -6,6 +6,7 @@
           <slot name="status" />
         </div>
         <h2 class="panel-shell__title">{{ title }}</h2>
+        <p v-if="subtitle" class="panel-shell__subtitle">{{ subtitle }}</p>
       </div>
 
       <div v-if="$slots.actions" class="panel-shell__actions">
@@ -22,6 +23,7 @@
 <script setup lang="ts">
 withDefaults(defineProps<{
   title: string
+  subtitle?: string
   tone?: 'companion' | 'admin' | 'neutral'
   density?: 'comfortable' | 'compact'
   minimal?: boolean
@@ -98,6 +100,14 @@ withDefaults(defineProps<{
   font-weight: 700;
   color: var(--yui-text);
   line-height: 1.25;
+}
+
+.panel-shell__subtitle {
+  max-width: 68ch;
+  margin: 0;
+  color: var(--yui-muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .panel-shell__body {

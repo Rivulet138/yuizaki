@@ -76,4 +76,64 @@ describe('RealtimeVoiceEventBridge', () => {
     expect(firstDispose).toHaveBeenCalledTimes(1)
     expect(secondDispose).toHaveBeenCalledTimes(1)
   })
+
+  it('keeps bounded redacted latency samples from realtime stages', () => {
+    const listeners = new Map<string, (payload: never) => void>()
+    const source: RealtimeVoiceEventSource = {
+      on: (event, listener) => {
+        listeners.set(event, listener as (payload: never) => void)
+        return () => listeners.delete(event)
+      },
+    }
+    const bridge = new RealtimeVoiceEventBridge(source)
+    bridge.listen('transcript-stable', () => undefined)
+    bridge.listen('playback-start', () => undefined)
+    listeners.get('transcript-stable')?.({ elapsedMs: 210 } as never)
+    listeners.get('playback-start')?.({ elapsedMs: 380 } as never)
+
+    const snapshot = bridge.getDiagnosticSnapshot()
+    expect(snapshot.sampleCount).toBe(2)
+    expect(snapshot.stages.asr_final).toEqual({
+      count: 1, p50Ms: 210, p95Ms: 210, errorCount: 0,
+      recoveryAttempts: 0, recoverySuccesses: 0, recoveryP50Ms: null, recoveryP95Ms: null,
+      playbackUnderruns: 0,
+    })
+    expect(snapshot.stages.first_audio).toEqual({
+      count: 1, p50Ms: 380, p95Ms: 380, errorCount: 0,
+      recoveryAttempts: 0, recoverySuccesses: 0, recoveryP50Ms: null, recoveryP95Ms: null,
+      playbackUnderruns: 0,
+    })
+    expect(JSON.stringify(snapshot)).not.toContain('elapsedMs')
+  })
+
+  it('records explicit playback recovery outcomes without treating unknown events as success', () => {
+    const listeners = new Map<string, (payload: never) => void>()
+    const source: RealtimeVoiceEventSource = {
+      on: (event, listener) => {
+        listeners.set(event, listener as (payload: never) => void)
+        return () => listeners.delete(event)
+      },
+    }
+    const bridge = new RealtimeVoiceEventBridge(source)
+    bridge.listen('playback-recovery', () => undefined)
+    listeners.get('playback-recovery')?.({
+      elapsedMs: 240,
+      ok: false,
+      recovered: false,
+      recoveryLatencyMs: 240,
+      playbackUnderruns: 2,
+    } as never)
+
+    expect(bridge.getDiagnosticSnapshot().stages.playback_recovery).toEqual({
+      count: 1,
+      p50Ms: 240,
+      p95Ms: 240,
+      errorCount: 1,
+      recoveryAttempts: 1,
+      recoverySuccesses: 0,
+      recoveryP50Ms: 240,
+      recoveryP95Ms: 240,
+      playbackUnderruns: 2,
+    })
+  })
 })

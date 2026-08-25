@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import uuid
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
-import logging
 
 import numpy as np
 
 from .backend import MemoryBackendStatus, MemorySearchIncompleteError
+from .reranker import lexical_overlap_score, normalize_scores
 from .schema import MemorySearchFilters
 from .vector_store import (
     Document,
@@ -18,8 +19,10 @@ from .vector_store import (
     _embed_document,
     _embed_query,
     _memory_type_filter_values,
+    memory_recency_score,
+    memory_score_components,
+    memory_score_weights,
 )
-from .reranker import lexical_overlap_score, normalize_scores
 
 logger = logging.getLogger(__name__)
 QDRANT_SEARCH_SCAN_LIMIT = 4096
@@ -317,8 +320,6 @@ class QdrantVectorStore(VectorStore):
         quality_weight: float = 0.15,
         filters: MemorySearchFilters | None = None,
     ) -> list[tuple[Document, float]]:
-        from datetime import datetime
-
         candidates = self.search(
             query=query,
             top_k=max(top_k * 8, self._reranker_candidate_count if getattr(self._reranker, "enabled", False) else top_k),
@@ -337,9 +338,11 @@ class QdrantVectorStore(VectorStore):
                 learned_enabled = False
                 logger.warning("Learned Qdrant reranker unavailable; using hybrid scores: %s", exc)
 
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         scored: list[tuple[float, Document]] = []
         allowed_types = _memory_type_filter_values(memory_types)
+        score_components = self._score_component_cache()
+        score_components.clear()
 
         for position, (doc, semantic_score) in enumerate(candidates):
             doc_type = str(doc.metadata.get("type") or "")
@@ -348,31 +351,31 @@ class QdrantVectorStore(VectorStore):
             if not self._doc_matches_filters(doc, filters=filters):
                 continue
 
-            timestamp_str = str(doc.metadata.get("timestamp") or "").strip()
-            if timestamp_str:
-                try:
-                    timestamp = datetime.fromisoformat(timestamp_str)
-                    age_days = (now - timestamp).days
-                    recency_score = 1.0 / (1 + age_days / 30.0)
-                except Exception:
-                    recency_score = 0.5
-            else:
-                recency_score = 0.5
+            recency_score = memory_recency_score(doc.metadata, now=now)
 
             quality_score = float(doc.metadata.get("quality_score") or doc.metadata.get("confidence") or 0.6)
             quality_score = max(0.0, min(1.0, quality_score))
             lexical_score = lexical_overlap_score(query, doc.text)
             learned_score = float(learned_scores[position]) if learned_enabled and position < len(learned_scores) else 0.0
-            learned_weight = 0.45 if learned_enabled else 0.0
-            lexical_weight = 0.10
-            semantic_weight = max(0.0, 1 - recency_weight - quality_weight - lexical_weight - learned_weight)
-            final_score = (
-                float(semantic_score) * semantic_weight
-                + lexical_score * lexical_weight
-                + learned_score * learned_weight
-                + recency_score * recency_weight
-                + quality_score * quality_weight
+            weights = memory_score_weights(
+                recency_weight=recency_weight,
+                quality_weight=quality_weight,
+                learned_enabled=learned_enabled,
             )
+            components = memory_score_components(
+                semantic=float(semantic_score),
+                lexical=lexical_score,
+                learned=learned_score,
+                recency=recency_score,
+                quality=quality_score,
+                semantic_weight=weights["semantic"],
+                lexical_weight=weights["lexical"],
+                learned_weight=weights["learned"],
+                recency_weight=weights["recency"],
+                quality_weight=weights["quality"],
+            )
+            final_score = components["final"]
+            score_components[(query, doc.id, recency_weight, quality_weight)] = components
             scored.append((final_score, doc))
 
         scored.sort(reverse=True, key=lambda item: item[0])

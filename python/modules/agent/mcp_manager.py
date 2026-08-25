@@ -1710,7 +1710,7 @@ class MCPManager:
                 parameters=item.input_schema or {"type": "object", "properties": {}},
                 handler=_mcp_tool_handler,
                 risk_level="medium",
-                require_confirm=True,
+                require_confirm=False,
                 tags=["mcp", f"mcp-server:{server_name}", f"mcp-tool:{remote_tool_name}", "contrib:capability"],
                 scopes=[f"mcp:{server_name}", f"mcp:{server_name}:{remote_tool_name}"],
             ))
@@ -1737,7 +1737,7 @@ class MCPManager:
             parameters={"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
             handler=_browser_open_page,
             risk_level="medium",
-            require_confirm=True,
+            require_confirm=False,
             tags=["mcp", "browser", "playwright"],
             scopes=["mcp:playwright", "browser:open_page"],
         ))

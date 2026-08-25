@@ -14,6 +14,8 @@
       </SettingsSectionHeader>
     </template>
 
+    <p class="asr-action-note">{{ t('settings.asr.actionHint') }}</p>
+
     <el-alert
       v-if="discoveryError"
       class="discovery-error"
@@ -163,6 +165,17 @@ const emitField = (field: keyof AsrSettings, value: unknown) => {
 <style scoped>
 .discovery-error {
   margin-bottom: 14px;
+}
+
+.asr-action-note {
+  margin: 0 0 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--yui-border);
+  border-radius: 8px;
+  color: var(--yui-muted);
+  background: var(--yui-surface-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .form-grid {

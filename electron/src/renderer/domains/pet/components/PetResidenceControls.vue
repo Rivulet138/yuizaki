@@ -64,6 +64,7 @@
           <span>{{ state.doNotDisturb ? t('common.enabled') : t('common.disabled') }}</span>
         </div>
         <el-switch
+          data-testid="pet-dnd-toggle"
           :model-value="state.doNotDisturb"
           :disabled="loading"
           :aria-label="t('pet.residence.dnd')"

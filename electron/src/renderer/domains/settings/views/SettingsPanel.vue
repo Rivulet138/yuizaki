@@ -1,5 +1,8 @@
 <template>
-  <PanelShell :title="t('settings.title')" tone="admin">
+  <PanelShell :title="t('settings.title')" :subtitle="t('settings.subtitle')" tone="admin">
+    <template #actions>
+      <el-button plain @click="openOnboarding">{{ t('onboarding.reopen') }}</el-button>
+    </template>
     <AsyncState :loading="settingsRequest.loading && !settings" :empty="!settings && !settingsRequest.error" :empty-text="t('settings.empty')">
       <div class="settings-panel">
         <el-alert
@@ -19,18 +22,13 @@
         />
 
         <SettingsAccessSection
-          v-model:admin-token="adminTokenInput"
           v-model:backend-token="backendTokenInput"
-          :admin-token-configured="adminTokenConfigured"
-          :admin-token-loading="adminTokenRequest.loading"
           :backend-token-configured="backendTokenConfigured"
           :backend-token-busy="backendTokenBusy"
           :backend-token-status-known="Boolean(backendTokenStatus)"
           :backend-token-source-label="backendTokenSourceLabel"
           :backend-token-preview="backendTokenPreview"
           :backend-token-requires-restart="backendTokenRequiresRestart"
-          @save-admin-token="saveAdminToken"
-          @clear-admin-token="clearAdminToken"
           @save-backend-token="saveBackendToken"
           @reset-backend-token="resetBackendToken"
         />
@@ -48,6 +46,7 @@
                       <el-tag :type="hasLlmEndpoint ? 'success' : 'warning'">{{ hasLlmEndpoint ? t('common.configured') : t('settings.tts.incomplete') }}</el-tag>
                       <el-tag :type="hasLlmApiKey ? 'success' : 'info'">{{ llmApiKeyTagLabel }}</el-tag>
                       <el-tag :type="llmDetectionTagType">{{ llmDetectionStatus }}</el-tag>
+                      <el-tag :type="llmRuntimeTagType">{{ llmRuntimeLabel }}</el-tag>
                       <el-tag v-if="llmModels.length" type="info">{{ t('settings.llm.modelsCount', { count: llmModels.length }) }}</el-tag>
                     </div>
                     <div class="llm-actions">
@@ -74,6 +73,10 @@
                           <el-icon><Refresh /></el-icon>
                           {{ t('settings.llm.detectModels') }}
                         </el-button>
+                        <el-button plain :loading="llmStatusRequest.loading" @click="refreshLlmStatus">
+                          <el-icon><Refresh /></el-icon>
+                          {{ t('settings.llm.refreshStatus') }}
+                        </el-button>
                         <el-button type="primary" plain :loading="testLlmRequest.loading" :disabled="!hasLlmEndpoint" @click="handleTestLlm">
                           <el-icon><Connection /></el-icon>
                           {{ t('settings.llm.test') }}
@@ -84,20 +87,31 @@
                 </div>
               </template>
               <input ref="llmImportInput" class="sr-only-input" type="file" accept="application/json,.json" @change="handleLlmImportFile" />
+              <p class="panel-action-note">{{ t('settings.llm.actionHint') }}</p>
               <el-form label-position="top" @submit.prevent>
                 <div class="llm-workspace">
                   <aside class="llm-profile-rail">
                     <div class="profile-rail-head">
                       <strong>{{ t('settings.llm.profileTitle') }}</strong>
                     </div>
-                    <el-radio-group v-model="llmProviderPreset" class="provider-stack" :aria-label="t('settings.llm.providerPreset')" @change="applyLlmProviderPreset">
-                      <el-radio-button v-for="option in llmProviderOptionRows" :key="option.value" :label="option.label" :value="option.value">
+                    <div class="provider-stack" role="radiogroup" :aria-label="t('settings.llm.providerPreset')">
+                      <button
+                        v-for="option in llmProviderOptionRows"
+                        :key="option.value"
+                        class="provider-option"
+                        :class="{ 'is-active': option.value === llmProviderPreset }"
+                        type="button"
+                        role="radio"
+                        :aria-checked="option.value === llmProviderPreset"
+                        :aria-label="`${option.label}: ${option.status}`"
+                        @click="applyLlmProviderPreset(option.value)"
+                      >
                         <span class="provider-option-label">
                           <strong>{{ option.label }}</strong>
                           <small :class="`status-${option.statusClass}`">{{ option.status }}</small>
                         </span>
-                      </el-radio-button>
-                    </el-radio-group>
+                      </button>
+                    </div>
                     <el-button class="profile-reset-button" plain @click="resetCurrentLlmProfile">
                       <el-icon><Refresh /></el-icon>
                       {{ t('settings.llm.resetProfile') }}
@@ -228,6 +242,10 @@
                         <el-icon><Refresh /></el-icon>
                         {{ t('settings.tts.refreshStatus') }}
                       </el-button>
+                      <el-button plain :loading="warmupTtsRequest.loading" :disabled="!hasTtsVoice" @click="handleWarmupTts">
+                        <el-icon><Refresh /></el-icon>
+                        {{ t('settings.tts.warmup') }}
+                      </el-button>
                       <el-button plain :loading="localDiscoveryRequest.loading" @click="applyLocalTtsDiscovery">
                         <el-icon><Connection /></el-icon>
                         {{ t('settings.discovery.detectLocal') }}
@@ -244,6 +262,7 @@
                   </div>
                 </div>
               </template>
+              <p class="panel-action-note">{{ t('settings.tts.actionHint') }}</p>
               <el-form label-position="top" @submit.prevent>
                 <div class="voice-main-form single">
                   <div v-if="ttsStatus || ttsStatusRequest.loading || ttsStatusRequest.error" class="tts-runtime-panel">
@@ -368,6 +387,7 @@
               @discover-local="applyLocalMemoryDiscovery"
               @rebuild="handleRebuildMemoryIndex"
             />
+            <SettingsProductMetricsConsentSection class="product-metrics-consent-card" />
           </el-tab-pane>
 
           <el-tab-pane :label="t('settings.tabs.summary')" name="summary" lazy>
@@ -475,6 +495,12 @@
               </el-collapse>
             </el-card>
           </el-tab-pane>
+          <el-tab-pane :label="t('settings.tabs.portable')" name="portable" lazy>
+            <PortableSettingsSection
+              :before-import="flushPendingSave"
+              @imported="handlePortableImported"
+            />
+          </el-tab-pane>
         </el-tabs>
       </div>
     </AsyncState>
@@ -503,23 +529,26 @@ import type { ManagedModelResourceId, ManagedResourceMetadata, ModelResourceStat
 import { DEFAULT_VAD_MIN_SILENCE_MS } from '@/../shared/runtime-defaults'
 import type { InputBindingSettingsPatch, KeyboardShortcutAction, MouseSideButton } from '@/../shared/input-bindings'
 import { useSettingsDomain } from '../composables/useSettingsDomain'
+import { openOnboarding } from '@/domains/onboarding/onboardingEvents'
 import SettingsAsrSection, { type AsrSettings } from '../components/SettingsAsrSection.vue'
 import SettingsAccessSection from '../components/SettingsAccessSection.vue'
 import SettingsLlmCapabilityPanel from '../components/SettingsLlmCapabilityPanel.vue'
 import SettingsLlmVisionSection from '../components/SettingsLlmVisionSection.vue'
 import SettingsMemorySection, { type MemorySettings } from '../components/SettingsMemorySection.vue'
+import SettingsProductMetricsConsentSection from '../components/SettingsProductMetricsConsentSection.vue'
 import SettingsSummarySection, { type SummarySettings } from '../components/SettingsSummarySection.vue'
 import SettingsSvcSection, { type SvcSettings } from '../components/SettingsSvcSection.vue'
 import SettingsDesktopInputSection from '../components/SettingsDesktopInputSection.vue'
 import SettingsInterfaceSection from '../components/SettingsInterfaceSection.vue'
 import SettingsResourcesSection from '../components/SettingsResourcesSection.vue'
+import PortableSettingsSection from '../components/PortableSettingsSection.vue'
 import { isLocalLlmEndpoint, normalizeOpenAiBaseUrl, shouldAutoDiscoverLlmModels } from '../llmDiscovery'
 import { LLM_PROVIDER_BASE_URLS, LLM_PROVIDER_ENDPOINTS, choosePreferredLlmModel, getLlmProviderOptions, inferLlmProviderPreset } from '../llmProviders'
 import type { LlmProviderPreset } from '../llmProviders'
 import { isPlainRecord, normalizeResourceStatus, normalizeStorageStatus } from '../resourceStatus'
 
 type SaveTimeout = ReturnType<typeof window.setTimeout>
-type SettingSectionId = 'llm' | 'voice' | 'asr' | 'memory' | 'summary' | 'svc' | 'resources' | 'system'
+type SettingSectionId = 'llm' | 'voice' | 'asr' | 'memory' | 'summary' | 'svc' | 'resources' | 'system' | 'portable'
 type QualityScorerMode = 'rule' | 'llm'
 type SettingsPatch = Record<string, unknown>
 type AlertType = 'success' | 'warning' | 'info' | 'error'
@@ -594,6 +623,8 @@ const {
   updateRequest,
   llmModels,
   llmModelsRequest,
+  llmStatus,
+  llmStatusRequest,
   ttsStatus,
   ttsStatusRequest,
   testLlmRequest,
@@ -601,6 +632,7 @@ const {
   loadSettings,
   patchSettings,
   loadLlmModels,
+  loadLlmStatus,
   loadTtsStatus,
   testLlm,
   testTts,
@@ -732,9 +764,6 @@ const setKey = ref('')
 const setValueJson = ref('')
 const llmModelStatus = ref('')
 const llmModelAutoSelected = ref(false)
-const adminTokenInput = ref('')
-const adminTokenConfigured = ref(false)
-const adminTokenRequest = useDomainRequest<{ ok?: boolean; hasToken: boolean }>()
 const backendTokenInput = ref('')
 const backendTokenStatus = ref<BackendTokenStatusResponse | null>(null)
 const backendTokenStatusRequest = useDomainRequest<BackendTokenStatusResponse>()
@@ -1227,6 +1256,23 @@ const llmDetectionTagType = computed(() => {
   if (llmModelsRequest.error) return 'danger'
   if (llmModelsRequest.loading) return 'warning'
   if (llmModels.value.length) return 'success'
+  return 'info'
+})
+
+const llmRuntimeLabel = computed(() => {
+  if (llmStatusRequest.loading) return t('settings.llm.runtime.reading')
+  if (llmStatusRequest.error) return t('settings.llm.runtime.failed')
+  const snapshot = llmStatus.value
+  if (!snapshot) return t('settings.llm.runtime.unread')
+  if (snapshot.preconnect_running) return t('settings.llm.runtime.checking')
+  if (snapshot.available && snapshot.last_preconnect_ok !== false) return t('settings.llm.runtime.ready')
+  return t('settings.llm.runtime.offline')
+})
+
+const llmRuntimeTagType = computed<TagType>(() => {
+  if (llmStatusRequest.error || (llmStatus.value && !llmStatus.value.available)) return 'danger'
+  if (llmStatusRequest.loading || llmStatus.value?.preconnect_running) return 'warning'
+  if (llmStatus.value?.available && llmStatus.value.last_preconnect_ok !== false) return 'success'
   return 'info'
 })
 
@@ -1957,71 +2003,12 @@ const exportLlmProfile = async () => {
   }
 }
 
-const refreshAdminTokenStatus = async () => {
-  const result = await adminTokenRequest.execute(() => settingsClient.adminTokenStatus())
-  if (result) {
-    adminTokenConfigured.value = result.hasToken
-  }
-  return result
-}
-
 const refreshBackendTokenStatus = async () => {
   const result = await backendTokenStatusRequest.execute(() => settingsClient.backendTokenStatus())
   if (result) {
     backendTokenStatus.value = result
   }
   return result
-}
-
-const saveAdminToken = async () => {
-  const token = adminTokenInput.value.trim()
-  if (!token) {
-    ElMessage.warning(t('settings.messages.adminRequired'))
-    return
-  }
-
-  const result = await adminTokenRequest.execute(async () => {
-    const response = await settingsClient.setAdminToken(token)
-    return { ok: response.ok, hasToken: Boolean(response.hasToken) }
-  })
-  if (!result?.ok) return
-
-  adminTokenConfigured.value = result.hasToken
-  adminTokenInput.value = ''
-  ElMessage.success(t('settings.messages.adminUnlocked'))
-  if (!(await flushPendingSave())) return
-  await loadSettings()
-  hydrateForm()
-  if (!settingsRequest.error) {
-    await loadSettingsAdmin()
-    scheduleLlmModelDiscovery()
-  }
-}
-
-const clearAdminToken = async () => {
-  try {
-    await ElMessageBox.confirm(
-      t('settings.confirm.clearAdminTokenMessage'),
-      t('settings.confirm.clearAdminTokenTitle'),
-      {
-        confirmButtonText: t('common.clear'),
-        cancelButtonText: t('common.cancel'),
-        type: 'warning',
-      },
-    )
-  } catch {
-    return
-  }
-
-  const result = await adminTokenRequest.execute(async () => {
-    const response = await settingsClient.clearAdminToken()
-    return { ok: response.ok, hasToken: false }
-  })
-  if (!result?.ok) return
-
-  adminTokenConfigured.value = false
-  adminTokenInput.value = ''
-  ElMessage.success(t('settings.messages.adminCleared'))
 }
 
 const saveBackendToken = async () => {
@@ -2072,6 +2059,10 @@ const handleTestLlm = async () => {
   }
 }
 
+const refreshLlmStatus = async () => {
+  await loadLlmStatus()
+}
+
 const refreshTtsStatus = async (): Promise<TtsRuntimeStatusResponse | null> => {
   return loadTtsStatus()
 }
@@ -2082,6 +2073,21 @@ const queueTtsWarmup = async () => {
   const result = await warmupTts()
   if (result?.ok) {
     void loadTtsStatus()
+  }
+}
+
+const handleWarmupTts = async () => {
+  if (!hasTtsVoice.value) {
+    ElMessage.warning(t('settings.messages.ttsWarmupNeedsConfig'))
+    return
+  }
+  if (!(await flushPendingSave())) return
+  const result = await warmupTts()
+  await refreshTtsStatus()
+  if (result?.ok || result?.queued) {
+    ElMessage.success(t('settings.messages.ttsWarmupQueued'))
+  } else if (result) {
+    ElMessage.error(result.message || t('settings.messages.ttsWarmupFailed'))
   }
 }
 
@@ -2343,6 +2349,12 @@ const removeModelResource = async (
   } finally {
     resourceActionKey.value = ''
   }
+}
+
+const handlePortableImported = async (): Promise<void> => {
+  await loadSettings()
+  hydrateForm()
+  await loadSettingsAdmin()
 }
 
 const handleLlmModelChange = (value: string | number | boolean) => {
@@ -2745,13 +2757,13 @@ const hydrateForm = () => {
 
 onMounted(async () => {
   document.addEventListener('visibilitychange', handleResourceProgressVisibility)
-  await Promise.all([refreshAdminTokenStatus(), refreshBackendTokenStatus(), inputBindingsStore.load()])
+  await Promise.all([refreshBackendTokenStatus(), inputBindingsStore.load()])
   await loadSettings()
   hydrateForm()
   if (!settingsRequest.error) {
     await loadSettingsAdmin()
   }
-  await Promise.all([refreshResourcePanel(), loadTtsStatus()])
+  await Promise.all([refreshResourcePanel(), loadTtsStatus(), loadLlmStatus()])
   void queueTtsWarmup()
   scheduleLlmModelDiscovery({ manual: false })
 })

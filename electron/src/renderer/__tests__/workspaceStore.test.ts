@@ -75,9 +75,6 @@ describe('workspaceStore active workspace switching', () => {
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify({ workspace_id: 'ws-2' }),
-          headers: expect.objectContaining({
-            Authorization: 'Bearer backend-token',
-          }),
         }),
       )
     })

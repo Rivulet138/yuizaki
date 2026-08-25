@@ -102,6 +102,30 @@ export interface LlmSettingsResponse {
     profiles?: Record<string, LlmProviderProfile>
 }
 
+export interface LlmRuntimeStatusResponse {
+  available: boolean
+  provider?: string
+  protocol?: string
+  model?: string
+  model_limits?: {
+    context_window_tokens?: number | null
+    max_output_tokens?: number | null
+  }
+  effective_context_max_tokens?: number | null
+  effective_default_max_output_tokens?: number | null
+  preconnect_running?: boolean
+  preconnect_cooldown_seconds?: number
+  preconnect_cooldown_remaining_ms?: number
+  preconnect_attempts?: number
+  preconnect_failures?: number
+  last_preconnect_elapsed_ms?: number | null
+  last_preconnect_ok?: boolean | null
+  last_preconnect_reached_upstream?: boolean | null
+  last_preconnect_http_status?: number | null
+  last_preconnect_error?: string | null
+  message?: string
+}
+
 export interface TtsSettingsResponse {
     genie_character: string
     genie_model_dir: string
@@ -161,15 +185,6 @@ export interface SettingsMetadataResponse {
 export interface SettingValueResponse {
   key: string
   value: unknown
-}
-
-export interface AdminTokenStatusResponse {
-  hasToken: boolean
-}
-
-export interface AdminTokenMutationResponse {
-  ok: boolean
-  hasToken?: boolean
 }
 
 export interface BackendTokenStatusResponse {
@@ -321,6 +336,7 @@ export const settingsClient = {
       body: JSON.stringify(payload),
     }),
   testLlm: async () => requestJson<TestConnectionResponse>(`${CONTROL_ORIGIN}/api/settings/test/llm`, { method: 'POST', timeoutMs: MODEL_CONNECTION_TIMEOUT_MS }),
+  llmStatus: async () => requestJson<LlmRuntimeStatusResponse>(`${CONTROL_ORIGIN}/api/settings/llm/status`),
   listLlmModels: async (payload: LlmModelsRequest) => requestJson<LlmModelsResponse>(`${CONTROL_ORIGIN}/api/settings/llm/models`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -341,13 +357,6 @@ export const settingsClient = {
     body: JSON.stringify(value),
   }),
   deleteSetting: async (key: string) => requestJson<SettingsMutationResponse>(`${CONTROL_ORIGIN}/api/settings/${encodeURIComponent(key)}`, { method: 'DELETE' }),
-  adminTokenStatus: async () => requestJson<AdminTokenStatusResponse>(`${CONTROL_ORIGIN}/api/system/admin-token`),
-  setAdminToken: async (token: string) => requestJson<AdminTokenMutationResponse>(`${CONTROL_ORIGIN}/api/system/admin-token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token }),
-  }),
-  clearAdminToken: async () => requestJson<{ ok: boolean }>(`${CONTROL_ORIGIN}/api/system/admin-token`, { method: 'DELETE' }),
   backendTokenStatus: async () => requestJson<BackendTokenStatusResponse>(`${CONTROL_ORIGIN}/api/system/backend-token`),
   setBackendToken: async (token: string) => requestJson<BackendTokenMutationResponse>(`${CONTROL_ORIGIN}/api/system/backend-token`, {
     method: 'POST',

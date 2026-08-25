@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import inspect
-from typing import Any, Callable
+import os
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException
-
-from modules.system.api_security import require_bearer_token, resolve_admin_authorization
+from fastapi import APIRouter, HTTPException
 
 
 def _custom_stdio_mcp_enabled() -> bool:
@@ -21,10 +20,22 @@ def create_system_router(
     health_handler: Callable[[], Any],
     readiness_handler: Callable[[], Any],
     system_status_handler: Callable[[], Any],
+    onboarding_readiness_state_handler: Callable[[], Any] | None = None,
+    onboarding_readiness_run_handler: Callable[[list[str] | None], Any] | None = None,
+    onboarding_readiness_retry_handler: Callable[[str, list[str] | None], Any] | None = None,
+    onboarding_readiness_cancel_handler: Callable[[str], Any] | None = None,
+    onboarding_readiness_action_handler: Callable[[str], Any] | None = None,
     heartbeat_status_handler: Callable[[], Any] | None = None,
     companion_runtime_handler: Callable[[int], Any] | None = None,
     companion_opportunity_outcome_handler: Callable[[str, dict[str, Any]], Any] | None = None,
+    heartbeat_opportunity_accept_handler: Callable[[str, dict[str, Any]], Any] | None = None,
     heartbeat_goal_cancel_handler: Callable[[str, dict[str, Any]], Any] | None = None,
+    proactive_settings_get_handler: Callable[[], Any] | None = None,
+    proactive_settings_patch_handler: Callable[[dict[str, Any]], Any] | None = None,
+    activity_frames_list_handler: Callable[[int], Any] | None = None,
+    activity_frames_rebuild_handler: Callable[[dict[str, Any]], Any] | None = None,
+    activity_frame_delete_handler: Callable[[str], Any] | None = None,
+    proactive_feedback_handler: Callable[[dict[str, Any]], Any] | None = None,
     capabilities_state_handler: Callable[[], Any] | None = None,
     orchestration_state_handler: Callable[[], Any] | None = None,
     active_workspace_handler: Callable[[dict[str, Any]], Any] | None = None,
@@ -40,6 +51,8 @@ def create_system_router(
     cancel_schedule_handler: Callable[[str], Any] | None = None,
     agent_trace_handler: Callable[[], Any] | None = None,
     experience_metrics_handler: Callable[[], Any] | None = None,
+    product_metrics_consent_handler: Callable[[], Any] | None = None,
+    product_metrics_consent_patch_handler: Callable[[bool], Any] | None = None,
     mcp_state_handler: Callable[[], Any] | None = None,
     toggle_mcp_handler: Callable[[str, bool], Any] | None = None,
     add_mcp_handler: Callable[[str, str, str, bool, str | None, list[str] | None, dict[str, str] | None, dict[str, str] | None], Any] | None = None,
@@ -52,7 +65,6 @@ def create_system_router(
     imported_skills_state_handler: Callable[[], Any] | None = None,
     save_imported_skills_handler: Callable[[list[dict[str, Any]]], Any] | None = None,
     remove_imported_skills_handler: Callable[[list[str]], Any] | None = None,
-    get_admin_token: Callable[[], str] | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["system"])
 
@@ -64,11 +76,6 @@ def create_system_router(
         if inspect.isawaitable(result):
             return await result
         return result
-
-    def _require_admin(authorization: str | None):
-        if get_admin_token is None:
-            return None
-        return require_bearer_token(authorization, get_admin_token())
 
     def _handler_accepts_mcp_headers(handler: Callable[..., Any]) -> bool:
         try:
@@ -185,6 +192,78 @@ def create_system_router(
     async def readiness():
         return await _call_handler(readiness_handler)
 
+    def _strict_payload(payload: dict[str, Any], allowed: set[str]) -> None:
+        extra = set(payload) - allowed
+        if extra:
+            raise HTTPException(status_code=422, detail=f"Unknown fields: {', '.join(sorted(extra))}")
+
+    def _probe_ids(payload: dict[str, Any]) -> list[str] | None:
+        value = payload.get("probeIds")
+        if value is None:
+            return None
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            raise HTTPException(status_code=422, detail="probeIds must be a list of strings")
+        return value
+
+    if onboarding_readiness_state_handler is not None:
+        @router.get("/api/system/onboarding/readiness")
+        async def onboarding_readiness_state():
+            return await _call_handler(onboarding_readiness_state_handler)
+
+    if onboarding_readiness_run_handler is not None:
+        @router.post("/api/system/onboarding/readiness/run")
+        async def onboarding_readiness_run(payload: dict[str, Any] | None = None):
+            body = payload or {}
+            _strict_payload(body, {"probeIds"})
+            try:
+                return await _call_handler(onboarding_readiness_run_handler, _probe_ids(body))
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if onboarding_readiness_retry_handler is not None:
+        @router.post("/api/system/onboarding/readiness/retry")
+        async def onboarding_readiness_retry(payload: dict[str, Any]):
+            _strict_payload(payload, {"runId", "probeIds"})
+            run_id = payload.get("runId")
+            if not isinstance(run_id, str) or not run_id.strip():
+                raise HTTPException(status_code=422, detail="runId is required")
+            try:
+                return await _call_handler(onboarding_readiness_retry_handler, run_id, _probe_ids(payload))
+            except LookupError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if onboarding_readiness_cancel_handler is not None:
+        @router.post("/api/system/onboarding/readiness/cancel")
+        async def onboarding_readiness_cancel(payload: dict[str, Any]):
+            _strict_payload(payload, {"runId"})
+            run_id = payload.get("runId")
+            if not isinstance(run_id, str) or not run_id.strip():
+                raise HTTPException(status_code=422, detail="runId is required")
+            try:
+                return await _call_handler(onboarding_readiness_cancel_handler, run_id)
+            except LookupError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    if onboarding_readiness_action_handler is not None:
+        @router.post("/api/system/onboarding/readiness/action")
+        async def onboarding_readiness_action(payload: dict[str, Any]):
+            _strict_payload(payload, {"actionId"})
+            action_id = payload.get("actionId")
+            if not isinstance(action_id, str) or not action_id.strip():
+                raise HTTPException(status_code=422, detail="actionId is required")
+            if action_id != "mcp.refresh_existing":
+                raise HTTPException(status_code=422, detail="unknown readiness actionId")
+            try:
+                return await _call_handler(onboarding_readiness_action_handler, action_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @router.get("/system/status")
     async def system_status():
         return await _call_handler(system_status_handler)
@@ -204,10 +283,67 @@ def create_system_router(
         async def companion_opportunity_outcome(job_id: str, payload: dict[str, Any]):
             return await _call_handler(companion_opportunity_outcome_handler, job_id, payload, offload=True)
 
+    if heartbeat_opportunity_accept_handler is not None:
+        @router.post("/api/system/heartbeat/opportunities/{job_id:path}/accept")
+        async def heartbeat_opportunity_accept(job_id: str, payload: dict[str, Any]):
+            return await _call_handler(heartbeat_opportunity_accept_handler, job_id, payload)
+
     if heartbeat_goal_cancel_handler is not None:
         @router.post("/api/system/heartbeat/goals/{goal_id:path}/cancel")
         async def heartbeat_goal_cancel(goal_id: str, payload: dict[str, Any] | None = None):
             return await _call_handler(heartbeat_goal_cancel_handler, goal_id, payload or {}, offload=True)
+
+    if proactive_settings_get_handler is not None:
+        @router.get("/api/system/proactive/settings")
+        async def proactive_settings_get():
+            return await _call_handler(proactive_settings_get_handler, offload=True)
+
+    if proactive_settings_patch_handler is not None:
+        @router.patch("/api/system/proactive/settings")
+        async def proactive_settings_patch(payload: dict[str, Any]):
+            try:
+                return await _call_handler(proactive_settings_patch_handler, payload, offload=True)
+            except LookupError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if activity_frames_list_handler is not None:
+        @router.get("/api/system/activity-frames")
+        async def activity_frames_list(limit: int = 50):
+            if not 1 <= limit <= 200:
+                raise HTTPException(status_code=422, detail="limit must be between 1 and 200")
+            return await _call_handler(activity_frames_list_handler, limit, offload=True)
+
+    if activity_frames_rebuild_handler is not None:
+        @router.post("/api/system/activity-frames/rebuild")
+        async def activity_frames_rebuild(
+            payload: dict[str, Any] | None = None,
+        ):
+            try:
+                return await _call_handler(activity_frames_rebuild_handler, payload or {}, offload=True)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if activity_frame_delete_handler is not None:
+        @router.delete("/api/system/activity-frames/{frame_id:path}")
+        async def activity_frame_delete(frame_id: str):
+            try:
+                return await _call_handler(activity_frame_delete_handler, frame_id, offload=True)
+            except LookupError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if proactive_feedback_handler is not None:
+        @router.post("/api/system/proactive/feedback")
+        async def proactive_feedback(payload: dict[str, Any]):
+            try:
+                return await _call_handler(proactive_feedback_handler, payload, offload=True)
+            except LookupError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     if capabilities_state_handler is not None:
         @router.get("/api/system/capabilities")
@@ -226,124 +362,98 @@ def create_system_router(
 
     if permissions_handler is not None:
         @router.get("/api/system/permissions")
-        async def permissions_state(authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def permissions_state():
             return await _call_handler(permissions_handler, offload=True)
 
     if revoke_permission_handler is not None:
         @router.delete("/api/system/permissions/{tool_name:path}")
-        async def revoke_permission(tool_name: str, authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def revoke_permission(tool_name: str):
             return await _call_handler(revoke_permission_handler, tool_name, offload=True)
 
     if clear_permissions_handler is not None:
         @router.delete("/api/system/permissions")
-        async def clear_permissions(authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def clear_permissions():
             return await _call_handler(clear_permissions_handler, offload=True)
 
     if schedules_handler is not None:
         @router.get("/api/system/schedules")
-        async def schedules_state(authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def schedules_state():
             return await _call_handler(schedules_handler, offload=True)
 
     if create_once_schedule_handler is not None:
         @router.post("/api/system/schedules/once")
-        async def create_once_schedule(payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def create_once_schedule(payload: dict[str, Any]):
             name, prompt, run_after_seconds = _validate_once_schedule(payload)
             return await _call_handler(create_once_schedule_handler, name, prompt, run_after_seconds, offload=True)
 
     if create_interval_schedule_handler is not None:
         @router.post("/api/system/schedules/interval")
-        async def create_interval_schedule(payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def create_interval_schedule(payload: dict[str, Any]):
             name, prompt, interval_seconds = _validate_interval_schedule(payload)
             return await _call_handler(create_interval_schedule_handler, name, prompt, interval_seconds, offload=True)
 
     if remove_schedule_handler is not None:
         @router.delete("/api/system/schedules/{task_id:path}")
-        async def remove_schedule(task_id: str, authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def remove_schedule(task_id: str):
             return await _call_handler(remove_schedule_handler, task_id, offload=True)
 
     if toggle_schedule_handler is not None:
         @router.post("/api/system/schedules/{task_id:path}/toggle")
-        async def toggle_schedule(task_id: str, payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def toggle_schedule(task_id: str, payload: dict[str, Any]):
             return await _call_handler(toggle_schedule_handler, task_id, bool(payload.get("enabled", True)), offload=True)
 
     if run_schedule_now_handler is not None:
         @router.post("/api/system/schedules/{task_id:path}/run")
-        async def run_schedule_now(task_id: str, authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def run_schedule_now(task_id: str):
             return await _call_handler(run_schedule_now_handler, task_id, offload=True)
 
     if cancel_schedule_handler is not None:
         @router.post("/api/system/schedules/{task_id:path}/cancel")
-        async def cancel_schedule(task_id: str, authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def cancel_schedule(task_id: str):
             return await _call_handler(cancel_schedule_handler, task_id, offload=True)
 
     if agent_trace_handler is not None:
         @router.get("/api/system/agent-trace")
-        async def agent_trace_state(authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def agent_trace_state():
             return await _call_handler(agent_trace_handler, offload=True)
 
     if experience_metrics_handler is not None:
         @router.get("/api/system/experience-metrics")
-        async def experience_metrics_state(authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def experience_metrics_state():
             return await _call_handler(experience_metrics_handler, offload=True)
+
+    if product_metrics_consent_handler is not None:
+        @router.get("/api/system/product-metrics/consent")
+        async def product_metrics_consent():
+            return await _call_handler(product_metrics_consent_handler, offload=True)
+
+    if product_metrics_consent_patch_handler is not None:
+        @router.patch("/api/system/product-metrics/consent")
+        async def product_metrics_consent_patch(
+            payload: dict[str, Any],
+        ):
+            _strict_payload(payload, {"consented"})
+            consented = payload.get("consented")
+            if not isinstance(consented, bool):
+                raise HTTPException(status_code=422, detail="consented must be a boolean")
+            try:
+                return await _call_handler(product_metrics_consent_patch_handler, consented, offload=True)
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise HTTPException(status_code=409, detail="product metrics consent could not be persisted") from exc
 
     if mcp_state_handler is not None:
         @router.get("/api/system/mcp")
-        async def mcp_state(authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def mcp_state():
             return await _call_handler(mcp_state_handler, offload=True)
 
     if toggle_mcp_handler is not None:
         @router.post("/api/system/mcp/{server_name:path}/toggle")
-        async def toggle_mcp(server_name: str, payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def toggle_mcp(server_name: str, payload: dict[str, Any]):
             return await _call_handler(toggle_mcp_handler, server_name, bool(payload.get("enabled", True)), offload=True)
 
     if add_mcp_handler is not None:
         @router.post("/api/system/mcp")
-        async def add_mcp(payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def add_mcp(payload: dict[str, Any]):
             name, base_url, transport, enabled, command, args, env, headers = _validate_mcp_registration(payload)
             if not _handler_accepts_mcp_headers(add_mcp_handler):
                 return await _call_handler(add_mcp_handler, name, base_url, transport, enabled, command, args, env, offload=True)
@@ -351,75 +461,48 @@ def create_system_router(
 
     if install_mcp_preset_handler is not None:
         @router.post("/api/system/mcp/presets/{preset_id:path}/install")
-        async def install_mcp_preset(preset_id: str, authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def install_mcp_preset(preset_id: str):
             return await _call_handler(install_mcp_preset_handler, preset_id, offload=True)
 
     if remove_mcp_handler is not None:
         @router.delete("/api/system/mcp/{server_name:path}")
-        async def remove_mcp(server_name: str, authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def remove_mcp(server_name: str):
             return await _call_handler(remove_mcp_handler, server_name, offload=True)
 
     if refresh_mcp_handler is not None:
         @router.post("/api/system/mcp/{server_name:path}/refresh")
-        async def refresh_mcp(server_name: str, authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def refresh_mcp(server_name: str):
             return await _call_handler(refresh_mcp_handler, server_name, offload=True)
 
     if agent_plugin_state_handler is not None:
         @router.get("/api/system/agent-plugins")
-        async def agent_plugin_state(authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def agent_plugin_state():
             return await _call_handler(agent_plugin_state_handler, offload=True)
 
     if toggle_agent_plugin_handler is not None:
         @router.post("/api/system/agent-plugins/{plugin_id:path}/toggle")
-        async def toggle_agent_plugin(plugin_id: str, payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def toggle_agent_plugin(plugin_id: str, payload: dict[str, Any]):
             return await _call_handler(toggle_agent_plugin_handler, plugin_id, bool(payload.get("enabled", True)), offload=True)
 
     if update_agent_plugin_config_handler is not None:
         @router.post("/api/system/agent-plugins/{plugin_id:path}/config")
-        async def update_agent_plugin_config(plugin_id: str, payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def update_agent_plugin_config(plugin_id: str, payload: dict[str, Any]):
             return await _call_handler(update_agent_plugin_config_handler, plugin_id, payload, offload=True)
 
     if imported_skills_state_handler is not None:
         @router.get("/api/system/skills/imported")
-        async def imported_skills_state(authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def imported_skills_state():
             return await _call_handler(imported_skills_state_handler, offload=True)
 
     if save_imported_skills_handler is not None:
         @router.put("/api/system/skills/imported")
-        async def save_imported_skills(payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def save_imported_skills(payload: dict[str, Any]):
             items = _validate_imported_skill_items(payload)
             return await _call_handler(save_imported_skills_handler, items, offload=True)
 
     if remove_imported_skills_handler is not None:
         @router.delete("/api/system/skills/imported")
-        async def remove_imported_skills(payload: dict[str, Any], authorization: str | None = Depends(resolve_admin_authorization)):
-            auth_error = _require_admin(authorization)
-            if auth_error is not None:
-                return auth_error
+        async def remove_imported_skills(payload: dict[str, Any]):
             ids = _validate_imported_skill_ids(payload)
             return await _call_handler(remove_imported_skills_handler, ids, offload=True)
 

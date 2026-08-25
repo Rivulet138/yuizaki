@@ -55,41 +55,15 @@
             @change="emitChecked('set-muted', $event)"
           />
         </label>
-        <label class="toggle-row">
-          <span>
-            <strong>{{ t('workspaceDrawer.runtime.dnd') }}</strong>
-            <small>{{ t('workspaceDrawer.runtime.dndHint') }}</small>
-          </span>
-          <input
-            data-testid="workspace-dnd"
-            type="checkbox"
-            :checked="doNotDisturb"
-            :disabled="dndLoading"
-            :aria-label="t('workspaceDrawer.runtime.dnd')"
-            @change="emitChecked('set-dnd', $event)"
-          />
-        </label>
-        <div class="preset-row">
-          <span>
-            <strong>{{ t('workspaceDrawer.runtime.proactivity') }}</strong>
-            <small>{{ t('workspaceDrawer.runtime.proactivityHint') }}</small>
-          </span>
-          <div class="segmented-control" role="group" :aria-label="t('workspaceDrawer.runtime.proactivity')">
-            <button
-              data-testid="workspace-proactivity-conservative"
-              type="button"
-              :aria-pressed="proactivityPreset === 'conservative'"
-              @click="$emit('set-proactivity', 'conservative')"
-            >{{ t('workspaceDrawer.runtime.conservative') }}</button>
-            <button
-              data-testid="workspace-proactivity-standard"
-              type="button"
-              :aria-pressed="proactivityPreset === 'standard'"
-              @click="$emit('set-proactivity', 'standard')"
-            >{{ t('workspaceDrawer.runtime.standard') }}</button>
-          </div>
-        </div>
       </section>
+
+      <el-divider />
+
+      <ProactiveSettingsSection
+        :visible="visible"
+        :workspace-id="workspace.id"
+        :opportunity="proactiveOpportunity"
+      />
 
       <el-divider />
 
@@ -114,9 +88,12 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { CompanionRuntimeSnapshot } from '@/../shared/agent'
+import { parseProactiveOpportunityIdentity } from '@/../shared/proactive'
 import type { WorkspaceRecord } from '@/../shared/workspace'
 import type { CompanionRecord } from '@/api/clients/companion-client'
 import { useI18n } from '@/i18n'
+import ProactiveSettingsSection from './components/ProactiveSettingsSection.vue'
 
 const props = defineProps<{
   visible: boolean
@@ -124,20 +101,24 @@ const props = defineProps<{
   companions: CompanionRecord[]
   activeCompanion: CompanionRecord | null
   muted: boolean
-  doNotDisturb: boolean
-  dndLoading: boolean
-  proactivityPreset: 'conservative' | 'standard'
+  runtimeSnapshot?: CompanionRuntimeSnapshot | null
 }>()
 
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void
   (e: 'update-field', field: string, value: string): void
   (e: 'set-muted', value: boolean): void
-  (e: 'set-dnd', value: boolean): void
-  (e: 'set-proactivity', value: 'conservative' | 'standard'): void
 }>()
 
 const { t } = useI18n()
+const proactiveOpportunity = computed(() => {
+  const events = props.runtimeSnapshot?.heartbeat?.behavior_events ?? []
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const identity = parseProactiveOpportunityIdentity(events[index])
+    if (identity) return identity
+  }
+  return null
+})
 const updateField = (field: string, value: string) => emit('update-field', field, value)
 const canonicalRoute = (panel: string) => `/w/${encodeURIComponent(props.workspace.id)}/${panel}`
 const emitChecked = (event: 'set-muted' | 'set-dnd', value: Event) => {

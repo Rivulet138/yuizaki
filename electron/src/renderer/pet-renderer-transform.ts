@@ -4,6 +4,7 @@ import type { PetInteractionBoundsPayload, PetPlacement } from '../shared/pet-co
 const INTERACTION_WIDTH_RATIO = 0.28
 const INTERACTION_HEIGHT_RATIO = 0.72
 const EDGE_MARGIN = 32
+const MAX_BASE_MODEL_SCALE = 0.72
 
 export interface VisualBounds {
   x: number
@@ -30,26 +31,15 @@ export function computeBaseModelScale(options: {
   }
 
   try {
-    const modelCanvasSize = options.model.getModelCanvasSize?.()
-    if (
-      modelCanvasSize &&
-      Number.isFinite(modelCanvasSize.width) &&
-      Number.isFinite(modelCanvasSize.height) &&
-      modelCanvasSize.width > 0 &&
-      modelCanvasSize.height > 0
-    ) {
-      const widthScale = (options.viewportWidth * 0.42) / modelCanvasSize.width
-      const heightScale = (options.viewportHeight * 0.78) / modelCanvasSize.height
-      const nextBaseScale = Math.min(widthScale, heightScale)
-      return { baseScale: nextBaseScale, nextCache: nextBaseScale }
-    }
-
+    // `getModelCanvasSize()` is a Cubism canvas-space measurement. Its units
+    // are not guaranteed to match Pixi's local bounds, so do not mix it with
+    // CSS viewport pixels when calculating a screen-space scale.
     const localBounds = options.model.getLocalBounds()
     const localWidth = Math.max(localBounds.width, 220)
     const localHeight = Math.max(localBounds.height, 360)
-    const widthScale = (options.viewportWidth * 0.86) / localWidth
-    const heightScale = (options.viewportHeight * 0.92) / localHeight
-    const nextBaseScale = Math.min(widthScale, heightScale)
+    const widthScale = (options.viewportWidth * 0.28) / localWidth
+    const heightScale = (options.viewportHeight * 0.62) / localHeight
+    const nextBaseScale = Math.min(MAX_BASE_MODEL_SCALE, widthScale, heightScale)
     return { baseScale: nextBaseScale, nextCache: nextBaseScale }
   } catch {
     return { baseScale: 1, nextCache: options.cachedBaseScale }
@@ -221,11 +211,11 @@ export function resolveVisualPlacementOffset(options: {
 
   switch (options.placement) {
     case 'bottom-left':
-      return { x: -bounds.x, y: options.viewportHeight - bottom }
+      return { x: EDGE_MARGIN - bounds.x, y: options.viewportHeight - EDGE_MARGIN - bottom }
     case 'top-right':
-      return { x: options.viewportWidth - right, y: -bounds.y }
+      return { x: options.viewportWidth - EDGE_MARGIN - right, y: EDGE_MARGIN - bounds.y }
     case 'top-left':
-      return { x: -bounds.x, y: -bounds.y }
+      return { x: EDGE_MARGIN - bounds.x, y: EDGE_MARGIN - bounds.y }
     case 'center':
       return {
         x: options.viewportWidth / 2 - centerX,
@@ -239,8 +229,8 @@ export function resolveVisualPlacementOffset(options: {
     case 'bottom-right':
     default:
       return {
-        x: options.viewportWidth - right,
-        y: options.viewportHeight - bottom,
+        x: options.viewportWidth - EDGE_MARGIN - right,
+        y: options.viewportHeight - EDGE_MARGIN - bottom,
       }
   }
 }
@@ -282,6 +272,28 @@ export function scanAlphaBounds(options: {
         width: maxX - minX + 1,
         height: maxY - minY + 1,
       }
+}
+
+/**
+ * A framebuffer alpha rectangle that touches an edge may be only the visible
+ * slice of a model clipped by the viewport. It is not safe to use it as the
+ * model's full visual bounds for docking or dragging.
+ */
+export function isAlphaBoundsClipped(options: {
+  alphaBounds: VisualBounds
+  width: number
+  height: number
+  edgeTolerance?: number
+}): boolean {
+  const width = Math.max(1, Math.floor(options.width))
+  const height = Math.max(1, Math.floor(options.height))
+  const tolerance = clamp(Math.floor(options.edgeTolerance ?? 1), 0, Math.max(width, height))
+  const right = options.alphaBounds.x + options.alphaBounds.width
+  const bottom = options.alphaBounds.y + options.alphaBounds.height
+  return options.alphaBounds.x <= tolerance
+    || options.alphaBounds.y <= tolerance
+    || right >= width - tolerance
+    || bottom >= height - tolerance
 }
 
 export function mapAlphaBoundsToLocalBounds(options: {

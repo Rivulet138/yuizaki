@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
+import inspect
 import logging
+import os
 import time
 import uuid
 from typing import Any, Callable
@@ -18,6 +21,14 @@ from .schedule_store import ScheduleStore, ScheduledTask
 from ..system.memory_write_pipeline import build_task_completed_event
 
 logger = logging.getLogger(__name__)
+
+_TERMINAL_RUN_STATUSES = frozenset({
+    "completed",
+    "failed",
+    "cancelled",
+    "interrupted",
+    "unknown_effect",
+})
 
 
 @dataclass
@@ -33,6 +44,11 @@ class _ScheduledRun:
     status: str = "created"
     created_at: float = 0.0
     finished_at: float | None = None
+    outcome: str | None = None
+    retryable: bool | None = None
+    summary: str | None = None
+    configured_budget: dict[str, Any] = field(default_factory=dict)
+    consumed_usage: dict[str, Any] = field(default_factory=dict)
     background_task: asyncio.Task[None] | None = None
 
 
@@ -46,6 +62,8 @@ class AgentScheduler:
         workspace_id_provider: Callable[[], str] | None = None,
         interruption_epoch_provider: Callable[[], int] | None = None,
         job_event_log: CompanionJobEventLog | None = None,
+        turn_service: Any | None = None,
+        allow_legacy_pipeline: bool | None = None,
     ) -> None:
         self.store = store
         self.pipeline = pipeline
@@ -62,6 +80,13 @@ class AgentScheduler:
         self._latest_runs_by_task: dict[str, _ScheduledRun] = {}
         self._wake_event = asyncio.Event()
         self._job_events = job_event_log or CompanionJobEventLog()
+        self.turn_service = turn_service
+        self.allow_legacy_pipeline = (
+            str(os.getenv("YUIZAKI_ALLOW_LEGACY_TURN_PIPELINE", "")).strip().lower()
+            in {"1", "true", "yes", "on"}
+            if allow_legacy_pipeline is None
+            else bool(allow_legacy_pipeline)
+        )
         self._store_lock = asyncio.Lock()
 
     async def start(self) -> None:
@@ -288,9 +313,82 @@ class AgentScheduler:
         except Exception as exc:
             logger.exception("Scheduled task background run failed: %s", exc)
 
+    async def _load_durable_commit(
+        self,
+        ctx: AgentRequestContext | None,
+    ) -> Mapping[str, Any] | None:
+        if not isinstance(ctx, AgentRequestContext) or self.turn_service is None:
+            return None
+        ports = getattr(self.turn_service, "ports", None)
+        loader = getattr(ports, "load", None)
+        idempotency_key = getattr(self.turn_service, "idempotency_key", None)
+        semantic_fingerprint = getattr(self.turn_service, "semantic_fingerprint", None)
+        if not callable(loader) or not callable(idempotency_key) or not callable(semantic_fingerprint):
+            return None
+        expected_key = str(idempotency_key(ctx))
+        expected_fingerprint = str(semantic_fingerprint(ctx))
+        stored = loader(expected_key)
+        if inspect.isawaitable(stored):
+            stored = await stored
+        if not isinstance(stored, Mapping):
+            return None
+        if str(stored.get("idempotency_key") or "") != expected_key:
+            return None
+        if str(stored.get("semantic_fingerprint") or "") != expected_fingerprint:
+            return None
+        if not isinstance(stored.get("result"), Mapping):
+            return None
+        return stored
+
+    @staticmethod
+    def _apply_authoritative_result(
+        run: _ScheduledRun,
+        task: ScheduledTask,
+        result: Any,
+        *,
+        finished_at: float | None = None,
+    ) -> None:
+        def field_value(name: str, default: Any) -> Any:
+            return result.get(name, default) if isinstance(result, Mapping) else getattr(result, name, default)
+
+        outcome = str(field_value("outcome", "completed") or "completed").strip().lower()
+        if outcome not in _TERMINAL_RUN_STATUSES:
+            raise ValueError(f"unsupported authoritative scheduler outcome: {outcome}")
+        summary = str(field_value("reply", "") or "")[:160] or None
+        run.status = outcome
+        run.outcome = outcome
+        run.retryable = bool(field_value("retryable", False))
+        run.summary = summary
+        run.configured_budget = dict(field_value("configured_budget", {}) or {})
+        run.consumed_usage = dict(field_value("consumed_usage", {}) or {})
+        run.finished_at = float(finished_at) if finished_at is not None else time.time()
+        task.last_status = "ok" if outcome == "completed" else outcome
+        task.last_request_id = run.request_id
+        task.last_run_summary = summary
+
+    def _reconcile_durable_commit(
+        self,
+        run: _ScheduledRun,
+        task: ScheduledTask,
+        stored: Mapping[str, Any] | None,
+    ) -> bool:
+        if stored is None:
+            return False
+        result = stored.get("result")
+        if not isinstance(result, Mapping):
+            return False
+        created_at = stored.get("created_at")
+        self._apply_authoritative_result(
+            run,
+            task,
+            result,
+            finished_at=float(created_at) if created_at is not None else None,
+        )
+        return True
+
     def _emit_event(self, run: _ScheduledRun, task: ScheduledTask, status: str, **data: Any) -> None:
         run.status = status
-        if status in {"completed", "failed", "cancelled", "interrupted"}:
+        if status in _TERMINAL_RUN_STATUSES:
             run.finished_at = time.time()
         self._job_events.append(
             workspace_id=run.workspace_id,
@@ -321,7 +419,7 @@ class AgentScheduler:
                 (
                     run_id
                     for run_id, run in self._runs_by_id.items()
-                    if run.status in {"completed", "failed", "cancelled"}
+                    if run.status in _TERMINAL_RUN_STATUSES
                 ),
                 None,
             )
@@ -343,6 +441,11 @@ class AgentScheduler:
             "sessionId": run.session_id,
             "turnId": run.turn_id,
             "status": run.status,
+            "outcome": run.outcome,
+            "retryable": run.retryable,
+            "summary": run.summary,
+            "configuredBudget": dict(run.configured_budget),
+            "consumedUsage": dict(run.consumed_usage),
             "createdAt": run.created_at,
             "finishedAt": run.finished_at,
         }
@@ -411,57 +514,110 @@ class AgentScheduler:
     async def _run_task(self, task: ScheduledTask, run: _ScheduledRun) -> None:
         ctx: AgentRequestContext | None = None
         terminal_emitted = False
+        uses_turn_authority = self.turn_service is not None
         try:
+            task.last_status = "running"
+            task.last_request_id = run.request_id
+            await self._upsert_task(task)
+            self._emit_event(run, task, "running")
             ctx = self.context_factory(task)
             if isinstance(ctx, AgentRequestContext):
                 ctx.request_id = run.request_id
                 ctx.workspace_id = getattr(ctx, "workspace_id", None) or run.workspace_id
-            task.last_status = "running"
+                ctx.turn_id = run.turn_id
+                ctx.generation_id = f"generation:{run.turn_id}"
+                ctx.interruption_epoch = run.interruption_epoch
+                ctx.permission_scope = f"scheduler:{ctx.workspace_id}"
+                ctx.extra.update({
+                    "turn_id": ctx.turn_id,
+                    "generation_id": ctx.generation_id,
+                    "interruption_epoch": ctx.interruption_epoch,
+                    "job_id": run.job_id,
+                    "run_id": run.run_id,
+                    "task_id": task.id,
+                    "task_name": task.name,
+                    "task_mode": task.mode,
+                    "owner_agent_id": task.owner_agent_id,
+                    "owner_agent_role": task.owner_agent_role,
+                    "route_reason": task.route_reason,
+                    "permission_scope": ctx.permission_scope,
+                })
             task.last_request_id = str(getattr(ctx, "request_id", None) or run.request_id)
-            await self._upsert_task(task)
-            self._emit_event(run, task, "running")
-            result = await self.pipeline.run(ctx)
-            task.last_status = "ok"
+            if self.turn_service is not None:
+                commit = await self.turn_service.execute_context("scheduler", ctx)
+                result = commit.result
+            elif self.allow_legacy_pipeline:
+                commit = None
+                result = await self.pipeline.run(ctx)
+            else:
+                raise RuntimeError("TurnService is required for semantic scheduler execution")
+            terminal_status = str(getattr(commit, "outcome", "completed") if commit is not None else "completed")
+            task.last_status = "ok" if terminal_status == "completed" else terminal_status
             task.last_request_id = str(getattr(ctx, "request_id", None) or run.request_id)
             task.last_run_summary = str(getattr(result, "reply", "") or "")[:160] or None
-            try:
-                from .context import get_runtime_bindings
-                bindings = get_runtime_bindings(ctx)
-            except Exception:
-                bindings = None
-            relationship_writer = bindings.relationship_event_writer if bindings is not None else None
-            if relationship_writer:
-                relationship_writer(build_task_completed_event(
-                    task_name=task.name,
-                    task_id=task.id,
-                    task_mode=task.mode,
-                    owner_agent_id=task.owner_agent_id,
-                    owner_agent_role=task.owner_agent_role,
-                    session_id=getattr(ctx, "session_id", None),
-                ))
-            trace_store = getattr(ctx, "trace_store", None)
-            if trace_store is not None:
-                trace_store.append("scheduler", SchedulerRunRecord(
-                    timestamp=datetime.now().isoformat(),
-                    task_id=task.id,
-                    task_name=task.name,
-                    mode=task.mode,
-                    status="ok",
-                    run_id=run.run_id,
-                    job_id=run.job_id,
+            if commit is None:
+                try:
+                    from .context import get_runtime_bindings
+                    bindings = get_runtime_bindings(ctx)
+                except Exception:
+                    bindings = None
+                relationship_writer = bindings.relationship_event_writer if bindings is not None else None
+                if relationship_writer:
+                    relationship_writer(build_task_completed_event(
+                        task_name=task.name,
+                        task_id=task.id,
+                        task_mode=task.mode,
+                        owner_agent_id=task.owner_agent_id,
+                        owner_agent_role=task.owner_agent_role,
+                        session_id=getattr(ctx, "session_id", None),
+                    ))
+                trace_store = getattr(ctx, "trace_store", None)
+                if trace_store is not None:
+                    trace_store.append("scheduler", SchedulerRunRecord(
+                        timestamp=datetime.now().isoformat(),
+                        task_id=task.id,
+                        task_name=task.name,
+                        mode=task.mode,
+                        status="ok",
+                        run_id=run.run_id,
+                        job_id=run.job_id,
+                        summary=task.last_run_summary,
+                        request_id=getattr(ctx, "request_id", None) or run.request_id,
+                        owner_agent_id=task.owner_agent_id,
+                        owner_agent_role=task.owner_agent_role,
+                        route_reason=task.route_reason,
+                    ).to_dict())
+            result_failure = getattr(result, "failure", None)
+            result_recovery = getattr(result, "recovery", None)
+            commit_fields = ({
+                "idempotencyKey": commit.idempotency_key,
+                "semanticFingerprint": commit.semantic_fingerprint,
+                "turnStage": "committed",
+                "outcome": commit.outcome,
+                "generationId": commit.context.generation_id,
+                **({"failure": dict(result_failure)} if isinstance(result_failure, dict) else {}),
+                **({"recovery": dict(result_recovery)} if isinstance(result_recovery, dict) else {}),
+            } if commit is not None else {"turnStage": "legacy"})
+            if commit is None:
+                self._emit_event(
+                    run,
+                    task,
+                    "completed",
                     summary=task.last_run_summary,
-                    request_id=getattr(ctx, "request_id", None) or run.request_id,
-                    owner_agent_id=task.owner_agent_id,
-                    owner_agent_role=task.owner_agent_role,
-                    route_reason=task.route_reason,
-                ).to_dict())
-            self._emit_event(run, task, "completed", summary=task.last_run_summary)
+                    **commit_fields,
+                )
+            else:
+                self._apply_authoritative_result(run, task, result)
             terminal_emitted = True
         except asyncio.CancelledError:
             task.last_status = "cancelled"
             task.last_request_id = run.request_id
             task.last_run_summary = "cancelled"
-            self._emit_event(run, task, "cancelled", reason="cancelled")
+            durable_commit = await self._load_durable_commit(ctx) if uses_turn_authority else None
+            if durable_commit is not None:
+                self._reconcile_durable_commit(run, task, durable_commit)
+            else:
+                self._emit_event(run, task, "cancelled", reason="cancelled")
             terminal_emitted = True
             raise
         except Exception as exc:
@@ -469,7 +625,7 @@ class AgentScheduler:
             task.last_request_id = str(getattr(ctx, "request_id", None) or run.request_id) if ctx is not None else run.request_id
             task.last_run_summary = str(exc)
             trace_store = getattr(ctx, "trace_store", None) if ctx is not None else None
-            if trace_store is not None:
+            if not uses_turn_authority and trace_store is not None:
                 trace_store.append("scheduler", SchedulerRunRecord(
                     timestamp=datetime.now().isoformat(),
                     task_id=task.id,
@@ -484,7 +640,11 @@ class AgentScheduler:
                     owner_agent_role=task.owner_agent_role,
                     route_reason=task.route_reason,
                 ).to_dict())
-            self._emit_event(run, task, "failed", error=str(exc))
+            durable_commit = await self._load_durable_commit(ctx) if uses_turn_authority else None
+            if durable_commit is not None:
+                self._reconcile_durable_commit(run, task, durable_commit)
+            else:
+                self._emit_event(run, task, "failed", error=str(exc))
             terminal_emitted = True
         finally:
             self._active_task_ids.discard(task.id)

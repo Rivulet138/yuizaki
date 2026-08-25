@@ -1,12 +1,16 @@
-import { ref } from 'vue'
 import { logger } from '@/logger'
+import { watch, type WatchStopHandle } from 'vue'
 import type { PetCompanionIdleProfile } from '@/../shared/pet-control'
+import { resolveCompanionEmbodimentDelivery } from '@/../shared/companion-embodiment'
 import { useChatStore } from '@/stores/chatStore'
 import { useCompanionStore } from '@/stores/companionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { petControlClient, settingsClient, systemClient } from '@/api/client'
 import { workspaceClient } from '@/api/clients/workspace-client'
+import { parseProactiveOpportunityIdentity } from '@/../shared/proactive'
+import { currentLocale } from '@/i18n'
 import { syncCompanionVoiceSettings } from './companion-voice-settings'
+import { useProactiveControls } from './useProactiveControls'
 import {
   createCompanionRuntimeController,
   installCompanionRuntimeController,
@@ -15,33 +19,9 @@ import {
   type ProactivePollResult,
 } from '../runtime/companionRuntime'
 
-const PROACTIVITY_STORAGE_KEY = 'yuizaki.companion.proactivity-preset'
-export type CompanionProactivityPreset = 'conservative' | 'standard'
-
-const PROACTIVITY_PRESETS: Record<CompanionProactivityPreset, {
-  cooldownMs: number
-  frequencyBudget: number
-  frequencyWindowMs: number
-}> = {
-  conservative: { cooldownMs: 15 * 60_000, frequencyBudget: 2, frequencyWindowMs: 60 * 60_000 },
-  standard: { cooldownMs: 5 * 60_000, frequencyBudget: 3, frequencyWindowMs: 60 * 60_000 },
-}
-
-const normalizeProactivityPreset = (value: unknown): CompanionProactivityPreset =>
-  value === 'standard' ? 'standard' : 'conservative'
-
-const readStoredProactivityPreset = (): CompanionProactivityPreset => {
-  try {
-    return normalizeProactivityPreset(window.localStorage.getItem(PROACTIVITY_STORAGE_KEY))
-  } catch {
-    return 'conservative'
-  }
-}
-
 let runtimeController: CompanionRuntimeController | null = null
 let runtimeVisibilityHandler: (() => void) | null = null
-const activeProactivityPreset = ref<CompanionProactivityPreset>('conservative')
-const activeDoNotDisturb = ref(false)
+let stopPetLinkWatcher: WatchStopHandle | null = null
 let e2eClockOffsetMs = 0
 
 export const advanceCompanionCooldownForE2E = (): number => {
@@ -73,9 +53,23 @@ export function useCompanionRuntimeBridge() {
   const companionStore = useCompanionStore()
   const chatStore = useChatStore()
   const workspaceStore = useWorkspaceStore()
+  const proactiveControls = useProactiveControls()
   const runtimeSinks = {
+    embodiment: (intent: Parameters<typeof resolveCompanionEmbodiment>[0]) => {
+      const resolved = resolveCompanionEmbodimentDelivery(intent)
+      // Keep semantic waiting visible, but never forward an active animation
+      // state when the platform/user requested reduced motion.
+      const behavior = resolved.motionAllowed
+        ? resolved.behavior
+        : resolved.behavior === 'waiting' ? 'waiting' : 'idle'
+      return petControlClient.setBehaviorState(
+        behavior,
+        resolved.durationMs,
+        { source: 'automation' as const },
+      )
+    },
     behavior: (state: Parameters<typeof petControlClient.setBehaviorState>[0], durationMs?: number) =>
-      petControlClient.setBehaviorState(state, durationMs),
+      petControlClient.setBehaviorState(state, durationMs, { source: 'automation' as const }),
     emotion: (emotionId: string, context: { signal: AbortSignal; eventVersion: string }) =>
       petControlClient.triggerEmotion(emotionId, { source: 'automation' as const, ...context }),
     motion: (group: string, context: { signal: AbortSignal; eventVersion: string }) =>
@@ -85,14 +79,36 @@ export function useCompanionRuntimeBridge() {
   }
 
   if (!runtimeController) {
-    activeProactivityPreset.value = readStoredProactivityPreset()
     runtimeController = createCompanionRuntimeController({
       pollSnapshot: () => systemClient.companionRuntime(8),
       isAvailable: () => true,
       readDoNotDisturb: async () => {
-        const state = await petControlClient.getState()
-        activeDoNotDisturb.value = state.doNotDisturb
-        return state.doNotDisturb
+        try {
+          const state = await petControlClient.getState()
+          return state.doNotDisturb || proactiveControls.settings.value.dnd
+        } catch {
+          return true
+        }
+      },
+      getWorkspaceId: () => workspaceStore.activeWorkspaceId,
+      isPetLinkEnabled: () => chatStore.chatOptions.pet_link_enabled !== false,
+      getLocale: () => currentLocale.value,
+      authorizeOpportunity: async (candidate, snapshot) => {
+        const identity = parseProactiveOpportunityIdentity(candidate)
+        if (!identity || snapshot.active_workspace_id !== workspaceStore.activeWorkspaceId) return false
+        if (!await proactiveControls.load()) return false
+        if (!proactiveControls.allows(identity.sourceKind)) return false
+        const frame = proactiveControls.visibleFrames.value.find((item) =>
+          item.frameId === identity.frameId
+          && item.workspaceId === workspaceStore.activeWorkspaceId,
+        )
+        if (!frame || frame.expiresAt * 1_000 <= Date.now()) return false
+        controller?.configure({
+          cooldownMs: proactiveControls.settings.value.cooldownSeconds * 1_000,
+          frequencyBudget: proactiveControls.settings.value.dailyBudget,
+          frequencyWindowMs: 24 * 60 * 60_000,
+        })
+        return true
       },
       sinks: runtimeSinks,
       onSinkError: reportCompanionRuntimeSinkError,
@@ -106,12 +122,20 @@ export function useCompanionRuntimeBridge() {
         now: () => Date.now() + e2eClockOffsetMs,
         pollIntervalMs: 250,
       } : {}),
-      ...PROACTIVITY_PRESETS[activeProactivityPreset.value],
     })
     installCompanionRuntimeController(runtimeController)
   }
   const controller = runtimeController
-  controller.configure({ sinks: runtimeSinks })
+  controller.configure({
+    sinks: runtimeSinks,
+    isPetLinkEnabled: () => chatStore.chatOptions.pet_link_enabled !== false,
+  })
+  if (!stopPetLinkWatcher) {
+    stopPetLinkWatcher = watch(
+      () => chatStore.chatOptions.pet_link_enabled,
+      () => { void controller.refreshPresentation() },
+    )
+  }
 
   const startCompanionRuntime = (isAvailable: () => boolean) => {
     controller.configure({ isAvailable })
@@ -135,25 +159,6 @@ export function useCompanionRuntimeBridge() {
     controller.stop()
   }
   const pollCompanionOnce = () => controller.pollOnce()
-  const setProactivityPreset = (value: CompanionProactivityPreset): boolean => {
-    const preset = normalizeProactivityPreset(value)
-    const previous = activeProactivityPreset.value
-    try {
-      controller.configure(PROACTIVITY_PRESETS[preset])
-      window.localStorage.setItem(PROACTIVITY_STORAGE_KEY, preset)
-      activeProactivityPreset.value = preset
-      return true
-    } catch {
-      controller.configure(PROACTIVITY_PRESETS[previous])
-      return false
-    }
-  }
-
-  const setDoNotDisturb = async (enabled: boolean): Promise<void> => {
-    const state = await petControlClient.setDoNotDisturb(enabled)
-    activeDoNotDisturb.value = state.doNotDisturb
-  }
-
   const buildIdleProfileFromCompanion = (): PetCompanionIdleProfile | null => {
     const companion = companionStore.activeCompanion
     if (!companion) {
@@ -251,9 +256,5 @@ export function useCompanionRuntimeBridge() {
     startCompanionRuntime,
     stopCompanionRuntime,
     pollCompanionOnce,
-    proactivityPreset: activeProactivityPreset,
-    setProactivityPreset,
-    doNotDisturb: activeDoNotDisturb,
-    setDoNotDisturb,
   }
 }

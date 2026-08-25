@@ -2,7 +2,13 @@ import { computed, ref } from "vue";
 import { useDomainRequest } from "@/shared/composables/useDomainRequest";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { memoryClient } from "@/api/client";
-import type { MemoryDocListOptions, MemoryMetadata } from "@/api/clients/memory-client";
+import type {
+	MemoryDocListOptions,
+	MemoryLifecycleState,
+	MemoryMetadata,
+	MemoryOverview,
+	MemoryReviewStatus,
+} from "@/api/clients/memory-client";
 
 export interface MemoryDoc {
 	id: string;
@@ -22,6 +28,17 @@ export interface MemoryDoc {
 	turn_id?: string;
 	evidence?: unknown;
 	confidence_history?: Array<Record<string, unknown>>;
+	schema_version?: number;
+	revision?: number;
+	state?: MemoryLifecycleState;
+	review_status?: MemoryReviewStatus;
+	valid_from?: string;
+	valid_to?: string;
+	occurred_at?: string;
+	ingested_at?: string;
+	source_ids?: string[];
+	supersedes?: string | string[];
+	superseded_by?: string;
 }
 
 export interface MemoryDuplicateCandidate {
@@ -55,6 +72,11 @@ export interface MemoryRetrievalTrace {
 	average_score?: number;
 	latency_ms?: number;
 	backend_filter_downpushed?: boolean;
+	complete?: boolean;
+	error_code?: string;
+	scan_limit_reached?: boolean;
+	ranking_strategy?: string;
+	score_weights?: Record<string, number>;
 }
 
 interface MemoryQueryResult {
@@ -63,6 +85,7 @@ interface MemoryQueryResult {
 		id: string;
 		text: string;
 		score?: number;
+		score_components?: Record<string, number>;
 		layer?: string;
 		metadata?: Record<string, unknown>;
 	}>;
@@ -79,6 +102,7 @@ interface BackendQueryItem {
 	id?: unknown;
 	text?: unknown;
 	score?: unknown;
+	score_components?: unknown;
 	layer?: unknown;
 	metadata?: Record<string, unknown>;
 	doc?: BackendDocument;
@@ -125,6 +149,20 @@ const normalizeDuplicateCandidate = (raw: unknown): MemoryDuplicateCandidate => 
 	};
 };
 
+const resolveLifecycleState = (metadata: MemoryMetadata): MemoryLifecycleState => {
+	if (metadata.soft_forgotten === true) return "forgotten";
+	const reviewStatus = stringOrUndefined(metadata.review_status);
+	if (reviewStatus === "rejected" || reviewStatus === "superseded") return reviewStatus;
+	if (stringOrUndefined(metadata.superseded_by)) return "superseded";
+	const now = Date.now();
+	const expiresAt = Date.parse(String(metadata.expires_at ?? ""));
+	const validTo = Date.parse(String(metadata.valid_to ?? ""));
+	if ((Number.isFinite(expiresAt) && expiresAt <= now) || (Number.isFinite(validTo) && validTo <= now)) return "expired";
+	const validFrom = Date.parse(String(metadata.valid_from ?? ""));
+	if (Number.isFinite(validFrom) && validFrom > now) return "scheduled";
+	return "active";
+};
+
 export const normalizeDuplicateCandidates = (value: unknown) =>
 	Array.isArray(value) ? value.map(normalizeDuplicateCandidate) : [];
 
@@ -149,6 +187,20 @@ const normalizeDoc = (raw: unknown): MemoryDoc => {
 		turn_id: stringOrUndefined(metadata.turn_id),
 		evidence: metadata.evidence,
 		confidence_history: Array.isArray(metadata.confidence_history) ? metadata.confidence_history as Array<Record<string, unknown>> : [],
+		schema_version: numberOrUndefined(metadata.schema_version),
+		revision: numberOrUndefined(metadata.revision),
+		state: (stringOrUndefined(metadata.state) as MemoryLifecycleState | undefined) ?? resolveLifecycleState(metadata),
+		review_status: stringOrUndefined(metadata.review_status) as MemoryReviewStatus | undefined,
+		valid_from: stringOrUndefined(metadata.valid_from),
+		valid_to: stringOrUndefined(metadata.valid_to),
+		occurred_at: stringOrUndefined(metadata.occurred_at),
+		ingested_at: stringOrUndefined(metadata.ingested_at),
+		source_ids: normalizeStringList(metadata.source_ids),
+		supersedes:
+			Array.isArray(metadata.supersedes)
+				? normalizeStringList(metadata.supersedes)
+				: stringOrUndefined(metadata.supersedes),
+		superseded_by: stringOrUndefined(metadata.superseded_by),
 	};
 };
 
@@ -175,6 +227,14 @@ const normalizeTrace = (raw: unknown): MemoryRetrievalTrace | undefined => {
 			typeof trace.backend_filter_downpushed === "boolean"
 				? trace.backend_filter_downpushed
 				: undefined,
+		complete: typeof trace.complete === "boolean" ? trace.complete : undefined,
+		error_code: stringOrUndefined(trace.error_code),
+		scan_limit_reached:
+			typeof trace.scan_limit_reached === "boolean"
+				? trace.scan_limit_reached
+				: undefined,
+		ranking_strategy: stringOrUndefined(trace.ranking_strategy),
+		score_weights: normalizeStringNumberRecord(trace.score_weights),
 	};
 };
 
@@ -191,6 +251,7 @@ const normalizeQueryResult = (raw: unknown): MemoryQueryResult => {
 				id: String(result.id ?? doc?.id ?? ""),
 				text: String(result.text ?? doc?.text ?? ""),
 				score: numberOrUndefined(result.score),
+				score_components: normalizeStringNumberRecord(result.score_components),
 				layer:
 					typeof result.layer === "string"
 						? result.layer
@@ -208,6 +269,8 @@ export function useMemoryDomain() {
 	const workspaceStore = useWorkspaceStore();
 	const activeWorkspace = computed(() => workspaceStore.activeWorkspace);
 	const docs = ref<MemoryDoc[]>([]);
+	const forgottenDocs = ref<MemoryDoc[]>([]);
+	const overview = ref<MemoryOverview | null>(null);
 	const queryResult = ref<MemoryQueryResult | null>(null);
 
 	const workspaceDefaultScope = () =>
@@ -225,6 +288,8 @@ export function useMemoryDomain() {
 	};
 
 	const docsRequest = useDomainRequest<{ docs: unknown[] }>();
+	const forgottenDocsRequest = useDomainRequest<{ docs: unknown[] }>();
+	const overviewRequest = useDomainRequest<MemoryOverview>();
 	const addRequest = useDomainRequest<{
 		status?: string;
 		id?: string;
@@ -249,6 +314,25 @@ export function useMemoryDomain() {
 				? result.docs.map(normalizeDoc)
 				: [];
 		}
+	};
+
+	const loadOverview = async (options?: MemoryDocListOptions) => {
+		const result = await overviewRequest.execute(() => memoryClient.getOverview(options));
+		if (result) overview.value = result;
+		return result;
+	};
+
+	const loadForgottenDocs = async (options?: MemoryDocListOptions) => {
+		const result = await forgottenDocsRequest.execute(() => memoryClient.getDocs({
+			...options,
+			includeState: "forgotten",
+		}));
+		if (result) {
+			forgottenDocs.value = Array.isArray(result.docs)
+				? result.docs.map(normalizeDoc)
+				: [];
+		}
+		return result;
 	};
 
 	const addMemory = async (payload: {
@@ -300,6 +384,8 @@ export function useMemoryDomain() {
 		memoryClient.correctDoc(id, payload);
 	const softForgetDoc = (id: string, payload?: { reason?: string; turn_id?: string }) =>
 		memoryClient.softForgetDoc(id, payload);
+	const restoreDoc = (id: string, payload?: { reason?: string }) =>
+		memoryClient.restoreDoc(id, payload);
 
 	const queryMemory = async (payload: {
 		query: string;
@@ -312,15 +398,15 @@ export function useMemoryDomain() {
 	}) => {
 		const resolvedScope = resolveScope(payload);
 		const resolvedWorkspaceId = resolveScopedWorkspaceId(payload);
-		const result = await queryRequest.execute(() =>
-			memoryClient.queryPipeline(payload.query, {
-				topK: payload.top_k ?? 5,
-				sessionId: payload.session_id,
-				workspaceId: resolvedWorkspaceId,
-				scope: resolvedScope === "workspace" ? undefined : resolvedScope,
-				layers: payload.layers,
-			}),
-		);
+		const result = await queryRequest.execute(() => memoryClient.query({
+			query: payload.query,
+			top_k: payload.top_k ?? 5,
+			memory_types: payload.memory_types,
+			session_id: payload.session_id,
+			workspace_id: resolvedWorkspaceId,
+			scope: resolvedScope,
+			layers: payload.layers,
+		}));
 		if (result) {
 			queryResult.value = normalizeQueryResult(result);
 		}
@@ -364,17 +450,24 @@ export function useMemoryDomain() {
 
 	return {
 		docs,
+		forgottenDocs,
+		overview,
 		queryResult,
 		docsRequest,
+		forgottenDocsRequest,
+		overviewRequest,
 		addRequest,
 		updateRequest,
 		queryRequest,
 		rawQueryRequest,
 		loadDocs,
+		loadForgottenDocs,
+		loadOverview,
 		addMemory,
 		updateDoc,
 		correctDoc,
 		softForgetDoc,
+		restoreDoc,
 		queryMemory,
 		queryRawRag,
 	};

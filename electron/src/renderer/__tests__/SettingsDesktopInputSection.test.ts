@@ -1,6 +1,6 @@
 import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import SettingsDesktopInputSection from '../domains/settings/components/SettingsDesktopInputSection.vue'
 
@@ -11,8 +11,10 @@ const ElButtonStub = defineComponent({
 })
 
 const ElSwitchStub = defineComponent({
+  inheritAttrs: false,
+  props: ['modelValue'],
   emits: ['change'],
-  template: '<button data-testid="toggle-talk" @click="$emit(\'change\', true)">toggle</button>',
+  template: '<button v-bind="$attrs" @click="$emit(\'change\', !modelValue)">toggle</button>',
 })
 
 const ElSelectStub = defineComponent({
@@ -62,6 +64,10 @@ const mountSection = () => mount(SettingsDesktopInputSection, {
 })
 
 describe('SettingsDesktopInputSection', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'petApi')
+  })
+
   it('emits parent-owned input actions', async () => {
     const wrapper = mountSection()
 
@@ -71,7 +77,7 @@ describe('SettingsDesktopInputSection', () => {
     await wrapper.get('[data-testid="shortcut"]').trigger('keydown', { key: 'Space', ctrlKey: true })
 
     expect(wrapper.emitted('reset')).toEqual([[]])
-    expect(wrapper.emitted('set-push-to-talk-enabled')).toEqual([[true]])
+    expect(wrapper.emitted('set-push-to-talk-enabled')).toEqual([[false]])
     expect(wrapper.emitted('set-push-to-talk-mouse-button')).toEqual([[5]])
     expect(wrapper.emitted('capture-keyboard')?.[0]?.[0]).toBe('interact')
   })
@@ -84,5 +90,146 @@ describe('SettingsDesktopInputSection', () => {
 
     expect(wrapper.text()).toContain('桌面输入')
     expect(wrapper.text()).toContain('Electron')
+  })
+
+  it('loads and controls the desktop action beta through the closed preload API', async () => {
+    const status = {
+      enabled: false,
+      windowActionsAvailable: true,
+      nativeInputAvailable: false,
+      emergencyHotkeyAvailable: true,
+      emergencyStopped: false,
+      revision: 3,
+      stopEpoch: 0,
+      operationInFlight: false,
+      degraded: false,
+      leaseState: 'inactive' as const,
+      leaseExpiresAt: null,
+      lastHeartbeatAt: null,
+      authorizationGranted: false,
+      authorizationExpiresAt: null,
+      reason: null,
+      lastError: null,
+    }
+    const api = {
+      status: vi.fn(async () => ({ ok: true as const, data: status, status })),
+      enable: vi.fn(async () => ({
+        ok: true as const,
+        data: { ...status, enabled: true, revision: 4, leaseState: 'confirmed' as const },
+        status: { ...status, enabled: true, revision: 4, leaseState: 'confirmed' as const },
+      })),
+      disable: vi.fn(async () => ({ ok: true as const, data: status, status })),
+      rearm: vi.fn(),
+      manageAuthorization: vi.fn(async () => ({
+        ok: true as const,
+        data: { ...status, enabled: true, leaseState: 'confirmed' as const, authorizationGranted: true },
+        status: { ...status, enabled: true, leaseState: 'confirmed' as const, authorizationGranted: true },
+      })),
+    }
+    Object.defineProperty(window, 'petApi', {
+      configurable: true,
+      value: { desktopAction: api },
+    })
+
+    const wrapper = mountSection()
+    await flushPromises()
+    await wrapper.get('[data-testid="desktop-action-toggle"]').trigger('click')
+    await flushPromises()
+
+    expect(api.status).toHaveBeenCalledOnce()
+    expect(api.enable).toHaveBeenCalledOnce()
+    expect(wrapper.get('[data-testid="desktop-action-beta"]').text()).toContain('Enabled')
+    expect(wrapper.get('[data-testid="desktop-action-beta"]').text()).toContain('Native input unavailable')
+    await wrapper.get('[data-testid="desktop-action-manage-authorization"]').trigger('click')
+    await flushPromises()
+    expect(api.manageAuthorization).toHaveBeenCalledOnce()
+    expect(wrapper.get('[data-testid="desktop-action-beta"]').text()).toContain('Application authorized')
+
+    await wrapper.get('[data-testid="desktop-action-toggle"]').trigger('click')
+    await flushPromises()
+    expect(api.disable).toHaveBeenCalledOnce()
+  })
+
+  it('shows rearm only for the emergency-stop latch', async () => {
+    const stopped = {
+      enabled: false,
+      windowActionsAvailable: true,
+      nativeInputAvailable: false,
+      emergencyHotkeyAvailable: true,
+      emergencyStopped: true,
+      revision: 6,
+      stopEpoch: 2,
+      operationInFlight: false,
+      degraded: false,
+      leaseState: 'inactive' as const,
+      leaseExpiresAt: null,
+      lastHeartbeatAt: null,
+      authorizationGranted: false,
+      authorizationExpiresAt: null,
+      reason: null,
+      lastError: null,
+    }
+    const rearmed = { ...stopped, enabled: true, emergencyStopped: false, revision: 7 }
+    const api = {
+      status: vi.fn(async () => ({ ok: true as const, data: stopped, status: stopped })),
+      enable: vi.fn(),
+      disable: vi.fn(),
+      rearm: vi.fn(async () => ({ ok: true as const, data: rearmed, status: rearmed })),
+      manageAuthorization: vi.fn(),
+    }
+    Object.defineProperty(window, 'petApi', {
+      configurable: true,
+      value: { desktopAction: api },
+    })
+
+    const wrapper = mountSection()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="desktop-action-beta"]').text()).toContain('Stopped')
+    await wrapper.get('[data-testid="desktop-action-rearm"]').trigger('click')
+    await flushPromises()
+
+    expect(api.rearm).toHaveBeenCalledOnce()
+    expect(wrapper.find('[data-testid="desktop-action-rearm"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="desktop-action-beta"]').text()).toContain('Enabled')
+  })
+
+  it('shows degraded lease errors without remembered authorization controls', async () => {
+    const failed = {
+      enabled: false,
+      windowActionsAvailable: true,
+      nativeInputAvailable: false,
+      emergencyHotkeyAvailable: true,
+      emergencyStopped: true,
+      revision: 8,
+      stopEpoch: 3,
+      operationInFlight: false,
+      degraded: true,
+      leaseState: 'unconfirmed' as const,
+      leaseExpiresAt: null,
+      lastHeartbeatAt: null,
+      authorizationGranted: false,
+      authorizationExpiresAt: null,
+      reason: null,
+      lastError: { at: '2026-08-15T00:00:00.000Z', code: 'DA_BACKEND_TIMEOUT', message: 'heartbeat timed out' },
+    }
+    Object.defineProperty(window, 'petApi', {
+      configurable: true,
+      value: {
+        desktopAction: {
+          status: vi.fn(async () => ({ ok: true as const, data: failed, status: failed })),
+          enable: vi.fn(),
+          disable: vi.fn(),
+          rearm: vi.fn(),
+          manageAuthorization: vi.fn(),
+        },
+      },
+    })
+
+    const wrapper = mountSection()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="desktop-action-beta"]').text()).toContain('Lease unconfirmed')
+    expect(wrapper.get('[data-testid="desktop-action-error"]').attributes('title')).toBe('heartbeat timed out')
+    expect(wrapper.text().toLowerCase()).not.toContain('remember')
   })
 })

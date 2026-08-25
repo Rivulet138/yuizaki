@@ -30,7 +30,14 @@ from modules.system import (
 from modules.system.settings_api import SettingsAPI
 import modules.system.runtime_config as system_runtime_config
 from modules.system.active_workspace_state import ActiveWorkspaceState
-from modules.system.backend_api_auth import backend_api_auth_required, verify_backend_api_authorization
+from modules.system.active_application import read_active_application
+from modules.system.backend_api_auth import (
+    HOST_DESKTOP_ACTION_PREFIX,
+    HOST_DESKTOP_ACTION_TOKEN_ENV,
+    backend_api_auth_required,
+    verify_backend_api_authorization,
+    verify_host_desktop_action_authorization,
+)
 from modules.system.cache_janitor import run_audio_cache_janitor
 from modules.system.companion_runtime import build_companion_runtime_snapshot
 from modules.system.governance_alert_state import GovernanceAlertStateStore
@@ -39,13 +46,14 @@ from modules.system.runtime_endpoints import build_companion_runtime_endpoint
 from modules.system.schema_policy import enforce_schema_policy
 import modules.system.runtime_composition as system_runtime_composition
 from modules.system.runtime_composition import build_runtime_handlers
+from evals.product_metrics import JsonProductConsentStateStore
 from modules.system.relationship_runtime import (
     build_companion_relationship_history_endpoint,
     build_relationship_memory_writer,
     build_recent_relationship_history_provider,
     build_relationship_summary_provider,
 )
-from socket_server import DesktopPetSocketServer
+from socket_server import DesktopPetSocketServer, _parse_socket_allowed_origins
 from database import DatabaseRepository
 from routes.ai_api import create_ai_router
 from routes.database_api import create_database_router
@@ -63,6 +71,7 @@ from modules.memory.backend_factory import create_memory_backend
 from modules.system.heartbeat import HeartbeatScheduler, DEFAULT_HEARTBEAT_INTERVAL_SECONDS
 from modules.system.heartbeat_goal_store import HeartbeatGoalStore
 from modules.system.health_providers import build_app_runtime_health_providers, register_app_runtime_health_checks
+from modules.system.onboarding_readiness import OnboardingReadiness
 from modules.system.runtime_config import RuntimeConfig, apply_runtime_config
 from modules.system.settings_schema import validate_runtime_patch
 from modules.system.settings_store import DEFAULT_SETTINGS_PATH
@@ -111,19 +120,7 @@ def _runtime_services() -> RuntimeServicesModule:
 
 
 def _parse_allowed_origins(value: str | None) -> list[str]:
-    control_port = _parse_port(os.getenv("CONTROL_SERVER_PORT"), 38945)
-    renderer_port = _parse_port(os.getenv("VITE_DEV_SERVER_PORT") or os.getenv("YUIZAKI_RENDERER_DEV_PORT"), 5173)
-    default_origins = _dedupe_origins([
-        f"http://127.0.0.1:{control_port}",
-        f"http://localhost:{control_port}",
-        f"http://127.0.0.1:{renderer_port}",
-        f"http://localhost:{renderer_port}",
-        *[origin.strip() for origin in os.getenv("YUIZAKI_EXTRA_ALLOWED_ORIGINS", "").split(",") if origin.strip()],
-    ])
-    if not value:
-        return default_origins
-    origins = [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
-    return origins or default_origins
+    return _parse_socket_allowed_origins(value)
 
 
 def _parse_port(value: str | None, fallback: int) -> int:
@@ -133,16 +130,6 @@ def _parse_port(value: str | None, fallback: int) -> int:
         return fallback
     return port if 0 < port <= 65535 else fallback
 
-
-def _dedupe_origins(origins: list[str]) -> list[str]:
-    seen: set[str] = set()
-    result: list[str] = []
-    for origin in origins:
-        clean = origin.strip().rstrip("/")
-        if clean and clean not in seen:
-            seen.add(clean)
-            result.append(clean)
-    return result
 
 for _env_key in ("HF_HOME", "SENTENCE_TRANSFORMERS_HOME", "EMBEDDING_MODEL_LOCAL_PATH", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
     _env_val = os.getenv(_env_key)
@@ -172,10 +159,12 @@ _janitor_task: asyncio.Task[None] | None = None
 _retrieval_pipeline = None
 _heartbeat_scheduler = None
 _memory_state = None
+_memory_reload_lock = asyncio.Lock()
 _summary_list_limiter = SlidingWindowRateLimiter(max_requests=20, window_seconds=10.0)
 _summary_detail_limiter = SlidingWindowRateLimiter(max_requests=30, window_seconds=10.0)
 _summary_rewrite_limiter = SlidingWindowRateLimiter(max_requests=3, window_seconds=30.0)
 _governance_alert_store = GovernanceAlertStateStore(data_dir_from_env() / "governance_alert_state.json", logger)
+_product_metrics_consent_store = JsonProductConsentStateStore(data_dir_from_env() / "product_metrics_consent.json")
 
 
 def _apply_persisted_memory_config_before_backend_init() -> None:
@@ -208,39 +197,32 @@ def _get_memory_store():
 
 
 async def _reload_memory_runtime() -> None:
-    """Swap the active memory backend after memory settings change.
-
-    The expensive vector rewrite is intentionally left to /memory/index/rebuild.
-    During the swap, existing documents are preserved as metadata-only entries so
-    the rebuild endpoint can re-index them with the newly configured embedding
-    model or Qdrant collection.
-    """
+    """Atomically swap a fully hydrated memory backend after settings change."""
     global _retrieval_pipeline
-    if _memory_state is None:
-        return
-
-    previous_docs = []
-    try:
-        previous_docs = await asyncio.to_thread(_memory_state.store.list_documents)
-    except Exception as exc:
-        logger.warning("Failed to snapshot memory docs before backend reload: %s", exc)
-
-    new_store = create_memory_backend(config.memory)
-    for doc in previous_docs:
+    async with _memory_reload_lock:
+        if _memory_state is None:
+            return
+        previous_store = _memory_state.store
+        previous_docs = await asyncio.to_thread(previous_store.list_documents)
+        new_store = create_memory_backend(config.memory)
         try:
-            new_store.add_metadata_document(doc)
-        except Exception as exc:
-            logger.warning("Failed to carry memory doc %s into reloaded backend: %s", getattr(doc, "id", "?"), exc)
+            for doc in previous_docs:
+                await asyncio.to_thread(new_store.add_document, doc)
+            await asyncio.to_thread(new_store.list_documents)
+            new_pipeline = RetrievalPipeline(new_store)
+        except Exception:
+            logger.exception("Memory backend reload failed; retaining current authority")
+            return
 
-    _memory_state.store = new_store
-    _retrieval_pipeline = RetrievalPipeline(new_store)
-    _memory_state.pipeline = _retrieval_pipeline
-    sio_server.runtime.agent_pipeline.bind_retrieval_pipeline(_retrieval_pipeline)
-    logger.info(
-        "Memory runtime reloaded (backend=%s, preserved_docs=%d)",
-        getattr(new_store, "backend_name", "unknown"),
-        len(previous_docs),
-    )
+        _memory_state.store = new_store
+        _retrieval_pipeline = new_pipeline
+        _memory_state.pipeline = new_pipeline
+        sio_server.runtime.agent_pipeline.bind_retrieval_pipeline(new_pipeline)
+        logger.info(
+            "Memory runtime atomically reloaded (backend=%s, preserved_docs=%d)",
+            getattr(new_store, "backend_name", "unknown"),
+            len(previous_docs),
+        )
 
 # Socket.IO 服务器实例
 sio_server = DesktopPetSocketServer()
@@ -395,6 +377,8 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
         job_event_log=sio_server.job_events,
         goal_store=HeartbeatGoalStore(),
     )
+    if sio_server.runtime.activity_frame_service is not None:
+        sio_server.runtime.activity_frame_service.bind_scheduler(_heartbeat_scheduler)
     await _heartbeat_scheduler.start()
 
     # Start cache janitor
@@ -418,6 +402,8 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
         relationship_summary_provider=_relationship_evolution_summary,
         active_workspace_provider=_get_active_workspace_id,
     )
+    if sio_server.runtime.turn_outbox_worker is not None:
+        await sio_server.runtime.turn_outbox_worker.start()
     logger.info("Socket.IO server ready")
 
     yield
@@ -425,6 +411,8 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
     logger.info("Shutting down Yuizaki backend...")
     if _heartbeat_scheduler:
         await _heartbeat_scheduler.stop()
+    if sio_server.runtime.turn_outbox_worker is not None:
+        await sio_server.runtime.turn_outbox_worker.stop()
     if _janitor_task:
         _janitor_task.cancel()
         try:
@@ -447,14 +435,35 @@ async def ping():
     return {"ok": True}
 
 
+@app.get("/api/perception/active-application")
+async def active_application():
+    try:
+        return {"ok": True, **await asyncio.to_thread(read_active_application)}
+    except RuntimeError as exc:
+        return JSONResponse(
+            {"ok": False, "code": "PERCEPTION_PROVIDER_UNAVAILABLE", "message": str(exc)},
+            status_code=503,
+        )
+
+
 @app.middleware("http")
 async def backend_api_auth_middleware(request: Request, call_next):
     if request.url.path == "/api/ping":
         return await call_next(request)
+    if request.url.path == HOST_DESKTOP_ACTION_PREFIX or request.url.path.startswith(
+        f"{HOST_DESKTOP_ACTION_PREFIX}/"
+    ):
+        allowed, message = verify_host_desktop_action_authorization(
+            request.headers.get("authorization"),
+            os.getenv(HOST_DESKTOP_ACTION_TOKEN_ENV, ""),
+            _BACKEND_API_TOKEN,
+        )
+        if not allowed:
+            return JSONResponse({"error": "unauthorized", "message": message}, status_code=401)
+        return await call_next(request)
     client_host = request.client.host if request.client else None
     if backend_api_auth_required(
         request.url.path,
-        _BACKEND_API_TOKEN,
         request.method,
         client_host=client_host,
     ):
@@ -482,13 +491,17 @@ app.add_middleware(
     allow_origins=_parse_allowed_origins(os.getenv("YUIZAKI_ALLOWED_ORIGINS")),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "x-trace-id", "x-yuizaki-admin-token", "x-yuizaki-backend-token"],
+    allow_headers=["Authorization", "Content-Type", "x-trace-id", "x-yuizaki-backend-token"],
 )
 
 app.include_router(settings_router)
 
 # ============ Memory / RAG 路由 ============
 from modules.memory.routes import MemoryState, create_memory_pipeline_router, create_memory_router  # noqa: E402
+from modules.agent.host_control import (  # noqa: E402
+    create_computer_use_host_router,
+    create_desktop_action_host_router,
+)
 from modules.system.relationship_policy import (  # noqa: E402
     is_relationship_milestone,
     normalize_relationship_importance,
@@ -508,6 +521,15 @@ runtime_health_providers = build_app_runtime_health_providers(
     ocr_client_provider=lambda: _ocr_client,
     database_repository_provider=lambda: db_repo,
     memory_state_provider=lambda: _memory_state,
+)
+
+onboarding_readiness = OnboardingReadiness(
+    llm_client_provider=lambda: _llm_client,
+    tts_client_provider=lambda: _tts_client,
+    asr_manager_provider=lambda: _asr_manager,
+    database_repository_provider=lambda: db_repo,
+    memory_state_provider=lambda: _memory_state,
+    mcp_manager_provider=lambda: sio_server.mcp_manager,
 )
 
 
@@ -587,7 +609,6 @@ app.include_router(
         get_summary_rewrite_limiter=lambda: _summary_rewrite_limiter,
         get_governance_alert_state=lambda: _governance_alert_store.state,
         save_governance_alert_state=_governance_alert_store.save,
-        get_summary_admin_token=lambda: config.summary.admin_token or "",
         get_db_repo=lambda: db_repo,
         get_active_workspace_id=_get_active_workspace_id,
     )
@@ -597,7 +618,6 @@ app.include_router(
         get_config=lambda: config,
         get_generation_mgr=lambda: _generation_mgr,
         get_llm_client=lambda: _llm_client,
-        get_ocr_client=lambda: _ocr_client,
         get_svc_client=lambda: _svc_client,
         get_agent_runtime=lambda: sio_server.runtime,
         get_db_repo=lambda: db_repo,
@@ -642,14 +662,31 @@ runtime_handlers = build_runtime_handlers(
     generation_manager_provider=lambda: _generation_mgr,
     svc_client_provider=lambda: _svc_client,
     memory_status_provider=lambda: _get_memory_store().get_status() if _memory_state else None,
+    onboarding_readiness=onboarding_readiness,
+    product_metrics_consent_store=_product_metrics_consent_store,
 )
 app.include_router(create_memory_pipeline_router(runtime_handlers.memory_pipeline_query, get_active_workspace_id=_get_active_workspace_id))
+app.include_router(create_computer_use_host_router(
+    stop=sio_server.emergency_stop_computer_use,
+    status=sio_server.computer_use_status,
+))
+app.include_router(create_desktop_action_host_router(
+    status=sio_server.desktop_action_status,
+    enable=sio_server.enable_desktop_actions,
+    disable=sio_server.disable_desktop_actions,
+    rearm=sio_server.rearm_desktop_actions,
+    stop=sio_server.emergency_stop_desktop_actions,
+    heartbeat=sio_server.heartbeat_desktop_actions,
+    discover=sio_server.discover_desktop_actions,
+    grant=sio_server.grant_desktop_app,
+    host_token_provider=lambda: os.getenv(HOST_DESKTOP_ACTION_TOKEN_ENV, ""),
+    backend_token_provider=lambda: _BACKEND_API_TOKEN,
+))
 
 app.include_router(
     cast(Callable[..., Any], getattr(system_runtime_composition, "build_system_router_from_handlers"))(
         create_system_router=cast(Callable[..., Any], create_system_router),
         handlers=runtime_handlers,
-        admin_token_provider=lambda: config.summary.admin_token or "",
     )
 )
 

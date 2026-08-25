@@ -84,7 +84,9 @@ import {
 } from "./pet-renderer-runtime";
 import {
 	clampVisualAnchorToViewport,
+	computeBaseModelScale,
 	computeModelTransform,
+	isAlphaBoundsClipped,
 	mapAlphaBoundsToLocalBounds,
 	projectLocalVisualBounds,
 	resolveVisualPlacementOffset,
@@ -188,7 +190,19 @@ const isPetRendererDebugEnabled = (): boolean => {
 
 const logPetRendererDebug = (...args: unknown[]): void => {
 	if (isPetRendererDebugEnabled()) {
-		console.info(...args);
+		// Electron's console-message bridge stringifies extra arguments as
+		// "[object Object]". Serialize diagnostics here so geometry evidence is
+		// available in the renderer log without opening DevTools.
+		console.info(...args.map((arg) => {
+			if (arg && typeof arg === "object") {
+				try {
+					return JSON.stringify(arg);
+				} catch {
+					return String(arg);
+				}
+			}
+			return arg;
+		}));
 	}
 };
 
@@ -198,6 +212,7 @@ class PetRenderer {
 	private model: Live2DSprite | null = null;
 	private live2dViewport: PIXI.Container | null = null;
 	private live2dVisualLocalBounds: VisualBounds | null = null;
+	private live2dBaseScale: number | null = null;
 	private visualCalibrationFrame: number | null = null;
 	private visualCalibrationGeneration = 0;
 	private readonly container: HTMLElement;
@@ -207,6 +222,7 @@ class PetRenderer {
 
 	private noticeEl: HTMLDivElement | null = null;
 	private quickMenuEl: HTMLDivElement | null = null;
+	private quickMenuRestoreClickThrough: boolean | null = null;
 	private adjustmentSaveButton: HTMLButtonElement | null = null;
 	private adjustmentCancelButton: HTMLButtonElement | null = null;
 	private adjustmentActionPending = false;
@@ -373,6 +389,7 @@ class PetRenderer {
 
 		this.avatarCapabilities = null;
 		this.invalidateLive2DVisualCalibration();
+		this.live2dBaseScale = null;
 		window.live2dApi?.pet.reportAvatarCapabilities(null);
 		this.clearAvatarScheduling();
 		this.live2dRuntime?.destroy();
@@ -1312,13 +1329,20 @@ class PetRenderer {
 
 		const viewportWidth = window.innerWidth;
 		const viewportHeight = window.innerHeight;
+		const baseScaleResult = computeBaseModelScale({
+			cachedBaseScale: this.live2dBaseScale,
+			model: this.model,
+			viewportWidth,
+			viewportHeight,
+		});
+		this.live2dBaseScale = baseScaleResult.nextCache;
 
 		const transform = computeModelTransform({
 			configScale: this.config.scale,
 			defaultScale: DEFAULT_SCALE,
 			minScale: MIN_SCALE,
 			maxScale: MAX_SCALE,
-			baseScale: 1,
+			baseScale: baseScaleResult.baseScale,
 			viewportWidth,
 			viewportHeight,
 			positionX: this.config.positionX,
@@ -1379,7 +1403,7 @@ class PetRenderer {
 
 		logPetRendererDebug("[PetRenderer][transform] model geometry", {
 			configScale: this.config.scale,
-			baseScale: 1,
+			baseScale: baseScaleResult.baseScale,
 			nextScale: transform.nextScale,
 			anchorX: transform.anchorX,
 			anchorY: transform.anchorY,
@@ -1487,6 +1511,10 @@ class PetRenderer {
 			return;
 		}
 
+		// The first transform can run before easy-live2d has populated the
+		// model's local bounds. Re-run placement on the first stable ticker frame
+		// so a zero-sized bounds result cannot pin the model outside the viewport.
+		this.applyModelTransform();
 		const nominal = this.live2dViewport.getLocalBounds();
 		if (
 			!Number.isFinite(nominal.x) ||
@@ -1499,9 +1527,41 @@ class PetRenderer {
 			return;
 		}
 
+		// Measure the model away from the docked edge. Reading the current
+		// framebuffer at bottom-right can return a stale or clipped slice, which
+		// is not a valid visual rectangle.
+		const scaleX = this.live2dViewport.scale.x;
+		const scaleY = this.live2dViewport.scale.y;
+		this.live2dVisualLocalBounds = null;
+		this.live2dViewport.position.set(
+			window.innerWidth / 2 - (nominal.x + nominal.width / 2) * scaleX,
+			window.innerHeight / 2 - (nominal.y + nominal.height / 2) * scaleY,
+		);
+		const readAfterStableFrames = () => {
+			if (generation !== this.visualCalibrationGeneration || this.destroyed) {
+				return;
+			}
+			this.visualCalibrationFrame = null;
+			this.readLive2DVisualCalibration(generation, nominal);
+		};
+		this.visualCalibrationFrame = window.requestAnimationFrame(() => {
+			this.visualCalibrationFrame = window.requestAnimationFrame(readAfterStableFrames);
+		});
+	}
+
+	private readLive2DVisualCalibration(generation: number, nominal: VisualBounds): void {
+		if (
+			generation !== this.visualCalibrationGeneration ||
+			!this.app ||
+			!this.live2dViewport
+		) {
+			return;
+		}
+
 		try {
 			// easy-live2d renders its Cubism pass into Pixi's default framebuffer,
-			// so sample after the ticker render instead of extracting a new texture.
+			// so sample only after the temporary centered placement has rendered.
+			this.app.renderer.render(this.app.stage);
 			const webGlRenderer = this.app.renderer as typeof this.app.renderer & {
 				gl?: WebGLRenderingContext | WebGL2RenderingContext;
 			};
@@ -1528,6 +1588,19 @@ class PetRenderer {
 			});
 			if (!framebufferAlphaBounds) {
 				logger.warn("[PetRenderer] Live2D visual calibration returned no visible pixels");
+				this.restoreLive2DPlacement();
+				return;
+			}
+			if (isAlphaBoundsClipped({
+				alphaBounds: framebufferAlphaBounds,
+				width: pixelWidth,
+				height: pixelHeight,
+			})) {
+				logger.info("[PetRenderer] Live2D visual calibration skipped clipped framebuffer bounds", JSON.stringify({
+					alphaBounds: framebufferAlphaBounds,
+					framebuffer: { width: pixelWidth, height: pixelHeight },
+				}));
+				this.restoreLive2DPlacement();
 				return;
 			}
 			if (generation !== this.visualCalibrationGeneration) {
@@ -1573,7 +1646,13 @@ class PetRenderer {
 			}));
 		} catch (error) {
 			logger.warn("[PetRenderer] Live2D visual calibration failed:", error);
+			this.restoreLive2DPlacement();
 		}
+	}
+
+	private restoreLive2DPlacement(): void {
+		this.live2dVisualLocalBounds = null;
+		this.applyModelTransform();
 	}
 
 	private reportState(force = false): void {
@@ -2225,6 +2304,16 @@ class PetRenderer {
 	}
 
 	private readonly handleWindowMouseDown = (event: MouseEvent): void => {
+		if (this.quickMenuEl?.style.display === "block") {
+			if (event.target instanceof Node && this.quickMenuEl.contains(event.target)) {
+				event.stopPropagation();
+				return;
+			}
+			// An outside press dismisses the menu only. Do not let the same event
+			// become a model drag while the click-through restore is in flight.
+			this.hideQuickMenu();
+			return;
+		}
 		this.hideQuickMenu();
 
 		if (this.config.clickThrough) {
@@ -2470,6 +2559,8 @@ class PetRenderer {
 		}
 
 		this.app.renderer.resize(window.innerWidth, window.innerHeight);
+		this.live2dBaseScale = null;
+		this.invalidateLive2DVisualCalibration();
 		this.vrmRuntime?.resize(window.innerWidth, window.innerHeight);
 		this.applyModelTransform();
 		this.reportRendererMetrics("resize");
@@ -2587,15 +2678,35 @@ class PetRenderer {
 
 	private showQuickMenu(clientX: number, clientY: number): void {
 		const menu = this.ensureQuickMenu();
+		if (this.quickMenuRestoreClickThrough === null) {
+			this.quickMenuRestoreClickThrough = this.config.clickThrough;
+		}
 		menu.style.left = `${Math.min(Math.max(8, clientX), Math.max(8, window.innerWidth - 156))}px`;
 		menu.style.top = `${Math.min(Math.max(8, clientY), Math.max(8, window.innerHeight - 170))}px`;
 		menu.style.display = "block";
+		menu.focus({ preventScroll: true });
+		// A click-through BrowserWindow cannot receive button clicks even when a
+		// child element has pointer-events enabled. Temporarily switch the window
+		// to interactive mode while the menu is visible, then restore the user's
+		// persisted setting when it closes.
+		if (this.config.clickThrough) {
+			void window.live2dApi?.pet.setClickThrough?.(false);
+		}
 		this.requestMousePassthrough(false, "quick-menu", true);
 	}
 
 	private hideQuickMenu(): void {
+		const restoreClickThrough = this.quickMenuRestoreClickThrough;
+		this.quickMenuRestoreClickThrough = null;
 		if (this.quickMenuEl) {
 			this.quickMenuEl.style.display = "none";
+		}
+		if (restoreClickThrough === true) {
+			void window.live2dApi?.pet.setClickThrough?.(true);
+		} else if (this.config.clickThrough) {
+			this.requestMousePassthrough(true, "quick-menu-close", true);
+		} else {
+			this.syncMouseCaptureFromLastPoint("quick-menu-close", true);
 		}
 	}
 
@@ -2606,32 +2717,55 @@ class PetRenderer {
 
 		const menu = document.createElement("div");
 		menu.className = "pet-quick-menu";
+		menu.tabIndex = -1;
+		menu.setAttribute("role", "menu");
+		menu.addEventListener("pointerdown", (event) => {
+			event.stopPropagation();
+		});
+		menu.addEventListener("mousedown", (event) => {
+			event.stopPropagation();
+		});
+		menu.addEventListener("contextmenu", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+		});
+		menu.addEventListener("keydown", (event) => {
+			if (event.key !== "Escape") return;
+			event.preventDefault();
+			event.stopPropagation();
+			this.hideQuickMenu();
+		});
 
-		const addButton = (label: string, action: () => void) => {
+		const addButton = (label: string, action: () => void | Promise<unknown>) => {
 			const button = document.createElement("button");
 			button.type = "button";
+			button.setAttribute("role", "menuitem");
 			button.textContent = label;
 			button.addEventListener("click", (event) => {
 				event.stopPropagation();
-				action();
-				this.hideQuickMenu();
+				button.disabled = true;
+				try {
+					Promise.resolve(action()).catch((error: unknown) => {
+						logger.warn("[PetRenderer] quick menu action failed:", error);
+					}).finally(() => {
+						button.disabled = false;
+						this.hideQuickMenu();
+					});
+				} catch (error) {
+					logger.warn("[PetRenderer] quick menu action failed:", error);
+					button.disabled = false;
+					this.hideQuickMenu();
+				}
 			});
 			menu.appendChild(button);
 		};
 
 		addButton("打开聊天", () => window.live2dApi?.pet.openChatCenter?.());
-		addButton("锁定 / 解锁", () => {
-			void window.live2dApi?.pet.setLocked?.(!this.config.locked);
-		});
-		addButton("回到右下角", () => {
-			void window.live2dApi?.pet.snapBottomRight?.();
-		});
-		addButton("开启鼠标穿透", () => {
-			void window.live2dApi?.pet.setClickThrough?.(true);
-		});
-		addButton("重新加载模型", () => {
-			void window.live2dApi?.pet.reloadRenderer?.();
-		});
+		addButton("锁定 / 解锁", () => window.live2dApi?.pet.setLocked?.(!this.config.locked));
+		addButton("回到右下角", () => window.live2dApi?.pet.snapBottomRight?.());
+		addButton("开启鼠标穿透", () => window.live2dApi?.pet.setClickThrough?.(true));
+		addButton("重新加载模型", () => window.live2dApi?.pet.reloadRenderer?.());
+		addButton("关闭菜单", () => undefined);
 
 		document.body.appendChild(menu);
 		this.quickMenuEl = menu;
@@ -2673,6 +2807,7 @@ class PetRenderer {
 
 		this.quickMenuEl?.remove();
 		this.quickMenuEl = null;
+		this.quickMenuRestoreClickThrough = null;
 
 		this.stopPerformanceController();
 		this.performanceController = null;

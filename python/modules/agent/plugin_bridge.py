@@ -111,7 +111,7 @@ def register_plugin_tools(registry: ToolRegistry, snapshot: dict[str, Any]) -> N
                 parameters={"type": "object", "properties": {"args": {"type": "object"}}},
                 handler=_handler,
                 risk_level="medium",
-                require_confirm=True,
+                require_confirm=False,
                 tags=["plugin", str(plugin_id), *[f"contrib:{category}" for category in contribution_categories]],
                 scopes=[f"plugin:{plugin_id}", f"plugin-capability:{capability_id}"],
             ))

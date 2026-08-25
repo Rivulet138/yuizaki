@@ -197,6 +197,46 @@ describe('chatStore', () => {
     }))
   })
 
+  it('keeps the first text request voice-free for a fresh profile', () => {
+    mocks.connected = true
+    const store = useChatStore()
+
+    store.sendChat('hello')
+
+    expect(store.chatOptions.tts_enabled).toBe(false)
+    expect(mocks.sendAgentChat.mock.calls[0][5]).toMatchObject({
+      tts_enabled: false,
+    })
+  })
+
+  it('preserves an existing explicit TTS preference', () => {
+    activeStore.$dispose()
+    window.localStorage.setItem('yuizaki.chat.options', JSON.stringify({ tts_enabled: true }))
+    window.localStorage.setItem('yuizaki.chat.options.version', '7')
+    setActivePinia(createPinia())
+
+    activeStore = useChatStore()
+    activeStore.initChatStore()
+
+    expect(activeStore.chatOptions.tts_enabled).toBe(true)
+  })
+
+  it('persists an explicit user choice to enable TTS', () => {
+    const store = useChatStore()
+
+    store.setTtsEnabled(true)
+    expect(JSON.parse(window.localStorage.getItem('yuizaki.chat.options') || '{}')).toMatchObject({
+      tts_enabled: true,
+    })
+
+    activeStore.$dispose()
+    setActivePinia(createPinia())
+    activeStore = useChatStore()
+    activeStore.initChatStore()
+
+    expect(activeStore.chatOptions.tts_enabled).toBe(true)
+  })
+
   it('attaches agent steps and memory sources to the matching assistant reply', () => {
     mocks.connected = true
     const store = useChatStore()
@@ -527,6 +567,7 @@ describe('chatStore', () => {
   it('publishes pipeline pet control and TTS lifecycle with the originating interruption epoch', async () => {
     mocks.connected = true
     const store = useChatStore()
+    store.setTtsEnabled(true)
     store.sendChat('hello')
     const thinking = mocks.publishRuntime.mock.calls.find(([payload]) => payload.activity === 'thinking')?.[0]
     expect(thinking).toMatchObject({ source: 'chat', activity: 'thinking', interruptionEpoch: 0 })
@@ -658,6 +699,7 @@ describe('chatStore', () => {
   it('passes normalized sentence emotion cues to TTS playback events', () => {
     mocks.connected = true
     const store = useChatStore()
+    store.setTtsEnabled(true)
     store.sendChat('play reply')
     const ttsDetails: unknown[] = []
     const onTtsPlay = (event: Event) => {
@@ -905,7 +947,7 @@ describe('chatStore', () => {
     expect(store.chatOptions.max_tokens).toBe(64000)
     expect(store.chatOptions.mcp_enabled).toBe(true)
     expect(store.chatOptions.web_search_enabled).toBe(false)
-    expect(store.chatOptions.tts_enabled).toBe(true)
+    expect(store.chatOptions.tts_enabled).toBe(false)
     expect(store.chatOptions.prompt_mode).toBe('auto')
     expect(window.localStorage.getItem('yuizaki.chat.options.version')).toBe('7')
   })
@@ -1052,6 +1094,7 @@ describe('chatStore', () => {
   it('reports real playback start once and measures interrupt acknowledgement', () => {
     mocks.connected = true
     const store = useChatStore()
+    store.setTtsEnabled(true)
 
     window.dispatchEvent(new CustomEvent('pet:audio-started', {
       detail: { generationId: 'generation-1', sequence: 0 },
@@ -1086,6 +1129,7 @@ describe('chatStore', () => {
   it('drops TTS audio while interrupt is pending and from the interrupted generation', () => {
     mocks.connected = true
     const store = useChatStore()
+    store.setTtsEnabled(true)
     store.sendChat('old request')
     const oldEnvelope = agentCallEnvelope()
     const ttsDetails: unknown[] = []
@@ -1155,6 +1199,7 @@ describe('chatStore', () => {
   it('preserves the full generation envelope in Avatar and TTS playback details', () => {
     mocks.connected = true
     const store = useChatStore()
+    store.setTtsEnabled(true)
     store.sendChat('animate and speak')
     const envelope = agentCallEnvelope()
     const avatarDetails: unknown[] = []
@@ -1199,6 +1244,7 @@ describe('chatStore', () => {
   it('preserves playback compatibility when a legacy TTS payload omits duration', () => {
     mocks.connected = true
     const store = useChatStore()
+    store.setTtsEnabled(true)
     store.sendChat('legacy tts')
     const details: unknown[] = []
     const onTts = (event: Event) => details.push((event as CustomEvent<unknown>).detail)
@@ -1223,6 +1269,7 @@ describe('chatStore', () => {
   it('forwards binary PCM TTS chunks to the in-memory player contract', () => {
     mocks.connected = true
     const store = useChatStore()
+    store.setTtsEnabled(true)
     store.sendChat('pcm reply')
     const generationId = mocks.sendAgentChat.mock.calls[0][7]
     const pcmDetails: unknown[] = []
@@ -1272,6 +1319,7 @@ describe('chatStore', () => {
   it('can disable Live2D/VRM linkage for requests and playback cues', () => {
     mocks.connected = true
     const store = useChatStore()
+    store.setTtsEnabled(true)
     const petControls: unknown[] = []
     const ttsDetails: unknown[] = []
     const onPetControl = (event: Event) => petControls.push((event as CustomEvent<unknown>).detail)
@@ -1371,6 +1419,7 @@ describe('chatStore', () => {
   it('clears speaking state when audio playback ends', () => {
     mocks.connected = true
     const store = useChatStore()
+    store.setTtsEnabled(true)
     store.sendChat('speak')
 
     mocks.handlers.get(SocketEvents.TTS_DONE)?.({ audio_url: 'file:///tmp/reply.wav' })
@@ -1675,6 +1724,7 @@ describe('chatStore', () => {
   it('keeps the generation envelope alive until matching TTS completes', () => {
     mocks.connected = true
     const store = useChatStore()
+    store.setTtsEnabled(true)
     const played: unknown[] = []
     const onPlay = (event: Event) => played.push((event as CustomEvent<unknown>).detail)
     window.addEventListener('pet:tts-play-url', onPlay)

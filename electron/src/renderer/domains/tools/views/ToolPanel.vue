@@ -1,6 +1,7 @@
 <template>
   <PanelShell
-    title="本地能力"
+    title="能力与工具"
+    subtitle="检查工具权限、MCP、技能和最近调用"
     tone="tool"
   >
     <div class="tool-panel">
@@ -35,7 +36,7 @@
       <section class="capability-map panel-card">
         <div class="section-heading">
           <div>
-            <h3>能力分区</h3>
+            <h3>能力清单</h3>
           </div>
           <el-button plain :icon="Refresh" :loading="loadingSnapshots" @click="refreshSnapshots">刷新</el-button>
         </div>
@@ -370,9 +371,9 @@
         <article class="panel-card log-panel">
           <div class="section-heading compact">
             <div>
-              <h3>最近工具链路</h3>
+              <h3>最近调用</h3>
             </div>
-            <el-tag effect="plain">最近 {{ recentToolLogs.length }} 条</el-tag>
+            <el-tag effect="plain">{{ recentToolLogs.length }} 条记录</el-tag>
           </div>
           <div v-if="recentToolLogs.length" class="log-list">
             <div v-for="(log, idx) in recentToolLogs" :key="`${log.sortKey}-${idx}`" class="log-item">
@@ -653,14 +654,14 @@ const skillCategoryOptions = computed(() => (
 const summaryCards = computed(() => [
   { label: '可见能力', value: capabilities.value.length, desc: '当前运行时已注册', tone: 'blue' as MetricTone },
   { label: 'MCP 服务', value: mcpServerCount.value, desc: `${mcpEnabledCount.value} 个启用，${mcpConnectedCount.value} 个已连接`, tone: 'emerald' as MetricTone },
-  { label: '需确认', value: approvalRequiredCount.value, desc: '执行前需要授权', tone: 'amber' as MetricTone },
+  { label: '内置确认', value: approvalRequiredCount.value, desc: '仅统计仍需逐次确认的入口', tone: 'amber' as MetricTone },
   { label: '高风险', value: highRiskCount.value, desc: '文件、桌面或外部动作', tone: 'rose' as MetricTone },
   { label: '已追踪', value: tracedCapabilityCount.value, desc: '写入 trace 的入口', tone: 'emerald' as MetricTone },
 ])
 
 const healthItems = computed<HealthItem[]>(() => [
-  { key: 'ready', label: '可直接执行', value: readyCapabilityCount.value, detail: '低风险且免确认', tone: 'emerald' },
-  { key: 'approval', label: '需要确认', value: approvalRequiredCount.value, detail: '执行前会提示', tone: 'amber' },
+  { key: 'ready', label: '可直接执行', value: readyCapabilityCount.value, detail: '低风险或已选 MCP/插件', tone: 'emerald' },
+  { key: 'approval', label: '内置确认', value: approvalRequiredCount.value, detail: '执行前会提示', tone: 'amber' },
   { key: 'mcp-error', label: 'MCP 异常', value: mcpErrorCount.value, detail: '连接或清单错误', tone: mcpErrorCount.value ? 'rose' : 'emerald' },
   { key: 'plugin-error', label: '插件异常', value: pluginIssueCount.value, detail: '阻断、降级或装载失败', tone: pluginIssueCount.value ? 'rose' : 'emerald' },
   { key: 'trace', label: '有调用记录', value: recentToolLogs.value.length, detail: '最近工具链路', tone: 'blue' },
@@ -837,7 +838,10 @@ function countByKind(kind: CapabilityKindFilter) {
 }
 
 function isDirectExecutableCapability(item: CapabilityDescriptor) {
-  return !item.requiresApproval && ['safe', 'low'].includes(item.riskLevel)
+  return !item.requiresApproval && (
+    ['safe', 'low'].includes(item.riskLevel)
+    || ['mcp-tool', 'plugin-tool'].includes(item.kind)
+  )
 }
 
 function isMcpErrored(server: MCPRow) {
@@ -971,6 +975,7 @@ function mcpStatusTagType(server: MCPRow): TagType {
 
 function executionLabel(item: CapabilityDescriptor) {
   if (item.requiresApproval) return '执行前确认'
+  if (['mcp-tool', 'plugin-tool'].includes(item.kind)) return '启用即授权'
   if (['high', 'critical'].includes(item.riskLevel)) return '高风险免确认'
   return '可直接执行'
 }
@@ -1004,6 +1009,7 @@ function riskTagType(risk: CapabilityRiskLevel): TagType {
 
 function riskHint(item: CapabilityDescriptor) {
   if (item.requiresApproval) return '执行前会弹出确认。'
+  if (['mcp-tool', 'plugin-tool'].includes(item.kind)) return '由对应服务或插件的启用开关授权，关闭后停止调用。'
   if (['high', 'critical'].includes(item.riskLevel)) return '会触碰文件、桌面或外部服务，建议保留记录。'
   if (item.riskLevel === 'medium') return '适合按需调用并保留执行记录。'
   return '适合作为常规入口。'

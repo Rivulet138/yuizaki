@@ -10,11 +10,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Dict
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
-from time import perf_counter
+from functools import wraps
+from typing import Any, Callable, Dict, Mapping
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
@@ -22,14 +22,57 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 
 from .backend import MemoryBackend, MemorySearchIncompleteError
-from .vector_store import Document, MemoryType, is_memory_recallable
-from .pipeline import RetrievalPipeline
-from .schema import MemorySearchFilters, RetrievalRequest, RetrievalTrace
 from .expiry import is_memory_expired, normalize_memory_expiry
-
+from .metadata import (
+  append_memory_version,
+  has_prior_version_snapshot,
+  memory_state,
+  normalize_memory_metadata,
+  normalize_memory_validity,
+  recall_rejection_reason,
+)
+from .pipeline import RetrievalPipeline
+from .schema import MemorySearchFilters, RetrievalRequest
+from .vector_store import Document, MemoryType, is_memory_recallable
 
 VALID_MEMORY_LAYERS = {'profile', 'working', 'episodic', 'relationship', 'reflective', 'semantic', 'session'}
 VALID_MEMORY_SCOPES = {'global', 'workspace', 'session'}
+SERVER_OWNED_METADATA_FIELDS = frozenset({
+  'schema_version',
+  'revision',
+  'created_at',
+  'ingested_at',
+  'version_history',
+  'version_history_truncated',
+  'audit',
+  'audit_truncated',
+  'confidence_history',
+  'correction_history',
+  'soft_forgotten',
+  'soft_forgotten_at',
+  'soft_forget_turn_id',
+  'candidate_deleted',
+  'candidate_deleted_at',
+  'superseded_by',
+  'candidate',
+  'candidate_id',
+  'review_status',
+  'review_required',
+  'sensitive_category',
+  'sensitivity',
+  'source_kind',
+  'source_id',
+  'turn_id',
+  'evidence',
+})
+
+
+def _sanitize_create_metadata(metadata: Mapping[str, Any] | None) -> Dict[str, Any]:
+  return {
+    key: value
+    for key, value in (metadata or {}).items()
+    if key not in SERVER_OWNED_METADATA_FIELDS
+  }
 
 
 class MemoryDocPayload(BaseModel):
@@ -141,6 +184,26 @@ class MemorySoftForgetPayload(BaseModel):
   model_config = ConfigDict(extra='forbid')
   reason: str | None = None
   turn_id: str | None = None
+
+
+class MemoryReviewPayload(BaseModel):
+  model_config = ConfigDict(extra='forbid')
+  decision: str
+  reason: str | None = None
+
+  @field_validator('decision')
+  @classmethod
+  def validate_decision(cls, value: str) -> str:
+    normalized = str(value or '').strip().lower()
+    if normalized not in {'approve', 'reject'}:
+      raise ValueError('decision must be approve or reject')
+    return normalized
+
+
+class MemoryRollbackPayload(BaseModel):
+  model_config = ConfigDict(extra='forbid')
+  revision: int = Field(ge=1)
+  reason: str | None = None
 
 
 class MemoryMaintenancePayload(BaseModel):
@@ -347,7 +410,16 @@ def _append_audit(metadata: Dict[str, Any], *, action: str, reason: str | None =
   if before:
     event['before'] = before
   audit.append(event)
-  metadata['audit'] = audit[-25:]
+  audit_limit = 100
+  truncated_count = max(0, int(metadata.get('audit_truncated', 0) or 0))
+  if len(audit) > audit_limit:
+    truncated_count += len(audit) - audit_limit
+    audit = audit[-audit_limit:]
+  metadata['audit'] = audit
+  if truncated_count:
+    metadata['audit_truncated'] = truncated_count
+  else:
+    metadata.pop('audit_truncated', None)
   return metadata
 
 
@@ -518,6 +590,7 @@ class MemoryState:
   pipeline: RetrievalPipeline | None = None
   status: str = "idle"   # idle | indexing | error
   io_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+  mutation_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 def create_memory_router(
@@ -578,9 +651,37 @@ def create_memory_router(
     except MemorySearchIncompleteError as exc:
       raise HTTPException(status_code=503, detail=exc.to_detail()) from exc
 
+  def _serialized_mutation(handler: Callable[..., Any]) -> Callable[..., Any]:
+    @wraps(handler)
+    async def wrapped(*args: Any, **kwargs: Any) -> Any:
+      async with state.mutation_lock:
+        return await handler(*args, **kwargs)
+
+    return wrapped
+
   async def _delete_memory_documents(doc_ids: list[str]) -> int:
+    documents = await _run_store_call(state.store.list_documents)
+    candidate_docs = [
+      doc for doc in documents
+      if doc.id in set(doc_ids) and bool((doc.metadata or {}).get('candidate'))
+    ]
     for doc_id in doc_ids:
       await _run_store_call(state.store.delete_document, doc_id)
+    # Keep a metadata-only tombstone for review candidates. This is the
+    # candidate-specific replay guard; ordinary document deletion remains a
+    # physical delete as before.
+    for existing in candidate_docs:
+      metadata = dict(existing.metadata or {})
+      metadata['review_status'] = 'deleted'
+      metadata['candidate_deleted'] = True
+      metadata['candidate_deleted_at'] = datetime.now(timezone.utc).isoformat()
+      _append_audit(metadata, action='delete_candidate', reason='candidate_deleted')
+      add_metadata = getattr(state.store, 'add_metadata_document', None)
+      writer = add_metadata if callable(add_metadata) else state.store.add_document
+      await _run_store_call(
+        writer,
+        Document(id=existing.id, text=existing.text, metadata=metadata),
+      )
     clear_references = clear_memory_references
     if clear_references is None:
       return 0
@@ -588,7 +689,7 @@ def create_memory_router(
 
   def _normalize_expiry_for_write(metadata: Dict[str, Any]) -> Dict[str, Any]:
     try:
-      return normalize_memory_expiry(metadata, reject_expired=True)
+      return normalize_memory_validity(normalize_memory_expiry(metadata, reject_expired=True))
     except ValueError as exc:
       raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -605,6 +706,20 @@ def create_memory_router(
           "message": "Memory lifecycle fields are not supported",
         },
       )
+    documents = await _run_store_call(state.store.list_documents)
+    existing = next((item for item in documents if item.id == doc.id), None)
+    if existing is not None:
+      _ensure_doc_in_active_workspace(existing)
+    metadata = normalize_memory_metadata(metadata)
+    if existing is not None:
+      old_revision = int(normalize_memory_metadata(existing.metadata).get('revision', 1))
+      if not has_prior_version_snapshot(metadata, revision=old_revision, text=existing.text):
+        metadata = append_memory_version(
+          doc_id=doc.id,
+          old_text=existing.text,
+          old_metadata=existing.metadata,
+          new_metadata=metadata,
+        )
     await _run_store_call(state.store.add_document, Document(id=doc.id, text=doc.text, metadata=metadata))
 
   async def _compact_storage() -> Dict[str, Any] | None:
@@ -781,10 +896,13 @@ def create_memory_router(
     workspace_id: str | None = None,
     session_id: str | None = None,
     layer: str | None = None,
+    include_state: str = 'active',
   ) -> Dict[str, Any]:
     try:
       resolved_scope = _validate_scope(scope) or 'workspace'
       resolved_layer = _validate_layer(layer) if layer else None
+      if include_state not in {'active', 'forgotten', 'all'}:
+        raise ValueError('include_state must be active, forgotten, or all')
       resolved_workspace_id = _resolve_request_workspace_id(
         workspace_id,
         scope=resolved_scope,
@@ -804,9 +922,89 @@ def create_memory_router(
           session_id=session_id,
           layer=resolved_layer,
         )
-        and not is_memory_expired(doc.metadata)
-        and not (doc.metadata or {}).get('soft_forgotten')
+        and (
+          include_state == 'all'
+          or (include_state == 'forgotten' and memory_state(doc.metadata) == 'forgotten')
+          or (include_state == 'active' and memory_state(doc.metadata) == 'active')
+        )
       ]
+    }
+
+  @router.get('/overview')
+  async def memory_overview(
+    scope: str | None = None,
+    workspace_id: str | None = None,
+    session_id: str | None = None,
+  ) -> Dict[str, Any]:
+    try:
+      resolved_scope = _validate_scope(scope) or 'workspace'
+      resolved_workspace_id = _resolve_request_workspace_id(
+        workspace_id,
+        scope=resolved_scope,
+        default_for_workspace_scope=True,
+      )
+    except ValueError as exc:
+      raise HTTPException(status_code=400, detail=str(exc)) from exc
+    documents = await _run_store_call(state.store.list_documents)
+    scoped = [
+      doc for doc in documents
+      if _doc_matches_scope(
+        doc,
+        scope=resolved_scope,
+        workspace_id=resolved_workspace_id,
+        session_id=session_id,
+      )
+    ]
+    backend_status = await _run_store_call(state.store.get_status)
+
+    def _counts(key_fn: Callable[[Document], str]) -> Dict[str, int]:
+      counts: Dict[str, int] = {}
+      for document in scoped:
+        key = key_fn(document)
+        counts[key] = counts.get(key, 0) + 1
+      return counts
+
+    latest = sorted(
+      (
+        {
+          'id': doc.id,
+          'text': doc.text,
+          'updated_at': (doc.metadata or {}).get('updated_at') or (doc.metadata or {}).get('timestamp'),
+          'state': memory_state(doc.metadata),
+          'layer': (doc.metadata or {}).get('layer') or 'semantic',
+          'source': (doc.metadata or {}).get('source_kind') or (doc.metadata or {}).get('source') or 'unknown',
+          'action': (
+            ((doc.metadata or {}).get('audit') or [{}])[-1].get('action')
+            if isinstance((doc.metadata or {}).get('audit'), list)
+            and ((doc.metadata or {}).get('audit') or [])
+            and isinstance(((doc.metadata or {}).get('audit') or [{}])[-1], dict)
+            else None
+          ),
+        }
+        for doc in scoped
+      ),
+      key=lambda item: str(item.get('updated_at') or ''),
+      reverse=True,
+    )[:10]
+    review_counts = _counts(lambda doc: str((doc.metadata or {}).get('review_status') or 'unreviewed'))
+    recallable_count = sum(1 for doc in scoped if recall_rejection_reason(doc.metadata) is None)
+    return {
+      'total': len(scoped),
+      'recallable': recallable_count,
+      'by_state': _counts(lambda doc: memory_state(doc.metadata)),
+      'by_layer': _counts(lambda doc: str((doc.metadata or {}).get('layer') or 'semantic')),
+      'by_source': _counts(
+        lambda doc: str((doc.metadata or {}).get('source_kind') or (doc.metadata or {}).get('source') or 'unknown')
+      ),
+      'by_review_status': review_counts,
+      'index_health': {
+        'backend': backend_status.backend,
+        'healthy': backend_status.healthy,
+        'message': backend_status.message,
+        'status': state.status,
+        'metadata': backend_status.metadata or {},
+      },
+      'latest_activity': latest,
     }
 
   @router.post('/maintenance/preview')
@@ -826,6 +1024,7 @@ def create_memory_router(
     )
 
   @router.post('/maintenance/apply')
+  @_serialized_mutation
   async def apply_memory_maintenance(payload: MemoryMaintenanceApplyPayload) -> Dict[str, Any]:
     if payload.confirmation != 'PERMANENT_DELETE':
       raise HTTPException(
@@ -867,11 +1066,37 @@ def create_memory_router(
     }
 
   @router.post("/docs")
+  @_serialized_mutation
   async def add_doc(payload: MemoryDocPayload) -> Dict[str, Any]:
     payload_dict = _payload_dict(payload)
     doc_id = str(payload_dict.get("id") or f"doc_{uuid4().hex}")
+    if payload.id is not None:
+      documents = await _run_store_call(state.store.list_documents)
+      existing = next((doc for doc in documents if doc.id == doc_id), None)
+      if existing is not None:
+        _ensure_doc_in_active_workspace(existing)
+        existing_metadata = dict(existing.metadata or {})
+        review_status = str(existing_metadata.get('review_status') or '').strip().lower()
+        if (
+          existing_metadata.get('candidate')
+          or existing_metadata.get('candidate_deleted')
+          or existing_metadata.get('candidate_id')
+          or existing_metadata.get('review_required')
+          or review_status in {'pending', 'approved', 'rejected', 'deleted'}
+        ):
+          raise HTTPException(
+            status_code=409,
+            detail={
+              'error': 'memory_candidate_id_collision',
+              'message': 'Review candidate documents cannot be replaced through the create endpoint',
+              'id': doc_id,
+              'review_status': review_status or None,
+            },
+          )
     text = str(payload_dict.get("text") or "")
-    metadata = _normalize_expiry_for_write(dict(payload_dict.get("metadata") or {}))
+    metadata = _normalize_expiry_for_write(
+      _sanitize_create_metadata(dict(payload_dict.get("metadata") or {}))
+    )
     memory_type = _memory_type_value(payload_dict.get("type") or metadata.get("type") or MemoryType.FACT)
     importance = _coerce_importance(payload_dict.get("importance", metadata.get("importance", 0.5)))
     routing_payload = {
@@ -920,6 +1145,7 @@ def create_memory_router(
     return {"status": "ok", "id": doc_id}
 
   @router.post("/docs/batch-delete")
+  @_serialized_mutation
   async def batch_delete_docs(payload: MemoryDocBatchDeletePayload) -> Dict[str, Any]:
     doc_ids = payload.ids
     documents = await _run_store_call(state.store.list_documents)
@@ -939,7 +1165,16 @@ def create_memory_router(
     for doc_id in doc_ids:
       _ensure_doc_in_active_workspace(docs_by_id[doc_id])
 
-    cleared_references = await _delete_memory_documents(doc_ids)
+    candidate_ids = [doc_id for doc_id in doc_ids if (docs_by_id[doc_id].metadata or {}).get('candidate')]
+    hard_delete_ids = [doc_id for doc_id in doc_ids if doc_id not in candidate_ids]
+    for doc_id in candidate_ids:
+      metadata = dict(docs_by_id[doc_id].metadata or {})
+      metadata['review_status'] = 'deleted'
+      metadata['candidate_deleted_at'] = datetime.now(timezone.utc).isoformat()
+      metadata['candidate_deleted'] = True
+      _append_audit(metadata, action='delete_candidate', reason='candidate_deleted')
+      await _write_memory_document(Document(id=doc_id, text=docs_by_id[doc_id].text, metadata=metadata))
+    cleared_references = await _delete_memory_documents(hard_delete_ids) if hard_delete_ids else 0
     return {
       "status": "deleted",
       "ids": doc_ids,
@@ -949,6 +1184,7 @@ def create_memory_router(
     }
 
   @router.put("/docs/{doc_id:path}")
+  @_serialized_mutation
   async def update_doc(doc_id: str, payload: MemoryDocUpdatePayload) -> Dict[str, Any]:
     payload_dict = _payload_dict(payload)
     documents = await _run_store_call(state.store.list_documents)
@@ -964,10 +1200,15 @@ def create_memory_router(
     existing_metadata = dict(existing.metadata or {})
     incoming_metadata = dict(payload_dict.get("metadata") or {})
     merged_metadata = {**existing_metadata, **incoming_metadata}
-    # Origin provenance cannot be rewritten by an update payload.
-    for provenance_key in ('source_kind', 'source_id', 'turn_id', 'evidence', 'confidence_history'):
-      if provenance_key in existing_metadata:
-        merged_metadata[provenance_key] = existing_metadata[provenance_key]
+    # Origin, lifecycle, history, and audit state cannot be rewritten by a client update.
+    immutable_fields = SERVER_OWNED_METADATA_FIELDS | {
+      'source_kind', 'source_id', 'source_ids', 'turn_id', 'evidence',
+    }
+    for immutable_key in immutable_fields:
+      if immutable_key in existing_metadata:
+        merged_metadata[immutable_key] = existing_metadata[immutable_key]
+      else:
+        merged_metadata.pop(immutable_key, None)
     memory_type = _memory_type_value(payload_dict.get("type") or merged_metadata.get("type") or MemoryType.FACT)
     importance = _coerce_importance(payload_dict.get("importance", merged_metadata.get("importance", 0.5)))
     routing_payload = {
@@ -1029,6 +1270,7 @@ def create_memory_router(
     return {"status": "updated", "id": doc_id, "layer": layer, "scope": scope, "importance": importance}
 
   @router.post("/memory/add")
+  @_serialized_mutation
   async def add_memory(payload: MemoryAddPayload) -> Dict[str, Any]:
     """Add typed memory with importance filtering (Week 1 Task 1.3)"""
     payload_dict = _payload_dict(payload)
@@ -1057,7 +1299,9 @@ def create_memory_router(
       importance=importance,
       session_id=payload_dict.get('session_id'),
       workspace_id=workspace_id,
-      metadata=payload_dict.get('metadata') if isinstance(payload_dict.get('metadata'), dict) else {},
+      metadata=_sanitize_create_metadata(
+        payload_dict.get('metadata') if isinstance(payload_dict.get('metadata'), dict) else {}
+      ),
       explicit_layer=payload_dict.get('layer') if isinstance(payload_dict.get('layer'), str) else None,
       explicit_scope=payload_dict.get('scope') if isinstance(payload_dict.get('scope'), str) else None,
     )
@@ -1096,12 +1340,30 @@ def create_memory_router(
     return {"status": "ok", "id": doc_id, "type": memory_type, "layer": layer, "scope": scope, "importance": importance}
 
   @router.delete("/docs/{doc_id:path}")
+  @_serialized_mutation
   async def delete_doc(doc_id: str) -> Dict[str, Any]:
     documents = await _run_store_call(state.store.list_documents)
     existing = next((doc for doc in documents if doc.id == doc_id), None)
     if existing is None:
       raise HTTPException(status_code=404, detail="memory document not found")
     _ensure_doc_in_active_workspace(existing)
+    if (existing.metadata or {}).get('candidate'):
+      metadata = dict(existing.metadata or {})
+      metadata['review_status'] = 'deleted'
+      # Candidate deletion keeps a small tombstone so replaying the same
+      # deterministic candidate id cannot recreate the rejected record. Use
+      # candidate-specific lifecycle keys; legacy ``deleted_at`` is rejected
+      # by the normal write contract and remains reserved for old payloads.
+      metadata['candidate_deleted_at'] = datetime.now(timezone.utc).isoformat()
+      metadata['candidate_deleted'] = True
+      _append_audit(metadata, action='delete_candidate', reason='candidate_deleted')
+      await _write_memory_document(Document(id=doc_id, text=existing.text, metadata=metadata))
+      return {
+        'status': 'deleted',
+        'id': doc_id,
+        'tombstone': True,
+        'cleared_message_references': 0,
+      }
     cleared_references = await _delete_memory_documents([doc_id])
     return {
       "status": "deleted",
@@ -1123,7 +1385,54 @@ def create_memory_router(
     result['action'] = 'correction'
     return result
 
+  @router.post("/docs/{doc_id:path}/review")
+  @_serialized_mutation
+  async def review_doc(doc_id: str, payload: MemoryReviewPayload) -> Dict[str, Any]:
+    """Approve or reject a review-only candidate without changing provenance."""
+    documents = await _run_store_call(state.store.list_documents)
+    existing = next((doc for doc in documents if doc.id == doc_id), None)
+    if existing is None:
+      raise HTTPException(status_code=404, detail="memory document not found")
+    _ensure_doc_in_active_workspace(existing)
+    metadata = dict(existing.metadata or {})
+    if not metadata.get('candidate'):
+      raise HTTPException(status_code=409, detail="memory document is not a review candidate")
+    review_status = str(metadata.get('review_status') or '').lower()
+    if metadata.get('candidate_deleted') or review_status in {'deleted', 'rejected'}:
+      detail = "deleted memory candidate cannot be reviewed" if review_status == 'deleted' or metadata.get('candidate_deleted') else "rejected memory candidate cannot be reviewed"
+      raise HTTPException(status_code=409, detail=detail)
+    now = datetime.now(timezone.utc).isoformat()
+    metadata['review_status'] = 'approved' if payload.decision == 'approve' else 'rejected'
+    metadata['reviewed_at'] = now
+    metadata['review_reason'] = payload.reason
+    _append_audit(metadata, action=f"review_{payload.decision}", reason=payload.reason)
+    await _write_memory_document(Document(id=doc_id, text=existing.text, metadata=metadata))
+    return {'status': metadata['review_status'], 'id': doc_id}
+
+  @router.get("/candidates")
+  async def list_memory_candidates(status: str | None = None) -> Dict[str, Any]:
+    """List review candidates without exposing them through retrieval."""
+    requested = str(status or 'pending').strip().lower()
+    if requested not in {'pending', 'approved', 'rejected', 'deleted', 'all'}:
+      raise HTTPException(status_code=400, detail='unsupported candidate status')
+    documents = await _run_store_call(state.store.list_documents)
+    items: list[Dict[str, Any]] = []
+    for doc in documents:
+      metadata = dict(doc.metadata or {})
+      if not metadata.get('candidate'):
+        continue
+      review_status = str(metadata.get('review_status') or 'pending').lower()
+      if requested != 'all' and review_status != requested:
+        continue
+      try:
+        _ensure_doc_in_active_workspace(doc)
+      except HTTPException:
+        continue
+      items.append({'id': doc.id, 'text': doc.text, 'metadata': metadata})
+    return {'status': 'ok', 'candidates': items, 'count': len(items)}
+
   @router.post("/docs/{doc_id:path}/soft-forget")
+  @_serialized_mutation
   async def soft_forget_doc(doc_id: str, payload: MemorySoftForgetPayload) -> Dict[str, Any]:
     """Hide a memory without deleting its immutable record or provenance."""
     documents = await _run_store_call(state.store.list_documents)
@@ -1140,6 +1449,105 @@ def create_memory_router(
     _append_audit(metadata, action='soft_forget', reason=payload.reason or 'conversational_soft_forget', before={'text': existing.text})
     await _write_memory_document(Document(id=doc_id, text=existing.text, metadata=metadata))
     return {'status': 'soft_forgotten', 'id': doc_id, 'action': 'soft_forget'}
+
+  @router.post("/docs/{doc_id:path}/restore")
+  @_serialized_mutation
+  async def restore_doc(doc_id: str, payload: MemorySoftForgetPayload) -> Dict[str, Any]:
+    documents = await _run_store_call(state.store.list_documents)
+    existing = next((doc for doc in documents if doc.id == doc_id), None)
+    if existing is None:
+      raise HTTPException(status_code=404, detail="memory document not found")
+    _ensure_doc_in_active_workspace(existing)
+    metadata = dict(existing.metadata or {})
+    if not metadata.get('soft_forgotten'):
+      return {'status': 'active', 'id': doc_id, 'action': 'restore', 'changed': False}
+    metadata.pop('soft_forgotten', None)
+    metadata.pop('soft_forgotten_at', None)
+    metadata.pop('soft_forget_turn_id', None)
+    _append_audit(metadata, action='restore', reason=payload.reason or 'memory_restore')
+    await _write_memory_document(Document(id=doc_id, text=existing.text, metadata=metadata))
+    return {'status': 'active', 'id': doc_id, 'action': 'restore', 'changed': True}
+
+  @router.post("/docs/{doc_id:path}/rollback")
+  @_serialized_mutation
+  async def rollback_doc(doc_id: str, payload: MemoryRollbackPayload) -> Dict[str, Any]:
+    """Restore a retained snapshot by appending a new revision."""
+    documents = await _run_store_call(state.store.list_documents)
+    existing = next((doc for doc in documents if doc.id == doc_id), None)
+    if existing is None:
+      raise HTTPException(status_code=404, detail="memory document not found")
+    _ensure_doc_in_active_workspace(existing)
+
+    current_metadata = normalize_memory_metadata(existing.metadata)
+    current_revision = int(current_metadata.get("revision", 1))
+    if payload.revision == current_revision:
+      return {
+        "status": "active",
+        "id": doc_id,
+        "action": "rollback",
+        "changed": False,
+        "revision": current_revision,
+      }
+
+    history = current_metadata.get("version_history")
+    snapshots = history if isinstance(history, list) else []
+    snapshot = next(
+      (
+        item for item in reversed(snapshots)
+        if isinstance(item, dict) and item.get("revision") == payload.revision
+      ),
+      None,
+    )
+    if snapshot is None or not isinstance(snapshot.get("metadata"), dict):
+      raise HTTPException(
+        status_code=404,
+        detail={
+          "error": "memory_revision_not_found",
+          "revision": payload.revision,
+          "retained_revisions": [
+            item.get("revision") for item in snapshots if isinstance(item, dict)
+          ],
+          "truncated_count": int(current_metadata.get("version_history_truncated", 0) or 0),
+        },
+      )
+
+    restored_text = str(snapshot.get("text") or "").strip()
+    if not restored_text:
+      raise HTTPException(status_code=409, detail="memory revision contains no text")
+    restored_metadata = dict(snapshot["metadata"])
+    restored_metadata["version_history"] = snapshots
+    if current_metadata.get("version_history_truncated"):
+      restored_metadata["version_history_truncated"] = current_metadata["version_history_truncated"]
+    for history_key in ("audit", "confidence_history", "correction_history"):
+      if history_key in current_metadata:
+        restored_metadata[history_key] = current_metadata[history_key]
+    for lifecycle_key in (
+      "soft_forgotten", "soft_forgotten_at", "soft_forget_turn_id", "superseded_by",
+      "candidate_deleted", "candidate_deleted_at",
+    ):
+      if lifecycle_key in current_metadata:
+        restored_metadata[lifecycle_key] = current_metadata[lifecycle_key]
+    current_review_status = str(current_metadata.get("review_status") or "").strip().lower()
+    if current_review_status in {"deleted", "rejected"}:
+      restored_metadata["review_status"] = current_review_status
+      for review_key in ("reviewed_at", "review_reason"):
+        if review_key in current_metadata:
+          restored_metadata[review_key] = current_metadata[review_key]
+    _append_audit(
+      restored_metadata,
+      action="rollback",
+      reason=payload.reason or "user_requested_rollback",
+      before={"revision": current_revision, "text": existing.text},
+    )
+    await _write_memory_document(Document(id=doc_id, text=restored_text, metadata=restored_metadata))
+    return {
+      "status": "rolled_back",
+      "id": doc_id,
+      "action": "rollback",
+      "changed": True,
+      "restored_revision": payload.revision,
+      "revision": current_revision + 1,
+    }
 
   @router.get("/index/status")
   async def index_status() -> Dict[str, Any]:
@@ -1181,6 +1589,7 @@ def create_memory_router(
       state.status = "error"
       raise HTTPException(status_code=500, detail=f"memory index rebuild failed: {exc}") from exc
 
+  @router.post("/query")
   @router.post("/rag/query")
   async def rag_query(payload: MemoryRagQueryPayload) -> Dict[str, Any]:
     """
@@ -1196,77 +1605,29 @@ def create_memory_router(
     top_k = int(payload.top_k or 5)
     memory_types = payload.memory_types
     recency_weight = float(payload.recency_weight)
-    started = perf_counter()
     resolved_scope = payload.scope or 'workspace'
     resolved_workspace_id = _resolve_request_workspace_id(
       payload.workspace_id,
       scope=resolved_scope,
       default_for_workspace_scope=True,
     )
-    filters = MemorySearchFilters(
-      scope=resolved_scope,
-      session_id=payload.session_id,
-      workspace_id=resolved_workspace_id,
-      layers=payload.layers,
-    )
-
-    if state.pipeline:
-      request = RetrievalRequest(
-          query=query,
-          scope=resolved_scope,
-          session_id=payload.session_id,
-          workspace_id=resolved_workspace_id,
-          top_k=top_k,
-          layers=payload.layers or ['profile', 'working', 'episodic', 'relationship', 'reflective', 'semantic'],
-          memory_types=memory_types,
-          recency_weight=recency_weight,
-        )
-      try:
-        result = await run_in_threadpool(state.pipeline.recall, request)
-      except MemorySearchIncompleteError as exc:
-        raise HTTPException(status_code=503, detail=exc.to_detail()) from exc
-      result["query"] = query
-      return result
-
-    if memory_types or recency_weight > 0:
-      results = await _run_store_call(
-        state.store.search_with_rerank,
-        query=query,
-        top_k=top_k,
-        memory_types=memory_types,
-        recency_weight=recency_weight,
-        filters=filters,
-      )
-    else:
-      results = await _run_store_call(state.store.search, query, top_k=top_k, filters=filters)
-
-    scores = [float(score) for _, score in results]
-    trace = RetrievalTrace(
+    request = RetrievalRequest(
       query=query,
       scope=resolved_scope,
       session_id=payload.session_id,
       workspace_id=resolved_workspace_id,
+      top_k=top_k,
       layers=payload.layers or ['profile', 'working', 'episodic', 'relationship', 'reflective', 'semantic'],
-      recall_count=len(results),
-      selected_ids=[doc.id for doc, _ in results],
-      candidate_limit=top_k,
-      candidate_count=len(results),
-      filtered_count=len(results),
-      filtered_out_count=0,
-      filter_reasons={},
-      top_score=max(scores) if scores else None,
-      average_score=(sum(scores) / len(scores)) if scores else None,
-      latency_ms=round((perf_counter() - started) * 1000, 3),
-      backend_filter_downpushed=True,
+      memory_types=memory_types,
+      recency_weight=recency_weight,
     )
-
-    return {
-      "query": query,
-      "results": [
-        {"doc": doc.__dict__, "score": score} for (doc, score) in results
-      ],
-      "trace": asdict(trace),
-    }
+    pipeline = state.pipeline or RetrievalPipeline(state.store)
+    try:
+      result = await run_in_threadpool(pipeline.recall, request)
+    except MemorySearchIncompleteError as exc:
+      raise HTTPException(status_code=503, detail=exc.to_detail()) from exc
+    result["query"] = query
+    return result
 
   return router
 

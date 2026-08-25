@@ -1,9 +1,8 @@
 <template>
-  <PanelShell :title="t('navigation.svc.title')">
+  <PanelShell :title="t('navigation.svc.title')" subtitle="上传音频、转换音色并测试 TTS/ASR 服务">
     <div class="voice-panel">
       <section class="voice-toolbar">
         <div>
-          <span class="section-kicker">VOICE RUNTIME</span>
           <strong>{{ runtimeSummary }}</strong>
         </div>
         <div class="toolbar-actions">
@@ -18,7 +17,6 @@
           <template #header>
             <div class="card-header">
               <div>
-                <span class="section-kicker">SVC</span>
                 <strong>{{ svcProviderLabel }}</strong>
               </div>
               <el-tag :type="svcModelReady ? 'success' : 'warning'">{{ svcReadinessLabel }}</el-tag>
@@ -75,8 +73,7 @@
             <template #header>
               <div class="card-header">
                 <div>
-                  <span class="section-kicker">TTS</span>
-                  <strong>{{ t('settings.tts.service') }}</strong>
+              <strong>{{ t('settings.tts.service') }}</strong>
                 </div>
                 <el-button size="small" type="primary" plain :loading="testingTts" :disabled="testingTts" @click="testTts">{{ t('settings.tts.test') }}</el-button>
               </div>
@@ -116,8 +113,7 @@
             <template #header>
               <div class="card-header">
                 <div>
-                  <span class="section-kicker">ASR</span>
-                  <strong>{{ t('settings.asr.title') }}</strong>
+              <strong>{{ t('settings.asr.title') }}</strong>
                 </div>
                 <el-tag type="info">Socket.IO</el-tag>
               </div>

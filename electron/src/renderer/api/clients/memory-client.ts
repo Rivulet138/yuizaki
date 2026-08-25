@@ -7,9 +7,20 @@ export interface MemoryDocListOptions {
   workspaceId?: string
   sessionId?: string
   layer?: string
+  includeState?: 'active' | 'forgotten' | 'all'
 }
 
 export interface MemoryMetadata extends Record<string, unknown> {
+  schema_version?: number
+  revision?: number
+  review_status?: MemoryReviewStatus
+  valid_from?: string | null
+  valid_to?: string | null
+  occurred_at?: string | null
+  ingested_at?: string | null
+  source_ids?: string[]
+  supersedes?: string | string[] | null
+  superseded_by?: string | null
   expires_at?: string | null
   source_kind?: string
   source_id?: string
@@ -80,12 +91,35 @@ export interface MemoryIndexStatus {
   metadata?: Record<string, unknown>
 }
 
+export type MemoryLifecycleState = 'active' | 'forgotten' | 'expired' | 'scheduled' | 'superseded' | 'rejected'
+export type MemoryReviewStatus = 'unreviewed' | 'pending' | 'accepted' | 'confirmed' | 'rejected' | 'superseded'
+
+export interface MemoryOverview {
+  total: number
+  recallable: number
+  by_state: Record<string, number>
+  by_layer: Record<string, number>
+  by_source: Record<string, number>
+  by_review_status: Record<string, number>
+  latest_activity: Array<{
+    id: string
+    text: string
+    state: MemoryLifecycleState
+    layer?: string
+    source?: string
+    updated_at?: string
+    action?: string
+  }>
+  index_health: Omit<MemoryIndexStatus, 'count'>
+}
+
 const buildDocsUrl = (options?: MemoryDocListOptions) => {
   const search = new URLSearchParams()
   if (options?.scope) search.set('scope', options.scope)
   if (options?.workspaceId) search.set('workspace_id', options.workspaceId)
   if (options?.sessionId) search.set('session_id', options.sessionId)
   if (options?.layer) search.set('layer', options.layer)
+  if (options?.includeState) search.set('include_state', options.includeState)
   const suffix = search.toString()
   return `${CONTROL_ORIGIN}/memory/docs${suffix ? `?${suffix}` : ''}`
 }
@@ -112,6 +146,22 @@ export const memoryClient = {
     requestJson<{ status: string; id: string; action?: string }>(`${CONTROL_ORIGIN}/memory/docs/${encodeURIComponent(id)}/soft-forget`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload || {}),
     }),
+  restoreDoc: async (id: string, payload?: { reason?: string }) =>
+    requestJson<{ status: string; id: string; action?: string }>(`${CONTROL_ORIGIN}/memory/docs/${encodeURIComponent(id)}/restore`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload || {}),
+    }),
+  rollbackDoc: async (id: string, revision: number) =>
+    requestJson<{ status: string; id: string; revision?: number; action?: string }>(`${CONTROL_ORIGIN}/memory/docs/${encodeURIComponent(id)}/rollback`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision }),
+    }),
+  getOverview: async (options?: MemoryDocListOptions) => {
+    const search = new URLSearchParams()
+    if (options?.scope) search.set('scope', options.scope)
+    if (options?.workspaceId) search.set('workspace_id', options.workspaceId)
+    if (options?.sessionId) search.set('session_id', options.sessionId)
+    const suffix = search.toString()
+    return requestJson<MemoryOverview>(`${CONTROL_ORIGIN}/memory/overview${suffix ? `?${suffix}` : ''}`)
+  },
   getIndexStatus: async () => requestJson<MemoryIndexStatus>(`${CONTROL_ORIGIN}/memory/index/status`),
   rebuildIndex: async () => requestJson<{ status: string; backend?: string; document_count?: number; indexed_count?: number; skipped_count?: number; message?: string }>(`${CONTROL_ORIGIN}/memory/index/rebuild`, {
     method: 'POST',
@@ -150,6 +200,12 @@ export const memoryClient = {
     }),
   queryRag: async (payload: Record<string, unknown>) =>
     requestJson<{ results: unknown[]; trace?: unknown }>(`${CONTROL_ORIGIN}/memory/rag/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  query: async (payload: Record<string, unknown>) =>
+    requestJson<{ query: string; results: unknown[]; trace?: unknown }>(`${CONTROL_ORIGIN}/memory/query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

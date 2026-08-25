@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { petControl } from '../utils/petControl'
-import { clearControlAuthToken, CONTROL_ORIGIN } from '../api/clients/http-client'
+import { clearControlAuthToken } from '../api/clients/http-client'
 
 describe('petControl', () => {
   const setControlToken = (token = 'pet-token') => {
@@ -33,29 +33,20 @@ describe('petControl', () => {
     }))
   })
 
-  it('refreshes the browser control token before calling protected pet APIs', async () => {
-    window.history.replaceState({}, '', `/?control_origin=${encodeURIComponent(CONTROL_ORIGIN)}`)
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        text: vi.fn().mockResolvedValue('<!doctype html><meta name="yuizaki-control-token" content="fresh-token">'),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: vi.fn().mockResolvedValue({ activeModelId: null, models: [] }),
-      })
+  it('calls pet APIs directly without a control token bootstrap', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ activeModelId: null, models: [] }),
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(petControl.getCatalog()).resolves.toEqual({ activeModelId: null, models: [] })
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, `${CONTROL_ORIGIN}/`, expect.objectContaining({
-      cache: 'no-store',
-    }))
-    expect(fetchMock).toHaveBeenNthCalledWith(2, expect.stringContaining('/api/pet/catalog'), expect.objectContaining({
-      headers: expect.objectContaining({
-        Authorization: 'Bearer fresh-token',
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/pet/catalog'), expect.objectContaining({
+      headers: expect.not.objectContaining({
+        Authorization: expect.anything(),
       }),
     }))
   })
@@ -71,24 +62,24 @@ describe('petControl', () => {
     await expect(petControl.move(42, 64)).rejects.toThrow('Pet position is locked')
   })
 
-  it('explains missing control authorization in browser mode', async () => {
+  it('surfaces ordinary unauthorized responses without a token retry', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
       json: vi.fn().mockResolvedValue({}),
     }))
 
-    await expect(petControl.getCatalog()).rejects.toThrow('控制服务未授权')
+    await expect(petControl.getCatalog()).rejects.toThrow('Pet control request failed: 401')
+    expect(fetch).toHaveBeenCalledOnce()
   })
 
-  it('explains missing control authorization when the browser blocks the response', async () => {
-    window.history.replaceState({}, '', `/?control_origin=${encodeURIComponent(CONTROL_ORIGIN)}`)
+  it('reports connection failures without probing the control index', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(petControl.getCatalog()).rejects.toThrow('重新打开界面')
+    await expect(petControl.getCatalog()).rejects.toThrow('无法连接桌宠控制服务')
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock).toHaveBeenCalledWith(`${CONTROL_ORIGIN}/`, expect.objectContaining({ cache: 'no-store' }))
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/pet/catalog'), expect.anything())
   })
 
   it('posts automation motion requests through the HTTP control API', async () => {
@@ -277,7 +268,7 @@ describe('petControl', () => {
 
     await expect(petControl.getAvatarCapabilities()).resolves.toEqual({ success: true, capabilities })
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/pet/avatar-capabilities'), expect.objectContaining({
-      headers: expect.objectContaining({ Authorization: 'Bearer pet-token' }),
+      headers: expect.not.objectContaining({ Authorization: expect.anything() }),
     }))
   })
 

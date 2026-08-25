@@ -2,6 +2,7 @@
   <!-- Permission Dialog -->
   <el-dialog
     v-model="dialogStore.permissionDialogVisible"
+    data-testid="permission-dialog"
     width="480px"
     role="alertdialog"
     aria-labelledby="permission-dialog-title"
@@ -35,14 +36,10 @@
     :companions="companionStore.companions"
     :active-companion="companionStore.activeCompanion"
     :muted="muted"
-    :do-not-disturb="doNotDisturb"
-    :dnd-loading="dndLoading"
-    :proactivity-preset="proactivityPreset"
+    :runtime-snapshot="runtimeSnapshot"
     @update:visible="dialogStore.workspaceDrawerVisible = $event"
     @update-field="handleWorkspaceFieldUpdate"
     @set-muted="setMuted"
-    @set-dnd="setDrawerDoNotDisturb"
-    @set-proactivity="setDrawerProactivity"
   />
 
   <!-- Edit desktop pet profile dialog -->
@@ -94,13 +91,9 @@ const chatStore = useChatStore()
 const { t } = useI18n()
 const {
   applyActiveCompanionRuntime,
-  doNotDisturb,
-  proactivityPreset,
-  setDoNotDisturb,
-  setProactivityPreset,
+  runtimeSnapshot,
 } = useCompanionRuntimeBridge()
 const muted = computed(() => chatStore.chatOptions.tts_enabled === false)
-const dndLoading = ref(false)
 
 const rememberPermissionDecision = ref(false)
 const permissionDenyButton = ref<HTMLElement | { $el?: HTMLElement } | null>(null)
@@ -157,24 +150,6 @@ const handleWorkspaceFieldUpdate = async (field: string, value: string) => {
 const setMuted = (value: boolean) => {
   chatStore.setTtsEnabled(!value)
   ElMessage.success(value ? t('companion.home.muted') : t('companion.home.unmuted'))
-}
-
-const setDrawerDoNotDisturb = async (enabled: boolean) => {
-  if (dndLoading.value) return
-  dndLoading.value = true
-  try {
-    await setDoNotDisturb(enabled)
-    ElMessage.success(enabled ? t('companion.home.dndEnabled') : t('companion.home.dndDisabled'))
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : t('companion.home.petActionError'))
-  } finally {
-    dndLoading.value = false
-  }
-}
-
-const setDrawerProactivity = (value: 'conservative' | 'standard') => {
-  if (setProactivityPreset(value)) ElMessage.success(t(`companion.home.proactivitySet.${value}`))
-  else ElMessage.error(t('companion.home.proactivityError'))
 }
 
 const editCompanionForm = ref({

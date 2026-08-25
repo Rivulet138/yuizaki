@@ -12,6 +12,13 @@ from ..llm import LLMClient
 from ..ocr import OCRClient
 from ..svc import SVCClient
 from ..tts import TTSProviderClient, create_tts_client
+from .voice_diagnostics import VoiceDiagnostics
+
+_VOICE_DIAGNOSTICS = VoiceDiagnostics()
+
+
+def voice_diagnostics() -> VoiceDiagnostics:
+    return _VOICE_DIAGNOSTICS
 
 
 class LLMServiceConfig(Protocol):
@@ -172,6 +179,7 @@ async def initialize_llm(service_config: ServiceConfig, logger: logging.Logger) 
         service_config.llm.model,
         service_config.llm.timeout,
         provider=service_config.llm.provider,
+        diagnostics=_VOICE_DIAGNOSTICS,
     )
     await client.connect()
     logger.info("LLM client initialized")
@@ -190,6 +198,7 @@ async def initialize_vision_llm(service_config: ServiceConfig, logger: logging.L
         llm.vision_timeout,
         provider=llm.vision_provider,
         image_detail=llm.vision_detail,
+        diagnostics=_VOICE_DIAGNOSTICS,
     )
     await client.connect()
     logger.info("Vision LLM client initialized (provider=%s, model=%s)", llm.vision_provider, llm.vision_model)
@@ -220,6 +229,7 @@ async def initialize_tts(service_config: ServiceConfig, logger: logging.Logger) 
         mode=service_config.tts.mode,
         save_mode=service_config.tts.save_mode,
         audio_cache_dir=service_config.tts.audio_cache_dir,
+        diagnostics=_VOICE_DIAGNOSTICS,
     )
     startup_mode = _tts_startup_mode()
     warmup_enabled = _tts_warmup_enabled()
@@ -248,7 +258,7 @@ async def cleanup_tts(client: TTSProviderClient | None) -> None:
 
 
 def _tts_startup_mode() -> str:
-    mode = os.getenv("TTS_STARTUP_MODE", "background").strip().lower()
+    mode = os.getenv("TTS_STARTUP_MODE", "lazy").strip().lower()
     if mode in {"blocking", "eager", "foreground", "sync"}:
         return "blocking"
     if mode in {"background", "warmup", "preload"}:
@@ -257,7 +267,7 @@ def _tts_startup_mode() -> str:
 
 
 def _tts_warmup_enabled() -> bool:
-    value = os.getenv("TTS_WARMUP_ENABLED", "1").strip().lower()
+    value = os.getenv("TTS_WARMUP_ENABLED", "0").strip().lower()
     return value not in {"0", "false", "no", "off", "disabled"}
 
 
@@ -314,6 +324,7 @@ async def initialize_asr(service_config: ServiceConfig, logger: logging.Logger) 
             service_config.asr.vad_min_silence_ms,
             service_config.asr.asr_partial_every,
             service_config.asr.language,
+            diagnostics=_VOICE_DIAGNOSTICS,
         )
         logger.info("ASR manager initialized (provider=%s)", provider or "sensevoice-local")
         return manager

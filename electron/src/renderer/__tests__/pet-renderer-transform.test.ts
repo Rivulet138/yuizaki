@@ -3,6 +3,7 @@ import {
   clampVisualAnchorToViewport,
   computeBaseModelScale,
   computeModelTransform,
+  isAlphaBoundsClipped,
   mapAlphaBoundsToLocalBounds,
   projectLocalVisualBounds,
   resolveModelAnchor,
@@ -36,6 +37,20 @@ describe('pet-renderer-transform', () => {
 
     expect(result.baseScale).toBeGreaterThan(0)
     expect(result.nextCache).toBe(result.baseScale)
+  })
+
+  it('should cap the default model scale so docked pets stay inside the viewport', () => {
+    const result = computeBaseModelScale({
+      cachedBaseScale: null,
+      model: {
+        getModelCanvasSize: () => ({ width: 320, height: 320 }),
+        getLocalBounds: () => ({ width: 320, height: 320 }),
+      },
+      viewportWidth: 2560,
+      viewportHeight: 1440,
+    })
+
+    expect(result.baseScale).toBeLessThanOrEqual(0.72)
   })
 
   it('should compute docked transform and interaction bounds when no explicit position is provided', () => {
@@ -194,7 +209,7 @@ describe('pet-renderer-transform', () => {
       viewportHeight: 1200,
       desiredX: 0,
       desiredY: 0,
-    })).toEqual({ x: 300, y: 400 })
+    })).toEqual({ x: 268, y: 368 })
   })
 
   it('should scan visible alpha while ignoring fully transparent padding', () => {
@@ -220,6 +235,20 @@ describe('pet-renderer-transform', () => {
       width: 4,
       height: 3,
     })).toBeNull()
+  })
+
+  it('should reject alpha bounds that touch the framebuffer edge as clipped measurements', () => {
+    expect(isAlphaBoundsClipped({
+      alphaBounds: { x: 2417, y: 156, width: 145, height: 649 },
+      width: 2562,
+      height: 1530,
+    })).toBe(true)
+
+    expect(isAlphaBoundsClipped({
+      alphaBounds: { x: 400, y: 180, width: 500, height: 700 },
+      width: 2562,
+      height: 1530,
+    })).toBe(false)
   })
 
   it('should map extracted pixels back to local coordinates and scale the cached bounds', () => {

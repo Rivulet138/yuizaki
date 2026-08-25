@@ -9,8 +9,44 @@ from pathlib import Path
 from typing import Any
 
 from .backend import MemoryBackendStatus
+from .metadata import append_memory_version, has_prior_version_snapshot, normalize_memory_metadata
 from .schema import MemorySearchFilters
 from .vector_store import Document, EmbeddingProvider, VectorStore
+
+
+_APPEND_ONLY_HISTORY_LIMITS = {
+    "audit": 100,
+    "confidence_history": 50,
+    "correction_history": 25,
+}
+
+
+def _merge_append_only_metadata(
+    current: dict[str, Any],
+    incoming: dict[str, Any],
+) -> dict[str, Any]:
+    merged = dict(incoming)
+    for key, limit in _APPEND_ONLY_HISTORY_LIMITS.items():
+        raw_current_items = current.get(key)
+        raw_incoming_items = incoming.get(key)
+        current_items = raw_current_items if isinstance(raw_current_items, list) else []
+        incoming_items = raw_incoming_items if isinstance(raw_incoming_items, list) else []
+        items = list(current_items)
+        for item in incoming_items:
+            if item not in items:
+                items.append(item)
+        overflow = max(0, len(items) - limit)
+        merged[key] = items[-limit:]
+        if key == "audit":
+            truncated = max(
+                int(current.get("audit_truncated", 0) or 0),
+                int(incoming.get("audit_truncated", 0) or 0),
+            ) + overflow
+            if truncated:
+                merged["audit_truncated"] = truncated
+            else:
+                merged.pop("audit_truncated", None)
+    return merged
 
 
 class SQLiteMemoryStore(VectorStore):
@@ -35,6 +71,7 @@ class SQLiteMemoryStore(VectorStore):
         self._db_lock = threading.RLock()
         self._index_ready = False
         self._initialize_database()
+        self._migrate_legacy_metadata()
         self._load_documents()
 
     def _connect(self) -> sqlite3.Connection:
@@ -80,9 +117,64 @@ class SQLiteMemoryStore(VectorStore):
                 metadata = {}
             super().add_metadata_document(Document(id=str(doc_id), text=str(text), metadata=metadata))
 
-    def _persist(self, doc: Document) -> None:
-        metadata_json = json.dumps(doc.metadata or {}, ensure_ascii=False, sort_keys=True, default=str)
+    def _migrate_legacy_metadata(self) -> None:
         with self._db_lock, self._connection() as connection:
+            rows = connection.execute("SELECT id, metadata_json FROM memory_documents").fetchall()
+            for doc_id, metadata_json in rows:
+                try:
+                    legacy = json.loads(metadata_json)
+                except (TypeError, json.JSONDecodeError):
+                    legacy = {}
+                normalized = normalize_memory_metadata(legacy)
+                if normalized != legacy:
+                    connection.execute(
+                        "UPDATE memory_documents SET metadata_json = ? WHERE id = ?",
+                        (json.dumps(normalized, ensure_ascii=False, sort_keys=True, default=str), doc_id),
+                    )
+
+    def _persist(self, doc: Document) -> None:
+        with self._db_lock, self._connection() as connection:
+            row = connection.execute(
+                "SELECT text, metadata_json FROM memory_documents WHERE id = ?",
+                (doc.id,),
+            ).fetchone()
+            existing = None
+            if row is not None:
+                try:
+                    existing_metadata = json.loads(row[1])
+                except (TypeError, json.JSONDecodeError):
+                    existing_metadata = {}
+                existing = Document(id=doc.id, text=str(row[0]), metadata=existing_metadata)
+
+            metadata = normalize_memory_metadata(doc.metadata)
+            if existing is not None:
+                metadata = _merge_append_only_metadata(existing.metadata, metadata)
+                incoming_audit = metadata.get("audit")
+                latest_action = (
+                    incoming_audit[-1].get("action")
+                    if isinstance(incoming_audit, list)
+                    and incoming_audit
+                    and isinstance(incoming_audit[-1], dict)
+                    else None
+                )
+                if latest_action != "restore":
+                    for lifecycle_key in (
+                        "soft_forgotten",
+                        "soft_forgotten_at",
+                        "soft_forget_turn_id",
+                        "superseded_by",
+                    ):
+                        if lifecycle_key in existing.metadata and lifecycle_key not in metadata:
+                            metadata[lifecycle_key] = existing.metadata[lifecycle_key]
+                old_revision = int(normalize_memory_metadata(existing.metadata).get("revision", 1))
+                if not has_prior_version_snapshot(metadata, revision=old_revision, text=existing.text):
+                    metadata = append_memory_version(
+                        doc_id=doc.id,
+                        old_text=existing.text,
+                        old_metadata=existing.metadata,
+                        new_metadata=metadata,
+                    )
+            metadata_json = json.dumps(metadata, ensure_ascii=False, sort_keys=True, default=str)
             connection.execute(
                 """
                 INSERT INTO memory_documents (id, text, metadata_json, updated_at)
@@ -94,19 +186,23 @@ class SQLiteMemoryStore(VectorStore):
                 """,
                 (doc.id, doc.text, metadata_json),
             )
+        doc.metadata = metadata
 
     def add_document(self, doc: Document) -> None:
-        self._persist(doc)
-        super().add_document(doc)
+        with self._db_lock:
+            self._persist(doc)
+            super().add_document(doc)
 
     def add_metadata_document(self, doc: Document) -> None:
-        self._persist(doc)
-        super().add_metadata_document(doc)
+        with self._db_lock:
+            self._persist(doc)
+            super().add_metadata_document(doc)
 
     def delete_document(self, doc_id: str) -> None:
-        with self._db_lock, self._connection() as connection:
-            connection.execute("DELETE FROM memory_documents WHERE id = ?", (doc_id,))
-        super().delete_document(doc_id)
+        with self._db_lock:
+            with self._connection() as connection:
+                connection.execute("DELETE FROM memory_documents WHERE id = ?", (doc_id,))
+            super().delete_document(doc_id)
 
     def compact_storage(self) -> dict[str, int | str]:
         """Return deleted SQLite pages to disk after an explicit purge."""

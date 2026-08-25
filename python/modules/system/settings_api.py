@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from ..llm.client import fetch_available_models
 from ..llm.providers import normalize_llm_base_url, normalize_llm_provider
 from ..tts.capabilities import resolve_tts_provider_capabilities
-from .api_security import ensure_safe_relative_json_path, require_bearer_token, resolve_admin_authorization
+from .api_security import ensure_safe_relative_json_path
 from .dynamic_config import redact_sensitive_config_value
 from .runtime_config import RuntimeConfig
 from .service_discovery import discover_local_runtime_candidates
@@ -786,20 +786,8 @@ SettingsAPIDependency = Annotated[SettingsAPI, Depends(get_settings_api)]
 SettingBody = Annotated[object, Body(...)]
 
 
-def _settings_admin_token(api: SettingsAPI) -> str:
-    summary = getattr(api.config, "summary", None)
-    return str(getattr(summary, "admin_token", "") or "").strip()
-
-
-def _require_settings_admin(api: SettingsAPI, authorization: str | None):
-    return require_bearer_token(authorization, _settings_admin_token(api))
-
-
 @router.get("/", response_model=PersistedSettingsSchema)
-async def get_all_settings(api: SettingsAPIDependency, authorization: str | None = Depends(resolve_admin_authorization)):
-    auth_error = _require_settings_admin(api, authorization)
-    if auth_error is not None:
-        return auth_error
+async def get_all_settings(api: SettingsAPIDependency):
     return await api.get_all_settings()
 
 
@@ -809,18 +797,12 @@ async def get_metadata(api: SettingsAPIDependency):
 
 
 @router.get("/history", response_model=SettingsHistoryResponse)
-async def get_history(api: SettingsAPIDependency, key: str | None = None, limit: int = 10, authorization: str | None = Depends(resolve_admin_authorization)):
-    auth_error = _require_settings_admin(api, authorization)
-    if auth_error is not None:
-        return auth_error
+async def get_history(api: SettingsAPIDependency, key: str | None = None, limit: int = 10):
     return await api.get_change_history(key, limit)
 
 
 @router.get("/export")
-async def export_current_settings(api: SettingsAPIDependency, authorization: str | None = Depends(resolve_admin_authorization)):
-    auth_error = _require_settings_admin(api, authorization)
-    if auth_error is not None:
-        return auth_error
+async def export_current_settings(api: SettingsAPIDependency):
     settings = await api.get_all_settings()
     return JSONResponse(
         content=settings.model_dump(),
@@ -829,112 +811,70 @@ async def export_current_settings(api: SettingsAPIDependency, authorization: str
 
 
 @router.post("/import", response_model=SettingsImportResponse)
-async def import_settings_payload(payload: dict[str, object], api: SettingsAPIDependency, authorization: str | None = Depends(resolve_admin_authorization)):
-    auth_error = _require_settings_admin(api, authorization)
-    if auth_error is not None:
-        return auth_error
+async def import_settings_payload(payload: dict[str, object], api: SettingsAPIDependency):
     return await api.import_settings_payload(payload)
 
 
 @router.delete("/history", response_model=SettingsMutationResponse)
-async def clear_history(api: SettingsAPIDependency, authorization: str | None = Depends(resolve_admin_authorization)):
-    auth_error = _require_settings_admin(api, authorization)
-    if auth_error is not None:
-        return auth_error
+async def clear_history(api: SettingsAPIDependency):
     return await api.clear_history()
 
 
 @router.post("/test/llm")
-async def test_llm_connection(api: SettingsAPIDependency, authorization: str | None = Depends(resolve_admin_authorization)):
-    auth_error = _require_settings_admin(api, authorization)
-    if auth_error is not None:
-        return auth_error
+async def test_llm_connection(api: SettingsAPIDependency):
     return await api.test_llm_connection()
 
 
 @router.post("/llm/models")
-async def list_llm_models(request: dict[str, object], api: SettingsAPIDependency, authorization: str | None = Depends(resolve_admin_authorization)):
-    auth_error = _require_settings_admin(api, authorization)
-    if auth_error is not None:
-        return auth_error
+async def list_llm_models(request: dict[str, object], api: SettingsAPIDependency):
     return await api.list_llm_models(request)
 
 
 @router.get("/llm/status")
-async def get_llm_status(api: SettingsAPIDependency, authorization: str | None = Depends(resolve_admin_authorization)):
-    auth_error = _require_settings_admin(api, authorization)
-    if auth_error is not None:
-        return auth_error
+async def get_llm_status(api: SettingsAPIDependency):
     return await api.get_llm_status()
 
 
 @router.post("/test/tts")
-async def test_tts_connection(api: SettingsAPIDependency, authorization: str | None = Depends(resolve_admin_authorization)):
-    auth_error = _require_settings_admin(api, authorization)
-    if auth_error is not None:
-        return auth_error
+async def test_tts_connection(api: SettingsAPIDependency):
     return await api.test_tts_connection()
 
 
 @router.get("/tts/status")
-async def get_tts_status(api: SettingsAPIDependency, authorization: str | None = Depends(resolve_admin_authorization)):
-    auth_error = _require_settings_admin(api, authorization)
-    if auth_error is not None:
-        return auth_error
+async def get_tts_status(api: SettingsAPIDependency):
     return await api.get_tts_status()
 
 
 @router.post("/tts/warmup")
-async def warmup_tts(api: SettingsAPIDependency, authorization: str | None = Depends(resolve_admin_authorization)):
-    auth_error = _require_settings_admin(api, authorization)
-    if auth_error is not None:
-        return auth_error
+async def warmup_tts(api: SettingsAPIDependency):
     return await api.warmup_tts()
 
 
 @router.get("/local-discovery")
-async def discover_local_services(api: SettingsAPIDependency, authorization: str | None = Depends(resolve_admin_authorization)):
-    auth_error = _require_settings_admin(api, authorization)
-    if auth_error is not None:
-        return auth_error
+async def discover_local_services(api: SettingsAPIDependency):
     return await api.discover_local_services()
 
 
 @router.post("/rollback", response_model=SettingsRollbackResponse)
-async def rollback_changes(api: SettingsAPIDependency, steps: int = 1, authorization: str | None = Depends(resolve_admin_authorization)):
-    auth_error = _require_settings_admin(api, authorization)
-    if auth_error is not None:
-        return auth_error
+async def rollback_changes(api: SettingsAPIDependency, steps: int = 1):
     return await api.rollback_changes(steps)
 
 
 @router.get("/{key}", response_model=SettingValueResponse)
-async def get_setting(key: str, api: SettingsAPIDependency, authorization: str | None = Depends(resolve_admin_authorization)):
-    auth_error = _require_settings_admin(api, authorization)
-    if auth_error is not None:
-        return auth_error
+async def get_setting(key: str, api: SettingsAPIDependency):
     return await api.get_setting(key)
 
 
 @router.post("/{key}", response_model=SettingsMutationResponse)
-async def set_setting(key: str, value: SettingBody, api: SettingsAPIDependency, authorization: str | None = Depends(resolve_admin_authorization)):
-    auth_error = _require_settings_admin(api, authorization)
-    if auth_error is not None:
-        return auth_error
+async def set_setting(key: str, value: SettingBody, api: SettingsAPIDependency):
     return await api.set_setting(key, value)
 
 
 @router.patch("/", response_model=SettingsMutationResponse)
-async def update_settings(updates: dict[str, object], api: SettingsAPIDependency, authorization: str | None = Depends(resolve_admin_authorization)):
-    auth_error = _require_settings_admin(api, authorization)
-    if auth_error is not None:
-        return auth_error
+async def update_settings(updates: dict[str, object], api: SettingsAPIDependency):
     return await api.update_settings(updates)
 
 
 @router.delete("/{key}", response_model=SettingsMutationResponse)
-async def delete_setting(key: str, api: SettingsAPIDependency, authorization: str | None = Depends(resolve_admin_authorization)):
-    auth_error = _require_settings_admin(api, authorization)
-    if auth_error is not None:
-        return auth_error
+async def delete_setting(key: str, api: SettingsAPIDependency):
     return await api.delete_setting(key)

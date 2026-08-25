@@ -1,6 +1,5 @@
 import { app, ipcMain, nativeImage, screen, shell } from 'electron'
 import type { BrowserWindow, Display, NativeImage, Rectangle, WebContents } from 'electron'
-import { resolvePythonApiOrigin } from './http/python-origin'
 import { logger } from './logger'
 import { assertTrustedIpcSender } from './trusted-renderer-url'
 import { isPetLipSyncViseme } from '../shared/pet-control'
@@ -44,10 +43,24 @@ import type {
 } from '../shared/input-bindings'
 import type { ScreenCaptureEncodingOptions } from '../shared/types'
 import {
+  stopDesktopAutomationWithPerceptionFence,
+} from './perception-stop-coordinator'
+import {
   applyBlackPrivacyMasks,
   mapLogicalRegionToPixels,
   normalizeLogicalScreenRegion,
 } from './screen-privacy-mask'
+import type { ComputerUseBridge } from './computer-use-bridge'
+import type { AuthorizedPerceptionBridge } from './authorized-perception-bridge'
+import type { DesktopActionBridge } from './desktop-action-bridge'
+import type { OnboardingReadinessCoordinator } from './onboarding-readiness-coordinator'
+import {
+  isOnboardingProbeId,
+  isOnboardingRepairActionId,
+  isOnboardingDeviceProbeReport,
+  type OnboardingProbeRequest,
+  type OnboardingRetryRequest,
+} from '../shared/onboarding-readiness'
 
 export interface IpcContext {
   live2dWindow: {
@@ -107,16 +120,15 @@ export interface IpcContext {
     stop: () => Promise<void>
     health: () => Promise<boolean>
   }
-  adminTokenStore: {
-    getSummaryAdminToken: () => string
-    setSummaryAdminToken: (token: string) => { ok: boolean; hasToken: boolean }
-    clearSummaryAdminToken: () => { ok: boolean }
-  }
+  onboardingCoordinator: OnboardingReadinessCoordinator
   inputBindings: {
     getSnapshot: () => InputBindingSnapshot
-    update: (patch: InputBindingSettingsPatch) => InputBindingSnapshot
-    reset: () => InputBindingSnapshot
+    update: (patch: InputBindingSettingsPatch) => InputBindingSnapshot | Promise<InputBindingSnapshot>
+    reset: () => InputBindingSnapshot | Promise<InputBindingSnapshot>
   }
+  computerUseBridge: ComputerUseBridge
+  desktopActionBridge: DesktopActionBridge
+  perceptionBridge: AuthorizedPerceptionBridge
 }
 
 const PET_EVENT_NAMES = new Set<DesktopPetEventName>([
@@ -281,6 +293,7 @@ const dispatchDesktopPetEventToPlugins = async (
 
 export function registerIpcHandlers(ctx: IpcContext): void {
   registerPythonHandlers(ctx)
+  registerOnboardingHandlers(ctx)
   registerWindowControlHandlers(ctx)
   registerPetControlHandlers(ctx)
   registerPetInteractionHandlers(ctx)
@@ -288,8 +301,171 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   registerUiForwardingHandlers(ctx)
   registerScreenCaptureHandlers(ctx)
   registerShellHandlers()
-  registerAdminTokenHandlers(ctx)
+  registerRuntimeHandlers()
   registerInputBindingHandlers(ctx)
+  registerComputerUseHandlers(ctx)
+  registerDesktopActionHandlers(ctx)
+  registerAuthorizedPerceptionHandlers(ctx)
+}
+
+const isExactRecord = (value: unknown, allowed: readonly string[]): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value) &&
+  Object.keys(value as Record<string, unknown>).every((key) => allowed.includes(key))
+
+const parseOnboardingProbeRequest = (value: unknown): OnboardingProbeRequest => {
+  if (value === undefined) return {}
+  if (!isExactRecord(value, ['probeIds'])) throw new Error('Invalid onboarding probe request')
+  const probeIds = value['probeIds']
+  if (probeIds === undefined) return {}
+  if (!Array.isArray(probeIds) || probeIds.length > 12 || !probeIds.every(isOnboardingProbeId)) {
+    throw new Error('Invalid onboarding probe IDs')
+  }
+  return { probeIds: [...new Set(probeIds)] }
+}
+
+function registerOnboardingHandlers(ctx: IpcContext): void {
+  ipcMain.handle('onboarding:snapshot', (event, ...args: unknown[]) => {
+    assertTrustedIpcSender(event)
+    if (args.length) throw new Error('snapshot does not accept arguments')
+    return ctx.onboardingCoordinator.snapshot()
+  })
+  ipcMain.handle('onboarding:start-backend', (event, ...args: unknown[]) => {
+    assertTrustedIpcSender(event)
+    if (args.length) throw new Error('startBackend does not accept arguments')
+    return ctx.onboardingCoordinator.startBackend()
+  })
+  ipcMain.handle('onboarding:cancel-backend', (event, ...args: unknown[]) => {
+    assertTrustedIpcSender(event)
+    if (args.length) throw new Error('cancelBackend does not accept arguments')
+    return ctx.onboardingCoordinator.cancelBackend()
+  })
+  ipcMain.handle('onboarding:cancel-run', (event, ...args: unknown[]) => {
+    assertTrustedIpcSender(event)
+    if (args.length !== 1 || !isExactRecord(args[0], ['runId']) || typeof args[0]['runId'] !== 'string' || !args[0]['runId']) {
+      throw new Error('Invalid onboarding cancel request')
+    }
+    return ctx.onboardingCoordinator.cancelRun({ runId: args[0]['runId'] })
+  })
+  ipcMain.handle('onboarding:report-device-probe', (event, ...args: unknown[]) => {
+    assertTrustedIpcSender(event)
+    if (args.length !== 1 || !isOnboardingDeviceProbeReport(args[0])) throw new Error('Invalid onboarding device report')
+    return ctx.onboardingCoordinator.reportDeviceProbe(args[0])
+  })
+  ipcMain.handle('onboarding:run-probe', (event, ...args: unknown[]) => {
+    assertTrustedIpcSender(event)
+    if (args.length > 1) throw new Error('runProbe accepts at most one argument')
+    return ctx.onboardingCoordinator.runProbe(parseOnboardingProbeRequest(args[0]))
+  })
+  ipcMain.handle('onboarding:retry', (event, ...args: unknown[]) => {
+    assertTrustedIpcSender(event)
+    if (args.length !== 1) throw new Error('retry requires one argument')
+    const payload = args[0]
+    if (!isExactRecord(payload, ['runId', 'probeIds']) || typeof payload['runId'] !== 'string' || !payload['runId']) {
+      throw new Error('Invalid onboarding retry request')
+    }
+    const probes = parseOnboardingProbeRequest({ ...(payload['probeIds'] === undefined ? {} : { probeIds: payload['probeIds'] }) })
+    const request: OnboardingRetryRequest = { runId: payload['runId'], ...probes }
+    return ctx.onboardingCoordinator.retry(request)
+  })
+  ipcMain.handle('onboarding:run-repair', (event, ...args: unknown[]) => {
+    assertTrustedIpcSender(event)
+    if (args.length !== 1) throw new Error('runRepair requires one argument')
+    const payload = args[0]
+    if (!isExactRecord(payload, ['actionId']) || !isOnboardingRepairActionId(payload['actionId'])) {
+      throw new Error('Unknown onboarding repair action')
+    }
+    return ctx.onboardingCoordinator.runRepair(payload['actionId'])
+  })
+}
+
+function registerDesktopActionHandlers(ctx: IpcContext): void {
+  ipcMain.handle('desktop-action:status', (event, ...args: unknown[]) => {
+    assertTrustedIpcSender(event)
+    if (args.length !== 0) return {
+      ok: false,
+      code: 'DA_INVALID_REQUEST',
+      message: 'status does not accept arguments',
+      status: ctx.desktopActionBridge.getStatus(),
+    }
+    return ctx.desktopActionBridge.refreshStatus()
+  })
+  ipcMain.handle('desktop-action:enable', (event, ...args: unknown[]) => {
+    assertTrustedIpcSender(event)
+    if (args.length !== 0) return {
+      ok: false,
+      code: 'DA_INVALID_REQUEST',
+      message: 'enable does not accept arguments',
+      status: ctx.desktopActionBridge.getStatus(),
+    }
+    return ctx.desktopActionBridge.enable()
+  })
+  ipcMain.handle('desktop-action:disable', (event, ...args: unknown[]) => {
+    assertTrustedIpcSender(event)
+    if (args.length !== 0) return {
+      ok: false,
+      code: 'DA_INVALID_REQUEST',
+      message: 'disable does not accept arguments',
+      status: ctx.desktopActionBridge.getStatus(),
+    }
+    return ctx.desktopActionBridge.disable()
+  })
+  ipcMain.handle('desktop-action:rearm', (event, ...args: unknown[]) => {
+    assertTrustedIpcSender(event)
+    if (args.length !== 0) return {
+      ok: false,
+      code: 'DA_INVALID_REQUEST',
+      message: 'rearm does not accept arguments',
+      status: ctx.desktopActionBridge.getStatus(),
+    }
+    return ctx.desktopActionBridge.rearm()
+  })
+  ipcMain.handle('desktop-action:manage-authorization', (event, ...args: unknown[]) => {
+    assertTrustedIpcSender(event)
+    if (args.length !== 0) return {
+      ok: false,
+      code: 'DA_INVALID_REQUEST',
+      message: 'manage authorization does not accept arguments',
+      status: ctx.desktopActionBridge.getStatus(),
+    }
+    return ctx.desktopActionBridge.manageAuthorization()
+  })
+}
+
+function registerAuthorizedPerceptionHandlers(ctx: IpcContext): void {
+  const methods = {
+    'perception:collect-screenshot': (id: unknown) => ctx.perceptionBridge.collectScreenshot(id),
+    'perception:collect-target-window': (id: unknown) => ctx.perceptionBridge.collectTargetWindow(id),
+    'perception:collect-active-application': (id: unknown) => ctx.perceptionBridge.collectActiveApplication(id),
+    'perception:collect-selected-file': (id: unknown) => ctx.perceptionBridge.collectSelectedFile(id),
+    'perception:collect-clipboard': (id: unknown) => ctx.perceptionBridge.collectClipboard(id),
+    'perception:collect-ocr': (id: unknown) => ctx.perceptionBridge.collectOcr(id),
+  } as const
+  for (const [channel, collect] of Object.entries(methods)) {
+    ipcMain.handle(channel, (event, sessionId: unknown) => {
+      assertTrustedIpcSender(event)
+      return collect(sessionId)
+    })
+  }
+}
+
+function registerComputerUseHandlers(ctx: IpcContext): void {
+  ipcMain.handle('computer-use:preview', (event, payload: unknown) => {
+    assertTrustedIpcSender(event)
+    return ctx.computerUseBridge.preview(payload)
+  })
+  ipcMain.handle('computer-use:emergency-stop', (event) => {
+    assertTrustedIpcSender(event)
+    return stopDesktopAutomationWithPerceptionFence(
+      ctx.computerUseBridge,
+      ctx.desktopActionBridge,
+      ctx.perceptionBridge,
+      'ipc',
+    ).then((result) => result.computerUse)
+  })
+  ipcMain.handle('computer-use:status', (event) => {
+    assertTrustedIpcSender(event)
+    return ctx.computerUseBridge.refreshStatus()
+  })
 }
 
 function registerInputBindingHandlers(ctx: IpcContext): void {
@@ -319,22 +495,7 @@ function allowTrustedIpcSender(event: Parameters<typeof assertTrustedIpcSender>[
   }
 }
 
-function registerAdminTokenHandlers(ctx: IpcContext): void {
-  ipcMain.handle('auth:has-summary-admin-token', (event) => {
-    assertTrustedIpcSender(event)
-    return { hasToken: ctx.adminTokenStore.getSummaryAdminToken().trim().length > 0 }
-  })
-
-  ipcMain.handle('auth:set-summary-admin-token', (event, token: string) => {
-    assertTrustedIpcSender(event)
-    return ctx.adminTokenStore.setSummaryAdminToken(String(token || ''))
-  })
-
-  ipcMain.handle('auth:clear-summary-admin-token', (event) => {
-    assertTrustedIpcSender(event)
-    return ctx.adminTokenStore.clearSummaryAdminToken()
-  })
-
+function registerRuntimeHandlers(): void {
   ipcMain.handle('runtime:get-resource-snapshot', async (event) => {
     assertTrustedIpcSender(event)
     const metrics = app.getAppMetrics().map((metric) => ({
@@ -951,7 +1112,6 @@ function registerUiForwardingHandlers(ctx: IpcContext): void {
 }
 
 const toPngDataUrl = (buf: Buffer): string => `data:image/png;base64,${buf.toString('base64')}`
-const createTraceId = (): string => `trace_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
 interface CapturePrivacyContext {
   target: Display
@@ -1051,44 +1211,6 @@ function cropScreenshotToDataUrl(
   return encodeNativeImageDataUrl(image.crop(pixelRegion), payload, { target, viewport: logicalRegion })
 }
 
-const buildScreenshotMultipartBody = (buf: Buffer): { body: Buffer; boundary: string } => {
-  const boundary = `yuizaki-screen-ocr-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-  const header = Buffer.from(
-    `--${boundary}\r\n` +
-      'Content-Disposition: form-data; name="file"; filename="screenshot.png"\r\n' +
-      'Content-Type: image/png\r\n\r\n',
-  )
-  const footer = Buffer.from(`\r\n--${boundary}--\r\n`)
-  return { boundary, body: Buffer.concat([header, buf, footer]) }
-}
-
-const toJsonRecord = (text: string): Record<string, unknown> => {
-  if (!text.trim()) {
-    return {}
-  }
-  try {
-    const parsed = JSON.parse(text) as unknown
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : { value: parsed }
-  } catch {
-    return { error: text }
-  }
-}
-
-const responseErrorMessage = (
-  payload: Record<string, unknown>,
-  fallback: string,
-): string => {
-  for (const key of ['message', 'error', 'detail']) {
-    const value = payload[key]
-    if (typeof value === 'string' && value.trim()) {
-      return value
-    }
-  }
-  return fallback
-}
-
 function registerScreenCaptureHandlers(ctx: IpcContext): void {
   ipcMain.handle('screen:list-displays', (event) => {
     assertTrustedIpcSender(event)
@@ -1153,45 +1275,6 @@ function registerScreenCaptureHandlers(ctx: IpcContext): void {
       }
     },
   )
-
-  ipcMain.handle('screen:ocr', async (event, options?: { displayIndex?: number } | null) => {
-    assertTrustedIpcSender(event)
-    try {
-      const resolved = resolveDisplay(options?.displayIndex)
-      if (!resolved) {
-        return null
-      }
-      const { display: target, index } = resolved
-      const buf = await ctx.captureDisplayPng(target, index)
-      const { body, boundary } = buildScreenshotMultipartBody(buf)
-      const response = await fetch(`${resolvePythonApiOrigin()}/vision/ocr`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'x-trace-id': createTraceId(),
-          'x-yuizaki-backend-token': ctx.backendApiToken,
-        },
-        body,
-      })
-      const payload = toJsonRecord(await response.text())
-      if (!response.ok) {
-        return {
-          ...payload,
-          status: 'error',
-          statusCode: response.status,
-          error: responseErrorMessage(payload, `OCR request failed with HTTP ${response.status}`),
-        }
-      }
-
-      return payload
-    } catch (error) {
-      logger.error('Screen OCR failed:', error)
-      return {
-        status: 'error',
-        error: error instanceof Error ? error.message : String(error),
-      }
-    }
-  })
 
 }
 

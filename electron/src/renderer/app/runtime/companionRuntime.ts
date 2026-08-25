@@ -1,13 +1,21 @@
 import { computed, reactive, shallowRef, watch, type ComputedRef } from 'vue'
 import type { CompanionRuntimeSnapshot, HeartbeatBehaviorEvent } from '@/../shared/agent'
+import { parseProactiveOpportunityIdentity } from '@/../shared/proactive'
 import {
   createCompanionEventGate,
   isTerminalCompanionJobStatus,
+  normalizeCompanionEventEnvelope,
   type CompanionEventEnvelope,
+  type CompanionEventGateState,
   type CompanionEventScope,
   type CompanionEventSource,
 } from '@/../shared/companion-event'
 import type { PetBehaviorState } from '@/utils/petControl'
+import type {
+  CompanionEmbodimentIntent,
+  CompanionEmbodimentState,
+} from '@/../shared/companion-embodiment'
+import { resolveProactiveDeliveryMessage } from '@/i18n/proactiveMessages'
 import { createReducedMotionObserver, type ReducedMotionObserver } from './reducedMotion'
 
 export type CompanionActivity = 'idle' | 'listening' | 'thinking' | 'speaking' | 'executing'
@@ -39,6 +47,17 @@ export type ProactivePollResult = ProactiveSuppressionReason | ProactiveDelivery
 const DEFAULT_COMPANION_POLL_INTERVAL_MS = 60_000
 const DEFAULT_DELIVERED_IDENTITY_LIMIT = 256
 const JOB_TERMINAL_FEEDBACK_MS = 1_200
+const JOB_EVENT_GATE_STORAGE_PREFIX = 'yuizaki:companion-event-gate:v1:'
+const EMBODIMENT_DEFAULT_TTL_MS: Partial<Record<CompanionEmbodimentState, number>> = {
+  listening: 30_000,
+  thinking: 120_000,
+  executing: 120_000,
+  speaking: 60_000,
+  'waiting-permission': 300_000,
+  interrupted: JOB_TERMINAL_FEEDBACK_MS,
+  success: JOB_TERMINAL_FEEDBACK_MS,
+  error: JOB_TERMINAL_FEEDBACK_MS,
+}
 
 export interface CompanionRuntimeEvent {
   source: CompanionRuntimeSource
@@ -63,6 +82,7 @@ export interface CompanionRuntimeState {
 }
 
 interface CompanionRuntimeSinks {
+  embodiment?: (intent: CompanionEmbodimentIntent) => void | Promise<void>
   behavior?: (state: PetBehaviorState, durationMs?: number) => void | Promise<void>
   emotion?: (emotionId: string, context: ProactiveSinkContext) => void | Promise<void>
   motion?: (group: string, context: ProactiveSinkContext) => void | Promise<void>
@@ -74,6 +94,9 @@ export interface CompanionRuntimeDependencies {
   pollSnapshot: () => Promise<CompanionRuntimeSnapshot>
   isAvailable: () => boolean
   readDoNotDisturb: () => boolean | Promise<boolean>
+  authorizeOpportunity?: (candidate: HeartbeatBehaviorEvent, snapshot: CompanionRuntimeSnapshot) => boolean | Promise<boolean>
+  getWorkspaceId?: () => string
+  getLocale?: () => string
   sinks: CompanionRuntimeSinks
   pollIntervalMs?: number
   cooldownMs?: number
@@ -82,9 +105,12 @@ export interface CompanionRuntimeDependencies {
   deliveredIdentityLimit?: number
   now?: () => number
   reducedMotionObserver?: ReducedMotionObserver
+  isPetLinkEnabled?: () => boolean
   onSinkError?: (failure: { sink: CompanionRuntimeSinkName; message: string }) => void
   onPollResult?: (result: ProactivePollResult) => void
   reportOpportunityOutcome?: (jobId: string, requestId: string, outcome: OpportunityOutcome, reason?: string) => void | Promise<void>
+  loadJobEventGateState?: () => unknown
+  saveJobEventGateState?: (state: CompanionEventGateState) => void
 }
 
 const activityPriority: Record<CompanionActivity, number> = {
@@ -112,19 +138,61 @@ const behaviorForPresentation = (state: CompanionPresentationState): PetBehavior
   }
 }
 
-const eventIdentity = (event: HeartbeatBehaviorEvent): string | null => {
+const embodimentStateForPresentation = (state: CompanionPresentationState): CompanionEmbodimentState => {
+  switch (state) {
+    case 'waiting-for-permission': return 'waiting-permission'
+    case 'job-success': return 'success'
+    case 'job-error':
+    case 'job-cancelled': return 'error'
+    default: return state
+  }
+}
+
+const eventIdentity = (event: HeartbeatBehaviorEvent, requireAuthoritativeIdentity: boolean): string | null => {
+  const identity = parseProactiveOpportunityIdentity(event)
   if (!Number.isFinite(event.tick) || !event.type || !event.at) return null
-  return `${event.type}:${event.tick}:${event.at}`
+  if (!identity) return requireAuthoritativeIdentity ? null : `${event.type}:${event.tick}:${event.at}`
+  return `${identity.jobId}:${identity.requestId}:${identity.frameId}:${identity.sourceKind}:${event.tick}:${event.at}`
 }
 
 export const createCompanionRuntimeController = (initialDependencies: CompanionRuntimeDependencies) => {
   let dependencies = initialDependencies
+  type DurableJobEventGateState = CompanionEventGateState & { interruptionEpoch?: number }
+  const workspaceStorageKey = (workspaceId: string | undefined) => workspaceId === undefined
+    ? null
+    : `${JOB_EVENT_GATE_STORAGE_PREFIX}${encodeURIComponent(workspaceId)}`
+  const loadJobEventGateState = (workspaceId: string | undefined) => {
+    if (dependencies.loadJobEventGateState) return dependencies.loadJobEventGateState()
+    const storageKey = workspaceStorageKey(workspaceId)
+    if (!storageKey || typeof window === 'undefined') return undefined
+    try {
+      const stored = window.localStorage.getItem(storageKey)
+      return stored ? JSON.parse(stored) : undefined
+    } catch {
+      return undefined
+    }
+  }
+  const readDurableInterruptionEpoch = (value: unknown): number => {
+    if (!value || typeof value !== 'object') return 0
+    const durable = value as { interruptionEpoch?: unknown; jobs?: unknown }
+    if (Number.isInteger(durable.interruptionEpoch) && Number(durable.interruptionEpoch) >= 0) {
+      return Number(durable.interruptionEpoch)
+    }
+    if (!Array.isArray(durable.jobs)) return 0
+    return durable.jobs.reduce<number>((latest, job) => {
+      if (!job || typeof job !== 'object') return latest
+      const epoch = (job as { interruptionEpoch?: unknown }).interruptionEpoch
+      return Number.isInteger(epoch) && Number(epoch) >= 0 ? Math.max(latest, Number(epoch)) : latest
+    }, 0)
+  }
+  let activeWorkspaceId = dependencies.getWorkspaceId?.()
+  const initialJobEventGateState = loadJobEventGateState(activeWorkspaceId)
   const reducedMotionObserver = dependencies.reducedMotionObserver ?? createReducedMotionObserver()
   const state = reactive<CompanionRuntimeState>({
     activity: 'idle',
     availability: 'online',
     permission: 'none',
-    interruptionEpoch: 0,
+    interruptionEpoch: readDurableInterruptionEpoch(initialJobEventGateState),
     interruptedAtEpoch: null,
     reducedMotion: false,
     lastRequestId: null,
@@ -137,7 +205,12 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
       frequency_budget: 0,
     },
   })
-  const terminalJobPresentation = shallowRef<{ jobId: string; state: CompanionPresentationState; epoch: number } | null>(null)
+  const terminalJobPresentation = shallowRef<{
+    jobId: string
+    state: CompanionPresentationState
+    source: CompanionRuntimeSource
+    epoch: number
+  } | null>(null)
   const presentationState: ComputedRef<CompanionPresentationState> = computed(() => {
     if (state.availability === 'offline' || state.availability === 'error') return state.availability
     if (state.permission === 'waiting') return 'waiting-for-permission'
@@ -155,7 +228,29 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
   const categoryDeliveredAt = new Map<string, number>()
   const deliveredAt: number[] = []
   const pendingOpportunityOutcomes = new Map<string, PendingOpportunityOutcome>()
-  const jobEventGate = createCompanionEventGate()
+  let jobEventGate = createCompanionEventGate(256, initialJobEventGateState)
+  const persistJobEventGateState = (
+    workspaceId = activeWorkspaceId,
+    gate = jobEventGate,
+    interruptionEpoch = state.interruptionEpoch,
+  ): boolean => {
+    try {
+      const snapshot: DurableJobEventGateState = {
+        ...gate.exportState(),
+        interruptionEpoch,
+      }
+      if (dependencies.saveJobEventGateState) dependencies.saveJobEventGateState(snapshot)
+      else {
+        const storageKey = workspaceStorageKey(workspaceId)
+        if (storageKey && typeof window !== 'undefined') {
+          window.localStorage.setItem(storageKey, JSON.stringify(snapshot))
+        }
+      }
+      return true
+    } catch {
+      return false
+    }
+  }
   const activeJobIdsBySource = new Map<CompanionRuntimeSource, Set<string>>()
   let terminalJobTimer: ReturnType<typeof setTimeout> | null = null
   let timer: ReturnType<typeof setInterval> | null = null
@@ -166,6 +261,9 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
   let lifecycleEpoch = 0
   let healthEpoch = 0
   let lastBehavior: PetBehaviorState | null = 'idle'
+  let lastEmbodimentSignature: string | null = null
+  let embodimentSequence = 0
+  let lastInterruptionSource: CompanionRuntimeSource = 'builtin'
   let activePollAbortController: AbortController | null = null
 
   const abortActivePoll = () => {
@@ -178,20 +276,81 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     terminalJobPresentation.value = null
   }
 
+  const ensureWorkspaceJobEventGate = () => {
+    const currentWorkspaceId = dependencies.getWorkspaceId?.()
+    if (currentWorkspaceId === activeWorkspaceId) return
+    activeWorkspaceId = currentWorkspaceId
+    const restored = loadJobEventGateState(activeWorkspaceId)
+    jobEventGate = createCompanionEventGate(256, restored)
+    state.interruptionEpoch = readDurableInterruptionEpoch(restored)
+    state.interruptedAtEpoch = null
+    for (const source of activityExpiryTimers.keys()) clearActivityExpiry(source)
+    sourceActivities.clear()
+    sourceRequestIds.clear()
+    activeJobIdsBySource.clear()
+    state.lastRequestId = null
+    recomputeActivity()
+    clearTerminalJobPresentation()
+    abortActivePoll()
+  }
+
   watch(reducedMotionObserver.reduced, (reduced) => {
     state.reducedMotion = reduced
+    if (started) queueMicrotask(() => void applyPresentation(undefined, true))
   }, { immediate: true })
 
   const configure = (next: Partial<CompanionRuntimeDependencies>) => {
     dependencies = { ...dependencies, ...next, sinks: { ...dependencies.sinks, ...next.sinks } }
+    ensureWorkspaceJobEventGate()
   }
 
-  const applyPresentation = async (durationMs?: number) => {
+  const resolvePresentationSource = (): CompanionRuntimeSource => {
+    if (state.availability === 'offline' || state.availability === 'error') return 'health'
+    if (state.permission === 'waiting') return 'permission'
+    if (state.interruptedAtEpoch === state.interruptionEpoch) return lastInterruptionSource
+    if (state.activity !== 'idle') {
+      for (const [source, activity] of sourceActivities) {
+        if (activity === state.activity) return source
+      }
+    }
+    return terminalJobPresentation.value?.source ?? 'builtin'
+  }
+
+  const applyPresentation = async (durationMs?: number, force = false) => {
     const behavior = behaviorForPresentation(presentationState.value)
-    if (behavior === lastBehavior && durationMs === undefined) return
+    const now = (dependencies.now ?? Date.now)()
+    const petLinkEnabled = dependencies.isPetLinkEnabled?.() ?? true
+    const embodimentState = embodimentStateForPresentation(presentationState.value)
+    const intentDurationMs = typeof durationMs === 'number' && durationMs > 0
+      ? durationMs
+      : EMBODIMENT_DEFAULT_TTL_MS[embodimentState]
+    const intent: CompanionEmbodimentIntent = {
+      version: 1,
+      id: `embodiment:${state.interruptionEpoch}:${++embodimentSequence}`,
+      kind: 'operational',
+      state: embodimentState,
+      source: resolvePresentationSource(),
+      confidence: 1,
+      issuedAt: now,
+      expiresAt: intentDurationMs === undefined ? null : now + intentDurationMs,
+      reducedMotion: state.reducedMotion,
+      petLinkEnabled,
+    }
+    const signature = JSON.stringify({
+      state: intent.state,
+      source: intent.source,
+      durationMs: intentDurationMs,
+      reducedMotion: intent.reducedMotion,
+      petLinkEnabled: intent.petLinkEnabled,
+      requestId: state.lastRequestId,
+      terminalJobId: terminalJobPresentation.value?.jobId ?? null,
+    })
+    if (!force && signature === lastEmbodimentSignature && behavior === lastBehavior) return
+    lastEmbodimentSignature = signature
     lastBehavior = behavior
     try {
-      await dependencies.sinks.behavior?.(behavior, durationMs)
+      if (dependencies.sinks.embodiment) await dependencies.sinks.embodiment(intent)
+      else await dependencies.sinks.behavior?.(petLinkEnabled ? behavior : 'idle', petLinkEnabled ? durationMs : undefined)
     } catch (error) {
       dependencies.onSinkError?.({ sink: 'behavior', message: error instanceof Error ? error.message : String(error) })
     }
@@ -200,11 +359,16 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
   const showTerminalJobPresentation = async (event: CompanionEventEnvelope) => {
     const terminalState: CompanionPresentationState = event.status === 'completed'
       ? 'job-success'
-      : event.status === 'failed'
+      : event.status === 'failed' || event.status === 'unknown_effect'
         ? 'job-error'
         : 'job-cancelled'
     clearTerminalJobPresentation()
-    terminalJobPresentation.value = { jobId: event.jobId, state: terminalState, epoch: state.interruptionEpoch }
+    terminalJobPresentation.value = {
+      jobId: event.jobId,
+      state: terminalState,
+      source: event.source,
+      epoch: state.interruptionEpoch,
+    }
     await applyPresentation(JOB_TERMINAL_FEEDBACK_MS)
     terminalJobTimer = setTimeout(() => {
       terminalJobTimer = null
@@ -269,11 +433,12 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     if (event.activity === 'idle') sourceRequestIds.delete(event.source)
     else if (event.requestId !== undefined) sourceRequestIds.set(event.source, event.requestId)
     scheduleActivityExpiry(event)
-    await applyPresentation(event.durationMs)
+    await applyPresentation(event.durationMs, event.activity !== undefined)
     return true
   }
 
   const interrupt = async (source: CompanionRuntimeSource, sequence: number) => {
+    ensureWorkspaceJobEventGate()
     const currentSequence = sourceSequences.get(source) ?? -1
     if (sequence <= currentSequence) return false
     sourceSequences.set(source, sequence)
@@ -282,10 +447,11 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     sourceRequestIds.clear()
     activeJobIdsBySource.clear()
     clearTerminalJobPresentation()
-    jobEventGate.clear()
     state.lastRequestId = null
     recomputeActivity()
     state.interruptionEpoch += 1
+    lastInterruptionSource = source
+    persistJobEventGateState()
     abortActivePoll()
     if (activeOpportunityCandidate) {
       await reportOpportunity(activeOpportunityCandidate, 'cancelled', `interrupted_by_${source}`)
@@ -295,16 +461,43 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     return true
   }
 
-  const publishJob = async (event: CompanionEventEnvelope, scope: CompanionEventScope = {}): Promise<boolean> => {
-    const decision = jobEventGate.accept(event, {
+  const publishJob = async (value: unknown, scope: CompanionEventScope = {}): Promise<boolean> => {
+    ensureWorkspaceJobEventGate()
+    const event = normalizeCompanionEventEnvelope(value)
+    if (!event) return false
+    const currentWorkspaceId = dependencies.getWorkspaceId?.()
+    if (currentWorkspaceId !== undefined && event.workspaceId !== currentWorkspaceId) return false
+    if (scope.workspaceId !== undefined && currentWorkspaceId !== undefined && scope.workspaceId !== currentWorkspaceId) return false
+    if (scope.interruptionEpoch !== undefined && scope.interruptionEpoch !== state.interruptionEpoch) return false
+    const acceptanceScope: CompanionEventScope = {
       ...scope,
-      interruptionEpoch: scope.interruptionEpoch ?? state.interruptionEpoch,
-    })
-    if (!decision.accepted) return false
+      workspaceId: scope.workspaceId ?? currentWorkspaceId,
+      interruptionEpoch: state.interruptionEpoch,
+    }
+    const decision = jobEventGate.accept(event, acceptanceScope)
+    // A terminal event may be replayed only when it is the exact durable
+    // duplicate and still belongs to the current workspace/epoch scope. The
+    // gate's rejection reason preserves identity/epoch mismatches, which must
+    // never be bypassed after an interrupt or workspace switch.
+    const replayingUnacknowledgedTerminal = jobEventGate.isUnacknowledgedTerminal(event)
+      && event.interruptionEpoch === state.interruptionEpoch
+      && (decision.accepted || decision.reason === 'stale_revision' || decision.reason === 'terminal_job')
+    if (!decision.accepted && !replayingUnacknowledgedTerminal) return false
+    if (decision.accepted) persistJobEventGateState()
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent<CompanionEventEnvelope>('companion:job', { detail: event }))
     }
-    if (event.source === 'heartbeat') return true
+    const acknowledgeTerminal = () => {
+      if (!isTerminalCompanionJobStatus(event.status)) return
+      if (!jobEventGate.acknowledgeTerminal(event.jobId, event.revision)) return
+      if (!persistJobEventGateState()) {
+        jobEventGate.unacknowledgeTerminal(event.jobId, event.revision)
+      }
+    }
+    if (event.source === 'heartbeat') {
+      acknowledgeTerminal()
+      return true
+    }
     const activeJobs = activeJobIdsBySource.get(event.source) ?? new Set<string>()
     if (isTerminalCompanionJobStatus(event.status)) activeJobs.delete(event.jobId)
     else activeJobs.add(event.jobId)
@@ -321,6 +514,7 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     if (accepted && isTerminalCompanionJobStatus(event.status) && activeJobIdsBySource.size === 0 && state.activity === 'idle') {
       await showTerminalJobPresentation(event)
     }
+    if (accepted) acknowledgeTerminal()
     return accepted
   }
 
@@ -419,6 +613,7 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
   }
 
   const pollOnce = async (): Promise<ProactivePollResult> => {
+    ensureWorkspaceJobEventGate()
     if (pollInFlight) return 'in_flight'
     pollInFlight = true
     const requestAbortController = new AbortController()
@@ -427,10 +622,12 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     const requestHealthEpoch = healthEpoch
     const requestInterruptionEpoch = state.interruptionEpoch
     const requestStarted = started
+    const requestWorkspaceId = dependencies.getWorkspaceId?.()
     const isRequestCurrent = () => requestEpoch === lifecycleEpoch
       && requestHealthEpoch === healthEpoch
       && requestInterruptionEpoch === state.interruptionEpoch
       && (!requestStarted || started)
+      && (requestWorkspaceId === undefined || dependencies.getWorkspaceId?.() === requestWorkspaceId)
       && !requestAbortController.signal.aborted
     try {
       if (!dependencies.isAvailable()) {
@@ -455,10 +652,15 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
       if (!isRequestCurrent()) return 'stopped'
       const events = Array.isArray(snapshot.heartbeat?.behavior_events) ? snapshot.heartbeat.behavior_events : []
       const activeJobIds = snapshot.jobs ? new Set(snapshot.jobs.active_job_ids ?? []) : null
-      const candidate = events.findLast((event) => !event.job_id || activeJobIds === null || activeJobIds.has(event.job_id))
+      const candidate = dependencies.authorizeOpportunity
+        ? events.findLast((event) => {
+            const opportunityIdentity = parseProactiveOpportunityIdentity(event)
+            return opportunityIdentity !== null && activeJobIds?.has(opportunityIdentity.jobId) === true
+          })
+        : events.findLast((event) => !event.job_id || activeJobIds === null || activeJobIds.has(event.job_id))
       if (!candidate) return 'empty'
       activeOpportunityCandidate = candidate
-      const identity = eventIdentity(candidate)
+      const identity = eventIdentity(candidate, Boolean(dependencies.authorizeOpportunity))
       if (!identity || deliveredIdentities.has(identity)) return suppress('duplicate_or_invalid')
       if (candidate.expires_at && (dependencies.now ?? Date.now)() / 1000 >= candidate.expires_at) {
         rememberResolvedOpportunity(candidate, identity)
@@ -470,6 +672,11 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
         eventVersion: identity,
       }
       if (!dependencies.isAvailable()) return suppress('unavailable')
+      if (dependencies.authorizeOpportunity && !await dependencies.authorizeOpportunity(candidate, snapshot)) {
+        if (!isRequestCurrent()) return 'stopped'
+        rememberResolvedOpportunity(candidate, identity)
+        return suppress('ineligible')
+      }
       const doNotDisturb = await dependencies.readDoNotDisturb()
       if (!isRequestCurrent()) return 'stopped'
       if (doNotDisturb) {
@@ -482,7 +689,6 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
       const contextInterruptible = state.activity === 'idle' || state.activity === 'listening'
       if (proactive?.can_proactively_reach_out !== true || (typeof interruptibility === 'number' && interruptibility <= 0) || !contextInterruptible) {
         rememberResolvedOpportunity(candidate, identity)
-        await reportOpportunity(candidate, 'suppressed', 'ineligible')
         return suppress('ineligible')
       }
       const now = (dependencies.now ?? Date.now)()
@@ -500,34 +706,63 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
         await reportOpportunity(candidate, 'suppressed', 'frequency_budget')
         return suppress('frequency_budget')
       }
-
-      const result: ProactiveDeliveryResult = { status: 'delivered', attempted: [], succeeded: [], failed: [] }
-      if (candidate.emotion_id) {
-        const sink = dependencies.sinks.emotion
-        if (!await invokeSink('emotion', sink ? () => sink(candidate.emotion_id!, sinkContext) : undefined, result, isRequestCurrent)) return 'stopped'
+      if (dependencies.authorizeOpportunity && !await dependencies.authorizeOpportunity(candidate, snapshot)) {
+        if (!isRequestCurrent()) return 'stopped'
+        rememberResolvedOpportunity(candidate, identity)
+        return suppress('ineligible')
       }
-      if (candidate.motion_group && !state.reducedMotion) {
+
+      const result: ProactiveDeliveryResult = { status: 'failed', attempted: [], succeeded: [], failed: [] }
+      const authoritativeIdentity = dependencies.authorizeOpportunity
+        ? parseProactiveOpportunityIdentity(candidate)
+        : null
+      const authoritativeMessage = authoritativeIdentity
+        ? resolveProactiveDeliveryMessage(
+            authoritativeIdentity.sourceKind,
+            candidate.content_code,
+            dependencies.getLocale?.() ?? 'zh-CN',
+          )
+        : null
+      if (authoritativeIdentity && !authoritativeMessage) {
+        rememberResolvedOpportunity(candidate, identity)
+        await reportOpportunity(candidate, 'failed', 'invalid_content_contract')
+        return result
+      }
+      if (!authoritativeIdentity && candidate.emotion_id) {
+        const sink = dependencies.sinks.emotion
+        const linkedSink = (dependencies.isPetLinkEnabled?.() ?? true) ? sink : undefined
+        if (!await invokeSink('emotion', linkedSink ? () => linkedSink(candidate.emotion_id!, sinkContext) : undefined, result, isRequestCurrent)) return 'stopped'
+      }
+      if (!authoritativeIdentity && candidate.motion_group && !state.reducedMotion && (dependencies.isPetLinkEnabled?.() ?? true)) {
         const sink = dependencies.sinks.motion
         if (!await invokeSink('motion', sink ? () => sink(candidate.motion_group!, sinkContext) : undefined, result, isRequestCurrent)) return 'stopped'
       }
-      if (candidate.message) {
+      const visibleMessage = authoritativeMessage ?? candidate.message
+      if (visibleMessage) {
         const adviceSink = dependencies.sinks.advice
         const notificationSink = dependencies.sinks.notification
-        if (!await invokeSink('advice', adviceSink ? () => adviceSink(candidate.message!) : undefined, result, isRequestCurrent)) return 'stopped'
-        if (!await invokeSink('notification', notificationSink ? () => notificationSink(candidate.message!) : undefined, result, isRequestCurrent)) return 'stopped'
+        if (!await invokeSink('advice', adviceSink ? () => adviceSink(visibleMessage) : undefined, result, isRequestCurrent)) return 'stopped'
+        if (!await invokeSink('notification', notificationSink ? () => notificationSink(visibleMessage) : undefined, result, isRequestCurrent)) return 'stopped'
       }
       if (!isRequestCurrent()) return 'stopped'
       rememberDeliveredIdentity(identity)
-      categoryDeliveredAt.set(category, now)
-      deliveredAt.push(now)
-      if (result.failed.length === 0) {
-        result.status = 'delivered'
-      } else if (result.succeeded.length === 0) {
+      if (result.succeeded.length === 0) {
         result.status = 'failed'
+      } else if (result.failed.length === 0) {
+        result.status = 'delivered'
       } else {
         result.status = 'partial'
       }
-      await reportOpportunity(candidate, result.status === 'failed' ? 'failed' : 'delivered', result.status)
+      if (result.succeeded.length > 0) {
+        categoryDeliveredAt.set(category, now)
+        deliveredAt.push(now)
+      }
+      const failureReason = result.attempted.length === 0 ? 'no_visible_sink' : 'all_visible_sinks_failed'
+      await reportOpportunity(
+        candidate,
+        result.status === 'failed' ? 'failed' : 'delivered',
+        result.status === 'failed' ? failureReason : result.status,
+      )
       return result
     } catch {
       if (!isRequestCurrent()) return 'stopped'
@@ -585,7 +820,6 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     sourceRequestIds.clear()
     activeJobIdsBySource.clear()
     clearTerminalJobPresentation()
-    jobEventGate.clear()
     state.lastRequestId = null
     state.interruptedAtEpoch = null
     recomputeActivity()
@@ -605,6 +839,7 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
     publishJob,
     interrupt,
     pollOnce,
+    refreshPresentation: () => applyPresentation(undefined, true),
     start,
     stop,
     setPollingEnabled,

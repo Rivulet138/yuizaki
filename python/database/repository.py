@@ -198,11 +198,28 @@ class DatabaseRepository:
         workspace_id: str = "default",
         tool_trace: list[dict[str, Any]] | None = None,
         memory_trace: list[dict[str, Any]] | None = None,
+        turn_idempotency_key: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Persist one user/assistant turn atomically and in conversation order."""
         session = self.SessionLocal()
         try:
             normalized_workspace_id = self._require_workspace(session, workspace_id)
+            normalized_turn_key = str(turn_idempotency_key or "").strip() or None
+            if normalized_turn_key is not None:
+                existing = session.query(ChatMessage)\
+                    .filter(ChatMessage.turn_idempotency_key == normalized_turn_key)\
+                    .order_by(ChatMessage.id.asc())\
+                    .all()
+                by_role = {message.role: message for message in existing}
+                if "user" in by_role and "assistant" in by_role:
+                    return (
+                        self._message_to_record(by_role["user"]),
+                        self._message_to_record(by_role["assistant"]),
+                    )
+                if existing:
+                    raise DatabaseError(
+                        "incomplete_turn_message_pair: existing idempotent turn is partial"
+                    )
             chat_session = session.query(ChatSession).filter_by(id=session_id).first()
             if not chat_session:
                 chat_session = ChatSession(
@@ -228,6 +245,7 @@ class DatabaseRepository:
                 content=user_content,
                 tokens_used=0,
                 model=model,
+                turn_idempotency_key=normalized_turn_key,
             )
             assistant_message = ChatMessage(
                 session_id=session_id,
@@ -235,6 +253,7 @@ class DatabaseRepository:
                 content=assistant_content,
                 tokens_used=0,
                 model=model,
+                turn_idempotency_key=normalized_turn_key,
                 tool_trace=json.dumps(tool_trace, ensure_ascii=False) if tool_trace else None,
                 memory_trace=json.dumps(memory_trace, ensure_ascii=False) if memory_trace else None,
             )
@@ -253,6 +272,46 @@ class DatabaseRepository:
             logger.exception("Failed to save message pair: %s", exc)
             session.rollback()
             raise DatabaseError(f"failed_to_save_message_pair: {exc}") from exc
+        finally:
+            session.close()
+
+    def get_message_pair_by_turn_idempotency_key(
+        self,
+        turn_idempotency_key: str,
+        *,
+        workspace_id: str = "default",
+    ) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        """Load the authoritative chat pair for a committed semantic turn."""
+        normalized_turn_key = str(turn_idempotency_key or "").strip()
+        if not normalized_turn_key:
+            return None
+        normalized_workspace_id = self._normalize_workspace_id(workspace_id)
+        session = self.SessionLocal()
+        try:
+            existing = session.query(ChatMessage)\
+                .join(ChatSession, ChatSession.id == ChatMessage.session_id)\
+                .filter(
+                    ChatMessage.turn_idempotency_key == normalized_turn_key,
+                    ChatSession.workspace_id == normalized_workspace_id,
+                )\
+                .order_by(ChatMessage.id.asc())\
+                .all()
+            if not existing:
+                return None
+            by_role = {message.role: message for message in existing}
+            if "user" not in by_role or "assistant" not in by_role:
+                raise DatabaseError(
+                    "incomplete_turn_message_pair: existing idempotent turn is partial"
+                )
+            return (
+                self._message_to_record(by_role["user"]),
+                self._message_to_record(by_role["assistant"]),
+            )
+        except DatabaseError:
+            raise
+        except Exception as exc:
+            logger.exception("Failed to load message pair for turn %s", normalized_turn_key)
+            raise DatabaseError(f"failed_to_load_turn_message_pair: {exc}") from exc
         finally:
             session.close()
 

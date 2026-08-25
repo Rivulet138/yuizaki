@@ -183,7 +183,6 @@ class E2EState:
     fixture_origin: str = ""
     case_id: str | None = None
     ledger: FixtureLedger | None = None
-    ping_count: int = 0
     online: bool = True
     socket_connect_count: int = 0
     socket_disconnect_count: int = 0
@@ -248,8 +247,83 @@ def _authorize(request: Request, state: E2EState) -> JSONResponse | None:
     return None
 
 
+def _http_direction(request: Request, state: E2EState) -> str:
+    origin = request.headers.get("origin", "").strip()
+    if origin:
+        return (
+            "renderer->fixture"
+            if hmac.compare_digest(origin, state.trusted_socket_origin)
+            else "untrusted->fixture"
+        )
+    authorization = request.headers.get("authorization")
+    backend_token = request.headers.get("x-yuizaki-backend-token")
+    if authorization or backend_token:
+        allowed, _ = verify_backend_api_authorization(
+            authorization,
+            state.backend_token,
+            backend_token,
+            client_host=request.client.host if request.client else None,
+        )
+        return "renderer->fixture" if allowed else "untrusted->fixture"
+    return "main->fixture"
+
+
+def _fixture_onboarding_snapshot() -> dict[str, Any]:
+    definitions = (
+        ("backend.service", "Backend service", True, ()),
+        ("llm.provider", "LLM provider", True, ("backend.service",)),
+        ("llm.model_chat", "Configured chat model", True, ("llm.provider",)),
+        ("tts.status", "Text-to-speech", False, ("backend.service",)),
+        ("asr.runtime", "Speech recognition", False, ("backend.service",)),
+        ("database.status", "Database", False, ("backend.service",)),
+        ("memory.status", "Memory", False, ("database.status",)),
+        ("mcp.snapshot", "MCP servers", False, ("backend.service",)),
+    )
+    probes = [
+        {
+            "id": probe_id,
+            "label": label,
+            "status": "ready",
+            "requiredForText": required_for_text,
+            "dependencies": list(dependencies),
+            "timeoutMs": 1_000,
+            "message": "E2E fixture ready",
+            "evidence": {"source": "e2e_fixture"},
+            "repairActionId": None,
+        }
+        for probe_id, label, required_for_text, dependencies in definitions
+    ]
+    return {
+        "schemaVersion": 1,
+        "runId": "fixture-onboarding-readiness",
+        "revision": 1,
+        "state": "completed",
+        "readyForText": True,
+        "startedAt": "2026-08-24T00:00:00Z",
+        "completedAt": "2026-08-24T00:00:00Z",
+        "probes": probes,
+    }
+
+
 def create_app(state: E2EState) -> FastAPI:
     app = FastAPI()
+    e2e08_empty_response_routes = frozenset({
+        "GET /api/summary",
+        "GET /api/summary/report/json",
+        "GET /api/system/capabilities",
+        "GET /api/system/agent-trace",
+        "GET /api/system/permissions",
+        "GET /api/system/agent-plugins",
+        "GET /api/system/schedules",
+        "GET /api/system/heartbeat",
+        "GET /api/i18n/locales",
+        "GET /api/i18n/messages",
+        "GET /api/settings/metadata",
+        "GET /api/settings/history",
+        "GET /api/system/storage",
+        "GET /api/settings/tts/status",
+        "POST /api/settings/tts/warmup",
+    })
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["yuizaki-app://renderer"],
@@ -295,17 +369,22 @@ def create_app(state: E2EState) -> FastAPI:
         )
 
     @app.get("/api/ping")
-    async def ping() -> JSONResponse:
-        state.ping_count += 1
+    async def ping(request: Request) -> JSONResponse:
         if state.case_id is None:
             state.record("http", "supervisor->fixture", "GET /api/ping")
-        elif state.ping_count == 2:
-            state.record("http", "main->fixture", "GET /api/ping")
         else:
-            state.record("http", "renderer->fixture", "GET /api/ping")
+            state.record("http", _http_direction(request, state), "GET /api/ping")
         if not state.online:
             return JSONResponse({"detail": "backend_unavailable"}, status_code=503)
         return JSONResponse({"ok": True})
+
+    @app.post("/api/system/onboarding/readiness/run")
+    async def onboarding_readiness_run(request: Request) -> JSONResponse:
+        body = await request.json()
+        state.record("http", "main->fixture", "POST /api/system/onboarding/readiness/run")
+        if set(body) - {"probeIds"} or ("probeIds" in body and not isinstance(body["probeIds"], list)):
+            return JSONResponse({"error": "invalid_onboarding_probe_request"}, status_code=422)
+        return JSONResponse(_fixture_onboarding_snapshot())
 
     @app.post("/__e2e__/case/start")
     async def case_start(request: Request) -> JSONResponse:
@@ -505,22 +584,108 @@ def create_app(state: E2EState) -> FastAPI:
                 "type": "proactive_e2e",
                 "message": f"E2E proactive {event_id}",
                 "motion_group": "Tap@Body",
+                "job_id": f"proactive-job-{event_id}",
+                "request_id": f"proactive-request-{event_id}",
+                "source_kind": "completed_turn_followup",
+                "source_id": f"turn-{event_id}",
+                "trigger_reason": f"fixture-{event_id}",
+                "expires_at": 4102444800,
+                "frame_id": f"proactive-frame-{event_id}",
+                "content_code": "completed_turn_followup",
                 "proactive_state": {"can_proactively_reach_out": True, "trigger_reason": f"fixture-{event_id}"},
             }]
         return JSONResponse({
             "active_workspace_id": "default",
             "active_companion": None,
             "heartbeat": {"behavior_events": behavior_events},
+            "jobs": {"active_job_ids": [f"proactive-job-{event_id}"] if event_id else []},
             "companion_state": {"interruptibility": 0.8},
             "memory_state": {},
         })
 
+    @app.get("/api/system/proactive/settings")
+    async def proactive_settings() -> JSONResponse:
+        state.record("http", "renderer->fixture", "GET /api/system/proactive/settings")
+        if state.case_id not in {"E2E-05", "E2E-08"}:
+            return JSONResponse({"error": "invalid_proactive_settings_case"}, status_code=422)
+        return JSONResponse({
+            "schemaVersion": "yuizaki.proactive-settings.v1",
+            "workspaceId": "default",
+            "revision": 1,
+            "updatedAt": 1787550000,
+            "enabled": True,
+            "sourceEnabled": {"completed_turn_followup": True},
+            "dnd": False,
+            "quietHours": {"enabled": False, "start": "00:00", "end": "00:00", "timezone": "UTC"},
+            "dailyBudget": 20,
+            "cooldownSeconds": 900,
+            "retentionDays": 30,
+            "policyVersion": "e2e-policy-v1",
+        })
+
+    @app.get("/api/system/activity-frames")
+    async def activity_frames() -> JSONResponse:
+        state.record("http", "renderer->fixture", "GET /api/system/activity-frames")
+        if state.case_id not in {"E2E-05", "E2E-08"}:
+            return JSONResponse({"error": "invalid_activity_frames_case"}, status_code=422)
+        frames = [{
+            "frameId": f"proactive-frame-{event_id}",
+            "workspaceId": "default",
+            "sessionId": "session-e2e",
+            "sourceKind": "completed_turn_followup",
+            "sourceId": f"turn-{event_id}",
+            "sourceEventId": f"event-{event_id}",
+            "sourceCreatedAt": 1787550000,
+            "createdAt": 1787550000,
+            "expiresAt": 4102444800,
+            "projectionVersion": "e2e-projection-v1",
+            "policyVersion": "e2e-policy-v1",
+            "authoritative": False,
+            "allowedActions": [],
+        } for event_id in ("A", "B", "C")]
+        return JSONResponse({"schemaVersion": "yuizaki.activity-frame.v1", "frames": frames})
+
+    @app.post("/api/system/companion-runtime/opportunities/outcome/{job_id}")
+    async def companion_opportunity_outcome(job_id: str, request: Request) -> JSONResponse:
+        body = await request.json()
+        state.record("http", "renderer->fixture", f"POST /api/system/companion-runtime/opportunities/outcome/{job_id}")
+        event_id = job_id.removeprefix("proactive-job-")
+        expected_outcome = "suppressed" if event_id == "B" else "delivered"
+        if (
+            state.case_id != "E2E-05"
+            or event_id not in {"A", "B", "C"}
+            or body.get("request_id") != f"proactive-request-{event_id}"
+            or body.get("outcome") != expected_outcome
+        ):
+            return JSONResponse({"error": "invalid_companion_opportunity_outcome"}, status_code=422)
+        return JSONResponse({"ok": True})
+
     @app.get("/memory/docs")
     async def memory_docs(scope: str = "", workspace_id: str = "") -> JSONResponse:
         state.record("http", "renderer->fixture", f"GET /memory/docs?scope={scope}&workspace_id={workspace_id}")
+        if state.case_id == "E2E-08":
+            return JSONResponse({"docs": []})
         if state.case_id != "E2E-04" or scope != "workspace" or workspace_id != "default":
             return JSONResponse({"error": "invalid_memory_scope"}, status_code=422)
         return JSONResponse({"docs": [state.memory_doc] if state.memory_doc is not None else []})
+
+    @app.get("/memory/overview")
+    async def memory_overview() -> JSONResponse:
+        state.record("http", "renderer->fixture", "GET /memory/overview")
+        if state.case_id == "E2E-08":
+            return JSONResponse({"total": 0, "recallable": 0, "by_state": {}, "by_layer": {}, "by_source": {}, "by_review_status": {}, "latest_activity": []})
+        if state.case_id != "E2E-04":
+            return JSONResponse({"error": "invalid_memory_overview"}, status_code=422)
+        docs = [state.memory_doc] if state.memory_doc is not None else []
+        return JSONResponse({
+            "total": len(docs),
+            "recallable": len(docs),
+            "by_state": {"active": len(docs)},
+            "by_layer": {"semantic": len(docs)},
+            "by_source": {"manual": len(docs)},
+            "by_review_status": {},
+            "latest_activity": docs,
+        })
 
     @app.post("/memory/docs")
     async def create_memory_doc(request: Request) -> JSONResponse:
@@ -624,6 +789,51 @@ def create_app(state: E2EState) -> FastAPI:
             },
         })
 
+    @app.post("/memory/rag/query")
+    async def query_memory_rag(request: Request) -> JSONResponse:
+        body = await request.json()
+        state.record("http", "renderer->fixture", "POST /memory/rag/query")
+        expected_layers = {
+            "profile", "working", "episodic", "relationship", "reflective", "semantic",
+        }
+        if (
+            state.case_id != "E2E-04"
+            or body.get("query") != "E2E-memory"
+            or body.get("top_k") != 5
+            or body.get("scope") != "workspace"
+            or body.get("workspace_id") != "default"
+            or set(body.get("layers", [])) != expected_layers
+            or body.get("recency_weight") != 0.2
+        ):
+            return JSONResponse({"error": "invalid_memory_rag_query"}, status_code=422)
+        results = [] if state.memory_doc is None else [{
+            "id": state.memory_doc["id"],
+            "text": state.memory_doc["text"],
+            "score": 0.99,
+            "metadata": state.memory_doc["metadata"],
+        }]
+        return JSONResponse({"results": results, "trace": {"selected_ids": [item["id"] for item in results]}})
+
+    @app.post("/memory/query")
+    async def query_memory(request: Request) -> JSONResponse:
+        body = await request.json()
+        state.record("http", "renderer->fixture", "POST /memory/query")
+        if (
+            state.case_id != "E2E-04"
+            or body.get("query") != "E2E-memory"
+            or body.get("top_k") != 5
+            or body.get("scope") != "workspace"
+            or body.get("workspace_id") != "default"
+        ):
+            return JSONResponse({"error": "invalid_memory_query"}, status_code=422)
+        results = [] if state.memory_doc is None else [{
+            "id": state.memory_doc["id"],
+            "text": state.memory_doc["text"],
+            "score": 0.99,
+            "metadata": state.memory_doc["metadata"],
+        }]
+        return JSONResponse({"query": body["query"], "results": results})
+
     @app.post("/memory/maintenance/preview")
     async def preview_memory_maintenance(request: Request) -> JSONResponse:
         body = await request.json()
@@ -683,6 +893,47 @@ def create_app(state: E2EState) -> FastAPI:
         state.record("http", "renderer->fixture", "GET /api/readiness")
         return {"ready": True, "checks": {"llm": {"ready": True, "message": "fixture"}}}
 
+    @app.get("/api/system/mcp")
+    async def mcp_snapshot() -> dict[str, Any]:
+        state.record("http", "renderer->fixture", "GET /api/system/mcp")
+        return {"servers": {}, "status": {}, "presets": []}
+
+    @app.get("/api/system/experience-metrics")
+    async def experience_metrics() -> dict[str, Any]:
+        state.record("http", "renderer->fixture", "GET /api/system/experience-metrics")
+        return {
+            "generated_at": "2026-08-24T00:00:00Z",
+            "window": {
+                "max_entries": 0,
+                "generation_samples": 0,
+                "asr_samples": 0,
+                "voice_journey_samples": 0,
+                "voice_playback_journey_samples": 0,
+                "visual_analysis_samples": 0,
+            },
+            "latency": {},
+            "interrupts": {"requests": 0, "hits": 0, "hit_rate": None, "by_source": {}},
+            "tools": {"calls": 0, "successes": 0, "failures": 0, "success_rate": None},
+            "visual": {
+                "frames": 0,
+                "analysis_requests": 0,
+                "analysis_skipped": 0,
+                "analysis_rate": None,
+                "completed": 0,
+                "usable": 0,
+                "usable_rate": None,
+                "outcomes": {"ready": 0, "empty": 0, "error": 0, "stale": 0},
+                "decision_reasons": {},
+                "capture_reasons": {},
+                "latest_change_score": None,
+            },
+        }
+
+    @app.get("/api/system/product-metrics/consent")
+    async def product_metrics_consent() -> dict[str, Any]:
+        state.record("http", "renderer->fixture", "GET /api/system/product-metrics/consent")
+        return {"consented": False, "scope": "local", "transport": "disabled"}
+
     @app.patch("/api/workspaces/default")
     async def patch_workspace(request: Request) -> dict[str, Any]:
         body = await request.json()
@@ -691,7 +942,10 @@ def create_app(state: E2EState) -> FastAPI:
 
     @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def unhandled(request: Request, path: str) -> JSONResponse:
-        state.record("http", "renderer->fixture", f"{request.method} /{path}")
+        interaction_name = f"{request.method} /{path}"
+        state.record("http", "renderer->fixture", interaction_name)
+        if state.case_id == "E2E-08" and interaction_name in e2e08_empty_response_routes:
+            return JSONResponse({})
         return JSONResponse({"error": "e2e_unhandled_request"}, status_code=404)
 
     return app

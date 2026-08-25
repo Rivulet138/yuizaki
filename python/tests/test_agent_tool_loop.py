@@ -130,3 +130,56 @@ async def test_tool_loop_limits_mcp_tools_to_workspace_server_preset():
 
     names = {item["function"]["name"] for item in llm.tools}
     assert names == {"time_now", "calendar_list"}
+
+
+@pytest.mark.asyncio
+async def test_tool_loop_rejects_registered_tool_outside_exposed_allowlist():
+    tool_loop = importlib.import_module("modules.agent.tool_loop")
+    registry_module = importlib.import_module("modules.agent.tool_registry")
+    result_module = importlib.import_module("modules.agent.tool_result")
+    registry = registry_module.ToolRegistry()
+    registry.register(registry_module.ToolDefinition(
+        name="secret",
+        description="must remain hidden",
+        source="builtin",
+        parameters={"type": "object"},
+        handler=lambda _args: result_module.ToolResultEnvelope(
+            success=True, content="unexpected", source="builtin", tool_name="secret"
+        ),
+    ))
+
+    class FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        async def complete_chat(self, _messages, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return {
+                    "reply": "",
+                    "tool_calls": [{
+                        "id": "hidden-call",
+                        "function": {"name": "secret", "arguments": "{}"},
+                    }],
+                }
+            return {"reply": "denied", "tool_calls": []}
+
+    class FakeExecutor:
+        def __init__(self):
+            self.calls = []
+
+        async def execute(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            raise AssertionError("hidden tool must not execute")
+
+    executor = FakeExecutor()
+    result = await tool_loop.run_tool_loop(
+        FakeLLM(),
+        [{"role": "user", "content": "run hidden tool"}],
+        tool_registry=registry,
+        tool_executor=executor,
+        allowed_tool_names=[],
+    )
+
+    assert result["reply"] == "denied"
+    assert executor.calls == []

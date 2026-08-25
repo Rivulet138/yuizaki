@@ -124,11 +124,16 @@ const buildIpcContext = (): IpcContext => {
       stop: vi.fn(async () => undefined),
       health: vi.fn(async () => true),
     },
-    adminTokenStore: {
-      getSummaryAdminToken: vi.fn(() => ''),
-      setSummaryAdminToken: vi.fn(() => ({ ok: true, hasToken: true })),
-      clearSummaryAdminToken: vi.fn(() => ({ ok: true })),
-    },
+    onboardingCoordinator: {
+      snapshot: vi.fn(() => ({ schemaVersion: 1, runId: '', revision: 0, state: 'idle', readyForText: false, startedAt: null, completedAt: null, probes: [] })),
+      startBackend: vi.fn(),
+      cancelBackend: vi.fn(),
+      cancelRun: vi.fn(),
+      reportDeviceProbe: vi.fn(),
+      runProbe: vi.fn(),
+      retry: vi.fn(),
+      runRepair: vi.fn(),
+    } as never,
     inputBindings: {
       getSnapshot: vi.fn(() => ({
         settings: {
@@ -179,6 +184,42 @@ const buildIpcContext = (): IpcContext => {
         },
       })),
     },
+    computerUseBridge: {
+      preview: vi.fn(async () => ({ ok: true })),
+      stop: vi.fn(async () => ({ ok: true, data: { revision: 7 } })),
+      refreshStatus: vi.fn(async () => ({ ok: true })),
+    } as never,
+    desktopActionBridge: {
+      getStatus: vi.fn(() => ({
+        enabled: false,
+        windowActionsAvailable: false,
+        nativeInputAvailable: false,
+        emergencyHotkeyAvailable: true,
+        emergencyStopped: false,
+        revision: 0,
+        stopEpoch: 0,
+        operationInFlight: false,
+        degraded: false,
+        reason: 'disabled',
+        lastError: null,
+      })),
+      refreshStatus: vi.fn(async () => ({ ok: true })),
+      enable: vi.fn(async () => ({ ok: true })),
+      disable: vi.fn(async () => ({ ok: true })),
+      rearm: vi.fn(async () => ({ ok: true })),
+      beginEmergencyFence: vi.fn(),
+      emergencyStop: vi.fn(async () => ({ ok: true, data: { revision: 7 } })),
+    } as never,
+    perceptionBridge: {
+      collectScreenshot: vi.fn(async () => ({ ok: true })),
+      collectTargetWindow: vi.fn(async () => ({ ok: true })),
+      collectActiveApplication: vi.fn(async () => ({ ok: true })),
+      collectSelectedFile: vi.fn(async () => ({ ok: true })),
+      collectClipboard: vi.fn(async () => ({ ok: true })),
+      collectOcr: vi.fn(async () => ({ ok: true })),
+      beginStopFence: vi.fn(),
+      interrupt: vi.fn(),
+    } as never,
   }
 }
 
@@ -750,49 +791,13 @@ describe('IPC handler sender trust', () => {
     expect(result).toBe(`data:image/png;base64,${Buffer.from('cropped').toString('base64')}`)
   })
 
-  it('rejects untrusted screen OCR requests before reading the desktop', async () => {
+  it('does not register the legacy screen OCR bypass', async () => {
     const { registerIpcHandlers } = await import('../ipc-handlers')
     const ctx = buildIpcContext()
     registerIpcHandlers(ctx)
 
-    const handler = electronMock.handlers.get('screen:ocr')
-
-    expect(handler).toBeDefined()
-    await expect(handler?.(untrustedEvent, { displayIndex: 0 })).rejects.toThrow(/Blocked IPC from untrusted renderer/)
+    expect(electronMock.handlers.has('screen:ocr')).toBe(false)
     expect(ctx.captureDisplayPng).not.toHaveBeenCalled()
-  })
-
-  it('proxies trusted screen OCR requests to the Python OCR endpoint without returning the screenshot', async () => {
-    electronMock.screen.getAllDisplays.mockReturnValue([
-      {
-        id: 10,
-        bounds: { x: 0, y: 0, width: 200, height: 100 },
-        workArea: { x: 0, y: 0, width: 200, height: 100 },
-      },
-    ])
-    const fetchMock = vi.fn(async () => new Response(
-      JSON.stringify({ status: 'ok', text: 'screen text', blocks: [] }),
-      { status: 200 },
-    ))
-    vi.stubGlobal('fetch', fetchMock)
-
-    const { registerIpcHandlers } = await import('../ipc-handlers')
-    const ctx = buildIpcContext()
-    vi.mocked(ctx.captureDisplayPng).mockResolvedValue(Buffer.from('raw-png-bytes'))
-    registerIpcHandlers(ctx)
-
-    const handler = electronMock.handlers.get('screen:ocr')
-    const result = await handler?.(trustedEvent, { displayIndex: 0 })
-
-    expect(ctx.captureDisplayPng).toHaveBeenCalledWith(expect.objectContaining({ id: 10 }), 0)
-    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8001/vision/ocr', expect.objectContaining({
-      method: 'POST',
-      headers: expect.objectContaining({
-        'x-yuizaki-backend-token': 'backend-token',
-      }),
-    }))
-    expect(result).toEqual({ status: 'ok', text: 'screen text', blocks: [] })
-    expect(result).not.toHaveProperty('image')
   })
 
   it('does not register the legacy fire-and-forget full-screen capture listener', async () => {
@@ -826,5 +831,101 @@ describe('IPC handler sender trust', () => {
 
     expect(() => handler?.(untrustedEvent, { pushToTalk: { mouseButton: 4 } })).toThrow(/Blocked IPC/)
     expect(ctx.inputBindings.update).not.toHaveBeenCalled()
+  })
+
+  it('rejects untrusted computer-use IPC before reaching the host bridge', async () => {
+    const { registerIpcHandlers } = await import('../ipc-handlers')
+    const ctx = buildIpcContext()
+    registerIpcHandlers(ctx)
+
+    const preview = electronMock.handlers.get('computer-use:preview')
+    const stop = electronMock.handlers.get('computer-use:emergency-stop')
+    const status = electronMock.handlers.get('computer-use:status')
+
+    expect(() => preview?.(untrustedEvent, { actions: [] })).toThrow(/Blocked IPC/)
+    expect(() => stop?.(untrustedEvent)).toThrow(/Blocked IPC/)
+    expect(() => status?.(untrustedEvent)).toThrow(/Blocked IPC/)
+    expect(ctx.computerUseBridge.preview).not.toHaveBeenCalled()
+    expect(ctx.computerUseBridge.stop).not.toHaveBeenCalled()
+    expect(ctx.computerUseBridge.refreshStatus).not.toHaveBeenCalled()
+    expect(ctx.perceptionBridge.beginStopFence).not.toHaveBeenCalled()
+    expect(ctx.perceptionBridge.interrupt).not.toHaveBeenCalled()
+  })
+
+  it('fences in-flight perception before a trusted emergency stop reaches computer-use', async () => {
+    const { registerIpcHandlers } = await import('../ipc-handlers')
+    const ctx = buildIpcContext()
+    const order: string[] = []
+    vi.mocked(ctx.perceptionBridge.beginStopFence).mockImplementation(() => { order.push('perception-fence') })
+    vi.mocked(ctx.perceptionBridge.interrupt).mockImplementation(() => { order.push('perception-revision') })
+    vi.mocked(ctx.computerUseBridge.stop).mockImplementation(async () => {
+      order.push('computer-use')
+      return { ok: true, data: { revision: 7 } } as never
+    })
+    registerIpcHandlers(ctx)
+
+    const stop = electronMock.handlers.get('computer-use:emergency-stop')
+    await stop?.(trustedEvent)
+
+    expect(ctx.perceptionBridge.beginStopFence).toHaveBeenCalledOnce()
+    expect(ctx.perceptionBridge.interrupt).toHaveBeenCalledWith(7)
+    expect(order).toEqual(['perception-fence', 'computer-use', 'perception-revision'])
+  })
+
+  it('allows only trusted fixed perception IPC with one opaque session id', async () => {
+    const { registerIpcHandlers } = await import('../ipc-handlers')
+    const ctx = buildIpcContext()
+    registerIpcHandlers(ctx)
+    const channels = [
+      'perception:collect-screenshot',
+      'perception:collect-target-window',
+      'perception:collect-active-application',
+      'perception:collect-selected-file',
+      'perception:collect-clipboard',
+      'perception:collect-ocr',
+    ]
+
+    for (const channel of channels) {
+      const handler = electronMock.handlers.get(channel)
+      expect(() => handler?.(untrustedEvent, 'opaque-session')).toThrow(/Blocked IPC/)
+      await handler?.(trustedEvent, 'opaque-session')
+    }
+
+    expect(ctx.perceptionBridge.collectScreenshot).toHaveBeenCalledWith('opaque-session')
+    expect(ctx.perceptionBridge.collectTargetWindow).toHaveBeenCalledWith('opaque-session')
+    expect(ctx.perceptionBridge.collectActiveApplication).toHaveBeenCalledWith('opaque-session')
+    expect(ctx.perceptionBridge.collectSelectedFile).toHaveBeenCalledWith('opaque-session')
+    expect(ctx.perceptionBridge.collectClipboard).toHaveBeenCalledWith('opaque-session')
+    expect(ctx.perceptionBridge.collectOcr).toHaveBeenCalledWith('opaque-session')
+    expect(electronMock.handlers.has('perception:collect')).toBe(false)
+    expect(electronMock.handlers.has('perception:issue')).toBe(false)
+  })
+
+  it('exposes only closed trusted onboarding requests', async () => {
+    const { registerIpcHandlers } = await import('../ipc-handlers')
+    const ctx = buildIpcContext()
+    registerIpcHandlers(ctx)
+
+    expect(() => electronMock.handlers.get('onboarding:snapshot')?.(untrustedEvent)).toThrow(/Blocked IPC/)
+    expect(() => electronMock.handlers.get('onboarding:start-backend')?.(trustedEvent, { command: 'python' })).toThrow(/does not accept arguments/)
+    expect(() => electronMock.handlers.get('onboarding:run-probe')?.(trustedEvent, { probeIds: ['host.runtime'], env: {} })).toThrow(/Invalid onboarding probe request/)
+    expect(() => electronMock.handlers.get('onboarding:run-repair')?.(trustedEvent, { actionId: 'backend.retry', args: ['--unsafe'] })).toThrow(/Unknown onboarding repair action/)
+    expect(() => electronMock.handlers.get('onboarding:run-repair')?.(trustedEvent, { actionId: 'shell:cmd.exe' })).toThrow(/Unknown onboarding repair action/)
+    expect(() => electronMock.handlers.get('onboarding:cancel-run')?.(trustedEvent, { runId: 'run-1', command: 'kill' })).toThrow(/Invalid onboarding cancel request/)
+    expect(() => electronMock.handlers.get('onboarding:report-device-probe')?.(trustedEvent, {
+      probeId: 'host.microphone', outcome: 'ready', messageCode: 'permission_granted', evidence: { deviceId: 'secret' },
+    })).toThrow(/Invalid onboarding device report/)
+    expect(() => electronMock.handlers.get('onboarding:report-device-probe')?.(trustedEvent, {
+      probeId: 'host.microphone', outcome: 'ready', messageCode: 'arbitrary text',
+    })).toThrow(/Invalid onboarding device report/)
+
+    await electronMock.handlers.get('onboarding:run-repair')?.(trustedEvent, { actionId: 'backend.retry' })
+    expect(ctx.onboardingCoordinator.runRepair).toHaveBeenCalledWith('backend.retry')
+    await electronMock.handlers.get('onboarding:report-device-probe')?.(trustedEvent, {
+      probeId: 'host.speaker', outcome: 'ready', messageCode: 'test_completed',
+    })
+    expect(ctx.onboardingCoordinator.reportDeviceProbe).toHaveBeenCalledWith({
+      probeId: 'host.speaker', outcome: 'ready', messageCode: 'test_completed',
+    })
   })
 })

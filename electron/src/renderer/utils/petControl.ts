@@ -17,12 +17,7 @@ import type {
   PetModelImportMode,
 } from '../../shared/resource-manager'
 import type { AvatarCapabilitySnapshot, AvatarCommand, AvatarCommandResult } from '../../shared/avatar-command'
-import {
-  CONTROL_AUTH_MISSING_MESSAGE,
-  CONTROL_ORIGIN,
-  getControlAuthHeaders,
-  refreshControlTokenFromServer,
-} from '../api/clients/http-client'
+import { CONTROL_ORIGIN } from '../api/clients/http-client'
 
 type PetControlAutomationOptions = PetControlTriggerOptions & {
   signal?: AbortSignal
@@ -44,61 +39,21 @@ const getControlOrigin = (): string => {
 
 const createControlConnectionError = (error: unknown): Error => {
   const detail = error instanceof Error && error.message ? `（${error.message}）` : ''
-  return new Error(`无法连接桌宠控制服务：请确认 Electron 主程序正在运行，并从 Electron 应用入口重新打开界面后重试。${detail}`, { cause: error })
+  return new Error(`无法连接桌宠控制服务：请确认 Yuizaki 主程序正在运行。${detail}`, { cause: error })
 }
 
 const requestJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
-  let authHeaders = getControlAuthHeaders()
-  let hasAuthHeader = Boolean(authHeaders['Authorization'])
-  if (!hasAuthHeader) {
-    const refreshedToken = await refreshControlTokenFromServer()
-    if (refreshedToken) {
-      authHeaders = { Authorization: `Bearer ${refreshedToken}` }
-      hasAuthHeader = true
-    }
-  }
-  if (!hasAuthHeader) {
-    throw new Error(CONTROL_AUTH_MISSING_MESSAGE)
-  }
   let response: Response
   try {
     response = await fetch(`${getControlOrigin()}${path}`, {
       ...init,
       headers: {
         'Content-Type': 'application/json',
-        ...authHeaders,
         ...(init?.headers ?? {}),
       },
     })
   } catch (error) {
-    if (!hasAuthHeader) {
-      throw new Error(CONTROL_AUTH_MISSING_MESSAGE, { cause: error })
-    }
     throw createControlConnectionError(error)
-  }
-
-  if (response.status === 401) {
-    const refreshedToken = await refreshControlTokenFromServer()
-    const previousAuthHeader = authHeaders['Authorization'] || ''
-    if (refreshedToken && `Bearer ${refreshedToken}` !== previousAuthHeader) {
-      authHeaders = { Authorization: `Bearer ${refreshedToken}` }
-      hasAuthHeader = true
-      try {
-        response = await fetch(`${getControlOrigin()}${path}`, {
-          ...init,
-          headers: {
-            'Content-Type': 'application/json',
-            ...authHeaders,
-            ...(init?.headers ?? {}),
-          },
-        })
-      } catch (error) {
-        if (!hasAuthHeader) {
-          throw new Error(CONTROL_AUTH_MISSING_MESSAGE, { cause: error })
-        }
-        throw createControlConnectionError(error)
-      }
-    }
   }
 
   if (!response.ok) {
@@ -112,9 +67,6 @@ const requestJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
           : ''
     } catch {
       // keep the status-only fallback for non-JSON errors
-    }
-    if (response.status === 401) {
-      detail = CONTROL_AUTH_MISSING_MESSAGE
     }
     throw new Error(detail || `Pet control request failed: ${response.status}`)
   }

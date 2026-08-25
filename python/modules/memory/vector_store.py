@@ -7,23 +7,99 @@ Supports both in-memory (legacy) and Qdrant (production) backends.
 from __future__ import annotations
 
 import importlib
-from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Any, Dict, List, Protocol, Tuple
-from enum import Enum
 import logging
 import os
+import threading
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
+from typing import Any, Dict, List, Protocol, Tuple
 
 import numpy as np
 
 from ..core.config import DEFAULT_EMBEDDING_MODEL
 from .backend import MemoryBackendStatus
-from .schema import MemorySearchFilters
-from .expiry import is_memory_expired
+from .metadata import is_metadata_recallable
 from .reranker import LearnedReranker, lexical_overlap_score, normalize_scores
+from .schema import MemorySearchFilters
 
 logger = logging.getLogger(__name__)
+
+
+def memory_recency_score(metadata: Dict[str, Any], *, now: datetime | None = None) -> float:
+  """Return a stable 30-day recency score using event time before system time."""
+  raw = next(
+    (
+      metadata.get(key)
+      for key in ("occurred_at", "updated_at", "timestamp")
+      if metadata.get(key)
+    ),
+    None,
+  )
+  if not isinstance(raw, str):
+    return 0.5
+  try:
+    instant = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+  except ValueError:
+    return 0.5
+  if instant.tzinfo is None or instant.utcoffset() is None:
+    instant = instant.replace(tzinfo=timezone.utc)
+  current = now or datetime.now(timezone.utc)
+  if current.tzinfo is None or current.utcoffset() is None:
+    current = current.replace(tzinfo=timezone.utc)
+  age_days = max(0.0, (current.astimezone(timezone.utc) - instant.astimezone(timezone.utc)).total_seconds() / 86400)
+  return 1.0 / (1.0 + age_days / 30.0)
+
+
+def memory_score_components(
+  *,
+  semantic: float,
+  lexical: float,
+  learned: float,
+  recency: float,
+  quality: float,
+  semantic_weight: float,
+  lexical_weight: float,
+  learned_weight: float,
+  recency_weight: float,
+  quality_weight: float,
+) -> Dict[str, float]:
+  final = (
+    semantic * semantic_weight
+    + lexical * lexical_weight
+    + learned * learned_weight
+    + recency * recency_weight
+    + quality * quality_weight
+  )
+  return {
+    "semantic": float(semantic),
+    "lexical": float(lexical),
+    "learned": float(learned),
+    "recency": float(recency),
+    "quality": float(quality),
+    "final": float(final),
+  }
+
+
+def memory_score_weights(
+  *,
+  recency_weight: float,
+  quality_weight: float,
+  learned_enabled: bool,
+) -> Dict[str, float]:
+  weights = {
+    "lexical": 0.10,
+    "learned": 0.45 if learned_enabled else 0.0,
+    "recency": max(0.0, float(recency_weight)),
+    "quality": max(0.0, float(quality_weight)),
+  }
+  weights["semantic"] = max(0.0, 1.0 - sum(weights.values()))
+  total = sum(weights.values())
+  if total > 1.0:
+    weights = {key: value / total for key, value in weights.items()}
+  return weights
 
 
 def _resolve_huggingface_snapshot(cache_root: Path, model_name: str) -> str:
@@ -121,7 +197,7 @@ def is_memory_recallable(
   memory_types: Sequence[Any] | None = None,
 ) -> bool:
   metadata = doc.metadata or {}
-  if metadata.get("soft_forgotten") or is_memory_expired(metadata):
+  if not is_metadata_recallable(metadata):
     return False
   allowed_types = _memory_type_filter_values(memory_types)
   if allowed_types is not None and str(metadata.get("type") or "") not in allowed_types:
@@ -279,6 +355,28 @@ class VectorStore:
     self._reranker_candidate_count = max(5, min(100, int(reranker_candidate_count)))
     self._docs: Dict[str, Document] = {}
     self._vectors: Dict[str, np.ndarray] = {}
+    self._score_context = threading.local()
+
+  def _score_component_cache(self) -> Dict[tuple[str, str, float, float], Dict[str, float]]:
+    context = getattr(self, "_score_context", None)
+    if context is None:
+      context = threading.local()
+      self._score_context = context
+    cache = getattr(context, "components", None)
+    if not isinstance(cache, dict):
+      cache = {}
+      context.components = cache
+    return cache
+
+  def get_score_components(
+    self,
+    query: str,
+    doc_id: str,
+    recency_weight: float,
+    quality_weight: float,
+  ) -> Dict[str, float] | None:
+    components = self._score_component_cache().get((query, doc_id, recency_weight, quality_weight))
+    return dict(components) if components is not None else None
 
   def add_document(self, doc: Document) -> None:
     vec = _embed_document(self._embedding_service, doc.text)
@@ -386,8 +484,16 @@ class VectorStore:
     mats_norm = mats / (np.linalg.norm(mats, axis=1, keepdims=True) + 1e-8)
     q_norm = q / (np.linalg.norm(q) + 1e-8)
     semantic_scores = mats_norm @ q_norm
-    candidate_indices = np.argsort(semantic_scores)[::-1][: max(top_k, self._reranker_candidate_count)]
-    candidate_docs = [self._docs[vector_ids[int(index)]] for index in candidate_indices]
+    candidate_count = max(top_k, self._reranker_candidate_count)
+    semantic_indices = np.argsort(semantic_scores)[::-1][:candidate_count]
+    semantic_by_id = {vector_ids[index]: float(semantic_scores[index]) for index in range(len(vector_ids))}
+    lexical_ids = sorted(
+      vector_ids,
+      key=lambda doc_id: lexical_overlap_score(query, self._docs[doc_id].text),
+      reverse=True,
+    )[:candidate_count]
+    candidate_ids = list(dict.fromkeys([vector_ids[int(index)] for index in semantic_indices] + lexical_ids))
+    candidate_docs = [self._docs[doc_id] for doc_id in candidate_ids]
     learned_scores = np.zeros(len(candidate_docs), dtype=np.float32)
     learned_enabled = bool(getattr(self._reranker, "enabled", False))
     if learned_enabled and self._reranker is not None:
@@ -398,41 +504,40 @@ class VectorStore:
         logger.warning("Learned memory reranker unavailable; using hybrid scores: %s", exc)
 
     # Blend semantic relevance with lexical precision and business signals.
-    from datetime import datetime
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     scored = []
+    score_components = self._score_component_cache()
+    score_components.clear()
 
-    for position, index in enumerate(candidate_indices):
-      doc_id = vector_ids[int(index)]
+    for position, doc_id in enumerate(candidate_ids):
       doc = self._docs[doc_id]
-      semantic_score = float(semantic_scores[int(index)])
+      semantic_score = semantic_by_id[doc_id]
 
-      # Calculate recency score (30-day half-life)
-      timestamp_str = doc.metadata.get("timestamp")
-      if timestamp_str:
-        try:
-          timestamp = datetime.fromisoformat(timestamp_str)
-          age_days = (now - timestamp).days
-          recency_score = 1.0 / (1 + age_days / 30.0)
-        except (TypeError, ValueError):
-          recency_score = 0.5  # Default for invalid timestamps
-      else:
-        recency_score = 0.5
+      recency_score = memory_recency_score(doc.metadata, now=now)
 
       quality_score = float(doc.metadata.get("quality_score") or doc.metadata.get("confidence") or 0.6)
       quality_score = max(0.0, min(1.0, quality_score))
       lexical_score = lexical_overlap_score(query, doc.text)
       learned_score = float(learned_scores[position]) if learned_enabled and position < len(learned_scores) else 0.0
-      learned_weight = 0.45 if learned_enabled else 0.0
-      lexical_weight = 0.10
-      semantic_weight = max(0.0, 1 - recency_weight - quality_weight - lexical_weight - learned_weight)
-      final_score = (
-        semantic_score * semantic_weight
-        + lexical_score * lexical_weight
-        + learned_score * learned_weight
-        + recency_score * recency_weight
-        + quality_score * quality_weight
+      weights = memory_score_weights(
+        recency_weight=recency_weight,
+        quality_weight=quality_weight,
+        learned_enabled=learned_enabled,
       )
+      components = memory_score_components(
+        semantic=semantic_score,
+        lexical=lexical_score,
+        learned=learned_score,
+        recency=recency_score,
+        quality=quality_score,
+        semantic_weight=weights["semantic"],
+        lexical_weight=weights["lexical"],
+        learned_weight=weights["learned"],
+        recency_weight=weights["recency"],
+        quality_weight=weights["quality"],
+      )
+      final_score = components["final"]
+      score_components[(query, doc_id, recency_weight, quality_weight)] = components
       scored.append((final_score, doc, semantic_score))
 
     # Sort and return top_k

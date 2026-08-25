@@ -17,8 +17,6 @@ const mocks = vi.hoisted(() => ({
   sendPermissionResponse: vi.fn(),
   publishRuntime: vi.fn(() => Promise.resolve(true)),
   setTtsEnabled: vi.fn(),
-  setDoNotDisturb: vi.fn(() => Promise.resolve()),
-  setProactivityPreset: vi.fn(() => true),
 }))
 
 vi.mock('element-plus', () => ({
@@ -58,10 +56,7 @@ vi.mock('@/app/runtime/companionRuntime', () => ({
 vi.mock('@/app/composables/useCompanionRuntimeBridge', () => ({
   useCompanionRuntimeBridge: () => ({
     applyActiveCompanionRuntime: vi.fn(),
-    doNotDisturb: false,
-    proactivityPreset: 'conservative',
-    setDoNotDisturb: mocks.setDoNotDisturb,
-    setProactivityPreset: mocks.setProactivityPreset,
+    runtimeSnapshot: null,
   }),
 }))
 
@@ -83,12 +78,10 @@ const ElDialogStub = {
 }
 
 const WorkspaceDrawerStub = {
-  emits: ['set-muted', 'set-dnd', 'set-proactivity'],
+  emits: ['set-muted'],
   template: `
     <section>
       <button class="drawer-mute" @click="$emit('set-muted', true)">mute</button>
-      <button class="drawer-dnd" @click="$emit('set-dnd', true)">dnd</button>
-      <button class="drawer-proactivity" @click="$emit('set-proactivity', 'standard')">standard</button>
     </section>
   `,
 }
@@ -124,8 +117,6 @@ describe('GlobalDialogs permission dismissal', () => {
     mocks.sendPermissionResponse.mockReset()
     mocks.publishRuntime.mockClear()
     mocks.setTtsEnabled.mockClear()
-    mocks.setDoNotDisturb.mockClear()
-    mocks.setProactivityPreset.mockClear()
   })
 
   afterEach(() => syncLocaleFromSettings('zh-CN'))
@@ -173,17 +164,13 @@ describe('GlobalDialogs permission dismissal', () => {
     expect(chatSource).not.toContain('permission-card')
   })
 
-  it('routes workspace shortcuts through the existing chat and companion runtime owners', async () => {
+  it('routes the remaining workspace mute shortcut through the existing chat owner', async () => {
     const wrapper = mountDialogs()
 
     await wrapper.get('.drawer-mute').trigger('click')
-    await wrapper.get('.drawer-dnd').trigger('click')
-    await wrapper.get('.drawer-proactivity').trigger('click')
     await flushPromises()
 
     expect(mocks.setTtsEnabled).toHaveBeenCalledWith(false)
-    expect(mocks.setDoNotDisturb).toHaveBeenCalledWith(true)
-    expect(mocks.setProactivityPreset).toHaveBeenCalledWith('standard')
   })
 
   it.each(['dismiss-x', 'dismiss-escape', 'dismiss-backdrop'])('treats %s as an explicit denial', async (dismissClass) => {

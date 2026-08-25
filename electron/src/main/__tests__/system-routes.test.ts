@@ -353,7 +353,7 @@ describe('system routes', () => {
     }
   })
 
-  it('passes backend API token separately from summary admin auth when proxying Python', async () => {
+  it('passes only the backend API token when proxying Python', async () => {
     const { handleSystemRoutes } = await import('../http/routes/system-routes')
     const { response, getStatus, getJson } = createJsonResponse()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -368,7 +368,6 @@ describe('system routes', () => {
       new URL('http://127.0.0.1:38945/api/summary/session-1/rewrite'),
       {
         backendApiToken: 'backend-token',
-        adminTokenStore: { getSummaryAdminToken: () => 'summary-admin-token' },
       } as HttpRouteContext,
     )
 
@@ -379,7 +378,6 @@ describe('system routes', () => {
       `${expectedBackendOrigin()}/api/summary/session-1/rewrite`,
       expect.objectContaining({
         headers: expect.objectContaining({
-          'x-yuizaki-admin-token': 'summary-admin-token',
           'x-yuizaki-backend-token': 'backend-token',
           'x-trace-id': 'trace-system-test',
         }),
@@ -387,6 +385,7 @@ describe('system routes', () => {
     )
     const [, requestInit] = vi.mocked(fetch).mock.calls[0]
     expect(requestInit?.headers).not.toHaveProperty('Authorization')
+    expect(requestInit?.headers).not.toHaveProperty('x-yuizaki-admin-token')
   })
 
   it('returns backend API token status from the local token store', async () => {
@@ -631,7 +630,6 @@ describe('system routes', () => {
       new URL('http://127.0.0.1:38945/api/export/csv'),
       {
         backendApiToken: 'backend-token',
-        adminTokenStore: { getSummaryAdminToken: () => '' },
       } as HttpRouteContext,
     )
 
@@ -667,6 +665,8 @@ describe('system routes', () => {
       '/api/readiness',
       '/memory/docs?scope=workspace',
       '/memory/docs/doc-1',
+      '/memory/overview?scope=workspace',
+      '/memory/query',
       '/memory/index/status',
       '/memory/memory/add',
       '/memory/rag/query',
@@ -691,9 +691,13 @@ describe('system routes', () => {
       '/api/settings/system.theme',
       '/api/system/capabilities',
       '/api/system/orchestration',
+      '/api/system/experience-metrics',
+      '/api/system/product-metrics/consent',
       '/api/system/companion-runtime?limit=4',
       '/api/system/heartbeat',
       '/api/system/active-workspace',
+      '/api/system/proactive/settings',
+      '/api/system/activity-frames',
       '/api/workspaces',
       '/api/sessions',
       '/api/workspaces/default',
@@ -715,7 +719,6 @@ describe('system routes', () => {
         'GET',
         new URL(`http://127.0.0.1:38945${pathName}`),
         {
-          adminTokenStore: { getSummaryAdminToken: () => 'summary-admin-token' },
           providerCredentialStore: {
             captureSettingsPayload: vi.fn(),
             captureSettingValue: vi.fn(),
@@ -826,7 +829,25 @@ describe('system routes', () => {
       { method: 'DELETE', pathName: '/api/system/schedules/task-1' },
       { method: 'POST', pathName: '/api/system/schedules/task-1/toggle', body: { enabled: false } },
       { method: 'POST', pathName: '/api/system/schedules/task-1/run', body: {} },
+      {
+        method: 'POST',
+        pathName: '/api/agent/recovery/resume',
+        body: {
+          recovery_handle: 'recovery-handle-1',
+          workspace_id: 'default',
+          session_id: 'session-1',
+          turn_id: 'turn-1',
+          failed_step_id: 'step-2',
+        },
+      },
       { method: 'POST', pathName: '/api/system/active-workspace', body: { workspace_id: 'default' } },
+      { method: 'PATCH', pathName: '/api/system/proactive/settings', body: { expectedRevision: 1, dnd: true } },
+      { method: 'PATCH', pathName: '/api/system/product-metrics/consent', body: { consented: true } },
+      { method: 'POST', pathName: '/api/system/proactive/feedback', body: { feedbackId: 'f1', jobId: 'j1', requestId: 'r1', sourceKind: 'completed_turn_followup', kind: 'useful' } },
+      { method: 'POST', pathName: '/api/system/companion-runtime/opportunities/outcome/job-1', body: { request_id: 'r1', outcome: 'delivered' } },
+      { method: 'POST', pathName: '/api/system/heartbeat/opportunities/job%2F1/accept', body: { request_id: 'r1' } },
+      { method: 'POST', pathName: '/api/system/heartbeat/goals/goal%2F1/cancel', body: { reason: 'user_cancelled' } },
+      { method: 'DELETE', pathName: '/api/system/activity-frames/frame%2F1' },
     ]
 
     for (const item of mutationCases) {
@@ -837,7 +858,6 @@ describe('system routes', () => {
         item.method,
         new URL(`http://127.0.0.1:38945${item.pathName}`),
         {
-          adminTokenStore: { getSummaryAdminToken: () => 'summary-admin-token' },
         } as HttpRouteContext,
       )
 
@@ -858,6 +878,19 @@ describe('system routes', () => {
     }
   })
 
+  it('does not expose the administrative activity-frame rebuild route', async () => {
+    const { handleSystemRoutes } = await import('../http/routes/system-routes')
+    const { response } = createJsonResponse()
+    const handled = await handleSystemRoutes(
+      createJsonRequest({}),
+      response,
+      'POST',
+      new URL('http://127.0.0.1:38945/api/system/activity-frames/rebuild'),
+      {} as HttpRouteContext,
+    )
+    expect(handled).toBe(false)
+  })
+
   it('returns a bounded JSON error when proxied Python requests time out', async () => {
     vi.useFakeTimers()
     try {
@@ -873,7 +906,6 @@ describe('system routes', () => {
         'GET',
         new URL('http://127.0.0.1:38945/api/system/mcp'),
         {
-          adminTokenStore: { getSummaryAdminToken: () => 'summary-admin-token' },
         } as HttpRouteContext,
       )
 

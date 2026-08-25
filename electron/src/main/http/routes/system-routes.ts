@@ -46,12 +46,8 @@ const resolveElectronRoot = (): string => {
 const resolveProjectRoot = (): string => path.resolve(resolveElectronRoot(), '..')
 
 const buildProxyHeaders = (ctx: Parameters<HttpRouteHandler>[4], bodyIncluded: boolean, traceId: string | null) => {
-  const headers: { Connection: string; 'Content-Type'?: string; 'x-trace-id'?: string; 'x-yuizaki-admin-token'?: string; 'x-yuizaki-backend-token'?: string } = {
+  const headers: { Connection: string; 'Content-Type'?: string; 'x-trace-id'?: string; 'x-yuizaki-backend-token'?: string } = {
     Connection: 'close',
-  }
-  const token = ctx.adminTokenStore.getSummaryAdminToken().trim()
-  if (token) {
-    headers['x-yuizaki-admin-token'] = token
   }
   if (ctx.backendApiToken) {
     headers['x-yuizaki-backend-token'] = ctx.backendApiToken
@@ -625,6 +621,8 @@ const PYTHON_JSON_PROXY_PATHS = new Set([
   '/api/readiness',
   '/health',
   '/memory/docs',
+  '/memory/overview',
+  '/memory/query',
   '/memory/index/status',
   '/memory/index/rebuild',
   '/memory/memory/add',
@@ -632,6 +630,7 @@ const PYTHON_JSON_PROXY_PATHS = new Set([
   '/memory/maintenance/preview',
   '/memory/maintenance/apply',
   '/api/memory/pipeline/query',
+  '/api/agent/recovery/resume',
   '/api/companions',
   '/api/chat/translate',
   '/api/i18n/locales',
@@ -655,6 +654,8 @@ const PYTHON_JSON_PROXY_PATHS = new Set([
   '/api/system/schedules',
   '/api/system/mcp',
   '/api/system/agent-trace',
+  '/api/system/experience-metrics',
+  '/api/system/product-metrics/consent',
   '/api/system/agent-plugins',
   '/api/system/heartbeat',
   '/api/system/companion-runtime',
@@ -691,6 +692,16 @@ const isPythonBlobProxyPath = (pathname: string): boolean =>
   pathname === '/api/summary/report/csv' ||
   pathname === '/api/export/json' ||
   pathname === '/api/export/csv'
+
+const isProactivePythonProxyRoute = (method: string, pathname: string): boolean =>
+  (method === 'GET' && pathname === '/api/system/proactive/settings')
+  || (method === 'PATCH' && pathname === '/api/system/proactive/settings')
+  || (method === 'POST' && pathname === '/api/system/proactive/feedback')
+  || (method === 'POST' && /^\/api\/system\/companion-runtime\/opportunities\/outcome\/[^/]+$/.test(pathname))
+  || (method === 'POST' && /^\/api\/system\/heartbeat\/opportunities\/[^/]+\/accept$/.test(pathname))
+  || (method === 'POST' && /^\/api\/system\/heartbeat\/goals\/[^/]+\/cancel$/.test(pathname))
+  || (method === 'GET' && pathname === '/api/system/activity-frames')
+  || (method === 'DELETE' && /^\/api\/system\/activity-frames\/(?!rebuild$)[^/]+$/.test(pathname))
 
 export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, url, ctx) => {
   if (method === 'GET' && url.pathname === '/api/health') {
@@ -841,11 +852,6 @@ export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, ur
     return true
   }
 
-  if (method === 'GET' && url.pathname === '/api/system/admin-token') {
-    sendJson(res, 200, { hasToken: ctx.adminTokenStore.getSummaryAdminToken().trim().length > 0 })
-    return true
-  }
-
   if (method === 'GET' && url.pathname === '/api/system/backend-token') {
     sendJson(res, 200, ctx.backendApiTokenStore.getBackendApiTokenStatus())
     return true
@@ -928,12 +934,6 @@ export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, ur
     return true
   }
 
-  if (method === 'POST' && url.pathname === '/api/system/admin-token') {
-    const body = await parseRequestBody<{ token?: string }>(_req)
-    sendJson(res, 200, ctx.adminTokenStore.setSummaryAdminToken(String(body.token || '')))
-    return true
-  }
-
   if (method === 'POST' && url.pathname === '/api/system/backend-token') {
     const body = await parseRequestBody<{ token?: string }>(_req)
     try {
@@ -941,11 +941,6 @@ export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, ur
     } catch (error) {
       sendJson(res, 400, { ok: false, error: error instanceof Error ? error.message : 'Invalid backend API token' })
     }
-    return true
-  }
-
-  if (method === 'DELETE' && url.pathname === '/api/system/admin-token') {
-    sendJson(res, 200, ctx.adminTokenStore.clearSummaryAdminToken())
     return true
   }
 
@@ -970,7 +965,7 @@ export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, ur
     return true
   }
 
-  if (isPythonJsonProxyPath(url.pathname)) {
+  if (isProactivePythonProxyRoute(method, url.pathname) || isPythonJsonProxyPath(url.pathname)) {
     await proxyPythonJson(_req, res, method, url, ctx)
     return true
   }

@@ -8,47 +8,103 @@ from fastapi.responses import JSONResponse
 
 from ..agent.capability_registry import CapabilityRegistry
 from ..agent.orchestration_registry import OrchestrationRegistry
+from .heartbeat import (
+    HeartbeatOpportunityAcceptance,
+    HeartbeatOpportunityAuthorizationError,
+    HeartbeatOpportunityConflictError,
+    HeartbeatOpportunityTurnBridge,
+    HeartbeatOpportunityUnavailableError,
+)
 
 __all__ = [
-    "build_companion_runtime_endpoint",
-    "build_companion_opportunity_outcome_endpoint",
-    "build_heartbeat_goal_cancel_endpoint",
-    "build_capability_snapshot",
-    "build_orchestration_snapshot",
-    "build_heartbeat_status_endpoint",
     "build_active_workspace_endpoint",
-    "build_capabilities_state_endpoint",
-    "build_orchestration_state_endpoint",
-    "build_memory_pipeline_query_endpoint",
-    "build_health_endpoint",
-    "build_readiness_endpoint",
-    "build_memory_query_request_payload",
-    "build_permissions_state_endpoint",
-    "build_revoke_permission_endpoint",
-    "build_clear_permissions_endpoint",
-    "build_schedules_state_endpoint",
-    "build_agent_trace_state_endpoint",
-    "build_experience_metrics_endpoint",
-    "build_mcp_state_endpoint",
-    "build_toggle_mcp_endpoint",
+    "build_activity_frame_endpoints",
     "build_add_mcp_endpoint",
-    "build_install_mcp_preset_endpoint",
-    "build_remove_mcp_endpoint",
-    "build_refresh_mcp_endpoint",
     "build_agent_plugin_state_endpoint",
-    "build_toggle_agent_plugin_endpoint",
-    "build_update_agent_plugin_config_endpoint",
-    "build_imported_skills_state_endpoint",
-    "build_save_imported_skills_endpoint",
-    "build_remove_imported_skills_endpoint",
-    "build_system_status_endpoint",
-    "build_create_once_schedule_endpoint",
-    "build_create_interval_schedule_endpoint",
-    "build_remove_schedule_endpoint",
-    "build_toggle_schedule_endpoint",
-    "build_run_schedule_now_endpoint",
+    "build_agent_trace_state_endpoint",
     "build_cancel_schedule_endpoint",
+    "build_capabilities_state_endpoint",
+    "build_capability_snapshot",
+    "build_clear_permissions_endpoint",
+    "build_companion_opportunity_outcome_endpoint",
+    "build_companion_runtime_endpoint",
+    "build_create_interval_schedule_endpoint",
+    "build_create_once_schedule_endpoint",
+    "build_experience_metrics_endpoint",
+    "build_health_endpoint",
+    "build_heartbeat_goal_cancel_endpoint",
+    "build_heartbeat_opportunity_accept_endpoint",
+    "build_heartbeat_status_endpoint",
+    "build_imported_skills_state_endpoint",
+    "build_install_mcp_preset_endpoint",
+    "build_mcp_state_endpoint",
+    "build_memory_pipeline_query_endpoint",
+    "build_memory_query_request_payload",
+    "build_orchestration_snapshot",
+    "build_orchestration_state_endpoint",
+    "build_permissions_state_endpoint",
+    "build_readiness_endpoint",
+    "build_refresh_mcp_endpoint",
+    "build_remove_imported_skills_endpoint",
+    "build_remove_mcp_endpoint",
+    "build_remove_schedule_endpoint",
+    "build_revoke_permission_endpoint",
+    "build_run_schedule_now_endpoint",
+    "build_save_imported_skills_endpoint",
+    "build_schedules_state_endpoint",
+    "build_system_status_endpoint",
+    "build_toggle_agent_plugin_endpoint",
+    "build_toggle_mcp_endpoint",
+    "build_toggle_schedule_endpoint",
+    "build_update_agent_plugin_config_endpoint",
 ]
+
+
+def build_activity_frame_endpoints(
+    *,
+    service_provider: Callable[[], Any],
+    active_workspace_id_provider: Callable[[], str],
+) -> dict[str, Callable[..., Any]]:
+    def _service() -> Any:
+        service = service_provider()
+        if service is None:
+            raise RuntimeError("activity frame service is not initialized")
+        return service
+
+    def get_settings() -> dict[str, Any]:
+        return _service().get_settings(active_workspace_id_provider())
+
+    def patch_settings(payload: dict[str, Any]) -> dict[str, Any]:
+        return _service().patch_settings(active_workspace_id_provider(), payload)
+
+    def list_frames(limit: int = 50) -> dict[str, Any]:
+        return _service().list_frames(active_workspace_id_provider(), limit)
+
+    def rebuild(payload: dict[str, Any]) -> dict[str, Any]:
+        extra = set(payload) - {"limit"}
+        if extra:
+            raise ValueError(f"unknown rebuild fields: {', '.join(sorted(extra))}")
+        limit = payload.get("limit", 1000)
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10000:
+            raise ValueError("limit must be an integer between 1 and 10000")
+        return _service().rebuild(active_workspace_id_provider(), limit)
+
+    def delete_frame(frame_id: str) -> dict[str, Any]:
+        if not _service().delete_frame(active_workspace_id_provider(), frame_id):
+            raise LookupError("activity frame was not found")
+        return {"ok": True, "frameId": frame_id}
+
+    def feedback(payload: dict[str, Any]) -> dict[str, Any]:
+        return _service().feedback(active_workspace_id_provider(), payload)
+
+    return {
+        "get_settings": get_settings,
+        "patch_settings": patch_settings,
+        "list_frames": list_frames,
+        "rebuild": rebuild,
+        "delete_frame": delete_frame,
+        "feedback": feedback,
+    }
 
 
 def build_companion_runtime_endpoint(*, snapshot_provider: Callable[[int], dict[str, Any]]) -> Callable[[int], dict[str, Any]]:
@@ -79,6 +135,54 @@ def build_companion_opportunity_outcome_endpoint(
         if not accepted:
             return JSONResponse({"error": "opportunity_not_active"}, status_code=409)
         return {"ok": True, "job_id": job_id, "request_id": request_id, "outcome": outcome}
+
+    return _endpoint
+
+
+def build_heartbeat_opportunity_accept_endpoint(
+    *,
+    heartbeat_scheduler_provider: Callable[[], Any],
+    turn_service_provider: Callable[[], Any],
+    authorization_callback: Callable[..., Any] | None,
+) -> Callable[[str, dict[str, Any]], Coroutine[Any, Any, JSONResponse | dict[str, Any]]]:
+    bridge_state: dict[str, Any] = {}
+
+    async def _endpoint(job_id: str, payload: dict[str, Any]) -> JSONResponse | dict[str, Any]:
+        scheduler = heartbeat_scheduler_provider()
+        turn_service = turn_service_provider()
+        if scheduler is None or turn_service is None:
+            return JSONResponse(
+                {"error": "heartbeat_turn_service_not_initialized"},
+                status_code=503,
+            )
+        if authorization_callback is None:
+            return JSONResponse(
+                {"error": "heartbeat_acceptance_authorization_not_initialized"},
+                status_code=503,
+            )
+        try:
+            acceptance = HeartbeatOpportunityAcceptance.from_mapping(job_id, payload)
+        except ValueError as exc:
+            return JSONResponse({"error": "invalid_heartbeat_acceptance", "detail": str(exc)}, status_code=422)
+
+        runtime_identity = (id(scheduler), id(turn_service), id(authorization_callback))
+        if bridge_state.get("identity") != runtime_identity:
+            bridge_state["identity"] = runtime_identity
+            bridge_state["bridge"] = HeartbeatOpportunityTurnBridge(
+                scheduler=scheduler,
+                turn_service=turn_service,
+                authorizer=authorization_callback,
+            )
+        bridge = bridge_state["bridge"]
+        try:
+            accepted = await bridge.accept(acceptance)
+        except HeartbeatOpportunityAuthorizationError as exc:
+            return JSONResponse({"error": "heartbeat_acceptance_denied", "detail": str(exc)}, status_code=403)
+        except HeartbeatOpportunityConflictError as exc:
+            return JSONResponse({"error": "heartbeat_opportunity_not_active", "detail": str(exc)}, status_code=409)
+        except HeartbeatOpportunityUnavailableError as exc:
+            return JSONResponse({"error": "heartbeat_acceptance_unavailable", "detail": str(exc)}, status_code=503)
+        return accepted.response()
 
     return _endpoint
 
@@ -246,8 +350,14 @@ def build_readiness_endpoint(
     memory_health_provider: Callable[[], Coroutine[Any, Any, tuple[bool, str]]],
     generation_manager_provider: Callable[[], Any],
     svc_client_provider: Callable[[], Any],
+    onboarding_readiness: Any | None = None,
 ) -> Callable[[], Coroutine[Any, Any, dict[str, Any]]]:
     async def _endpoint() -> dict[str, Any]:
+        onboarding_snapshot: dict[str, Any] | None = None
+        if onboarding_readiness is not None:
+            onboarding_snapshot = await onboarding_readiness.run(
+                ["backend.service", "llm.provider", "llm.model_chat"]
+            )
         llm_ok, llm_msg = await llm_health_provider()
         tts_ok, tts_msg = await tts_health_provider()
         db_ok, db_msg = await database_health_provider()
@@ -262,19 +372,41 @@ def build_readiness_endpoint(
         svc_ok = svc_client is not None and bool(getattr(svc_client, "is_available", False))
         svc_msg = "SVC service healthy" if svc_ok else "SVC not available (optional)"
 
-        checks = {
-            "generation_manager": {"ok": generation_ok, "message": generation_msg, "required": True},
+        checks: dict[str, dict[str, Any]] = {
+            "backend_service": {"ok": True, "message": "Backend service is responding", "required": True},
+            "generation_manager": {"ok": generation_ok, "message": generation_msg, "required": False},
             "llm": {"ok": bool(llm_ok), "message": llm_msg, "required": True},
-            "tts": {"ok": bool(tts_ok), "message": tts_msg, "required": True},
-            "database": {"ok": bool(db_ok), "message": db_msg, "required": True},
+            "tts": {"ok": bool(tts_ok), "message": tts_msg, "required": False},
+            "database": {"ok": bool(db_ok), "message": db_msg, "required": False},
             "asr": {"ok": bool(asr_ok), "message": asr_msg, "required": False},
             "ocr": {"ok": bool(ocr_ok), "message": ocr_msg, "required": False},
-            "memory": {"ok": bool(memory_ok), "message": memory_msg, "required": True},
+            "memory": {"ok": bool(memory_ok), "message": memory_msg, "required": False},
             "svc": {"ok": bool(svc_ok), "message": svc_msg, "required": False},
         }
 
+        if onboarding_snapshot is not None:
+            probe_by_id = {item["id"]: item for item in onboarding_snapshot["probes"]}
+            provider = probe_by_id["llm.provider"]
+            model_chat = probe_by_id["llm.model_chat"]
+            checks["llm_provider"] = {
+                "ok": provider["status"] == "ready",
+                "message": provider["message"],
+                "required": True,
+            }
+            checks["llm_model_chat"] = {
+                "ok": model_chat["status"] == "ready",
+                "message": model_chat["message"],
+                "required": True,
+            }
+            checks["llm"] = {
+                "ok": checks["llm_provider"]["ok"] and checks["llm_model_chat"]["ok"],
+                "message": model_chat["message"],
+                "required": False,
+            }
+
         return {
             "ready": all(item["ok"] for item in checks.values() if item["required"]),
+            "readyForText": all(item["ok"] for item in checks.values() if item["required"]),
             "checks": checks,
         }
 

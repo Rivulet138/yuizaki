@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="运行检查" tone="admin">
+  <PanelShell title="运行检查" subtitle="检查后端连接、就绪状态和桌面控制能力" tone="admin">
     <div class="deploy-console">
       <section class="deploy-hero">
         <div class="hero-actions">
@@ -21,7 +21,7 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>健康闸门 · {{ passedRequiredChecks }} / {{ requiredCheckCount }}</strong>
+                <strong>必需检查 {{ passedRequiredChecks }} / {{ requiredCheckCount }}</strong>
               </div>
               <el-tag :type="health.healthy ? 'success' : 'danger'">{{ health.healthy ? '后端在线' : '等待连接' }}</el-tag>
             </div>
@@ -64,7 +64,7 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>启动阶段</strong>
+                <strong>运行检查项</strong>
               </div>
               <el-tag type="info">{{ completedRunwaySteps }} / {{ deploySteps.length }}</el-tag>
             </div>
@@ -375,12 +375,10 @@ const overallStatusText = computed(() => {
 
 const deploySteps = computed(() => {
   const steps = [
-    { id: 'install', title: '安装依赖', status: 'pending' as StepStatus },
-    { id: 'build', title: '构建前端与主进程', status: 'pending' as StepStatus },
-    { id: 'backend', title: '启动 Python 后端', status: health.healthy ? 'done' : 'active' as StepStatus },
-    { id: 'readiness', title: '确认 AI 就绪', status: readiness.ready ? 'done' : health.healthy ? 'active' : 'pending' as StepStatus },
-    { id: 'electron', title: '进入 Electron 桌宠面板', status: hasElectronBridge.value ? 'done' : 'pending' as StepStatus },
-    { id: 'docs', title: '打开 API 文档', status: health.healthy ? 'done' : 'blocked' as StepStatus },
+    { id: 'backend', title: '后端健康接口', status: health.healthy ? 'done' : 'active' as StepStatus },
+    { id: 'readiness', title: 'AI 就绪检查', status: readiness.ready ? 'done' : health.healthy ? 'active' : 'pending' as StepStatus },
+    { id: 'electron', title: 'Electron 启停桥接', status: hasElectronBridge.value ? 'done' : 'pending' as StepStatus },
+    { id: 'docs', title: 'API 文档入口', status: health.healthy ? 'done' : 'blocked' as StepStatus },
   ]
   return steps.map((step, index) => ({ ...step, index: index + 1 }))
 })

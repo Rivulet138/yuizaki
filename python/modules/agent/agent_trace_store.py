@@ -2,11 +2,20 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from ..core.paths import data_dir_from_env
-from .models import PlannerStepRecord, PlannerTrace, RuntimeLoopRecord, SchedulerRunRecord, StepConditionRecord, StepExecutionRecord
+from .models import (
+    PlannerStepRecord,
+    PlannerTrace,
+    RuntimeLoopRecord,
+    SchedulerRunRecord,
+    StepConditionRecord,
+    StepExecutionRecord,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +151,8 @@ class AgentTraceStore:
     def __init__(self, path: str | Path | None = None, max_entries: int = 500) -> None:
         self.path = Path(path) if path is not None else data_dir_from_env() / "agent_trace.json"
         self.max_entries = max_entries
+        self._lock = threading.RLock()
+        self._projection_keys: set[str] = set()
         self.data: dict[str, list[TraceRecord]] = {
             "planner": [],
             "steps": [],
@@ -156,22 +167,36 @@ class AgentTraceStore:
                 return
             payload = json.loads(self.path.read_text(encoding="utf-8"))
             if isinstance(payload, dict):
-                for key in self.data.keys():
+                projection_keys = payload.get("projection_keys")
+                if isinstance(projection_keys, list):
+                    self._projection_keys = {
+                        str(value) for value in projection_keys if str(value).strip()
+                    }
+                for key in self.data:
                     value = payload.get(key)
                     if isinstance(value, list):
                         coerce = COERCERS[key]
                         records: list[TraceRecord] = [coerce(item) for item in value if isinstance(item, dict)]
                         self.data[key] = records[-self.max_entries:]
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - corrupt trace files must fail open.
             logger.warning("Failed to load agent trace store: %s", exc)
             self.data = {"planner": [], "steps": [], "scheduler": [], "runtime_loop": []}
+            self._projection_keys = set()
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            json.dumps({key: [item.to_dict() for item in value] for key, value in self.data.items()}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            payload: dict[str, Any] = {
+                key: [item.to_dict() for item in value]
+                for key, value in self.data.items()
+            }
+            payload["projection_keys"] = sorted(self._projection_keys)
+            temporary_path = self.path.with_suffix(f"{self.path.suffix}.tmp")
+            temporary_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            temporary_path.replace(self.path)
 
     def append(self, category: str, item: dict[str, Any]) -> None:
         if category not in self.data:
@@ -185,9 +210,39 @@ class AgentTraceStore:
         if sum(len(v) for v in self.data.values()) % 10 == 0:
             self.save()
 
+    def append_once(
+        self,
+        category: str,
+        item: dict[str, Any],
+        *,
+        projection_key: str,
+    ) -> bool:
+        """Durably append a projection exactly once before its Outbox ACK."""
+        normalized_key = str(projection_key or "").strip()
+        if not normalized_key:
+            raise ValueError("trace projection_key is required")
+        coerce = COERCERS.get(category)
+        if coerce is None:
+            raise ValueError(f"unsupported trace category: {category}")
+        with self._lock:
+            if normalized_key in self._projection_keys:
+                return False
+            previous = list(self.data.get(category, []))
+            self.data.setdefault(category, []).append(coerce(item))
+            self.data[category] = self.data[category][-self.max_entries:]
+            self._projection_keys.add(normalized_key)
+            try:
+                self.save()
+            except Exception:
+                self.data[category] = previous
+                self._projection_keys.discard(normalized_key)
+                raise
+            return True
+
     def snapshot(self, limit: int = 100) -> dict[str, list[dict[str, Any]]]:
-        take = max(1, min(limit, self.max_entries))
-        return {
-            key: [item.to_dict() for item in value[-take:]]
-            for key, value in self.data.items()
-        }
+        with self._lock:
+            take = max(1, min(limit, self.max_entries))
+            return {
+                key: [item.to_dict() for item in value[-take:]]
+                for key, value in self.data.items()
+            }

@@ -6,27 +6,36 @@ import asyncio
 import base64
 import json
 import uuid
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional, cast
 
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field
 
 from modules.agent import AgentRuntime
 from modules.agent.context import AgentRequestContext, bind_runtime_bindings
 from modules.agent.permission_receipt import serialize_permission_payload
-from modules.ocr.payload import MAX_OCR_IMAGE_BYTES
 from modules.system.api_response import error_response
 from modules.system.memory_write_pipeline import build_user_signal_event
 from state.schemas import ChatCompletionRequest
 
 
-MAX_OCR_UPLOAD_BYTES = MAX_OCR_IMAGE_BYTES
 MAX_SVC_UPLOAD_BYTES = 25 * 1024 * 1024
 UPLOAD_READ_CHUNK_BYTES = 64 * 1024
 
 
 class UploadTooLargeError(Exception):
     pass
+
+
+class RecoveryResumeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    recovery_handle: str = Field(min_length=8, max_length=160)
+    workspace_id: str | None = Field(default=None, max_length=160)
+    session_id: str = Field(min_length=1, max_length=160)
+    turn_id: str = Field(min_length=1, max_length=200)
+    failed_step_id: str = Field(min_length=1, max_length=160)
 
 
 def _chat_error_message(exc: Exception) -> str:
@@ -55,7 +64,6 @@ def create_ai_router(
     get_config: Callable[[], Any],
     get_generation_mgr: Callable[[], Any],
     get_llm_client: Callable[[], Any],
-    get_ocr_client: Callable[[], Any],
     get_svc_client: Callable[[], Any],
     get_agent_runtime: Callable[[], AgentRuntime],
     get_db_repo: Callable[[], Any],
@@ -64,10 +72,17 @@ def create_ai_router(
     get_relationship_summary: Callable[[], Any],
     logger,
     get_active_workspace_id: Callable[[], str] | None = None,
+    allow_legacy_turn_pipeline: bool = False,
 ) -> APIRouter:
     router = APIRouter(tags=["ai"])
 
-    def _maybe_write_user_relationship_event(messages: list[dict[str, Any]], writer: Any) -> None:
+    def _maybe_write_user_relationship_event(
+        messages: list[dict[str, Any]],
+        writer: Any,
+        *,
+        workspace_id: str | None,
+        turn_id: str | None,
+    ) -> None:
         if not writer:
             return
         user_text = ""
@@ -75,12 +90,27 @@ def create_ai_router(
             if item.get('role') == 'user':
                 user_text = str(item.get('content') or '')
                 break
-        event = build_user_signal_event(user_text)
+        event = build_user_signal_event(
+            user_text,
+            workspace_id=workspace_id,
+            turn_id=turn_id,
+        )
         if event:
             writer(event)
 
-    async def _write_user_relationship_event(messages: list[dict[str, Any]]) -> None:
-        await asyncio.to_thread(_maybe_write_user_relationship_event, messages, get_relationship_writer())
+    async def _write_user_relationship_event(
+        messages: list[dict[str, Any]],
+        *,
+        workspace_id: str | None,
+        turn_id: str | None,
+    ) -> None:
+        await asyncio.to_thread(
+            _maybe_write_user_relationship_event,
+            messages,
+            get_relationship_writer(),
+            workspace_id=workspace_id,
+            turn_id=turn_id,
+        )
 
     async def _bind_runtime_context(ctx: AgentRequestContext) -> AgentRequestContext:
         relationship_history = await asyncio.to_thread(get_relationship_history)
@@ -141,6 +171,59 @@ def create_ai_router(
         requested = requested_session_id.strip() if isinstance(requested_session_id, str) else ""
         return requested or uuid.uuid4().hex[:12]
 
+    def _require_turn_service(runtime: Any) -> Any | None:
+        turn_service = getattr(runtime, "turn_service", None)
+        if turn_service is None and not allow_legacy_turn_pipeline:
+            raise RuntimeError("TurnService is required for semantic chat execution")
+        return turn_service
+
+    def _bind_http_generation(
+        generation_mgr: Any,
+        session_id: str,
+        request_id: str,
+    ) -> Any:
+        turn_id = f"turn:{request_id}"
+        generation_id = f"generation:{turn_id}"
+        try:
+            return generation_mgr.start(
+                session_id,
+                request_id=request_id,
+                turn_id=turn_id,
+                generation_id=generation_id,
+                interruption_epoch=0,
+            )
+        except TypeError:
+            generation = generation_mgr.start(session_id)
+            generation.request_id = request_id
+            generation.turn_id = turn_id
+            generation.generation_id = generation_id
+            generation.interruption_epoch = 0
+            return generation
+
+    def _commit_metadata(commit: Any) -> dict[str, Any]:
+        ctx = commit.context
+        metadata = {
+            "idempotency_key": commit.idempotency_key,
+            "semantic_fingerprint": commit.semantic_fingerprint,
+            "turn_stage": "committed",
+            "outcome": commit.outcome,
+            "retryable": bool(commit.retryable),
+            "replayed": bool(commit.replayed),
+            "workspace_id": ctx.workspace_id,
+            "session_id": ctx.session_id,
+            "request_id": ctx.request_id,
+            "turn_id": ctx.turn_id,
+            "generation_id": ctx.generation_id,
+            "interruption_epoch": ctx.interruption_epoch,
+        }
+        failure = getattr(commit.result, "failure", None)
+        recovery = getattr(commit.result, "recovery", None)
+        if isinstance(failure, dict):
+            metadata["failure"] = dict(failure)
+        if isinstance(recovery, dict):
+            metadata["recovery"] = dict(recovery)
+        return metadata
+
     def _build_http_schedule_context(task: Any, sid: str) -> AgentRequestContext:
         runtime = get_agent_runtime()
         llm_client = get_llm_client()
@@ -171,6 +254,35 @@ def create_ai_router(
         config = get_config()
         return {"object": "list", "data": [{"id": config.llm.model, "object": "model"}]}
 
+    @router.post("/api/agent/recovery/resume")
+    async def resume_agent_recovery(req: RecoveryResumeRequest):
+        workspace_id, workspace_error = _resolve_chat_workspace_id(req.workspace_id)
+        if workspace_error is not None:
+            return workspace_error
+        runtime = get_agent_runtime()
+        step_executor = getattr(runtime, "step_executor", None)
+        resume = getattr(step_executor, "resume_recovery_handle", None)
+        if not callable(resume):
+            return JSONResponse({"error": "recovery_not_available"}, status_code=503)
+        try:
+            resume_fn = cast(Callable[..., Awaitable[dict[str, Any]]], resume)
+            result = await resume_fn(
+                req.recovery_handle,
+                workspace_id=workspace_id,
+                session_id=req.session_id,
+                turn_id=req.turn_id,
+                failed_step_id=req.failed_step_id,
+            )
+        except Exception as exc:
+            logger.error("Recovery resume failed: %s", exc, exc_info=True)
+            return error_response(code="recovery_resume_failed", message="Recovery resume failed", status_code=500)
+        if not isinstance(result, dict):
+            return error_response(code="recovery_resume_invalid", message="Recovery resume returned an invalid result", status_code=500)
+        if result.get("error") == "invalid_or_expired_recovery_handle":
+            return JSONResponse({"error": result["error"]}, status_code=409)
+        result.pop("resume_token", None)
+        return JSONResponse(result)
+
     @router.post("/v1/chat/completions")
     async def chat_completions(req: ChatCompletionRequest):
         workspace_id, workspace_error = _resolve_chat_workspace_id(req.workspace_id)
@@ -192,16 +304,17 @@ def create_ai_router(
         if req.stream:
             async def stream_generator():
                 session_id = _resolve_chat_session_id(req.session_id)
-                gen = generation_mgr.start(session_id)
                 try:
                     messages = [m.model_dump() for m in req.messages]
-                    if req.autonomy_mode != "silent":
-                        await _write_user_relationship_event(messages)
                     request_id = req.request_id or f"agent_{uuid.uuid4().hex[:12]}"
+                    gen = _bind_http_generation(generation_mgr, session_id, request_id)
                     ctx = AgentRequestContext(
                         sid="http-stream",
                         session_id=session_id,
                         request_id=request_id,
+                        turn_id=gen.turn_id,
+                        generation_id=gen.generation_id,
+                        interruption_epoch=gen.interruption_epoch,
                         messages=messages,
                         workspace_id=workspace_id,
                         model=req.model,
@@ -225,16 +338,36 @@ def create_ai_router(
                         scheduler=scheduler,
                         trace_store=trace_store,
                         plugin_manager=plugin_manager,
-                        permission_scope="http:chat-completions:stream",
+                        permission_scope="http:chat-completions",
                         autonomy_mode=req.autonomy_mode,
                     )
                     if req.autonomy_mode != "silent":
                         ctx = await _bind_runtime_context(ctx)
-                    result_obj = await pipeline.run_streaming(ctx, None, gen)
+                    turn_service = _require_turn_service(runtime)
+                    commit: Any | None = None
+                    if turn_service is None:
+                        if req.autonomy_mode != "silent":
+                            await _write_user_relationship_event(
+                                messages,
+                                workspace_id=workspace_id,
+                                turn_id=ctx.turn_id,
+                            )
+                        result_obj = await pipeline.run_streaming(ctx, None, gen)
+                    else:
+                        executed_commit = await turn_service.execute_streaming_context(
+                            "http", ctx, None, gen,
+                        )
+                        commit = executed_commit
+                        result_obj = executed_commit.result
                     final_reply = result_obj.reply
-                    yield f"data: {json.dumps({'choices': [{'delta': {'content': final_reply}}]})}\n\n"
                     if result_obj.action_envelope:
                         yield f"data: {json.dumps({'action_envelope': serialize_permission_payload(result_obj.action_envelope)})}\n\n"
+                    terminal: dict[str, Any] = {
+                        "choices": [{"delta": {"content": final_reply}, "finish_reason": "stop"}],
+                    }
+                    if commit is not None:
+                        terminal["turn_commit"] = _commit_metadata(commit)
+                    yield f"data: {json.dumps(terminal)}\n\n"
                 except Exception as e:
                     logger.error("Chat error: %s", e, exc_info=True)
                     yield f"data: {json.dumps({'error': _chat_error_message(e)})}\n\n"
@@ -242,13 +375,16 @@ def create_ai_router(
         session_id = _resolve_chat_session_id(req.session_id)
         try:
             messages = [m.model_dump() for m in req.messages]
-            if req.autonomy_mode != "silent":
-                await _write_user_relationship_event(messages)
             request_id = req.request_id or f"agent_{uuid.uuid4().hex[:12]}"
+            turn_id = f"turn:{request_id}"
+            generation_id = f"generation:{turn_id}"
             ctx = AgentRequestContext(
                 sid="http",
                 session_id=session_id,
                 request_id=request_id,
+                turn_id=turn_id,
+                generation_id=generation_id,
+                interruption_epoch=0,
                 messages=messages,
                 workspace_id=workspace_id,
                 model=req.model,
@@ -277,7 +413,20 @@ def create_ai_router(
             )
             if req.autonomy_mode != "silent":
                 ctx = await _bind_runtime_context(ctx)
-            result = await pipeline.run(ctx)
+            turn_service = _require_turn_service(runtime)
+            commit: Any | None = None
+            if turn_service is None:
+                if req.autonomy_mode != "silent":
+                    await _write_user_relationship_event(
+                        messages,
+                        workspace_id=workspace_id,
+                        turn_id=ctx.turn_id,
+                    )
+                result = await pipeline.run(ctx)
+            else:
+                executed_commit = await turn_service.execute_context("http", ctx)
+                commit = executed_commit
+                result = executed_commit.result
             response_payload: dict[str, Any] = {
                 "choices": [{
                     "message": {
@@ -290,6 +439,8 @@ def create_ai_router(
                 response_payload["pet_control"] = result.pet_control
             if result.action_envelope:
                 response_payload["action_envelope"] = serialize_permission_payload(result.action_envelope)
+            if commit is not None:
+                response_payload["turn_commit"] = _commit_metadata(commit)
             return JSONResponse(response_payload)
         except Exception as e:
             logger.error("Chat error: %s", e, exc_info=True)
@@ -340,24 +491,6 @@ def create_ai_router(
         except Exception as e:
             logger.error("Translate error: %s", e)
             return error_response(code="translate_error", message="Translation failed", status_code=500)
-
-    @router.post("/vision/ocr")
-    async def ocr_endpoint(file: UploadFile = File(...)):
-        ocr_client = get_ocr_client()
-        if not ocr_client:
-            return JSONResponse({"error": "OCR not available"}, status_code=503)
-        try:
-            content = await _read_upload_limited(file, MAX_OCR_UPLOAD_BYTES)
-            image_base64 = base64.b64encode(content).decode()
-            result = await ocr_client.recognize(image_base64)
-            if result.get("status") == "error":
-                return JSONResponse(result, status_code=503)
-            return result
-        except UploadTooLargeError:
-            return JSONResponse({"error": "file_too_large", "max_bytes": MAX_OCR_UPLOAD_BYTES}, status_code=413)
-        except Exception as e:
-            logger.error("OCR error: %s", e)
-            return error_response(code="ocr_error", message="OCR request failed", status_code=500)
 
     @router.post("/svc/convert")
     async def svc_convert(

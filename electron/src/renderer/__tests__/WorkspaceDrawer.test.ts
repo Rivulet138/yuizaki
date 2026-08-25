@@ -34,9 +34,6 @@ const mountDrawer = (overrides: Record<string, unknown> = {}) => mount(Workspace
     companions: [{ id: 'companion-2', name: 'Companion 2' }] as never[],
     activeCompanion: null,
     muted: false,
-    doNotDisturb: false,
-    dndLoading: false,
-    proactivityPreset: 'conservative',
     ...overrides,
   },
   global,
@@ -100,16 +97,14 @@ describe('WorkspaceDrawer', () => {
     expect(wrapper.find('[data-testid="workspace-metadata"]').exists()).toBe(false)
   })
 
-  it('emits real runtime shortcut intents', async () => {
+  it('keeps mute as a runtime shortcut and moves proactive authority into the backend section', async () => {
     const wrapper = mountDrawer()
 
     await wrapper.get('[data-testid="workspace-mute"]').setValue(true)
-    await wrapper.get('[data-testid="workspace-dnd"]').setValue(true)
-    await wrapper.get('[data-testid="workspace-proactivity-standard"]').trigger('click')
-
     expect(wrapper.emitted('set-muted')).toEqual([[true]])
-    expect(wrapper.emitted('set-dnd')).toEqual([[true]])
-    expect(wrapper.emitted('set-proactivity')).toEqual([['standard']])
+    expect(wrapper.find('[data-testid="workspace-dnd"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="workspace-proactivity-standard"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="proactive-dnd"]').exists()).toBe(true)
   })
 
   it('reacts to locale changes and keeps canonical controls keyboard focusable', async () => {

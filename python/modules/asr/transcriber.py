@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 
 from ..core.state import ASRPipeline, Generation, GenerationManager
+from ..system.voice_diagnostics import VoiceDiagnostics
 
 logger = logging.getLogger("yuizaki.asr")
 
@@ -34,12 +35,14 @@ class ASRManager:
         vad_min_silence_ms: int = 300,
         asr_partial_every: int = 15,
         language: str = "zh",
+        diagnostics: VoiceDiagnostics | None = None,
     ):
         self.sensevoice_client = sensevoice_client
         self.vad_threshold = vad_threshold
         self.vad_min_silence_ms = vad_min_silence_ms
         self.asr_partial_every = asr_partial_every
         self.language = language
+        self.diagnostics = diagnostics or VoiceDiagnostics()
         self._pipelines: dict[str, ASRPipeline] = {}
         self._partial_tasks: dict[str, asyncio.Task[None]] = {}
         self._streaming_partials: dict[str, str] = {}
@@ -173,6 +176,7 @@ class ASRManager:
     ) -> None:
         client = self.sensevoice_client
         text = ""
+        final_started_at = asyncio.get_running_loop().time() if event == "vad_end" or is_final else None
         if event == "vad_start":
             await _safe_send(ws, Generation(generation_id="vad", session_id=session_id), {
                 "type": "asr_vad_start",
@@ -195,6 +199,13 @@ class ASRManager:
 
         if event == "vad_end" or is_final:
             final_text = (await client.finish_stream(session_id)).strip() or text.strip() or self._streaming_partials.get(session_id, "")
+            if final_started_at is not None:
+                self.diagnostics.record_elapsed(
+                    "asr_final",
+                    final_started_at,
+                    ok=bool(final_text),
+                    error_kind=None if final_text else "empty_result",
+                )
             if final_text:
                 asr.mark("asr_final")
                 mgr.append_history(session_id, "user", final_text)
@@ -232,6 +243,7 @@ class ASRManager:
     ) -> None:
         """Run the configured ASR transcription backend in a thread pool."""
         beam = 5 if is_final else 1
+        started_at = asyncio.get_running_loop().time()
         asr.mark("asr_started" if is_final else "asr_partial_started")
         try:
             text = await asyncio.to_thread(
@@ -241,15 +253,18 @@ class ASRManager:
                 self.language,
             )
         except asyncio.CancelledError:
+            self.diagnostics.record_elapsed("asr_final" if is_final else "asr", started_at, ok=False, error_kind="cancelled")
             return
 
         if not text:
+            self.diagnostics.record_elapsed("asr_final" if is_final else "asr", started_at, ok=False, error_kind="empty_result")
             if is_final:
                 asr.reset()
             return
 
         if is_final:
             asr.mark("asr_final")
+        self.diagnostics.record_elapsed("asr_final" if is_final else "asr", started_at)
 
         msg_type = "asr_final" if is_final else "asr_partial"
         logger.debug("[%s] ASR %s: %s", session_id, msg_type, text)

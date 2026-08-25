@@ -1,11 +1,58 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestParseActionKeepsStartFlags(t *testing.T) {
+	action, args := parseAction([]string{"--check", "--no-install"})
+	if action != actionStart || len(args) != 2 || args[0] != "--check" {
+		t.Fatalf("unexpected default action: %s %#v", action, args)
+	}
+	action, args = parseAction([]string{"status"})
+	if action != actionStatus || len(args) != 0 {
+		t.Fatalf("unexpected status action: %s %#v", action, args)
+	}
+}
+
+func TestUpdateDotEnvPreservesCommentsAndUpdatesKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte("# keep\nLLM_MODEL=old\nOTHER=value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := updateDotEnv(path, map[string]string{"LLM_MODEL": "new-model", "LLM_API_KEY": "secret"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "# keep") || !strings.Contains(content, "LLM_MODEL=new-model") || !strings.Contains(content, "LLM_API_KEY=secret") {
+		t.Fatalf("unexpected .env content: %s", content)
+	}
+}
+
+func TestSupervisorStateRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "supervisor.json")
+	original := supervisorState{PID: 42, RootDir: "root", Services: map[string]int{"backend": 99}}
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := readSupervisorState(path)
+	if err != nil || loaded.PID != 42 || loaded.Services["backend"] != 99 {
+		t.Fatalf("unexpected state: %#v (%v)", loaded, err)
+	}
+}
 
 func TestBuildRequired(t *testing.T) {
 	t.Parallel()

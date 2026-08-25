@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { companionJobToAgentStep, isTerminalCompanionJob, projectCompanionJob } from '@/app/runtime/companionJobProjection'
+import {
+  canCancelCompanionJob,
+  canConfirmUnknownEffectRetry,
+  canResumeCompanionJob,
+  canRetryCompanionJob,
+  companionJobToAgentStep,
+  isTerminalCompanionJob,
+  projectCompanionJob,
+} from '@/app/runtime/companionJobProjection'
 import type { CompanionEventEnvelope } from '@/../shared/companion-event'
 
 const event = (overrides: Partial<CompanionEventEnvelope> = {}): CompanionEventEnvelope => ({
@@ -27,6 +35,125 @@ describe('companion job projection', () => {
   it('shares one terminal-state definition', () => {
     expect(isTerminalCompanionJob('completed')).toBe(true)
     expect(isTerminalCompanionJob('interrupted')).toBe(true)
+    expect(isTerminalCompanionJob('unknown_effect')).toBe(true)
     expect(isTerminalCompanionJob('running')).toBe(false)
+  })
+
+  it('uses the canonical unknown-effect status as the explicit confirmation gate', () => {
+    const unknownEffect = event({
+      type: 'AgentJobUnknownEffect',
+      status: 'unknown_effect',
+      data: { tool_name: 'desktop.close_window', args: { window_id: 'opaque-window-1' } },
+    })
+
+    expect(projectCompanionJob(unknownEffect).effectOutcome).toBe('unknown_effect')
+    expect(canRetryCompanionJob(unknownEffect)).toBe(false)
+    expect(canConfirmUnknownEffectRetry(unknownEffect)).toBe(true)
+  })
+
+  it('allows cancellation only while a supported job is active', () => {
+    expect(canCancelCompanionJob(event({ status: 'running', data: { tool_name: 'filesystem.read' } }))).toBe(true)
+    expect(canCancelCompanionJob(event({ status: 'running', source: 'scheduler' }))).toBe(true)
+    expect(canCancelCompanionJob(event({ status: 'completed', data: { tool_name: 'filesystem.read' } }))).toBe(false)
+    expect(canCancelCompanionJob(event({ status: 'running', source: 'vision' }))).toBe(false)
+  })
+
+  it('never retries unknown effects or explicitly non-retryable tool outcomes', () => {
+    const retryableTool = { tool_name: 'filesystem.read', args: { path: '/tmp/example' }, retryable: true }
+    expect(canRetryCompanionJob(event({ status: 'failed', data: retryableTool }))).toBe(true)
+    expect(canRetryCompanionJob(event({
+      status: 'failed',
+      data: { ...retryableTool, outcome: 'unknown_effect' },
+    }))).toBe(false)
+    expect(canRetryCompanionJob(event({
+      status: 'failed',
+      data: { ...retryableTool, retryable: false },
+    }))).toBe(false)
+    expect(canRetryCompanionJob(event({ status: 'failed', data: { tool_name: 'filesystem.read' } }))).toBe(false)
+  })
+
+  it('requires explicit acknowledgement for a dispatched tool with an unknown effect', () => {
+    const unknownEffect = event({
+      status: 'failed',
+      data: {
+        tool_name: 'desktop.close_window',
+        args: { window_id: 'opaque-window-1' },
+        effectOutcome: 'unknown_effect',
+        retryable: false,
+      },
+    })
+
+    expect(canRetryCompanionJob(unknownEffect)).toBe(false)
+    expect(canConfirmUnknownEffectRetry(unknownEffect)).toBe(true)
+  })
+
+  it('projects bounded failure evidence from the terminal tool contract', () => {
+    const projection = projectCompanionJob(event({
+      status: 'failed',
+      data: {
+        tool_name: 'desktop.close_window',
+        effectOutcome: 'unknown_effect',
+        failureCategory: 'verification',
+        failedStep: 'verify-window-closed',
+        completedSteps: ['find-window', 'request-close'],
+        error: 'Postcondition could not be verified',
+      },
+    }))
+
+    expect(projection).toMatchObject({
+      effectOutcome: 'unknown_effect',
+      failureCategory: 'verification',
+      failedStep: 'verify-window-closed',
+      completedSteps: ['find-window', 'request-close'],
+    })
+  })
+
+  it('offers failed-step resume only with a scoped opaque recovery handle', () => {
+    const recoverable = event({
+      status: 'failed',
+      data: {
+        failedStep: 'write-output',
+        recovery: { available: true, action: 'resume_failed_step', retryable: true, handle: 'rh_opaque' },
+      },
+    })
+    expect(projectCompanionJob(recoverable).recoveryHandle).toBe('rh_opaque')
+    expect(canResumeCompanionJob(recoverable)).toBe(true)
+    expect(canResumeCompanionJob(event({ status: 'unknown_effect', data: {
+      failedStep: 'write-output',
+      recovery: { available: true, action: 'resume_failed_step', retryable: true, handle: 'rh_opaque' },
+    } }))).toBe(false)
+    expect(canResumeCompanionJob(event({ status: 'failed', data: {
+      effectOutcome: 'unknown_effect', failedStep: 'write-output',
+      recovery: { available: true, action: 'resume_failed_step', retryable: true, handle: 'rh_opaque' },
+    } }))).toBe(false)
+    expect(canResumeCompanionJob(event({ status: 'failed', data: {
+      failedStep: 'write-output', recovery: { available: false, action: 'resume_failed_step', retryable: true, handle: 'rh_opaque' },
+    } }))).toBe(false)
+    expect(canResumeCompanionJob(event({ status: 'failed', data: {
+      failedStep: 'write-output', recovery: { available: true, action: 'retry_entire_job', retryable: true, handle: 'rh_opaque' },
+    } }))).toBe(false)
+    expect(canResumeCompanionJob(event({ status: 'failed', data: {
+      failedStep: 'write-output',
+      failure: { status: 'unknown_effect' },
+      recovery: { available: true, action: 'resume_failed_step', retryable: true, handle: 'rh_opaque' },
+    } }))).toBe(false)
+    expect(canResumeCompanionJob(event({ status: 'failed', data: {
+      failedStep: 'write-output',
+      recovery: { available: true, action: 'resume_failed_step', retryable: true, reason: 'unknown_effect', handle: 'rh_opaque' },
+    } }))).toBe(false)
+  })
+
+  it('redacts secrets from user-visible terminal summaries and errors', () => {
+    const projection = projectCompanionJob(event({
+      status: 'failed',
+      data: {
+        resultSummary: 'provider token=summary-secret failed',
+        error: 'Authorization: Bearer error-secret',
+      },
+    }))
+
+    expect(projection.resultSummary).not.toContain('summary-secret')
+    expect(projection.error).not.toContain('error-secret')
+    expect(`${projection.resultSummary} ${projection.error}`).toContain('[redacted]')
   })
 })

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createCompanionRuntimeController } from '../app/runtime/companionRuntime'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import type { CompanionEventEnvelope } from '../../shared/companion-event'
 
 const event = (overrides: Record<string, unknown> = {}) => ({
   type: 'suggestion',
@@ -68,6 +69,86 @@ describe('companion runtime controller', () => {
     expect(controller.state.activity).toBe('thinking')
   })
 
+  it('emits scoped operational embodiment intent with TTL and pet-link fallback', async () => {
+    let petLinkEnabled = true
+    const embodiment = vi.fn()
+    const controller = createCompanionRuntimeController({
+      pollSnapshot: vi.fn(),
+      isAvailable: () => true,
+      readDoNotDisturb: async () => false,
+      isPetLinkEnabled: () => petLinkEnabled,
+      now: () => 10_000,
+      sinks: { embodiment },
+    })
+
+    await controller.publish({
+      source: 'chat',
+      sequence: 1,
+      activity: 'thinking',
+      requestId: 'request-intent',
+      durationMs: 750,
+    })
+    expect(embodiment).toHaveBeenLastCalledWith(expect.objectContaining({
+      version: 1,
+      kind: 'operational',
+      state: 'thinking',
+      source: 'chat',
+      confidence: 1,
+      issuedAt: 10_000,
+      expiresAt: 10_750,
+      reducedMotion: false,
+      petLinkEnabled: true,
+    }))
+
+    petLinkEnabled = false
+    await controller.refreshPresentation()
+    expect(embodiment).toHaveBeenLastCalledWith(expect.objectContaining({
+      state: 'thinking',
+      petLinkEnabled: false,
+    }))
+    expect(embodiment.mock.calls.at(-1)?.[0]).not.toHaveProperty('persona')
+  })
+
+  it('bounds non-idle embodiment states when publishers omit a duration', async () => {
+    const embodiment = vi.fn()
+    const controller = createCompanionRuntimeController({
+      pollSnapshot: vi.fn(),
+      isAvailable: () => true,
+      readDoNotDisturb: async () => false,
+      now: () => 20_000,
+      sinks: { embodiment },
+    })
+
+    await controller.publish({ source: 'voice', sequence: 1, activity: 'speaking', requestId: 'voice-ttl' })
+    expect(embodiment).toHaveBeenLastCalledWith(expect.objectContaining({
+      state: 'speaking',
+      issuedAt: 20_000,
+      expiresAt: 80_000,
+    }))
+  })
+
+  it('does not invoke proactive avatar sinks when pet link is disabled', async () => {
+    const emotion = vi.fn()
+    const motion = vi.fn()
+    const notification = vi.fn()
+    const controller = createCompanionRuntimeController({
+      pollSnapshot: async () => ({
+        heartbeat: { behavior_events: [event()] },
+        companion_state: { interruptibility: 1 },
+      } as never),
+      isAvailable: () => true,
+      readDoNotDisturb: async () => false,
+      isPetLinkEnabled: () => false,
+      sinks: { emotion, motion, notification },
+      cooldownMs: 0,
+    })
+
+    expect(await controller.pollOnce()).toMatchObject({ status: 'delivered' })
+    expect(emotion).not.toHaveBeenCalled()
+    expect(motion).not.toHaveBeenCalled()
+    expect(notification).toHaveBeenCalledOnce()
+  })
+
   it('consumes unified Agent job events without allowing late progress to reopen a terminal job', async () => {
     const controller = createCompanionRuntimeController({
       pollSnapshot: vi.fn(),
@@ -110,6 +191,198 @@ describe('companion runtime controller', () => {
       status: 'progress',
     })).toBe(false)
     expect(controller.state.activity).toBe('idle')
+  })
+
+  it('restores the reducer and acknowledges a terminal projection durably across remounts', async () => {
+    let durableState: unknown
+    const eventFor = (revision: number, status: 'created' | 'completed') => ({
+      version: 1 as const,
+      type: status === 'created' ? 'AgentJobCreated' as const : 'AgentJobCompleted' as const,
+      workspaceId: 'default', sessionId: 'voice', turnId: 'turn-durable', jobId: 'job-durable',
+      requestId: 'request-durable', revision, interruptionEpoch: 0, source: 'voice' as const,
+      timestamp: 1_000 + revision, status,
+    })
+    const create = () => createCompanionRuntimeController({
+      pollSnapshot: vi.fn(),
+      isAvailable: () => true,
+      readDoNotDisturb: async () => false,
+      sinks: {},
+      loadJobEventGateState: () => durableState,
+      saveJobEventGateState: (state) => { durableState = JSON.parse(JSON.stringify(state)) },
+    })
+
+    const first = create()
+    expect(await first.publishJob(eventFor(1, 'created'))).toBe(true)
+    expect(await first.publishJob(eventFor(2, 'completed'))).toBe(true)
+
+    const restored = create()
+    expect(await restored.publishJob(eventFor(2, 'completed'))).toBe(false)
+    expect(await restored.publishJob({ ...eventFor(2, 'completed'), revision: 3 })).toBe(false)
+  })
+
+  it('replays an unacknowledged terminal after durable acknowledgement persistence fails', async () => {
+    let durableState: unknown
+    let failTerminalSave = true
+    const dispatched: string[] = []
+    const listener = (event: Event) => dispatched.push((event as CustomEvent<CompanionEventEnvelope>).detail.status)
+    window.addEventListener('companion:job', listener)
+    const base = {
+      version: 1 as const, workspaceId: 'default', sessionId: 'voice', turnId: 'turn-replay',
+      jobId: 'job-replay', requestId: 'request-replay', interruptionEpoch: 0, source: 'voice' as const,
+      timestamp: 1_000,
+    }
+    const dependencies = {
+      pollSnapshot: vi.fn(), isAvailable: () => true, readDoNotDisturb: async () => false, sinks: {},
+      loadJobEventGateState: () => durableState,
+      saveJobEventGateState: (state: unknown) => {
+        const terminal = (state as { jobs: Array<{ terminal: boolean; terminalAcknowledged: boolean }> }).jobs[0]
+        if (terminal?.terminalAcknowledged && failTerminalSave) throw new Error('disk unavailable')
+        durableState = JSON.parse(JSON.stringify(state))
+      },
+    }
+
+    const first = createCompanionRuntimeController(dependencies)
+    await first.publishJob({ ...base, type: 'AgentJobCreated', revision: 1, status: 'created' })
+    await first.publishJob({ ...base, type: 'AgentJobCompleted', revision: 2, status: 'completed' })
+    failTerminalSave = false
+    const restored = createCompanionRuntimeController(dependencies)
+    expect(await restored.publishJob({ ...base, type: 'AgentJobCompleted', revision: 2, status: 'completed' })).toBe(true)
+    expect(dispatched).toEqual(['created', 'completed', 'completed'])
+    window.removeEventListener('companion:job', listener)
+  })
+
+  it('rejects an unacknowledged terminal replay from before the current interruption epoch', async () => {
+    let durableState: unknown
+    let failTerminalSave = true
+    const controller = createCompanionRuntimeController({
+      pollSnapshot: vi.fn(), isAvailable: () => true, readDoNotDisturb: async () => false, sinks: {},
+      loadJobEventGateState: () => durableState,
+      saveJobEventGateState: (state: unknown) => {
+        const terminal = (state as { jobs: Array<{ terminal: boolean; terminalAcknowledged: boolean }> }).jobs[0]
+        if (terminal?.terminalAcknowledged && failTerminalSave) throw new Error('disk unavailable')
+        durableState = JSON.parse(JSON.stringify(state))
+      },
+    })
+    const base = {
+      version: 1 as const, workspaceId: 'default', sessionId: 'voice', turnId: 'turn-epoch-replay',
+      jobId: 'job-epoch-replay', requestId: 'request-epoch-replay', interruptionEpoch: 0,
+      source: 'voice' as const, timestamp: 1_000,
+    }
+
+    expect(await controller.publishJob({ ...base, type: 'AgentJobCreated', revision: 1, status: 'created' })).toBe(true)
+    expect(await controller.publishJob({ ...base, type: 'AgentJobCompleted', revision: 2, status: 'completed' })).toBe(true)
+    expect(controller.state.interruptionEpoch).toBe(0)
+
+    await controller.interrupt('chat', 1)
+    failTerminalSave = false
+    expect(controller.state.interruptionEpoch).toBe(1)
+    expect(await controller.publishJob({ ...base, type: 'AgentJobCompleted', revision: 2, status: 'completed' })).toBe(false)
+  })
+
+  it('does not let a stale caller scope override the controller interruption epoch', async () => {
+    const dispatched: string[] = []
+    const listener = (event: Event) => dispatched.push((event as CustomEvent<CompanionEventEnvelope>).detail.jobId)
+    window.addEventListener('companion:job', listener)
+    const controller = createCompanionRuntimeController({
+      pollSnapshot: vi.fn(), isAvailable: () => true, readDoNotDisturb: async () => false, sinks: {},
+    })
+    await controller.interrupt('chat', 1)
+    const stale = {
+      version: 1 as const, type: 'AgentJobCreated' as const, workspaceId: 'default',
+      sessionId: 'voice', turnId: 'turn-stale-scope', jobId: 'job-stale-scope',
+      requestId: 'request-stale-scope', revision: 1, interruptionEpoch: 0,
+      source: 'voice' as const, timestamp: 1_000, status: 'created' as const,
+    }
+    expect(await controller.publishJob(stale, { interruptionEpoch: 0 })).toBe(false)
+    expect(dispatched).toEqual([])
+    window.removeEventListener('companion:job', listener)
+  })
+
+  it('restores a persisted interruption epoch on remount and accepts fresh events at that epoch', async () => {
+    let durableState: unknown
+    const create = () => createCompanionRuntimeController({
+      pollSnapshot: vi.fn(), isAvailable: () => true, readDoNotDisturb: async () => false, sinks: {},
+      loadJobEventGateState: () => durableState,
+      saveJobEventGateState: (value) => { durableState = JSON.parse(JSON.stringify(value)) },
+    })
+
+    const first = create()
+    await first.interrupt('chat', 1)
+    expect(first.state.interruptionEpoch).toBe(1)
+    expect((durableState as { interruptionEpoch: number }).interruptionEpoch).toBe(1)
+
+    const restored = create()
+    expect(restored.state.interruptionEpoch).toBe(1)
+    expect(await restored.publishJob({
+      version: 1 as const, type: 'AgentJobCreated' as const,
+      workspaceId: 'default', sessionId: 'voice', turnId: 'turn-after-remount',
+      jobId: 'job-after-remount', requestId: 'request-after-remount', revision: 1,
+      interruptionEpoch: 1, source: 'voice' as const, timestamp: 2_000, status: 'created' as const,
+    })).toBe(true)
+  })
+
+  it('uses bounded workspace-scoped storage without retaining event payloads', async () => {
+    const key = 'yuizaki:companion-event-gate:v1:workspace-storage'
+    window.localStorage.removeItem(key)
+    const create = () => createCompanionRuntimeController({
+      pollSnapshot: vi.fn(), isAvailable: () => true, readDoNotDisturb: async () => false, sinks: {},
+      getWorkspaceId: () => 'workspace-storage',
+    })
+    const base = {
+      version: 1 as const, workspaceId: 'workspace-storage', sessionId: 'voice', turnId: 'turn-storage',
+      jobId: 'job-storage', requestId: 'request-storage', interruptionEpoch: 0, source: 'voice' as const,
+      timestamp: 1_000,
+    }
+
+    const first = create()
+    await first.publishJob({ ...base, type: 'AgentJobCreated', revision: 1, status: 'created', data: { secret: 'not durable' } })
+    await first.publishJob({ ...base, type: 'AgentJobCompleted', revision: 2, status: 'completed', data: { secret: 'not durable' } })
+    const stored = window.localStorage.getItem(key) || ''
+    expect(stored).not.toContain('not durable')
+    expect((JSON.parse(stored) as { jobs: unknown[] }).jobs).toHaveLength(1)
+
+    expect(await create().publishJob({ ...base, type: 'AgentJobCompleted', revision: 2, status: 'completed' })).toBe(false)
+    window.localStorage.removeItem(key)
+  })
+
+  it('rehydrates independent event gates and epochs across workspace A to B to A switches', async () => {
+    const keyA = 'yuizaki:companion-event-gate:v1:workspace-a'
+    const keyB = 'yuizaki:companion-event-gate:v1:workspace-b'
+    window.localStorage.removeItem(keyA)
+    window.localStorage.removeItem(keyB)
+    let workspaceId = 'workspace-a'
+    const controller = createCompanionRuntimeController({
+      pollSnapshot: vi.fn(), isAvailable: () => true, readDoNotDisturb: async () => false, sinks: {},
+      getWorkspaceId: () => workspaceId,
+    })
+    const eventFor = (workspace: string, job: string, revision: number, status: 'created' | 'progress', epoch: number) => ({
+      version: 1 as const,
+      type: status === 'created' ? 'AgentJobCreated' as const : 'AgentJobProgress' as const,
+      workspaceId: workspace, sessionId: 'voice', turnId: `turn-${job}`, jobId: job,
+      requestId: `request-${job}`, revision, interruptionEpoch: epoch, source: 'voice' as const,
+      timestamp: 3_000 + revision, status,
+    })
+
+    await controller.interrupt('chat', 1)
+    expect(controller.state.interruptionEpoch).toBe(1)
+    expect(await controller.publishJob(eventFor('workspace-a', 'job-a', 1, 'created', 1))).toBe(true)
+
+    workspaceId = 'workspace-b'
+    expect(await controller.publishJob(eventFor('workspace-b', 'job-b', 1, 'created', 0))).toBe(true)
+    expect(controller.state.interruptionEpoch).toBe(0)
+    expect(window.localStorage.getItem(keyA)).toContain('job-a')
+    expect(window.localStorage.getItem(keyA)).not.toContain('job-b')
+    expect(window.localStorage.getItem(keyB)).toContain('job-b')
+    expect(window.localStorage.getItem(keyB)).not.toContain('job-a')
+
+    workspaceId = 'workspace-a'
+    expect(await controller.publishJob(eventFor('workspace-a', 'job-a', 1, 'created', 1))).toBe(false)
+    expect(controller.state.interruptionEpoch).toBe(1)
+    expect(await controller.publishJob(eventFor('workspace-a', 'job-a', 2, 'progress', 1))).toBe(true)
+    expect((JSON.parse(window.localStorage.getItem(keyA) || '{}') as { interruptionEpoch: number }).interruptionEpoch).toBe(1)
+
+    window.localStorage.removeItem(keyA)
+    window.localStorage.removeItem(keyB)
   })
 
   it('shows bounded terminal job feedback and restores idle without reopening stale jobs', async () => {
@@ -567,11 +840,12 @@ describe('companion runtime controller', () => {
   })
 
   it('does not replay a delivered identity after stop and remount', async () => {
+    const notification = vi.fn()
     const controller = createCompanionRuntimeController({
       pollSnapshot: async () => ({ heartbeat: { behavior_events: [event()] } } as never),
       isAvailable: () => true,
       readDoNotDisturb: async () => false,
-      sinks: {},
+      sinks: { notification },
       cooldownMs: 0,
       frequencyBudget: 10,
     })
@@ -604,13 +878,14 @@ describe('companion runtime controller', () => {
 
   it('bounds delivered identity history while retaining recent duplicate suppression', async () => {
     let tick = 0
+    const notification = vi.fn()
     const controller = createCompanionRuntimeController({
       pollSnapshot: async () => ({
         heartbeat: { behavior_events: [event({ tick: ++tick, at: `t${tick}` })] },
       } as never),
       isAvailable: () => true,
       readDoNotDisturb: async () => false,
-      sinks: {},
+      sinks: { notification },
       cooldownMs: 0,
       frequencyBudget: 10,
       deliveredIdentityLimit: 3,
@@ -675,6 +950,7 @@ describe('companion runtime controller', () => {
 
   it('reports delivery and suppression against the heartbeat opportunity identity', async () => {
     const reportOpportunityOutcome = vi.fn(async () => undefined)
+    const notification = vi.fn()
     let dnd = true
     let tick = 0
     const controller = createCompanionRuntimeController({
@@ -689,7 +965,7 @@ describe('companion runtime controller', () => {
       } as never),
       isAvailable: () => true,
       readDoNotDisturb: async () => dnd,
-      sinks: {},
+      sinks: { notification },
       reportOpportunityOutcome,
       cooldownMs: 0,
       frequencyBudget: 10,
@@ -878,7 +1154,7 @@ describe('companion runtime controller', () => {
 
     expect(await controller.pollOnce()).toMatchObject({ status: 'failed' })
     expect(reportOpportunityOutcome).toHaveBeenCalledWith(
-      'heartbeat-failed', 'request-failed', 'failed', 'failed',
+      'heartbeat-failed', 'request-failed', 'failed', 'all_visible_sinks_failed',
     )
   })
 
@@ -892,7 +1168,7 @@ describe('companion runtime controller', () => {
     })
 
     expect(await controller.pollOnce()).toEqual({
-      status: 'delivered',
+      status: 'failed',
       attempted: [],
       succeeded: [],
       failed: [],
@@ -915,5 +1191,8 @@ describe('companion runtime controller', () => {
     expect(voice).not.toContain("petControl.setBehaviorState(")
     expect(shell).toContain('startCompanionRuntime')
     expect(shell).not.toContain('systemClient.companionRuntime')
+    expect(runtimeBridge).toContain('resolveCompanionEmbodimentDelivery')
+    expect(runtimeBridge).toContain('resolved.motionAllowed')
+    expect(runtimeBridge).toContain("resolved.behavior === 'waiting' ? 'waiting' : 'idle'")
   })
 })

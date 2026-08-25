@@ -18,6 +18,10 @@
     "build": "npm run build:renderer && npm run audit:renderer-bundle && npm run build:electron",
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.json",
+    "prepare:runtime": "node scripts/prepare-package-runtime.mjs",
+    "prepare:launcher": "node scripts/build-launcher.mjs --target=all",
+    "prepare:launcher:win": "node scripts/build-launcher.mjs --target=windows",
+    "prepare:launcher:linux": "node scripts/build-launcher.mjs --target=linux",
     "audit:renderer-bundle": "node scripts/audit-renderer-bundle.mjs",
     "install:runtime": "node -e \"require('electron')\"",
     "start": "node scripts/run-electron.mjs",
@@ -29,7 +33,10 @@
     "test:e2e:unit": "node --test scripts/__tests__/e2e-supervisor.test.mjs scripts/__tests__/e2e-lifecycle.test.mjs",
     "test:e2e:redaction": "npm run build && node --test scripts/__tests__/e2e-redaction-artifacts.test.mjs",
     "test:ci-contract": "node --test ../scripts/__tests__/verify-protected-ci.test.mjs && node ../scripts/verify-protected-ci.mjs",
-    "test:e2e": "npm run build && node scripts/run-electron-e2e.mjs"
+    "test:e2e": "npm run build && node scripts/run-electron-e2e.mjs",
+    "package:win": "npm run prepare:launcher:win && npm run prepare:runtime && npm run build && electron-builder --win nsis",
+    "package:linux": "npm run prepare:launcher:linux && npm run prepare:runtime && npm run build && electron-builder --linux AppImage deb",
+    "package": "npm run prepare:launcher && npm run prepare:runtime && npm run build && electron-builder"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
@@ -57,6 +64,7 @@
     "autoprefixer": "^10.5.0",
     "concurrently": "^10.0.4",
     "electron": "^42.7.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^10.4.1",
     "eslint-plugin-vue": "^10.9.2",
     "globals": "^17.6.0",
@@ -70,5 +78,42 @@
     "vitest": "^4.1.8",
     "vue-eslint-parser": "^10.4.1",
     "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "com.yuizaki.desktop",
+    "productName": "Yuizaki",
+    "artifactName": "Yuizaki-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "directories": {
+      "output": "../release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": ".package-runtime",
+        "to": "runtime",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Yuizaki"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Utility",
+      "synopsis": "Local-first AI desktop companion",
+      "maintainer": "Yuizaki Contributors <maintainers@yuizaki.dev>"
+    }
   }
 }

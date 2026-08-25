@@ -64,12 +64,20 @@ services/soulx-svc/references/*
 coverage/
 htmlcov/
 *-smoke.png
+/.tmp/
+/.pytest_cache/
+/.pytest-tmp*/
 /tmp/
 /data/test_chat.db
 /.omx/**/*.png
 /electron/.codex-logs/
 /electron/artifacts/
 /electron/test-results/
+/electron/.package-runtime/
+/electron/.tmp/
+/electron/tmp/
+/python/.tmp/
+/python/tmp*/
 /python/.pytest-tmp-codex*/
 /python/.test-tmp/
 
@@ -89,3 +97,5 @@ electron/out/
 electron/.vite/
 *.tsbuildinfo
 /YuizakiLauncher.exe
+/YuizakiLauncher
+/release/

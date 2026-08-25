@@ -1,623 +1,125 @@
+
 <template>
-  <PanelShell title="她记住了什么" tone="companion">
+  <PanelShell title="记忆管理" subtitle="查看、编辑和控制记忆召回" tone="companion" density="compact">
+    <template #status><span class="local-status" role="status">本机保存 · {{ scopeLabel(currentMemoryScope) }}</span></template>
+    <template #actions>
+      <label class="scope-control"><span>当前范围</span><el-select :model-value="currentMemoryScope" size="small" :disabled="workspaceScopeSaving" aria-label="当前记忆范围" @change="updateDefaultMemoryScope"><el-option v-for="scope in memoryScopeOptions" :key="scope.value" :label="scope.label" :value="scope.value" /></el-select></label>
+      <el-button data-testid="memory-advanced-tools-toggle" circle plain :icon="Tools" :type="advancedToolsVisible ? 'primary' : 'default'" title="高级工具" aria-label="打开高级工具" :aria-expanded="advancedToolsVisible" @click="advancedToolsVisible = true" />
+      <el-button data-testid="memory-refresh" circle plain :icon="Refresh" title="刷新记忆" aria-label="刷新记忆" :loading="docsRequest.loading" @click="refreshMemoryState" />
+    </template>
+
     <div class="memory-panel">
-      <div class="panel-toolbar">
-        <div>
-          <h3>关系记忆库</h3>
+      <section class="memory-welcome" aria-labelledby="memory-welcome-title">
+        <div class="welcome-copy">
+          <span class="welcome-kicker"><el-icon><User /></el-icon> 当前范围</span>
+          <h3 id="memory-welcome-title">记忆状态</h3>
+          <p>数据保存在本机。可查看来源、修改内容、停止召回或恢复。</p>
         </div>
-        <div class="toolbar-actions">
-          <label class="toolbar-field">
-            <span>默认记忆范围</span>
-            <el-select
-              :model-value="currentMemoryScope"
-              size="small"
-              class="scope-select"
-              :disabled="workspaceScopeSaving"
-              @change="updateDefaultMemoryScope"
-            >
-              <el-option v-for="scope in memoryScopeOptions" :key="scope.value" :label="scope.label" :value="scope.value" />
-            </el-select>
-          </label>
-          <el-button
-            data-testid="memory-advanced-tools-toggle"
-            plain
-            circle
-            :icon="Tools"
-            :type="advancedToolsVisible ? 'primary' : 'default'"
-            :title="advancedToolsVisible ? t('memory.advanced.collapse') : t('memory.advanced.expand')"
-            :aria-label="advancedToolsVisible ? t('memory.advanced.collapse') : t('memory.advanced.expand')"
-            :aria-expanded="advancedToolsVisible"
-            @click="advancedToolsVisible = !advancedToolsVisible"
-          />
-          <el-button v-if="advancedToolsVisible" plain :loading="rebuildIndexLoading" @click="rebuildMemoryIndex">{{ t('memory.actions.rebuildIndex') }}</el-button>
-          <el-button data-testid="memory-refresh" type="primary" plain :loading="docsRequest.loading" @click="refreshMemoryState">{{ t('memory.actions.refresh') }}</el-button>
+        <div class="memory-health" aria-label="当前记忆状态">
+          <div class="scope-pill"><span>当前范围</span><strong>{{ scopeLabel(currentMemoryScope) }}</strong></div>
+          <div class="health-stat"><strong>{{ overview?.recallable ?? docs.length }}</strong><span>可召回</span></div>
+          <div class="health-stat" :class="{ attention: reviewDocs.length > 0 }"><strong>{{ reviewDocs.length }}</strong><span>待确认</span></div>
         </div>
-      </div>
-
-      <section class="memory-metrics" aria-label="记忆概况">
-        <article v-for="metric in memoryMetrics" :key="metric.label" class="memory-metric" :class="`tone-${metric.tone}`">
-          <span>{{ metric.label }}</span>
-          <strong>{{ metric.value }}</strong>
-          <small>{{ metric.detail }}</small>
-        </article>
       </section>
+      <nav class="memory-tabs" role="tablist" aria-label="记忆视图">
+        <button v-for="(tab, index) in memoryTabs" :id="`memory-tab-${tab.value}`" :key="tab.value" type="button" role="tab" :tabindex="activeTab === tab.value ? 0 : -1" :aria-selected="activeTab === tab.value" :aria-controls="`memory-panel-${tab.value}`" @click="activeTab = tab.value" @keydown="onMemoryTabKeydown($event, index)">
+          <el-icon aria-hidden="true"><component :is="tab.icon" /></el-icon><span class="tab-label">{{ tab.label }}</span><span v-if="tab.count !== undefined" class="tab-count">{{ tab.count }}</span>
+        </button>
+      </nav>
+      <div class="tab-context" role="status"><strong>{{ activeTabMeta.label }}</strong><span>{{ activeTabMeta.description }}</span></div>
 
-      <div class="layout-grid">
-        <div class="left-column">
-          <el-card shadow="never">
-            <template #header>
-              <div class="card-header">
-                <span>关系记忆地图</span>
-                <el-tag :type="indexStatusTone" size="small">{{ indexStatusLabel }}</el-tag>
-              </div>
-            </template>
-            <div class="index-grid">
-              <div>
-                <span>文档</span>
-                <strong>{{ docs.length }}</strong>
-              </div>
-              <div>
-                <span>索引</span>
-                <strong>{{ indexStatus?.count ?? '-' }}</strong>
-              </div>
-              <div>
-                <span>范围</span>
-                <strong>{{ scopeLabel(currentMemoryScope) }}</strong>
-              </div>
-              <div>
-                <span>待复核</span>
-                <strong>{{ reviewDocs.length }}</strong>
-              </div>
-            </div>
-            <div v-if="advancedToolsVisible && retrievalStrategy.label" class="strategy-status with-margin">
-              <span>策略</span>
-              <strong>{{ retrievalStrategy.label }}</strong>
-            </div>
-            <div v-if="advancedToolsVisible && retrievalStrategy.layers.length" class="tag-row with-margin">
-              <el-tag v-for="(layer, idx) in retrievalStrategy.layers" :key="idx" type="info">{{ layer }}</el-tag>
-            </div>
-            <div v-if="indexStatus?.backend || indexStatus?.message" class="index-health with-margin">
-              <span>后端 {{ indexStatus.backend || 'memory' }}</span>
-              <span>{{ indexAvailabilityLabel }}</span>
-            </div>
-            <div class="layer-map with-margin">
-              <button
-                v-for="layer in layerStats"
-                :key="layer.value"
-                type="button"
-                class="layer-map-item"
-                :class="{ active: filterLayer === layer.value }"
-                @click="setLayerFilter(layer.value)"
-              >
-                <strong>{{ layer.label }}</strong>
-                <span>{{ layer.desc }} · {{ layer.count }}</span>
-              </button>
-            </div>
-          </el-card>
-
-          <el-card shadow="never">
-            <template #header>
-              <div class="card-header">
-                <span>告诉她一件事</span>
-                <el-tag size="small" type="info">{{ selectedLayerDefinition.desc }}</el-tag>
-              </div>
-            </template>
-            <el-form label-position="top" @submit.prevent>
-              <el-form-item label="她应该记住">
-                <el-input v-model="form.text" type="textarea" :rows="4" placeholder="例如：我喜欢被叫溪羽；周五要提醒我检查模型。" />
-              </el-form-item>
-              <el-form-item label="记到哪里">
-                <el-select v-model="form.layer" class="full-width">
-                  <el-option v-for="l in layers" :key="l.value" :label="l.label" :value="l.value" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="记忆类型">
-                <el-select
-                  v-model="form.type"
-                  data-testid="memory-type-select"
-                  class="full-width"
-                  filterable
-                  allow-create
-                  default-first-option
-                  placeholder="选择或输入类型"
-                >
-                  <el-option v-for="preset in memoryTypePresets" :key="preset.value" :label="preset.label" :value="preset.value" />
-                </el-select>
-              </el-form-item>
-              <div class="form-grid">
-                <el-form-item :label="`重要度：${form.importance.toFixed(2)}`">
-                  <el-slider v-model="form.importance" :min="0" :max="1" :step="0.05" />
-                </el-form-item>
-                <el-form-item :label="`置信度：${form.confidence.toFixed(2)}`">
-                  <el-slider v-model="form.confidence" :min="0" :max="1" :step="0.05" />
-                </el-form-item>
-              </div>
-              <el-form-item label="来源">
-                <el-select v-model="form.source" class="full-width">
-                  <el-option v-for="source in memorySourceOptions" :key="source.value" :label="source.label" :value="source.value" />
-                </el-select>
-              </el-form-item>
-              <el-button type="primary" :loading="addRequest.loading" :disabled="!form.text.trim()" @click="submitMemory">让她记住</el-button>
-            </el-form>
-          </el-card>
-
-          <div v-if="duplicateCandidates.length" class="duplicate-panel">
-            <div class="trace-header">
-              <span class="trace-title">合并候选</span>
-              <el-tag size="small" type="warning">{{ duplicateCandidates.length }} 条</el-tag>
-            </div>
-            <article v-for="candidate in duplicateCandidates" :key="candidate.id" class="candidate-row">
-              <div class="candidate-main">
-                <strong>{{ candidate.id }}</strong>
-                <span>{{ candidate.text }}</span>
-              </div>
-              <div class="tag-row">
-                <el-tag size="small" type="info">{{ candidate.layer || 'unknown' }}</el-tag>
-                <el-tag v-if="candidate.match_reason" size="small" type="warning">{{ candidate.match_reason }}</el-tag>
-                <el-tag v-if="candidate.score !== undefined" size="small">得分 {{ candidate.score.toFixed(4) }}</el-tag>
-                <el-tag v-if="candidate.text_similarity !== undefined" size="small">文本 {{ candidate.text_similarity.toFixed(4) }}</el-tag>
-              </div>
-            </article>
-          </div>
-
-          <el-card shadow="never">
-            <template #header>
-              <div class="card-header">
-                <span>整理队列</span>
-                <el-tag :type="reviewDocs.length ? 'warning' : 'success'" size="small">{{ reviewDocs.length }} 条</el-tag>
-              </div>
-            </template>
-            <div v-if="reviewDocs.length" class="review-list">
-              <article v-for="doc in reviewDocs.slice(0, 5)" :key="doc.id" class="review-item">
-                <div>
-                  <strong>{{ doc.type || 'memory' }}</strong>
-                  <span>{{ compactText(doc.text, 84) }}</span>
-                </div>
-                <div class="tag-row">
-                  <el-tag size="small" :type="layerTagType(doc.layer)">{{ doc.layer || 'unknown' }}</el-tag>
-                  <el-tag size="small" :type="qualityTagType(doc)">质量 {{ qualityPercent(doc) }}</el-tag>
-                  <el-button size="small" type="primary" link @click="openEditDoc(doc)">复核</el-button>
-                </div>
-              </article>
-            </div>
-            <el-empty v-else description="暂无需要复核的记忆" :image-size="56" />
-          </el-card>
-
-          <el-card shadow="never" class="maintenance-card">
-            <template #header>
-              <div class="card-header">
-                <span>长期记忆维护</span>
-                <el-tag :type="maintenancePreview ? (maintenancePreview.summary.delete_count ? 'danger' : 'success') : 'info'" size="small">
-                  {{ maintenancePreview ? `${maintenancePreview.summary.delete_count} 条待永久清理` : '尚未预览' }}
-                </el-tag>
-              </div>
-            </template>
-            <div class="maintenance-policy-grid">
-              <label class="maintenance-field">
-                <span>工作记忆保留</span>
-                <el-input-number v-model="maintenancePolicy.workingRetentionDays" :min="1" :max="365" size="small" controls-position="right" />
-                <small>天</small>
-              </label>
-            </div>
-            <label class="maintenance-threshold">
-              <span>低质量阈值 {{ Math.round(maintenancePolicy.lowQualityThreshold * 100) }}%</span>
-              <el-slider v-model="maintenancePolicy.lowQualityThreshold" :min="0" :max="1" :step="0.05" />
-            </label>
-            <div class="maintenance-switches">
-              <label><el-switch v-model="maintenancePolicy.includeStaleWorking" size="small" />过期工作记忆</label>
-              <label><el-switch v-model="maintenancePolicy.includeLowQuality" size="small" />低质量记忆</label>
-              <label><el-switch v-model="maintenancePolicy.includeExactDuplicates" size="small" />完全重复项</label>
-            </div>
-            <div class="button-row with-margin">
-              <el-button plain :loading="maintenanceSaving" @click="saveMemoryPolicy">保存整理规则</el-button>
-              <el-button data-testid="memory-maintenance-preview" type="primary" plain :loading="maintenancePreviewLoading" @click="previewMemoryMaintenance">{{ t('memory.actions.previewImpact') }}</el-button>
-              <el-button
-                type="danger"
-                :loading="maintenanceApplyLoading"
-                :disabled="!maintenancePreview?.summary.delete_count || !maintenancePreviewMatchesPolicy"
-                @click="applyMemoryMaintenance"
-              >永久清理</el-button>
-            </div>
-            <div v-if="maintenancePreview" class="maintenance-summary with-margin">
-              <div><span>已扫描</span><strong>{{ maintenancePreview.summary.scanned_count }}</strong></div>
-              <div><span>永久清理</span><strong>{{ maintenancePreview.summary.delete_count }}</strong></div>
-            </div>
-            <div v-if="maintenancePreview?.candidates.length" class="maintenance-candidates with-margin">
-              <article v-for="candidate in maintenancePreview.candidates.slice(0, 8)" :key="candidate.id">
-                <div>
-                  <strong>{{ compactText(candidate.text, 68) || candidate.id }}</strong>
-                  <span>{{ candidate.layer }} · {{ maintenanceReasonLabel(candidate.reasons) }}</span>
-                </div>
-                <el-tag size="small" :type="maintenanceActionTone(candidate.action)">{{ maintenanceActionLabel(candidate.action) }}</el-tag>
-              </article>
-              <small v-if="maintenancePreview.candidates.length > 8">另有 {{ maintenancePreview.candidates.length - 8 }} 条</small>
-            </div>
-          </el-card>
-
-          <el-card v-if="advancedToolsVisible" shadow="never">
-            <template #header>写入原始文档</template>
-            <el-form label-position="top" @submit.prevent>
-              <el-form-item label="文档 ID（可选）">
-                <el-input v-model="docForm.id" />
-              </el-form-item>
-              <el-form-item label="文档内容">
-                <el-input data-testid="memory-document-text" v-model="docForm.text" type="textarea" :rows="4" :placeholder="t('memory.document.textPlaceholder')" />
-              </el-form-item>
-              <el-form-item label="元数据 JSON">
-                <el-input data-testid="memory-document-metadata" v-model="docForm.metadataJson" type="textarea" :rows="3" :placeholder="t('memory.document.metadataPlaceholder')" />
-              </el-form-item>
-              <div class="button-row">
-                <el-button data-testid="memory-document-submit" type="primary" plain :loading="docWriteLoading" :disabled="!docForm.text.trim()" @click="submitDocument">{{ t('memory.actions.writeDocument') }}</el-button>
-                <el-tag type="info">原始文档</el-tag>
-              </div>
-            </el-form>
-          </el-card>
-        </div>
-
-        <div class="right-column">
-          <el-card v-if="advancedToolsVisible" shadow="never">
-            <template #header>
-              <div class="card-header">
-                <span>她会想起什么</span>
-                <el-tag v-if="querySummary" type="success" size="small">{{ querySummary }}</el-tag>
-              </div>
-            </template>
-            <el-form label-position="top" @submit.prevent>
-              <el-form-item label="检索问题">
-                <el-input data-testid="memory-query-input" v-model="queryForm.query" :placeholder="t('memory.query.placeholder')" @keyup.enter="submitQuery" />
-              </el-form-item>
-              <div class="form-grid">
-                <el-form-item label="作用域">
-                  <el-select v-model="queryForm.scope" class="full-width">
-                    <el-option label="全局" value="global" />
-                    <el-option label="工作区" value="workspace" />
-                    <el-option label="会话" value="session" />
-                  </el-select>
-                </el-form-item>
-                <el-form-item label="返回数量">
-                  <el-input-number v-model="queryForm.top_k" :min="1" :max="20" />
-                </el-form-item>
-              </div>
-              <div class="button-row">
-                <el-button data-testid="memory-query-submit" type="primary" :loading="queryRequest.loading" :disabled="!queryForm.query.trim()" @click="submitQuery">{{ t('memory.actions.layeredQuery') }}</el-button>
-                <el-button plain :loading="rawQueryRequest.loading" :disabled="!queryForm.query.trim()" @click="submitRawQuery">原始检索</el-button>
-                <el-tag type="info">平均得分：{{ averageQueryScore }}</el-tag>
-              </div>
-              <div class="query-layer-picker" aria-label="检索层级">
-                <button
-                  v-for="layer in layers"
-                  :key="layer.value"
-                  type="button"
-                  class="query-layer-chip"
-                  :class="{ active: effectiveQueryLayers.includes(layer.value) }"
-                  @click="toggleQueryLayer(layer.value)"
-                >
-                  <strong>{{ layer.label }}</strong>
-                  <span>{{ layer.desc }}</span>
-                </button>
-                <el-button size="small" link type="primary" @click="resetQueryLayers">重置层级</el-button>
-              </div>
-            </el-form>
-
-            <div v-if="queryTrace" class="trace-panel">
-              <div class="trace-header">
-                <span class="trace-title">检索轨迹</span>
-                <div class="tag-row">
-                  <el-tag type="success" size="small">召回 {{ queryTrace.recall_count ?? queryResult?.results?.length ?? 0 }}</el-tag>
-                  <el-tag type="info" size="small">作用域 {{ queryTrace.scope || 'auto' }}</el-tag>
-                  <el-tag v-if="queryTrace.workspace_id" type="info" size="small">工作区 {{ queryTrace.workspace_id }}</el-tag>
-                  <el-tag v-if="queryTrace.session_id" type="info" size="small">会话 {{ queryTrace.session_id }}</el-tag>
-                  <el-tag type="info" size="small">候选 {{ queryTrace.candidate_count ?? 0 }}/{{ queryTrace.candidate_limit ?? 0 }}</el-tag>
-                  <el-tag type="warning" size="small">已过滤 {{ queryTrace.filtered_out_count ?? 0 }}</el-tag>
-                  <el-tag size="small" :type="queryTrace.backend_filter_downpushed ? 'success' : 'info'">后端过滤 {{ queryTrace.backend_filter_downpushed ? '开启' : '关闭' }}</el-tag>
-                </div>
-              </div>
-              <div class="trace-line">
-                <span class="trace-label">得分</span>
-                <span>最高 {{ formatScore(queryTrace.top_score) }} · 平均 {{ formatScore(queryTrace.average_score) }} · {{ formatLatency(queryTrace.latency_ms) }}</span>
-              </div>
-              <div v-if="queryTrace.layers.length" class="trace-line">
-                <span class="trace-label">层级</span>
-                <span>{{ queryTrace.layers.join(' > ') }}</span>
-              </div>
-              <div v-if="filterReasonText" class="trace-line">
-                <span class="trace-label">过滤</span>
-                <span>{{ filterReasonText }}</span>
-              </div>
-              <div v-if="selectedTraceIds.length" class="trace-line trace-ids">
-                <span class="trace-label">命中 ID</span>
-                <code v-for="id in selectedTraceIds" :key="id">{{ id }}</code>
-                <span v-if="hiddenTraceIdCount" class="trace-more">+{{ hiddenTraceIdCount }}</span>
-              </div>
-            </div>
-
-            <AsyncState :loading="queryRequest.loading" :error="queryRequest.error" :empty="!queryResult || !queryResult.results?.length" empty-text="暂无检索结果" class="result-state" @retry="submitQuery">
-              <div class="query-result-list">
-                <article v-for="(row, index) in queryResult?.results || []" :key="row.id || index" class="query-result-card">
-                  <div class="query-rank">{{ index + 1 }}</div>
-                  <div class="query-result-main">
-                    <p>{{ row.text }}</p>
-                    <div class="tag-row">
-                      <el-tag v-if="row.layer" size="small" :type="layerTagType(row.layer)">{{ row.layer }}</el-tag>
-                      <el-tag size="small" type="success">得分 {{ Number(row.score ?? 0).toFixed(4) }}</el-tag>
-                      <el-tag v-if="row.id" size="small" type="info">{{ row.id }}</el-tag>
-                      <el-button v-if="row.id" size="small" type="primary" link @click="selectDocById(row.id)">查看记忆</el-button>
-                    </div>
-                  </div>
-                </article>
-              </div>
-            </AsyncState>
-          </el-card>
-
-          <el-card shadow="never">
-            <template #header>
-              <div class="card-header">
-                <span>记忆文档</span>
-                <div class="doc-filter-stack">
-                  <div class="filter-row">
-                    <el-button
-                      v-for="option in docViewOptions"
-                      :key="option.value"
-                      size="small"
-                      :type="docViewMode === option.value ? 'primary' : 'default'"
-                      plain
-                      @click="setDocView(option.value)"
-                    >
-                      {{ option.label }} {{ docViewCount(option.value) }}
-                    </el-button>
-                  </div>
-                  <div class="filter-row">
-                    <el-select v-model="filterLayer" size="small" clearable placeholder="层级" class="filter-select">
-                      <el-option v-for="l in layers" :key="l.value" :label="l.label" :value="l.value" />
-                    </el-select>
-                    <el-select v-model="docSortMode" size="small" placeholder="排序" class="filter-select">
-                      <el-option label="最近更新" value="updated" />
-                      <el-option label="重要度" value="importance" />
-                      <el-option label="质量" value="quality" />
-                      <el-option label="置信度" value="confidence" />
-                    </el-select>
-                    <el-input v-model="searchText" size="small" clearable placeholder="搜索内容" class="filter-input" />
-                  </div>
-                  <div class="filter-row">
-                    <el-button size="small" plain :disabled="!hasDocFilters" @click="resetDocFilters">清空筛选</el-button>
-                    <el-button size="small" plain :loading="batchActionLoading" :disabled="batchActionDisabled" :title="batchActionHint" @click="batchBoostVisibleDocs">提高筛选结果重要度</el-button>
-                    <el-button size="small" type="danger" plain :loading="batchActionLoading" :disabled="batchActionDisabled" :title="batchActionHint" @click="batchDeleteVisibleDocs">{{ batchDeleteLabel }}</el-button>
-                  </div>
-                </div>
-              </div>
-            </template>
-            <AsyncState :loading="docsRequest.loading" :error="docsRequest.error" :empty="filteredDocs.length === 0" empty-text="暂无匹配的记忆文档" @retry="loadScopedDocs">
-              <div class="doc-layout">
-                <div class="memory-doc-list">
-                  <article
-                    v-for="row in visibleDocs"
-                    :key="row.id"
-                    class="memory-doc-card"
-                    :data-memory-id="row.id"
-                    :class="{ active: selectedDoc?.id === row.id, hit: isQueryHit(row) }"
-                    role="button"
-                    tabindex="0"
-                    @click="selectDoc(row)"
-                    @keyup.enter="selectDoc(row)"
-                    @keyup.space.prevent="selectDoc(row)"
-                  >
-                    <div class="doc-card-main">
-                      <div class="doc-card-head">
-                        <strong>{{ row.type || 'fact' }}</strong>
-                        <div class="tag-row">
-                          <el-tag v-if="isQueryHit(row)" size="small" type="success">命中</el-tag>
-                          <el-tag size="small" :type="layerTagType(row.layer)">{{ row.layer || 'unknown' }}</el-tag>
-                        </div>
-                      </div>
-                      <p>{{ row.text }}</p>
-                      <div class="doc-meta">
-                        <span :class="importanceColorClass(row.importance)">重要度 {{ Number(row.importance ?? 0).toFixed(2) }}</span>
-                        <span>质量 {{ formatScore(row.quality_score) }}</span>
-                        <span>置信 {{ formatScore(row.confidence) }}</span>
-                        <span>{{ docSourceLabel(row) }}</span>
-                        <span>{{ docScopeLabel(row) }}</span>
-                        <span>{{ docExpiryLabel(row) }}</span>
-                        <span>{{ docUpdatedLabel(row) }}</span>
-                      </div>
-                    </div>
-                  </article>
-                  <button
-                    v-if="remainingFilteredDocCount > 0"
-                    type="button"
-                    class="doc-list-more"
-                    @click="showMoreDocs"
-                  >
-                    显示更多 {{ remainingFilteredDocCount }} 条
-                  </button>
-                </div>
-
-                <aside class="doc-inspector">
-                  <template v-if="selectedDoc">
-                    <div class="inspector-head">
-                      <div>
-                        <span>{{ selectedDoc.id }}</span>
-                        <strong>{{ selectedDoc.type || 'fact' }}</strong>
-                      </div>
-                    </div>
-                    <div class="inspector-editor">
-                      <label class="editor-field editor-field-full">
-                        <span>内容</span>
-                        <el-input data-testid="memory-inspector-text" v-model="inspectorDraft.text" type="textarea" :rows="4" resize="none" />
-                      </label>
-                      <div class="editor-grid">
-                        <label class="editor-field">
-                          <span>类型</span>
-                          <el-input v-model="inspectorDraft.type" size="small" />
-                        </label>
-                        <label class="editor-field">
-                          <span>层级</span>
-                          <el-select v-model="inspectorDraft.layer" size="small" class="full-width">
-                            <el-option v-for="l in layers" :key="l.value" :label="l.label" :value="l.value" />
-                          </el-select>
-                        </label>
-                        <label class="editor-field">
-                          <span>来源</span>
-                          <el-select v-model="inspectorDraft.source" size="small" class="full-width">
-                            <el-option v-for="source in memorySourceOptions" :key="source.value" :label="source.label" :value="source.value" />
-                          </el-select>
-                        </label>
-                      </div>
-                      <div class="form-grid compact">
-                        <el-form-item :label="`重要度：${inspectorDraft.importance.toFixed(2)}`">
-                          <el-slider v-model="inspectorDraft.importance" :min="0" :max="1" :step="0.05" />
-                        </el-form-item>
-                        <el-form-item :label="`置信度：${inspectorDraft.confidence.toFixed(2)}`">
-                          <el-slider v-model="inspectorDraft.confidence" :min="0" :max="1" :step="0.05" />
-                        </el-form-item>
-                      </div>
-                      <div class="button-row">
-                        <el-button
-                          data-testid="memory-inspector-save"
-                          size="small"
-                          type="primary"
-                          :loading="inspectorDraftSaving"
-                          :disabled="!inspectorDraftDirty || !inspectorDraft.text.trim()"
-                          @click="saveInspectorDraft"
-                        >
-                          保存面板修改
-                        </el-button>
-                        <el-button size="small" plain :disabled="!inspectorDraftDirty" @click="resetInspectorDraft">重置</el-button>
-                      </div>
-                    </div>
-                    <div class="inspector-grid">
-                      <div>
-                        <span>层级</span>
-                        <strong>{{ selectedDoc.layer || 'unknown' }}</strong>
-                      </div>
-                      <div>
-                        <span>作用域</span>
-                        <strong>{{ docScopeLabel(selectedDoc) }}</strong>
-                      </div>
-                      <div>
-                        <span>来源</span>
-                        <strong>{{ docSourceLabel(selectedDoc) }}</strong>
-                      </div>
-                      <div>
-                        <span>质量</span>
-                        <strong>{{ qualityPercent(selectedDoc) }}</strong>
-                      </div>
-                    </div>
-                    <div class="inspector-actions">
-                      <el-button size="small" type="primary" plain @click="openEditDoc(selectedDoc)">完整编辑</el-button>
-                      <el-button size="small" plain @click="boostDocImportance(selectedDoc)">提高重要度</el-button>
-                        <el-button
-                          data-testid="memory-inspector-delete"
-                        size="small"
-                        type="danger"
-                        plain
-                        :loading="removingDocIds.has(selectedDoc.id)"
-                        :disabled="removingDocIds.has(selectedDoc.id)"
-                        @click="removeDoc(selectedDoc.id)"
-                      >
-                        永久删除
-                      </el-button>
-                    </div>
-                    <div class="layer-action-grid">
-                      <button
-                        v-for="layer in layers"
-                        :key="layer.value"
-                        type="button"
-                        :class="{ active: selectedDoc.layer === layer.value }"
-                        @click="moveDocLayer(selectedDoc, layer.value)"
-                      >
-                        <strong>{{ layer.label }}</strong>
-                        <span>{{ layer.desc }}</span>
-                      </button>
-                    </div>
-                    <details class="inspector-details">
-                      <summary>元数据</summary>
-                      <pre>{{ metadataPreview(selectedDoc) }}</pre>
-                    </details>
-                    <details v-if="docAuditEntries(selectedDoc).length" class="inspector-details">
-                      <summary>审计记录</summary>
-                      <div class="audit-list">
-                        <div v-for="(entry, idx) in docAuditEntries(selectedDoc)" :key="idx">
-                          <strong>{{ auditActionLabel(entry.action) }}</strong>
-                          <span>{{ auditEntrySummary(entry) }}</span>
-                        </div>
-                      </div>
-                    </details>
-                  </template>
-                  <el-empty v-else description="未选择记忆" :image-size="56" />
-                </aside>
-              </div>
-            </AsyncState>
-          </el-card>
-        </div>
+      <div v-show="activeTab === 'library'" id="memory-panel-library" role="tabpanel" aria-labelledby="memory-tab-library" class="tab-panel">
+        <MemoryQuickCapture :form="form" :layers="layers" :type-options="memoryTypePresets" :source-options="memorySourceOptions" :selected-layer-description="selectedLayerDefinition.desc" :duplicate-candidates="duplicateCandidates" :loading="addRequest.loading" @update-form="Object.assign(form, $event)" @submit="submitMemory" />
+        <MemoryLibrary
+          :visible-docs="visibleDocs" :filtered-count="filteredDocs.length" :remaining-count="remainingFilteredDocCount" :selected-doc="selectedDoc"
+          :view-mode="docViewMode" :sort-mode="docSortMode" :filter-layer="filterLayer" :search-text="searchText" :view-options="docViewOptions"
+          :layers="layers" :source-options="memorySourceOptions" :loading="docsRequest.loading" :error="docsRequest.error"
+          :has-filters="hasDocFilters" :batch-action-hint="batchActionHint" :batch-delete-label="batchDeleteLabel"
+          :batch-action-loading="batchActionLoading" :batch-action-disabled="batchActionDisabled" :inspector-draft="inspectorDraft"
+          :inspector-draft-dirty="inspectorDraftDirty" :inspector-draft-saving="inspectorDraftSaving" :forgetting-doc-ids="forgettingDocIds" :removing-doc-ids="removingDocIds"
+          :doc-view-count="docViewCount" :is-query-hit="isQueryHit" :layer-tag-type="layerTagType" :format-score="formatScore"
+          :doc-updated-label="docUpdatedLabel" :doc-scope-label="docScopeLabel" :doc-source-label="docSourceLabel" :quality-percent="qualityPercent"
+          :metadata-preview="metadataPreview" :doc-audit-entries="docAuditEntries" :audit-action-label="auditActionLabel" :audit-entry-summary="auditEntrySummary"
+          @update:view-mode="docViewMode = $event" @update:sort-mode="docSortMode = $event" @update:filter-layer="filterLayer = $event" @update:search-text="searchText = $event"
+          @select="selectDoc" @edit="openEditDoc" @boost="boostDocImportance" @forget="forgetDoc" @remove="removeDoc" @move-layer="moveDocLayer"
+          @retry="loadScopedDocs" @show-more="showMoreDocs" @reset-filters="resetDocFilters" @batch-boost="batchBoostVisibleDocs"
+          @batch-delete="batchDeleteVisibleDocs" @save-inspector="saveInspectorDraft" @reset-inspector="resetInspectorDraft"
+          @update-inspector-draft="Object.assign(inspectorDraft, $event)"
+        />
+      </div>
+      <div v-show="activeTab === 'review'" id="memory-panel-review" role="tabpanel" aria-labelledby="memory-tab-review" class="tab-panel"><MemoryReviewQueue :docs="reviewDocs" :compact-text="compactText" :quality-percent="qualityPercent" @review="openEditDoc" /></div>
+      <div v-show="activeTab === 'overview'" id="memory-panel-overview" role="tabpanel" aria-labelledby="memory-tab-overview" class="tab-panel">
+        <MemoryOverview
+          :overview="overview" :forgotten-docs="forgottenDocs" :layers="layerStats" :selected-layer="filterLayer"
+          :loading="overviewRequest.loading || forgottenDocsRequest.loading" :error="overviewRequest.error || forgottenDocsRequest.error"
+          :restoring-doc-ids="restoringDocIds" @select-layer="openLayerInLibrary" @restore="restoreForgottenDoc"
+        />
       </div>
     </div>
 
-    <el-dialog v-model="editDialogVisible" title="编辑记忆" width="640px">
+    <el-drawer v-model="advancedToolsVisible" title="高级记忆工具" size="min(560px, 92vw)" append-to-body>
+      <MemoryAdvancedTools
+        :index-status="indexStatus" :index-status-label="indexStatusLabel" :index-availability-label="indexAvailabilityLabel" :index-status-tone="indexStatusTone"
+        :doc-count="docs.length" :rebuild-index-loading="rebuildIndexLoading" :query-form="queryForm" :layers="layers"
+        :effective-query-layers="effectiveQueryLayers" :query-loading="queryRequest.loading" :raw-query-loading="rawQueryRequest.loading"
+        :query-error="queryRequest.error" :query-result="queryResult" :query-trace="queryTrace" :query-summary="querySummary"
+        :filter-reason-text="filterReasonText" :selected-trace-ids="selectedTraceIds" :hidden-trace-id-count="hiddenTraceIdCount"
+        :document-form="docForm" :document-loading="docWriteLoading" :maintenance-policy="maintenancePolicy" :maintenance-preview="maintenancePreview"
+        :maintenance-preview-matches-policy="maintenancePreviewMatchesPolicy" :maintenance-saving="maintenanceSaving"
+        :maintenance-preview-loading="maintenancePreviewLoading" :maintenance-apply-loading="maintenanceApplyLoading"
+        :format-latency="formatLatency" :compact-text="compactText" :maintenance-reason-label="maintenanceReasonLabel"
+        @rebuild-index="rebuildMemoryIndex" @query="submitQuery" @raw-query="submitRawQuery" @toggle-query-layer="toggleQueryLayer"
+        @reset-query-layers="resetQueryLayers" @select-result="selectDocFromAdvanced" @write-document="submitDocument"
+        @save-maintenance="saveMemoryPolicy" @preview-maintenance="previewMemoryMaintenance" @apply-maintenance="applyMemoryMaintenance"
+        @update-query="Object.assign(queryForm, $event)" @update-document="Object.assign(docForm, $event)" @update-maintenance="Object.assign(maintenancePolicy, $event)"
+      />
+    </el-drawer>
+
+    <el-dialog v-model="editDialogVisible" title="编辑记忆" width="min(640px, 92vw)">
       <el-form label-position="top" @submit.prevent>
-        <el-form-item label="记忆内容">
-          <el-input v-model="editForm.text" type="textarea" :rows="5" />
-        </el-form-item>
-        <div class="form-grid">
-          <el-form-item label="记忆层级">
-            <el-select v-model="editForm.layer" class="full-width">
-              <el-option v-for="l in layers" :key="l.value" :label="l.label" :value="l.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="数据类型">
-            <el-input v-model="editForm.type" />
-          </el-form-item>
-        </div>
-        <el-form-item :label="`重要度：${editForm.importance.toFixed(2)}`">
-          <el-slider v-model="editForm.importance" :min="0" :max="1" :step="0.05" />
-        </el-form-item>
-        <div class="form-grid">
-          <el-form-item :label="`置信度：${editForm.confidence.toFixed(2)}`">
-            <el-slider v-model="editForm.confidence" :min="0" :max="1" :step="0.05" />
-          </el-form-item>
-          <el-form-item label="来源">
-            <el-select v-model="editForm.source" class="full-width">
-              <el-option v-for="source in memorySourceOptions" :key="source.value" :label="source.label" :value="source.value" />
-            </el-select>
-          </el-form-item>
-        </div>
-        <el-form-item label="元数据 JSON">
-          <el-input v-model="editForm.metadataJson" type="textarea" :rows="4" />
-        </el-form-item>
+        <el-form-item label="记忆内容"><el-input v-model="editForm.text" type="textarea" :rows="5" /></el-form-item>
+        <div class="dialog-grid"><el-form-item label="记忆层级"><el-select v-model="editForm.layer"><el-option v-for="layer in layers" :key="layer.value" :label="layer.label" :value="layer.value" /></el-select></el-form-item><el-form-item label="数据类型"><el-input v-model="editForm.type" /></el-form-item></div>
+        <div class="dialog-grid"><el-form-item :label="`重要度：${editForm.importance.toFixed(2)}`"><el-slider v-model="editForm.importance" :min="0" :max="1" :step="0.05" /></el-form-item><el-form-item :label="`置信度：${editForm.confidence.toFixed(2)}`"><el-slider v-model="editForm.confidence" :min="0" :max="1" :step="0.05" /></el-form-item></div>
+        <el-form-item label="来源"><el-select v-model="editForm.source"><el-option v-for="source in memorySourceOptions" :key="source.value" :label="source.label" :value="source.value" /></el-select></el-form-item>
+        <details><summary>元数据 JSON</summary><el-input v-model="editForm.metadataJson" type="textarea" :rows="4" /></details>
       </el-form>
-      <template #footer>
-        <div class="button-row footer-actions">
-          <el-button @click="editDialogVisible = false">取消</el-button>
-          <el-button type="primary" :loading="updateRequest.loading" :disabled="!editForm.text.trim()" @click="submitEditDoc">保存修改</el-button>
-        </div>
-      </template>
+      <template #footer><el-button @click="editDialogVisible = false">取消</el-button><el-button type="primary" :loading="updateRequest.loading" :disabled="!editForm.text.trim()" @click="submitEditDoc">保存修改</el-button></template>
     </el-dialog>
   </PanelShell>
 </template>
 
+
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, provide, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useI18n } from '@/i18n'
-import { Tools } from '@element-plus/icons-vue'
+import { Collection, DataAnalysis, Refresh, Tools, User } from '@element-plus/icons-vue'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
-import AsyncState from '@/shared/components/feedback/AsyncState.vue'
+import MemoryAdvancedTools from '../components/MemoryAdvancedTools.vue'
+import MemoryLibrary from '../components/MemoryLibrary.vue'
+import MemoryOverview from '../components/MemoryOverview.vue'
+import MemoryQuickCapture from '../components/MemoryQuickCapture.vue'
+import MemoryReviewQueue from '../components/MemoryReviewQueue.vue'
 import { normalizeDuplicateCandidates, useMemoryDomain } from '../composables/useMemoryDomain'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { systemClient } from '@/api/client'
 import { memoryClient } from '@/api/clients/memory-client'
-import type { MemoryIndexStatus, MemoryMaintenanceCandidate, MemoryMaintenancePolicyPayload, MemoryMaintenancePreview } from '@/api/clients/memory-client'
+import type { MemoryIndexStatus, MemoryMaintenancePolicyPayload, MemoryMaintenancePreview } from '@/api/clients/memory-client'
 import { getMemoryIndexUiStatus } from '../memory-index-status'
 import type { MemoryDoc, MemoryDuplicateCandidate } from '../composables/useMemoryDomain'
+import { memoryInspectorActionsKey } from '../components/memory-panel-types'
 
 type TagType = 'success' | 'warning' | 'danger' | 'info' | 'primary'
-type MetricTone = 'green' | 'blue' | 'amber' | 'rose' | 'slate'
 type DocViewMode = 'all' | 'recallable' | 'review' | 'important' | 'hits'
 type DocSortMode = 'updated' | 'importance' | 'quality' | 'confidence'
 type MemoryScope = 'global' | 'workspace' | 'session'
+type MemoryTab = 'library' | 'review' | 'overview'
 
-const { docs, queryResult, docsRequest, addRequest, updateRequest, queryRequest, rawQueryRequest, loadDocs, addMemory, updateDoc, queryMemory, queryRawRag } = useMemoryDomain()
-const { t } = useI18n()
+const {
+  docs, forgottenDocs, overview, queryResult,
+  docsRequest, forgottenDocsRequest, overviewRequest, addRequest, updateRequest, queryRequest, rawQueryRequest,
+  loadDocs, loadForgottenDocs, loadOverview, addMemory, updateDoc, softForgetDoc, restoreDoc, queryMemory, queryRawRag,
+} = useMemoryDomain()
 const e2eMode = Boolean(window.petApi?.e2e)
 const sessionStore = useSessionStore()
 const workspaceStore = useWorkspaceStore()
@@ -630,6 +132,7 @@ const currentMemoryScope = computed<MemoryScope>(() => normalizeMemoryScope(acti
 const indexStatus = ref<MemoryIndexStatus | null>(null)
 const retrievalStrategy = ref<{ label: string; layers: string[] }>({ label: '', layers: [] })
 const advancedToolsVisible = ref(false)
+const activeTab = ref<MemoryTab>('library')
 const searchText = ref('')
 const filterLayer = ref('')
 const duplicateCandidates = ref<MemoryDuplicateCandidate[]>([])
@@ -642,12 +145,17 @@ const docForm = reactive({ id: '', text: '', metadataJson: '' })
 const queryForm = reactive({ query: '', scope: currentMemoryScope.value, top_k: 5 })
 const editDialogVisible = ref(false)
 const editForm = reactive({ id: '', text: '', type: 'fact', layer: 'semantic', importance: 0.5, confidence: 0.72, source: 'manual', metadataJson: '' })
-const inspectorDraft = reactive({ id: '', text: '', type: 'fact', layer: 'semantic', importance: 0.5, confidence: 0.72, source: 'manual' })
+const inspectorDraft = reactive({
+  id: '', text: '', type: 'fact', layer: 'semantic', importance: 0.5, confidence: 0.72, source: 'manual',
+  validFrom: '', validTo: '', expiresAt: '',
+})
 const docWriteLoading = ref(false)
 const rebuildIndexLoading = ref(false)
 const batchActionLoading = ref(false)
 const workspaceScopeSaving = ref(false)
 const inspectorDraftSaving = ref(false)
+const forgettingDocIds = ref(new Set<string>())
+const restoringDocIds = ref(new Set<string>())
 const removingDocIds = ref(new Set<string>())
 const batchDeleteProgress = reactive({ active: false, total: 0, done: 0 })
 const maintenancePreview = ref<MemoryMaintenancePreview | null>(null)
@@ -714,13 +222,6 @@ const docViewOptions: Array<{ value: DocViewMode; label: string }> = [
   { value: 'hits', label: '本次命中' },
 ]
 
-const importanceColorClass = (val?: number | null) => {
-  const v = Number(val ?? 0)
-  if (v >= 0.8) return 'important-high'
-  if (v >= 0.5) return 'important-medium'
-  return 'important-low'
-}
-
 const layerTagType = (layer?: string) => {
   const map: Record<string, TagType> = { profile: 'warning', working: 'primary', episodic: 'info', relationship: 'danger', reflective: 'success', semantic: 'info' }
   return map[layer || ''] || 'info'
@@ -737,13 +238,6 @@ const scorePercent = (value?: number | null) => {
 
 const qualityPercent = (doc: MemoryDoc) => scorePercent(doc.quality_score ?? doc.confidence)
 
-const qualityTagType = (doc: MemoryDoc): TagType => {
-  const score = Number(doc.quality_score ?? doc.confidence ?? 1)
-  if (score >= 0.78) return 'success'
-  if (score >= 0.62) return 'warning'
-  return 'danger'
-}
-
 const compactText = (text?: string | null, limit = 120) => {
   const normalized = String(text || '').replace(/\s+/g, ' ').trim()
   if (normalized.length <= limit) return normalized
@@ -754,13 +248,6 @@ const docUpdatedLabel = (doc: MemoryDoc) => {
   const raw = doc.updated_at || (typeof doc.metadata?.timestamp === 'string' ? doc.metadata.timestamp : '')
   if (!raw) return '未记录时间'
   return String(raw).replace('T', ' ').slice(0, 16)
-}
-
-const docExpiryLabel = (doc: MemoryDoc) => {
-  const raw = doc.expires_at || (typeof doc.metadata?.expires_at === 'string' ? doc.metadata.expires_at : '')
-  return raw
-    ? t('memory.expiry.until', { value: raw.replace('T', ' ').slice(0, 16) })
-    : t('memory.expiry.permanent')
 }
 
 const stringMeta = (doc: MemoryDoc, key: string) => {
@@ -801,10 +288,6 @@ const maintenanceReasonLabel = (reasons: string[]) => reasons.map((reason) => ({
   low_quality: '质量低于阈值',
   exact_duplicate: '与保留项完全重复',
 }[reason] || reason)).join('、')
-
-const maintenanceActionLabel = (_action: MemoryMaintenanceCandidate['action']) => '永久删除'
-
-const maintenanceActionTone = (_action: MemoryMaintenanceCandidate['action']): TagType => 'danger'
 
 const saveMemoryPolicy = async () => {
   if (maintenanceSaving.value) return
@@ -899,11 +382,12 @@ const updateDefaultMemoryScope = async (value: string) => {
   }
 }
 
+
 const recallableDocs = computed(() => docs.value)
 
 const layerStats = computed(() => layers.map(layer => ({
   ...layer,
-  count: recallableDocs.value.filter(doc => doc.layer === layer.value).length,
+  count: overview.value?.by_layer[layer.value] ?? recallableDocs.value.filter(doc => doc.layer === layer.value).length,
 })))
 const queryTrace = computed(() => queryResult.value?.trace ?? null)
 const queryHitIds = computed(() => new Set([
@@ -911,44 +395,30 @@ const queryHitIds = computed(() => new Set([
   ...((queryResult.value?.results ?? []).map(item => item.id).filter(Boolean)),
 ]))
 
-const highImportanceDocs = computed(() => recallableDocs.value.filter(doc => Number(doc.importance ?? 0) >= 0.8))
-const lowConfidenceDocs = computed(() => recallableDocs.value.filter(doc => Number(doc.confidence ?? 1) < 0.7))
-const lowQualityDocs = computed(() => recallableDocs.value.filter(doc => Number(doc.quality_score ?? 1) < 0.66))
 const reviewDocs = computed(() => recallableDocs.value
   .filter(doc => Number(doc.confidence ?? 1) < 0.72 || Number(doc.quality_score ?? 1) < 0.66)
   .sort((left, right) => Math.min(Number(left.confidence ?? 1), Number(left.quality_score ?? 1)) - Math.min(Number(right.confidence ?? 1), Number(right.quality_score ?? 1))))
+const memoryTabs = computed(() => [
+  { value: 'library' as const, label: '记忆库', count: docs.value.length, icon: Collection, description: '搜索、添加和修正她当前可以使用的记忆。' },
+  { value: 'review' as const, label: '待确认', count: reviewDocs.value.length, icon: User, description: '检查低置信度或质量较低的内容，避免错误延续。' },
+  { value: 'overview' as const, label: '概览', icon: DataAnalysis, description: '查看范围、分层、活动和已停止召回的内容。' },
+])
 
-const indexedRatio = computed(() => {
-  if (!recallableDocs.value.length) return 0
-  return Math.min(1, Number(indexStatus.value?.count ?? 0) / recallableDocs.value.length)
-})
+const activeTabMeta = computed(() => memoryTabs.value.find(tab => tab.value === activeTab.value) || memoryTabs.value[0])
 
-const memoryMetrics = computed(() => [
-  {
-    label: '索引覆盖',
-    value: `${Math.round(indexedRatio.value * 100)}%`,
-    detail: `${indexStatus.value?.count ?? 0}/${recallableDocs.value.length} 条可召回`,
-    tone: indexedRatio.value >= 0.9 ? 'green' : indexedRatio.value >= 0.5 ? 'amber' : 'slate',
-  },
-  {
-    label: '活跃记忆',
-    value: recallableDocs.value.length,
-    detail: `${highImportanceDocs.value.length} 条高重要度`,
-    tone: 'blue',
-  },
-  {
-    label: '待复核',
-    value: reviewDocs.value.length,
-    detail: `${lowConfidenceDocs.value.length} 条低置信；${lowQualityDocs.value.length} 条低质量`,
-    tone: reviewDocs.value.length ? 'amber' : 'green',
-  },
-  {
-    label: '当前召回',
-    value: queryTrace.value?.recall_count ?? queryResult.value?.results?.length ?? 0,
-    detail: queryTrace.value ? `${formatLatency(queryTrace.value.latency_ms)} · ${queryTrace.value.scope || 'auto'}` : '未检索',
-    tone: queryTrace.value ? 'green' : 'slate',
-  },
-] satisfies Array<{ label: string; value: string | number; detail: string; tone: MetricTone }>)
+const onMemoryTabKeydown = (event: KeyboardEvent, index: number) => {
+  const key = event.key
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(key)) return
+  event.preventDefault()
+  const tabs = memoryTabs.value
+  const nextIndex = key === 'Home'
+    ? 0
+    : key === 'End'
+      ? tabs.length - 1
+      : (index + (key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length
+  activeTab.value = tabs[nextIndex].value
+  void nextTick(() => document.getElementById(`memory-tab-${tabs[nextIndex].value}`)?.focus())
+}
 
 const selectedLayerDefinition = computed(() => layers.find(layer => layer.value === form.layer) || layers[1])
 
@@ -970,13 +440,6 @@ const effectiveQueryLayers = computed(() => {
   return retrievalStrategy.value.layers.length ? retrievalStrategy.value.layers : defaultQueryLayers
 })
 
-const averageQueryScore = computed(() => {
-  const results = queryResult.value?.results ?? []
-  if (!results.length) return '-'
-  const total = results.reduce((sum, item) => sum + Number(item.score ?? 0), 0)
-  return (total / results.length).toFixed(4)
-})
-
 const selectedTraceIds = computed(() => queryTrace.value?.selected_ids.slice(0, 8) ?? [])
 const hiddenTraceIdCount = computed(() => Math.max(0, (queryTrace.value?.selected_ids.length ?? 0) - selectedTraceIds.value.length))
 const filterReasonText = computed(() => {
@@ -987,12 +450,15 @@ const filterReasonText = computed(() => {
     .join(' · ')
 })
 
-const setLayerFilter = (layer: string) => {
+const openLayerInLibrary = (layer: string) => {
   filterLayer.value = filterLayer.value === layer ? '' : layer
+  activeTab.value = 'library'
 }
 
-const setDocView = (mode: DocViewMode) => {
-  docViewMode.value = mode
+const selectDocFromAdvanced = (id: string) => {
+  selectDocById(id)
+  advancedToolsVisible.value = false
+  activeTab.value = 'library'
 }
 
 const resetDocFilters = () => {
@@ -1095,6 +561,17 @@ const resetQueryLayers = () => {
   selectedQueryLayers.value = []
 }
 
+const rollbackMemoryDoc = async (doc: MemoryDoc, revision: number) => {
+  const result = await memoryClient.rollbackDoc(doc.id, revision)
+  if (result?.status === 'rolled_back' || result?.status === 'updated' || result?.status === 'ok') {
+    ElMessage.success(`已恢复到版本 ${revision}`)
+    selectedDocId.value = doc.id
+    await refreshMemoryState()
+  }
+}
+
+provide(memoryInspectorActionsKey, { rollback: rollbackMemoryDoc })
+
 const setDocRemoving = (id: string, removing: boolean) => {
   const next = new Set(removingDocIds.value)
   if (removing) {
@@ -1103,6 +580,13 @@ const setDocRemoving = (id: string, removing: boolean) => {
     next.delete(id)
   }
   removingDocIds.value = next
+}
+
+const setPendingDocId = (target: typeof forgettingDocIds | typeof restoringDocIds, id: string, pending: boolean) => {
+  const next = new Set(target.value)
+  if (pending) next.add(id)
+  else next.delete(id)
+  target.value = next
 }
 
 const scopedDocOptions = () => ({
@@ -1118,7 +602,12 @@ const refreshIndexStatus = async () => {
 }
 
 const refreshMemoryState = async () => {
-  await loadScopedDocs()
+  const options = scopedDocOptions()
+  await Promise.all([
+    loadDocs(options),
+    loadOverview(options),
+    loadForgottenDocs(options),
+  ])
   if (e2eMode) return
   try {
     await refreshIndexStatus()
@@ -1198,6 +687,7 @@ const submitDocument = async () => {
       metadata: scopedMetadata,
       scope: currentMemoryScope.value,
       workspace_id: currentMemoryScope.value === 'global' ? undefined : activeWorkspace.value?.id,
+
       session_id: currentMemoryScope.value === 'session' ? sessionStore.activeSession?.id : undefined,
       layer: typeof scopedMetadata.layer === 'string' ? scopedMetadata.layer : undefined,
     })
@@ -1498,6 +988,7 @@ const removeDoc = async (id: string) => {
       {
         confirmButtonText: '永久删除',
         cancelButtonText: '取消',
+
         type: 'warning',
       },
     )
@@ -1516,6 +1007,46 @@ const removeDoc = async (id: string) => {
     ElMessage.error(error instanceof Error ? error.message : '永久删除失败')
   } finally {
     setDocRemoving(id, false)
+  }
+}
+
+const forgetDoc = async (id: string) => {
+  if (forgettingDocIds.value.has(id)) return
+  try {
+    await ElMessageBox.confirm(
+      '停止召回后，这条记忆不会再参与回答；你仍可在概览中恢复。',
+      '停止召回这条记忆',
+      { confirmButtonText: '停止召回', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+
+  setPendingDocId(forgettingDocIds, id, true)
+  try {
+    const fallbackId = filteredDocs.value.find(doc => doc.id !== id)?.id || ''
+    await softForgetDoc(id, { reason: 'user_soft_forget' })
+    if (selectedDocId.value === id) selectedDocId.value = fallbackId
+    ElMessage.success('已停止召回这条记忆')
+    await refreshMemoryState()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '停止召回失败')
+  } finally {
+    setPendingDocId(forgettingDocIds, id, false)
+  }
+}
+
+const restoreForgottenDoc = async (id: string) => {
+  if (restoringDocIds.value.has(id)) return
+  setPendingDocId(restoringDocIds, id, true)
+  try {
+    await restoreDoc(id, { reason: 'user_restore' })
+    ElMessage.success('这条记忆已恢复召回')
+    await refreshMemoryState()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '恢复召回失败')
+  } finally {
+    setPendingDocId(restoringDocIds, id, false)
   }
 }
 
@@ -1545,6 +1076,25 @@ const docSourceLabel = (doc: MemoryDoc) => {
   return labels[label] || label
 }
 
+const toDateTimeLocal = (value: unknown) => {
+  if (typeof value !== 'string' || !value.trim()) return ''
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return ''
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+const toIsoOrNull = (value: string) => {
+  if (!value.trim()) return null
+  const date = new Date(value)
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null
+}
+
+const preserveTemporalPrecision = (draftValue: string, originalValue: unknown) =>
+  draftValue === toDateTimeLocal(originalValue)
+    ? (typeof originalValue === 'string' ? originalValue : null)
+    : toIsoOrNull(draftValue)
+
 const hydrateInspectorDraft = (doc: MemoryDoc) => {
   inspectorDraft.id = doc.id
   inspectorDraft.text = doc.text || ''
@@ -1553,6 +1103,9 @@ const hydrateInspectorDraft = (doc: MemoryDoc) => {
   inspectorDraft.importance = Number(doc.importance ?? 0.5)
   inspectorDraft.confidence = Number(doc.confidence ?? 0.72)
   inspectorDraft.source = docSourceValue(doc)
+  inspectorDraft.validFrom = toDateTimeLocal(doc.valid_from ?? doc.metadata?.valid_from)
+  inspectorDraft.validTo = toDateTimeLocal(doc.valid_to ?? doc.metadata?.valid_to)
+  inspectorDraft.expiresAt = toDateTimeLocal(doc.expires_at ?? doc.metadata?.expires_at)
 }
 
 const resetInspectorDraft = () => {
@@ -1568,6 +1121,9 @@ const inspectorDraftDirty = computed(() => {
     || Number(inspectorDraft.importance.toFixed(4)) !== Number(Number(doc.importance ?? 0.5).toFixed(4))
     || Number(inspectorDraft.confidence.toFixed(4)) !== Number(Number(doc.confidence ?? 0.72).toFixed(4))
     || inspectorDraft.source !== docSourceValue(doc)
+    || inspectorDraft.validFrom !== toDateTimeLocal(doc.valid_from ?? doc.metadata?.valid_from)
+    || inspectorDraft.validTo !== toDateTimeLocal(doc.valid_to ?? doc.metadata?.valid_to)
+    || inspectorDraft.expiresAt !== toDateTimeLocal(doc.expires_at ?? doc.metadata?.expires_at)
 })
 
 const saveInspectorDraft = async () => {
@@ -1589,6 +1145,9 @@ const saveInspectorDraft = async () => {
           confidence_source: inspectorDraft.source,
           layer: inspectorDraft.layer,
           type: inspectorDraft.type || 'fact',
+          valid_from: preserveTemporalPrecision(inspectorDraft.validFrom, doc.valid_from ?? doc.metadata?.valid_from),
+          valid_to: preserveTemporalPrecision(inspectorDraft.validTo, doc.valid_to ?? doc.metadata?.valid_to),
+          expires_at: preserveTemporalPrecision(inspectorDraft.expiresAt, doc.expires_at ?? doc.metadata?.expires_at),
         },
         edit_reason: 'inspector_edit',
       },
@@ -1645,6 +1204,9 @@ watch(
     selectedDoc.value.importance,
     selectedDoc.value.confidence,
     docSourceValue(selectedDoc.value),
+    selectedDoc.value.valid_from ?? selectedDoc.value.metadata?.valid_from,
+    selectedDoc.value.valid_to ?? selectedDoc.value.metadata?.valid_to,
+    selectedDoc.value.expires_at ?? selectedDoc.value.metadata?.expires_at,
   ] : [],
   () => {
     if (selectedDoc.value && !inspectorDraftSaving.value) hydrateInspectorDraft(selectedDoc.value)
@@ -1659,20 +1221,15 @@ watch(
     hydrateMaintenancePolicy()
     maintenancePreview.value = null
     maintenancePreviewPolicyKey.value = ''
-    void loadScopedDocs()
+    void refreshMemoryState()
   },
 )
 
 onMounted(async () => {
   queryForm.scope = currentMemoryScope.value
-  await loadScopedDocs()
+  await refreshMemoryState()
   openRequestedMemoryDoc()
   if (e2eMode) return
-  try {
-    await refreshIndexStatus()
-  } catch (error) {
-    console.debug('[MemoryPanel] failed to load index status:', error)
-  }
   try {
     const payload = await systemClient.companionRuntime(4)
     if (payload.retrieval_strategy) {
@@ -1687,1000 +1244,35 @@ onMounted(async () => {
 })
 </script>
 
+
 <style scoped>
-.memory-panel,
-.left-column,
-.right-column {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
-}
-
-.panel-toolbar,
-.card-header,
-.button-row,
-.tag-row,
-.filter-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.panel-toolbar,
-.card-header {
-  justify-content: space-between;
-}
-
-.card-header > span {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-
-.toolbar-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.toolbar-field {
-  display: flex;
-  min-width: 150px;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.toolbar-field span,
-.editor-field span {
-  color: var(--yui-muted);
-  font-size: 11px;
-  line-height: 1.25;
-}
-
-.scope-select {
-  width: 150px;
-}
-
-.panel-toolbar {
-  padding: 14px 16px;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-card);
-  background: var(--yui-surface-raised);
-  box-shadow: var(--yui-shadow-card);
-}
-
-.panel-toolbar > div:first-child {
-  min-width: 0;
-}
-
-.panel-toolbar h3 {
-  margin: 0 0 4px;
-  color: var(--yui-text);
-  font-size: 16px;
-  line-height: 1.25;
-}
-
-.memory-metrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
-  gap: 12px;
-}
-
-.memory-metric {
-  min-width: 0;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-card);
-  background: var(--yui-surface-raised);
-  box-shadow: var(--yui-shadow-card);
-  padding: 14px;
-}
-
-.memory-metric span,
-.memory-metric small,
-.index-grid span,
-.doc-meta span {
-  color: var(--yui-muted);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.memory-metric strong {
-  display: block;
-  margin: 7px 0 4px;
-  color: var(--yui-text);
-  font-size: 24px;
-  line-height: 1;
-  font-weight: 900;
-}
-
-.tone-green strong { color: #059669; }
-.tone-blue strong { color: #2563eb; }
-.tone-amber strong { color: #d97706; }
-.tone-rose strong { color: #e11d48; }
-.tone-slate strong { color: #475569; }
-
-.layout-grid {
-  display: grid;
-  grid-template-columns: minmax(320px, 0.72fr) minmax(0, 1.28fr);
-  gap: 16px;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.memory-panel :deep(.el-card),
-.memory-panel :deep(.el-card__header),
-.memory-panel :deep(.el-card__body),
-.memory-panel :deep(.el-form),
-.memory-panel :deep(.el-descriptions),
-.memory-panel :deep(.el-table) {
-  min-width: 0;
-  max-width: 100%;
-}
-
-.memory-panel :deep(.el-card__body) {
-  overflow: hidden;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.form-grid.compact {
-  gap: 8px;
-}
-
-.full-width {
-  width: 100%;
-}
-
-.with-margin,
-.result-state {
-  margin-top: 12px;
-}
-
-.index-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.index-grid > div {
-  min-width: 0;
-  border: 1px solid var(--yui-border);
-  border-radius: 8px;
-  background: var(--yui-surface-muted);
-  padding: 10px;
-}
-
-.index-grid strong {
-  display: block;
-  margin-top: 4px;
-  color: var(--yui-text);
-  font-size: 17px;
-  font-weight: 850;
-  overflow-wrap: anywhere;
-}
-
-.index-health {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  color: var(--yui-muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.index-health span {
-  border-radius: 999px;
-  background: var(--yui-surface-muted);
-  padding: 3px 8px;
-  color: var(--yui-text);
-}
-
-.index-health small {
-  flex-basis: 100%;
-  color: var(--yui-muted);
-  overflow-wrap: anywhere;
-}
-
-.strategy-status {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: baseline;
-  gap: 8px;
-  color: var(--yui-muted);
-  font-size: 12px;
-}
-
-.strategy-status strong {
-  min-width: 0;
-  color: var(--yui-text);
-  overflow-wrap: anywhere;
-}
-
-.layer-map {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.layer-map-item {
-  min-width: 0;
-  border: 1px solid var(--yui-border);
-  border-radius: 8px;
-  background: var(--yui-surface-raised);
-  color: var(--yui-text);
-  cursor: pointer;
-  padding: 10px;
-  text-align: left;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
-}
-
-.layer-map-item:hover,
-.layer-map-item.active {
-  transform: translateY(-1px);
-  border-color: var(--yui-border-strong);
-  box-shadow: var(--yui-shadow-hover);
-}
-
-.layer-map-item.active {
-  background: rgba(37, 99, 235, 0.08);
-}
-
-.layer-map-item strong,
-.review-item strong,
-.doc-card-head strong {
-  display: block;
-  color: var(--yui-text);
-  font-size: 12px;
-  font-weight: 850;
-}
-
-.layer-map-item span {
-  display: block;
-  margin-top: 4px;
-  color: var(--yui-muted);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.maintenance-policy-grid,
-.maintenance-summary {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.maintenance-field {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  color: var(--yui-text);
-  font-size: 12px;
-}
-
-.maintenance-field > span {
-  grid-column: 1 / -1;
-  font-weight: 650;
-}
-
-.maintenance-field :deep(.el-input-number) {
-  width: 100%;
-}
-
-.maintenance-field small,
-.maintenance-threshold span,
-.maintenance-candidates span,
-.maintenance-candidates > small {
-  color: var(--yui-muted);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.maintenance-threshold {
-  display: block;
-  margin-top: 12px;
-}
-
-.maintenance-switches {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 14px;
-  margin: 4px 0 12px;
-}
-
-.maintenance-switches label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--yui-text);
-  font-size: 12px;
-}
-
-.maintenance-summary {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.maintenance-summary > div {
-  min-width: 0;
-  border: 1px solid var(--yui-border);
-  border-radius: 8px;
-  background: var(--yui-surface-muted);
-  padding: 8px;
-}
-
-.maintenance-summary span,
-.maintenance-summary strong {
-  display: block;
-}
-
-.maintenance-summary span {
-  color: var(--yui-muted);
-  font-size: 11px;
-}
-
-.maintenance-summary strong {
-  margin-top: 4px;
-  color: var(--yui-text);
-  font-size: 17px;
-}
-
-.maintenance-candidates {
-  display: flex;
-  max-height: 280px;
-  flex-direction: column;
-  gap: 7px;
-  overflow: auto;
-}
-
-.maintenance-candidates article {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  border: 1px solid var(--yui-border);
-  border-radius: 8px;
-  background: var(--yui-surface-muted);
-  padding: 9px;
-}
-
-.maintenance-candidates article > div {
-  min-width: 0;
-  flex: 1;
-}
-
-.maintenance-candidates strong {
-  display: block;
-  color: var(--yui-text);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-.query-layer-picker {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: stretch;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.query-layer-chip {
-  min-width: 108px;
-  border: 1px solid var(--yui-border);
-  border-radius: 8px;
-  background: var(--yui-surface-raised);
-  color: var(--yui-text);
-  cursor: pointer;
-  padding: 7px 9px;
-  text-align: left;
-  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
-}
-
-.query-layer-chip:hover,
-.query-layer-chip:focus-visible,
-.query-layer-chip.active {
-  outline: none;
-  border-color: var(--yui-border-strong);
-  box-shadow: 0 0 0 2px var(--yui-accent-soft);
-}
-
-.query-layer-chip.active {
-  background: var(--yui-accent-soft);
-}
-
-.query-layer-chip strong,
-.layer-action-grid strong {
-  display: block;
-  color: var(--yui-text);
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1.25;
-}
-
-.query-layer-chip span,
-.layer-action-grid span {
-  display: block;
-  margin-top: 3px;
-  color: var(--yui-muted);
-  font-size: 11px;
-  line-height: 1.35;
-}
-
-.trace-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 12px;
-  padding: 12px;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-card);
-  background: var(--yui-surface-muted);
-}
-
-.duplicate-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid rgba(245, 158, 11, 0.28);
-  border-radius: var(--yui-radius-card);
-  background: var(--yui-warning-soft);
-}
-
-.candidate-row {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-card);
-  background: var(--yui-surface-raised);
-}
-
-.candidate-main {
-  display: grid;
-  grid-template-columns: minmax(88px, auto) minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-}
-
-.candidate-main span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.review-list,
-.query-result-list,
-.memory-doc-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.review-item,
-.query-result-card,
-.memory-doc-card {
-  min-width: 0;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-card);
-  background: var(--yui-surface-raised);
-  padding: 12px;
-}
-
-.review-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.review-item span {
-  display: block;
-  margin-top: 4px;
-  color: var(--yui-muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.query-result-card {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
-  gap: 10px;
-}
-
-.query-rank {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  background: rgba(37, 99, 235, 0.08);
-  color: var(--yui-text);
-  font-size: 12px;
-  font-weight: 850;
-}
-
-.query-result-main {
-  min-width: 0;
-}
-
-.query-result-main p,
-.memory-doc-card p {
-  margin: 0 0 9px;
-  color: var(--yui-text);
-  font-size: 13px;
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-}
-
-.memory-doc-list {
-  max-height: 620px;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-.doc-list-more {
-  min-height: 38px;
-  border: 1px dashed var(--yui-border-strong);
-  border-radius: var(--yui-radius-card);
-  background: var(--yui-surface-muted);
-  color: var(--yui-text);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 760;
-}
-
-.doc-list-more:hover,
-.doc-list-more:focus-visible {
-  outline: none;
-  border-color: var(--yui-accent);
-  box-shadow: 0 0 0 2px var(--yui-accent-soft);
-}
-
-.doc-filter-stack {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-  min-width: 0;
-}
-
-.doc-layout {
-  display: grid;
-  grid-template-columns: minmax(280px, 0.96fr) minmax(260px, 0.74fr);
-  gap: 12px;
-  align-items: start;
-  min-width: 0;
-}
-
-.memory-doc-card {
-  display: block;
-  cursor: pointer;
-  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
-}
-
-.memory-doc-card:hover,
-.memory-doc-card:focus-visible,
-.memory-doc-card.active {
-  outline: none;
-  border-color: var(--yui-border-strong);
-  box-shadow: var(--yui-shadow-hover);
-}
-
-.memory-doc-card.active {
-  background: var(--yui-accent-soft);
-}
-
-.memory-doc-card.hit {
-  border-color: rgba(16, 185, 129, 0.48);
-}
-
-.memory-doc-card.hit:not(.active) {
-  background: var(--yui-success-soft);
-}
-
-.doc-card-main {
-  min-width: 0;
-}
-
-.doc-card-head,
-.doc-meta,
-.doc-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.doc-card-head {
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.doc-meta {
-  flex-wrap: wrap;
-}
-
-.doc-meta span {
-  border-radius: 999px;
-  background: var(--yui-surface-muted);
-  padding: 3px 8px;
-}
-
-.doc-actions {
-  justify-content: flex-start;
-  align-self: start;
-}
-
-.doc-inspector {
-  position: sticky;
-  top: 0;
-  display: flex;
-  min-width: 0;
-  max-height: 620px;
-  flex-direction: column;
-  gap: 12px;
-  overflow: auto;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-card);
-  background: var(--yui-surface-muted);
-  padding: 12px;
-}
-
-.inspector-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-}
-
-.inspector-head > div {
-  min-width: 0;
-}
-
-.inspector-head span {
-  display: block;
-  color: var(--yui-muted);
-  font-size: 11px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-
-.inspector-head strong {
-  display: block;
-  margin-top: 3px;
-  color: var(--yui-text);
-  font-size: 14px;
-  font-weight: 850;
-}
-
-.inspector-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-  border: 1px solid var(--yui-border);
-  border-radius: 8px;
-  background: var(--yui-surface-raised);
-  padding: 10px;
-}
-
-.editor-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.editor-field {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.editor-field-full {
-  grid-column: 1 / -1;
-}
-
-.inspector-text {
-  margin: 0;
-  color: var(--yui-text);
-  font-size: 13px;
-  line-height: 1.7;
-  overflow-wrap: anywhere;
-}
-
-.inspector-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.inspector-grid > div {
-  min-width: 0;
-  border: 1px solid var(--yui-border);
-  border-radius: 8px;
-  background: var(--yui-surface-raised);
-  padding: 9px;
-}
-
-.inspector-grid span {
-  display: block;
-  color: var(--yui-muted);
-  font-size: 11px;
-  line-height: 1.35;
-}
-
-.inspector-grid strong {
-  display: block;
-  margin-top: 4px;
-  color: var(--yui-text);
-  font-size: 12px;
-  font-weight: 820;
-  overflow-wrap: anywhere;
-}
-
-.inspector-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.layer-action-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.layer-action-grid button {
-  min-width: 0;
-  border: 1px solid var(--yui-border);
-  border-radius: 8px;
-  background: var(--yui-surface-raised);
-  cursor: pointer;
-  padding: 8px;
-  text-align: left;
-  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
-}
-
-.layer-action-grid button:hover,
-.layer-action-grid button:focus-visible,
-.layer-action-grid button.active {
-  outline: none;
-  border-color: var(--yui-border-strong);
-  box-shadow: 0 0 0 2px var(--yui-accent-soft);
-}
-
-.layer-action-grid button.active {
-  background: var(--yui-accent-soft);
-}
-
-.inspector-details {
-  border: 1px solid var(--yui-border);
-  border-radius: 8px;
-  background: var(--yui-surface-raised);
-  padding: 9px 10px;
-}
-
-.inspector-details summary {
-  color: var(--yui-text);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 760;
-}
-
-.inspector-details pre {
-  max-height: 210px;
-  margin: 10px 0 0;
-  overflow: auto;
-  color: var(--yui-text);
-  font-size: 11px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.audit-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.audit-list > div {
-  min-width: 0;
-  border-radius: 8px;
-  background: var(--yui-surface-muted);
-  padding: 8px;
-}
-
-.audit-list strong,
-.audit-list span {
-  display: block;
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.audit-list strong {
-  color: var(--yui-text);
-}
-
-.audit-list span {
-  margin-top: 2px;
-  color: var(--yui-muted);
-  overflow-wrap: anywhere;
-}
-
-.trace-header,
-.trace-line {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.trace-header {
-  justify-content: space-between;
-}
-
-.trace-title,
-.trace-label {
-  color: var(--yui-text);
-  font-weight: 600;
-}
-
-.trace-label {
-  min-width: 84px;
-  color: var(--yui-muted);
-}
-
-.trace-ids {
-  align-items: flex-start;
-  flex-wrap: wrap;
-}
-
-.trace-ids code,
-.trace-more {
-  padding: 2px 6px;
-  border-radius: 6px;
-  background: var(--yui-surface-raised);
-  color: var(--yui-text);
-  font-size: 12px;
-}
-
-.tag-row {
-  flex-wrap: wrap;
-}
-
-.tag-row .el-button,
-.button-row .el-button,
-.filter-row .el-input,
-.filter-row .el-select {
-  min-width: 0;
-}
-
-.button-row {
-  flex-wrap: wrap;
-}
-
-.footer-actions {
-  justify-content: flex-end;
-}
-
-.filter-select {
-  width: 140px;
-}
-
-.filter-input {
-  width: 180px;
-}
-
-.important-high {
-  color: var(--el-color-danger);
-  font-weight: 600;
-}
-
-.important-medium {
-  color: var(--el-color-warning);
-  font-weight: 600;
-}
-
-.important-low {
-  color: var(--el-text-color-secondary);
-}
-
-@media (max-width: 960px) {
-  .layout-grid,
-  .form-grid,
-  .doc-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .layout-grid,
-  .left-column,
-  .right-column,
-  .panel-toolbar,
-  .card-header,
-  .doc-filter-stack,
-  .toolbar-actions {
-    width: 100%;
-    max-width: 100%;
-  }
-
-  .panel-toolbar,
-  .card-header,
-  .trace-header,
-  .trace-line,
-  .filter-row,
-  .doc-filter-stack {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .toolbar-actions {
-    justify-content: flex-start;
-  }
-
-  .filter-select,
-  .filter-input,
-  .scope-select,
-  .toolbar-field {
-    width: 100%;
-  }
-
-  .candidate-main {
-    grid-template-columns: 1fr;
-  }
-
-  .layer-map,
-  .index-grid,
-  .memory-doc-card,
-  .inspector-grid,
-  .editor-grid,
-  .layer-action-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .doc-inspector {
-    position: static;
-    max-height: none;
-  }
-
-  .doc-card-head,
-  .doc-actions {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-}
-
-@media (max-width: 760px) {
-  .memory-panel,
-  .left-column,
-  .right-column {
-    gap: 12px;
-  }
-
-  .panel-toolbar {
-    padding: 12px;
-  }
-
-  :deep(.el-card__body) {
-    padding: 14px;
-  }
-
-  .maintenance-policy-grid,
-  .maintenance-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-}
+.memory-panel { display: flex; min-height: 0; flex-direction: column; gap: 14px; }
+.local-status { color: var(--yui-muted); font-size: 11px; }
+.scope-control { display: flex; align-items: center; gap: 7px; color: var(--yui-muted); font-size: 11px; }
+.scope-control :deep(.el-select) { width: 108px; }
+.memory-welcome { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 18px; border: 1px solid var(--yui-border); border-radius: var(--yui-radius-card); background: color-mix(in srgb, var(--yui-accent-soft) 58%, var(--yui-surface)); }
+.welcome-copy { min-width: 0; }
+.welcome-kicker { display: inline-flex; align-items: center; gap: 5px; color: var(--yui-accent); font-size: 11px; font-weight: 700; }
+.welcome-copy h3 { margin: 5px 0 4px; color: var(--yui-text); font-size: 17px; line-height: 1.3; }
+.welcome-copy p { max-width: 58ch; margin: 0; color: var(--yui-muted); font-size: 12px; line-height: 1.55; }
+.memory-health { display: flex; flex: 0 0 auto; align-items: stretch; gap: 8px; }
+.scope-pill, .health-stat { display: flex; min-width: 72px; flex-direction: column; justify-content: center; gap: 3px; padding: 8px 10px; border: 1px solid var(--yui-border); border-radius: var(--yui-radius-control); background: color-mix(in srgb, var(--yui-surface) 80%, transparent); }
+.scope-pill span, .health-stat span { color: var(--yui-muted); font-size: 10px; }
+.scope-pill strong, .health-stat strong { color: var(--yui-text); font-size: 13px; }
+.health-stat.attention { border-color: color-mix(in srgb, #d97706 42%, var(--yui-border)); background: var(--yui-warning-soft); }
+.memory-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--yui-border); }
+.memory-tabs button { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 8px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--yui-muted); font: inherit; font-size: 13px; cursor: pointer; }
+.memory-tabs button[aria-selected="true"] { border-bottom-color: var(--yui-accent); color: var(--yui-text); font-weight: 700; }
+.memory-tabs button .tab-count { display: inline-grid; min-width: 18px; min-height: 18px; margin-left: 2px; place-items: center; border-radius: 9px; background: var(--yui-surface-muted); font-size: 10px; }
+.memory-tabs button[aria-selected="true"] .tab-count { background: var(--yui-accent-soft); color: var(--yui-accent); }
+.memory-tabs button:focus-visible { outline: 2px solid var(--yui-accent); outline-offset: -2px; }
+.tab-context { display: flex; align-items: baseline; gap: 8px; min-height: 18px; color: var(--yui-muted); font-size: 12px; }
+.tab-context strong { color: var(--yui-text); font-size: 12px; }
+.tab-panel { min-width: 0; }
+.tab-panel > :deep(* + *) { margin-top: 18px; }
+.dialog-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.dialog-grid :deep(.el-select), :deep(.el-dialog .el-select) { width: 100%; }
+details summary { margin-bottom: 10px; color: var(--yui-muted); cursor: pointer; font-size: 12px; }
+@media (max-width: 760px) { .scope-control span { display: none; }.memory-welcome { align-items: stretch; flex-direction: column; gap: 12px; }.memory-health { width: 100%; }.scope-pill, .health-stat { flex: 1; }.memory-tabs { position: sticky; top: 0; z-index: 2; background: var(--yui-panel-surface, var(--yui-surface)); }.memory-tabs button { flex: 1; justify-content: center; padding-inline: 8px; }.tab-context { align-items: flex-start; flex-direction: column; gap: 2px; }.dialog-grid { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }
 </style>

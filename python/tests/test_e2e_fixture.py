@@ -102,7 +102,7 @@ def test_fixture_loads_same_four_part_manifest_and_hash() -> None:
         "e2e_controls",
         "cases",
     ]
-    assert MANIFEST_HASH == "e801d039b138ebdb1d5e4dd7ed6f57f34aed9f941b7a6274a6291a50975665ab"
+    assert MANIFEST_HASH == "11d3256146f8e31a18d5f538eff800201db5832461522355b6d89c32256ba3ca"
 
 
 def test_fixture_matcher_keeps_case_variant_below_production_authority() -> None:
@@ -230,6 +230,55 @@ def test_fixture_production_routes_require_consistent_backend_identity(tmp_path:
         json={"case_id": "E2E-08"},
     ).status_code == 200
     assert backend_token not in state.render_log()
+
+
+def test_ping_direction_uses_request_identity_instead_of_arrival_count(tmp_path: Path) -> None:
+    state = E2EState(token="run-token", artifact_dir=tmp_path, backend_token="backend-token")
+    client = TestClient(create_app(state))
+
+    assert client.get("/api/ping").status_code == 200
+    state.start_case("E2E-01")
+    assert client.get("/api/ping").status_code == 200
+    assert client.get("/api/ping", headers={"Origin": state.trusted_socket_origin}).status_code == 200
+    assert client.get("/api/ping", headers={"Authorization": "Bearer backend-token"}).status_code == 200
+    assert client.get("/api/ping", headers={"Origin": "https://untrusted.example"}).status_code == 200
+
+    assert [entry["direction"] for entry in state.entries if entry["name"] == "GET /api/ping"] == [
+        "supervisor->fixture",
+        "main->fixture",
+        "renderer->fixture",
+        "renderer->fixture",
+        "untrusted->fixture",
+    ]
+
+
+def test_onboarding_readiness_run_models_main_process_probe(tmp_path: Path) -> None:
+    backend_token = "backend-token"
+    state = E2EState(token="run-token", artifact_dir=tmp_path, backend_token=backend_token)
+    state.start_case("E2E-01")
+    client = TestClient(create_app(state))
+
+    response = client.post(
+        "/api/system/onboarding/readiness/run",
+        headers={"x-yuizaki-backend-token": backend_token},
+        json={},
+    )
+
+    assert response.status_code == 200
+    snapshot = response.json()
+    assert snapshot["schemaVersion"] == 1
+    assert snapshot["state"] == "completed"
+    assert snapshot["readyForText"] is True
+    assert {probe["id"] for probe in snapshot["probes"]} >= {
+        "backend.service",
+        "llm.provider",
+        "llm.model_chat",
+    }
+    assert state.entries[-1] == {
+        "channel": "http",
+        "direction": "main->fixture",
+        "name": "POST /api/system/onboarding/readiness/run",
+    }
 
 
 def test_socket_connect_requires_exact_backend_token_and_trusted_renderer_origin(tmp_path: Path) -> None:

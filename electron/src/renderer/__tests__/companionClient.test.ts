@@ -16,7 +16,6 @@ describe('companionClient', () => {
   })
 
   it('routes companion management through the Electron control server', async () => {
-    window.sessionStorage.setItem('yuizaki.control.token', 'companion-token')
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -31,9 +30,7 @@ describe('companionClient', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       `${CONTROL_ORIGIN}/api/companions`,
-      expect.objectContaining({
-        headers: expect.objectContaining({ Authorization: 'Bearer companion-token' }),
-      }),
+      expect.any(Object),
     )
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
@@ -41,7 +38,6 @@ describe('companionClient', () => {
       expect.objectContaining({
         method: 'PATCH',
         headers: expect.objectContaining({
-          Authorization: 'Bearer companion-token',
           'Content-Type': 'application/json',
         }),
       }),
@@ -49,9 +45,7 @@ describe('companionClient', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
       `${CONTROL_ORIGIN}/api/companions/default/relationship-history?limit=5`,
-      expect.objectContaining({
-        headers: expect.objectContaining({ Authorization: 'Bearer companion-token' }),
-      }),
+      expect.any(Object),
     )
   })
 

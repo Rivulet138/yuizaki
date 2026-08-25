@@ -361,7 +361,11 @@ def create_realtime_router(
 
             if get_relationship_writer is not None:
                 writer = get_relationship_writer()
-                relationship_event = build_user_signal_event(user_text)
+                relationship_event = build_user_signal_event(
+                    user_text,
+                    workspace_id=workspace_id,
+                    turn_id=payload.turn_id,
+                )
                 if writer and relationship_event:
                     await run_in_threadpool(writer, relationship_event)
 

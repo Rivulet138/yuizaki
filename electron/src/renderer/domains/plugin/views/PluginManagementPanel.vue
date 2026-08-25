@@ -1,15 +1,15 @@
 <template>
-  <PanelShell title="桌宠技能市场" tone="companion">
+  <PanelShell title="桌宠插件" subtitle="查看插件权限、启停状态和执行结果" tone="companion">
     <div class="plugin-console">
-      <section class="plugin-toolbar" aria-label="技能市场操作">
+<section class="plugin-toolbar" aria-label="插件操作">
         <div class="toolbar-summary">
-          <strong>{{ pluginRows.length }} 个技能 · {{ auditLogs.length }} 条调用记录</strong>
+          <strong>{{ pluginRows.length }} 个插件 · {{ auditLogs.length }} 条调用记录</strong>
           <span>运行 {{ activeExecutionCount }} · 失败 {{ loadFailures.length }}</span>
         </div>
         <div class="toolbar-actions">
-          <el-tag :type="blockedOrErrorCount > 0 ? 'danger' : 'success'">{{ blockedOrErrorCount > 0 ? '需要关注' : '运行稳定' }}</el-tag>
-          <el-button plain :disabled="problemPluginCount === 0 && loadFailures.length === 0" @click="showProblemPlugins">查看问题</el-button>
-          <el-button type="primary" :loading="pluginsRequest.loading" @click="loadPlugins">刷新技能快照</el-button>
+          <el-tag :type="blockedOrErrorCount > 0 ? 'danger' : 'success'">{{ blockedOrErrorCount > 0 ? '存在异常' : '无异常' }}</el-tag>
+          <el-button plain :disabled="problemPluginCount === 0 && loadFailures.length === 0" @click="showProblemPlugins">筛选异常插件</el-button>
+<el-button type="primary" :loading="pluginsRequest.loading" @click="loadPlugins">刷新插件状态</el-button>
         </div>
       </section>
 
@@ -26,9 +26,9 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>{{ filteredPluginRows.length }} / {{ pluginRows.length }} 个技能</strong>
+              <strong>{{ filteredPluginRows.length }} / {{ pluginRows.length }} 个插件</strong>
               </div>
-              <el-tag :type="blockedOrErrorCount > 0 ? 'danger' : 'success'">{{ blockedOrErrorCount > 0 ? '需要关注' : '运行稳定' }}</el-tag>
+              <el-tag :type="blockedOrErrorCount > 0 ? 'danger' : 'success'">{{ blockedOrErrorCount > 0 ? '存在异常' : '无异常' }}</el-tag>
             </div>
           </template>
 
@@ -83,7 +83,7 @@
                 </div>
               </button>
             </div>
-            <el-empty v-else description="没有匹配当前筛选的技能" :image-size="72" />
+            <el-empty v-else description="没有匹配当前筛选的插件" :image-size="72" />
           </AsyncState>
         </el-card>
 
@@ -91,7 +91,7 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>{{ selectedPlugin?.name ?? '选择一个技能' }}</strong>
+                <strong>{{ selectedPlugin?.name ?? '选择插件查看详情' }}</strong>
               </div>
               <el-tag :type="statusTagType(selectedPluginState?.status)">{{ statusLabel(selectedPluginState?.status ?? 'loaded') }}</el-tag>
             </div>
@@ -112,7 +112,7 @@
             </div>
 
             <div class="detail-block skill-benefit-block">
-              <label>它会让桌宠多做什么</label>
+              <label>插件能力</label>
               <p class="skill-benefit-text">{{ selectedSkillSummary }}</p>
               <div v-if="selectedPlugin.petEvents?.length" class="tag-wrap">
                 <el-tag v-for="event in selectedPlugin.petEvents" :key="`${event.event}-${event.routeId || 'local'}`" type="info">
@@ -122,7 +122,7 @@
             </div>
 
             <div v-if="selectedPetEventRows.length" class="detail-block pet-trigger-block">
-              <label>桌宠触发方式</label>
+              <label>事件触发</label>
               <div class="pet-trigger-list">
                 <div v-for="event in selectedPetEventRows" :key="`${event.event}-${event.routeId || 'local'}`" class="pet-trigger-row">
                   <div class="pet-trigger-head">
@@ -187,7 +187,7 @@
               />
             </div>
           </div>
-          <el-empty v-else description="未选择技能" />
+            <el-empty v-else description="未选择插件" />
         </el-card>
       </section>
 
@@ -195,11 +195,11 @@
         <el-card class="panel-card" shadow="never">
           <template #header>
             <div class="card-head compact">
-              <strong>正在运行的技能</strong>
+            <strong>运行中的插件</strong>
               <el-tag type="info">{{ selectedPluginState?.activeExecutions.length ?? 0 }} 条</el-tag>
             </div>
           </template>
-          <el-empty v-if="selectedPluginState == null || selectedPluginState.activeExecutions.length === 0" description="当前没有技能在运行" :image-size="56" />
+          <el-empty v-if="selectedPluginState == null || selectedPluginState.activeExecutions.length === 0" description="当前没有插件在运行" :image-size="56" />
           <el-table v-else :data="selectedPluginState.activeExecutions" size="small" stripe>
             <el-table-column prop="invocationId" label="调用 ID" min-width="240" />
             <el-table-column prop="routeId" label="路由" min-width="120" />
@@ -228,7 +228,7 @@
         <el-card class="panel-card" shadow="never">
           <template #header>
             <div class="card-head compact">
-              <strong>技能组成总览</strong>
+            <strong>插件能力组成</strong>
               <el-tag type="info">{{ contributionSummaries.length }} 类</el-tag>
             </div>
           </template>
@@ -239,7 +239,7 @@
               <small>{{ item.items.slice(0, 4).join(' / ') || '暂无条目' }}</small>
             </div>
           </div>
-          <el-empty v-else description="暂无技能组成摘要" :image-size="56" />
+          <el-empty v-else description="暂无插件能力摘要" :image-size="56" />
         </el-card>
       </section>
 
@@ -247,11 +247,11 @@
         <el-card class="panel-card" shadow="never">
           <template #header>
             <div class="card-head compact">
-              <strong>安装失败 / 清单错误</strong>
+            <strong>加载失败 / 清单错误</strong>
               <el-tag :type="loadFailures.length > 0 ? 'danger' : 'success'">{{ loadFailures.length }} 条</el-tag>
             </div>
           </template>
-          <el-empty v-if="loadFailures.length === 0" description="暂无技能安装失败记录" :image-size="56" />
+          <el-empty v-if="loadFailures.length === 0" description="暂无插件加载失败记录" :image-size="56" />
           <el-table v-else :data="loadFailures" size="small" stripe height="220">
             <el-table-column prop="manifestPath" label="清单路径" min-width="220" />
             <el-table-column prop="pluginId" label="技能 ID" min-width="120" />
@@ -262,11 +262,11 @@
         <el-card class="panel-card" shadow="never">
           <template #header>
             <div class="card-head compact">
-              <strong>高级调用记录</strong>
+            <strong>调用审计记录</strong>
               <el-tag type="info">最近 {{ auditLogs.length }} 条</el-tag>
             </div>
           </template>
-          <el-empty v-if="auditLogs.length === 0" description="暂无调用审计记录" :image-size="56" />
+          <el-empty v-if="auditLogs.length === 0" description="暂无插件调用记录" :image-size="56" />
           <el-table v-else :data="auditLogs" size="small" stripe height="240">
             <el-table-column prop="timestamp" label="时间" min-width="160" />
             <el-table-column prop="pluginId" label="技能" min-width="130" />
@@ -405,7 +405,7 @@ const pluginSkillSummary = (plugin: DesktopPetPlugin & { lastError?: string }) =
   }
   const primaryTool = plugin.toolCapabilities?.[0]
   if (primaryTool) {
-    return primaryTool.desc || `让桌宠使用「${primaryTool.name}」能力`
+  return primaryTool.desc || `可调用工具：${primaryTool.name}`
   }
   const primaryModel = plugin.modelProviders?.[0]
   if (primaryModel) {
@@ -449,7 +449,7 @@ const contributionSummaries = computed(() =>
   (payload.value?.contributionSummary ?? []).filter((item) => item.category !== 'ui'),
 )
 const problemPluginCount = computed(() => pluginRows.value.filter((plugin) => plugin.status !== 'loaded').length)
-const selectedSkillSummary = computed(() => selectedPlugin.value ? pluginSkillSummary(selectedPlugin.value) : '选择一个技能查看它会让桌宠多做什么')
+const selectedSkillSummary = computed(() => selectedPlugin.value ? pluginSkillSummary(selectedPlugin.value) : '选择插件查看能力、权限和触发条件')
 const selectedPetEventRows = computed(() => (selectedPlugin.value?.petEvents ?? []).map(buildPetEventRow))
 const selectedPermissionExplanations = computed(() => selectedPlugin.value ? buildPermissionExplanations(selectedPlugin.value) : [])
 

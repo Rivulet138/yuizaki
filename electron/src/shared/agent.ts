@@ -682,6 +682,14 @@ export interface HeartbeatBehaviorEvent {
   goal_id?: string
   expires_at?: number
   trigger_reason?: string
+  content_code?: string
+  sourceKind?: import('./proactive').ProactiveSource
+  source_kind?: import('./proactive').ProactiveSource
+  sourceId?: string
+  source_id?: string
+  frame_id?: string
+  frameId?: string
+  activity_frame_id?: string
   proactive_state?: {
     can_proactively_reach_out: boolean
     suppression_reasons?: string[]

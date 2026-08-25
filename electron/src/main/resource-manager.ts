@@ -152,7 +152,7 @@ const GENIE_CHARACTER_ROOT = path.join(PYTHON_DIR, 'CharacterModels', 'v2ProPlus
 const GENIE_CHARACTER_METADATA_ROOT = path.join(HF_CACHE_ROOT, 'download', 'CharacterModels', 'v2ProPlus')
 const SOULX_SERVICE_DIR = path.join(PROJECT_ROOT, 'services', 'soulx-svc')
 const SOULX_DOWNLOAD_SCRIPT = path.join(SOULX_SERVICE_DIR, 'download_models.py')
-const SOULX_LAUNCHER = path.join(PROJECT_ROOT, process.platform === 'win32' ? 'start_soulx_svc.bat' : 'start_soulx_svc.sh')
+const SOULX_LAUNCHER = path.join(SOULX_SERVICE_DIR, 'docker-compose.yml')
 const SOULX_MODEL_DIR = path.join(SOULX_SERVICE_DIR, 'models', 'SoulX-Singer')
 const SOULX_PREPROCESS_DIR = path.join(SOULX_SERVICE_DIR, 'models', 'SoulX-Singer-Preprocess')
 const SOULX_REFERENCE_DIR = path.join(SOULX_SERVICE_DIR, 'references')

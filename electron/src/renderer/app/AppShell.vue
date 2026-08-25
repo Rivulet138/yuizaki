@@ -41,7 +41,11 @@
           />
 
           <main class="app-main" :class="activeTab === 'chat' ? 'chat-mode' : 'panel-mode'">
-            <div class="view-host">
+            <div
+              class="view-host"
+              data-testid="route-view"
+              :data-route-name="activeTab"
+            >
               <router-view v-slot="{ Component, route }">
                 <keep-alive>
                   <component :is="Component" v-if="Component" :key="route.name" class="view-component" />
@@ -1134,6 +1138,47 @@ watch(
 
 .yuizaki-bg .el-card__header {
   font-weight: 750;
+}
+
+.yuizaki-bg .panel-mode .el-alert__content,
+.yuizaki-bg .panel-mode .el-alert__title,
+.yuizaki-bg .panel-mode .el-alert__description {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.yuizaki-bg .panel-mode .el-slider {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.yuizaki-bg .panel-mode .el-card__body,
+.yuizaki-bg .panel-mode .el-card__header,
+.yuizaki-bg .panel-mode .toolbar-actions,
+.yuizaki-bg .panel-mode .hero-actions,
+.yuizaki-bg .panel-mode .card-head,
+.yuizaki-bg .panel-mode .card-header,
+.yuizaki-bg .panel-mode .section-header {
+  min-width: 0;
+}
+
+.yuizaki-bg .panel-mode .toolbar-actions,
+.yuizaki-bg .panel-mode .hero-actions {
+  flex-wrap: wrap;
+}
+
+.yuizaki-bg .panel-mode .metric-card,
+.yuizaki-bg .panel-mode .summary-card,
+.yuizaki-bg .panel-mode .status-card,
+.yuizaki-bg .panel-mode .panel-card {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.yuizaki-bg .app-main.panel-mode > .view-host > .view-component > .panel-shell {
+  background: var(--yui-panel-surface-strong, var(--yui-panel-surface));
 }
 
 .yuizaki-bg .el-table,

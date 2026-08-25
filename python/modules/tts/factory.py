@@ -5,6 +5,7 @@ from pathlib import Path
 from modules.tts.openai_compatible import OpenAICompatibleTTSClient
 from modules.tts.provider import TTSProviderClient
 from modules.tts.synthesizer import TTSClient
+from modules.system.voice_diagnostics import VoiceDiagnostics
 
 
 def create_tts_client(
@@ -26,6 +27,7 @@ def create_tts_client(
     mode: str,
     save_mode: str,
     audio_cache_dir: Path,
+    diagnostics: VoiceDiagnostics | None = None,
 ) -> TTSProviderClient:
     normalized_provider = provider.strip().lower()
     if normalized_provider == "openai-compatible":
@@ -36,6 +38,7 @@ def create_tts_client(
             voice=voice,
             timeout=timeout,
             audio_cache_dir=audio_cache_dir,
+            diagnostics=diagnostics,
         )
     if normalized_provider != "genie-tts":
         raise ValueError(f"Unsupported TTS provider: {provider}")
@@ -51,4 +54,5 @@ def create_tts_client(
         mode=mode,
         save_mode=save_mode,
         audio_cache_dir=audio_cache_dir,
+        diagnostics=diagnostics,
     )

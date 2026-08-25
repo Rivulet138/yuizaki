@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any, Dict
 
 from .memory_write_pipeline import normalize_relationship_memory_payload, persist_relationship_memory
+from ..memory.metadata import is_metadata_recallable
 
 __all__ = [
     "collect_relationship_events",
@@ -30,6 +31,8 @@ def collect_relationship_events(
     events: list[Dict[str, Any]] = []
     for doc in reversed(docs):
         meta = doc.metadata or {}
+        if not is_metadata_recallable(meta):
+            continue
         if meta.get("event_type") != "relationship_state":
             continue
         if companion_id and meta.get("companion_id") != companion_id:
@@ -114,17 +117,27 @@ def build_relationship_memory_writer(
     resolve_relationship_scope: Callable[[str, str | None], str],
     normalize_relationship_importance: Callable[[str, float | int | None], float],
 ) -> Callable[[dict[str, Any]], None]:
-    def _writer(payload: dict[str, Any]) -> None:
-        write_relationship_memory(
-            payload,
-            get_active_workspace_id=get_active_workspace_id,
-            get_db_repo=get_db_repo,
-            get_memory_store=get_memory_store,
-            resolve_relationship_scope=resolve_relationship_scope,
-            normalize_relationship_importance=normalize_relationship_importance,
-        )
+    class _WorkspaceAwareWriter:
+        def _write(self, payload: dict[str, Any], workspace_id: str) -> None:
+            write_relationship_memory(
+                payload,
+                get_active_workspace_id=lambda: workspace_id,
+                get_db_repo=get_db_repo,
+                get_memory_store=get_memory_store,
+                resolve_relationship_scope=resolve_relationship_scope,
+                normalize_relationship_importance=normalize_relationship_importance,
+            )
 
-    return _writer
+        def __call__(self, payload: dict[str, Any]) -> None:
+            self._write(payload, get_active_workspace_id())
+
+        def for_workspace(self, workspace_id: str) -> Callable[[dict[str, Any]], None]:
+            bound_workspace_id = str(workspace_id or "").strip()
+            if not bound_workspace_id:
+                raise ValueError("workspace_id is required")
+            return lambda payload: self._write(payload, bound_workspace_id)
+
+    return _WorkspaceAwareWriter()
 
 
 def build_recent_relationship_history_provider(

@@ -44,6 +44,7 @@ type ScreenshotOptions = {
   turnId?: string;
   jobId?: string;
   requestId?: string;
+  generationId?: string;
   interruptionEpoch?: number;
 };
 export type ToolCallOptions = {
@@ -339,6 +340,7 @@ export class SocketClient {
     if (options.turnId) payload.turn_id = options.turnId;
     if (options.jobId) payload.job_id = options.jobId;
     if (options.requestId) payload.request_id = options.requestId;
+    if (options.generationId) payload.generation_id = options.generationId;
     if (options.interruptionEpoch !== undefined) payload.interruption_epoch = options.interruptionEpoch;
     this.emit(SocketEvents.SCREENSHOT_REQUEST, payload);
   }

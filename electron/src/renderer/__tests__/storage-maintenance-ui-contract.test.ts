@@ -32,7 +32,7 @@ describe('storage maintenance UI contract', () => {
   })
 
   it('reuses the resource refresh orchestration during initialization', () => {
-    expect(source).toContain('await Promise.all([refreshResourcePanel(), loadTtsStatus()])')
+    expect(source).toContain('await Promise.all([refreshResourcePanel(), loadTtsStatus(), loadLlmStatus()])')
     expect(source).not.toContain('await Promise.all([loadResourceStatus(), loadStorageStatus(), loadTtsStatus()])')
   })
 })

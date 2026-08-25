@@ -37,6 +37,7 @@ describe('PythonService', () => {
     delete process.env['SERVER_HOST']
     delete process.env['SERVER_PORT']
     delete process.env['YUIZAKI_BACKEND_API_TOKEN']
+    delete process.env['YUIZAKI_HOST_DESKTOP_ACTION_TOKEN']
   }
 
   beforeEach(() => {
@@ -69,6 +70,23 @@ describe('PythonService', () => {
       }),
     )
     expect(axiosGetMock).toHaveBeenCalledWith('http://127.0.0.1:8123/api/ping', expect.any(Object))
+  })
+
+  it('passes the dedicated desktop action token only through the child environment', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    spawnMock.mockReturnValue(createChildProcess())
+    axiosGetMock.mockResolvedValue({ data: { status: 'healthy' } })
+
+    const { PythonService } = await import('../python')
+    await new PythonService('general-token', {}, 'perception-token', 'desktop-host-token').start()
+
+    const spawnOptions = spawnMock.mock.calls[0]?.[2] as { env?: Record<string, string> }
+    expect(spawnOptions.env).toMatchObject({
+      YUIZAKI_BACKEND_API_TOKEN: 'general-token',
+      YUIZAKI_HOST_PERCEPTION_TOKEN: 'perception-token',
+      YUIZAKI_HOST_DESKTOP_ACTION_TOKEN: 'desktop-host-token',
+    })
+    expect(process.env['YUIZAKI_HOST_DESKTOP_ACTION_TOKEN']).toBeUndefined()
   })
 
   it('normalizes explicit backend health URLs before deriving uvicorn args', async () => {
@@ -121,5 +139,35 @@ describe('PythonService', () => {
     const { PythonService } = await import('../python')
 
     await expect(new PythonService().health()).resolves.toBe(false)
+  })
+
+  it('cancels an in-flight start, rejects its stale health result, and allows retry without an orphan', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    let resolveFirstHealth: ((value: { data: { ok: boolean } }) => void) | undefined
+    axiosGetMock.mockImplementationOnce(() => new Promise((resolve) => { resolveFirstHealth = resolve }))
+    const firstChild = createChildProcess()
+    firstChild.kill.mockImplementation(() => {
+      queueMicrotask(() => firstChild.emit('exit', null))
+      return true
+    })
+    const secondChild = createChildProcess()
+    spawnMock.mockReturnValueOnce(firstChild).mockReturnValueOnce(secondChild)
+
+    const { PythonService } = await import('../python')
+    const service = new PythonService()
+    const firstStart = service.start()
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledOnce())
+    const cancellation = service.cancelStart()
+    resolveFirstHealth?.({ data: { ok: true } })
+
+    await expect(firstStart).rejects.toThrow(/cancelled/)
+    await cancellation
+    expect(firstChild.kill).toHaveBeenCalledWith('SIGTERM')
+    expect(service.getStatus().state).toBe('cancelled')
+
+    axiosGetMock.mockResolvedValue({ data: { ok: true } })
+    await expect(service.start()).resolves.toBeUndefined()
+    expect(spawnMock).toHaveBeenCalledTimes(2)
+    expect(service.getStatus().state).toBe('running')
   })
 })

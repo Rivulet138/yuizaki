@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
@@ -105,3 +106,27 @@ def test_sqlite_memory_compaction_releases_free_pages(tmp_path):
     assert free_pages_after == 0
     assert result["backend"] == "sqlite"
     assert result["after_bytes"] <= result["before_bytes"]
+
+
+def test_sqlite_concurrent_updates_preserve_every_revision(tmp_path):
+    db_path = tmp_path / "memory.db"
+    store = SQLiteMemoryStore(db_path, embedding_service=_FakeEmbeddingService())
+    store.add_metadata_document(Document(id="shared", text="revision 1", metadata={}))
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        list(executor.map(
+            lambda revision: store.add_metadata_document(Document(
+                id="shared",
+                text=f"revision {revision}",
+                metadata={},
+            )),
+            range(2, 12),
+        ))
+
+    current = next(doc for doc in store.list_documents() if doc.id == "shared")
+    reopened = SQLiteMemoryStore(db_path, embedding_service=_FakeEmbeddingService())
+    persisted = next(doc for doc in reopened.list_documents() if doc.id == "shared")
+    assert current.metadata["revision"] == 11
+    assert len(current.metadata["version_history"]) == 10
+    assert persisted.text == current.text
+    assert persisted.metadata == current.metadata

@@ -9,7 +9,8 @@ import { resourceClient } from './clients/resource-client'
 import { workspaceClient } from './clients/workspace-client'
 import { companionClient } from './clients/companion-client'
 import { i18nClient } from './clients/i18n-client'
+import { proactiveClient } from './clients/proactive-client'
 
 export const petControlClient = petControl
 
-export { systemClient, summaryClient, settingsClient, memoryClient, chatClient, shortcutClient, pluginClient, resourceClient, workspaceClient, companionClient, i18nClient }
+export { systemClient, summaryClient, settingsClient, memoryClient, chatClient, shortcutClient, pluginClient, resourceClient, workspaceClient, companionClient, i18nClient, proactiveClient }

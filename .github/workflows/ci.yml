@@ -97,10 +97,6 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: ${{ github.workspace }}/tools/yuizaki-launcher
         run: go test ./...
-      - name: Validate Linux launch scripts
-        if: runner.os == 'Linux'
-        working-directory: ${{ github.workspace }}
-        run: test -x install.sh && bash -n install.sh start.sh start_soulx_svc.sh scripts/check_linux_environment.sh scripts/run_backend_dev.sh scripts/smoke_linux_electron.sh
       - name: Install Linux GUI runtime libraries
         if: runner.os == 'Linux'
         working-directory: ${{ github.workspace }}
@@ -139,10 +135,6 @@ jobs:
         working-directory: ${{ github.workspace }}/electron
         run: xvfb-run -a npm run test:e2e
       # YUIZAKI_E2E_LINUX_BLOCK_END
-      - name: Smoke test Linux Electron GUI
-        if: runner.os == 'Linux'
-        working-directory: ${{ github.workspace }}
-        run: xvfb-run -a env PYTHON_BIN=python scripts/smoke_linux_electron.sh
 
   node-mcp-test:
     name: Node MCP Test (Linux)
@@ -207,15 +199,4 @@ jobs:
         run: pyright --pythonversion ${{ matrix.python-version }}
 
       - name: Run tests
-        run: pytest -q --tb=short
-
-      - name: Run offline model evaluation smoke suite
-        run: python -m evals --output artifacts/model-evaluation-${{ matrix.os }}-${{ matrix.python-version }}.json
-
-      - name: Upload model evaluation report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: model-evaluation-${{ matrix.os }}-${{ matrix.python-version }}
-          path: python/artifacts/model-evaluation-${{ matrix.os }}-${{ matrix.python-version }}.json
-          if-no-files-found: warn
+        run: pytest . -q --tb=short

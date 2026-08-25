@@ -1,5 +1,5 @@
 <template>
-  <PanelShell :title="t('i18n.title')" tone="admin">
+  <PanelShell :title="t('i18n.title')" subtitle="切换界面语言，检查后端翻译并查询键值" tone="admin">
     <div class="i18n-panel">
       <el-card shadow="never">
         <template #header>

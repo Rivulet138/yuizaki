@@ -32,7 +32,8 @@ class PolicyEngine:
 
     当前策略：
     - safe / low：允许
-    - 任何 require_confirm=True 且 risk_level in (medium/high/critical)：默认拒绝
+    - medium：由工具所属服务或插件的启用选择授权
+    - require_confirm=True 或 high / critical：请求用户确认
     """
 
     def __init__(self, store_file: str | Path | None = None) -> None:
@@ -89,6 +90,11 @@ class PolicyEngine:
         scope = (permission_scope or "default").strip() or "default"
         return f"{tool_name}::{scope}"
 
+    @staticmethod
+    def _is_selected_external_tool(tool: ToolDefinition) -> bool:
+        """MCP/plugin enablement is the authorization decision for that tool."""
+        return tool.source in {"mcp", "plugin"} and not tool.require_confirm
+
     def get_audit_log(self, limit: int = 100) -> list[dict[str, object]]:
         take = max(1, min(int(limit), self._audit_max_entries))
         return self._audit[-take:]
@@ -123,6 +129,37 @@ class PolicyEngine:
         ).to_dict())
         return count
 
+    def preview_tool(
+        self,
+        tool: ToolDefinition,
+        request_id: str | None = None,
+        permission_scope: str | None = None,
+        parameters: object | None = None,
+        force_confirm: bool = False,
+    ) -> PolicyDecision:
+        """Return the current policy outcome without creating control-plane state."""
+
+        del request_id, parameters
+        if self._is_selected_external_tool(tool):
+            return PolicyDecision(allowed=True)
+        scope_key = self._build_scope_key(tool.name, permission_scope)
+        remembered = self._remembered.get(scope_key)
+        if remembered is True and not tool.allow_remembered_decision:
+            remembered = None
+        if remembered is not None and (not force_confirm or remembered is False):
+            return PolicyDecision(allowed=remembered, reason="remembered")
+        if force_confirm or tool.require_confirm or tool.risk_level in {"high", "critical"}:
+            return PolicyDecision(
+                allowed=False,
+                reason=(
+                    "untrusted_mcp_followup_requires_confirmation"
+                    if force_confirm
+                    else "permission_required"
+                ),
+                require_confirm=True,
+            )
+        return PolicyDecision(allowed=True)
+
     def evaluate_tool(
         self,
         tool: ToolDefinition,
@@ -135,6 +172,9 @@ class PolicyEngine:
         scope = (permission_scope or "default").strip() or "default"
         permission_request_id = f"perm_{uuid.uuid4().hex[:12]}"
         capability_call_id = f"call_{uuid.uuid4().hex[:12]}"
+
+        if self._is_selected_external_tool(tool):
+            return PolicyDecision(allowed=True)
 
         def receipt(decision: PermissionDecision, reason_code: str, *, retryable: bool) -> PermissionReceipt:
             return build_permission_receipt(
@@ -152,9 +192,14 @@ class PolicyEngine:
                 parameters=parameters or {},
             )
 
-        scope_key = self._build_scope_key(tool.name, permission_scope)
-        remembered = self._remembered.get(scope_key)
-        if remembered is not None and (not force_confirm or remembered is False):
+        preview = self.preview_tool(
+            tool,
+            request_id=request_id,
+            permission_scope=permission_scope,
+            parameters=parameters,
+            force_confirm=force_confirm,
+        )
+        if preview.reason == "remembered":
             self._append_audit(PermissionAuditRecord(
                 timestamp=datetime.now().isoformat(),
                 tool_name=tool.name,
@@ -162,7 +207,7 @@ class PolicyEngine:
                 capability_type="tool",
                 capability_kind=f"{tool.source}-tool",
                 remember_scope=(permission_scope or "default").strip() or "default",
-                decision="remembered_allow" if remembered else "remembered_deny",
+                decision="remembered_allow" if preview.allowed else "remembered_deny",
                 risk_level=tool.risk_level,
                 request_id=request_id,
                 requires_approval=bool(tool.require_confirm),
@@ -172,16 +217,16 @@ class PolicyEngine:
                 permission_scope=scope,
             ).to_dict())
             return PolicyDecision(
-                allowed=remembered,
+                allowed=preview.allowed,
                 reason="remembered",
                 permission_receipt=receipt(
-                    "allowed" if remembered else "denied",
-                    "remembered_allow" if remembered else "remembered_deny",
-                    retryable=bool(remembered),
+                    "allowed" if preview.allowed else "denied",
+                    "remembered_allow" if preview.allowed else "remembered_deny",
+                    retryable=bool(preview.allowed),
                 ),
             )
 
-        if force_confirm or tool.require_confirm or tool.risk_level in {"medium", "high", "critical"}:
+        if preview.require_confirm:
             reason_code = "untrusted_mcp_followup_requires_confirmation" if force_confirm else "permission_required"
             with self._store_lock:
                 self._permission_metadata[permission_request_id] = {
@@ -233,7 +278,7 @@ class PolicyEngine:
             permission_scope=scope,
         ).to_dict())
         return PolicyDecision(
-            allowed=True,
+            allowed=preview.allowed,
             permission_receipt=receipt("allowed", "policy_auto_allow", retryable=True),
         )
 

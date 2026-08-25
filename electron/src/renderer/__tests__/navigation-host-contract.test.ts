@@ -27,6 +27,10 @@ describe('navigation view host', () => {
   })
 
   it('keeps the desktop pet primary navigation focused on daily use', () => {
+    const moduleIds = staticNavigationModuleRecords.map((module) => module.id)
+    expect(new Set(moduleIds).size).toBe(moduleIds.length)
+    expect(new Set(router.getRoutes().map((route) => route.name).filter(Boolean)).size)
+      .toBe(router.getRoutes().map((route) => route.name).filter(Boolean).length)
     expect(primaryNavigationModules().map((module) => module.id)).toEqual([
       'chat',
       'memory',
@@ -65,5 +69,11 @@ describe('navigation view host', () => {
     expect(toolPanel).toContain("canonicalPath('agent-governance')")
     expect(overviewPanel).toContain("canonicalPath('infrastructure')")
     expect(overviewPanel).toContain("canonicalPath('deploy')")
+  })
+
+  it('treats enabled MCP and plugin tools as selected capabilities without per-call approval', () => {
+    expect(toolPanel).toContain("['mcp-tool', 'plugin-tool'].includes(item.kind)")
+    expect(toolPanel).toContain("return '启用即授权'")
+    expect(toolPanel).toContain('关闭后停止调用')
   })
 })

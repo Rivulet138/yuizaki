@@ -13,11 +13,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -40,6 +42,8 @@ type launcherConfig struct {
 	nodeMCPDir       string
 	scriptsDir       string
 	logDir           string
+	stateDir         string
+	statePath        string
 	backendURL       string
 	controlURL       string
 	rendererOrigin   string
@@ -62,6 +66,7 @@ type launcherConfig struct {
 	renderFallbacks  string
 	mcpPort          string
 	token            string
+	autoInstall      bool
 	env              map[string]string
 	logger           *logHub
 }
@@ -90,7 +95,139 @@ type electronBuildState struct {
 	OutputFingerprint string `json:"outputFingerprint"`
 }
 
+type supervisorState struct {
+	PID        int            `json:"pid"`
+	RootDir    string         `json:"rootDir"`
+	StartedAt  string         `json:"startedAt"`
+	BackendURL string         `json:"backendUrl"`
+	ControlURL string         `json:"controlUrl"`
+	MCPURL     string         `json:"mcpUrl"`
+	Services   map[string]int `json:"services"`
+}
+
+type launcherAction string
+
+const (
+	actionStart          launcherAction = "start"
+	actionSetup          launcherAction = "setup"
+	actionStop           launcherAction = "stop"
+	actionStatus         launcherAction = "status"
+	actionLogs           launcherAction = "logs"
+	actionInstallDesktop launcherAction = "install-desktop"
+	actionRemoveDesktop  launcherAction = "remove-desktop"
+)
+
+func parseAction(args []string) (launcherAction, []string) {
+	if len(args) == 0 {
+		return actionStart, args
+	}
+	switch launcherAction(args[0]) {
+	case actionStart, actionSetup, actionStop, actionStatus, actionLogs, actionInstallDesktop, actionRemoveDesktop:
+		return launcherAction(args[0]), args[1:]
+	default:
+		return actionStart, args
+	}
+}
+
+func resolveProjectRoot() (string, error) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	candidates := []string{filepath.Dir(exePath)}
+	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+		candidates = append(candidates, cwd)
+	}
+	for _, candidate := range candidates {
+		current, absErr := filepath.Abs(candidate)
+		if absErr != nil {
+			continue
+		}
+		for {
+			if _, statErr := os.Stat(filepath.Join(current, "electron", "package.json")); statErr == nil {
+				return current, nil
+			}
+			parent := filepath.Dir(current)
+			if parent == current {
+				break
+			}
+			current = parent
+		}
+	}
+	return "", fmt.Errorf("Yuizaki project root not found beside launcher or current directory")
+}
+
+func launcherStateDir(root string) string {
+	if runtime.GOOS == "windows" {
+		if base := strings.TrimSpace(os.Getenv("APPDATA")); base != "" {
+			return filepath.Join(base, "Yuizaki")
+		}
+		return filepath.Join(root, ".yuizaki", "state")
+	}
+	if base := strings.TrimSpace(os.Getenv("XDG_STATE_HOME")); base != "" {
+		return filepath.Join(base, "yuizaki")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".local", "state", "yuizaki")
+	}
+	return filepath.Join(root, ".yuizaki", "state")
+}
+
+func loadDotEnv(path string, values map[string]string) {
+	file, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		if key == "" {
+			continue
+		}
+		value := strings.Trim(strings.TrimSpace(parts[1]), "\"'")
+		if strings.TrimSpace(values[key]) == "" {
+			values[key] = value
+		}
+	}
+}
+
 func main() {
+	action, remaining := parseAction(os.Args[1:])
+	if action != actionStart {
+		var err error
+		switch action {
+		case actionSetup:
+			err = runSetup(remaining)
+		case actionStop:
+			err = runStop()
+		case actionStatus:
+			err = runStatus()
+		case actionLogs:
+			err = runLogs(remaining)
+		case actionInstallDesktop:
+			err = runDesktopShortcut(true)
+		case actionRemoveDesktop:
+			err = runDesktopShortcut(false)
+		default:
+			err = fmt.Errorf("unknown launcher command: %s", action)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[launcher] %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	os.Args = append([]string{os.Args[0]}, remaining...)
 	cfg, err := newConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[launcher] %v\n", err)
@@ -116,16 +253,9 @@ func main() {
 }
 
 func newConfig() (*launcherConfig, error) {
-	exePath, err := os.Executable()
+	rootDir, err := resolveProjectRoot()
 	if err != nil {
 		return nil, err
-	}
-	rootDir := filepath.Dir(exePath)
-	if _, err := os.Stat(filepath.Join(rootDir, "start.bat")); err != nil {
-		cwd, cwdErr := os.Getwd()
-		if cwdErr == nil {
-			rootDir = cwd
-		}
 	}
 	rootDir, err = filepath.Abs(rootDir)
 	if err != nil {
@@ -133,6 +263,8 @@ func newConfig() (*launcherConfig, error) {
 	}
 
 	env := envMap()
+	loadDotEnv(filepath.Join(rootDir, "python", ".env"), env)
+	stateDir := launcherStateDir(rootDir)
 	cfg := &launcherConfig{
 		rootDir:          rootDir,
 		pythonDir:        filepath.Join(rootDir, "python"),
@@ -140,17 +272,20 @@ func newConfig() (*launcherConfig, error) {
 		nodeMCPDir:       filepath.Join(rootDir, "node-mcp"),
 		scriptsDir:       filepath.Join(rootDir, "scripts"),
 		logDir:           filepath.Join(rootDir, "logs", "dev"),
+		stateDir:         stateDir,
+		statePath:        filepath.Join(stateDir, "supervisor.json"),
 		withMCP:          mcpEnabled(env),
 		devRenderer:      envOrMap(env, "YUIZAKI_USE_VITE", "0") == "1",
 		noQdrant:         !qdrantAutoStartEnabled(env),
-		serverHost:       envOr("SERVER_HOST", "127.0.0.1"),
-		serverPort:       envOr("SERVER_PORT", defaultBackendPort),
-		serverFallbacks:  envOr("SERVER_PORT_FALLBACKS", "8011,8012,8013,8014,8015,8021,8022"),
-		controlPort:      envOr("CONTROL_SERVER_PORT", defaultControlPort),
-		controlFallbacks: envOr("CONTROL_SERVER_PORT_FALLBACKS", "38946,38947,38948,38949"),
-		rendererPort:     envOr("RENDERER_PORT", defaultRendererPort),
-		renderFallbacks:  envOr("RENDERER_PORT_FALLBACKS", "5174,5175,5176,5177"),
-		mcpPort:          envOr("MCP_PORT", defaultMCPPort),
+		serverHost:       envOrMap(env, "SERVER_HOST", "127.0.0.1"),
+		serverPort:       envOrMap(env, "SERVER_PORT", defaultBackendPort),
+		serverFallbacks:  envOrMap(env, "SERVER_PORT_FALLBACKS", "8011,8012,8013,8014,8015,8021,8022"),
+		controlPort:      envOrMap(env, "CONTROL_SERVER_PORT", defaultControlPort),
+		controlFallbacks: envOrMap(env, "CONTROL_SERVER_PORT_FALLBACKS", "38946,38947,38948,38949"),
+		rendererPort:     envOrMap(env, "RENDERER_PORT", defaultRendererPort),
+		renderFallbacks:  envOrMap(env, "RENDERER_PORT_FALLBACKS", "5174,5175,5176,5177"),
+		mcpPort:          envOrMap(env, "MCP_PORT", defaultMCPPort),
+		autoInstall:      true,
 		env:              env,
 	}
 
@@ -162,6 +297,7 @@ func newConfig() (*launcherConfig, error) {
 	withQdrant := flagSet.Bool("with-qdrant", false, "start Qdrant Docker when memory backend needs it")
 	flagSet.BoolVar(&cfg.smoke, "smoke", false, "run lightweight smoke checks after startup")
 	flagSet.BoolVar(&cfg.checkOnly, "check", false, "run startup preflight checks only")
+	noInstall := flagSet.Bool("no-install", false, "disable automatic dependency installation")
 	noMCP := flagSet.Bool("no-mcp", false, "do not start MCP service")
 	noDevRenderer := flagSet.Bool("no-dev-renderer", false, "serve built renderer through Electron control server")
 	devRenderer := flagSet.Bool("dev-renderer", cfg.devRenderer, "start Vite dev renderer")
@@ -179,6 +315,9 @@ func newConfig() (*launcherConfig, error) {
 	if *withQdrant {
 		cfg.noQdrant = false
 	}
+	if *noInstall {
+		cfg.autoInstall = false
+	}
 
 	if err := os.MkdirAll(cfg.logDir, 0o755); err != nil {
 		return nil, err
@@ -189,10 +328,7 @@ func newConfig() (*launcherConfig, error) {
 	}
 	cfg.logger = logger
 
-	cfg.token = cfg.env["YUIZAKI_CONTROL_TOKEN"]
-	if cfg.token == "" {
-		cfg.token = cfg.env["YUIZAKI_BACKEND_API_TOKEN"]
-	}
+	cfg.token = cfg.env["YUIZAKI_BACKEND_API_TOKEN"]
 	if cfg.token == "" {
 		token, err := generateToken()
 		if err != nil {
@@ -200,7 +336,6 @@ func newConfig() (*launcherConfig, error) {
 		}
 		cfg.token = token
 	}
-	cfg.env["YUIZAKI_CONTROL_TOKEN"] = cfg.token
 	cfg.env["YUIZAKI_BACKEND_API_TOKEN"] = cfg.token
 	cfg.env["YUIZAKI_SUPERVISOR"] = "1"
 	cfg.env["APP_ENV"] = envOrMap(cfg.env, "APP_ENV", "development")
@@ -229,6 +364,9 @@ func (r *commandRunner) Run(ctx context.Context) error {
 	cfg.logger.Log("launcher", "Project root: "+cfg.rootDir)
 	cfg.logger.Log("launcher", fmt.Sprintf("Mode: devRenderer=%t withMCP=%t", cfg.devRenderer, cfg.withMCP))
 
+	if err := r.ensureFirstRun(ctx); err != nil {
+		return err
+	}
 	if err := r.preflight(ctx); err != nil {
 		return err
 	}
@@ -297,6 +435,7 @@ func (r *commandRunner) Run(ctx context.Context) error {
 	if !cfg.noOpen {
 		r.openPanel()
 	}
+	r.persistState()
 
 	cfg.logger.Log("launcher", "============================================")
 	cfg.logger.Log("launcher", "Yuizaki supervised launch completed")
@@ -309,24 +448,168 @@ func (r *commandRunner) Run(ctx context.Context) error {
 	return r.monitor(ctx)
 }
 
+func (r *commandRunner) ensureFirstRun(ctx context.Context) error {
+	envPath := filepath.Join(r.cfg.pythonDir, ".env")
+	if _, err := os.Stat(envPath); os.IsNotExist(err) && !r.cfg.checkOnly {
+		templatePath := filepath.Join(r.cfg.pythonDir, ".env.example")
+		if err := copyFile(templatePath, envPath); err != nil {
+			return fmt.Errorf("create first-run configuration: %w", err)
+		}
+		r.cfg.logger.Log("setup", "Created python/.env from .env.example")
+		if isInteractiveTerminal() {
+			if err := runSetupWizardForRoot(r.cfg.rootDir); err != nil {
+				return err
+			}
+		}
+	}
+	loadDotEnv(envPath, r.cfg.env)
+	if r.cfg.autoInstall && !r.cfg.checkOnly && !runtimeDependenciesReady(r.cfg) {
+		profile := "core"
+		if strings.EqualFold(strings.TrimSpace(r.cfg.env["YUIZAKI_INSTALL_PROFILE"]), "full") {
+			profile = "full"
+		}
+		r.cfg.logger.Log("setup", "Runtime dependencies are incomplete; installing profile "+profile)
+		return r.installRuntime(ctx, profile)
+	}
+	return nil
+}
+
+func (r *commandRunner) installRuntime(ctx context.Context, profile string) error {
+	if profile != "core" && profile != "full" {
+		return fmt.Errorf("unsupported install profile %q", profile)
+	}
+	if _, err := exec.LookPath(nodeExecutable()); err != nil {
+		return fmt.Errorf("Node.js is required: %w", err)
+	}
+	npm := "npm"
+	if runtime.GOOS == "windows" {
+		npm = "npm.cmd"
+	}
+	if _, err := exec.LookPath(npm); err != nil {
+		return fmt.Errorf("npm is required: %w", err)
+	}
+	if err := r.runLogged(ctx, "install-electron", r.cfg.electronDir, npm, "ci"); err != nil {
+		return err
+	}
+	if err := r.runLogged(ctx, "install-electron-runtime", r.cfg.electronDir, npm, "run", "install:runtime"); err != nil {
+		return err
+	}
+	if err := r.runLogged(ctx, "install-mcp", r.cfg.nodeMCPDir, npm, "ci"); err != nil {
+		return err
+	}
+
+	pythonCommand, pythonArgs := pythonBootstrapCommand()
+	if _, err := exec.LookPath(pythonCommand); err != nil {
+		return fmt.Errorf("Python is required: %w", err)
+	}
+	venvPath := filepath.Join(r.cfg.pythonDir, ".venv")
+	pythonExe := pythonExecutable(r.cfg.pythonDir)
+	if _, err := os.Stat(pythonExe); os.IsNotExist(err) {
+		args := append(append([]string{}, pythonArgs...), "-m", "venv", venvPath)
+		if err := r.runLogged(ctx, "install-python-venv", r.cfg.pythonDir, pythonCommand, args...); err != nil {
+			return err
+		}
+	}
+	lockName := "requirements-core-lock-linux.txt"
+	if runtime.GOOS == "windows" {
+		lockName = "requirements-core-lock-windows.txt"
+	}
+	if profile == "full" {
+		lockName = strings.Replace(lockName, "core-", "", 1)
+	}
+	lockPath := filepath.Join(r.cfg.pythonDir, lockName)
+	if err := r.runLogged(ctx, "install-python", r.cfg.pythonDir, pythonExe, "-m", "pip", "install", "--upgrade", "pip"); err != nil {
+		return err
+	}
+	if err := r.runLogged(ctx, "install-python-lock", r.cfg.pythonDir, pythonExe, "-m", "pip", "install", "-r", lockPath); err != nil {
+		return err
+	}
+	if err := r.runLogged(ctx, "install-python-check", r.cfg.pythonDir, pythonExe, "-m", "pip", "check"); err != nil {
+		return err
+	}
+	if err := r.runLogged(ctx, "install-python-lock-check", r.cfg.pythonDir, pythonExe, "scripts/check_installed_lock.py", "--lock", lockName); err != nil {
+		return err
+	}
+	envPath := filepath.Join(r.cfg.pythonDir, ".env")
+	if _, err := os.Stat(envPath); os.IsNotExist(err) {
+		if err := copyFile(filepath.Join(r.cfg.pythonDir, ".env.example"), envPath); err != nil {
+			return err
+		}
+		r.cfg.logger.Log("setup", "Created python/.env from .env.example")
+	}
+	return nil
+}
+
+func pythonBootstrapCommand() (string, []string) {
+	if runtime.GOOS == "windows" {
+		if _, err := exec.LookPath("py"); err == nil {
+			return "py", []string{"-3"}
+		}
+		return "python", nil
+	}
+	if _, err := exec.LookPath("python3"); err == nil {
+		return "python3", nil
+	}
+	return "python", nil
+}
+
+func runtimeDependenciesReady(cfg *launcherConfig) bool {
+	electronPackage := filepath.Join(cfg.electronDir, "node_modules", "electron", "package.json")
+	mcpPackage := filepath.Join(cfg.nodeMCPDir, "node_modules")
+	pythonExecutable := filepath.Join(cfg.pythonDir, ".venv", "Scripts", "python.exe")
+	if runtime.GOOS != "windows" {
+		pythonExecutable = filepath.Join(cfg.pythonDir, ".venv", "bin", "python")
+	}
+	if _, err := os.Stat(electronPackage); err != nil {
+		return false
+	}
+	if cfg.withMCP {
+		if _, err := os.Stat(mcpPackage); err != nil {
+			return false
+		}
+	}
+	_, err := os.Stat(pythonExecutable)
+	return err == nil
+}
+
+func isInteractiveTerminal() bool {
+	info, err := os.Stdin.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+func copyFile(source, target string) error {
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(target, data, 0o600)
+}
+
 func (r *commandRunner) preflight(ctx context.Context) error {
-	args := []string{"/d", "/c", "call", filepath.Join(r.cfg.rootDir, "start.bat"), "--check", "--no-pause", "--no-open", "--no-show-pet"}
-	if r.cfg.withMCP {
-		args = append(args, "--with-mcp")
-	} else {
-		args = append(args, "--no-mcp")
+	for _, command := range []string{nodeExecutable(), "npm"} {
+		if _, err := exec.LookPath(command); err != nil {
+			return fmt.Errorf("required command %q is not available: %w", command, err)
+		}
 	}
-	if r.cfg.devRenderer {
-		args = append(args, "--dev-renderer")
-	} else {
-		args = append(args, "--no-dev-renderer")
+	for _, path := range []string{
+		filepath.Join(r.cfg.pythonDir, "app.py"),
+		filepath.Join(r.cfg.pythonDir, ".env.example"),
+		filepath.Join(r.cfg.electronDir, "package.json"),
+		filepath.Join(r.cfg.electronDir, "src", "main", "index.ts"),
+		filepath.Join(r.cfg.nodeMCPDir, "server.mjs"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			return fmt.Errorf("required project file is missing: %s", path)
+		}
 	}
-	if r.cfg.noQdrant {
-		args = append(args, "--no-qdrant")
-	} else {
-		args = append(args, "--with-qdrant")
+	if !runtimeDependenciesReady(r.cfg) {
+		return fmt.Errorf("runtime dependencies are incomplete; rerun without --check to install them")
 	}
-	return r.runLogged(ctx, "preflight", r.cfg.rootDir, "cmd.exe", args...)
+	r.cfg.logger.Log("preflight", "runtime and project checks passed")
+	return nil
 }
 
 func (r *commandRunner) selectControlAndRendererPorts(ctx context.Context) error {
@@ -376,46 +659,59 @@ func (r *commandRunner) selectAndCheckBackend(ctx context.Context) (bool, error)
 }
 
 func (r *commandRunner) selectPort(ctx context.Context, mode, preferred, fallbacks string) (string, string, error) {
-	out, err := r.runCapture(ctx, "port-"+mode, r.cfg.rootDir, "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", filepath.Join(r.cfg.scriptsDir, "select_startup_port.ps1"), "-Mode", mode, "-PreferredPort", preferred, "-FallbackPorts", fallbacks, "-ProjectRoot", r.cfg.rootDir)
-	if err != nil {
-		return "", "", err
+	ports := append([]string{preferred}, strings.Split(fallbacks, ",")...)
+	seen := map[string]bool{}
+	for _, port := range ports {
+		port = strings.TrimSpace(port)
+		if port == "" || seen[port] {
+			continue
+		}
+		seen[port] = true
+		healthPath := "/api/ping"
+		switch mode {
+		case "control":
+			healthPath = "/api/health"
+		case "mcp":
+			healthPath = "/health"
+		case "renderer":
+			healthPath = "/"
+		}
+		if r.httpOK(ctx, fmt.Sprintf("http://%s:%s%s", r.cfg.serverHost, port, healthPath), nil, 2*time.Second) {
+			return port, "healthy", nil
+		}
+		listener, err := net.Listen("tcp", net.JoinHostPort(r.cfg.serverHost, port))
+		if err == nil {
+			_ = listener.Close()
+			return port, "available", nil
+		}
 	}
-	line := firstNonEmptyLine(out)
-	parts := strings.SplitN(line, "|", 2)
-	if len(parts) != 2 {
-		return "", "", fmt.Errorf("unexpected port selection output for %s: %q", mode, line)
-	}
-	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), nil
+	return "", "blocked", fmt.Errorf("all %s ports are occupied", mode)
 }
 
 func (r *commandRunner) buildElectron(ctx context.Context) error {
-	script := "npm run build:electron"
-	if !r.cfg.devRenderer {
-		script = "npm run build"
-		return r.runLogged(ctx, "build", r.cfg.electronDir, "cmd.exe", "/d", "/c", script)
-	}
-
 	outputPath := filepath.Join(r.cfg.electronDir, "dist", "main", "index.js")
-	outputs := []string{
-		filepath.Join(r.cfg.electronDir, "dist", "main"),
-		filepath.Join(r.cfg.electronDir, "dist", "preload"),
-		filepath.Join(r.cfg.electronDir, "dist", "shared"),
+	outputs := []string{filepath.Join(r.cfg.electronDir, "dist", "main"), filepath.Join(r.cfg.electronDir, "dist", "preload"), filepath.Join(r.cfg.electronDir, "dist", "shared")}
+	if !r.cfg.devRenderer {
+		outputs = append(outputs, filepath.Join(r.cfg.electronDir, "dist", "renderer"))
 	}
-	statePath := filepath.Join(r.cfg.electronDir, "dist", ".launcher-main-build.json")
+	statePath := filepath.Join(r.cfg.electronDir, "dist", ".launcher-build.json")
 	inputs := []string{
-		filepath.Join(r.cfg.electronDir, "src", "main"),
-		filepath.Join(r.cfg.electronDir, "src", "preload"),
-		filepath.Join(r.cfg.electronDir, "src", "shared"),
+		filepath.Join(r.cfg.electronDir, "src"),
 		filepath.Join(r.cfg.electronDir, "package.json"),
 		filepath.Join(r.cfg.electronDir, "package-lock.json"),
 		filepath.Join(r.cfg.electronDir, "tsconfig.json"),
+		filepath.Join(r.cfg.electronDir, "vite.config.ts"),
 	}
 	if buildIsCurrent(outputPath, statePath, inputs, outputs) {
-		r.cfg.logger.Log("build", "Electron main build is current; skipping TypeScript compilation")
+		r.cfg.logger.Log("build", "Electron build is current; skipping frontend and TypeScript compilation")
 		return nil
 	}
 
-	if err := r.runLogged(ctx, "build", r.cfg.electronDir, "cmd.exe", "/d", "/c", script); err != nil {
+	script := "build:electron"
+	if !r.cfg.devRenderer {
+		script = "build"
+	}
+	if err := r.runNpm(ctx, "build", script); err != nil {
 		return err
 	}
 	inputFingerprint, inputErr := buildFingerprint(inputs)
@@ -548,11 +844,15 @@ func (r *commandRunner) prepareModelCaches() {
 }
 
 func (r *commandRunner) ensureQdrant(ctx context.Context) error {
+	if runtime.GOOS != "windows" {
+		r.cfg.logger.Log("qdrant", "Qdrant auto-start is not managed by the Linux launcher; start the configured Docker service separately")
+		return nil
+	}
 	return r.runLogged(ctx, "qdrant", r.cfg.rootDir, "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", filepath.Join(r.cfg.scriptsDir, "ensure_qdrant_docker.ps1"), "-ProjectRoot", r.cfg.rootDir, "-SettingsPath", filepath.Join(r.cfg.pythonDir, "config", "settings.json"), "-EnvPath", filepath.Join(r.cfg.pythonDir, ".env"))
 }
 
 func (r *commandRunner) checkDatabaseMigrations(ctx context.Context) {
-	pythonExe := filepath.Join(r.cfg.pythonDir, ".venv", "Scripts", "python.exe")
+	pythonExe := pythonExecutable(r.cfg.pythonDir)
 	err := r.runLogged(ctx, "migration-check", r.cfg.pythonDir, pythonExe, "migration_check.py")
 	if err != nil {
 		r.cfg.logger.Log("migration-check", "schema is not at Alembic head; backend runner will auto-migrate on startup")
@@ -560,7 +860,10 @@ func (r *commandRunner) checkDatabaseMigrations(ctx context.Context) {
 }
 
 func (r *commandRunner) startBackend(ctx context.Context) error {
-	return r.startService(ctx, "backend", r.cfg.pythonDir, "cmd.exe", "/d", "/c", "call", filepath.Join(r.cfg.scriptsDir, "run_backend_dev.bat"))
+	if err := r.runLogged(ctx, "migration-bootstrap", r.cfg.pythonDir, pythonExecutable(r.cfg.pythonDir), "migration_bootstrap.py"); err != nil {
+		return err
+	}
+	return r.startService(ctx, "backend", r.cfg.pythonDir, pythonExecutable(r.cfg.pythonDir), "-m", "uvicorn", "app:app", "--host", r.cfg.serverHost, "--port", r.cfg.serverPort, "--env-file", filepath.Join(r.cfg.pythonDir, ".env"), "--log-level", "info")
 }
 
 func (r *commandRunner) ensureMCP(ctx context.Context) error {
@@ -568,7 +871,7 @@ func (r *commandRunner) ensureMCP(ctx context.Context) error {
 		r.cfg.logger.Log("mcp", "Reusing existing MCP service: "+r.cfg.mcpURL)
 		return nil
 	}
-	if err := r.startService(ctx, "mcp", r.cfg.nodeMCPDir, "cmd.exe", "/d", "/c", "call", filepath.Join(r.cfg.scriptsDir, "run_mcp_dev.bat")); err != nil {
+	if err := r.startService(ctx, "mcp", r.cfg.nodeMCPDir, nodeExecutable(), "server.mjs"); err != nil {
 		return err
 	}
 	return r.waitHTTP(ctx, "mcp", r.cfg.mcpURL+"/health", nil, 120*time.Second)
@@ -579,14 +882,28 @@ func (r *commandRunner) ensureRenderer(ctx context.Context) error {
 		r.cfg.logger.Log("renderer", "Reusing existing renderer: "+r.cfg.rendererURL)
 		return nil
 	}
-	if err := r.startService(ctx, "renderer", r.cfg.electronDir, "cmd.exe", "/d", "/c", "call", filepath.Join(r.cfg.scriptsDir, "run_renderer_dev.bat")); err != nil {
+	if err := r.startService(ctx, "renderer", r.cfg.electronDir, nodeExecutable(), filepath.Join(r.cfg.electronDir, "node_modules", "vite", "bin", "vite.js"), "--host", "127.0.0.1", "--port", r.cfg.rendererPort); err != nil {
 		return err
 	}
 	return r.waitHTTP(ctx, "renderer", r.cfg.rendererURL, nil, 120*time.Second)
 }
 
 func (r *commandRunner) startElectron(ctx context.Context) error {
-	return r.startService(ctx, "electron", r.cfg.electronDir, "cmd.exe", "/d", "/c", "call", filepath.Join(r.cfg.scriptsDir, "run_electron_app.bat"))
+	return r.startService(ctx, "electron", r.cfg.electronDir, nodeExecutable(), filepath.Join(r.cfg.electronDir, "scripts", "run-electron.mjs"))
+}
+
+func pythonExecutable(pythonDir string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(pythonDir, ".venv", "Scripts", "python.exe")
+	}
+	return filepath.Join(pythonDir, ".venv", "bin", "python")
+}
+
+func nodeExecutable() string {
+	if runtime.GOOS == "windows" {
+		return "node.exe"
+	}
+	return "node"
 }
 
 func (r *commandRunner) verifyControlBackend(ctx context.Context) error {
@@ -626,7 +943,7 @@ func (r *commandRunner) ensurePetVisible(ctx context.Context) error {
 }
 
 func (r *commandRunner) openPanel() {
-	if err := exec.Command("cmd.exe", "/d", "/c", "start", "", r.cfg.panelOpenURL).Start(); err != nil {
+	if err := openURL(r.cfg.panelOpenURL); err != nil {
 		r.cfg.logger.Log("launcher", "failed to open panel: "+err.Error())
 	}
 }
@@ -665,7 +982,7 @@ func (r *commandRunner) startService(ctx context.Context, name, workdir, exe str
 	cmd := exec.CommandContext(ctx, exe, args...)
 	cmd.Dir = workdir
 	cmd.Env = r.cfg.envList()
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x00000200}
+	configureChildProcess(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -683,6 +1000,7 @@ func (r *commandRunner) startService(ctx context.Context, name, workdir, exe str
 	r.services = append(r.services, svc)
 	r.mu.Unlock()
 	r.cfg.logger.Log(name, fmt.Sprintf("started pid=%d", cmd.Process.Pid))
+	r.persistState()
 	go r.stream(name, stdout)
 	go r.stream(name, stderr)
 	go func() {
@@ -695,6 +1013,7 @@ func (r *commandRunner) runLogged(ctx context.Context, name, workdir, exe string
 	cmd := exec.CommandContext(ctx, exe, args...)
 	cmd.Dir = workdir
 	cmd.Env = r.cfg.envList()
+	configureChildProcess(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -712,6 +1031,14 @@ func (r *commandRunner) runLogged(ctx context.Context, name, workdir, exe string
 		return fmt.Errorf("%s failed: %w", name, err)
 	}
 	return nil
+}
+
+func (r *commandRunner) runNpm(ctx context.Context, name, script string) error {
+	executable := "npm"
+	if runtime.GOOS == "windows" {
+		executable = "npm.cmd"
+	}
+	return r.runLogged(ctx, name, r.cfg.electronDir, executable, "run", script)
 }
 
 func (r *commandRunner) runCapture(ctx context.Context, name, workdir, exe string, args ...string) (string, error) {
@@ -749,8 +1076,45 @@ func (r *commandRunner) StopAll() {
 			continue
 		}
 		svc.stopped = true
-		pid := fmt.Sprint(svc.cmd.Process.Pid)
-		_ = exec.Command("taskkill", "/T", "/F", "/PID", pid).Run()
+		_ = stopChildProcess(svc.cmd)
+	}
+	_ = os.Remove(r.cfg.statePath)
+}
+
+func (r *commandRunner) persistState() {
+	state := supervisorState{
+		PID:        os.Getpid(),
+		RootDir:    r.cfg.rootDir,
+		StartedAt:  time.Now().UTC().Format(time.RFC3339),
+		BackendURL: r.cfg.backendURL,
+		ControlURL: r.cfg.controlURL,
+		MCPURL:     r.cfg.mcpURL,
+		Services:   map[string]int{},
+	}
+	r.mu.Lock()
+	for _, service := range r.services {
+		if service != nil && service.cmd != nil && service.cmd.Process != nil && !service.stopped {
+			state.Services[service.name] = service.cmd.Process.Pid
+		}
+	}
+	r.mu.Unlock()
+	if len(state.Services) == 0 {
+		return
+	}
+	if err := os.MkdirAll(r.cfg.stateDir, 0o755); err != nil {
+		r.cfg.logger.Log("launcher", "state write failed: "+err.Error())
+		return
+	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return
+	}
+	tmp := r.cfg.statePath + ".tmp"
+	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
+		return
+	}
+	if err := os.Rename(tmp, r.cfg.statePath); err != nil {
+		_ = os.Remove(tmp)
 	}
 }
 
@@ -819,7 +1183,6 @@ func (r *commandRunner) authHeaders() map[string]string {
 	return map[string]string{
 		"Authorization":             "Bearer " + token,
 		"x-yuizaki-backend-token":   token,
-		"x-yuizaki-control-token":   token,
 		"x-yuizaki-supervisor-mode": "1",
 	}
 }
@@ -985,8 +1348,238 @@ func isBenignLogStreamClose(err error) bool {
 	return false
 }
 
-func init() {
-	if os.PathSeparator != '\\' {
-		panic(errors.New("YuizakiLauncher is intended for Windows"))
+func runSetup(_ []string) error {
+	root, err := resolveProjectRoot()
+	if err != nil {
+		return err
 	}
+	return runSetupWizardForRoot(root)
+}
+
+func runSetupWizardForRoot(root string) error {
+	envPath := filepath.Join(root, "python", ".env")
+	if _, err := os.Stat(envPath); os.IsNotExist(err) {
+		if err := copyFile(filepath.Join(root, "python", ".env.example"), envPath); err != nil {
+			return err
+		}
+	}
+	values := map[string]string{}
+	loadDotEnv(envPath, values)
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("Yuizaki first-run setup")
+	fmt.Println("Leave a value empty to keep the current setting.")
+	values["LLM_PROVIDER"] = promptValue(reader, "LLM provider", values["LLM_PROVIDER"], "custom")
+	values["LLM_BASE_URL"] = promptValue(reader, "API base URL", values["LLM_BASE_URL"], "")
+	values["LLM_API_KEY"] = promptSecretValue(reader, values["LLM_API_KEY"])
+	values["LLM_MODEL"] = promptValue(reader, "Chat model", values["LLM_MODEL"], "gpt-4o-mini")
+	values["YUIZAKI_INSTALL_PROFILE"] = promptValue(reader, "Install profile (core/full)", values["YUIZAKI_INSTALL_PROFILE"], "core")
+	return updateDotEnv(envPath, values)
+}
+
+func promptValue(reader *bufio.Reader, label, current, fallback string) string {
+	display := current
+	if display == "" {
+		display = fallback
+	}
+	fmt.Printf("%s [%s]: ", label, display)
+	line, err := reader.ReadString('\n')
+	if err != nil && len(line) == 0 {
+		return display
+	}
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return display
+	}
+	return line
+}
+
+func promptSecretValue(reader *bufio.Reader, current string) string {
+	display := ""
+	if current != "" {
+		display = "configured"
+	}
+	fmt.Printf("API key [%s]: ", display)
+	line, err := reader.ReadString('\n')
+	if err != nil && len(line) == 0 {
+		return current
+	}
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return current
+	}
+	return line
+}
+
+func updateDotEnv(path string, updates map[string]string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	seen := map[string]bool{}
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		parts := strings.SplitN(trimmed, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(strings.TrimPrefix(parts[0], "export "))
+		value, ok := updates[key]
+		if !ok {
+			continue
+		}
+		lines[index] = key + "=" + strings.ReplaceAll(value, "\n", "")
+		seen[key] = true
+	}
+	for key, value := range updates {
+		if !seen[key] && value != "" {
+			lines = append(lines, key+"="+strings.ReplaceAll(value, "\n", ""))
+		}
+	}
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600)
+}
+
+func runStop() error {
+	root, err := resolveProjectRoot()
+	if err != nil {
+		return err
+	}
+	statePath := filepath.Join(launcherStateDir(root), "supervisor.json")
+	state, err := readSupervisorState(statePath)
+	if os.IsNotExist(err) {
+		fmt.Println("Yuizaki is not running.")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for name, pid := range state.Services {
+		if err := stopPID(pid); err != nil {
+			fmt.Printf("[WARN] %s pid %d: %v\n", name, pid, err)
+		} else {
+			fmt.Printf("[OK] stopped %s (pid %d)\n", name, pid)
+		}
+	}
+	return os.Remove(statePath)
+}
+
+func runStatus() error {
+	root, err := resolveProjectRoot()
+	if err != nil {
+		return err
+	}
+	statePath := filepath.Join(launcherStateDir(root), "supervisor.json")
+	state, err := readSupervisorState(statePath)
+	if os.IsNotExist(err) {
+		fmt.Println("status: stopped")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	controlOK := httpEndpointOK(state.ControlURL + "/api/health")
+	backendOK := httpEndpointOK(state.BackendURL + "/api/ping")
+	mcpOK := httpEndpointOK(state.MCPURL + "/health")
+	_, mcpRequired := state.Services["mcp"]
+	fmt.Printf("status: %s\n", map[bool]string{true: "running", false: "degraded"}[controlOK && backendOK && (!mcpRequired || mcpOK)])
+	fmt.Printf("control: %s\nbackend: %s\nmcp: %s\n", state.ControlURL, state.BackendURL, state.MCPURL)
+	for name, pid := range state.Services {
+		fmt.Printf("service.%s: pid=%d\n", name, pid)
+	}
+	if !controlOK || !backendOK || (mcpRequired && !mcpOK) {
+		return fmt.Errorf("one or more supervised endpoints are unavailable")
+	}
+	return nil
+}
+
+func readSupervisorState(path string) (supervisorState, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return supervisorState{}, err
+	}
+	var state supervisorState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return supervisorState{}, err
+	}
+	return state, nil
+}
+
+func httpEndpointOK(url string) bool {
+	client := http.Client{Timeout: 2 * time.Second}
+	response, err := client.Get(url)
+	if err != nil {
+		return false
+	}
+	defer response.Body.Close()
+	return response.StatusCode >= 200 && response.StatusCode < 300
+}
+
+func runLogs(args []string) error {
+	root, err := resolveProjectRoot()
+	if err != nil {
+		return err
+	}
+	logPath := filepath.Join(root, "logs", "dev", "supervisor.log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\r\n"), "\n")
+	start := 0
+	if len(lines) > 200 {
+		start = len(lines) - 200
+	}
+	follow := len(args) > 0 && (args[0] == "--follow" || args[0] == "-f")
+	fmt.Println(strings.Join(lines[start:], "\n"))
+	if !follow {
+		return nil
+	}
+	file, err := os.Open(logPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if _, err := file.Seek(0, io.SeekEnd); err != nil {
+		return err
+	}
+	reader := bufio.NewReader(file)
+	for {
+		line, readErr := reader.ReadString('\n')
+		if len(line) > 0 {
+			fmt.Print(line)
+		}
+		if readErr != nil {
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+}
+
+func runDesktopShortcut(install bool) error {
+	root, err := resolveProjectRoot()
+	if err != nil {
+		return err
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if runtime.GOOS == "windows" {
+		return installWindowsShortcut(install, root, executable)
+	}
+	return installLinuxDesktopEntry(install, root, executable)
+}
+
+func openURL(url string) error {
+	if runtime.GOOS == "windows" {
+		return exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", url).Start()
+	}
+	return exec.Command("xdg-open", url).Start()
+}
+
+func init() {
+	// The supervised launcher is intentionally cross-platform. Platform-specific
+	// process-group and shortcut behavior lives in build-tagged helpers.
 }

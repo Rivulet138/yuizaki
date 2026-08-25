@@ -472,6 +472,10 @@ class GenerationManager:
     def get(self, session_id: str) -> Optional[Generation]:
         return self._active.get(session_id)
 
+    def active_session_ids(self) -> tuple[str, ...]:
+        """Return an identity-only snapshot for host cancellation."""
+        return tuple(self._active)
+
     def interrupt(self, session_id: str) -> Optional[Generation]:
         """Interrupt the active generation. Returns it or None."""
         gen = self._active.get(session_id)

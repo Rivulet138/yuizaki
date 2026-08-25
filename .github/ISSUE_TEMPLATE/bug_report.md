@@ -32,6 +32,6 @@ assignees: []
 
 ## Checks tried / 已尝试的检查
 
-- [ ] `start.bat --check` or `./start.sh --check` / 启动器检查
+- [ ] `YuizakiLauncher.exe --check` or `./YuizakiLauncher --check` / 启动器检查
 - [ ] `/api/ping` and `/health` / 健康检查接口
 - [ ] Relevant test or smoke command / 相关测试或冒烟命令

@@ -9,13 +9,12 @@ import time
 from datetime import datetime
 from typing import Any, Callable
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from database.repository import DatabaseError, NotFoundError
 from modules.system.api_response import error_response
-from modules.system.api_security import require_bearer_token, resolve_admin_authorization
 
 
 def create_summary_router(
@@ -26,15 +25,10 @@ def create_summary_router(
     get_summary_rewrite_limiter: Callable[[], Any],
     get_governance_alert_state: Callable[[], dict[str, dict[str, Any]]],
     save_governance_alert_state: Callable[[], None],
-    get_summary_admin_token: Callable[[], str],
     get_db_repo: Callable[[], Any] | None = None,
     get_active_workspace_id: Callable[[], str] | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["summary"])
-
-    def _require_summary_admin(authorization: str | None):
-        expected_token = get_summary_admin_token().strip()
-        return require_bearer_token(authorization, expected_token)
 
     def _active_workspace_id() -> str | None:
         if get_active_workspace_id is None:
@@ -333,10 +327,7 @@ def create_summary_router(
         }
 
     @router.post("/api/summary/alerts/ack")
-    async def ack_governance_alert(key: str, authorization: str | None = Depends(resolve_admin_authorization)):
-        auth_error = _require_summary_admin(authorization)
-        if auth_error is not None:
-            return auth_error
+    async def ack_governance_alert(key: str):
         governance_alert_state = get_governance_alert_state()
         governance_alert_state[key] = {
             "acked": True,
@@ -347,10 +338,7 @@ def create_summary_router(
         return {"status": "ok", "key": key, "acked": True}
 
     @router.post("/api/summary/alerts/snooze")
-    async def snooze_governance_alert(key: str, minutes: int = 60, authorization: str | None = Depends(resolve_admin_authorization)):
-        auth_error = _require_summary_admin(authorization)
-        if auth_error is not None:
-            return auth_error
+    async def snooze_governance_alert(key: str, minutes: int = 60):
         mins = max(1, min(int(minutes), 1440))
         governance_alert_state = get_governance_alert_state()
         governance_alert_state[key] = {
@@ -362,10 +350,7 @@ def create_summary_router(
         return {"status": "ok", "key": key, "snooze_minutes": mins}
 
     @router.post("/api/summary/alerts/clear")
-    async def clear_governance_alert_state(authorization: str | None = Depends(resolve_admin_authorization)):
-        auth_error = _require_summary_admin(authorization)
-        if auth_error is not None:
-            return auth_error
+    async def clear_governance_alert_state():
         governance_alert_state = get_governance_alert_state()
         governance_alert_state.clear()
         await run_in_threadpool(save_governance_alert_state)
@@ -446,7 +431,7 @@ def create_summary_router(
         )
 
     @router.post("/api/summary/{session_id:path}/rewrite")
-    async def rewrite_session_summary(session_id: str, authorization: str | None = Depends(resolve_admin_authorization)):
+    async def rewrite_session_summary(session_id: str):
         limit = get_summary_rewrite_limiter().check(f"summary_rewrite:{session_id}")
         if not limit.allowed:
             return JSONResponse(
@@ -458,10 +443,6 @@ def create_summary_router(
                 status_code=429,
                 headers={"Retry-After": str(max(1, int(limit.retry_after)))},
             )
-
-        auth_error = _require_summary_admin(authorization)
-        if auth_error is not None:
-            return auth_error
 
         guard = await run_in_threadpool(_enforce_active_session_workspace, session_id)
         if guard is not None:

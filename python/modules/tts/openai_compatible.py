@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from modules.core.paths import DEFAULT_AUDIO_CACHE_DIR
+from modules.system.voice_diagnostics import VoiceDiagnostics
 from modules.tts.capabilities import resolve_tts_provider_capabilities
 from modules.tts.synthesizer import _split_tts_segments
 
@@ -41,6 +42,7 @@ class OpenAICompatibleTTSClient:
         timeout: float = 60.0,
         audio_cache_dir: Path = DEFAULT_AUDIO_CACHE_DIR,
         transport: httpx.AsyncBaseTransport | None = None,
+        diagnostics: VoiceDiagnostics | None = None,
     ) -> None:
         self._endpoint = normalize_speech_endpoint(base_url)
         self._api_key = api_key.strip()
@@ -49,6 +51,7 @@ class OpenAICompatibleTTSClient:
         self._timeout = max(1.0, float(timeout))
         self.audio_cache_dir = audio_cache_dir
         self._transport = transport
+        self.diagnostics = diagnostics or VoiceDiagnostics()
         self._client: httpx.AsyncClient | None = None
         self._available = False
         self._active_request: asyncio.Task[bytes] | None = None
@@ -111,6 +114,7 @@ class OpenAICompatibleTTSClient:
             "last_cancel_ms": _round_ms(self._last_cancel_ms),
             "cancel_count": self._cancel_count,
             "last_error": self._last_error,
+            "voice_diagnostics": self.diagnostics.snapshot(),
             "capabilities": resolve_tts_provider_capabilities(
                 "openai-compatible",
                 output_transport="wav" if self._available else "unavailable",
@@ -145,6 +149,7 @@ class OpenAICompatibleTTSClient:
             gen.mark("tts_started")
 
         started = time.perf_counter()
+        request: asyncio.Task[bytes] | None = None
         try:
             request = asyncio.create_task(self._request_audio(segment))
             self._active_request = request
@@ -161,6 +166,8 @@ class OpenAICompatibleTTSClient:
                 return False
 
             self._last_generation_ms = (time.perf_counter() - started) * 1000
+            if sequence == 0:
+                self.diagnostics.record("first_audio", self._last_generation_ms)
             self._last_error = None
             if sequence == 0 and hasattr(gen, "mark"):
                 gen.mark("tts_first_chunk")
@@ -184,8 +191,9 @@ class OpenAICompatibleTTSClient:
             if _generation_cancelled(gen):
                 return False
             raise
-        except Exception as exc:
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
             self._last_generation_ms = (time.perf_counter() - started) * 1000
+            self.diagnostics.record("tts", self._last_generation_ms, ok=False, error_kind="generation_failed")
             self._last_error = f"TTS generation failed: {exc}"
             logger.error(
                 "[%s/%s] OpenAI-compatible TTS segment %d failed: %s",
@@ -202,7 +210,7 @@ class OpenAICompatibleTTSClient:
             })
             return False
         finally:
-            if self._active_request is request and request.done():
+            if request is not None and self._active_request is request and request.done():
                 self._active_request = None
 
     async def complete_stream(self, ws: Any, gen: Any, sequence: int) -> None:
@@ -230,7 +238,7 @@ class OpenAICompatibleTTSClient:
             ok = bool(audio)
             self._last_generation_ms = (time.perf_counter() - started) * 1000
             self._last_error = None if ok else "TTS provider returned empty audio"
-        except Exception as exc:
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
             ok = False
             self._last_error = f"TTS connection failed: {exc}"
         return {
@@ -266,6 +274,13 @@ class OpenAICompatibleTTSClient:
         await asyncio.gather(request, return_exceptions=True)
         self._last_cancel_ms = (time.perf_counter() - started) * 1000
         self._cancel_count += 1
+        self.diagnostics.record(
+            "interruption",
+            self._last_cancel_ms,
+            ok=True,
+            recovered=True,
+            recovery_latency_ms=self._last_cancel_ms,
+        )
         self._active_request = None
 
 

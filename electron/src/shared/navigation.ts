@@ -147,8 +147,8 @@ export const staticNavigationModuleRecords = [
   },
   {
     id: 'persona-memory',
-    title: '记忆调试',
-    desc: '观察 persona、heartbeat、行为事件与记忆检索调试信息',
+    title: '行为运行调试',
+    desc: '观察 persona、heartbeat 与行为运行事件',
     order: 11,
     enabled: true,
     capabilities: { memory: true, petControl: true, admin: true },

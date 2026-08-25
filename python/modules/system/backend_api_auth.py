@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-import os
 import secrets
 from ipaddress import ip_address
 
 
 PUBLIC_PREFIXES = ("/audio", "/socket.io", "/docs", "/redoc", "/openapi.json")
 PROTECTED_PREFIXES = ("/api", "/memory", "/v1", "/vision", "/svc", "/system")
-LOCAL_DEV_AUTH_BYPASS_ENV = "YUIZAKI_ALLOW_UNAUTHENTICATED_LOCAL_DEV"
-
-
-def _env_flag_enabled(value: str | None) -> bool:
-    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+HOST_DESKTOP_ACTION_TOKEN_ENV = "YUIZAKI_HOST_DESKTOP_ACTION_TOKEN"
+HOST_DESKTOP_ACTION_PREFIX = "/api/desktop-actions"
 
 
 def is_loopback_client(host: str | None) -> bool:
@@ -30,13 +26,8 @@ def is_loopback_client(host: str | None) -> bool:
         return False
 
 
-def unauthenticated_local_dev_allowed(client_host: str | None = None) -> bool:
-    return _env_flag_enabled(os.getenv(LOCAL_DEV_AUTH_BYPASS_ENV)) and is_loopback_client(client_host)
-
-
 def backend_api_auth_required(
     path: str,
-    token: str,
     method: str = "GET",
     *,
     client_host: str | None = None,
@@ -50,7 +41,7 @@ def backend_api_auth_required(
     protected = any(path == prefix or path.startswith(f"{prefix}/") for prefix in PROTECTED_PREFIXES)
     if not protected:
         return False
-    if not token and unauthenticated_local_dev_allowed(client_host):
+    if is_loopback_client(client_host):
         return False
     return True
 
@@ -62,9 +53,9 @@ def verify_backend_api_authorization(
     *,
     client_host: str | None = None,
 ) -> tuple[bool, str]:
+    if is_loopback_client(client_host):
+        return True, ""
     if not token:
-        if unauthenticated_local_dev_allowed(client_host):
-            return True, ""
         return False, "Backend API token is not configured"
     credentials: list[str] = []
     if backend_token_header is not None:
@@ -78,4 +69,24 @@ def verify_backend_api_authorization(
         return False, "Missing backend API token"
     if any(not provided or not secrets.compare_digest(provided, token) for provided in credentials):
         return False, "Invalid backend API token"
+    return True, ""
+
+
+def verify_host_desktop_action_authorization(
+    authorization: str | None,
+    host_token: str,
+    backend_token: str,
+) -> tuple[bool, str]:
+    """Verify the private Electron-main-to-Python desktop action authority."""
+    configured = (host_token or "").strip()
+    if not configured:
+        return False, "Desktop action host token is not configured"
+    if backend_token and secrets.compare_digest(configured, backend_token.strip()):
+        return False, "Desktop action host token must be distinct"
+    header = (authorization or "").strip()
+    if not header.startswith("Bearer "):
+        return False, "Missing desktop action host token"
+    provided = header[7:].strip()
+    if not provided or not secrets.compare_digest(provided, configured):
+        return False, "Invalid desktop action host token"
     return True, ""
