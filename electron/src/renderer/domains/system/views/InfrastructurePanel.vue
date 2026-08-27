@@ -16,14 +16,6 @@
         </div>
       </section>
 
-      <section class="metric-grid" aria-label="基础设施概况">
-        <article v-for="metric in metrics" :key="metric.label" class="metric-card" :class="metric.tone">
-          <span>{{ metric.label }}</span>
-          <strong>{{ metric.value }}</strong>
-          <small>{{ metric.detail }}</small>
-        </article>
-      </section>
-
       <section class="infra-grid">
         <el-card class="panel-card status-card" shadow="never">
           <template #header>
@@ -340,7 +332,6 @@ const {
 
 const runtimeExceptions = computed(() => diagnostics.value?.runtimeExceptions ?? [])
 const refreshing = computed(() => diagnosticsRequest.loading || logsRequest.loading || backupTargetsRequest.loading)
-const hasDiagnostics = computed(() => Boolean(diagnostics.value))
 const systemStatus = ref<Record<string, unknown> | null>(null)
 const databaseStats = ref<Record<string, unknown> | null>(null)
 const statistics = ref<Record<string, unknown> | null>(null)
@@ -474,7 +465,6 @@ const envChecks = computed(() => {
 })
 
 const envPassedCount = computed(() => envChecks.value.filter((item) => item.ok).length)
-const existingBackupTargets = computed(() => backupTargets.value.filter((item) => item.exists).length)
 const envStatusLabel = computed(() => {
   if (diagnosticsRequest.loading) return '诊断刷新中'
   if (diagnosticsRequest.error) return '诊断失败'
@@ -558,39 +548,6 @@ const exceptionTagType = computed(() => {
   if (!diagnostics.value || diagnosticsRequest.loading) return 'info'
   return runtimeExceptions.value.length ? 'danger' : 'success'
 })
-
-const metrics = computed(() => [
-  {
-    label: '环境检查',
-    value: hasDiagnostics.value ? `${envPassedCount.value}/${envChecks.value.length}` : '待诊断',
-    detail: hasDiagnostics.value ? '关键文件与目录可用性' : '等待诊断快照',
-    tone: hasDiagnostics.value && envPassedCount.value === envChecks.value.length ? 'green' : 'amber',
-  },
-  {
-    label: '插件异常',
-    value: hasDiagnostics.value ? (diagnostics.value?.pluginErrorCount ?? 0) : '待诊断',
-    detail: hasDiagnostics.value ? `${diagnostics.value?.pluginCount ?? 0} 个插件已纳入诊断` : '等待诊断快照',
-    tone: diagnostics.value?.pluginErrorCount ? 'red' : hasDiagnostics.value ? 'green' : 'amber',
-  },
-  {
-    label: '运行异常',
-    value: hasDiagnostics.value ? runtimeExceptions.value.length : '待诊断',
-    detail: hasDiagnostics.value ? (runtimeExceptions.value.length ? '请查看异常列表' : '暂无运行时异常') : '等待诊断快照',
-    tone: runtimeExceptions.value.length ? 'red' : hasDiagnostics.value ? 'green' : 'amber',
-  },
-  {
-    label: '备份目标',
-    value: `${existingBackupTargets.value}/${backupTargets.value.length || 6}`,
-    detail: backupResult.value ? '最近已创建备份清单' : '覆盖数据库、配置与桌宠状态',
-    tone: existingBackupTargets.value === backupTargets.value.length && backupTargets.value.length > 0 ? 'green' : 'slate',
-  },
-  {
-    label: '进程内存',
-    value: runtimeSnapshot.value ? formatBytes(runtimeSnapshot.value.totalPrivateKb * 1024) : '待采样',
-    detail: runtimeSnapshot.value ? `${runtimeSnapshot.value.processes.length} 个 Electron 进程` : '仅桌面客户端可读取',
-    tone: runtimeSnapshot.value ? 'blue' : 'slate',
-  },
-])
 
 const formatBytes = (bytes: number) => {
   const value = Math.max(0, Number(bytes) || 0)
@@ -886,15 +843,10 @@ onMounted(() => {
   text-transform: uppercase;
 }
 
-.metric-grid,
 .infra-grid,
 .log-grid {
   display: grid;
   gap: 14px;
-}
-
-.metric-grid {
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .infra-grid {
@@ -926,38 +878,11 @@ onMounted(() => {
   color: var(--yui-text);
 }
 
-.metric-card,
 .panel-card {
   border: 1px solid var(--yui-border);
   background: var(--yui-surface-raised);
   box-shadow: var(--yui-shadow-card);
 }
-
-.metric-card {
-  display: flex;
-  min-height: 126px;
-  flex-direction: column;
-  justify-content: space-between;
-  padding: 16px;
-  border-radius: var(--yui-radius-card);
-}
-
-.metric-card span,
-.metric-card small {
-  color: #64748b;
-}
-
-.metric-card strong {
-  color: var(--yui-text);
-  font-size: 26px;
-  letter-spacing: 0;
-}
-
-.metric-card.green { background: var(--yui-success-soft); }
-.metric-card.blue { background: rgba(37, 99, 235, 0.08); }
-.metric-card.amber { background: var(--yui-warning-soft); }
-.metric-card.red { background: var(--yui-danger-soft); }
-.metric-card.slate { background: var(--yui-surface-muted); }
 
 .panel-card {
   border-radius: var(--yui-radius-card);
@@ -1372,7 +1297,6 @@ onMounted(() => {
 }
 
 @media (max-width: 1180px) {
-  .metric-grid,
   .infra-grid,
   .lower-grid,
   .log-grid {

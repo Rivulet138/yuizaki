@@ -5,61 +5,48 @@
       <el-button plain :loading="overviewRefreshLoading" @click="refreshOverview">刷新</el-button>
     </template>
     <div class="overview-console">
-      <section class="ops-hero">
-        <div class="ops-status-grid">
-          <article v-for="card in connectionCards" :key="card.label" class="ops-status-card" :class="card.tone" :title="card.desc">
-            <span>{{ card.label }}</span>
-            <strong>{{ card.value }}</strong>
-          </article>
-        </div>
-      </section>
       <nav class="canonical-links" :aria-label="t('canonical.system.aria')">
         <router-link :to="canonicalPath('infrastructure')">{{ t('canonical.system.diagnostics') }}</router-link>
         <router-link :to="canonicalPath('deploy')">{{ t('canonical.system.runtimeChecks') }}</router-link>
       </nav>
 
-      <section class="ops-card chain-card">
+      <section class="ops-card runtime-readiness-card" aria-label="运行环境与下一步操作">
         <div class="ops-card-head">
           <div>
-            <h3>依赖检查</h3>
-          </div>
-        </div>
-        <div class="chain-grid">
-          <article v-for="item in chainChecks" :key="item.label" class="chain-check" :class="item.tone" :title="item.desc">
-            <div>
-              <strong>{{ item.label }}</strong>
-              <span>{{ item.value }}</span>
-            </div>
-          </article>
-        </div>
-        <div v-if="chainIssues.length" class="chain-issues" aria-label="链路问题">
-          <div v-for="issue in chainIssues" :key="issue.key" class="chain-issue" :class="issue.tone">
-            <strong>{{ issue.title }}</strong>
-            <span>{{ issue.desc }}</span>
-          </div>
-        </div>
-      </section>
-
-      <section class="ops-card runtime-checklist-card" aria-label="运行状态清单">
-        <div class="ops-card-head">
-          <div>
-            <h3>运行状态清单</h3>
-            <span>只读检查；异常项可直接进入对应设置</span>
+            <h3>{{ runtimeActionItems.length ? `需要处理 ${runtimeActionItems.length} 项` : '运行链路就绪' }}</h3>
+            <span>{{ readyChainCount }}/{{ chainChecks.length }} 个核心环节可用</span>
           </div>
           <el-button plain size="small" :loading="runtimeRequest.loading" @click="loadRuntimeDependencies">刷新检查</el-button>
         </div>
-        <AsyncState :loading="runtimeRequest.loading" :error="runtimeRequest.error" @retry="loadRuntimeDependencies">
-          <div class="runtime-checklist">
-            <article v-for="item in runtimeRows" :key="item.key" class="runtime-check" :class="item.tone">
-              <div class="runtime-check-copy">
-                <strong>{{ item.label }}</strong>
-                <span>{{ item.value }}</span>
-                <small>{{ item.desc }}</small>
-              </div>
-              <router-link class="runtime-check-link" :to="item.to">处理</router-link>
-            </article>
-          </div>
-        </AsyncState>
+        <el-alert
+          v-if="runtimeRequest.error"
+          class="runtime-readiness-alert"
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="runtimeRequest.error"
+        />
+        <div v-if="runtimeActionItems.length" class="runtime-action-list">
+          <article v-for="item in runtimeActionItems" :key="item.key" class="runtime-action-item" :class="item.tone">
+            <span class="runtime-action-dot" aria-hidden="true"></span>
+            <div>
+              <strong>{{ item.title }}</strong>
+              <span>{{ item.desc }}</span>
+            </div>
+            <router-link :to="item.to">{{ item.actionLabel }}</router-link>
+          </article>
+        </div>
+        <div v-else class="runtime-ready-state">
+          <strong>可以开始对话</strong>
+          <span>控制服务、模型链路、实时通道和桌宠联动均未发现阻塞项。</span>
+        </div>
+        <div class="runtime-chain" aria-label="核心链路状态">
+          <span v-for="item in chainChecks" :key="item.label" class="runtime-chain-item" :class="item.tone" :title="item.desc">
+            <i aria-hidden="true"></i>
+            <strong>{{ item.label }}</strong>
+            <small>{{ item.value }}</small>
+          </span>
+        </div>
       </section>
 
       <section class="ops-card voice-quality-card" aria-label="语音体验质量">
@@ -145,13 +132,15 @@
             </div>
           </div>
 
-          <div v-if="governanceData" class="metric-grid">
-            <div v-for="stat in governanceStats" :key="stat.label" class="metric-tile" :class="stat.tone">
-              <strong>{{ stat.value }}</strong>
-              <span>{{ stat.label }}</span>
+          <AsyncState :loading="governanceReq.loading" :error="governanceReq.error" @retry="loadGovernance">
+            <div v-if="governanceData" class="metric-grid">
+              <div v-for="stat in governanceStats" :key="stat.label" class="metric-tile" :class="stat.tone">
+                <strong>{{ stat.value }}</strong>
+                <span>{{ stat.label }}</span>
+              </div>
             </div>
-          </div>
             <el-empty v-else description="暂无摘要状态" :image-size="56" />
+          </AsyncState>
 
           <div v-if="governanceData?.alerts?.length" class="alert-stack">
             <div v-for="alert in governanceData.alerts.slice(0, 3)" :key="alert.key" class="alert-item">
@@ -406,6 +395,7 @@ const canonicalPath = (moduleId: string) => `/w/${workspaceStore.activeWorkspace
 
 const loadGovernance = async () => {
   governanceReq.loading = true
+  governanceReq.error = ''
   try {
     governanceData.value = await summaryClient.getGovernanceReport(7)
   } catch (e: any) { governanceReq.error = e?.message || '加载失败' }
@@ -609,6 +599,7 @@ const currentModel = computed(() => {
 
 type CheckTone = 'online' | 'warning' | 'offline'
 type ChainIssue = { key: string; title: string; desc: string; tone: CheckTone }
+type RuntimeActionItem = ChainIssue & { to: string; actionLabel: string }
 
 const llmProviderPreset = computed(() => inferLlmProviderPreset(settingsStore.state.llm.base_url))
 const canAssessConfiguredServices = computed(() => systemStore.controlRunning && !settingsStore.state.error)
@@ -728,6 +719,44 @@ const chainIssues = computed<ChainIssue[]>(() => {
   return issues
 })
 
+const issueTarget = (key: string): string => {
+  if (key === 'control' || key === 'python' || key === 'socket' || key === 'providers') return canonicalPath('infrastructure')
+  if (key === 'connectors') return canonicalPath('agent-governance')
+  if (key === 'pet' || key.startsWith('pet-')) return canonicalPath('pet')
+  if (key === 'platform') return canonicalPath('deploy')
+  return canonicalPath('settings')
+}
+
+const runtimeActionItems = computed<RuntimeActionItem[]>(() => {
+  const localIssues = chainIssues.value.map((item) => ({
+    ...item,
+    to: issueTarget(item.key),
+    actionLabel: ['control', 'python', 'socket'].includes(item.key) ? '查看诊断' : '前往设置',
+  }))
+  const remoteIssues = runtimeRows.value
+    .filter((item) => item.tone !== 'online')
+    .filter((item) => item.key !== 'providers' || providerSnapshot.value)
+    .filter((item) => item.key !== 'platform' || platformSnapshot.value)
+    .map((item) => ({
+      key: item.key,
+      title: `${item.label}：${item.value}`,
+      desc: item.desc,
+      tone: item.tone,
+      to: item.to,
+      actionLabel: '查看详情',
+    }))
+
+  const seen = new Set<string>()
+  return [...localIssues, ...remoteIssues]
+    .sort((left, right) => Number(left.tone !== 'offline') - Number(right.tone !== 'offline'))
+    .filter((item) => {
+      if (seen.has(item.key)) return false
+      seen.add(item.key)
+      return true
+    })
+    .slice(0, 6)
+})
+
 const chainChecks = computed<Array<{ label: string; value: string; desc: string; tone: CheckTone }>>(() => [
   {
     label: '对话链路',
@@ -772,6 +801,7 @@ const chainChecks = computed<Array<{ label: string; value: string; desc: string;
     tone: voiceChainReady.value ? 'online' : 'warning',
   },
 ])
+const readyChainCount = computed(() => chainChecks.value.filter((item) => item.tone === 'online').length)
 
 const refreshChainStatus = async () => {
   await Promise.all([
@@ -802,27 +832,6 @@ const refreshOverview = async () => {
     loadAvatarCapabilities(),
   ])
 }
-
-const connectionCards = computed(() => [
-  {
-    label: 'Control Server',
-    value: systemStore.controlRunning ? 'OK' : 'WAIT',
-    desc: systemStore.controlRunning ? 'Control HTTP ready' : systemStore.controlHealthError || 'Checking control service',
-    tone: systemStore.controlRunning ? 'online' : 'offline',
-  },
-  {
-    label: 'Python 后端',
-    value: systemStore.pythonRunning ? '在线' : '离线',
-    desc: systemStore.pythonRunning ? 'FastAPI 服务可达' : systemStore.pythonHealthError || '等待后端健康检查',
-    tone: systemStore.pythonRunning ? 'online' : 'offline',
-  },
-  {
-    label: 'Socket.IO',
-    value: systemStore.sioConnected ? '已连接' : '等待中',
-    desc: systemStore.sioConnected ? '双向运行时通道正常' : '等待 Socket.IO 握手',
-    tone: systemStore.sioConnected ? 'online' : 'warning',
-  },
-])
 
 const governanceStats = computed(() => {
   const summary = governanceData.value?.summary ?? {}
@@ -901,17 +910,6 @@ onDeactivated(() => {
   gap: 16px;
 }
 
-.ops-hero {
-  display: block;
-}
-
-.ops-status-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.ops-status-card,
 .ops-card,
 .control-block {
   border: 1px solid var(--yui-panel-outline, var(--yui-border));
@@ -920,14 +918,6 @@ onDeactivated(() => {
   box-shadow: var(--yui-panel-shadow, var(--yui-shadow-card));
 }
 
-.ops-status-card {
-  min-height: 88px;
-  border-radius: var(--yui-radius-card);
-  padding: 16px;
-  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
-}
-
-.ops-status-card:hover,
 .ops-card:hover,
 .control-block:hover {
   border-color: var(--yui-panel-outline-strong, var(--yui-border-strong));
@@ -940,35 +930,10 @@ onDeactivated(() => {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--yui-accent) 16%, transparent), var(--yui-shadow-hover);
 }
 
-.ops-status-card span,
-.ops-status-card small {
-  display: block;
-  color: var(--yui-muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.ops-status-card strong {
-  display: block;
-  margin: 10px 0 0;
-  color: var(--yui-text);
-  font-size: 22px;
-  font-weight: 950;
-  letter-spacing: 0;
-}
-
-.ops-status-card.online { background: var(--yui-success-soft); }
-.ops-status-card.warning { background: var(--yui-warning-soft); }
-.ops-status-card.offline { background: var(--yui-danger-soft); }
-
 .ops-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
   gap: 16px;
-}
-
-.chain-card {
-  padding: 18px;
 }
 
 .voice-quality-card {
@@ -1048,101 +1013,135 @@ onDeactivated(() => {
   font-size: 12px;
 }
 
-.chain-grid {
+.runtime-readiness-card {
+  padding: 18px;
+}
+
+.runtime-readiness-alert {
+  margin-bottom: 10px;
+}
+
+.runtime-action-list {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 10px;
+  gap: 2px;
+  border-top: 1px solid var(--yui-border);
+  border-bottom: 1px solid var(--yui-border);
 }
 
-.chain-check {
-  display: flex;
-  min-height: 72px;
+.runtime-action-item {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
-  flex-direction: column;
-  justify-content: center;
-  gap: 10px;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-card);
-  background: var(--yui-surface-muted);
-  padding: 12px;
+  padding: 10px 2px;
 }
 
-.chain-check strong,
-.chain-check span,
-.chain-check small {
+.runtime-action-item + .runtime-action-item {
+  border-top: 1px solid var(--yui-border);
+}
+
+.runtime-action-dot,
+.runtime-chain-item i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--yui-muted);
+}
+
+.runtime-action-item.warning .runtime-action-dot,
+.runtime-chain-item.warning i {
+  background: #d97706;
+}
+
+.runtime-action-item.offline .runtime-action-dot,
+.runtime-chain-item.offline i {
+  background: #dc2626;
+}
+
+.runtime-chain-item.online i {
+  background: #059669;
+}
+
+.runtime-action-item div,
+.runtime-action-item strong,
+.runtime-action-item span {
+  min-width: 0;
+}
+
+.runtime-action-item strong,
+.runtime-action-item span {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.chain-check strong {
+.runtime-action-item strong {
   color: var(--yui-text);
   font-size: 13px;
-  font-weight: 900;
 }
 
-.chain-check span {
-  margin-top: 6px;
+.runtime-action-item span {
+  margin-top: 2px;
+  color: var(--yui-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.runtime-action-item a {
+  color: var(--yui-accent);
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.runtime-ready-state {
+  padding: 10px 0 14px;
+}
+
+.runtime-ready-state strong,
+.runtime-ready-state span {
+  display: block;
+}
+
+.runtime-ready-state strong {
   color: var(--yui-text);
-  font-size: 18px;
-  font-weight: 950;
+  font-size: 13px;
 }
 
-.chain-check small {
+.runtime-ready-state span {
+  margin-top: 3px;
+  color: var(--yui-muted);
+  font-size: 12px;
+}
+
+.runtime-chain {
+  display: flex;
+  align-items: center;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.runtime-chain-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   color: var(--yui-muted);
   font-size: 11px;
-  font-weight: 700;
 }
 
-.chain-check.online { background: var(--yui-success-soft); }
-.chain-check.warning { background: var(--yui-warning-soft); }
-.chain-check.offline { background: var(--yui-danger-soft); }
-
-.chain-issues {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 8px;
-  margin-top: 12px;
+.runtime-chain-item strong {
+  color: var(--yui-text);
+  font-size: 11px;
 }
 
-.chain-issue {
-  min-width: 0;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-card);
-  background: var(--yui-surface-muted);
-  padding: 10px 12px;
-}
-
-.chain-issue strong,
-.chain-issue span {
-  display: block;
-  min-width: 0;
+.runtime-chain-item small {
   overflow: hidden;
+  max-width: 100px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-.chain-issue strong {
-  color: var(--yui-text);
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.chain-issue span {
-  margin-top: 4px;
-  color: var(--yui-muted);
-  font-size: 12px;
-  font-weight: 650;
-  overflow: visible;
-  overflow-wrap: anywhere;
-  text-overflow: clip;
-  white-space: normal;
-}
-
-.chain-issue.online { background: var(--yui-success-soft); }
-.chain-issue.warning { background: var(--yui-warning-soft); }
-.chain-issue.offline { background: var(--yui-danger-soft); }
 
 .ops-card {
   border-radius: var(--yui-radius-card);
@@ -1381,53 +1380,6 @@ onDeactivated(() => {
   font-size: 12px;
 }
 
-.runtime-checklist {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.runtime-check {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-width: 0;
-  border: 1px solid var(--yui-border);
-  border-left: 3px solid var(--yui-border);
-  border-radius: var(--yui-radius-card);
-  padding: 12px;
-  background: var(--yui-surface-muted);
-}
-
-.runtime-check.online { border-left-color: var(--yui-success); }
-.runtime-check.warning { border-left-color: var(--yui-warning); }
-.runtime-check.offline { border-left-color: var(--yui-danger); }
-
-.runtime-check-copy {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.runtime-check-copy strong,
-.runtime-check-copy span,
-.runtime-check-copy small {
-  overflow-wrap: anywhere;
-}
-
-.runtime-check-copy strong { color: var(--yui-text); font-size: 13px; }
-.runtime-check-copy span { color: var(--yui-text); font-size: 12px; font-weight: 700; }
-.runtime-check-copy small { color: var(--yui-muted); font-size: 11px; }
-
-.runtime-check-link {
-  flex: 0 0 auto;
-  color: var(--yui-accent);
-  font-size: 12px;
-  font-weight: 700;
-  text-underline-offset: 3px;
-}
-
 .platform-table-wrap {
   width: 100%;
   overflow-x: auto;
@@ -1485,29 +1437,22 @@ onDeactivated(() => {
 }
 
 @media (max-width: 1180px) {
-  .ops-hero,
   .ops-grid {
     grid-template-columns: 1fr;
   }
 
-  .ops-status-grid,
-  .pet-control-grid,
-  .chain-grid {
+  .pet-control-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 760px) {
-  .ops-hero,
   .ops-card {
     padding: 18px;
   }
 
-  .ops-status-grid,
   .metric-grid,
   .pet-control-grid,
-  .chain-grid,
-  .runtime-checklist,
   .voice-quality-grid,
   .pet-capability-summary {
     grid-template-columns: 1fr;
@@ -1518,6 +1463,15 @@ onDeactivated(() => {
   .summary-footnote {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .runtime-action-item {
+    grid-template-columns: 10px minmax(0, 1fr);
+  }
+
+  .runtime-action-item a {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .platform-table-wrap {

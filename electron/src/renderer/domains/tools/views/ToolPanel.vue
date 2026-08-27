@@ -10,14 +10,6 @@
         <router-link :to="canonicalPath('plugins')">{{ t('canonical.capabilities.plugins') }}</router-link>
         <router-link :to="canonicalPath('agent-governance')">{{ t('canonical.capabilities.governance') }}</router-link>
       </nav>
-      <section class="overview-band">
-        <article v-for="item in summaryCards" :key="item.label" class="summary-card" :class="`tone-${item.tone}`">
-          <span>{{ item.label }}</span>
-          <strong>{{ item.value }}</strong>
-          <small>{{ item.desc }}</small>
-        </article>
-      </section>
-
       <section class="tool-health panel-card" aria-label="本地能力状态">
         <button
           v-for="item in healthItems"
@@ -33,36 +25,16 @@
         </button>
       </section>
 
-      <section class="capability-map panel-card">
-        <div class="section-heading">
-          <div>
-            <h3>能力清单</h3>
-          </div>
-          <el-button plain :icon="Refresh" :loading="loadingSnapshots" @click="refreshSnapshots">刷新</el-button>
-        </div>
-        <div class="source-grid">
-          <button
-            v-for="item in sourceCards"
-            :key="item.kind || 'all'"
-            type="button"
-            class="source-card"
-            :class="{ active: filterKind === item.kind }"
-            @click="setKindFilter(item.kind)"
-          >
-            <span class="source-dot" :style="{ background: item.accent }"></span>
-            <strong>{{ item.title }}</strong>
-            <em>{{ item.count }}</em>
-          </button>
-        </div>
-      </section>
-
-      <section class="mcp-panel panel-card">
+      <section class="mcp-summary panel-card">
         <div class="section-heading">
           <div>
             <h3>MCP 服务</h3>
             <p>{{ mcpRows.length }} 个服务器，已连接 {{ mcpConnectedCount }}，异常 {{ mcpErrorCount }}，未启用 {{ mcpDisabledCount }}</p>
           </div>
-          <el-button plain :icon="Refresh" :loading="loadingMcp" @click="loadMcpServers">刷新</el-button>
+          <div class="section-actions">
+            <el-button plain :icon="Refresh" :loading="loadingMcp" @click="loadMcpServers">刷新</el-button>
+            <router-link class="governance-link" :to="canonicalPath('agent-governance')">管理 MCP</router-link>
+          </div>
         </div>
 
         <el-alert v-if="mcpLoadError" class="panel-alert" type="warning" :closable="false" show-icon>
@@ -72,65 +44,12 @@
           </div>
         </el-alert>
 
-        <div v-if="mcpRows.length" class="mcp-filter-row" role="tablist" aria-label="MCP 服务筛选">
-          <button
-            v-for="option in mcpFilterOptions"
-            :key="option.value"
-            type="button"
-            class="mcp-filter-button"
-            :class="{ active: mcpFilter === option.value }"
-            @click="mcpFilter = option.value"
-          >
-            <span>{{ option.label }}</span>
-            <strong>{{ option.count }}</strong>
-          </button>
+        <div v-if="mcpRows.length" class="mcp-status-line" aria-label="MCP 状态摘要">
+          <span><i class="connected"></i>{{ mcpConnectedCount }} 已连接</span>
+          <span><i class="error"></i>{{ mcpErrorCount }} 异常</span>
+          <span><i class="disabled"></i>{{ mcpDisabledCount }} 未启用</span>
         </div>
-
-        <div v-if="filteredMcpRows.length" class="mcp-grid">
-          <article
-            v-for="server in filteredMcpRows"
-            :key="server.name"
-            class="mcp-card"
-            :class="{ disabled: !server.enabled, connected: server.connected, errored: isMcpErrored(server) }"
-          >
-            <div class="mcp-main">
-              <div>
-                <strong>{{ server.name }}</strong>
-                <span>{{ mcpEndpointLabel(server) }}</span>
-              </div>
-              <el-tag size="small" :type="mcpStatusTagType(server)">{{ mcpStatusLabel(server) }}</el-tag>
-            </div>
-            <div class="mcp-meta">
-              <span>{{ transportLabel(server.transport) }}</span>
-              <span>工具 {{ server.tools_count }}</span>
-              <span>资源 {{ server.resources_count }}</span>
-              <span>Prompt {{ server.prompts_count }}</span>
-              <span v-if="server.env_keys?.length">环境变量 {{ server.env_keys.join(', ') }}</span>
-              <span v-if="server.header_keys?.length">请求头 {{ server.header_keys.join(', ') }}</span>
-            </div>
-            <div v-if="server.last_error || server.inventory_error" class="mcp-error">
-              {{ server.last_error || server.inventory_error }}
-            </div>
-            <div class="mcp-actions">
-              <el-switch
-                :model-value="server.enabled"
-                size="small"
-                :loading="mcpActionNames.has(server.name)"
-                @change="(value) => toggleMcpServer(server.name, Boolean(value))"
-              />
-              <el-button
-                size="small"
-                link
-                type="primary"
-                :loading="mcpActionNames.has(`${server.name}:refresh`)"
-                @click="refreshMcpServer(server.name)"
-              >
-                重连
-              </el-button>
-            </div>
-          </article>
-        </div>
-        <el-empty v-else :description="mcpEmptyDescription" :image-size="64" />
+        <el-empty v-else description="暂无 MCP 服务" :image-size="48" />
       </section>
 
       <section class="capability-workspace panel-card">
@@ -139,6 +58,7 @@
             <div>
               <h3>{{ activeFilterLabel }}</h3>
             </div>
+            <el-button plain :icon="Refresh" :loading="loadingSnapshots" @click="refreshSnapshots">刷新能力</el-button>
           </div>
 
           <div class="toolbar">
@@ -147,6 +67,9 @@
                 <el-icon><Search /></el-icon>
               </template>
             </el-input>
+            <el-select v-model="filterKind" placeholder="能力来源" class="toolbar-select" @change="activeHealthKey = ''">
+              <el-option v-for="item in sourceCards" :key="item.kind || 'all'" :label="`${item.title} (${item.count})`" :value="item.kind" />
+            </el-select>
             <el-select v-model="filterRisk" clearable placeholder="风险级别" class="toolbar-select">
               <el-option v-for="risk in riskOptions" :key="risk.value" :label="risk.label" :value="risk.value" />
             </el-select>
@@ -414,7 +337,6 @@ type MetricTone = 'blue' | 'amber' | 'rose' | 'emerald'
 type SkillCategoryFilter = 'all' | string
 type ImportedSkillCatalogItem = SkillCatalogItem & { imported?: boolean }
 type HealthActionKey = 'ready' | 'approval' | 'mcp-error' | 'plugin-error' | 'trace'
-type MCPFilter = 'all' | 'connected' | 'error' | 'disabled'
 
 const IMPORTED_SKILLS_STORAGE_KEY = 'yuizaki.importedSkills'
 const IMPORTED_SKILLS_MIGRATION_KEY = 'yuizaki.importedSkills.backendMigrated'
@@ -426,8 +348,6 @@ const canonicalPath = (moduleId: string) => `/w/${workspaceStore.activeWorkspace
 interface SourceCard {
   kind: CapabilityKindFilter
   title: string
-  description: string
-  accent: string
   count: number
 }
 
@@ -454,12 +374,6 @@ interface HealthItem {
   tone: MetricTone
 }
 
-interface MCPFilterOption {
-  value: MCPFilter
-  label: string
-  count: number
-}
-
 type MCPRow = MCPServerConfigSnapshot & MCPServerStatusSnapshot & {
   name: string
   connected: boolean
@@ -482,7 +396,6 @@ const filterApproval = ref<ApprovalFilter>('all')
 const searchText = ref('')
 const selectedCapabilityId = ref('')
 const activeHealthKey = ref<HealthActionKey | ''>('')
-const mcpFilter = ref<MCPFilter>('all')
 const skillSearchText = ref('')
 const skillCategoryFilter = ref<SkillCategoryFilter>('all')
 const skillImportInput = ref<HTMLInputElement | null>(null)
@@ -498,7 +411,6 @@ const capabilityLoadError = ref('')
 const mcpLoadError = ref('')
 const importedSkillStorageError = ref('')
 const importedSkillBackendReady = ref(false)
-const mcpActionNames = ref(new Set<string>())
 let pluginLoadSequence = 0
 let capabilityLoadSequence = 0
 let toolTraceLoadSequence = 0
@@ -593,8 +505,6 @@ const loadingSnapshots = computed(() => loadingCapabilities.value || loadingPlug
 
 const readyCapabilityCount = computed(() => capabilities.value.filter(isDirectExecutableCapability).length)
 const approvalRequiredCount = computed(() => capabilities.value.filter(item => item.requiresApproval).length)
-const highRiskCount = computed(() => capabilities.value.filter(item => ['high', 'critical'].includes(item.riskLevel)).length)
-const tracedCapabilityCount = computed(() => capabilities.value.filter(item => item.observability?.trace).length)
 const pluginIssueCount = computed(() => (
   pluginLoadFailures.value.length +
   pluginStates.value.filter(item => ['blocked', 'error', 'degraded'].includes(item.status)).length
@@ -629,41 +539,14 @@ const mcpRows = computed<MCPRow[]>(() => {
     })
     .sort((left, right) => Number(right.enabled) - Number(left.enabled) || left.name.localeCompare(right.name, 'zh-CN'))
 })
-const mcpServerCount = computed(() => mcpRows.value.length)
-const mcpEnabledCount = computed(() => mcpRows.value.filter(item => item.enabled).length)
 const mcpConnectedCount = computed(() => mcpRows.value.filter(item => item.connected).length)
 const mcpErrorCount = computed(() => mcpRows.value.filter(isMcpErrored).length)
 const mcpDisabledCount = computed(() => mcpRows.value.filter(item => !item.enabled).length)
-const mcpFilterOptions = computed<MCPFilterOption[]>(() => [
-  { value: 'all', label: '全部', count: mcpRows.value.length },
-  { value: 'connected', label: '已连接', count: mcpConnectedCount.value },
-  { value: 'error', label: '异常', count: mcpErrorCount.value },
-  { value: 'disabled', label: '未启用', count: mcpDisabledCount.value },
-])
-const filteredMcpRows = computed(() => mcpRows.value.filter((server) => {
-  if (mcpFilter.value === 'connected') return server.connected
-  if (mcpFilter.value === 'error') return isMcpErrored(server)
-  if (mcpFilter.value === 'disabled') return !server.enabled
-  return true
-}))
-const mcpEmptyDescription = computed(() => {
-  if (!mcpRows.value.length) return '暂无 MCP 服务'
-  const selected = mcpFilterOptions.value.find(item => item.value === mcpFilter.value)
-  return `没有${selected?.label || '当前'} MCP 服务`
-})
 
 const skillCategoryOptions = computed(() => (
   [...new Set(allSkillItems.value.map(item => item.category).filter(Boolean))]
     .sort((a, b) => skillCategoryLabel(a).localeCompare(skillCategoryLabel(b), 'zh-CN'))
 ))
-
-const summaryCards = computed(() => [
-  { label: '可见能力', value: capabilities.value.length, desc: '当前运行时已注册', tone: 'blue' as MetricTone },
-  { label: 'MCP 服务', value: mcpServerCount.value, desc: `${mcpEnabledCount.value} 个启用，${mcpConnectedCount.value} 个已连接`, tone: 'emerald' as MetricTone },
-  { label: '内置确认', value: approvalRequiredCount.value, desc: '仅统计仍需逐次确认的入口', tone: 'amber' as MetricTone },
-  { label: '高风险', value: highRiskCount.value, desc: '文件、桌面或外部动作', tone: 'rose' as MetricTone },
-  { label: '已追踪', value: tracedCapabilityCount.value, desc: '写入 trace 的入口', tone: 'emerald' as MetricTone },
-])
 
 const healthItems = computed<HealthItem[]>(() => [
   { key: 'ready', label: '可直接执行', value: readyCapabilityCount.value, detail: '低风险或已选 MCP/插件', tone: 'emerald' },
@@ -677,43 +560,31 @@ const sourceCards = computed<SourceCard[]>(() => [
   {
     kind: '',
     title: '全部能力',
-    description: '查看所有已注册入口。',
-    accent: '#64748b',
     count: capabilities.value.length,
   },
   {
     kind: 'builtin-tool',
     title: '内置工具',
-    description: '文件、浏览器、桌面、时间和搜索。',
-    accent: '#2563eb',
     count: countByKind('builtin-tool'),
   },
   {
     kind: 'mcp-tool',
     title: 'MCP 工具',
-    description: '由 MCP 服务提供的外部能力。',
-    accent: '#d97706',
     count: countByKind('mcp-tool'),
   },
   {
     kind: 'plugin-tool',
     title: '插件工具',
-    description: '由插件注册的轻量扩展。',
-    accent: '#059669',
     count: countByKind('plugin-tool'),
   },
   {
     kind: 'skill',
     title: '编排技能',
-    description: '可复用的 Agent 流程。',
-    accent: '#db2777',
     count: countByKind('skill'),
   },
   {
     kind: 'command',
     title: '本地命令',
-    description: '任务创建和调度入口。',
-    accent: '#7c3aed',
     count: countByKind('command'),
   },
 ])
@@ -854,11 +725,6 @@ function isMcpErrored(server: MCPRow) {
   return Boolean(server.enabled && !server.connected && (server.last_error || server.inventory_error || server.message))
 }
 
-function setKindFilter(kind: CapabilityKindFilter) {
-  activeHealthKey.value = ''
-  filterKind.value = kind
-}
-
 function applyHealthAction(action: HealthActionKey) {
   activeHealthKey.value = action
   if (action === 'ready') {
@@ -879,7 +745,6 @@ function applyHealthAction(action: HealthActionKey) {
     filterKind.value = 'mcp-tool'
     filterRisk.value = ''
     filterApproval.value = 'all'
-    mcpFilter.value = 'error'
     searchText.value = ''
     return
   }
@@ -946,37 +811,6 @@ function displayCapabilityDescription(item: CapabilityDescriptor) {
   if (rawDescriptionOverride) return rawDescriptionOverride
 
   return item.description || kindFallbackDescription(item.kind)
-}
-
-function transportLabel(transport: string) {
-  const labels: Record<string, string> = {
-    http: 'HTTP',
-    sse: 'SSE',
-    stdio: 'STDIO',
-    streamable_http: '流式 HTTP',
-  }
-  return labels[transport] || transport.toUpperCase()
-}
-
-function mcpEndpointLabel(server: MCPRow) {
-  if (server.transport === 'stdio') {
-    return `${server.command || 'stdio'} ${(server.args || []).join(' ')}`.trim()
-  }
-  return server.base_url || '未配置地址'
-}
-
-function mcpStatusLabel(server: MCPRow) {
-  if (!server.enabled) return '未启用'
-  if (server.connected) return '已连接'
-  if (server.last_error || server.inventory_error || server.message) return '异常'
-  return '已启用'
-}
-
-function mcpStatusTagType(server: MCPRow): TagType {
-  if (!server.enabled) return 'info'
-  if (server.connected) return 'success'
-  if (server.last_error || server.inventory_error || server.message) return 'danger'
-  return 'warning'
 }
 
 function executionLabel(item: CapabilityDescriptor) {
@@ -1499,18 +1333,6 @@ const pushLog = (text: string) => {
   if (logs.value.length > 20) logs.value.pop()
 }
 
-function addMcpAction(name: string) {
-  const next = new Set(mcpActionNames.value)
-  next.add(name)
-  mcpActionNames.value = next
-}
-
-function removeMcpAction(name: string) {
-  const next = new Set(mcpActionNames.value)
-  next.delete(name)
-  mcpActionNames.value = next
-}
-
 function formatTraceTime(timestamp?: string) {
   if (!timestamp) return '-'
   const parts = timestamp.split('T')
@@ -1628,34 +1450,6 @@ async function loadMcpServers() {
   }
 }
 
-async function toggleMcpServer(serverName: string, enabled: boolean) {
-  addMcpAction(serverName)
-  try {
-    await systemClient.toggleMcp(serverName, enabled)
-    await loadMcpServers()
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
-    pushLog(`MCP ${serverName} ${enabled ? '启用' : '停用'}失败: ${message}`)
-    await loadMcpServers()
-  } finally {
-    removeMcpAction(serverName)
-  }
-}
-
-async function refreshMcpServer(serverName: string) {
-  const actionName = `${serverName}:refresh`
-  addMcpAction(actionName)
-  try {
-    await systemClient.refreshMcp(serverName)
-    await loadMcpServers()
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
-    pushLog(`MCP ${serverName} 重连失败: ${message}`)
-  } finally {
-    removeMcpAction(actionName)
-  }
-}
-
 async function refreshSnapshots() {
   await Promise.all([loadPlugins(), loadCapabilities(), loadToolTrace(), loadMcpServers()])
 }
@@ -1675,27 +1469,13 @@ onMounted(async () => {
   gap: 16px;
 }
 
-.panel-card,
-.summary-card {
+.panel-card {
   border: 1px solid var(--yui-border);
   border-radius: var(--yui-radius-card);
   background: var(--yui-surface-raised);
   box-shadow: var(--yui-shadow-card);
 }
 
-.overview-band {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 12px;
-}
-
-.summary-card {
-  min-height: 88px;
-  padding: 14px;
-}
-
-.summary-card span,
-.summary-card small,
 .detail-grid span,
 .risk-card span,
 .section-label {
@@ -1705,22 +1485,12 @@ onMounted(async () => {
   font-weight: 700;
 }
 
-.summary-card strong {
-  display: block;
-  margin: 6px 0;
-  color: var(--yui-text);
-  font-size: 28px;
-  line-height: 1;
-  font-weight: 900;
-}
-
 .tone-blue strong { color: #2563eb; }
 .tone-amber strong { color: #d97706; }
 .tone-rose strong { color: #e11d48; }
 .tone-emerald strong { color: #059669; }
 
-.capability-map,
-.mcp-panel,
+.mcp-summary,
 .skill-catalog,
 .plugin-panel,
 .log-panel {
@@ -1793,6 +1563,16 @@ onMounted(async () => {
   gap: 8px;
 }
 
+.governance-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  color: var(--yui-accent);
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
 .file-input {
   display: none;
 }
@@ -1819,30 +1599,6 @@ onMounted(async () => {
   line-height: 1.55;
 }
 
-.source-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
-}
-
-.source-card {
-  min-height: 64px;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 8px;
-  align-items: center;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-card);
-  background: var(--yui-surface-muted);
-  color: var(--yui-text);
-  cursor: pointer;
-  padding: 12px;
-  text-align: left;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
-}
-
-.source-card:hover,
-.source-card.active,
 .capability-row:hover,
 .capability-row.active,
 .skill-card:hover {
@@ -1851,13 +1607,6 @@ onMounted(async () => {
   box-shadow: var(--yui-shadow-hover);
 }
 
-.source-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-}
-
-.source-card strong,
 .skill-card strong,
 .mini-item strong {
   color: var(--yui-text);
@@ -1865,145 +1614,31 @@ onMounted(async () => {
   font-weight: 850;
 }
 
-.source-card em {
-  color: var(--yui-text);
-  font-size: 16px;
-  font-style: normal;
-  font-weight: 900;
-}
-
-.source-card small {
-  grid-column: 1 / -1;
-  color: var(--yui-muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.mcp-filter-row {
+.mcp-status-line {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 10px 18px;
 }
 
-.mcp-filter-button {
+.mcp-status-line span {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  border: 1px solid var(--yui-border);
-  border-radius: 999px;
-  background: var(--yui-surface-muted);
-  color: var(--yui-text);
-  cursor: pointer;
-  padding: 6px 10px;
-  transition: border-color 0.18s ease, background 0.18s ease;
-}
-
-.mcp-filter-button:hover,
-.mcp-filter-button:focus-visible,
-.mcp-filter-button.active {
-  border-color: var(--yui-border-strong);
-  background: var(--yui-surface-raised);
-  outline: none;
-}
-
-.mcp-filter-button span {
-  color: var(--yui-muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.mcp-filter-button strong {
-  color: var(--yui-text);
-  font-size: 12px;
-}
-
-.mcp-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 10px;
-}
-
-.mcp-card {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 10px;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-card);
-  background: var(--yui-surface-raised);
-  padding: 13px;
-}
-
-.mcp-card.connected {
-  border-color: rgba(34, 197, 94, 0.24);
-  background: var(--yui-success-soft);
-}
-
-.mcp-card.errored {
-  border-color: rgba(244, 63, 94, 0.35);
-  background: var(--yui-danger-soft);
-}
-
-.mcp-card.disabled {
-  background: var(--yui-surface-muted);
-}
-
-.mcp-main,
-.mcp-actions {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.mcp-main > div {
-  min-width: 0;
-}
-
-.mcp-main strong {
-  display: block;
-  color: var(--yui-text);
-  font-size: 14px;
-  font-weight: 850;
-}
-
-.mcp-main span {
-  display: block;
-  margin-top: 4px;
-  color: var(--yui-muted);
-  font-size: 11px;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-
-.mcp-meta {
-  display: flex;
-  flex-wrap: wrap;
   gap: 6px;
+  color: var(--yui-muted);
+  font-size: 12px;
 }
 
-.mcp-meta span {
-  border-radius: 999px;
-  background: var(--yui-surface-muted);
-  color: #64748b;
-  padding: 3px 8px;
-  font-size: 11px;
+.mcp-status-line i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--yui-muted);
 }
 
-.mcp-error {
-  border-radius: 6px;
-  background: var(--yui-danger-soft);
-  color: #be123c;
-  padding: 7px 9px;
-  font-size: 11px;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-
-.mcp-actions {
-  align-items: center;
-}
+.mcp-status-line i.connected { background: #059669; }
+.mcp-status-line i.error { background: #dc2626; }
+.mcp-status-line i.disabled { background: #94a3b8; }
 
 .capability-workspace {
   display: grid;
@@ -2385,8 +2020,6 @@ onMounted(async () => {
 }
 
 @media (max-width: 1180px) {
-  .overview-band,
-  .source-grid,
   .skill-grid,
   .bottom-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2403,8 +2036,6 @@ onMounted(async () => {
 }
 
 @media (max-width: 760px) {
-  .overview-band,
-  .source-grid,
   .skill-grid,
   .bottom-grid,
   .detail-grid {

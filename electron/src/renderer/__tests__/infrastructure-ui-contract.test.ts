@@ -30,4 +30,12 @@ describe('infrastructure panel UI contract', () => {
     expect(source).toContain('if (logsLoaded.value) requests.push(loadLogs())')
     expect(source).toContain('if (details?.open && !logsLoaded.value) void refreshLogs()')
   })
+
+  it('keeps status metrics with their owning sections instead of repeating a summary card band', () => {
+    expect(source).not.toContain('aria-label="基础设施概况"')
+    expect(source).not.toContain('const metrics = computed')
+    expect(source).toContain('服务状态')
+    expect(source).toContain('环境依赖 · {{ envStatusLabel }}')
+    expect(source).toContain('运行时资源')
+  })
 })

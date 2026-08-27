@@ -127,6 +127,26 @@ describe('responsive shell and chat contracts', () => {
     expect(basePanel).toMatch(/background-clip\s*:\s*padding-box/)
   })
 
+  it('distinguishes browser preview, browser control console, and service failures', () => {
+    const source = readRendererSource('app/AppShell.vue')
+
+    expect(source).toContain("hasControlAuthToken() || systemStore.controlRunning")
+    expect(source).toContain("title: browserAuthorized ? '浏览器控制台' : '浏览器预览模式'")
+    expect(source).toContain("title: `${unavailable}未连接`")
+    expect(source).toContain("title: '实时通道未连接'")
+  })
+
+  it('offers an explicit compact navigation expansion for non-hover users', () => {
+    const source = readRendererSource('app/AppSidebar.vue')
+
+    expect(source).toContain('class="compact-nav-toggle"')
+    expect(source).toContain('class="compact-nav-backdrop"')
+    expect(source).toContain("const compactOpen = ref(false)")
+    expect(source).toContain("event.key === 'Escape' && compactOpen.value")
+    expect(source).toContain('.sidebar.compact-open')
+    expect(source).toMatch(/\.compact-nav-toggle\s*\{[\s\S]*min-width:\s*44px[\s\S]*min-height:\s*44px/)
+  })
+
   it('lazy-renders every main settings tab', () => {
     const source = readRendererSource('domains/settings/views/SettingsPanel.vue')
     const tabPanes = source.match(/<el-tab-pane\b[^>]*>/g) || []

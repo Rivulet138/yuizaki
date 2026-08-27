@@ -11,14 +11,6 @@
         </div>
       </section>
 
-      <section class="metric-grid" aria-label="Agent 治理概况">
-        <article v-for="metric in governanceMetrics" :key="metric.label" class="metric-card" :class="metric.tone">
-          <span>{{ metric.label }}</span>
-          <strong>{{ metric.value }}</strong>
-          <small>{{ metric.detail }}</small>
-        </article>
-      </section>
-
       <el-card class="panel-card connector-card" shadow="never">
         <template #header>
           <div class="card-head">
@@ -63,8 +55,9 @@
             </article>
           </div>
           <el-empty v-else description="暂无连接器状态" :image-size="64" />
-          <div class="connector-config-grid">
-            <section v-for="connectorId in messageConnectorIds" :key="connectorId" class="connector-config-panel">
+          <el-tabs v-model="activeConnectorId" class="connector-config-tabs">
+            <el-tab-pane v-for="connectorId in messageConnectorIds" :key="connectorId" :label="connectorDisplayName(connectorId)" :name="connectorId" lazy>
+            <section class="connector-config-panel">
               <div class="connector-config-head">
                 <div>
                   <strong>{{ connectorDisplayName(connectorId) }} 设置</strong>
@@ -149,7 +142,8 @@
                 </div>
               </div>
             </section>
-          </div>
+            </el-tab-pane>
+          </el-tabs>
         </AsyncState>
       </el-card>
 
@@ -537,6 +531,7 @@ const retryingDeliveryKeys = ref(new Set<string>())
 const accountBusyIds = ref(new Set<string>())
 const messageConnectorIds = ['telegram', 'discord', 'qq', 'wechat'] as const
 type MessageConnectorId = typeof messageConnectorIds[number]
+const activeConnectorId = ref<MessageConnectorId>('telegram')
 const connectorConfigs = reactive<Partial<Record<MessageConnectorId, MessageConnectorConfigSnapshot>>>({})
 type ConnectorDraft = MessageConnectorConfigUpdate & { botToken: string; webhookSecret: string; publicKey: string; accountMode: string; bridgeUrl: string; bridgeProtocol: string; bridgeToken: string; clearBotToken: boolean; clearWebhookSecret: boolean; clearPublicKey: boolean; clearBridgeUrl: boolean; clearBridgeProtocol: boolean; clearBridgeToken: boolean }
 const newConnectorDraft = (): ConnectorDraft => ({ enabled: false, botToken: '', webhookSecret: '', publicKey: '', accountMode: 'personal_bridge', bridgeUrl: '', bridgeProtocol: 'generic', bridgeToken: '', clearBotToken: false, clearWebhookSecret: false, clearPublicKey: false, clearBridgeUrl: false, clearBridgeProtocol: false, clearBridgeToken: false })
@@ -653,7 +648,6 @@ const permissionMutationError = computed(() => revokePermissionRequest.error || 
 const agentPluginMutationError = computed(() => toggleAgentPluginRequest.error || updateAgentPluginConfigRequest.error)
 const connectorMutationError = computed(() => disableConnectorRequest.error)
 const connectedMcpCount = computed(() => mcpRows.value.filter((row) => row.connected).length)
-const enabledMcpCount = computed(() => mcpRows.value.filter((row) => row.enabled).length)
 const failingMcpCount = computed(() => mcpRows.value.filter((row) => row.enabled && !row.connected).length)
 const disabledMcpCount = computed(() => mcpRows.value.filter((row) => !row.enabled).length)
 const mcpFilterOptions = computed<MCPFilterOption[]>(() => [
@@ -673,10 +667,6 @@ const mcpEmptyDescription = computed(() => {
   const selected = mcpFilterOptions.value.find((item) => item.value === mcpFilter.value)
   return `没有${selected?.label || '当前'} MCP 服务`
 })
-const totalMcpInventory = computed(() => mcpRows.value.reduce((total, row) => total + row.tools_count + row.resources_count + row.prompts_count, 0))
-const approvedPermissionCount = computed(() => permissionRows.value.filter((row) => row.approved).length)
-const deniedPermissionCount = computed(() => permissionRows.value.filter((row) => !row.approved).length)
-const totalContributionCount = computed(() => contributionComparisonRows.value.reduce((total, row) => total + row.electron + row.agent + row.mcp, 0))
 
 const connectorStateLabel = (state: ConnectorState) => {
   const labels: Record<ConnectorState, string> = {
@@ -748,33 +738,6 @@ const governancePostureTagType = computed(() => {
   if (mcpRows.value.length === 0 && permissionRows.value.length === 0) return 'info'
   return 'success'
 })
-
-const governanceMetrics = computed(() => [
-  {
-    label: 'MCP 连接',
-    value: `${connectedMcpCount.value}/${mcpRows.value.length}`,
-    detail: `${enabledMcpCount.value} 个已启用，${failingMcpCount.value} 个需处理`,
-    tone: failingMcpCount.value ? 'red' : mcpRows.value.length ? 'green' : 'slate',
-  },
-  {
-    label: '工具库存',
-    value: totalMcpInventory.value,
-    detail: '工具、资源与 Prompt 总数',
-    tone: totalMcpInventory.value ? 'blue' : 'slate',
-  },
-  {
-    label: '已记住规则',
-    value: permissionRows.value.length,
-    detail: `${approvedPermissionCount.value} 个允许，${deniedPermissionCount.value} 个阻断`,
-    tone: permissionRows.value.length ? 'green' : 'slate',
-  },
-  {
-    label: '扩展贡献',
-    value: totalContributionCount.value,
-    detail: 'UI、能力、事件、策略贡献面',
-    tone: totalContributionCount.value ? 'violet' : 'slate',
-  },
-])
 
 const extensionHosts = computed(() => [
   {
@@ -1336,15 +1299,10 @@ const saveAgentPluginConfig = async (pluginId: string) => {
   gap: 10px;
 }
 
-.metric-grid,
 .governance-grid,
 .host-grid {
   display: grid;
   gap: 14px;
-}
-
-.metric-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .governance-grid {
@@ -1360,7 +1318,6 @@ const saveAgentPluginConfig = async (pluginId: string) => {
   margin-bottom: 14px;
 }
 
-.metric-card,
 .panel-card,
 .server-card,
 .preset-card,
@@ -1370,7 +1327,6 @@ const saveAgentPluginConfig = async (pluginId: string) => {
   box-shadow: var(--yui-shadow-card);
 }
 
-.metric-card,
 .host-card {
   display: flex;
   min-height: 112px;
@@ -1380,29 +1336,20 @@ const saveAgentPluginConfig = async (pluginId: string) => {
   border-radius: var(--yui-radius-card);
 }
 
-.metric-card span,
-.metric-card small,
 .host-card span,
 .host-card small {
   color: var(--yui-muted);
 }
 
-.metric-card strong,
 .host-card strong {
   color: var(--yui-text);
   font-size: 26px;
   letter-spacing: 0;
 }
 
-.metric-card.green,
 .host-card.green { background: var(--yui-success-soft); }
-.metric-card.blue,
 .host-card.blue { background: var(--yui-accent-soft); }
-.metric-card.violet,
 .host-card.violet { background: var(--yui-accent-soft); }
-.metric-card.amber { background: var(--yui-warning-soft); }
-.metric-card.red { background: var(--yui-danger-soft); }
-.metric-card.slate { background: var(--yui-surface-muted); }
 
 .panel-card {
   border-radius: var(--yui-radius-card);
@@ -1488,10 +1435,7 @@ const saveAgentPluginConfig = async (pluginId: string) => {
   align-items: center;
 }
 
-.connector-config-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+.connector-config-tabs {
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid var(--yui-border);
@@ -1935,7 +1879,6 @@ const saveAgentPluginConfig = async (pluginId: string) => {
 }
 
 @media (max-width: 1200px) {
-  .metric-grid,
   .governance-grid,
   .lower-grid,
   .host-grid {
@@ -1978,10 +1921,6 @@ const saveAgentPluginConfig = async (pluginId: string) => {
   }
 
   .connector-list {
-    grid-template-columns: 1fr;
-  }
-
-  .connector-config-grid {
     grid-template-columns: 1fr;
   }
 

@@ -81,6 +81,15 @@
 5. Companion first, control panel second: the pet remains calm and visible; memory tools are dense, predictable, and task-focused.
 - Tradeoffs: consistency and user trust take priority over autonomous write volume, graph novelty, and maximum recall aggressiveness.
 
+## Research basis / 研究依据
+
+- Human-centered proactive agents: CUI 2024 recommends that proactive timing and content follow user goals and context, with persistent controls over frequency and categories. Yuizaki therefore keeps proactive behavior low-attention and user-adjustable instead of using blocking prompts. <https://doi.org/10.1145/3626772.3657843>
+- Explainable proactive intent: CHI 2025 supports short user-facing reasons for proactive interventions without exposing chain-of-thought. Yuizaki surfaces a concise reason and next action rather than raw internal reasoning. <https://doi.org/10.1145/3706598.3713760>
+- Companion well-being: AI & Society 2025 identifies both relationship benefits and dependency risks in companion AI. Yuizaki prioritizes pause, quiet hours, reduced frequency, and non-coercive copy over engagement pressure. <https://doi.org/10.1007/s00146-025-02318-6>
+- Long-term memory: CAIM at IUI 2026 separates persistent cognitive memory from transient interaction context. Yuizaki keeps stable facts and preferences distinct from session context and does not promote one-off emotional statements directly into the core profile. <https://doi.org/10.1145/3742413.3789222>
+- Memory evaluation: the ACL 2024 long-term memory benchmark covers temporal change, contradiction, and multi-session retrieval. Yuizaki preserves correction history and gives the user's current correction precedence in recall. <https://doi.org/10.48550/arXiv.2402.17753>
+- Operational interaction: Microsoft Human-AI Interaction Guidelines, OpenAI Memory controls, and Anthropic Computer Use guidance support visible system state, low-cost correction, scoped memory controls, and observable tool execution. <https://www.microsoft.com/en-us/research/publication/guidelines-for-human-ai-interaction/> <https://help.openai.com/en/articles/8590148-memory-faq> <https://docs.anthropic.com/en/docs/build-with-claude/computer-use>
+
 ## Visual language / 视觉语言
 
 - Color: reuse existing Yuizaki neutral surfaces and one accent; reserve green/amber/red for verified states, review, and destructive risk.

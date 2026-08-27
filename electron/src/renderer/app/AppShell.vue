@@ -12,12 +12,7 @@
         <div class="wallpaper-layer" :style="{ backgroundImage: `url(${currentWallpaper})` }"></div>
         <div class="wallpaper-blur" :style="{ backgroundImage: `url(${currentWallpaper})` }"></div>
         <div class="wallpaper-mask"></div>
-        <div v-if="showOfflineBanner" class="offline-banner" role="status" aria-live="polite">
-          <span>{{ t('shell.offline') }}</span>
-          <button type="button" @click="retryConnection">{{ t('shell.retry') }}</button>
-        </div>
-
-        <div class="content-frame" :class="{ 'has-offline-banner': showOfflineBanner }">
+        <div class="content-frame">
           <AppTopbar
             v-if="activeTab !== 'chat'"
             :active-workspace="activeWorkspace"
@@ -38,6 +33,13 @@
             @maximize="maximize"
             @close="close"
             @change-companion="handleCompanionChange"
+          />
+
+          <RuntimeEnvironmentStrip
+            v-if="runtimeEnvironmentNotice"
+            v-bind="runtimeEnvironmentNotice"
+            @open-checks="openRuntimeChecks"
+            @retry="retryConnection"
           />
 
           <main class="app-main" :class="activeTab === 'chat' ? 'chat-mode' : 'panel-mode'">
@@ -91,6 +93,7 @@ import { ElMessage } from 'element-plus'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { yuizakiConfig } from '@/config/yuizaki'
+import { hasControlAuthToken } from '@/api/clients/http-client'
 import { getSocketClient, SocketEvents } from '@/net/socketClient'
 import { useChatStore } from '@/stores/chatStore'
 import { useCompanionStore } from '@/stores/companionStore'
@@ -105,6 +108,7 @@ import { adminNavigationModules, isPanelKey, primaryNavigationModules, type Navi
 import AppSidebar from './AppSidebar.vue'
 import AppTopbar from './AppTopbar.vue'
 import GlobalDialogs from './components/dialogs/GlobalDialogs.vue'
+import RuntimeEnvironmentStrip from './components/RuntimeEnvironmentStrip.vue'
 import { useAppOrchestrator } from './orchestrators/useAppOrchestrator'
 import { useVoiceConversationBridge } from './composables/useVoiceConversationBridge'
 import { advanceCompanionCooldownForE2E, useCompanionRuntimeBridge } from './composables/useCompanionRuntimeBridge'
@@ -161,11 +165,45 @@ const companionOptions = computed(() => {
 })
 const isElectronPanel = computed(() => Boolean(petApi?.window))
 const handleCompanionChange = orchestrator.handleCompanionChange
-const showOfflineBanner = computed(() => (
-  systemStore.statusChecked &&
-  !systemStore.pythonRunning &&
-  !systemStore.sioConnected
-))
+const runtimeEnvironmentNotice = computed(() => {
+  const browserHost = !isElectronPanel.value
+  const browserAuthorized = browserHost && (hasControlAuthToken() || systemStore.controlRunning)
+  if (systemStore.statusChecked && (!systemStore.controlRunning || !systemStore.pythonRunning)) {
+    const unavailable = [
+      !systemStore.controlRunning ? '控制服务' : '',
+      !systemStore.pythonRunning ? 'Python 后端' : '',
+    ].filter(Boolean).join('、')
+    return {
+      kind: 'offline' as const,
+      tone: 'danger' as const,
+      title: `${unavailable}未连接`,
+      detail: '对话、语音、记忆或桌宠控制暂不可用。',
+      retryable: true,
+    }
+  }
+  if (systemStore.statusChecked && !systemStore.sioConnected) {
+    return {
+      kind: 'degraded' as const,
+      tone: 'warning' as const,
+      title: '实时通道未连接',
+      detail: '设置仍可读取，但流式对话、语音回传和桌宠联动会中断。',
+      retryable: true,
+    }
+  }
+  if (browserHost) {
+    return {
+      kind: 'browser' as const,
+      tone: 'info' as const,
+      title: browserAuthorized ? '浏览器控制台' : '浏览器预览模式',
+      detail: browserAuthorized
+        ? '服务功能可用；桌宠宿主窗口、全局输入和 Electron 进程资源不可用。'
+        : '仅用于界面预览；请从 Yuizaki 桌面应用或本地控制页打开完整功能。',
+      retryable: false,
+    }
+  }
+  if (!systemStore.statusChecked) return null
+  return null
+})
 
 let themeMediaQuery: MediaQueryList | null = null
 let healthScheduleEnabled = !e2eMode
@@ -249,6 +287,8 @@ const retryConnection = () => {
     () => socketClient.isConnected(),
   )
 }
+
+const openRuntimeChecks = () => handlePanelOpenTab('deploy')
 
 const handleGlobalKeydown = (event: KeyboardEvent) => {
   if (event.key === '?' && !event.ctrlKey && !event.metaKey && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
@@ -610,42 +650,6 @@ watch(
   inset: 0;
 }
 
-.offline-banner {
-  position: absolute;
-  top: 6px;
-  left: 50%;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  transform: translateX(-50%);
-  width: max-content;
-  max-width: calc(100% - 32px);
-  box-sizing: border-box;
-  padding: 6px 16px;
-  border: 1px solid #fecaca;
-  border-radius: 10px;
-  color: #dc2626;
-  background: #fef2f2;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  font-size: 14px;
-}
-
-.offline-banner button {
-  border: none;
-  border-radius: 6px;
-  color: #fff;
-  background: #dc2626;
-  padding: 4px 12px;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.content-frame.has-offline-banner {
-  box-sizing: border-box;
-  padding-top: 48px;
-}
-
 .shortcuts-overlay {
   position: fixed;
   inset: 0;
@@ -755,24 +759,6 @@ watch(
     padding: 10px;
   }
 
-  .offline-banner {
-    top: 8px;
-    left: 16px;
-    right: 16px;
-    justify-content: space-between;
-    width: auto;
-    max-width: none;
-    transform: none;
-  }
-
-  .content-frame.has-offline-banner {
-    padding-top: 72px;
-  }
-
-  .offline-banner button {
-    min-width: 44px;
-    min-height: 44px;
-  }
 }
 </style>
 

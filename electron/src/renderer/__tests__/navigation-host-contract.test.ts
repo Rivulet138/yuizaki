@@ -10,6 +10,7 @@ const navigationModules = readFileSync(resolve(process.cwd(), 'src/renderer/navi
 const svcPanel = readFileSync(resolve(process.cwd(), 'src/renderer/domains/tools/views/SVCPanel.vue'), 'utf8')
 const toolPanel = readFileSync(resolve(process.cwd(), 'src/renderer/domains/tools/views/ToolPanel.vue'), 'utf8')
 const overviewPanel = readFileSync(resolve(process.cwd(), 'src/renderer/domains/system/views/OverviewPanel.vue'), 'utf8')
+const governancePanel = readFileSync(resolve(process.cwd(), 'src/renderer/domains/system/views/AgentGovernancePanel.vue'), 'utf8')
 
 describe('navigation view host', () => {
   it('does not block async routes behind an out-in keep-alive transition', () => {
@@ -75,5 +76,21 @@ describe('navigation view host', () => {
     expect(toolPanel).toContain("['mcp-tool', 'plugin-tool'].includes(item.kind)")
     expect(toolPanel).toContain("return '启用即授权'")
     expect(toolPanel).toContain('关闭后停止调用')
+  })
+
+  it('keeps MCP lifecycle operations in governance and only a health summary in the tool catalog', () => {
+    expect(toolPanel).toContain('管理 MCP')
+    expect(toolPanel).toContain('mcp-status-line')
+    expect(toolPanel).not.toContain('toggleMcpServer(')
+    expect(toolPanel).not.toContain('refreshMcpServer(')
+    expect(governancePanel).toContain('toggleMcpItem(')
+    expect(governancePanel).toContain('refreshMcpItem(')
+  })
+
+  it('uses lazy connector tabs instead of rendering four configuration cards at once', () => {
+    expect(governancePanel).toContain('<el-tabs v-model="activeConnectorId"')
+    expect(governancePanel).toContain('<el-tab-pane v-for="connectorId in messageConnectorIds"')
+    expect(governancePanel).toContain('lazy>')
+    expect(governancePanel).not.toContain('connector-config-grid')
   })
 })

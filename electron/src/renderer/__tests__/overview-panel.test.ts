@@ -95,7 +95,8 @@ const global = {
       template: '<section><h1>{{ title }}</h1><slot /></section>',
     },
     AsyncState: {
-      template: '<div><slot /></div>',
+      props: ['error'],
+      template: '<div><span v-if="error">{{ error }}</span><slot /></div>',
     },
     'el-button': {
       props: ['loading', 'disabled'],
@@ -113,6 +114,14 @@ const global = {
     },
     'el-tag': {
       template: '<span><slot /></span>',
+    },
+    'el-alert': {
+      props: ['title'],
+      template: '<div>{{ title }}<slot /></div>',
+    },
+    'router-link': {
+      props: ['to'],
+      template: '<a :href="to"><slot /></a>',
     },
     'el-slider': {
       template: '<input />',
@@ -225,20 +234,30 @@ describe('OverviewPanel chain self check', () => {
     await flushPromises()
     await flushPromises()
 
-    expect(wrapper.findAll('.chain-check')).toHaveLength(7)
-    expect(wrapper.find('.chain-issues').exists()).toBe(true)
+    expect(wrapper.findAll('.runtime-chain-item')).toHaveLength(7)
+    expect(wrapper.find('.runtime-action-list').exists()).toBe(true)
+    expect(wrapper.findAll('.runtime-action-item').length).toBeGreaterThanOrEqual(5)
     expect(wrapper.text()).toContain('Python 后端未连接')
     expect(wrapper.text()).toContain('Socket.IO 未连接')
     expect(wrapper.text()).toContain('LLM 未选择模型')
     expect(wrapper.text()).toContain('ASR 缺少地址')
     expect(wrapper.text()).toContain('桌宠模型未加载')
-    expect(wrapper.text()).toContain('运行状态清单')
-    expect(wrapper.text()).toContain('模型与语音服务')
-    expect(wrapper.text()).toContain('1/1 健康')
+    expect(wrapper.text()).toContain('需要处理')
+    expect(wrapper.text()).toContain('查看诊断')
+    expect(wrapper.text()).not.toContain('运行状态清单')
     expect(wrapper.text()).toContain('语音体验')
     expect(wrapper.text()).toContain('暂无')
     expect(clientMocks.voiceDiagnostics).toHaveBeenCalled()
     expect(clientMocks.companionRuntime).not.toHaveBeenCalled()
+  })
+
+  it('renders governance request failures instead of presenting them as empty data', async () => {
+    clientMocks.getGovernanceReport.mockRejectedValueOnce(new Error('治理快照不可用'))
+    const wrapper = mount(OverviewPanel, { global })
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('治理快照不可用')
   })
 
   it('shows measured voice quality separately from provider configuration', async () => {

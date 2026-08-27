@@ -1,5 +1,21 @@
 <template>
-  <aside class="sidebar" :aria-label="t('sidebar.aria')">
+  <button
+    v-if="compactOpen"
+    class="compact-nav-backdrop"
+    type="button"
+    aria-label="收起导航"
+    @click="closeCompactNavigation"
+  />
+  <aside class="sidebar" :class="{ 'compact-open': compactOpen }" :aria-label="t('sidebar.aria')">
+    <button
+      class="compact-nav-toggle"
+      type="button"
+      :aria-label="compactOpen ? '收起导航' : '展开导航'"
+      :aria-expanded="compactOpen"
+      @click="compactOpen = !compactOpen"
+    >
+      <el-icon><Close v-if="compactOpen" /><Menu v-else /></el-icon>
+    </button>
     <div class="brand">
       <img
         v-if="yuizakiConfig.decorations.letterDecor"
@@ -20,6 +36,7 @@
         active-class="active"
         :aria-label="menu.title"
         :title="menu.title"
+        @click="closeCompactNavigation"
       >
         <el-icon class="menu-icon"><component :is="menu.icon" /></el-icon>
         <span class="menu-label">{{ menu.title }}</span>
@@ -51,6 +68,7 @@
           active-class="active"
           :aria-label="menu.title"
           :title="menu.title"
+          @click="closeCompactNavigation"
         >
           <el-icon class="menu-icon"><component :is="menu.icon" /></el-icon>
           <span class="menu-label">{{ menu.title }}</span>
@@ -65,6 +83,7 @@
             active-class="active"
             :aria-label="menu.title"
             :title="menu.title"
+            @click="closeCompactNavigation"
           >
             <el-icon class="menu-icon"><component :is="menu.icon" /></el-icon>
             <span class="menu-label">{{ menu.title }}</span>
@@ -80,7 +99,7 @@
         title="桌宠场景设置"
         aria-label="桌宠场景设置"
         data-testid="workspace-settings"
-        @click="$emit('open-workspace-settings')"
+        @click="openWorkspaceSettings"
       >
         <el-icon class="menu-icon"><Setting /></el-icon>
         <span class="menu-label">场景设置</span>
@@ -90,8 +109,8 @@
 </template>
 
 <script setup lang="ts">
-import { ArrowDown, Setting } from '@element-plus/icons-vue'
-import { computed, ref } from 'vue'
+import { ArrowDown, Close, Menu, Setting } from '@element-plus/icons-vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { Component } from 'vue'
 import { yuizakiConfig } from '@/config/yuizaki'
 import { t } from '@/i18n'
@@ -103,12 +122,29 @@ const props = defineProps<{
   menus: SidebarMenu[]
   adminMenus: SidebarMenu[]
 }>()
-defineEmits<{
+const emit = defineEmits<{
   (e: 'open-workspace-settings'): void
 }>()
 // Keep the full desktop tool index visible on first render. The toggle remains
 // available for users who prefer a compact primary-only sidebar.
 const adminExpanded = ref(true)
+const compactOpen = ref(false)
+
+const closeCompactNavigation = () => {
+  compactOpen.value = false
+}
+
+const openWorkspaceSettings = () => {
+  closeCompactNavigation()
+  emit('open-workspace-settings')
+}
+
+const handleEscape = (event: KeyboardEvent) => {
+  if (event.key === 'Escape' && compactOpen.value) closeCompactNavigation()
+}
+
+onMounted(() => window.addEventListener('keydown', handleEscape))
+onUnmounted(() => window.removeEventListener('keydown', handleEscape))
 
 const adminGroupDefinitions = [
   { id: 'permissions', labelKey: 'sidebar.groups.skillsConnectionsPermissions', canonicalIds: ['tool'], relatedIds: ['plugins', 'agent-governance'] },
@@ -171,6 +207,23 @@ const adminMenuGroups = computed(() => {
 
 .sidebar::before {
   content: none;
+}
+
+.compact-nav-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-control, 6px);
+  color: var(--yui-text);
+  background: var(--yui-surface);
+  cursor: pointer;
+}
+
+.compact-nav-backdrop {
+  display: none;
 }
 
 .brand,
@@ -399,6 +452,19 @@ const adminMenuGroups = computed(() => {
 }
 
 @media (max-width: 980px) {
+  .compact-nav-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 29;
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background: rgba(15, 23, 42, 0.22);
+    cursor: default;
+  }
+
   .sidebar {
     width: 76px;
     min-width: 76px;
@@ -415,6 +481,50 @@ const adminMenuGroups = computed(() => {
   .menu-divider,
   .menu-item.active::after {
     display: none;
+  }
+
+  .compact-nav-toggle {
+    display: flex;
+    flex: 0 0 auto;
+    margin: 0 auto 8px;
+  }
+
+  .sidebar:not(.compact-open) .related-routes {
+    display: none;
+  }
+
+  .sidebar.compact-open {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 30;
+    width: min(280px, calc(100vw - 24px));
+    min-width: min(280px, calc(100vw - 24px));
+    padding: 12px;
+    box-shadow: 10px 0 28px rgba(15, 23, 42, 0.18);
+  }
+
+  .sidebar.compact-open .brand-wordmark,
+  .sidebar.compact-open .brand-name,
+  .sidebar.compact-open .menu-section-label,
+  .sidebar.compact-open .menu-label,
+  .sidebar.compact-open .admin-toggle-label,
+  .sidebar.compact-open .admin-group-label,
+  .sidebar.compact-open .menu-divider {
+    display: block;
+  }
+
+  .sidebar.compact-open .brand {
+    display: flex;
+  }
+
+  .sidebar.compact-open .compact-nav-toggle {
+    margin-right: 0;
+  }
+
+  .sidebar.compact-open .admin-toggle,
+  .sidebar.compact-open .menu-item {
+    justify-content: flex-start;
+    padding: 0 10px;
   }
 
   .brand {
