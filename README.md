@@ -32,7 +32,7 @@
 
 ## 下载
 
-发布文件位于 [GitHub Releases](https://github.com/Rivulet138/yuizaki/releases/latest)。
+发布文件位于 [GitHub Releases](https://github.com/Rivulet138/yuizaki/releases/latest)。仓库为私有状态时，需在浏览器登录 GitHub，或使用已认证的 GitHub CLI 下载；匿名直链会返回 404。
 
 | 文件 | 用途 |
 | --- | --- |
@@ -51,6 +51,7 @@ Launcher 负责创建环境、安装锁定依赖、启动 Python、MCP 和 Elect
 - Python 3.11-3.13
 - Node.js 22.13 或更高版本，附带 npm
 - 一个可用的 OpenAI-compatible LLM 服务
+- GitHub CLI，仅在从私有仓库命令行下载发布文件时需要
 - Go 1.22 仅在自行编译 Launcher 时需要
 - Docker 仅在使用自动启动的 Qdrant 时需要
 
@@ -59,9 +60,7 @@ Launcher 负责创建环境、安装锁定依赖、启动 Python、MCP 和 Elect
 ```powershell
 git clone https://github.com/Rivulet138/yuizaki.git
 cd yuizaki
-Invoke-WebRequest `
-  https://github.com/Rivulet138/yuizaki/releases/latest/download/YuizakiLauncher.exe `
-  -OutFile YuizakiLauncher.exe
+gh release download v0.1.0 --pattern YuizakiLauncher.exe
 ./YuizakiLauncher.exe setup
 ./YuizakiLauncher.exe start
 ```
@@ -71,8 +70,7 @@ Invoke-WebRequest `
 ```bash
 git clone https://github.com/Rivulet138/yuizaki.git
 cd yuizaki
-curl -L https://github.com/Rivulet138/yuizaki/releases/latest/download/YuizakiLauncher \
-  -o YuizakiLauncher
+gh release download v0.1.0 --pattern YuizakiLauncher
 chmod +x YuizakiLauncher
 ./YuizakiLauncher setup
 ./YuizakiLauncher start
