@@ -452,7 +452,11 @@ async function createApp(): Promise<void> {
         await shell.openPath(path.join(app.getPath('userData'), 'logs'))
       },
       openInstallGuide: async () => {
-        await shell.openPath(path.resolve(__dirname, '../../../docs/ENVIRONMENT_SETUP.md'))
+        if (app.isPackaged) {
+          await shell.openExternal('https://github.com/Rivulet138/yuizaki/blob/main/docs/CONFIGURATION.md')
+          return
+        }
+        await shell.openPath(path.resolve(__dirname, '../../../docs/CONFIGURATION.md'))
       },
     },
   )
