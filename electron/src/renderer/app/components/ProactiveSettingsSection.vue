@@ -65,7 +65,18 @@
     </div>
 
     <div class="frames">
-      <h4>{{ t('proactive.frames.title') }}</h4>
+      <div class="section-heading">
+        <h4>{{ t('proactive.frames.title') }}</h4>
+        <button
+          type="button"
+          class="text-action"
+          data-testid="proactive-frames-rebuild"
+          :disabled="controls.rebuilding.value"
+          @click="rebuildFrames"
+        >
+          {{ t(controls.rebuilding.value ? 'proactive.frames.rebuilding' : 'proactive.frames.rebuild') }}
+        </button>
+      </div>
       <p v-if="!controls.visibleFrames.value.length" class="empty">{{ t('proactive.frames.empty') }}</p>
       <div v-for="frame in controls.visibleFrames.value" :key="frame.frameId" class="frame-row">
         <span><strong>{{ sourceLabel(frame.sourceKind) }}</strong><small>{{ t('proactive.frames.expires') }} {{ formatDate(frame.expiresAt) }}</small></span>
@@ -150,6 +161,12 @@ const sendFeedback = async (kind: ProactiveFeedbackKind) => {
   if (saved) ElMessage.success(t('proactive.feedback.saved'))
   await nextTick()
   if (kind === 'never_source') neverButton?.focus()
+}
+
+const rebuildFrames = async () => {
+  const rebuilt = await controls.rebuildFrames()
+  if (rebuilt) ElMessage.success(t('proactive.frames.rebuilt'))
+  else ElMessage.error(t('proactive.frames.rebuildFailed'))
 }
 
 watch(() => [props.visible, props.workspaceId] as const, ([visible], previous) => {

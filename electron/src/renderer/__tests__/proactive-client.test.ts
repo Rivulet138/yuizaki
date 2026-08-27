@@ -117,4 +117,21 @@ describe('proactiveClient', () => {
     const { schemaVersion: _schemaVersion, ...expectedFrame } = frame
     await expect(proactiveClient.frames()).resolves.toEqual([expectedFrame])
   })
+
+  it('rebuilds activity frames through the bounded backend endpoint', async () => {
+    window.sessionStorage.setItem('yuizaki.control.token', 'proactive-token')
+    const payload = { workspaceId: 'default', projected: 4, tombstoned: 1, projectionVersion: 'activity-frame.v1' }
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue(payload),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(proactiveClient.rebuildFrames(500)).resolves.toEqual(payload)
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${CONTROL_ORIGIN}/api/system/activity-frames/rebuild`,
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ limit: 500 }) }),
+    )
+  })
 })

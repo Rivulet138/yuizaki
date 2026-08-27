@@ -10,6 +10,13 @@ import {
 } from '@/../shared/proactive'
 import { CONTROL_ORIGIN, requestJson } from './http-client'
 
+export interface ActivityFrameRebuildResult {
+  workspaceId: string
+  projected: number
+  tombstoned: number
+  projectionVersion: string
+}
+
 const requireSettings = (value: unknown): ProactiveSettings => {
   const parsed = parseProactiveSettings(value)
   if (!parsed) throw new Error('invalid_proactive_settings')
@@ -35,6 +42,14 @@ export const proactiveClient = {
   ),
   frames: async (): Promise<ActivityFrameSummary[]> => requireFrames(
     await requestJson<unknown>(`${CONTROL_ORIGIN}/api/system/activity-frames`),
+  ),
+  rebuildFrames: async (limit = 1000): Promise<ActivityFrameRebuildResult> => requestJson<ActivityFrameRebuildResult>(
+    `${CONTROL_ORIGIN}/api/system/activity-frames/rebuild`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ limit }),
+    },
   ),
   deleteFrame: async (frameId: string): Promise<{ ok: boolean }> => requestJson<{ ok: boolean }>(
     `${CONTROL_ORIGIN}/api/system/activity-frames/${encodeURIComponent(frameId)}`,

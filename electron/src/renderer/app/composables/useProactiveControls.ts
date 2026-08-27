@@ -18,6 +18,7 @@ interface ProactiveApi {
   settings: typeof proactiveClient.settings
   updateSettings: typeof proactiveClient.updateSettings
   frames: typeof proactiveClient.frames
+  rebuildFrames: typeof proactiveClient.rebuildFrames
   deleteFrame: typeof proactiveClient.deleteFrame
   feedback: typeof proactiveClient.feedback
 }
@@ -65,6 +66,7 @@ export const createProactiveControls = (api: ProactiveApi = proactiveClient) => 
   const policyClosed = ref(true)
   const loading = ref(false)
   const saving = ref(false)
+  const rebuilding = ref(false)
   const error = ref<string | null>(null)
   const pendingFeedback = ref(new Set<string>())
   const acknowledgedFeedback = ref(new Map<string, ProactiveFeedbackKind>())
@@ -155,6 +157,22 @@ export const createProactiveControls = (api: ProactiveApi = proactiveClient) => 
     }
   }
 
+  const rebuildFrames = async (limit = 1000): Promise<boolean> => {
+    if (rebuilding.value) return false
+    rebuilding.value = true
+    error.value = null
+    try {
+      await api.rebuildFrames(limit)
+      hiddenFrameIds.value = new Set()
+      return await load()
+    } catch (rebuildError) {
+      error.value = rebuildError instanceof Error ? rebuildError.message : 'activity_frame_rebuild_failed'
+      return false
+    } finally {
+      rebuilding.value = false
+    }
+  }
+
   const submitFeedback = async (
     opportunity: ProactiveOpportunityIdentity,
     feedback: ProactiveFeedbackKind,
@@ -211,11 +229,13 @@ export const createProactiveControls = (api: ProactiveApi = proactiveClient) => 
     policyClosed,
     loading,
     saving,
+    rebuilding,
     error,
     acknowledgedFeedback,
     load,
     updateSettings,
     deleteFrame,
+    rebuildFrames,
     submitFeedback,
     isFeedbackPending,
     allows,

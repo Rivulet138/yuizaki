@@ -146,7 +146,12 @@
             <div v-for="alert in governanceData.alerts.slice(0, 3)" :key="alert.key" class="alert-item">
               <el-tag :type="alert.severity === 'high' ? 'danger' : 'warning'" size="small">{{ alert.type }}</el-tag>
               <span>{{ alert.message }}</span>
+              <div class="alert-actions">
+                <el-button text size="small" :loading="alertActionKey === alert.key" @click="acknowledgeAlert(alert.key)">确认</el-button>
+                <el-button text size="small" :loading="alertActionKey === alert.key" @click="snoozeAlert(alert.key)">稍后</el-button>
+              </div>
             </div>
+            <el-button text size="small" :loading="alertActionKey === '__clear__'" @click="clearAlertState">清空</el-button>
           </div>
         </article>
 
@@ -380,6 +385,7 @@ import type {
 
 const governanceData = ref<any>(null)
 const governanceReq = reactive({ loading: false, error: '' })
+const alertActionKey = ref<string | null>(null)
 const platformSnapshot = ref<PlatformCapabilitySnapshot | null>(null)
 const platformRequest = reactive({ loading: false, error: '' })
 const providerSnapshot = ref<ProviderRegistrySnapshot | null>(null)
@@ -400,6 +406,49 @@ const loadGovernance = async () => {
     governanceData.value = await summaryClient.getGovernanceReport(7)
   } catch (e: any) { governanceReq.error = e?.message || '加载失败' }
   finally { governanceReq.loading = false }
+}
+
+const refreshGovernanceAfterAlertAction = async () => {
+  await loadGovernance()
+}
+
+const acknowledgeAlert = async (key: string) => {
+  if (alertActionKey.value) return
+  alertActionKey.value = key
+  try {
+    await summaryClient.ackAlert(key)
+    await refreshGovernanceAfterAlertAction()
+  } catch (error: any) {
+    governanceReq.error = error?.message || '告警确认失败'
+  } finally {
+    alertActionKey.value = null
+  }
+}
+
+const snoozeAlert = async (key: string) => {
+  if (alertActionKey.value) return
+  alertActionKey.value = key
+  try {
+    await summaryClient.snoozeAlert(key, 60)
+    await refreshGovernanceAfterAlertAction()
+  } catch (error: any) {
+    governanceReq.error = error?.message || '告警延后失败'
+  } finally {
+    alertActionKey.value = null
+  }
+}
+
+const clearAlertState = async () => {
+  if (alertActionKey.value) return
+  alertActionKey.value = '__clear__'
+  try {
+    await summaryClient.clearAlerts()
+    await refreshGovernanceAfterAlertAction()
+  } catch (error: any) {
+    governanceReq.error = error?.message || '告警清空失败'
+  } finally {
+    alertActionKey.value = null
+  }
 }
 
 const loadPlatformMatrix = async () => {

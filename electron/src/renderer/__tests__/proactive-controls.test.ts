@@ -55,6 +55,7 @@ const api = (overrides: Record<string, unknown> = {}) => ({
   updateSettings: vi.fn(async () => settings({ revision: 3 })),
   frames: vi.fn(async () => [frame]),
   deleteFrame: vi.fn(async () => ({ ok: true })),
+  rebuildFrames: vi.fn(async () => ({ workspaceId: 'default', projected: 1, tombstoned: 0, projectionVersion: 'projection-v1' })),
   feedback: vi.fn(async () => ({ ok: true })),
   ...overrides,
 })
@@ -136,5 +137,15 @@ describe('proactive controls', () => {
     expect(await controls.deleteFrame('frame-1')).toBe(false)
     expect(controls.visibleFrames.value).toEqual([])
     expect(controls.policyClosed.value).toBe(true)
+  })
+
+  it('rebuilds activity frames and reloads the authoritative list', async () => {
+    const backend = api()
+    const controls = createProactiveControls(backend as never)
+    expect(await controls.rebuildFrames()).toBe(true)
+    expect(backend.rebuildFrames).toHaveBeenCalledWith(1000)
+    expect(backend.settings).toHaveBeenCalledOnce()
+    expect(backend.frames).toHaveBeenCalledOnce()
+    expect(controls.visibleFrames.value).toEqual([frame])
   })
 })

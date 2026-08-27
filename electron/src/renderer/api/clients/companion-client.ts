@@ -55,6 +55,14 @@ export interface RelationshipSummary {
   milestone_reasoning?: string | null
 }
 
+export interface RelationshipHistoryPayload {
+  companion_id: string
+  events: RelationshipHistoryEvent[]
+  grouped: Record<string, Record<string, RelationshipHistoryEvent[]>>
+  milestones: RelationshipHistoryEvent[]
+  summary: RelationshipSummary
+}
+
 export const companionClient = {
   list: async () => requestJson<{ companions: CompanionRecord[] }>(`${CONTROL_ORIGIN}/api/companions`),
   get: async (id: string) => requestJson<CompanionRecord>(`${CONTROL_ORIGIN}/api/companions/${encodeURIComponent(id)}`),
@@ -75,5 +83,5 @@ export const companionClient = {
       method: 'DELETE',
     }),
   relationshipHistory: async (id: string, limit = 20) =>
-    requestJson<{ companion_id: string; events: RelationshipHistoryEvent[]; grouped: Record<string, Record<string, RelationshipHistoryEvent[]>>; milestones: RelationshipHistoryEvent[]; summary: RelationshipSummary }>(`${CONTROL_ORIGIN}/api/companions/${encodeURIComponent(id)}/relationship-history?limit=${encodeURIComponent(String(limit))}`),
+    requestJson<RelationshipHistoryPayload>(`${CONTROL_ORIGIN}/api/companions/${encodeURIComponent(id)}/relationship-history?limit=${encodeURIComponent(String(limit))}`),
 }

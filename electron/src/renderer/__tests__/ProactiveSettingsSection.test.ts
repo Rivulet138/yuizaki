@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   load: vi.fn(async () => true),
   updateSettings: vi.fn(async () => true),
   deleteFrame: vi.fn(async () => true),
+  rebuildFrames: vi.fn(async () => true),
   submitFeedback: vi.fn(async () => true),
   invalidate: vi.fn(),
   pending: false,
@@ -45,10 +46,12 @@ vi.mock('../app/composables/useProactiveControls', async () => {
       policyClosed: ref(false),
       loading: ref(false),
       saving: ref(false),
+      rebuilding: ref(false),
       error: ref(null),
       load: mocks.load,
       updateSettings: mocks.updateSettings,
       deleteFrame: mocks.deleteFrame,
+      rebuildFrames: mocks.rebuildFrames,
       submitFeedback: mocks.submitFeedback,
       isFeedbackPending: () => mocks.pending,
       invalidate: mocks.invalidate,
@@ -161,5 +164,12 @@ describe('ProactiveSettingsSection', () => {
     expect(button.attributes('title')).toBe(button.attributes('aria-label'))
     expect(wrapper.html()).not.toContain('>×<')
     expect(wrapper.html()).not.toContain('>脳<')
+  })
+
+  it('rebuilds retained activity frames and reports the terminal state', async () => {
+    const wrapper = mountSection()
+    await wrapper.get('[data-testid="proactive-frames-rebuild"]').trigger('click')
+    expect(mocks.rebuildFrames).toHaveBeenCalledOnce()
+    expect(mocks.success).toHaveBeenCalledWith('重建完成')
   })
 })

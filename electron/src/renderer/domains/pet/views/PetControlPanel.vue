@@ -1,5 +1,8 @@
 <template>
   <PanelShell title="桌宠控制" subtitle="选择模型并修改显示、位置、交互和动作参数" tone="companion">
+    <template #actions>
+      <el-button :icon="Clock" plain @click="relationshipHistoryVisible = true">关系历史</el-button>
+    </template>
     <div class="pet-console">
       <section class="status-strip" aria-label="桌宠状态">
         <article v-for="item in statusCards" :key="item.label" class="status-card">
@@ -280,14 +283,17 @@
       </section>
     </div>
   </PanelShell>
+  <RelationshipHistoryDrawer v-model="relationshipHistoryVisible" />
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Clock } from '@element-plus/icons-vue'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import PetModelManager from '../components/PetModelManager.vue'
 import PetResidenceControls from '../components/PetResidenceControls.vue'
+import RelationshipHistoryDrawer from '../components/RelationshipHistoryDrawer.vue'
 import { useI18n } from '@/i18n'
 import { petControl, type PetBehaviorState } from '@/utils/petControl'
 import {
@@ -347,6 +353,7 @@ const refreshingPet = ref(false)
 const hasLoadedState = ref(false)
 const operationMessage = ref('')
 const operationAlertType = ref<'success' | 'warning' | 'info' | 'error'>('info')
+const relationshipHistoryVisible = ref(false)
 const localModelRefreshHint = '如果模型文件是在资源管理器里删除或补齐的，请点击“刷新”同步列表。'
 const modelSourceLabels = {
   bundled: '内置',

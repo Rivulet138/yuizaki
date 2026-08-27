@@ -7,6 +7,9 @@ import { useSystemStore } from '../stores/systemStore'
 
 const clientMocks = vi.hoisted(() => ({
   getGovernanceReport: vi.fn(),
+  ackAlert: vi.fn(),
+  snoozeAlert: vi.fn(),
+  clearAlerts: vi.fn(),
   getSessions: vi.fn(),
   getSummary: vi.fn(),
   getReadiness: vi.fn(),
@@ -26,6 +29,9 @@ const clientMocks = vi.hoisted(() => ({
 vi.mock('../api/client', () => ({
   summaryClient: {
     getGovernanceReport: clientMocks.getGovernanceReport,
+    ackAlert: clientMocks.ackAlert,
+    snoozeAlert: clientMocks.snoozeAlert,
+    clearAlerts: clientMocks.clearAlerts,
     getSessions: clientMocks.getSessions,
     getSummary: clientMocks.getSummary,
     getReadiness: clientMocks.getReadiness,
@@ -48,6 +54,9 @@ vi.mock('../api/client', () => ({
 vi.mock('../api/clients/summary-client', () => ({
   summaryClient: {
     getGovernanceReport: clientMocks.getGovernanceReport,
+    ackAlert: clientMocks.ackAlert,
+    snoozeAlert: clientMocks.snoozeAlert,
+    clearAlerts: clientMocks.clearAlerts,
     exportGovernanceReport: vi.fn(),
   },
 }))
@@ -258,6 +267,26 @@ describe('OverviewPanel chain self check', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('治理快照不可用')
+  })
+
+  it('exposes acknowledgement, snooze, and clear actions for governance alerts', async () => {
+    clientMocks.getGovernanceReport
+      .mockResolvedValueOnce({ trends: [], alerts: [{ key: 'slow_summary:2026-08-28', type: 'slow_summary', day: '2026-08-28', severity: 'high', message: '摘要延迟' }], summary: {} })
+      .mockResolvedValueOnce({ trends: [], alerts: [{ key: 'slow_summary:2026-08-28', type: 'slow_summary', day: '2026-08-28', severity: 'high', message: '摘要延迟' }], summary: {} })
+      .mockResolvedValue({ trends: [], alerts: [], summary: {} })
+    clientMocks.ackAlert.mockResolvedValue({ status: 'ok' })
+    clientMocks.snoozeAlert.mockResolvedValue({ status: 'ok' })
+    clientMocks.clearAlerts.mockResolvedValue({ status: 'ok' })
+    const wrapper = mount(OverviewPanel, { global })
+    await flushPromises()
+    const alert = wrapper.find('.alert-item')
+    expect(alert.text()).toContain('确认')
+    expect(alert.text()).toContain('稍后')
+    await alert.get('button').trigger('click')
+    expect(clientMocks.ackAlert).toHaveBeenCalledWith('slow_summary:2026-08-28')
+    await flushPromises()
+    await wrapper.get('.alert-stack > button').trigger('click')
+    expect(clientMocks.clearAlerts).toHaveBeenCalledOnce()
   })
 
   it('shows measured voice quality separately from provider configuration', async () => {

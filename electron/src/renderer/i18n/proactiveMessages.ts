@@ -80,6 +80,10 @@ export const proactiveMessages = {
     'proactive.frames.empty': '暂无保留的活动摘要',
     'proactive.frames.expires': '到期',
     'proactive.frames.delete': '删除活动摘要',
+    'proactive.frames.rebuild': '重建活动摘要',
+    'proactive.frames.rebuilding': '重建中',
+    'proactive.frames.rebuilt': '重建完成',
+    'proactive.frames.rebuildFailed': '重建失败',
   },
   'en-US': {
     'proactive.title': 'Proactive companion',
@@ -121,6 +125,10 @@ export const proactiveMessages = {
     'proactive.frames.empty': 'No retained activity summaries',
     'proactive.frames.expires': 'Expires',
     'proactive.frames.delete': 'Delete activity summary',
+    'proactive.frames.rebuild': 'Rebuild activity summaries',
+    'proactive.frames.rebuilding': 'Rebuilding',
+    'proactive.frames.rebuilt': 'Rebuild complete',
+    'proactive.frames.rebuildFailed': 'Rebuild failed',
   },
   'ja-JP': {
     'proactive.title': 'プロアクティブなコンパニオン',
@@ -162,5 +170,9 @@ export const proactiveMessages = {
     'proactive.frames.empty': '保持中のアクティビティ要約はありません',
     'proactive.frames.expires': '期限',
     'proactive.frames.delete': 'アクティビティ要約を削除',
+    'proactive.frames.rebuild': 'アクティビティ要約を再構築',
+    'proactive.frames.rebuilding': '再構築中',
+    'proactive.frames.rebuilt': '再構築完了',
+    'proactive.frames.rebuildFailed': '再構築失敗',
   },
 } as const
