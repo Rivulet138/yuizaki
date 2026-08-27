@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ref } from "vue";
 
 import MemoryPanel from "../domains/memory/views/MemoryPanel.vue";
+import MemoryReviewQueue from "../domains/memory/components/MemoryReviewQueue.vue";
+import MemoryOverview from "../domains/memory/components/MemoryOverview.vue";
 
 const systemClientMocks = vi.hoisted(() => ({
 	companionRuntime: vi.fn(),
@@ -14,16 +16,23 @@ const systemClientMocks = vi.hoisted(() => ({
 }));
 
 const memoryClientMocks = vi.hoisted(() => ({
+	getCandidates: vi.fn(),
+	exportDocs: vi.fn(),
+	importDocs: vi.fn(),
+	reviewCandidate: vi.fn(),
 	getIndexStatus: vi.fn(),
 	removeDoc: vi.fn(),
 	removeDocs: vi.fn(),
+	previewDelete: vi.fn(),
 	previewMaintenance: vi.fn(),
 	applyMaintenance: vi.fn(),
 	rollbackDoc: vi.fn(),
+	recordRecallFeedback: vi.fn().mockResolvedValue({ status: "recorded", id: "doc-1", feedback: "helpful", counts: { helpful: 1 } }),
 }));
 
 const memoryDomainMocks = vi.hoisted(() => ({
 	loadDocs: vi.fn(),
+	loadCandidates: vi.fn(),
 	loadOverview: vi.fn(),
 	loadForgottenDocs: vi.fn(),
 	softForgetDoc: vi.fn(),
@@ -51,9 +60,14 @@ vi.mock("@/api/client", () => ({
 
 vi.mock("@/api/clients/memory-client", () => ({
 	memoryClient: {
+		getCandidates: memoryClientMocks.getCandidates,
+		exportDocs: memoryClientMocks.exportDocs,
+		importDocs: memoryClientMocks.importDocs,
+		reviewCandidate: memoryClientMocks.reviewCandidate,
 		getIndexStatus: memoryClientMocks.getIndexStatus,
 		removeDoc: memoryClientMocks.removeDoc,
 		removeDocs: memoryClientMocks.removeDocs,
+		previewDelete: memoryClientMocks.previewDelete,
 		previewMaintenance: memoryClientMocks.previewMaintenance,
 		applyMaintenance: memoryClientMocks.applyMaintenance,
 		rollbackDoc: memoryClientMocks.rollbackDoc,
@@ -112,13 +126,18 @@ vi.mock("../domains/system/composables/useSystemDomain", () => ({
 
 const docs = ref<any[]>([]);
 const forgottenDocs = ref<any[]>([]);
+const reviewCandidates = ref<any[]>([]);
 const overview = ref<any>(null);
+const overviewRequest = ref({ loading: false, error: "" });
+const candidatesRequest = ref({ loading: false, error: "" });
 const queryResult = ref({
 	query: "remember preference",
 	results: [{
 		id: "doc-1",
 		score: 0.9,
 		text: "remembered preference",
+		why_recalled: "与当前请求直接匹配",
+		evidence_type: "anchor",
 		score_components: { semantic: 0.92, lexical: 0.4, recency: 0.8, quality: 0.88, learned: 0.1, final: 0.9 },
 	}],
 	trace: {
@@ -146,11 +165,13 @@ vi.mock("../domains/memory/composables/useMemoryDomain", () => ({
 	useMemoryDomain: () => ({
 		docs,
 		forgottenDocs,
+		reviewCandidates,
 		overview,
 		queryResult,
 		docsRequest: ref({ loading: false, error: "" }),
 		forgottenDocsRequest: ref({ loading: false, error: "" }),
-		overviewRequest: ref({ loading: false, error: "" }),
+		overviewRequest,
+		candidatesRequest,
 		addRequest: ref({ loading: false, error: "" }),
 		updateRequest: ref({ loading: false, error: "" }),
 		queryRequest: ref({ loading: false, error: "" }),
@@ -158,12 +179,15 @@ vi.mock("../domains/memory/composables/useMemoryDomain", () => ({
 		loadDocs: memoryDomainMocks.loadDocs,
 		loadOverview: memoryDomainMocks.loadOverview,
 		loadForgottenDocs: memoryDomainMocks.loadForgottenDocs,
+		loadCandidates: memoryDomainMocks.loadCandidates,
 		addMemory: vi.fn().mockResolvedValue({ status: "ok" }),
 		updateDoc: memoryDomainMocks.updateDoc,
 		softForgetDoc: memoryDomainMocks.softForgetDoc,
 		restoreDoc: memoryDomainMocks.restoreDoc,
+		reviewCandidate: memoryClientMocks.reviewCandidate,
 		queryMemory: vi.fn().mockResolvedValue(undefined),
 		queryRawRag: vi.fn().mockResolvedValue(undefined),
+		recordRecallFeedback: memoryClientMocks.recordRecallFeedback,
 	}),
 }));
 
@@ -318,17 +342,49 @@ describe("refactor surface component integration", () => {
 		systemClientMocks.updateCompanionIdleProfile.mockReset();
 		systemClientMocks.saveSettings.mockReset();
 		memoryClientMocks.getIndexStatus.mockReset();
+		memoryClientMocks.getCandidates.mockReset();
+		memoryClientMocks.exportDocs.mockReset().mockResolvedValue({
+			format: "yuizaki-memory-export",
+			version: 1,
+			exported_at: "2026-08-26T00:00:00Z",
+			scope: "workspace",
+			include_state: "all",
+			count: 2,
+			docs: [],
+		});
+		memoryClientMocks.importDocs.mockReset().mockResolvedValue({
+			status: "ok",
+			imported_ids: [],
+			imported_count: 0,
+			skipped: [],
+			skipped_count: 0,
+			scope: "workspace",
+		});
+		memoryClientMocks.reviewCandidate.mockReset().mockResolvedValue({ status: "approved", id: "candidate-1" });
 		memoryClientMocks.removeDoc.mockReset();
 		memoryClientMocks.removeDocs.mockReset();
+		memoryClientMocks.previewDelete.mockReset().mockResolvedValue({
+			status: "preview",
+			ids: ["doc-1"],
+			total_count: 1,
+			hard_delete_count: 1,
+			candidate_tombstone_count: 0,
+			affected_message_count: 0,
+			effects: { authority_store: "delete_or_tombstone", index: "entries_removed", chat_references: "unchanged", recoverable: false },
+		});
 		memoryClientMocks.previewMaintenance.mockReset();
 		memoryClientMocks.applyMaintenance.mockReset();
 		memoryClientMocks.rollbackDoc.mockReset();
 		memoryDomainMocks.loadDocs.mockReset().mockResolvedValue(undefined);
+		memoryDomainMocks.loadCandidates.mockReset().mockResolvedValue(undefined);
 		memoryDomainMocks.loadOverview.mockReset().mockResolvedValue(undefined);
 		memoryDomainMocks.loadForgottenDocs.mockReset().mockResolvedValue(undefined);
 		memoryDomainMocks.softForgetDoc.mockReset().mockResolvedValue({ status: "forgotten" });
 		memoryDomainMocks.restoreDoc.mockReset().mockResolvedValue({ status: "restored" });
 		memoryDomainMocks.updateDoc.mockReset().mockResolvedValue({ status: "updated" });
+		reviewCandidates.value = [];
+		overviewRequest.value = { loading: false, error: "" };
+		candidatesRequest.value = { loading: false, error: "" };
 		systemClientMocks.setModelSelection.mockResolvedValue(undefined);
 		systemClientMocks.updateCompanionIdleProfile.mockResolvedValue(undefined);
 		systemClientMocks.saveSettings.mockResolvedValue(undefined);
@@ -477,6 +533,7 @@ describe("refactor surface component integration", () => {
 				metadata: { scope: "workspace", workspace_id: "ws-1", source: "manual" },
 			},
 		];
+		reviewCandidates.value = [docs.value[1]];
 		forgottenDocs.value = [
 			{
 				id: "doc-forgotten",
@@ -521,7 +578,7 @@ describe("refactor surface component integration", () => {
 
 		expect(advancedButton.attributes("aria-expanded")).toBe("true");
 		expect(wrapper.text()).toContain("写入原始文档");
-		expect(wrapper.text()).toContain("原始检索");
+		expect(wrapper.text()).toContain("召回实验台");
 		expect(wrapper.text()).toContain("检索轨迹");
 		expect(wrapper.text()).toContain("召回 1 · 候选 3 · 过滤 2");
 		expect(wrapper.text()).toContain("workspace 2");
@@ -535,6 +592,71 @@ describe("refactor surface component integration", () => {
 		expect(wrapper.text()).toContain("永久清理");
 		expect(wrapper.find(".score-components").text()).toContain("语义0.9200");
 		expect(wrapper.find(".score-components").text()).toContain("最终0.9000");
+		expect(wrapper.text()).toContain("与当前请求直接匹配");
+		expect(wrapper.text()).toContain("直接匹配");
+		await wrapper.get('[data-memory-query-id="doc-1"] .feedback-row button').trigger("click");
+		expect(memoryClientMocks.recordRecallFeedback).toHaveBeenCalledWith("doc-1", "helpful");
+	});
+
+	it("shows a retryable candidate error instead of an empty queue", async () => {
+		candidatesRequest.value = { loading: false, error: "候选读取失败：控制服务不可用" };
+		const wrapper = mount(MemoryPanel, { global });
+		await flushPromises();
+
+		const reviewQueue = wrapper.findComponent(MemoryReviewQueue);
+		expect(reviewQueue.props("error")).toBe("候选读取失败：控制服务不可用");
+		reviewQueue.vm.$emit("retry");
+		await flushPromises();
+		expect(memoryDomainMocks.loadCandidates).toHaveBeenCalled();
+	});
+
+	it("shows a direct retry action when the overview request fails", async () => {
+		overviewRequest.value = { loading: false, error: "概览读取失败：控制服务不可用" };
+		const wrapper = mount(MemoryPanel, { global });
+		await flushPromises();
+
+		const overviewPanel = wrapper.findComponent(MemoryOverview);
+		expect(overviewPanel.props("error")).toBe("概览读取失败：控制服务不可用");
+		overviewPanel.vm.$emit("retry");
+		await flushPromises();
+		expect(memoryDomainMocks.loadOverview).toHaveBeenCalled();
+	});
+
+	it("renders the per-record memory import report and storage effects", async () => {
+		memoryClientMocks.importDocs.mockResolvedValueOnce({
+			status: "ok",
+			imported_ids: ["import-1"],
+			imported_count: 1,
+			skipped: [{ id: "import-duplicate", reason: "id_exists" }],
+			skipped_count: 1,
+			skipped_reason_counts: { id_exists: 1 },
+			restored_soft_forgotten_count: 1,
+			effects: { authority_store: "updated", index: "rebuild_required", chat_references: "preserved" },
+			scope: "workspace",
+		});
+		const wrapper = mount(MemoryPanel, { global });
+		await flushPromises();
+		const input = wrapper.get('input[aria-label="选择记忆备份文件"]');
+		Object.defineProperty(input.element, "files", {
+			configurable: true,
+			value: [{
+				size: 128,
+				text: vi.fn().mockResolvedValue(JSON.stringify({
+					format: "yuizaki-memory-export",
+					version: 1,
+					docs: [{ id: "import-1", text: "restored memory", metadata: {} }],
+				})),
+			}],
+		});
+
+		await input.trigger("change");
+		await flushPromises();
+
+		expect(wrapper.text()).toContain("最近一次导入结果");
+		expect(wrapper.text()).toContain("恢复停止召回 1 条");
+		expect(wrapper.text()).toContain("索引状态 需要重建");
+		expect(wrapper.text()).toContain("ID 已存在：1");
+		expect(wrapper.text()).toContain("import-duplicate");
 	});
 
 	it("supports roving keyboard navigation across memory tabs", async () => {
@@ -657,7 +779,7 @@ describe("refactor surface component integration", () => {
 		await flushPromises();
 
 		expect(messageBoxMocks.confirm).toHaveBeenCalledWith(
-			"这些记忆将从存储中永久删除。",
+			"共 1 条：1 条物理删除；索引对应条目会移除，操作不可恢复。",
 			"永久删除 1 条记忆",
 			expect.objectContaining({ confirmButtonText: "永久删除", cancelButtonText: "取消", type: "warning" }),
 		);
@@ -669,7 +791,7 @@ describe("refactor surface component integration", () => {
 		await flushPromises();
 
 		expect(messageBoxMocks.confirm).toHaveBeenLastCalledWith(
-			"这条记忆将从存储中永久删除。",
+			"共 1 条：1 条物理删除；索引对应条目会移除，操作不可恢复。",
 			"永久删除记忆",
 			expect.objectContaining({ confirmButtonText: "永久删除", cancelButtonText: "取消", type: "warning" }),
 		);

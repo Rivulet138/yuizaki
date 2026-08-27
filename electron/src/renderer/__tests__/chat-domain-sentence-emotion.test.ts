@@ -166,4 +166,53 @@ describe('useVoiceConversationBridge sentence emotion scheduling', () => {
 
     wrapper.unmount()
   })
+
+  it('normalizes legacy LLM embodiment fields into one avatar command', async () => {
+    const { useVoiceConversationBridge } = await import('../app/composables/useVoiceConversationBridge')
+    const TestHarness = defineComponent({
+      setup() {
+        useVoiceConversationBridge()
+        return () => h('div')
+      },
+    })
+    const wrapper = mount(TestHarness)
+
+    window.dispatchEvent(new CustomEvent('pet:llm-control', {
+      detail: {
+        emotion_id: 'curious',
+        motion_group: 'Wave',
+        motion_index: 2,
+        expression_name: 'smile',
+        parameter_overrides: [{ id: 'ParamAngleX', value: 8, weight: 0.5 }],
+        intensity: 0.7,
+        duration_ms: 900,
+      },
+    }))
+
+    await vi.waitFor(() => expect(petControlMocks.triggerAvatarCommand).toHaveBeenCalledTimes(1))
+    const [command, options] = petControlMocks.triggerAvatarCommand.mock.calls[0]
+    expect(options).toEqual({ source: 'automation' })
+    expect(command).toEqual(expect.objectContaining({
+      version: 1,
+      streamId: expect.stringMatching(/^voice:/),
+      priority: 50,
+      interrupt: 'replace',
+      actions: [
+        { type: 'affect', emotion: 'curious', intensity: 0.7, decayMs: 900 },
+        { type: 'expression', name: 'smile', weight: 0.7, fadeOutMs: 900 },
+        {
+          type: 'parameterPatch',
+          patches: [{ id: 'ParamAngleX', value: 8, weight: 0.5, mode: 'set' }],
+          durationMs: 900,
+        },
+        { type: 'motion', group: 'Wave', index: 2, intensity: 0.7 },
+      ],
+    }))
+    expect(petControlMocks.triggerEmotion).not.toHaveBeenCalled()
+    expect(petControlMocks.triggerMotion).not.toHaveBeenCalled()
+    expect(petControlMocks.triggerExpressionMix).not.toHaveBeenCalled()
+    expect(petControlMocks.triggerExpression).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
 })

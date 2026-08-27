@@ -47,6 +47,9 @@ export interface MemoryQueryForm {
   query: string
   scope: MemoryScope
   top_k: number
+  expand_relations: boolean
+  relation_limit: number
+  relation_depth: number
 }
 
 export interface MemoryInspectorDraft extends MemoryCaptureForm {

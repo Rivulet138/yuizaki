@@ -3,11 +3,16 @@ from __future__ import annotations
 import secrets
 from ipaddress import ip_address
 
-
 PUBLIC_PREFIXES = ("/audio", "/socket.io", "/docs", "/redoc", "/openapi.json")
 PROTECTED_PREFIXES = ("/api", "/memory", "/v1", "/vision", "/svc", "/system")
 HOST_DESKTOP_ACTION_TOKEN_ENV = "YUIZAKI_HOST_DESKTOP_ACTION_TOKEN"
 HOST_DESKTOP_ACTION_PREFIX = "/api/desktop-actions"
+CONNECTOR_WEBHOOK_PATHS = frozenset({
+    "/api/system/connectors/telegram/webhook",
+    "/api/system/connectors/discord/webhook",
+    "/api/system/connectors/qq/webhook",
+    "/api/system/connectors/wechat/webhook",
+})
 
 
 def is_loopback_client(host: str | None) -> bool:
@@ -36,14 +41,18 @@ def backend_api_auth_required(
         return False
     if path in {"/health", "/api/ping"}:
         return False
+    # External providers cannot attach Yuizaki's backend token. These two
+    # exact endpoints authenticate with their upstream webhook secret or
+    # Ed25519 signature inside connector_api; sibling connector routes remain
+    # protected by the normal backend boundary.
+    if path in CONNECTOR_WEBHOOK_PATHS and method.upper() == "POST":
+        return False
     if any(path == prefix or path.startswith(f"{prefix}/") for prefix in PUBLIC_PREFIXES):
         return False
     protected = any(path == prefix or path.startswith(f"{prefix}/") for prefix in PROTECTED_PREFIXES)
     if not protected:
         return False
-    if is_loopback_client(client_host):
-        return False
-    return True
+    return not is_loopback_client(client_host)
 
 
 def verify_backend_api_authorization(

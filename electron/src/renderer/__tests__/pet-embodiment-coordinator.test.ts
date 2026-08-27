@@ -80,4 +80,16 @@ describe('PetEmbodimentCoordinator', () => {
     expect(applied).toEqual(['speaking'])
     expect(resetTransient).toHaveBeenCalledOnce()
   })
+
+  it('resets active transients during disposal', () => {
+    const resetTransient = vi.fn()
+    const coordinator = new PetEmbodimentCoordinator({ applyBehavior: vi.fn(), resetTransient })
+    coordinator.beginTransient('gaze')
+    coordinator.beginTransient('viseme')
+
+    coordinator.destroy()
+
+    expect(resetTransient).toHaveBeenCalledWith('gaze')
+    expect(resetTransient).toHaveBeenCalledWith('viseme')
+  })
 })

@@ -30,6 +30,7 @@ export interface OnboardingProbeResult {
   requiredForText: boolean
   dependencies: OnboardingProbeId[]
   timeoutMs: number
+  durationMs?: number | null
   message: string
   messageKey?: OnboardingProbeMessageKey
   evidence: Record<string, unknown>

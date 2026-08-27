@@ -1,6 +1,189 @@
 import type { CapabilitiesSnapshot } from './capability'
 import type { PetControlState } from './pet-control'
 
+export interface ProviderStatus {
+  id: string
+  kind: 'llm' | 'vision' | 'tts' | 'asr' | string
+  label: string
+  provider: string | null
+  model: string | null
+  configured: boolean
+  available: boolean
+  healthy: boolean
+  retryable: boolean
+  optional: boolean
+  capabilities: string[]
+  message: string
+  source: string
+}
+
+export interface ProviderRegistrySnapshot {
+  schemaVersion: number
+  generatedAt: string
+  providers: ProviderStatus[]
+  summary: {
+    total: number
+    configured: number
+    available: number
+    healthy: number
+    requiredHealthy: boolean
+  }
+}
+
+export interface VoiceDiagnosticsSnapshot {
+  sample_count: number
+  run_id?: string | null
+  stages: Record<string, Record<string, unknown>>
+  comfort: Record<string, unknown>
+  evidence_kinds: string[]
+  evidence_claim: string
+  providers: Record<string, {
+    configured: boolean
+    available: boolean
+    provider?: string | null
+    message?: string
+    status?: Record<string, unknown>
+  }>
+  capability: {
+    voice: string
+    text_chat: string
+    text_chat_blocked_by_voice: boolean
+  }
+  recommendations: string[]
+  generated_at?: number
+}
+
+export type ConnectorState = 'uninstalled' | 'disabled' | 'running' | 'failure'
+
+export interface ConnectorStatus {
+  id: string
+  name: string
+  kind: string
+  state: ConnectorState
+  installed: boolean
+  enabled: boolean
+  canDisable: boolean
+  experimental: boolean
+  capabilities: string[]
+  dataFlow: string[]
+  permissionScope: string
+  message: string
+  lastError: string | null
+  transport?: string
+  toolsCount?: number
+  account?: ConnectorAccountSnapshot | null
+  source: string
+}
+
+export interface ConnectorRegistrySnapshot {
+  schemaVersion: number
+  generatedAt: string
+  connectors: ConnectorStatus[]
+  summary: {
+    total: number
+    installed: number
+    enabled: number
+    running: number
+    failures: number
+    uninstalled: number
+    canDisable: number
+  }
+}
+
+export type PlatformCapabilityState = 'available' | 'needs_config' | 'experimental' | 'planned' | 'unsupported'
+
+export interface PlatformCapability {
+  status: PlatformCapabilityState
+  detail: string
+  evidence: string
+}
+
+export interface PlatformCapabilityRow {
+  id: string
+  name: string
+  host: boolean
+  capabilities: {
+    desktop: PlatformCapability
+    live2d_vrm: PlatformCapability
+    text_voice: PlatformCapability
+    native_actions: PlatformCapability
+  }
+}
+
+export interface PlatformCapabilitySnapshot {
+  schemaVersion: number
+  generatedAt: string
+  host: { system: string; release: string; displayServer: string }
+  platforms: PlatformCapabilityRow[]
+  statusLegend: PlatformCapabilityState[]
+}
+
+export interface MessageConnectorConfigSnapshot {
+  id: 'telegram' | 'discord' | 'qq' | 'wechat'
+  enabled: boolean
+  botTokenConfigured?: boolean
+  webhookSecretConfigured?: boolean
+  publicKeyConfigured?: boolean
+  webhookPath: string
+  accountMode?: 'personal_bridge' | string
+  bridgeUrlConfigured?: boolean
+  bridgeUrl?: string
+  bridgeTokenConfigured?: boolean
+  bridgeProtocol?: string
+}
+
+export interface MessageConnectorConfigUpdate {
+  enabled: boolean
+  botToken?: string
+  webhookSecret?: string
+  publicKey?: string
+  accountMode?: 'personal_bridge' | string
+  bridgeUrl?: string
+  bridgeProtocol?: string
+  bridgeToken?: string
+  clearBotToken?: boolean
+  clearWebhookSecret?: boolean
+  clearPublicKey?: boolean
+  clearBridgeUrl?: boolean
+  clearBridgeProtocol?: boolean
+  clearBridgeToken?: boolean
+}
+
+export interface ConnectorAccountSnapshot {
+  id: 'qq' | 'wechat' | string
+  connected: boolean
+  configured: boolean
+  accountKind: string
+  capabilities: string[]
+  accountId: string | null
+  accountName: string | null
+  loginState: 'connected' | 'awaiting_scan' | 'signed_out' | 'error' | string
+  experimental: boolean
+  loginUrl?: string | null
+  bridgeProtocol?: string | null
+  lastError: string | null
+}
+
+export interface ConnectorDeliveryItem {
+  deliveryKey: string
+  idempotencyKey: string
+  connectorId: string
+  eventId: string
+  status: 'processing' | 'sending' | 'failed' | 'delivered' | string
+  attemptCount: number
+  lastError: string | null
+  updatedAt: number
+  deliveredAt: number | null
+  retryable: boolean
+  cancellable: boolean
+}
+
+export interface ConnectorDeliverySnapshot {
+  ok: boolean
+  connectorId: string
+  items: ConnectorDeliveryItem[]
+}
+
 /** Versioned identity shared by ASR, generation and TTS events. */
 export interface GenerationEnvelope {
   version: 1
@@ -379,6 +562,16 @@ export interface ExperienceMetricsSnapshot {
     failures: number
     success_rate: number | null
   }
+  voice_runtime?: {
+    playback_recovery: {
+      attempts: number
+      successes: number
+      failures: number
+      success_rate: number | null
+      underruns: number
+      latency: ExperienceLatencySummary
+    }
+  }
   visual: {
     frames: number
     analysis_requests: number
@@ -450,6 +643,26 @@ export interface BackupRestorePlanItem {
   skippedReason?: string
 }
 
+export type BackupRestoreEffectStatus = 'will_restore' | 'restored' | 'rebuild_required' | 'unchanged' | 'skipped'
+
+export interface BackupRestoreSummary {
+  totalTargets: number
+  restoreCount: number
+  skippedCount: number
+  overwriteCount: number
+  missingCurrentCount: number
+}
+
+export interface BackupRestoreEffects {
+  database: BackupRestoreEffectStatus
+  memoryIndex: BackupRestoreEffectStatus
+  settings: BackupRestoreEffectStatus
+  governance: BackupRestoreEffectStatus
+  audioCache: BackupRestoreEffectStatus
+  petState: BackupRestoreEffectStatus
+  plugins: BackupRestoreEffectStatus
+}
+
 export interface BackupRestoreResponse {
   ok: boolean
   dryRun: boolean
@@ -464,6 +677,8 @@ export interface BackupRestoreResponse {
     }>
   }
   restorePlan: BackupRestorePlanItem[]
+  summary?: BackupRestoreSummary
+  effects?: BackupRestoreEffects
 }
 
 export interface PermissionStateSnapshot {

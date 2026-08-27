@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Coroutine
-from typing import Any
+from collections.abc import Callable, Coroutine, Mapping
+from typing import Any, cast
 
 from fastapi.responses import JSONResponse
 
 from ..agent.capability_registry import CapabilityRegistry
 from ..agent.orchestration_registry import OrchestrationRegistry
+from .connector_registry import build_connector_registry_snapshot
 from .heartbeat import (
     HeartbeatOpportunityAcceptance,
     HeartbeatOpportunityAuthorizationError,
@@ -15,6 +16,8 @@ from .heartbeat import (
     HeartbeatOpportunityTurnBridge,
     HeartbeatOpportunityUnavailableError,
 )
+from .platform_capabilities import build_platform_capability_snapshot
+from .provider_registry import build_provider_registry_snapshot
 
 __all__ = [
     "build_active_workspace_endpoint",
@@ -28,8 +31,10 @@ __all__ = [
     "build_clear_permissions_endpoint",
     "build_companion_opportunity_outcome_endpoint",
     "build_companion_runtime_endpoint",
+    "build_connector_registry_endpoint",
     "build_create_interval_schedule_endpoint",
     "build_create_once_schedule_endpoint",
+    "build_disable_connector_endpoint",
     "build_experience_metrics_endpoint",
     "build_health_endpoint",
     "build_heartbeat_goal_cancel_endpoint",
@@ -43,6 +48,8 @@ __all__ = [
     "build_orchestration_snapshot",
     "build_orchestration_state_endpoint",
     "build_permissions_state_endpoint",
+    "build_platform_capability_endpoint",
+    "build_provider_registry_endpoint",
     "build_readiness_endpoint",
     "build_refresh_mcp_endpoint",
     "build_remove_imported_skills_endpoint",
@@ -57,6 +64,7 @@ __all__ = [
     "build_toggle_mcp_endpoint",
     "build_toggle_schedule_endpoint",
     "build_update_agent_plugin_config_endpoint",
+    "build_voice_diagnostics_endpoint",
 ]
 
 
@@ -280,6 +288,124 @@ def build_capabilities_state_endpoint(
             }
 
         return capability_snapshot_builder(registry)
+
+    return _endpoint
+
+
+def build_provider_registry_endpoint(
+    *,
+    config_snapshot_provider: Callable[[], dict[str, Any]],
+    health_providers: dict[str, Callable[..., Any]],
+    client_providers: dict[str, Callable[[], Any]],
+) -> Callable[[], Coroutine[Any, Any, dict[str, Any]]]:
+    async def _endpoint() -> dict[str, Any]:
+        return await build_provider_registry_snapshot(
+            config_snapshot_provider=config_snapshot_provider,
+            health_providers=health_providers,
+            client_providers=client_providers,
+        )
+
+    return _endpoint
+
+
+def build_voice_diagnostics_endpoint(
+    *,
+    diagnostics_provider: Callable[[], Any],
+    asr_client_provider: Callable[[], Any] | None = None,
+    tts_client_provider: Callable[[], Any] | None = None,
+) -> Callable[[], dict[str, Any]]:
+    """Expose transcript-free voice readiness and local latency evidence.
+
+    The endpoint intentionally delegates to ``VoiceDiagnostics.runtime_snapshot``
+    and never opens a microphone, emits audio, or probes a network provider.
+    Device checks remain explicit user actions in the onboarding surface.
+    """
+
+    def _endpoint() -> dict[str, Any]:
+        diagnostics = diagnostics_provider()
+        if diagnostics is None:
+            return {
+                "sample_count": 0,
+                "evidence_kinds": [],
+                "evidence_claim": "synthetic_regression_only",
+                "providers": {},
+                "capability": {"voice": "degraded", "text_chat": "preserved", "text_chat_blocked_by_voice": False},
+                "recommendations": ["voice diagnostics are not initialized"],
+            }
+        runtime_snapshot = getattr(diagnostics, "runtime_snapshot", None)
+        if not callable(runtime_snapshot):
+            raise TypeError("voice diagnostics runtime snapshot is unavailable")
+        snapshot = runtime_snapshot(
+            asr=asr_client_provider() if asr_client_provider is not None else None,
+            tts=tts_client_provider() if tts_client_provider is not None else None,
+        )
+        if not isinstance(snapshot, Mapping):
+            raise TypeError("voice diagnostics runtime snapshot must be an object")
+        return cast(dict[str, Any], dict(snapshot))
+
+    return _endpoint
+
+
+def build_connector_registry_endpoint(
+    *,
+    mcp_manager: Any,
+    plugin_manager: Any,
+    adapter_registry: Any | None = None,
+) -> Callable[[], Coroutine[Any, Any, dict[str, Any]]]:
+    async def _endpoint() -> dict[str, Any]:
+        mcp_snapshot = await asyncio.to_thread(mcp_manager.snapshot)
+        plugin_snapshot = await asyncio.to_thread(plugin_manager.snapshot)
+        return build_connector_registry_snapshot(
+            mcp_snapshot=mcp_snapshot,
+            plugin_snapshot=plugin_snapshot,
+            adapter_registry=adapter_registry,
+        )
+
+    return _endpoint
+
+
+def build_platform_capability_endpoint() -> Callable[[], dict[str, Any]]:
+    """Build a side-effect-free platform matrix endpoint."""
+
+    def _endpoint() -> dict[str, Any]:
+        return build_platform_capability_snapshot()
+
+    return _endpoint
+
+
+def build_disable_connector_endpoint(
+    *,
+    mcp_manager: Any,
+    plugin_manager: Any,
+    adapter_registry: Any | None = None,
+) -> Callable[[str], Coroutine[Any, Any, dict[str, Any]]]:
+    async def _endpoint(connector_id: str) -> dict[str, Any]:
+        prefix, _, name = connector_id.partition(":")
+        if adapter_registry is not None and connector_id in {"telegram", "discord", "qq", "wechat"}:
+            connector = await asyncio.to_thread(adapter_registry.disable, connector_id)
+            if connector is None:
+                return {"ok": False, "connector": None, "error": "connector is not installed or cannot be disabled"}
+            return {"ok": connector.get("state") == "disabled", "connector": connector}
+        if not name or prefix not in {"mcp", "plugin"}:
+            return {"ok": False, "connector": None, "error": "connector is not installed or cannot be disabled"}
+        if prefix == "mcp":
+            result = await asyncio.to_thread(mcp_manager.set_enabled, name, False)
+            if result is None:
+                return {"ok": False, "connector": None, "error": "connector not found"}
+            await mcp_manager.refresh_one(name, timeout_seconds=3.0)
+        else:
+            result = await asyncio.to_thread(plugin_manager.set_enabled, name, False)
+            if result is None:
+                return {"ok": False, "connector": None, "error": "connector not found"}
+        snapshot = await asyncio.to_thread(mcp_manager.snapshot)
+        plugin_snapshot = await asyncio.to_thread(plugin_manager.snapshot)
+        registry = build_connector_registry_snapshot(
+            mcp_snapshot=snapshot,
+            plugin_snapshot=plugin_snapshot,
+            adapter_registry=adapter_registry,
+        )
+        connector = next((item for item in registry["connectors"] if item["id"] == connector_id), None)
+        return {"ok": connector is not None and connector["state"] == "disabled", "connector": connector}
 
     return _endpoint
 

@@ -41,6 +41,61 @@ def test_failure_taxonomy_is_closed_and_classifies_execution_signals():
         StepFailure(step_id="x", kind="new_kind", message="bad")
 
 
+@pytest.mark.parametrize(
+    ("exc", "expected_kind", "expected_reason"),
+    [
+        (TimeoutError("provider timed out"), "timeout", "provider_timeout"),
+        (ConnectionRefusedError("offline"), "provider", "provider_unavailable"),
+        (ConnectionResetError("connection reset"), "provider", "provider_unavailable"),
+    ],
+)
+def test_provider_runtime_failure_classifies_retryable_transport_errors(
+    exc, expected_kind, expected_reason
+):
+    failure = recovery.classify_provider_runtime_exception(exc)
+
+    assert failure is not None
+    assert failure.kind == expected_kind
+    assert failure.reason == expected_reason
+    assert failure.retryable is True
+
+
+def test_provider_runtime_failure_recognizes_retryable_http_status_without_importing_sdk():
+    class APIStatusError(Exception):
+        status_code = 503
+
+    failure = recovery.classify_provider_runtime_exception(APIStatusError("unavailable"))
+
+    assert failure is not None
+    assert failure.kind == "provider"
+    assert failure.reason == "provider_unavailable"
+
+
+@pytest.mark.parametrize("status", [408, 429, 503])
+def test_provider_runtime_failure_recognizes_local_llm_http_wrapper(status):
+    failure = recovery.classify_provider_runtime_exception(
+        RuntimeError(f"LLM API {status}: upstream unavailable")
+    )
+
+    assert failure is not None
+    assert failure.reason in {"provider_unavailable", "provider_timeout"}
+    assert failure.retryable is True
+
+
+def test_provider_runtime_failure_classifies_http_auth_or_request_errors_as_non_retryable():
+    failure = recovery.classify_provider_runtime_exception(
+        RuntimeError("LLM API 401: unauthorized")
+    )
+
+    assert failure is not None
+    assert failure.reason == "provider_request_rejected"
+    assert failure.retryable is False
+
+
+def test_provider_runtime_failure_does_not_hide_programming_errors():
+    assert recovery.classify_provider_runtime_exception(ValueError("broken invariant")) is None
+
+
 def test_resume_token_round_trip_binds_scope_and_plan():
     now = [1000.0]
     codec = ResumeTokenCodec("test-secret", clock=lambda: now[0])

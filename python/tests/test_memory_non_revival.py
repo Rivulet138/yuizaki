@@ -132,6 +132,28 @@ def test_permanent_delete_leaves_no_authority_index_or_query_residue(tmp_path):
     assert _query(client) == []
 
 
+def test_index_status_detects_same_count_but_different_ids_and_falls_back_to_authority():
+    authority = VectorStore(embedding_service=_Embedding())
+    index = VectorStore(embedding_service=_Embedding())
+    authority.add_document(Document(id="memory-a", text="jasmine tea", metadata={"scope": "global"}))
+    authority.add_document(Document(id="memory-b", text="green tea", metadata={"scope": "global"}))
+    index.add_document(Document(id="memory-a", text="jasmine tea", metadata={"scope": "global"}))
+    index.add_document(Document(id="memory-b", text="green tea", metadata={"scope": "global"}))
+    composite = IndexedMemoryBackend(authority=authority, index=index)
+
+    # Simulate a recovered index with the same count but one stale/missing ID.
+    index.delete_document("memory-a")
+    index.add_document(Document(id="stale-memory", text="unrelated", metadata={"scope": "global"}))
+
+    status = composite.get_status()
+    assert status.metadata["id_set_in_sync"] is False
+    assert status.metadata["index_dirty"] is True
+    assert status.metadata["actual_index_count"] == status.metadata["expected_index_count"]
+    result_ids = [doc.id for doc, _score in composite.search("jasmine tea")]
+    assert "memory-a" in result_ids
+    assert "stale-memory" not in result_ids
+
+
 @pytest.mark.parametrize("terminal_status", ["deleted", "rejected"])
 def test_candidate_terminal_status_survives_rollback_to_pending_revision(terminal_status: str):
     store = VectorStore(embedding_service=_Embedding())

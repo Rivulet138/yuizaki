@@ -49,6 +49,7 @@
           <span :title="`${experienceMetrics?.interrupts.by_source.voice?.hits ?? 0}/${experienceMetrics?.interrupts.by_source.voice?.requests ?? 0}`">语音打断 <strong>{{ formatRate(experienceMetrics?.interrupts.by_source.voice?.hit_rate) }}</strong></span>
           <span :title="`${experienceMetrics?.interrupts.by_source.manual?.hits ?? 0}/${experienceMetrics?.interrupts.by_source.manual?.requests ?? 0}`">手动中断 <strong>{{ formatRate(experienceMetrics?.interrupts.by_source.manual?.hit_rate) }}</strong></span>
           <span :title="`${experienceMetrics?.tools.successes ?? 0}/${experienceMetrics?.tools.calls ?? 0}`">工具成功 <strong>{{ formatRate(experienceMetrics?.tools.success_rate) }}</strong></span>
+          <span :title="`${experienceMetrics?.voice_runtime?.playback_recovery.successes ?? 0}/${experienceMetrics?.voice_runtime?.playback_recovery.attempts ?? 0}，underrun ${experienceMetrics?.voice_runtime?.playback_recovery.underruns ?? 0} 次`">播放恢复 <strong>{{ formatRate(experienceMetrics?.voice_runtime?.playback_recovery.success_rate) }}</strong></span>
           <span :title="`分析 ${experienceMetrics?.visual?.analysis_requests ?? 0}/${experienceMetrics?.visual?.frames ?? 0}，复用 ${experienceMetrics?.visual?.analysis_skipped ?? 0} 帧`">视觉调用 <strong>{{ formatRate(experienceMetrics?.visual?.analysis_rate) }}</strong></span>
           <span :title="`${experienceMetrics?.visual?.usable ?? 0}/${experienceMetrics?.visual?.completed ?? 0}`">视觉结论 <strong>{{ formatRate(experienceMetrics?.visual?.usable_rate) }}</strong></span>
         </div>
@@ -70,7 +71,7 @@
               <div class="job-card-main">
                 <div class="job-title-row">
                   <strong>{{ companionJobTitle(job) }}</strong>
-                  <el-tag size="small" :type="companionJobTagType(job.status)" effect="light">{{ companionJobStatusLabel(job.status) }}</el-tag>
+                  <el-tag size="small" :type="companionJobTagType(job)" effect="light">{{ companionJobStatusLabel(job) }}</el-tag>
                 </div>
                 <p class="job-subtitle">{{ job.source }} · {{ job.jobId }}</p>
                 <div class="tag-row">
@@ -82,6 +83,9 @@
                 <el-progress v-if="companionJobProgress(job) !== null" class="job-progress" :percentage="companionJobProgress(job) || 0" :show-text="false" :status="job.status === 'failed' || job.status === 'unknown_effect' ? 'exception' : undefined" />
                 <p v-if="companionJobResultSummary(job)" class="job-result">{{ companionJobResultSummary(job) }}</p>
                 <p v-if="companionJobOutcome(job)" class="job-outcome">{{ companionJobOutcome(job) }}</p>
+                <ul v-if="companionJobEvidence(job).length" class="job-evidence" aria-label="执行证据">
+                  <li v-for="line in companionJobEvidence(job)" :key="line">{{ line }}</li>
+                </ul>
                 <ul v-if="failureEvidenceLines(job).length" class="job-failure-evidence" aria-label="失败证据">
                   <li v-for="line in failureEvidenceLines(job)" :key="line">{{ line }}</li>
                 </ul>
@@ -91,6 +95,7 @@
                 <el-button v-if="canResumeCompanionJob(job)" size="small" type="primary" plain :loading="retryingJobIds.has(job.jobId)" :disabled="retryingJobIds.has(job.jobId)" @click="resumeCompanionJob(job)">从失败步骤继续</el-button>
                 <el-button v-if="canRetryCompanionJob(job)" size="small" type="warning" plain :loading="retryingJobIds.has(job.jobId)" :disabled="retryingJobIds.has(job.jobId)" @click="retryCompanionJob(job)">重试</el-button>
                 <el-button v-if="canConfirmUnknownEffectRetry(job)" size="small" type="danger" plain :loading="retryingJobIds.has(job.jobId)" :disabled="retryingJobIds.has(job.jobId)" @click="confirmUnknownEffectRetry(job)">检查后重试</el-button>
+                <el-button v-if="canRecheckCompanionJob(job)" size="small" type="info" plain :loading="recheckingJobIds.has(job.jobId)" :disabled="recheckingJobIds.has(job.jobId)" @click="recheckCompanionJob(job)">重新检查</el-button>
                 <el-button v-if="canCancelCompanionJob(job)" size="small" type="warning" plain :loading="cancellingJobIds.has(job.jobId)" :disabled="cancellingJobIds.has(job.jobId)" @click="cancelCompanionJob(job)">停止</el-button>
               </div>
             </article>
@@ -364,10 +369,11 @@ import { getSocketClient } from '@/net/socketClient'
 import { systemClient } from '@/api/client'
 import { useSystemDomain } from '../composables/useSystemDomain'
 import type { PlannerTrace, RuntimeLoopRecord, ScheduleTask, SchedulerRunRecord, StepConditionRecord, StepExecutionRecord } from '@/../shared/agent'
-import type { CompanionEventEnvelope, CompanionJobStatus } from '@/../shared/companion-event'
+import type { CompanionEventEnvelope } from '@/../shared/companion-event'
 import {
   canCancelCompanionJob,
   canConfirmUnknownEffectRetry,
+  canRecheckCompanionJob,
   canResumeCompanionJob,
   canRetryCompanionJob,
   companionJobToolArgs,
@@ -490,6 +496,7 @@ const runningScheduleIds = ref(new Set<string>())
 const cancellingScheduleIds = ref(new Set<string>())
 const cancellingJobIds = ref(new Set<string>())
 const retryingJobIds = ref(new Set<string>())
+const recheckingJobIds = ref(new Set<string>())
 
 const addPending = (setRef: { value: Set<string> }, key: string) => {
   setRef.value = new Set(setRef.value).add(key)
@@ -568,21 +575,25 @@ function failureEvidenceLines(job: CompanionEventEnvelope) {
   return lines
 }
 
-function companionJobTagType(status: CompanionJobStatus): TagType {
-  if (status === 'completed') return 'success'
-  if (status === 'failed') return 'danger'
-  if (status === 'unknown_effect') return 'danger'
-  if (status === 'interrupted') return 'warning'
-  if (status === 'cancelled') return 'info'
-  if (status === 'progress') return 'warning'
+function companionJobTagType(job: CompanionEventEnvelope): TagType {
+  const status = projectCompanionJob(job).actionStatus
+  if (status === 'verified') return 'success'
+  if (status === 'completed') return 'info'
+  if (status === 'failed' || status === 'unknown_effect') return 'danger'
+  if (status === 'cancelled') return 'warning'
   return 'primary'
 }
 
-function companionJobStatusLabel(status: CompanionJobStatus) {
-  const labels: Record<CompanionJobStatus, string> = {
-    created: 'created', running: 'running', progress: 'progress', completed: 'completed', failed: 'failed', cancelled: 'cancelled', interrupted: 'interrupted', unknown_effect: 'unknown effect',
+function companionJobStatusLabel(job: CompanionEventEnvelope) {
+  const status = projectCompanionJob(job).actionStatus
+  const labels: Record<typeof status, string> = {
+    executing: '执行中', completed: '已完成（未验证）', verified: '已验证', failed: '失败', unknown_effect: '结果未知', cancelled: '已停止',
   }
   return labels[status]
+}
+
+function companionJobEvidence(job: CompanionEventEnvelope) {
+  return projectCompanionJob(job).evidence
 }
 
 function companionToolName(job: CompanionEventEnvelope) {
@@ -644,6 +655,34 @@ const retryCompanionJob = async (job: CompanionEventEnvelope, unknownEffectAckno
     }
   } finally {
     removePending(retryingJobIds, job.jobId)
+  }
+}
+
+const recheckCompanionJob = async (job: CompanionEventEnvelope) => {
+  if (!canRecheckCompanionJob(job)) return
+  const toolName = companionToolName(job)
+  const args = companionJobToolArgs(job)
+  if (!toolName || !args) return
+  addPending(recheckingJobIds, job.jobId)
+  try {
+    const recheckId = `${job.requestId}:recheck:${Date.now()}`
+    const result = await getSocketClient().requestToolRecheck(recheckId, toolName, args, {
+      // Keep the job identity stable so the backend can append evidence to
+      // the terminal job without creating a second job stream.
+      requestId: job.requestId,
+      runId: job.runId,
+      jobId: job.jobId,
+      source: 'desktop',
+    })
+    if (result.status === 'verified') ElMessage.success('当前状态已验证')
+    else if (result.status === 'unverified') ElMessage.warning('当前状态仍无法确认，可稍后再次检查')
+    else if (result.status === 'unavailable') ElMessage.warning('该任务当前无法重新检查')
+    else ElMessage.error('状态检查失败，请稍后重试')
+    await loadCompanionRuntime()
+  } catch {
+    ElMessage.error('状态检查超时或连接中断')
+  } finally {
+    removePending(recheckingJobIds, job.jobId)
   }
 }
 
@@ -851,6 +890,9 @@ const experienceMetricDefinitions = [
   { key: 'realtime_speech_to_response', label: '即时首响应' },
   { key: 'realtime_speech_to_playback', label: '即时首播' },
   { key: 'realtime_interrupt_ack', label: '即时打断' },
+  { key: 'realtime_playback_stop', label: '即时停播' },
+  { key: 'realtime_playback_recovery', label: '播放恢复' },
+  { key: 'realtime_provider_cancel', label: 'Provider 取消' },
   { key: 'visual_analysis', label: '视觉分析' },
 ] as const
 
@@ -1370,12 +1412,17 @@ onMounted(() => {
   margin-top: 10px;
 }
 
+.job-evidence,
 .job-failure-evidence {
   margin: 8px 0 0;
   padding-left: 18px;
   color: var(--yui-text);
   font-size: 11px;
   line-height: 1.55;
+}
+
+.job-evidence {
+  color: #047857;
 }
 
 .experience-grid {

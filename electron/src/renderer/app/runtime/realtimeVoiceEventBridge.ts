@@ -32,7 +32,7 @@ export interface RealtimeVoiceEventSource {
 }
 
 export interface RealtimeVoiceDiagnosticSample {
-  stage: 'connect' | 'asr_final' | 'first_token' | 'first_audio' | 'interruption' | 'playback_recovery'
+  stage: 'connect' | 'asr_final' | 'first_token' | 'first_audio' | 'interruption' | 'interrupt_ack' | 'playback_recovery'
   latencyMs: number
   ok: boolean
   recovered?: boolean
@@ -88,6 +88,7 @@ export class RealtimeVoiceEventBridge {
       'response-start': 'first_token',
       'playback-start': 'first_audio',
       'playback-stop': 'interruption',
+      'interrupt-ack': 'interrupt_ack',
       'playback-recovery': 'playback_recovery',
     }
     const stage = stageByEvent[event]

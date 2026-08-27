@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import importlib
+import ipaddress
 import logging
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 import numpy as np
 
@@ -19,6 +21,8 @@ from .vector_store import (
     _embed_document,
     _embed_query,
     _memory_type_filter_values,
+    _raise_if_rebuild_cancelled,
+    memory_feedback_quality_score,
     memory_recency_score,
     memory_score_components,
     memory_score_weights,
@@ -26,12 +30,30 @@ from .vector_store import (
 
 logger = logging.getLogger(__name__)
 QDRANT_SEARCH_SCAN_LIMIT = 4096
+QDRANT_MANIFEST_PAGE_SIZE = 1024
+
+
+def _loopback_http_client_options(qdrant_url: str) -> dict[str, bool]:
+    parsed = urlparse(qdrant_url)
+    if parsed.scheme.lower() != "http":
+        return {}
+    hostname = (parsed.hostname or "").lower()
+    is_loopback = hostname == "localhost"
+    if not is_loopback:
+        try:
+            is_loopback = ipaddress.ip_address(hostname).is_loopback
+        except ValueError:
+            is_loopback = False
+    if not is_loopback:
+        return {}
+    return {"trust_env": False, "verify": False}
 
 
 class QdrantVectorStore(VectorStore):
     """Qdrant-backed implementation of the VectorStore contract."""
 
     backend_name = "qdrant"
+    supports_durable_rebuild_checkpoint = True
 
     def __init__(
         self,
@@ -67,7 +89,12 @@ class QdrantVectorStore(VectorStore):
         if self._qdrant_url == ":memory:":
             self.client = qdrant_client_cls(location=":memory:")
         else:
-            self.client = qdrant_client_cls(url=self._qdrant_url, api_key=self._qdrant_api_key or None, timeout=self._timeout)
+            self.client = qdrant_client_cls(
+                url=self._qdrant_url,
+                api_key=self._qdrant_api_key or None,
+                timeout=self._timeout,
+                **_loopback_http_client_options(self._qdrant_url),
+            )
         self.collection_name = collection_name
         self._collection_ready = False
 
@@ -98,16 +125,6 @@ class QdrantVectorStore(VectorStore):
                 vectors_config=self._vector_params(size=vector_size, distance=self._distance.COSINE),
             )
         self._collection_ready = True
-
-    def _delete_collection_if_exists(self) -> bool:
-        if not self._collection_exists():
-            return False
-        delete_collection = getattr(self.client, "delete_collection", None)
-        if not callable(delete_collection):
-            raise RuntimeError("qdrant_client_delete_collection_unavailable")
-        delete_collection(collection_name=self.collection_name)
-        self._collection_ready = False
-        return True
 
     def _serialize_doc(self, doc: Document) -> dict[str, Any]:
         return {
@@ -167,16 +184,98 @@ class QdrantVectorStore(VectorStore):
             kwargs["must"] = must
         return self._filter(**kwargs)
 
-    def add_document(self, doc: Document) -> None:
+    def _upsert_document(self, doc: Document, *, index_generation: str | None = None) -> None:
         self._docs.pop(doc.id, None)
         vector_array = _embed_document(self._embedding_service, doc.text).astype("float32")
         self._ensure_collection(int(vector_array.shape[0]))
         vector = vector_array.tolist()
-        point = self._point_struct(id=self._point_id(doc.id), vector=vector, payload=self._serialize_doc(doc))
-        self.client.upsert(collection_name=self.collection_name, points=[point])
+        payload = self._serialize_doc(doc)
+        if index_generation:
+            payload["index_generation"] = index_generation
+        point = self._point_struct(id=self._point_id(doc.id), vector=vector, payload=payload)
+        self.client.upsert(collection_name=self.collection_name, points=[point], wait=True)
+
+    def add_document(self, doc: Document) -> None:
+        self._upsert_document(doc)
+
+    def add_document_for_generation(self, doc: Document, index_generation: str) -> None:
+        self._upsert_document(doc, index_generation=index_generation)
 
     def add_metadata_document(self, doc: Document) -> None:
         self._docs[doc.id] = doc
+
+    def update_metadata(self, doc_id: str, metadata: dict[str, Any]) -> None:
+        updated_metadata = dict(metadata)
+        local_document = self._docs.get(doc_id)
+        collection_exists = self._collection_exists()
+        if not collection_exists:
+            if local_document is None:
+                raise KeyError(doc_id)
+            local_document.metadata = updated_metadata
+            return
+
+        metadata_payload = {
+            "metadata": updated_metadata,
+            **{
+                key: updated_metadata.get(key)
+                for key in (
+                    "timestamp",
+                    "type",
+                    "layer",
+                    "scope",
+                    "session_id",
+                    "workspace_id",
+                    "quality_score",
+                    "confidence",
+                    "source",
+                )
+            },
+        }
+        point_id = self._point_id(doc_id)
+        set_payload = getattr(self.client, "set_payload", None)
+        if callable(set_payload):
+            set_payload(
+                collection_name=self.collection_name,
+                payload=metadata_payload,
+                points=[point_id],
+                wait=True,
+            )
+        else:
+            overwrite_payload = getattr(self.client, "overwrite_payload", None)
+            retrieve = getattr(self.client, "retrieve", None)
+            if not callable(overwrite_payload) or not callable(retrieve):
+                raise AttributeError("qdrant_client_payload_update_unavailable")
+            points = retrieve(
+                collection_name=self.collection_name,
+                ids=[point_id],
+                with_payload=True,
+                with_vectors=False,
+            )
+            if not isinstance(points, Sequence):
+                raise TypeError("qdrant_retrieve_must_return_sequence")
+            if not points:
+                raise KeyError(doc_id)
+            point = points[0]
+            retrieved_payload = getattr(point, "payload", None)
+            if retrieved_payload is not None and not isinstance(retrieved_payload, dict):
+                raise TypeError("qdrant_point_payload_must_be_mapping")
+            current = self._deserialize_doc(
+                getattr(point, "id", point_id),
+                retrieved_payload,
+            )
+            current.metadata = updated_metadata
+            serialized = self._serialize_doc(current)
+            if retrieved_payload and retrieved_payload.get("index_generation"):
+                serialized["index_generation"] = retrieved_payload["index_generation"]
+            overwrite_payload(
+                collection_name=self.collection_name,
+                payload=serialized,
+                points=[point_id],
+                wait=True,
+            )
+
+        if local_document is not None:
+            local_document.metadata = updated_metadata
 
     def delete_document(self, doc_id: str) -> None:
         self._docs.pop(doc_id, None)
@@ -185,6 +284,7 @@ class QdrantVectorStore(VectorStore):
         self.client.delete(
             collection_name=self.collection_name,
             points_selector=self._point_ids_list(points=[self._point_id(doc_id)]),
+            wait=True,
         )
 
     def list_documents(self) -> list[Document]:
@@ -207,20 +307,71 @@ class QdrantVectorStore(VectorStore):
         documents.extend(doc for doc in self._docs.values() if doc.id not in known_ids)
         return documents
 
-    def rebuild_index(self) -> dict[str, Any]:
+    def get_index_manifest(self, index_generation: str) -> tuple[set[str], set[str]]:
+        """Return current-generation and all document IDs without full payloads."""
+        if not self._collection_exists():
+            return set(), set()
+        generation_ids: set[str] = set()
+        all_ids: set[str] = set()
+        offset = None
+        while True:
+            points, offset = self.client.scroll(
+                collection_name=self.collection_name,
+                with_payload=["doc_id", "index_generation"],
+                with_vectors=False,
+                limit=QDRANT_MANIFEST_PAGE_SIZE,
+                offset=offset,
+            )
+            for point in points:
+                payload = getattr(point, "payload", None)
+                if not isinstance(payload, dict):
+                    continue
+                doc_id = str(payload.get("doc_id") or point.id)
+                all_ids.add(doc_id)
+                if payload.get("index_generation") == index_generation:
+                    generation_ids.add(doc_id)
+            if offset is None:
+                break
+        return generation_ids, all_ids
+
+    def list_document_ids(self) -> set[str]:
+        _generation_ids, document_ids = self.get_index_manifest("")
+        document_ids.update(self._docs)
+        return document_ids
+
+    def get_rebuild_generation_ids(self, index_generation: str) -> set[str]:
+        generation_ids, _all_ids = self.get_index_manifest(index_generation)
+        return generation_ids
+
+    def rebuild_index(
+        self,
+        progress_callback: Callable[[int, int, str], None] | None = None,
+        should_cancel: Callable[[], bool] | Any | None = None,
+    ) -> dict[str, Any]:
         documents = self.list_documents()
-        deleted_collection = self._delete_collection_if_exists()
+        total = len(documents)
         indexed = 0
+        _raise_if_rebuild_cancelled(should_cancel, processed=0, total=total, phase="indexing")
         for doc in documents:
             self.add_document(doc)
             indexed += 1
+            if progress_callback is not None:
+                progress_callback(indexed, total, "indexing")
+            _raise_if_rebuild_cancelled(
+                should_cancel,
+                processed=indexed,
+                total=total,
+                phase="indexing",
+            )
 
         self._docs = {}
+        if progress_callback is not None:
+            progress_callback(indexed, total, "complete")
         return {
             "status": "rebuilt",
             "backend": self.backend_name,
             "collection": self.collection_name,
-            "collection_deleted": deleted_collection,
+            "collection_deleted": False,
             "document_count": len(documents),
             "indexed_count": indexed,
             "skipped_count": 0,
@@ -353,8 +504,8 @@ class QdrantVectorStore(VectorStore):
 
             recency_score = memory_recency_score(doc.metadata, now=now)
 
-            quality_score = float(doc.metadata.get("quality_score") or doc.metadata.get("confidence") or 0.6)
-            quality_score = max(0.0, min(1.0, quality_score))
+            quality_baseline = float(doc.metadata.get("quality_score") or doc.metadata.get("confidence") or 0.6)
+            quality_score = memory_feedback_quality_score(doc.metadata, quality_baseline)
             lexical_score = lexical_overlap_score(query, doc.text)
             learned_score = float(learned_scores[position]) if learned_enabled and position < len(learned_scores) else 0.0
             weights = memory_score_weights(

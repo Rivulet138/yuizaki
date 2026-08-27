@@ -12,6 +12,7 @@ import {
   normalizePetLipSyncProfile,
   type PetCompanionIdleProfile,
   type PetControlConfigPatch,
+  type PetEmotionPreset,
   type PetPlacement,
   type PetLipSyncProfile,
   type PetLipSyncViseme,
@@ -33,6 +34,7 @@ interface VrmHostContext {
     modelType: 'live2d' | 'vrm'
     modelPath: string
     animationPaths: string[]
+    emotionPresets?: PetEmotionPreset[]
     scale: number
     positionX: number | null
     positionY: number | null
@@ -161,6 +163,7 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
       ...expressions,
       gaze ? 'lookAt' : 'no-lookAt',
       ...motions.map((motion) => `${motion.group}:${motion.index}`),
+      ...(this.host.config.emotionPresets ?? []).map((emotion) => `${emotion.id}:${emotion.expressions.join(',')}:${emotion.motions.map((motion) => `${motion.group}:${motion.index}`).join(',')}`),
     ])
     return {
       revision,
@@ -169,7 +172,7 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
       generatedAt: Date.now(),
       actions: {
         behavior: true,
-        affect: expressions.length > 0,
+        affect: expressions.length > 0 || (this.host.config.emotionPresets?.length ?? 0) > 0,
         gaze,
         motion: motions.length > 0,
         expression: expressions.length > 0,
@@ -191,9 +194,24 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
         this.behaviorProfile = resolveVrmBehaviorProfile(this.behavior, this.companionIdleProfile)
         return { status: 'completed' }
       case 'affect': {
-        const expression = this.resolveVrmExpression(action.emotion)
-        if (!expression) return { status: 'degraded', message: `VRM expression not available: ${action.emotion}` }
-        this.setExpressionTarget(expression, (action.intensity ?? 1) * this.behaviorProfile.expressionWeight, 160, action.decayMs ?? 1800)
+        const preset = (this.host.config.emotionPresets ?? []).find((item) => item.id.toLowerCase() === action.emotion.toLowerCase())
+        const requestedExpression = action.expressionName ?? preset?.expressions[0] ?? action.emotion
+        const expression = this.resolveVrmExpression(requestedExpression)
+        const motion = action.motion === null ? undefined : action.motion ?? preset?.motions[0]
+        let applied = false
+        if (expression) {
+          this.setExpressionTarget(expression, (action.intensity ?? 1) * this.behaviorProfile.expressionWeight, 160, action.decayMs ?? 1800)
+          applied = true
+        }
+        if (motion) {
+          const motionResult = this.playAnimation(motion.group, motion.index, action.intensity ?? 1)
+          applied = true
+          if (motionResult.status === 'degraded' && !expression) return motionResult
+        }
+        if (!applied) return { status: 'degraded', message: `VRM expression not available: ${action.emotion}` }
+        this.behavior = 'react'
+        this.behaviorStartedAt = performance.now()
+        this.behaviorProfile = resolveVrmBehaviorProfile('react', this.companionIdleProfile)
         return { status: 'completed' }
       }
       case 'gaze':
@@ -486,14 +504,14 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
     }
 
     VRMUtils.rotateVRM0(vrm)
-    const previousVrm = this.vrm
-    this.disposeAnimationState()
-    this.vrm = vrm
     const externalClips = await this.loadExternalAnimationClips(animationPaths, generation, scene)
     if (generation !== this.loadGeneration || this.scene !== scene) {
       VRMUtils.deepDispose(vrm.scene)
       return false
     }
+    const previousVrm = this.vrm
+    this.disposeAnimationState()
+    this.vrm = vrm
     this.animationClips = [
       ...(Array.isArray(gltf.animations) ? gltf.animations : []),
       ...externalClips,
@@ -594,11 +612,10 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
         candidate.name.toLowerCase() === normalizedGroup || `clip-${candidateIndex}` === normalizedGroup
       ))
       : this.animationClips[index]
-    if (!clip) {
-      return { status: 'degraded', message: `VRM animation clip not available: ${group || index}` }
-    }
+    const selectedClip = clip ?? this.animationClips[0]
+    if (!selectedClip) return { status: 'degraded', message: `VRM animation clip not available: ${group || index}` }
     this.activeAnimationAction?.fadeOut(this.behaviorProfile.motionFadeMs / 1000)
-    const action = this.animationMixer.clipAction(clip)
+    const action = this.animationMixer.clipAction(selectedClip)
     action.reset()
     action.setLoop(this.behaviorProfile.motionLoop ? THREE.LoopRepeat : THREE.LoopOnce, this.behaviorProfile.motionLoop ? Infinity : 1)
     action.clampWhenFinished = !this.behaviorProfile.motionLoop
@@ -606,8 +623,8 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
     action.fadeIn(this.behaviorProfile.motionFadeMs / 1000)
     action.play()
     this.activeAnimationAction = action
-    this.host.markActivity(`vrm-motion:${clip.name || index}`)
-    return { status: 'completed' }
+    this.host.markActivity(`vrm-motion:${selectedClip.name || index}`)
+    return clip ? { status: 'completed' } : { status: 'degraded', message: `VRM animation clip not available: ${group || index}; used ${selectedClip.name || 'first clip'} fallback` }
   }
 
   private stopAnimation(): void {

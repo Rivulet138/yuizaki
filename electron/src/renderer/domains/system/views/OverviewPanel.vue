@@ -40,6 +40,99 @@
         </div>
       </section>
 
+      <section class="ops-card runtime-checklist-card" aria-label="运行状态清单">
+        <div class="ops-card-head">
+          <div>
+            <h3>运行状态清单</h3>
+            <span>只读检查；异常项可直接进入对应设置</span>
+          </div>
+          <el-button plain size="small" :loading="runtimeRequest.loading" @click="loadRuntimeDependencies">刷新检查</el-button>
+        </div>
+        <AsyncState :loading="runtimeRequest.loading" :error="runtimeRequest.error" @retry="loadRuntimeDependencies">
+          <div class="runtime-checklist">
+            <article v-for="item in runtimeRows" :key="item.key" class="runtime-check" :class="item.tone">
+              <div class="runtime-check-copy">
+                <strong>{{ item.label }}</strong>
+                <span>{{ item.value }}</span>
+                <small>{{ item.desc }}</small>
+              </div>
+              <router-link class="runtime-check-link" :to="item.to">处理</router-link>
+            </article>
+          </div>
+        </AsyncState>
+      </section>
+
+      <section class="ops-card voice-quality-card" aria-label="语音体验质量">
+        <div class="ops-card-head">
+          <div>
+            <h3>语音体验</h3>
+            <span>只读汇总，不会自动打开设备或发起网络测试</span>
+          </div>
+          <el-button plain size="small" :loading="voiceRequest.loading" @click="loadVoiceDiagnostics">刷新语音数据</el-button>
+        </div>
+        <AsyncState :loading="voiceRequest.loading" :error="voiceRequest.error" @retry="loadVoiceDiagnostics">
+          <div v-if="voiceSnapshot" class="voice-quality-grid">
+            <div class="voice-quality-metric">
+              <strong>{{ voiceEvidenceLabel }}</strong>
+              <span>证据类型</span>
+            </div>
+            <div class="voice-quality-metric">
+              <strong>{{ voiceSnapshot.sample_count }}</strong>
+              <span>采样数</span>
+            </div>
+            <div class="voice-quality-metric">
+              <strong>{{ voiceP95Label(voiceSnapshot.stages.first_audio) }}</strong>
+              <span>首包 p95</span>
+            </div>
+            <div class="voice-quality-metric">
+              <strong>{{ voiceP95Label(voiceSnapshot.stages.interruption) }}</strong>
+              <span>打断 p95</span>
+            </div>
+          </div>
+          <div v-if="voiceRecommendations.length" class="voice-quality-notes">
+            <span v-for="recommendation in voiceRecommendations.slice(0, 2)" :key="recommendation">{{ recommendation }}</span>
+          </div>
+          <el-empty v-if="voiceSnapshot && voiceSnapshot.sample_count === 0" description="暂无语音体验采样；可在语音设置中开始使用" :image-size="48" />
+        </AsyncState>
+      </section>
+
+      <section class="ops-card platform-card" aria-label="跨平台能力">
+        <div class="ops-card-head">
+          <div>
+            <h3>平台能力</h3>
+            <span v-if="platformSnapshot">宿主：{{ platformHostLabel }}</span>
+          </div>
+          <el-button plain size="small" :loading="platformRequest.loading" @click="loadPlatformMatrix">刷新能力</el-button>
+        </div>
+        <AsyncState :loading="platformRequest.loading" :error="platformRequest.error" @retry="loadPlatformMatrix">
+          <div v-if="platformRows.length" class="platform-table-wrap">
+            <table class="platform-table">
+              <thead>
+                <tr>
+                  <th>平台</th>
+                  <th>桌面壳</th>
+                  <th>Live2D / VRM</th>
+                  <th>文字 / 语音</th>
+                  <th>桌面动作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in platformRows" :key="row.id" :class="{ host: row.host }">
+                  <th scope="row"><strong>{{ row.name }}</strong><small v-if="row.host">当前宿主</small></th>
+                  <td v-for="capability in platformCapabilityKeys" :key="`${row.id}-${capability}`">
+                    <el-tag size="small" :type="platformTagType(row.capabilities[capability].status)">
+                      {{ platformStatusLabel(row.capabilities[capability].status) }}
+                    </el-tag>
+                    <span class="platform-detail">{{ row.capabilities[capability].detail }}</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <el-empty v-else description="暂无平台能力数据" :image-size="56" />
+        </AsyncState>
+      </section>
+
       <section class="ops-grid">
         <article class="ops-card governance-card">
           <div class="ops-card-head">
@@ -249,6 +342,25 @@
             <el-button type="primary" @click="dockBottomRight">定位到右下角</el-button>
           </div>
         </div>
+
+        <div v-if="avatarCapabilities" class="pet-capability-summary" aria-label="桌宠能力">
+          <div class="pet-capability-item">
+            <strong>{{ avatarCapabilities.expressions.length }}</strong>
+            <span>表情</span>
+          </div>
+          <div class="pet-capability-item">
+            <strong>{{ avatarCapabilities.motions.length }}</strong>
+            <span>动作</span>
+          </div>
+          <div class="pet-capability-item">
+            <strong>{{ avatarCapabilities.actions.gaze ? '可用' : '无' }}</strong>
+            <span>注视</span>
+          </div>
+          <div class="pet-capability-item">
+            <strong>{{ avatarCapabilities.actions.viseme ? '可用' : '无' }}</strong>
+            <span>口型同步</span>
+          </div>
+        </div>
       </section>
     </div>
   </PanelShell>
@@ -266,9 +378,27 @@ import { inferLlmProviderPreset } from '@/domains/settings/llmProviders'
 import { normalizeOpenAiBaseUrl } from '@/domains/settings/llmDiscovery'
 import { useI18n } from '@/i18n'
 import { openOnboarding } from '@/domains/onboarding/onboardingEvents'
+import { systemClient } from '@/api/client'
+import { petControl } from '@/utils/petControl'
+import type {
+  AvatarCapabilitySnapshot,
+  ConnectorRegistrySnapshot,
+  PlatformCapabilitySnapshot,
+  PlatformCapabilityState,
+  ProviderRegistrySnapshot,
+  VoiceDiagnosticsSnapshot,
+} from '@/../shared/agent'
 
 const governanceData = ref<any>(null)
 const governanceReq = reactive({ loading: false, error: '' })
+const platformSnapshot = ref<PlatformCapabilitySnapshot | null>(null)
+const platformRequest = reactive({ loading: false, error: '' })
+const providerSnapshot = ref<ProviderRegistrySnapshot | null>(null)
+const connectorSnapshot = ref<ConnectorRegistrySnapshot | null>(null)
+const avatarCapabilities = ref<AvatarCapabilitySnapshot | null>(null)
+const voiceSnapshot = ref<VoiceDiagnosticsSnapshot | null>(null)
+const runtimeRequest = reactive({ loading: false, error: '' })
+const voiceRequest = reactive({ loading: false, error: '' })
 const settingsStore = useSettingsStore()
 const workspaceStore = useWorkspaceStore()
 const { t } = useI18n()
@@ -281,6 +411,135 @@ const loadGovernance = async () => {
   } catch (e: any) { governanceReq.error = e?.message || '加载失败' }
   finally { governanceReq.loading = false }
 }
+
+const loadPlatformMatrix = async () => {
+  platformRequest.loading = true
+  platformRequest.error = ''
+  try {
+    platformSnapshot.value = await systemClient.platforms()
+  } catch (error: any) {
+    platformRequest.error = error?.message || '平台能力读取失败'
+  } finally {
+    platformRequest.loading = false
+  }
+}
+
+const loadRuntimeDependencies = async () => {
+  runtimeRequest.loading = true
+  runtimeRequest.error = ''
+  try {
+    const [providers, connectors] = await Promise.all([
+      systemClient.providers(),
+      systemClient.connectors(),
+    ])
+    providerSnapshot.value = providers
+    connectorSnapshot.value = connectors
+  } catch (error: any) {
+    runtimeRequest.error = error?.message || '运行依赖读取失败'
+  } finally {
+    runtimeRequest.loading = false
+  }
+}
+
+const loadVoiceDiagnostics = async () => {
+  voiceRequest.loading = true
+  voiceRequest.error = ''
+  try {
+    voiceSnapshot.value = await systemClient.voiceDiagnostics()
+  } catch (error: any) {
+    voiceRequest.error = error?.message || '语音体验数据读取失败'
+  } finally {
+    voiceRequest.loading = false
+  }
+}
+
+const loadAvatarCapabilities = async () => {
+  try {
+    const result = await petControl.getAvatarCapabilities()
+    avatarCapabilities.value = result.success ? result.capabilities : null
+  } catch {
+    // Capability reporting is optional; keep the rest of the pet controls usable.
+    avatarCapabilities.value = null
+  }
+}
+
+const voiceEvidenceLabel = computed(() => {
+  const kinds = voiceSnapshot.value?.evidence_kinds ?? []
+  if (!kinds.length) return '暂无'
+  if (kinds.includes('real_device')) return '真实设备'
+  return '本地 fixture'
+})
+const voiceP95Label = (stage: Record<string, unknown> | undefined): string => {
+  const value = stage?.p95_ms
+  return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value)} ms` : '暂无'
+}
+const voiceRecommendations = computed(() => voiceSnapshot.value?.recommendations ?? [])
+
+const platformRows = computed(() => platformSnapshot.value?.platforms ?? [])
+const platformHostLabel = computed(() => {
+  const host = platformSnapshot.value?.host
+  if (!host) return ''
+  return `${host.system} · ${host.displayServer}`
+})
+const platformCapabilityKeys = ['desktop', 'live2d_vrm', 'text_voice', 'native_actions'] as const
+const platformStatusLabel = (status: PlatformCapabilityState) => ({
+  available: '可用',
+  needs_config: '需配置',
+  experimental: '实验性',
+  planned: '规划中',
+  unsupported: '不支持',
+}[status] || status)
+const platformTagType = (status: PlatformCapabilityState) => ({
+  available: 'success',
+  needs_config: 'warning',
+  experimental: 'warning',
+  planned: 'info',
+  unsupported: 'danger',
+}[status] || 'info') as 'success' | 'warning' | 'info' | 'danger'
+
+const runtimeRows = computed(() => {
+  const providers = providerSnapshot.value?.providers ?? []
+  const connectors = connectorSnapshot.value?.connectors ?? []
+  const providerFailures = providers.filter((item) => item.configured && !item.healthy)
+  const requiredProviders = providers.filter((item) => !item.optional)
+  const requiredHealthy = requiredProviders.length === 0 || requiredProviders.every((item) => item.healthy)
+  const runningConnectors = connectors.filter((item) => item.state === 'running')
+  const connectorFailures = connectors.filter((item) => item.state === 'failure')
+  return [
+    {
+      key: 'providers',
+      label: '模型与语音服务',
+      value: !providers.length ? '暂无 provider' : requiredHealthy ? `${providers.filter((item) => item.healthy).length}/${providers.length} 健康` : '有必需服务异常',
+      desc: providerFailures[0]?.message || (providers.length ? 'LLM、ASR、TTS 和视觉 provider' : '尚未读取 provider 状态'),
+      tone: !providers.length ? 'warning' : requiredHealthy ? 'online' : 'offline',
+      to: canonicalPath('infrastructure'),
+    },
+    {
+      key: 'connectors',
+      label: '连接器',
+      value: connectorFailures.length ? `${connectorFailures.length} 项故障` : `${runningConnectors.length} 项运行中`,
+      desc: connectorFailures[0]?.lastError || '外部消息与工具连接器默认可停用',
+      tone: connectorFailures.length ? 'warning' : 'online',
+      to: canonicalPath('agent-governance'),
+    },
+    {
+      key: 'pet',
+      label: '桌宠资源',
+      value: currentModel.value ? '已加载' : '待配置',
+      desc: currentModel.value?.name || '选择 Live2D 或 VRM 模型',
+      tone: currentModel.value ? 'online' : 'warning',
+      to: canonicalPath('pet'),
+    },
+    {
+      key: 'platform',
+      label: '当前平台',
+      value: platformHostLabel.value || '待检测',
+      desc: '能力矩阵显示已验证和实验性边界',
+      tone: platformSnapshot.value ? 'online' : 'warning',
+      to: canonicalPath('deploy'),
+    },
+  ] as Array<{ key: string; label: string; value: string; desc: string; tone: CheckTone; to: string }>
+})
 
 const downloadBlob = (blob: Blob, filename: string) => {
   const url = URL.createObjectURL(blob)
@@ -527,6 +786,9 @@ const overviewRefreshLoading = computed(() => (
   || readinessReq.loading
   || summarySessionsReq.loading
   || governanceReq.loading
+  || platformRequest.loading
+  || runtimeRequest.loading
+  || voiceRequest.loading
 ))
 
 const refreshOverview = async () => {
@@ -534,6 +796,10 @@ const refreshOverview = async () => {
     refreshChainStatus(),
     loadSummarySessions(),
     loadGovernance(),
+    loadPlatformMatrix(),
+    loadRuntimeDependencies(),
+    loadVoiceDiagnostics(),
+    loadAvatarCapabilities(),
   ])
 }
 
@@ -703,6 +969,83 @@ onDeactivated(() => {
 
 .chain-card {
   padding: 18px;
+}
+
+.voice-quality-card {
+  padding: 18px;
+}
+
+.voice-quality-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.voice-quality-metric {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-control);
+  background: var(--yui-surface);
+}
+
+.voice-quality-metric strong,
+.voice-quality-metric span {
+  display: block;
+}
+
+.voice-quality-metric strong {
+  overflow: hidden;
+  color: var(--yui-text);
+  font-size: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-quality-metric span {
+  margin-top: 4px;
+  color: var(--yui-muted);
+  font-size: 12px;
+}
+
+.voice-quality-notes {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  color: var(--yui-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.pet-capability-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.pet-capability-item {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-control);
+  background: var(--yui-surface);
+}
+
+.pet-capability-item strong,
+.pet-capability-item span {
+  display: block;
+}
+
+.pet-capability-item strong {
+  color: var(--yui-text);
+  font-size: 15px;
+}
+
+.pet-capability-item span {
+  margin-top: 3px;
+  color: var(--yui-muted);
+  font-size: 12px;
 }
 
 .chain-grid {
@@ -1033,6 +1376,114 @@ onDeactivated(() => {
   outline-offset: 2px;
 }
 
+.ops-card-head > div:first-child > span {
+  color: var(--yui-muted);
+  font-size: 12px;
+}
+
+.runtime-checklist {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.runtime-check {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid var(--yui-border);
+  border-left: 3px solid var(--yui-border);
+  border-radius: var(--yui-radius-card);
+  padding: 12px;
+  background: var(--yui-surface-muted);
+}
+
+.runtime-check.online { border-left-color: var(--yui-success); }
+.runtime-check.warning { border-left-color: var(--yui-warning); }
+.runtime-check.offline { border-left-color: var(--yui-danger); }
+
+.runtime-check-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.runtime-check-copy strong,
+.runtime-check-copy span,
+.runtime-check-copy small {
+  overflow-wrap: anywhere;
+}
+
+.runtime-check-copy strong { color: var(--yui-text); font-size: 13px; }
+.runtime-check-copy span { color: var(--yui-text); font-size: 12px; font-weight: 700; }
+.runtime-check-copy small { color: var(--yui-muted); font-size: 11px; }
+
+.runtime-check-link {
+  flex: 0 0 auto;
+  color: var(--yui-accent);
+  font-size: 12px;
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
+
+.platform-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.platform-table {
+  width: 100%;
+  min-width: 820px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.platform-table th,
+.platform-table td {
+  border-bottom: 1px solid var(--yui-border);
+  padding: 12px;
+  color: var(--yui-text);
+  text-align: left;
+  vertical-align: top;
+}
+
+.platform-table thead th {
+  color: var(--yui-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.platform-table thead th:first-child,
+.platform-table tbody th {
+  width: 132px;
+}
+
+.platform-table tbody th strong,
+.platform-table tbody th small,
+.platform-detail {
+  display: block;
+}
+
+.platform-table tbody th small {
+  margin-top: 5px;
+  color: var(--yui-accent);
+  font-size: 11px;
+}
+
+.platform-table tbody tr.host {
+  background: var(--yui-accent-soft);
+}
+
+.platform-detail {
+  margin-top: 7px;
+  color: var(--yui-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1180px) {
   .ops-hero,
   .ops-grid {
@@ -1055,7 +1506,10 @@ onDeactivated(() => {
   .ops-status-grid,
   .metric-grid,
   .pet-control-grid,
-  .chain-grid {
+  .chain-grid,
+  .runtime-checklist,
+  .voice-quality-grid,
+  .pet-capability-summary {
     grid-template-columns: 1fr;
   }
 
@@ -1064,6 +1518,47 @@ onDeactivated(() => {
   .summary-footnote {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .platform-table-wrap {
+    overflow: visible;
+  }
+
+  .platform-table,
+  .platform-table tbody,
+  .platform-table tr,
+  .platform-table th,
+  .platform-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .platform-table {
+    min-width: 0;
+  }
+
+  .platform-table thead {
+    display: none;
+  }
+
+  .platform-table tbody tr {
+    margin-bottom: 12px;
+    border: 1px solid var(--yui-border);
+    border-radius: var(--yui-radius-card);
+    background: var(--yui-surface-muted);
+  }
+
+  .platform-table tbody tr.host {
+    background: var(--yui-accent-soft);
+  }
+
+  .platform-table tbody th,
+  .platform-table tbody td {
+    border-bottom: 1px solid var(--yui-border);
+  }
+
+  .platform-table tbody td:last-child {
+    border-bottom: 0;
   }
 }
 </style>

@@ -7,7 +7,7 @@
 - Primary product surfaces: desktop companion, chat, long-term memory, Agent jobs, settings, Live2D/VRM pet
 - Code evidence reviewed: `electron/src/renderer/app`, `electron/src/renderer/domains`, `electron/src/renderer/runtime`, `electron/src/renderer/audio`, `electron/src/main`, `python/modules/agent`, `python/modules/memory`, `python/routes`, and their contract tests
 - Documentation boundary: README and design documents describe intent; implementation claims must be rechecked against source paths and tests before release
-- External research and comparable projects: [docs/REFERENCES.md](docs/REFERENCES.md) (canonical index; external material never proves a local capability)
+- External material may inform design decisions, but only current code, tests, and target-device evidence establish a local capability.
 
 ## Code evidence map / 代码证据映射
 

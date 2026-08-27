@@ -8,7 +8,10 @@
       <span v-if="loading" class="loading-label" role="status">正在刷新…</span>
     </div>
 
-    <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
+    <div v-if="error" class="overview-error" role="alert">
+      <span>{{ error }}</span>
+      <el-button link type="danger" size="small" @click="emit('retry')">重试概览</el-button>
+    </div>
 
     <dl class="metric-grid" aria-label="记忆状态统计">
       <div><dt>全部记忆</dt><dd>{{ overview?.total ?? 0 }}</dd><small>含不可召回文档</small></div>
@@ -71,7 +74,7 @@ const props = defineProps<{
   restoringDocIds: Set<string>
 }>()
 
-const emit = defineEmits<{ 'select-layer': [value: string]; restore: [id: string] }>()
+const emit = defineEmits<{ 'select-layer': [value: string]; restore: [id: string]; retry: [] }>()
 const reviewCount = computed(() => Number(props.overview?.by_review_status.pending ?? 0) + Number(props.overview?.by_review_status.unreviewed ?? 0))
 const forgottenCount = computed(() => props.overview?.by_state.forgotten ?? props.forgottenDocs.length)
 const compactText = (value: string, limit = 86) => value.length > limit ? `${value.slice(0, limit - 1)}…` : value
@@ -85,6 +88,7 @@ const activityLabel = (action?: string, state?: string) => ({
 .overview,.overview-section { display: flex; min-width: 0; flex-direction: column; gap: 14px; }
 .overview { gap: 20px; }
 .overview-heading,.section-heading,.activity-list li,.forgotten-list li { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.overview-error { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid rgba(239,68,68,.28); border-radius: var(--yui-radius-card); background: var(--yui-danger-soft); color: #991b1b; font-size: 12px; }
 h3,h4 { margin: 0; color: var(--yui-text); }
 h3 { font-size: 15px; } h4 { font-size: 13px; }
 .overview-heading p,.section-heading span,.loading-label,.empty-copy { margin: 4px 0 0; color: var(--yui-muted); font-size: 12px; }

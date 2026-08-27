@@ -8,6 +8,12 @@ import { validateProtectedCi } from '../verify-protected-ci.mjs'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const ci = fs.readFileSync(path.join(repositoryRoot, '.github', 'workflows', 'ci.yml'), 'utf8')
+const mutateQdrantJob = (transform) => {
+  const marker = '  qdrant-integration:'
+  const start = ci.indexOf(marker)
+  assert.notEqual(start, -1)
+  return ci.slice(0, start) + transform(ci.slice(start))
+}
 
 test('accepts the protected CI structure', () => {
   assert.deepEqual(validateProtectedCi(ci), [])
@@ -115,7 +121,15 @@ test('rejects a changed redaction command', () => {
   assert.ok(validateProtectedCi(mutated).some((error) => error.includes('Redaction Test (Windows) must run exactly')))
 })
 
-for (const stepName of ['Run Electron E2E Unit Tests', 'Run Electron E2E Redaction Test']) {
+test('rejects a changed runtime recovery smoke command', () => {
+  const mutated = ci.replace(
+    '        run: npm run test:runtime-smoke',
+    '        run: echo runtime-smoke-skipped',
+  )
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('Runtime Recovery Smoke (Windows) must run exactly')))
+})
+
+for (const stepName of ['Run Electron E2E Unit Tests', 'Run Python Runtime Recovery Smoke', 'Run Electron E2E Redaction Test']) {
   test(`rejects a constant-false ${stepName} condition`, () => {
     const mutated = ci.replace(
       `      - name: ${stepName} (Windows)\n        if: runner.os == 'Windows'`,
@@ -131,6 +145,24 @@ test('rejects a redaction step with the wrong working directory', () => {
     "      - name: Run Electron E2E Redaction Test (Windows)\n        if: runner.os == 'Windows'\n        working-directory: ${{ github.workspace }}",
   )
   assert.ok(validateProtectedCi(mutated).some((error) => error.includes('Redaction Test (Windows) must use the electron working directory')))
+})
+
+test('rejects a runtime recovery smoke step with the wrong working directory', () => {
+  const mutated = ci.replace(
+    "      - name: Run Python Runtime Recovery Smoke (Windows)\n        if: runner.os == 'Windows'\n        working-directory: ${{ github.workspace }}/electron",
+    "      - name: Run Python Runtime Recovery Smoke (Windows)\n        if: runner.os == 'Windows'\n        working-directory: ${{ github.workspace }}",
+  )
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('Runtime Recovery Smoke (Windows) must use the electron working directory')))
+})
+
+test('rejects a missing runtime recovery smoke step', () => {
+  const step = `      - name: Run Python Runtime Recovery Smoke (Windows)
+        if: runner.os == 'Windows'
+        working-directory: \${{ github.workspace }}/electron
+        run: npm run test:runtime-smoke
+`
+  const mutated = ci.replace(step, '')
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('exactly one Run Python Runtime Recovery Smoke (Windows)')))
 })
 
 test('rejects a duplicate E2E unit step', () => {
@@ -169,8 +201,13 @@ test('rejects redaction running before E2E unit tests', () => {
         working-directory: \${{ github.workspace }}/electron
         run: npm run test:e2e:redaction
 `
-  const mutated = ci.replace(`${unitStep}${redactionStep}`, `${redactionStep}${unitStep}`)
-  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('build -> unit -> redaction -> default E2E order')))
+  const runtimeStep = `      - name: Run Python Runtime Recovery Smoke (Windows)
+        if: runner.os == 'Windows'
+        working-directory: \${{ github.workspace }}/electron
+        run: npm run test:runtime-smoke
+`
+  const mutated = ci.replace(`${unitStep}${runtimeStep}${redactionStep}`, `${redactionStep}${runtimeStep}${unitStep}`)
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('build -> unit -> runtime smoke -> redaction -> default E2E order')))
 })
 
 test('requires both protected operating systems in the electron matrix', () => {
@@ -392,4 +429,136 @@ test('rejects pyright running before ruff', () => {
 `
   const mutated = ci.replace(`${ruffStep}${pyrightStep}`, `${pyrightStep}${ruffStep}`)
   assert.ok(validateProtectedCi(mutated).some((error) => error.includes('Install dependencies -> ruff -> pyright -> pytest order')))
+})
+
+test('rejects a missing Qdrant integration job', () => {
+  const mutated = ci.replace('  qdrant-integration:', '  qdrant-integration-disabled:')
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('missing jobs.qdrant-integration')))
+})
+
+test('rejects duplicate Qdrant integration jobs', () => {
+  const mutated = ci.replace(
+    '  qdrant-integration:',
+    '  qdrant-integration:\n    runs-on: ubuntu-latest\n    steps: []\n\n  qdrant-integration:',
+  )
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('must occur exactly once')))
+})
+
+test('rejects a Qdrant integration job on the wrong runner', () => {
+  const mutated = ci.replace(
+    '  qdrant-integration:\n    name: Real Qdrant Recovery Integration\n    runs-on: ubuntu-latest',
+    '  qdrant-integration:\n    name: Real Qdrant Recovery Integration\n    runs-on: windows-latest',
+  )
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('runs-on must be ubuntu-latest')))
+})
+
+test('rejects a disabled Qdrant setup-python step', () => {
+  const mutated = mutateQdrantJob((job) => job.replace(
+    '      - uses: actions/setup-python@v5\n        with:\n          python-version:',
+    '      - uses: actions/setup-python@v5\n        if: false\n        with:\n          python-version:',
+  ))
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('actions/setup-python@v5 must run unconditionally without continue-on-error')))
+})
+
+test('rejects a disabled Qdrant integration job', () => {
+  const mutated = mutateQdrantJob((job) => job.replace(
+    '    runs-on: ubuntu-latest',
+    '    runs-on: ubuntu-latest\n    if: false',
+  ))
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('qdrant-integration must run unconditionally')))
+})
+
+test('rejects continue-on-error on the Qdrant integration job', () => {
+  const mutated = mutateQdrantJob((job) => job.replace(
+    '    runs-on: ubuntu-latest',
+    '    runs-on: ubuntu-latest\n    continue-on-error: true',
+  ))
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('qdrant-integration must not set continue-on-error')))
+})
+
+test('rejects continue-on-error on the Qdrant integration step', () => {
+  const mutated = mutateQdrantJob((job) => job.replace(
+    '      - name: Run real Qdrant recovery integration\n        run:',
+    '      - name: Run real Qdrant recovery integration\n        continue-on-error: true\n        run:',
+  ))
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('Run real Qdrant recovery integration must not set continue-on-error')))
+})
+
+test('rejects a shell override on the Qdrant integration step', () => {
+  const mutated = mutateQdrantJob((job) => job.replace(
+    '      - name: Run real Qdrant recovery integration\n        run:',
+    '      - name: Run real Qdrant recovery integration\n        shell: echo {0}\n        run:',
+  ))
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('Run real Qdrant recovery integration must not override the command shell')))
+})
+
+test('rejects a default shell override on the Qdrant integration job', () => {
+  const mutated = mutateQdrantJob((job) => job.replace(
+    '    runs-on: ubuntu-latest',
+    '    runs-on: ubuntu-latest\n    defaults:\n      run:\n        shell: echo {0}',
+  ))
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('qdrant-integration must not override defaults.run.shell')))
+})
+
+test('rejects a missing Qdrant checkout step', () => {
+  const mutated = mutateQdrantJob((job) => job.replace('      - uses: actions/checkout@v4\n\n', ''))
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('exactly one actions/checkout@v4')))
+})
+
+test('rejects a missing Qdrant setup-python step', () => {
+  const setupStep = `      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: python/requirements-dev-lock-linux.txt
+
+`
+  const mutated = mutateQdrantJob((job) => job.replace(setupStep, ''))
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('exactly one actions/setup-python@v5')))
+})
+
+test('rejects an unpinned Qdrant Python version', () => {
+  const mutated = mutateQdrantJob((job) => job.replace("          python-version: '3.12'", "          python-version: '3.x'"))
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('must pin Python 3.12')))
+})
+
+test('rejects a changed Qdrant integration command', () => {
+  const mutated = ci.replace(
+    '        run: python scripts/run_qdrant_integration.py',
+    '        run: pytest python/tests/test_qdrant_integration.py -q',
+  )
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('Run real Qdrant recovery integration must run exactly')))
+})
+
+test('rejects a disabled Qdrant integration step', () => {
+  const mutated = ci.replace(
+    '      - name: Run real Qdrant recovery integration\n        run:',
+    '      - name: Run real Qdrant recovery integration\n        if: false\n        run:',
+  )
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('Run real Qdrant recovery integration must run unconditionally')))
+})
+
+test('rejects Qdrant integration before dependency install', () => {
+  const installStep = `      - name: Install Qdrant integration dependencies
+        working-directory: python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev-lock-linux.txt
+          pip check
+          python scripts/check_installed_lock.py --lock requirements-dev-lock-linux.txt
+
+`
+  const integrationStep = `      - name: Run real Qdrant recovery integration
+        run: python scripts/run_qdrant_integration.py
+`
+  const mutated = ci.replace(`${installStep}${integrationStep}`, `${integrationStep}\n${installStep.trimEnd()}`)
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('dependency install -> real integration order')))
+})
+
+test('rejects a Qdrant integration step in the Python directory', () => {
+  const mutated = ci.replace(
+    '      - name: Run real Qdrant recovery integration\n        run:',
+    '      - name: Run real Qdrant recovery integration\n        working-directory: python\n        run:',
+  )
+  assert.ok(validateProtectedCi(mutated).some((error) => error.includes('Run real Qdrant recovery integration must run in the python working directory')))
 })

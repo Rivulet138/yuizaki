@@ -6,7 +6,7 @@ import re
 import secrets
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from .permission_receipt import PermissionReceipt
 from .planner import canonical_json_bytes
@@ -17,8 +17,11 @@ ContextToolHandler = Callable[
     [dict[str, Any], Any, PermissionReceipt | None, Any],
     ToolResultEnvelope | Awaitable[ToolResultEnvelope],
 ]
+PostconditionVerifier = Callable[[dict[str, Any], Any, Any], Any]
+RecheckHandler = Callable[[dict[str, Any], Any], Any]
 ExecutionPermitClaims = Callable[[dict[str, Any], Any], str]
 _EXECUTION_PERMIT_KEY = secrets.token_bytes(32)
+EffectKind = Literal["read", "write", "unknown"]
 
 
 @dataclass(frozen=True)
@@ -130,6 +133,29 @@ class ToolDefinition:
     allow_remembered_decision: bool = True
     context_handler: ContextToolHandler | None = None
     execution_permit_claims: ExecutionPermitClaims | None = None
+    # Optional local postcondition check. It runs after the handler and only
+    # enriches the terminal event; it never adds an interactive confirmation.
+    postcondition_verifier: PostconditionVerifier | None = None
+    # Optional side-effect-free status probe used by the UI recheck action.
+    # It must never repeat the tool's primary effect.
+    recheck_handler: RecheckHandler | None = None
+    # Appended after the legacy positional fields to preserve plugin ABI.
+    # Unknown integrations default conservatively without adding confirmation.
+    effect_kind: EffectKind = "unknown"
+    # Bounds optional observation work after the primary handler returns.
+    # This does not change the tool's execution timeout or approval policy.
+    verification_timeout_seconds: float = 5.0
+
+    def __post_init__(self) -> None:
+        if self.effect_kind not in {"read", "write", "unknown"}:
+            raise ValueError("effect_kind must be read, write, or unknown")
+        if self.verification_timeout_seconds <= 0:
+            raise ValueError("verification_timeout_seconds must be positive")
+
+
+def tool_may_change_state(tool: ToolDefinition) -> bool:
+    """Classify whether cancellation after dispatch can leave a real effect."""
+    return tool.effect_kind != "read"
 
 
 class ToolRegistry:
@@ -216,6 +242,14 @@ class ToolRegistry:
                 "tags": list(tool.tags or []),
                 "scopes": list(tool.scopes or []),
                 "parameters": tool.parameters,
+                # Surface completion observability to the local UI so users
+                # can tell whether a state-changing tool has a verifier or a
+                # side-effect-free recheck path. This is metadata only and
+                # does not add confirmation friction.
+                "effectKind": tool.effect_kind,
+                "hasPostcondition": tool.postcondition_verifier is not None,
+                "hasRecheck": tool.recheck_handler is not None,
+                "verificationTimeoutMs": round(tool.verification_timeout_seconds * 1000),
             }
             for tool in self._tools.values()
         ]

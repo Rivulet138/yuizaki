@@ -4,6 +4,7 @@ import type {
   PetParameterOverrideItem,
   PetSentenceEmotionCue,
 } from '../shared/pet-control'
+import { legacyDirectiveToAvatarCommand } from '../shared/avatar-command'
 import { petControl } from './utils/petControl'
 
 type UnknownRecord = Record<string, unknown>
@@ -234,20 +235,37 @@ export const buildExpressionMixPayload = (cue: PetSentenceEmotionCue): PetExpres
 }
 
 export const applySentenceEmotionCue = async (cue: PetSentenceEmotionCue): Promise<void> => {
-  if (cue.emotionId) {
-    await petControl.triggerEmotion(cue.emotionId, { source: 'automation' })
-  }
-  if (cue.motionGroup) {
-    await petControl.triggerMotion(cue.motionGroup, cue.motionIndex ?? 0, { source: 'automation' })
-  }
-
+  const sequence = sentenceEmotionCommandSequence++
   const expressionMixPayload = buildExpressionMixPayload(cue)
-  if (expressionMixPayload) {
-    await petControl.triggerExpressionMix(expressionMixPayload, { source: 'automation' })
-  } else if (cue.expressionName) {
-    await petControl.triggerExpression(cue.expressionName, { source: 'automation' })
+  const command = legacyDirectiveToAvatarCommand({
+    expressionMix: expressionMixPayload?.expressions ?? [],
+    parameterOverrides: expressionMixPayload?.parameterOverrides ?? [],
+    ...(cue.motionGroup ? { motion: { group: cue.motionGroup, index: cue.motionIndex ?? 0 } } : {}),
+    intensity: cue.intensity ?? 1,
+    durationMs: cue.durationMs ?? 1800,
+  }, {
+    id: `sentence-cue-${Date.now()}-${sequence}`,
+    streamId: sentenceEmotionCommandStreamId,
+    sequence,
+    issuedAt: Date.now(),
+    priority: 45,
+    interrupt: 'replace',
+  })
+  if (cue.emotionId) {
+    command.actions.unshift({
+      type: 'affect',
+      emotion: cue.emotionId,
+      intensity: cue.intensity ?? 1,
+      decayMs: cue.durationMs ?? 1800,
+    })
+  }
+  if (command.actions.length > 0) {
+    await petControl.triggerAvatarCommand(command, { source: 'automation' })
   }
 }
+
+const sentenceEmotionCommandStreamId = `sentence-emotion:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
+let sentenceEmotionCommandSequence = 0
 
 export class PetSentenceEmotionScheduler {
   private readonly applyCue: (cue: PetSentenceEmotionCue) => Promise<void> | void

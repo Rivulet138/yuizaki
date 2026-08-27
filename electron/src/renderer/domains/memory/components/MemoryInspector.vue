@@ -16,6 +16,7 @@
       <details><summary>重要度与置信度</summary><div class="slider-grid"><label><span>重要度 {{ draft.importance.toFixed(2) }}</span><el-slider :model-value="draft.importance" :min="0" :max="1" :step="0.05" @update:model-value="updateDraft('importance', Number($event))" /></label><label><span data-testid="memory-inspector-confidence">置信度 {{ draft.confidence.toFixed(2) }}</span><el-slider :model-value="draft.confidence" :min="0" :max="1" :step="0.05" @update:model-value="updateDraft('confidence', Number($event))" /></label></div></details>
       <div class="actions"><div class="save-state" :class="{ dirty }" role="status">{{ dirty ? '有未保存修改' : '已保存' }}</div><el-button data-testid="memory-inspector-save" size="small" type="primary" :loading="saving" :disabled="!dirty || !draft.text.trim()" @click="emit('save')">保存修改</el-button><el-button size="small" plain :disabled="!dirty" @click="emit('reset')">重置</el-button><el-button data-testid="memory-inspector-forget" size="small" type="warning" plain :loading="forgetting" :disabled="forgetting" @click="emit('forget', doc.id)">停止召回</el-button></div>
       <dl><div><dt>作用域</dt><dd data-testid="memory-inspector-scope">{{ docScopeLabel(doc) }}</dd></div><div><dt>来源</dt><dd data-testid="memory-inspector-source">{{ docSourceLabel(doc) }}</dd></div><div><dt>质量</dt><dd>{{ qualityPercent(doc) }}</dd></div></dl>
+      <details v-if="evidenceIds.length"><summary>依据与关联（{{ evidenceIds.length }}）</summary><div class="evidence-list" data-testid="memory-inspector-evidence"><span v-for="id in evidenceIds" :key="id">{{ id }}</span></div></details>
       <details><summary>调整记忆层级</summary><div class="layer-actions"><button v-for="layer in layers" :key="layer.value" type="button" :aria-pressed="doc.layer === layer.value" @click="emit('move-layer', { doc, layer: layer.value })">{{ layer.label }}</button></div></details>
       <details><summary>技术信息</summary><pre>{{ metadataPreview(doc) }}</pre></details>
       <details v-if="auditEntries(doc).length"><summary>审计记录</summary><div class="audit"><div v-for="(entry, index) in auditEntries(doc)" :key="index"><strong>{{ auditActionLabel(entry.action) }}</strong><span>{{ auditEntrySummary(entry) }}</span></div></div></details>
@@ -67,6 +68,18 @@ const versionTimestamp = (entry: MemoryVersionSnapshot) => {
   const date = new Date(value)
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : ''
 }
+const evidenceIds = computed(() => {
+  const metadata = props.doc?.metadata ?? {}
+  const ids = new Set<string>()
+  const sourceIds = metadata.source_ids
+  if (Array.isArray(sourceIds)) sourceIds.forEach(value => { if (typeof value === 'string' && value.trim()) ids.add(value) })
+  const evidence = metadata.evidence
+  if (Array.isArray(evidence)) evidence.forEach(value => {
+    if (typeof value === 'string' && value.trim()) ids.add(value)
+    else if (value && typeof value === 'object' && typeof (value as Record<string, unknown>).id === 'string') ids.add(String((value as Record<string, unknown>).id))
+  })
+  return [...ids]
+})
 const rollback = async (revision: number) => {
   if (!props.doc || !inspectorActions || rollingBackRevision.value !== null) return
   rollingBackRevision.value = revision

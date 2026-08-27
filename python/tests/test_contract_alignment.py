@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
 import importlib
 import io
+import json
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -11,9 +13,8 @@ from dataclasses import dataclass
 from typing import cast
 
 import pytest
-from PIL import Image
-
 from modules.ocr.recognizer import OCRClient
+from PIL import Image
 
 BuildSnapshot = Callable[..., dict[str, object]]
 
@@ -21,13 +22,13 @@ companion_runtime_module = importlib.import_module("modules.system.companion_run
 
 build_companion_runtime_snapshot = cast(
     BuildSnapshot,
-    getattr(companion_runtime_module, "build_companion_runtime_snapshot"),
+    vars(companion_runtime_module)["build_companion_runtime_snapshot"],
 )
 
 
 @dataclass
 class EmptyMemoryState:
-    store: "EmptyStore"
+    store: EmptyStore
 
 
 class EmptyStore:
@@ -74,6 +75,20 @@ class CompanionStateRepo:
         }
 
 
+class RuntimeJobEventSource:
+    def __init__(self, events: list[dict[str, object]]):
+        self.events = events
+
+    def snapshot(self) -> list[dict[str, object]]:
+        return self.events
+
+    def snapshot_job_events(self) -> list[dict[str, object]]:
+        return self.events
+
+    def active_job_ids(self) -> list[str]:
+        return ["job-1"]
+
+
 def _empty_relationship_summary(events: Sequence[object]) -> dict[str, object]:
     return {
         "event_count": len(events),
@@ -117,6 +132,109 @@ def test_companion_runtime_empty_snapshot_matches_frontend_memory_contract():
         "recent_signals": [],
         "signal_summary": {},
     }
+
+
+@pytest.mark.parametrize("source_kind", ["job_event_log", "scheduler"])
+def test_companion_runtime_projects_bounded_redacted_job_events_without_mutating_source(source_kind: str):
+    event = {
+        "version": 1,
+        "type": "companion.job.failed",
+        "workspaceId": "workspace-1",
+        "sessionId": "session-1",
+        "turnId": "turn-1",
+        "jobId": "job-1",
+        "requestId": "request-1",
+        "revision": 7,
+        "interruptionEpoch": 2,
+        "source": "tool",
+        "timestamp": 1234.0,
+        "status": "failed",
+        "data": {
+            "args": {
+                "path": "notes.txt",
+                "api_key": "args-secret",
+                "nested": {
+                    "Authorization": "Bearer nested-secret-token",
+                    "detail": "token=inline-secret-token",
+                },
+            },
+            "toolName": "write_file",
+            "retryable": True,
+            "replayArgsAvailable": True,
+            "recheckAvailable": True,
+            "effectOutcome": "unknown_effect",
+            "verification": {
+                "status": "error",
+                "evidence": [f"evidence-{index}" for index in range(40)],
+            },
+            "recovery": {
+                "available": True,
+                "action": "resume_failed_step",
+                "retryable": True,
+                "handle": "rh_recovery_handle",
+            },
+            "failure": {
+                "category": "provider_timeout",
+                "failedStep": "write-output",
+                "message": "Authorization: Bearer failure-secret-token",
+            },
+            "longText": "x" * 2000,
+            "longList": list(range(100)),
+            "longDict": {f"key-{index}": index for index in range(100)},
+        },
+    }
+    source = RuntimeJobEventSource([event])
+    before = copy.deepcopy(source.events)
+    source_argument = {source_kind: source}
+
+    snapshot = build_companion_runtime_snapshot(
+        active_workspace_id="workspace-1",
+        db_repo=EmptyRepo(),
+        heartbeat_scheduler=None,
+        memory_state=EmptyMemoryState(store=EmptyStore()),
+        summarize_relationship_events=_empty_relationship_summary,
+        is_relationship_milestone=_is_relationship_milestone,
+        limit=4,
+        **source_argument,
+    )
+
+    jobs = cast(dict[str, object], snapshot["jobs"])
+    projected = cast(list[dict[str, object]], jobs["events"])[0]
+    for key in (
+        "version", "type", "workspaceId", "sessionId", "turnId", "jobId",
+        "requestId", "revision", "interruptionEpoch", "source", "timestamp", "status",
+    ):
+        assert projected[key] == event[key]
+    data = cast(dict[str, object], projected["data"])
+    for key in (
+        "args", "toolName", "retryable", "replayArgsAvailable", "recheckAvailable",
+        "effectOutcome", "verification", "recovery", "failure",
+    ):
+        assert key in data
+    assert data["toolName"] == "write_file"
+    assert data["retryable"] is True
+    assert data["replayArgsAvailable"] is True
+    assert data["recheckAvailable"] is True
+    assert data["effectOutcome"] == "unknown_effect"
+    assert len(cast(str, data["longText"])) <= 512
+    assert len(cast(list[object], data["longList"])) <= 16
+    assert len(cast(dict[str, object], data["longDict"])) <= 32
+    verification = cast(dict[str, object], data["verification"])
+    assert verification["status"] == "error"
+    assert len(cast(list[object], verification["evidence"])) <= 16
+    recovery = cast(dict[str, object], data["recovery"])
+    assert recovery["handle"] == "rh_recovery_handle"
+    failure = cast(dict[str, object], data["failure"])
+    assert failure["category"] == "provider_timeout"
+    args = cast(dict[str, object], data["args"])
+    assert args["path"] == "notes.txt"
+    assert args["api_key"] == "[REDACTED]"
+    serialized = json.dumps(projected)
+    assert "args-secret" not in serialized
+    assert "nested-secret-token" not in serialized
+    assert "inline-secret-token" not in serialized
+    assert "failure-secret-token" not in serialized
+    assert source.events == before
 
 
 def test_companion_runtime_uses_persisted_companion_state_fields():

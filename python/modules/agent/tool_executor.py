@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import re
 import time
 import uuid
@@ -15,14 +16,16 @@ from ..system.relationship_policy import summarize_relationship_events
 from .companion_events import CompanionJobCapacityError, CompanionJobEventLog
 from .context import get_runtime_bindings
 from .models import RuntimeLoopRecord
+from .perception import redact_sensitive_payload
 from .permission_receipt import build_permission_receipt
 from .policy_engine import PolicyEngine
 from .route_policy import memory_reflector_route
-from .tool_registry import ToolRegistry, _mint_execution_permit
+from .tool_registry import ToolRegistry, _mint_execution_permit, tool_may_change_state
 from .tool_result import ToolResultEnvelope
 
 PermissionRequestCallback = Any
 _RESULT_SUMMARY_LIMIT = 360
+logger = logging.getLogger(__name__)
 
 
 def _bounded_result_summary(content: Any) -> str:
@@ -32,6 +35,15 @@ def _bounded_result_summary(content: Any) -> str:
     if len(text) <= _RESULT_SUMMARY_LIMIT:
         return text
     return f"{text[:_RESULT_SUMMARY_LIMIT - 3].rstrip()}..."
+
+
+def _normalize_verification_status(value: Any) -> str:
+    marker = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if marker in {"verified", "passed", "success", "succeeded", "ok"}:
+        return "verified"
+    if marker in {"error", "failed", "failure", "timeout", "timed_out"}:
+        return "error"
+    return "unverified"
 
 
 class ToolExecutor:
@@ -94,6 +106,125 @@ class ToolExecutor:
             return False
         return True
 
+    async def recheck(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        *,
+        ctx: Any,
+        request_id: str,
+        run_id: str | None = None,
+        job_id: str | None = None,
+        source: str = "desktop",
+    ) -> dict[str, Any]:
+        """Run a side-effect-free status probe for a completed job.
+
+        A recheck is deliberately opt-in per tool.  It never calls the primary
+        handler and therefore cannot repeat a desktop write or external send.
+        The resulting evidence is appended to the original job when possible.
+        """
+        log = self.job_event_log
+        if log is None and ctx is not None:
+            log = getattr(ctx, "extra", {}).get("job_event_log")
+        workspace_id = str(
+            getattr(ctx, "workspace_id", None)
+            or (getattr(ctx, "extra", {}).get("active_workspace_id") if ctx is not None else None)
+            or "default"
+        )
+        if log is None or not job_id:
+            return {"status": "unavailable", "reason": "job_not_available"}
+        latest = log.latest(job_id, workspace_id)
+        if latest is None:
+            return {"status": "unavailable", "reason": "job_not_found"}
+        latest_data = dict(latest.get("data") or {})
+        original_tool = str(latest_data.get("toolName") or "")
+        original_args = latest_data.get("args")
+        latest_status = str(latest.get("status") or "")
+        latest_effect_outcome = str(latest_data.get("effectOutcome") or "")
+        recheckable_terminal = latest_status == "completed" or (
+            latest_status in {"failed", "cancelled", "interrupted", "unknown_effect"}
+            and latest_effect_outcome == "unknown_effect"
+        )
+        if (
+            not recheckable_terminal
+            or latest_data.get("recheckAvailable") is not True
+            or original_tool != tool_name
+            or not isinstance(original_args, dict)
+            or original_args != args
+            or str(latest.get("requestId") or "") != request_id
+            or (run_id is not None and str(latest.get("runId") or "") != run_id)
+        ):
+            return {"status": "unavailable", "reason": "job_identity_mismatch"}
+        tool = self.registry.get(original_tool)
+        if tool is None:
+            return {"status": "unavailable", "reason": "unknown_tool"}
+        probe = getattr(tool, "recheck_handler", None)
+        if probe is None:
+            return {"status": "unavailable", "reason": "probe_not_available"}
+        started_at = time.perf_counter()
+        failed_reason: str | None = None
+        try:
+            result = await asyncio.wait_for(
+                self._invoke_observer(probe, original_args, ctx),
+                timeout=tool.verification_timeout_seconds,
+            )
+            status = "verified" if result is True else "unverified"
+            evidence: list[str] = []
+            if isinstance(result, dict):
+                status = _normalize_verification_status(result.get("status") or status)
+                raw_evidence = result.get("evidence")
+                values = raw_evidence if isinstance(raw_evidence, list) else [raw_evidence]
+                evidence = [
+                    _bounded_result_summary(redact_sensitive_payload(item))
+                    for item in values if item is not None and str(item).strip()
+                ][:6]
+            resolved_effect_outcome = (
+                "known_success"
+                if status == "verified"
+                else latest_effect_outcome or "verification_pending"
+            )
+            payload = {
+                "verificationStatus": status,
+                "verificationEvidence": evidence,
+                "recheck": True,
+                "recheckAvailable": True,
+                "durationMs": round((time.perf_counter() - started_at) * 1000),
+                "effectOutcome": resolved_effect_outcome,
+            }
+        except TimeoutError:
+            status = "error"
+            evidence = []
+            failed_reason = "status_probe_timeout"
+            payload = {
+                "verificationStatus": "error",
+                "recheck": True,
+                "recheckAvailable": True,
+                "durationMs": round((time.perf_counter() - started_at) * 1000),
+                "recheckError": "status_probe_timeout",
+            }
+        except Exception as exc:  # noqa: BLE001 - probe failure is user-visible, not a transport crash
+            logger.debug("Tool recheck failed for %s: %s", tool_name, exc)
+            status = "error"
+            evidence = []
+            failed_reason = "status_probe_failed"
+            payload = {
+                "verificationStatus": "error",
+                "recheck": True,
+                "recheckAvailable": True,
+                "durationMs": round((time.perf_counter() - started_at) * 1000),
+                "recheckError": "status_probe_failed",
+            }
+        log.append_recheck(
+            job_id=job_id,
+            workspace_id=workspace_id,
+            timestamp=time.time(),
+            data={"toolName": original_tool, "progress": 1.0, **payload},
+        )
+        response = {"status": status, "evidence": evidence, "durationMs": payload["durationMs"]}
+        if failed_reason:
+            response["reason"] = failed_reason
+        return response
+
     @classmethod
     async def _wait_for_cancellation(cls, signal: Any) -> None:
         if isinstance(signal, asyncio.Event):
@@ -131,9 +262,29 @@ class ToolExecutor:
             cancellation_task.cancel()
             await asyncio.gather(cancellation_task, return_exceptions=True)
 
+    @staticmethod
+    async def _await_noninterruptible(awaitable: Any) -> tuple[Any, bool]:
+        """Wait for a synchronous worker's real terminal state after caller cancel."""
+        task = asyncio.ensure_future(awaitable)
+        try:
+            return await asyncio.shield(task), False
+        except asyncio.CancelledError:
+            outcome = await asyncio.gather(task, return_exceptions=True)
+            result = outcome[0]
+            if isinstance(result, BaseException):
+                raise result
+            return result, True
+
     def _finish(self, outcome: ToolResultEnvelope) -> ToolResultEnvelope:
         self._observe(bool(outcome.success))
         return outcome
+
+    @staticmethod
+    async def _invoke_observer(callback: Callable[..., Any], *args: Any) -> Any:
+        if inspect.iscoroutinefunction(callback):
+            return await callback(*args)
+        result = await asyncio.to_thread(callback, *args)
+        return await result if inspect.isawaitable(result) else result
 
     def _observe(self, success: bool) -> None:
         if self.outcome_observer is None:
@@ -525,7 +676,14 @@ class ToolExecutor:
             **job_data,
             "args": redacted_args,
             "retryable": not bool(getattr(receipt, "redacted_paths", [])),
+            "replayArgsAvailable": not bool(getattr(receipt, "redacted_paths", [])),
         }
+        state_changing = tool_may_change_state(tool)
+        recheck_capable = (
+            state_changing
+            and getattr(tool, "recheck_handler", None) is not None
+            and not bool(getattr(receipt, "redacted_paths", []))
+        )
         started_at = time.perf_counter()
         dispatched = False
         handler_result: ToolResultEnvelope | None = None
@@ -540,7 +698,7 @@ class ToolExecutor:
             data=job_data,
         )
 
-        async def _run_tool() -> Any:
+        async def _run_tool() -> tuple[Any, bool]:
             nonlocal dispatched, handler_result
             execution_permit = None
             if tool.execution_permit_claims is not None:
@@ -558,52 +716,87 @@ class ToolExecutor:
                 context_handler = tool.context_handler
                 dispatched = True
                 if inspect.iscoroutinefunction(context_handler):
-                    tool_result = await context_handler(args, ctx, receipt, execution_permit)
+                    tool_result, cancelled = await self._await_with_cancellation(
+                        context_handler(args, ctx, receipt, execution_permit),
+                        cancellation_signal,
+                    )
                 else:
-                    tool_result = await asyncio.to_thread(context_handler, args, ctx, receipt, execution_permit)
+                    tool_result, caller_cancelled = await self._await_noninterruptible(
+                        asyncio.to_thread(
+                            context_handler,
+                            args,
+                            ctx,
+                            receipt,
+                            execution_permit,
+                        )
+                    )
+                    cancelled = caller_cancelled or self._cancelled(cancellation_signal)
             else:
                 handler = tool.handler
                 dispatched = True
                 if inspect.iscoroutinefunction(handler):
-                    tool_result = await handler(args)
+                    tool_result, cancelled = await self._await_with_cancellation(
+                        handler(args),
+                        cancellation_signal,
+                    )
                 else:
-                    tool_result = await asyncio.to_thread(handler, args)
+                    # A running thread cannot be interrupted safely. Wait only
+                    # for the synchronous call itself to finish, then treat any
+                    # awaitable it returns as a separately cancellable stage.
+                    tool_result, caller_cancelled = await self._await_noninterruptible(
+                        asyncio.to_thread(handler, args)
+                    )
+                    cancelled = caller_cancelled or self._cancelled(cancellation_signal)
+            if cancelled and inspect.isawaitable(tool_result):
+                pending_result = asyncio.ensure_future(tool_result)
+                pending_result.cancel()
+                await asyncio.gather(pending_result, return_exceptions=True)
+            if cancelled:
+                return None, True
             if inspect.isawaitable(tool_result):
-                tool_result = await tool_result
+                tool_result, cancelled = await self._await_with_cancellation(
+                    tool_result,
+                    cancellation_signal,
+                )
+                if cancelled:
+                    return None, True
             if isinstance(tool_result, ToolResultEnvelope):
                 handler_result = tool_result
             if plugin_manager is not None:
-                tool_result = await plugin_manager.after_tool(tool_result, tool.name, args, ctx)
-            return tool_result
+                tool_result, cancelled = await self._await_with_cancellation(
+                    plugin_manager.after_tool(tool_result, tool.name, args, ctx),
+                    cancellation_signal,
+                )
+                if cancelled:
+                    return None, True
+            return tool_result, False
 
         try:
-            # asyncio cannot stop a synchronous function already running in a
-            # worker thread. Await it to a real terminal state before reporting
-            # cancellation, so the job never claims a side effect stopped while
-            # it is still executing.
-            if not inspect.iscoroutinefunction(tool.context_handler or tool.handler):
-                result = await _run_tool()
-                cancelled = self._cancelled(cancellation_signal)
-            else:
-                result, cancelled = await self._await_with_cancellation(_run_tool(), cancellation_signal)
+            result, cancelled = await _run_tool()
         except asyncio.CancelledError:
             terminal_data = {
                 **terminal_data,
                 "durationMs": round((time.perf_counter() - started_at) * 1000),
-                "effectOutcome": "unknown_effect" if dispatched else "known_failure",
+                "effectOutcome": (
+                    "unknown_effect" if dispatched and state_changing else "known_failure"
+                ),
+                "recheckAvailable": recheck_capable,
             }
             self._job_event(
                 ctx=ctx, status="cancelled", job_id=job_id, run_id=run_id,
                 request_id=request_id, source=event_source, tool_name=tool_name,
                 error="cancelled", data=terminal_data,
             )
-            if not dispatched:
+            if not dispatched or not state_changing:
                 return self._finish(ToolResultEnvelope(
                     success=False,
                     content="",
                     source=tool.source,
                     tool_name=tool_name,
-                    error="Tool execution cancelled before dispatch",
+                    error=(
+                        "Tool execution cancelled after read dispatch"
+                        if dispatched else "Tool execution cancelled before dispatch"
+                    ),
                     permission_receipt=receipt,
                     outcome="known_failure",
                     retryable=True,
@@ -623,12 +816,13 @@ class ToolExecutor:
             if handler_result is not None:
                 result = handler_result
                 cancelled = False
-            elif dispatched:
+            elif dispatched and state_changing:
                 terminal_data = {
                     **terminal_data,
                     "durationMs": round((time.perf_counter() - started_at) * 1000),
                     "effectOutcome": "unknown_effect",
                     "retryable": False,
+                    "recheckAvailable": recheck_capable,
                 }
                 self._job_event(
                     ctx=ctx, status="failed", job_id=job_id, run_id=run_id,
@@ -645,6 +839,28 @@ class ToolExecutor:
                     outcome="unknown_effect",
                     retryable=False,
                     data={"code": "TOOL_OUTCOME_UNKNOWN"},
+                ))
+            elif dispatched:
+                terminal_data = {
+                    **terminal_data,
+                    "durationMs": round((time.perf_counter() - started_at) * 1000),
+                    "effectOutcome": "known_failure",
+                    "retryable": True,
+                }
+                self._job_event(
+                    ctx=ctx, status="failed", job_id=job_id, run_id=run_id,
+                    request_id=request_id, source=event_source, tool_name=tool_name,
+                    error=str(exc), data=terminal_data,
+                )
+                return self._finish(ToolResultEnvelope(
+                    success=False,
+                    content="",
+                    source=tool.source,
+                    tool_name=tool_name,
+                    error="Read-only tool execution failed after dispatch",
+                    permission_receipt=receipt,
+                    outcome="known_failure",
+                    retryable=True,
                 ))
             else:
                 terminal_data = {
@@ -663,7 +879,12 @@ class ToolExecutor:
                 **terminal_data,
                 "durationMs": round((time.perf_counter() - started_at) * 1000),
                 "cancellationReason": "cancelled",
-                "effectOutcome": "unknown_effect" if dispatched else "known_failure",
+                "effectOutcome": (
+                    "unknown_effect" if dispatched and state_changing else "known_failure"
+                ),
+                "recheckAvailable": (
+                    recheck_capable
+                ),
             }
             self._job_event(
                 ctx=ctx, status="cancelled", job_id=job_id, run_id=run_id,
@@ -677,18 +898,83 @@ class ToolExecutor:
                 tool_name=tool_name,
                 error=(
                     "Tool execution cancelled after dispatch; effect is unknown"
-                    if dispatched else "Tool execution cancelled before dispatch"
+                    if dispatched and state_changing
+                    else "Tool execution cancelled after read dispatch"
+                    if dispatched
+                    else "Tool execution cancelled before dispatch"
                 ),
                 permission_receipt=receipt,
-                outcome="unknown_effect" if dispatched else "known_failure",
-                retryable=not dispatched,
-                data={"code": "TOOL_OUTCOME_UNKNOWN"} if dispatched else None,
+                outcome=(
+                    "unknown_effect" if dispatched and state_changing else "known_failure"
+                ),
+                retryable=not (dispatched and state_changing),
+                data=(
+                    {"code": "TOOL_OUTCOME_UNKNOWN"}
+                    if dispatched and state_changing else None
+                ),
             ))
-        result_summary = _bounded_result_summary(getattr(result, "content", ""))
+        verification_data: dict[str, Any] = {}
+        verifier = getattr(tool, "postcondition_verifier", None)
+        if verifier is not None:
+            try:
+                verification, verification_cancelled = await self._await_with_cancellation(
+                    asyncio.wait_for(
+                        self._invoke_observer(verifier, args, result, ctx),
+                        timeout=tool.verification_timeout_seconds,
+                    ),
+                    cancellation_signal,
+                )
+                if verification_cancelled:
+                    verification_data = {
+                        "verificationStatus": "cancelled",
+                        "verificationError": "verification_cancelled",
+                    }
+                    verification = None
+                if isinstance(verification, dict):
+                    status = _normalize_verification_status(
+                        verification.get("status") or "unverified"
+                    )
+                    evidence = verification.get("evidence")
+                    verification_data["verificationStatus"] = status
+                    if isinstance(evidence, list):
+                        verification_data["verificationEvidence"] = [
+                            _bounded_result_summary(redact_sensitive_payload(item))
+                            for item in evidence if str(item).strip()
+                        ][:6]
+                    elif evidence:
+                        verification_data["verificationEvidence"] = [
+                            _bounded_result_summary(redact_sensitive_payload(evidence))
+                        ]
+                elif not verification_data:
+                    verification_data["verificationStatus"] = "verified" if verification is True else "unverified"
+            except TimeoutError:
+                verification_data = {
+                    "verificationStatus": "error",
+                    "verificationError": "verification_timeout",
+                }
+            except asyncio.CancelledError:
+                # The primary handler has already reached a known terminal
+                # result. Cancelling its optional observation must not erase
+                # that result or leave the user-visible job running forever.
+                verification_data = {
+                    "verificationStatus": "cancelled",
+                    "verificationError": "verification_cancelled",
+                }
+            except Exception as exc:  # noqa: BLE001 - verification must not break a completed action
+                logger.debug("Tool postcondition verification failed for %s: %s", tool.name, exc)
+                verification_data = {"verificationStatus": "error"}
+        result_summary = _bounded_result_summary(
+            redact_sensitive_payload(getattr(result, "content", ""))
+        )
         terminal_data = {
             **terminal_data,
             "durationMs": round((time.perf_counter() - started_at) * 1000),
             "artifactCount": len(getattr(result, "artifacts", []) or []),
+            "recheckAvailable": (
+                getattr(tool, "recheck_handler", None) is not None
+                and not bool(getattr(receipt, "redacted_paths", []))
+            ),
+            **verification_data,
             **({"resultSummary": result_summary} if result_summary else {}),
         }
         self._job_event(

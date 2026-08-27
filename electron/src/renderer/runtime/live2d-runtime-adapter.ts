@@ -12,6 +12,7 @@ import type {
   ExpressionLayer,
   PetCompanionIdleProfile,
   PetControlConfigPatch,
+  PetEmotionPreset,
   PetExpressionMixPayload,
   PetParameterOverrideItem,
   PetRendererStatePayload,
@@ -86,6 +87,7 @@ interface Live2DHostContext {
     modelType: 'live2d' | 'vrm'
     modelPath: string
     modelManifest: AvatarManifest | null
+    emotionPresets?: PetEmotionPreset[]
     lipSyncProfile: PetControlConfigPatch['lipSyncProfile']
     scale: number
     positionX: number | null
@@ -149,6 +151,7 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
       ...expressions,
       ...motions.map((motion) => `${motion.group}:${motion.index}`),
       ...parameters.map((parameter) => parameter.id),
+      ...(this.host.config.emotionPresets ?? []).map((emotion) => `${emotion.id}:${emotion.expressions.join(',')}:${emotion.motions.map((motion) => `${motion.group}:${motion.index}`).join(',')}`),
     ])
 
     return {
@@ -158,7 +161,7 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
       generatedAt: Date.now(),
       actions: {
         behavior: true,
-        affect: expressions.length > 0,
+        affect: expressions.length > 0 || (this.host.config.emotionPresets?.length ?? 0) > 0,
         gaze: true,
         motion: motions.length > 0,
         expression: expressions.length > 0,
@@ -178,13 +181,25 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
         this.setBehaviorState(this.mapAvatarBehavior(action.behavior), action.durationMs ?? 0)
         return { status: 'completed' }
       case 'affect': {
-        const expression = this.resolveExpressionName(action.emotion)
-        if (!expression) return { status: 'degraded', message: `Expression not available: ${action.emotion}` }
-        this.triggerExpressionMix({
-          expressions: [{ expression, weight: action.intensity ?? 1 }],
-          intensity: action.intensity ?? 1,
-          durationMs: action.decayMs ?? 1800,
-        })
+        const preset = (this.host.config.emotionPresets ?? []).find((item) => item.id.toLowerCase() === action.emotion.toLowerCase())
+        const requestedExpression = action.expressionName ?? preset?.expressions[0] ?? action.emotion
+        const expression = this.resolveExpressionName(requestedExpression)
+        const motion = action.motion === null ? undefined : action.motion ?? preset?.motions[0]
+        let applied = false
+        if (expression) {
+          this.triggerExpressionMix({
+            expressions: [{ expression, weight: action.intensity ?? 1 }],
+            intensity: action.intensity ?? 1,
+            durationMs: action.decayMs ?? 1800,
+          })
+          applied = true
+        }
+        if (motion) {
+          this.triggerMotion(motion.group, motion.index, { updateBehavior: false })
+          applied = true
+        }
+        if (!applied) return { status: 'degraded', message: `Emotion not available: ${action.emotion}` }
+        this.setBehaviorState('reacting', action.decayMs ?? 1800)
         return { status: 'completed' }
       }
       case 'gaze':
@@ -197,8 +212,21 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
         return { status: 'completed' }
       case 'motion':
         if (!action.group) return { status: 'rejected', message: 'Live2D motion group is required' }
-        this.triggerMotion(action.group, action.index ?? 0)
-        return { status: 'completed' }
+        {
+          const requestedGroup = action.group
+          const manifestMotions = this.host.config.modelManifest?.motions ?? {}
+          const motionGroups = Object.entries(manifestMotions).map(([id, motion]) => motion.group ?? id)
+          const requestedAvailable = motionGroups.includes(requestedGroup)
+          const fallbackGroup = requestedAvailable ? requestedGroup : motionGroups[0]
+          if (fallbackGroup) {
+            this.triggerMotion(fallbackGroup, requestedAvailable ? action.index ?? 0 : 0)
+            return requestedAvailable
+              ? { status: 'completed' }
+              : { status: 'degraded', message: `Motion not available: ${requestedGroup}; used ${fallbackGroup}` }
+          }
+          this.triggerRandomMotion()
+          return { status: 'degraded', message: `Motion not available: ${requestedGroup}; used idle fallback` }
+        }
       case 'expression':
         if (!this.resolveExpressionName(action.name)) {
           return { status: 'degraded', message: `Expression not available: ${action.name}` }
@@ -282,51 +310,65 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
     }
 
     const generation = ++this.loadGeneration
-    this.stopBehaviorControllers()
-
     const modelPath = config.modelPath ?? this.host.config.modelPath
-    const currentModel = this.host.getModel()
-    const viewport = this.host.ensureViewport()
-    if (currentModel) {
-      viewport.removeChild(currentModel)
+    let model: Live2DSprite | null = null
+    try {
+      await ensureCubismCore()
+      if (generation !== this.loadGeneration) return
+      Live2DConfig.MotionGroupIdle = 'Idle'
+      Live2DConfig.MouseFollow = false
+      model = createLive2DModel(modelPath)
+      const ready = (model as Live2DSprite & { ready?: Promise<void> }).ready
+      if (ready && typeof ready.then === 'function') {
+        await ready
+      }
+      if (!model) {
+        this.host.showNotice('Live2D model is empty.')
+        return
+      }
+
+      model.anchor.set(0.5, 1)
+      model.label = this.host.config.modelId ?? model.label
+      this.host.config.modelPath = modelPath
+
+      if ('setSize' in model && typeof model.setSize === 'function') {
+        model.setSize({ height: window.innerHeight * 0.78, width: window.innerWidth * 0.32 })
+      }
+
+      if ('eventMode' in model) {
+        ;(model as PIXI.Container & { eventMode?: string }).eventMode = 'none'
+      }
+
+      if ('interactiveChildren' in model) {
+        ;(model as PIXI.Container & { interactiveChildren?: boolean }).interactiveChildren = false
+      }
+    } catch (error) {
+      if (model) {
+        destroyCurrentModel(this.host.app, model)
+      }
+      this.host.showNotice('Live2D model failed to load.')
+      throw error instanceof Error ? error : new Error('Live2D model failed to load')
     }
-    this.host.setModel(destroyCurrentModel(this.host.app, currentModel))
-
-    await ensureCubismCore()
-    if (generation !== this.loadGeneration) return
-    Live2DConfig.MotionGroupIdle = 'Idle'
-    Live2DConfig.MouseFollow = false
-
-    const model = createLive2DModel(modelPath)
     if (!model) {
       this.host.showNotice('Live2D model is empty.')
-      return
+      throw new Error('Live2D model is empty')
     }
     if (generation !== this.loadGeneration) {
       destroyCurrentModel(this.host.app, model)
       return
     }
 
-    model.anchor.set(0.5, 1)
-    model.label = this.host.config.modelId ?? model.label
-    this.host.config.modelPath = modelPath
-
-    if ('setSize' in model && typeof model.setSize === 'function') {
-      model.setSize({ height: window.innerHeight * 0.78, width: window.innerWidth * 0.32 })
-    }
-
-    if ('eventMode' in model) {
-      ;(model as PIXI.Container & { eventMode?: string }).eventMode = 'none'
-    }
-
-    if ('interactiveChildren' in model) {
-      ;(model as PIXI.Container & { interactiveChildren?: boolean }).interactiveChildren = false
-    }
-
+    const viewport = this.host.ensureViewport()
+    const previousModel = this.host.getModel()
     this.host.setModel(model)
     this.host.installEasyLive2DInteractivity()
     this.host.setupModelInteractivity()
     viewport.addChild(model)
+    if (previousModel) {
+      viewport.removeChild(previousModel)
+      destroyCurrentModel(this.host.app, previousModel)
+    }
+    this.stopBehaviorControllers()
     this.host.applyModelTransform()
     this.host.scheduleVisualCalibration?.()
     this.host.hideNotice()
@@ -685,6 +727,8 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
   }
 
   destroy(): void {
+    // Invalidate in-flight model creation before disposing the current instance.
+    this.loadGeneration += 1
     this.stopBehaviorControllers()
     this.activeMixState = null
     this.stopExpressionMixLoop()

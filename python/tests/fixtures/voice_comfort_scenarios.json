@@ -1,0 +1,36 @@
+{
+  "claim": "synthetic_comfort_regression_only",
+  "scenarios": [
+    {
+      "scenario": "deliberate_interrupt",
+      "stop_audio_latency_ms": 80,
+      "interrupt_ack_latency_ms": 110,
+      "false_interruption": false,
+      "continuous_turn_completed": true
+    },
+    {
+      "scenario": "hesitation",
+      "false_interruption": false,
+      "first_audio_latency_ms": 180,
+      "continuous_turn_completed": true
+    },
+    {
+      "scenario": "backchannel",
+      "false_interruption": false,
+      "first_audio_latency_ms": 160,
+      "continuous_turn_completed": true
+    },
+    {
+      "scenario": "background_speech",
+      "false_interruption": true,
+      "first_audio_latency_ms": 220,
+      "continuous_turn_completed": false
+    },
+    {
+      "scenario": "empty_asr",
+      "false_interruption": false,
+      "first_audio_latency_ms": 200,
+      "continuous_turn_completed": true
+    }
+  ]
+}

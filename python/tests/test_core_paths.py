@@ -7,7 +7,14 @@ from modules.agent.schedule_store import ScheduleStore
 from modules.agent.skill_store import SkillCatalogStore
 from modules.agent_plugins.manager import PluginManager
 from modules.core.config import AppConfig, LLMConfig, public_config_snapshot
-from modules.core.paths import BACKEND_ROOT, DEFAULT_AUDIO_CACHE_DIR, audio_cache_dir_from_env
+from modules.core.paths import (
+    BACKEND_ROOT,
+    DEFAULT_AUDIO_CACHE_DIR,
+    DEFAULT_SETTINGS_PATH,
+    audio_cache_dir_from_env,
+    settings_path_from_env,
+)
+from modules.system.settings_store import SettingsStore
 
 
 def test_audio_cache_path_uses_canonical_variable_and_backend_relative_paths(monkeypatch) -> None:
@@ -33,6 +40,29 @@ def test_runtime_stores_share_configured_data_directory(monkeypatch, tmp_path) -
     assert ScheduleStore().path == tmp_path / "schedules.json"
     assert SkillCatalogStore().path == tmp_path / "imported_skills.json"
     assert PluginManager()._store_file == tmp_path / "agent_plugins.json"
+
+
+def test_runtime_settings_follow_configured_data_directory(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("YUIZAKI_SETTINGS_PATH", raising=False)
+    monkeypatch.setenv("YUIZAKI_DATA_DIR", str(tmp_path))
+
+    assert settings_path_from_env() == tmp_path / "settings.json"
+    assert SettingsStore().storage_path == tmp_path / "settings.json"
+
+
+def test_explicit_runtime_settings_path_takes_precedence(monkeypatch, tmp_path) -> None:
+    configured_path = tmp_path / "config" / "runtime-settings.json"
+    monkeypatch.setenv("YUIZAKI_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("YUIZAKI_SETTINGS_PATH", str(configured_path))
+
+    assert settings_path_from_env() == configured_path
+
+
+def test_default_runtime_settings_path_remains_backward_compatible(monkeypatch) -> None:
+    monkeypatch.delenv("YUIZAKI_DATA_DIR", raising=False)
+    monkeypatch.delenv("YUIZAKI_SETTINGS_PATH", raising=False)
+
+    assert settings_path_from_env() == DEFAULT_SETTINGS_PATH
 
 
 def test_public_system_config_does_not_expose_llm_api_key(monkeypatch) -> None:

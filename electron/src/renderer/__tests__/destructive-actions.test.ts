@@ -51,6 +51,8 @@ const systemClientMocks = vi.hoisted(() => ({
   startPython: vi.fn(),
   stopPython: vi.fn(),
   openExternal: vi.fn(),
+  productMetricsConsent: vi.fn(),
+  patchProductMetricsConsent: vi.fn(),
 }))
 
 const summaryClientMocks = vi.hoisted(() => ({
@@ -249,6 +251,10 @@ vi.mock('@/api/client', () => ({
   summaryClient: summaryClientMocks,
 }))
 
+vi.mock('@/api/clients/system-client', () => ({
+  systemClient: systemClientMocks,
+}))
+
 vi.mock('element-plus', () => ({
   ElMessage: {
     error: elementPlusMocks.error,
@@ -428,6 +434,16 @@ describe('destructive action confirmation', () => {
     systemClientMocks.startPython.mockResolvedValue({ success: true })
     systemClientMocks.stopPython.mockResolvedValue({ success: true })
     systemClientMocks.openExternal.mockResolvedValue(undefined)
+    systemClientMocks.productMetricsConsent.mockResolvedValue({
+      consented: false,
+      scope: 'local_product_metrics',
+      transport: 'not_configured',
+    })
+    systemClientMocks.patchProductMetricsConsent.mockResolvedValue({
+      consented: false,
+      scope: 'local_product_metrics',
+      transport: 'not_configured',
+    })
     summaryClientMocks.getReadiness.mockResolvedValue({ ready: true, checks: {} })
     Object.defineProperty(window, 'petApi', {
       value: {

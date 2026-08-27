@@ -82,6 +82,45 @@
       </section>
 
       <section class="deploy-grid lower-grid">
+        <el-card class="panel-card provider-card" shadow="never">
+          <template #header>
+            <div class="card-head">
+              <div>
+                <strong>模型与语音运行时</strong>
+                <span class="card-subtitle">配置、初始化和健康状态来自同一份后端快照</span>
+              </div>
+              <el-tag :type="providerSummary.requiredHealthy ? 'success' : 'warning'">
+                {{ providerSummary.healthy }}/{{ providerSummary.total }} 正常
+              </el-tag>
+            </div>
+          </template>
+          <el-alert v-if="providersError" :title="providersError" type="warning" show-icon :closable="false" />
+          <div v-if="providersLoading && !providers.length" class="provider-empty">正在读取 provider 状态...</div>
+          <div v-else class="provider-grid">
+            <article v-for="provider in providers" :key="provider.id" class="provider-item" :class="provider.healthy ? 'ok' : provider.configured ? 'degraded' : 'optional'">
+              <div class="provider-item-head">
+                <strong>{{ provider.label }}</strong>
+                <el-tag size="small" :type="provider.healthy ? 'success' : provider.configured ? 'warning' : 'info'">
+                  {{ provider.healthy ? '正常' : provider.configured ? '待处理' : provider.optional ? '未配置' : '必需' }}
+                </el-tag>
+              </div>
+              <span>{{ provider.provider || '未选择 provider' }}{{ provider.model ? ` · ${provider.model}` : '' }}</span>
+              <small>{{ provider.message }}</small>
+              <small v-if="provider.capabilities.length">能力：{{ provider.capabilities.join('、') }}</small>
+              <el-button
+                v-if="provider.retryable"
+                class="provider-retry"
+                text
+                type="primary"
+                size="small"
+                :loading="providersLoading"
+                :data-testid="`provider-retry-${provider.id}`"
+                @click="checkProviders"
+              >重新检查</el-button>
+            </article>
+          </div>
+        </el-card>
+
         <el-card class="panel-card command-card" shadow="never">
           <template #header>
             <div class="card-head">
@@ -111,6 +150,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import { systemClient, summaryClient } from '@/api/client'
+import type { ProviderStatus } from '@/../shared/agent'
 import { resolveBackendUrl } from '@/api/clients/http-client'
 import { buildDeployPlatformCommands, resolveDeployPlatform } from '../platform-commands'
 
@@ -142,6 +182,10 @@ const startLoading = ref(false)
 const stopLoading = ref(false)
 const actionError = ref('')
 const lastCheckedAt = ref('')
+const providers = ref<ProviderStatus[]>([])
+const providerSummary = reactive({ total: 0, healthy: 0, requiredHealthy: false })
+const providersLoading = ref(false)
+const providersError = ref('')
 let refreshGeneration = 0
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
@@ -208,8 +252,24 @@ const checkReadiness = async () => {
   }
 }
 
+const checkProviders = async () => {
+  providersLoading.value = true
+  providersError.value = ''
+  try {
+    const data = await systemClient.providers()
+    providers.value = Array.isArray(data.providers) ? data.providers : []
+    providerSummary.total = Number(data.summary?.total || providers.value.length)
+    providerSummary.healthy = Number(data.summary?.healthy || 0)
+    providerSummary.requiredHealthy = data.summary?.requiredHealthy === true
+  } catch (error) {
+    providersError.value = error instanceof Error ? error.message : 'provider 状态读取失败'
+  } finally {
+    providersLoading.value = false
+  }
+}
+
 const checkHealth = async () => {
-  await Promise.all([checkHealthByHttp(), checkReadiness()])
+  await Promise.all([checkHealthByHttp(), checkReadiness(), checkProviders()])
 }
 
 const startPython = async () => {
@@ -454,6 +514,36 @@ onMounted(() => {
 
 .lower-grid { grid-template-columns: minmax(0, 1fr); }
 
+.card-subtitle {
+  color: var(--yui-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.provider-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-card);
+  background: var(--yui-surface-muted);
+}
+
+.provider-item.ok { border-color: rgba(34, 197, 94, 0.26); background: var(--yui-success-soft); }
+.provider-item.degraded { border-color: rgba(245, 158, 11, 0.24); background: var(--yui-warning-soft); }
+.provider-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.provider-item span, .provider-item small { color: var(--yui-muted); overflow-wrap: anywhere; }
+.provider-item small { font-size: 11px; line-height: 1.45; }
+.provider-empty { padding: 14px; color: var(--yui-muted); }
+
 .service-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-top: 14px;
@@ -632,7 +722,8 @@ onMounted(() => {
   .metric-grid,
   .deploy-grid,
   .lower-grid,
-  .service-grid {
+  .service-grid,
+  .provider-grid {
     grid-template-columns: 1fr;
   }
 }

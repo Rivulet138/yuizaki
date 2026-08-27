@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from ..tools.local_tools import dispatch_tool, web_search
+import hashlib
+
+from ..tools.local_tools import dispatch_tool, read_file, web_search
 from .tool_registry import ToolDefinition, ToolRegistry
 from .tool_result import ToolResultEnvelope
 
@@ -23,6 +25,15 @@ def _web_search_envelope(args: dict) -> ToolResultEnvelope:
         )
 
 
+def _verify_written_file(args: dict, *_context: object) -> dict[str, object]:
+    expected = str(args.get("content", ""))
+    actual = read_file(str(args.get("path", "")))
+    matches = actual == expected
+    digest = hashlib.sha256(actual.encode("utf-8")).hexdigest()[:12]
+    return {
+        "status": "verified" if matches else "unverified",
+        "evidence": [f"file content {'matches' if matches else 'differs'} (sha256 {digest})"],
+    }
 def register_default_tools(registry: ToolRegistry) -> None:
     registry.register(ToolDefinition(
         name="open_app",
@@ -35,6 +46,7 @@ def register_default_tools(registry: ToolRegistry) -> None:
             source="builtin",
             tool_name="open_app",
         ),
+        effect_kind="write",
         risk_level="low",
         tags=["desktop", "launch"],
         scopes=["desktop:open_app"],
@@ -51,6 +63,7 @@ def register_default_tools(registry: ToolRegistry) -> None:
             source="builtin",
             tool_name="open_url",
         ),
+        effect_kind="write",
         risk_level="low",
         tags=["browser", "external"],
         scopes=["browser:open_url"],
@@ -67,6 +80,7 @@ def register_default_tools(registry: ToolRegistry) -> None:
             source="builtin",
             tool_name="read_file",
         ),
+        effect_kind="read",
         risk_level="low",
         tags=["filesystem", "read"],
         scopes=["fs:read"],
@@ -90,10 +104,13 @@ def register_default_tools(registry: ToolRegistry) -> None:
             source="builtin",
             tool_name="write_file",
         ),
+        effect_kind="write",
         risk_level="high",
         require_confirm=True,
         tags=["filesystem", "write"],
         scopes=["fs:write"],
+        postcondition_verifier=_verify_written_file,
+        recheck_handler=lambda args, _ctx: _verify_written_file(args),
     ))
 
     registry.register(ToolDefinition(
@@ -109,6 +126,7 @@ def register_default_tools(registry: ToolRegistry) -> None:
             "required": ["query"],
         },
         handler=_web_search_envelope,
+        effect_kind="read",
         risk_level="low",
         tags=["web", "search", "current"],
         scopes=["web:search"],

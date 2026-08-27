@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from modules.core import config, GenerationManager, public_config_snapshot
-from modules.core.paths import DEFAULT_RUNTIME_TEMP_DIR, data_dir_from_env
+from modules.core.paths import DEFAULT_RUNTIME_TEMP_DIR, data_dir_from_env, settings_path_from_env
 from modules.core.settings import SettingsManager
 from modules.llm import LLMClient
 from modules.tts import TTSClient
@@ -43,6 +43,7 @@ from modules.system.companion_runtime import build_companion_runtime_snapshot
 from modules.system.governance_alert_state import GovernanceAlertStateStore
 from modules.system.memory_query import build_memory_query_request
 from modules.system.runtime_endpoints import build_companion_runtime_endpoint
+from modules.system.message_connectors import MessageConnectorRegistry
 from modules.system.schema_policy import enforce_schema_policy
 import modules.system.runtime_composition as system_runtime_composition
 from modules.system.runtime_composition import build_runtime_handlers
@@ -63,6 +64,7 @@ from routes.system_api import create_system_router
 from routes.workspace_api import create_workspace_router
 from routes.companion_api import create_companion_router
 from routes.realtime_api import create_realtime_router
+from routes.connector_api import create_message_connector_router
 from routes.storage_api import create_storage_router
 from modules.system.settings_api import router as settings_router
 from modules.system.logging_config import configure_application_logging
@@ -72,9 +74,9 @@ from modules.system.heartbeat import HeartbeatScheduler, DEFAULT_HEARTBEAT_INTER
 from modules.system.heartbeat_goal_store import HeartbeatGoalStore
 from modules.system.health_providers import build_app_runtime_health_providers, register_app_runtime_health_checks
 from modules.system.onboarding_readiness import OnboardingReadiness
+from modules.system.runtime_services import voice_diagnostics
 from modules.system.runtime_config import RuntimeConfig, apply_runtime_config
 from modules.system.settings_schema import validate_runtime_patch
-from modules.system.settings_store import DEFAULT_SETTINGS_PATH
 
 LOG_FORMAT = "%(asctime)s  %(levelname)-8s  %(name)s  %(message)s"
 
@@ -147,6 +149,7 @@ settings_api = None  # Settings API instance
 settings_manager: SettingsManager | None = None
 db_repo: DatabaseRepository | None = None  # 数据库实例
 _active_workspace_state = ActiveWorkspaceState()
+_message_connector_registry = MessageConnectorRegistry(state_path=data_dir_from_env() / "message_connectors.json")
 
 _llm_client: LLMClient | None = None
 _vision_llm_client: LLMClient | None = None
@@ -169,10 +172,11 @@ _product_metrics_consent_store = JsonProductConsentStateStore(data_dir_from_env(
 
 def _apply_persisted_memory_config_before_backend_init() -> None:
     """Apply persisted memory settings before module-level memory routes are built."""
-    if not DEFAULT_SETTINGS_PATH.exists():
+    settings_path = settings_path_from_env()
+    if not settings_path.exists():
         return
     try:
-        with open(DEFAULT_SETTINGS_PATH, "r", encoding="utf-8") as settings_file:
+        with open(settings_path, "r", encoding="utf-8") as settings_file:
             loaded = json.load(settings_file)
         if not isinstance(loaded, dict):
             return
@@ -432,7 +436,18 @@ _BACKEND_API_TOKEN = os.getenv("YUIZAKI_BACKEND_API_TOKEN", "").strip()
 
 @app.get("/api/ping")
 async def ping():
-    return {"ok": True}
+    payload: dict[str, Any] = {"ok": True}
+    instance_id = os.getenv("YUIZAKI_RUNTIME_INSTANCE_ID", "").strip()
+    generation = os.getenv("YUIZAKI_RUNTIME_GENERATION", "").strip()
+    startup_nonce = os.getenv("YUIZAKI_RUNTIME_STARTUP_NONCE", "").strip()
+    if instance_id and generation and startup_nonce:
+        payload["runtime"] = {
+            "instance_id": instance_id,
+            "generation": generation,
+            "startup_nonce": startup_nonce,
+            "pid": os.getpid(),
+        }
+    return payload
 
 
 @app.get("/api/perception/active-application")
@@ -581,6 +596,7 @@ memory_router = create_memory_router(
     _memory_state,
     get_active_workspace_id=_get_active_workspace_id,
     clear_memory_references=lambda memory_ids: db_repo.clear_memory_references(memory_ids) if db_repo else 0,
+    count_memory_references=lambda memory_ids: db_repo.count_memory_references(memory_ids) if db_repo else 0,
 )
 app.include_router(memory_router)
 app.include_router(
@@ -636,6 +652,12 @@ app.include_router(
         get_relationship_writer=lambda: _write_relationship_memory,
     )
 )
+app.include_router(create_message_connector_router(
+    registry_provider=lambda: _message_connector_registry,
+    turn_service_provider=lambda: sio_server.runtime.turn_service if sio_server and sio_server.runtime else None,
+    active_workspace_id_provider=_get_active_workspace_id,
+    delivery_store_provider=lambda: sio_server.runtime.turn_store if sio_server and sio_server.runtime else None,
+))
 config.tts.audio_cache_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/audio", StaticFiles(directory=str(config.tts.audio_cache_dir)), name="audio")
 
@@ -652,6 +674,7 @@ runtime_handlers = build_runtime_handlers(
     retrieval_pipeline_provider=lambda: _retrieval_pipeline,
     relationship_summary_provider=_relationship_evolution_summary,
     companion_runtime_provider=_companion_runtime_snapshot,
+    voice_diagnostics_provider=voice_diagnostics,
     build_memory_query_request=build_memory_query_request,
     llm_health_provider=runtime_health_providers.llm,
     tts_health_provider=runtime_health_providers.tts,
@@ -659,11 +682,16 @@ runtime_handlers = build_runtime_handlers(
     asr_health_provider=runtime_health_providers.asr,
     ocr_health_provider=runtime_health_providers.ocr,
     memory_health_provider=runtime_health_providers.memory,
+    llm_client_provider=lambda: _llm_client,
+    tts_client_provider=lambda: _tts_client,
+    asr_manager_provider=lambda: _asr_manager,
+    vision_client_provider=lambda: _vision_llm_client,
     generation_manager_provider=lambda: _generation_mgr,
     svc_client_provider=lambda: _svc_client,
     memory_status_provider=lambda: _get_memory_store().get_status() if _memory_state else None,
     onboarding_readiness=onboarding_readiness,
     product_metrics_consent_store=_product_metrics_consent_store,
+    message_connector_registry=_message_connector_registry,
 )
 app.include_router(create_memory_pipeline_router(runtime_handlers.memory_pipeline_query, get_active_workspace_id=_get_active_workspace_id))
 app.include_router(create_computer_use_host_router(

@@ -2,6 +2,27 @@ import { createHash } from 'node:crypto'
 
 export type PackageCapability = 'voice' | 'avatar' | 'skill' | 'workflow' | 'memory-sync'
 
+export type PackageAssetKind = 'role' | 'voice' | 'motion' | 'avatar'
+
+export interface PackageAssetEntry {
+  kind: PackageAssetKind
+  path: string
+  sha256: string
+}
+
+export interface PackageAssetLicense {
+  spdx: string
+  redistributable: boolean
+  attribution?: string
+}
+
+export interface PackageAssetManifest {
+  schemaVersion: 1
+  displayName: string
+  assets: PackageAssetEntry[]
+  license: PackageAssetLicense
+}
+
 export interface PackageManifest {
   packageId: string
   version: string
@@ -11,6 +32,7 @@ export interface PackageManifest {
   capabilities: PackageCapability[]
   minRuntime?: string
   maxRuntime?: string
+  assetManifest?: PackageAssetManifest
 }
 
 export interface PackageArtifactStore {
@@ -79,7 +101,55 @@ export const canonicalizePackageManifest = (manifest: PackageManifest): Buffer =
   capabilities: [...manifest.capabilities].sort(),
   minRuntime: manifest.minRuntime ?? null,
   maxRuntime: manifest.maxRuntime ?? null,
+  assetManifest: manifest.assetManifest
+    ? {
+        schemaVersion: manifest.assetManifest.schemaVersion,
+        displayName: manifest.assetManifest.displayName,
+        assets: manifest.assetManifest.assets
+          .map((asset) => ({ kind: asset.kind, path: asset.path, sha256: asset.sha256.toLowerCase() }))
+          .sort((left, right) => left.path.localeCompare(right.path) || left.kind.localeCompare(right.kind)),
+        license: {
+          spdx: manifest.assetManifest.license.spdx,
+          redistributable: manifest.assetManifest.license.redistributable,
+          attribution: manifest.assetManifest.license.attribution ?? null,
+        },
+      }
+    : null,
 }), 'utf8')
+
+const ASSET_SHA256 = /^[a-f0-9]{64}$/i
+const PACKAGE_ASSET_KINDS = new Set<PackageAssetKind>(['role', 'voice', 'motion', 'avatar'])
+
+const isSafeAssetPath = (value: string): boolean => {
+  if (!value || value.includes('\\') || value.startsWith('/') || /^[A-Za-z]:/.test(value)) return false
+  const segments = value.split('/')
+  return segments.every((segment) => segment.length > 0 && segment !== '.' && segment !== '..')
+}
+
+export const validatePackageAssetManifest = (assetManifest: PackageAssetManifest): void => {
+  if (assetManifest.schemaVersion !== 1) throw new Error('asset manifest schema version is unsupported')
+  const displayName = assetManifest.displayName.trim()
+  if (!displayName || displayName.length > 120) throw new Error('asset manifest display name is invalid')
+  if (!Array.isArray(assetManifest.assets) || assetManifest.assets.length < 1 || assetManifest.assets.length > 512) {
+    throw new Error('asset manifest must contain between 1 and 512 assets')
+  }
+  const seenPaths = new Set<string>()
+  for (const asset of assetManifest.assets) {
+    if (!PACKAGE_ASSET_KINDS.has(asset.kind)) throw new Error('asset manifest kind is unsupported')
+    if (!isSafeAssetPath(asset.path)) throw new Error('asset manifest path is unsafe')
+    if (seenPaths.has(asset.path)) throw new Error('asset manifest path is duplicated')
+    seenPaths.add(asset.path)
+    if (!ASSET_SHA256.test(asset.sha256)) throw new Error('asset manifest checksum is invalid')
+  }
+  const spdx = assetManifest.license.spdx.trim()
+  if (!spdx || spdx.length > 80) throw new Error('asset manifest SPDX license is invalid')
+  if (typeof assetManifest.license.redistributable !== 'boolean') {
+    throw new Error('asset manifest redistribution flag is required')
+  }
+  if (assetManifest.license.attribution !== undefined && assetManifest.license.attribution.length > 500) {
+    throw new Error('asset manifest attribution is too long')
+  }
+}
 
 const cloneState = (state: PackageState): PackageState => ({
   activeVersion: state.activeVersion,
@@ -246,6 +316,15 @@ export class PackageLifecycle {
     if (manifest.capabilities.some((capability) => !this.allowedCapabilities.has(capability))) throw new Error('package capability is not allowed')
     if (manifest.minRuntime && compareVersions(this.runtimeVersion, manifest.minRuntime) < 0) throw new Error('package runtime is too old')
     if (manifest.maxRuntime && compareVersions(this.runtimeVersion, manifest.maxRuntime) > 0) throw new Error('package runtime is too new')
+    if (manifest.assetManifest) {
+      validatePackageAssetManifest(manifest.assetManifest)
+      const requiredCapabilities = new Set(
+        manifest.assetManifest.assets.map((asset) => asset.kind === 'voice' ? 'voice' : 'avatar'),
+      )
+      if ([...requiredCapabilities].some((capability) => !manifest.capabilities.includes(capability))) {
+        throw new Error('asset manifest capability is not declared')
+      }
+    }
     const checksum = createHash('sha256').update(artifact).digest('hex')
     if (checksum !== manifest.sha256.toLowerCase()) throw new Error('package checksum mismatch')
     if (!this.verifySignature(canonicalizePackageManifest(manifest), manifest.signature, manifest.keyId)) throw new Error('package signature rejected')

@@ -50,12 +50,31 @@ def evaluate_memory_retrieval(
             | scope_forbidden_ids
         )
         response = run_query(case)
+        raw_trace = response.get("trace")
+        trace: Mapping[str, Any] = raw_trace if isinstance(raw_trace, Mapping) else {}
         retrieved_ids = [
             str(item.get("doc", {}).get("id"))
             for item in response.get("results", [])
             if isinstance(item, Mapping) and isinstance(item.get("doc"), Mapping)
         ]
         expected_set = set(expected_ids)
+        raw_expected_abstention = case.get("abstention_expected")
+        expected_abstention = (
+            bool(raw_expected_abstention)
+            if raw_expected_abstention is not None
+            else not expected_set
+        )
+        expected_missing_premises = {
+            str(item) for item in case.get("missing_premises", [])
+        }
+        raw_observed_missing = response.get("missing_premises", trace.get("missing_premises", []))
+        observed_missing_premises = {
+            str(item) for item in raw_observed_missing
+        } if isinstance(raw_observed_missing, (list, tuple, set, frozenset)) else set()
+        observed_abstention = not retrieved_ids
+        abstention_passed = expected_abstention == observed_abstention
+        missing_premise_mismatch = expected_missing_premises != observed_missing_premises
+        abstention_mismatch = not abstention_passed or missing_premise_mismatch
         hits = expected_set.intersection(retrieved_ids)
         recall_at_k = len(hits) / len(expected_set) if expected_set else None
         recall_at = {
@@ -76,8 +95,6 @@ def evaluate_memory_retrieval(
         leaked_ids = sorted(forbidden_ids.intersection(retrieved_ids))
         lifecycle_leaked_ids = sorted(lifecycle_forbidden_ids.intersection(retrieved_ids))
         scope_leaked_ids = sorted(scope_forbidden_ids.intersection(retrieved_ids))
-        raw_trace = response.get("trace")
-        trace: Mapping[str, Any] = raw_trace if isinstance(raw_trace, Mapping) else {}
         required_evidence_ids = {
             str(item) for item in case.get("required_evidence_ids", [])
         }
@@ -107,11 +124,18 @@ def evaluate_memory_retrieval(
             )
         results.append({
             "id": case_id,
+            "scenario": str(case.get("scenario") or "general"),
             "retrieved_ids": retrieved_ids,
             "recall_at_k": recall_at_k,
             "recall_at": recall_at,
             "reciprocal_rank": reciprocal_rank,
-            "abstention_passed": not expected_set and not retrieved_ids,
+            "abstention_passed": abstention_passed and not missing_premise_mismatch,
+            "abstention_expected": expected_abstention,
+            "observed_abstention": observed_abstention,
+            "expected_missing_premises": sorted(expected_missing_premises),
+            "observed_missing_premises": sorted(observed_missing_premises),
+            "missing_premise_mismatch": missing_premise_mismatch,
+            "abstention_mismatch": abstention_mismatch,
             "leaked_ids": leaked_ids,
             "lifecycle_leaked_ids": lifecycle_leaked_ids,
             "scope_leaked_ids": scope_leaked_ids,
@@ -124,6 +148,11 @@ def evaluate_memory_retrieval(
             "output_tokens": int(trace.get("output_tokens") or 0),
             "candidate_count": int(trace.get("candidate_count") or 0),
             "filtered_out_count": int(trace.get("filtered_out_count") or 0),
+            "relation_attempted": int(trace.get("relation_attempted") or 0),
+            "relation_accepted": int(trace.get("relation_accepted") or 0),
+            "evidence_coverage": float(trace.get("evidence_coverage") or 0.0),
+            "relation_latency_ms": float(trace.get("relation_latency_ms") or 0.0),
+            "relation_token_estimate": int(trace.get("relation_token_estimate") or 0),
             "score_component_completeness": (
                 score_component_count / len(retrieved_ids) if retrieved_ids else 1.0
             ),
@@ -145,6 +174,11 @@ def evaluate_memory_retrieval(
     token_costs = [item["token_cost"] for item in results]
     candidate_counts = [float(item["candidate_count"]) for item in results]
     filtered_counts = [float(item["filtered_out_count"]) for item in results]
+    relation_attempted = [float(item["relation_attempted"]) for item in results]
+    relation_accepted = [float(item["relation_accepted"]) for item in results]
+    evidence_coverages = [float(item["evidence_coverage"]) for item in results]
+    relation_latencies = [float(item["relation_latency_ms"]) for item in results]
+    relation_token_estimates = [float(item["relation_token_estimate"]) for item in results]
     positive_results = [item for item in results if item["recall_at_k"] is not None]
     reciprocal_ranks = [
         item["reciprocal_rank"]
@@ -152,8 +186,35 @@ def evaluate_memory_retrieval(
         if item["reciprocal_rank"] is not None
     ]
     abstention_results = [item for item in results if item["recall_at_k"] is None]
+    abstention_mismatch_count = sum(1 for item in results if item["abstention_mismatch"])
     security_results = [item for item in results if item["security_phase"]]
     evidence_results = [item for item in results if item["evidence_quality_passed"] is not None]
+    scenario_metrics: dict[str, dict[str, Any]] = {}
+    for scenario in sorted({str(item["scenario"]) for item in results}):
+        scenario_items = [item for item in results if item["scenario"] == scenario]
+        scenario_positive = [item for item in scenario_items if item["recall_at_k"] is not None]
+        scenario_evidence = [item for item in scenario_items if item["evidence_quality_passed"] is not None]
+        scenario_latencies = [float(item["latency_ms"]) for item in scenario_items]
+        scenario_costs = [float(item["token_cost"]) for item in scenario_items]
+        scenario_metrics[scenario] = {
+            "case_count": len(scenario_items),
+            "recall_at_k": (
+                fmean(item["recall_at_k"] for item in scenario_positive)
+                if scenario_positive else 0.0
+            ),
+            "evidence_quality_pass_rate": (
+                fmean(1.0 if item["evidence_quality_passed"] else 0.0 for item in scenario_evidence)
+                if scenario_evidence else 1.0
+            ),
+            "latency_ms": {
+                "p50": _percentile(scenario_latencies, 0.50),
+                "p95": _percentile(scenario_latencies, 0.95),
+            },
+            "token_cost": {
+                "mean": fmean(scenario_costs) if scenario_costs else 0.0,
+                "total": sum(scenario_costs),
+            },
+        }
     return {
         "case_count": count,
         "recall_at_k": (
@@ -172,6 +233,15 @@ def evaluate_memory_retrieval(
             fmean(1.0 if item["abstention_passed"] else 0.0 for item in abstention_results)
             if abstention_results
             else 1.0
+        ),
+        "abstention_mismatch_count": abstention_mismatch_count,
+        "abstention_mismatch_rate": abstention_mismatch_count / count if count else 0.0,
+        "missing_premise_mismatch_count": sum(
+            1 for item in results if item["missing_premise_mismatch"]
+        ),
+        "missing_premise_mismatch_rate": (
+            sum(1 for item in results if item["missing_premise_mismatch"]) / count
+            if count else 0.0
         ),
         "leakage_case_count": sum(1 for item in results if item["leaked_ids"]),
         "lifecycle_leakage_case_count": sum(
@@ -215,6 +285,21 @@ def evaluate_memory_retrieval(
             "p95": _percentile(filtered_counts, 0.95),
             "max": max(filtered_counts, default=0.0),
         },
+        "relation": {
+            "attempted": sum(relation_attempted),
+            "accepted": sum(relation_accepted),
+            "evidence_coverage_mean": fmean(evidence_coverages) if evidence_coverages else 0.0,
+            "latency_ms": {
+                "mean": fmean(relation_latencies) if relation_latencies else 0.0,
+                "p95": _percentile(relation_latencies, 0.95),
+                "max": max(relation_latencies, default=0.0),
+            },
+            "token_estimate": {
+                "total": sum(relation_token_estimates),
+                "mean": fmean(relation_token_estimates) if relation_token_estimates else 0.0,
+                "p95": _percentile(relation_token_estimates, 0.95),
+            },
+        },
         "temporal_consistency_pass_rate": (
             fmean(1.0 if item["temporal_consistency_passed"] else 0.0 for item in results)
             if results else 1.0
@@ -239,5 +324,6 @@ def evaluate_memory_retrieval(
             fmean(1.0 if item["evidence_quality_passed"] else 0.0 for item in evidence_results)
             if evidence_results else 1.0
         ),
+        "scenario_metrics": scenario_metrics,
         "cases": results,
     }

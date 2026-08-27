@@ -9,11 +9,10 @@ from typing import Any, Dict
 from datetime import datetime
 
 from .dynamic_config import redact_sensitive_config_value
+from ..core.paths import DEFAULT_SETTINGS_PATH, settings_path_from_env
 
 logger = logging.getLogger(__name__)
 
-BACKEND_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SETTINGS_PATH = BACKEND_ROOT / "config" / "settings.json"
 DEFAULT_SETTINGS_PATH_STR = str(DEFAULT_SETTINGS_PATH)
 PROVIDER_CREDENTIALS_ENV = "YUIZAKI_PROVIDER_CREDENTIALS_JSON"
 SETTINGS_SECRET_MASK = "********"
@@ -69,13 +68,13 @@ def _scrub_sensitive_settings(value: Any) -> Any:
 class SettingsStore:
     """Persistent settings storage using JSON."""
 
-    def __init__(self, storage_path: str = DEFAULT_SETTINGS_PATH_STR):
+    def __init__(self, storage_path: str | Path | None = None):
         """Initialize settings store.
 
         Args:
             storage_path: Path to JSON settings file.
         """
-        self.storage_path = Path(storage_path)
+        self.storage_path = Path(storage_path) if storage_path is not None else settings_path_from_env()
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         self.transfer_dir = self.storage_path.parent / "transfers"
         self.transfer_dir.mkdir(parents=True, exist_ok=True)

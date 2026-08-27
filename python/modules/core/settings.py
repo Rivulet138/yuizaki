@@ -19,9 +19,7 @@ from typing import Any, Dict
 
 from ..system.settings_store import SettingsStore
 from ..system.settings_schema import PersistedSettingsSchema, merge_settings
-
-BACKEND_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SETTINGS_PATH = BACKEND_ROOT / "config" / "settings.json"
+from .paths import settings_path_from_env
 
 SettingsSchema = PersistedSettingsSchema
 
@@ -34,8 +32,8 @@ class SettingsManager:
     SettingsSchema instance.
     """
 
-    def __init__(self, storage_path: Path | str = DEFAULT_SETTINGS_PATH) -> None:
-        self._store = SettingsStore(str(storage_path))
+    def __init__(self, storage_path: Path | str | None = None) -> None:
+        self._store = SettingsStore(storage_path or settings_path_from_env())
         self.settings = self._load_from_store()
 
     # ------------------------------------------------------------------

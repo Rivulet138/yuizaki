@@ -109,6 +109,15 @@ export interface PetModelExpressionOption {
   label: string
 }
 
+export type PetModelLicenseStatus = 'declared' | 'missing' | 'invalid'
+
+export interface PetModelLicenseInfo {
+  status: PetModelLicenseStatus
+  spdx?: string
+  redistributable?: boolean
+  attribution?: string
+}
+
 export interface PetExpressionMixItem {
   expression: string
   weight?: number
@@ -245,6 +254,7 @@ export interface PetModelDefinition {
   motions: PetModelMotionOption[]
   expressions: PetModelExpressionOption[]
   emotions: PetEmotionPreset[]
+  license?: PetModelLicenseInfo
   animationPaths?: string[]
   manifest?: AvatarManifest
   promptContext?: string
@@ -302,6 +312,8 @@ export interface PetControlConfigPatch {
   modelId?: string | null
   modelPath?: string | undefined
   modelManifest?: AvatarManifest | null
+  /** Resolved model emotion presets used by AvatarCommand affect actions. */
+  emotionPresets?: PetEmotionPreset[]
   animationPaths?: string[]
   displayId?: number | null
   scale?: number

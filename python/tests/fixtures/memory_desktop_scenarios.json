@@ -1,0 +1,41 @@
+[
+  {
+    "id": "desktop-preference-change",
+    "scenario": "preference_change",
+    "query": "Which drink should I offer the user now?",
+    "expected_ids": ["drink-preference-current"],
+    "lifecycle_forbidden_ids": ["drink-preference-old"],
+    "required_evidence_ids": ["drink-preference-update"]
+  },
+  {
+    "id": "desktop-repeated-workflow",
+    "scenario": "repeated_workflow",
+    "query": "How did the user start the daily standup last time?",
+    "expected_ids": ["standup-workflow"],
+    "required_evidence_ids": ["standup-last-run"]
+  },
+  {
+    "id": "desktop-last-failure",
+    "scenario": "last_failure",
+    "query": "What went wrong the last time the release was attempted?",
+    "expected_ids": ["release-failure-latest"],
+    "lifecycle_forbidden_ids": ["release-failure-resolved"],
+    "required_evidence_ids": ["release-failure-log"]
+  },
+  {
+    "id": "desktop-unfinished-task",
+    "scenario": "unfinished_task",
+    "query": "What task did I leave unfinished yesterday?",
+    "expected_ids": ["unfinished-task-yesterday"],
+    "required_evidence_ids": ["unfinished-task-event"]
+  },
+  {
+    "id": "desktop-missing-prerequisite",
+    "scenario": "missing_prerequisite",
+    "query": "Can I run the deployment now, or is something missing?",
+    "expected_ids": [],
+    "abstention_expected": true,
+    "missing_premises": ["deployment-environment"],
+    "required_evidence_ids": ["deployment-check"]
+  }
+]

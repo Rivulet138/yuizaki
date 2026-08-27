@@ -112,6 +112,7 @@ class OnboardingReadiness:
             "requiredForText": definition.required_for_text,
             "dependencies": list(definition.dependencies),
             "timeoutMs": definition.timeout_ms,
+            "durationMs": None,
             "message": "Not checked",
             "evidence": {},
             "repairActionId": definition.repair_action_id,
@@ -261,6 +262,7 @@ class OnboardingReadiness:
             self._revision += 1
 
     async def _run_probe(self, run_id: str, definition: ProbeDefinition) -> None:
+        started_at = asyncio.get_running_loop().time()
         try:
             ok, message, evidence = await asyncio.wait_for(
                 definition.function(), timeout=definition.timeout_ms / 1000
@@ -274,11 +276,12 @@ class OnboardingReadiness:
         except Exception as exc:
             status = "unavailable" if definition.required_for_text else "degraded"
             message, evidence = "Probe failed", {"category": type(exc).__name__, "detail": str(exc)}
+        duration_ms = max(0, round((asyncio.get_running_loop().time() - started_at) * 1000))
         async with self._lock:
             if self._run_id != run_id or self._state != "running":
                 return
             result = self._results[definition.probe_id]
-            result.update(status=status, message=_redact(str(message)), evidence=_redact(evidence))
+            result.update(status=status, durationMs=duration_ms, message=_redact(str(message)), evidence=_redact(evidence))
             self._revision += 1
 
     async def _probe_backend(self) -> tuple[bool, str, Mapping[str, Any]]:

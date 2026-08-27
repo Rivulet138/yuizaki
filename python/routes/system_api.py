@@ -37,6 +37,10 @@ def create_system_router(
     activity_frame_delete_handler: Callable[[str], Any] | None = None,
     proactive_feedback_handler: Callable[[dict[str, Any]], Any] | None = None,
     capabilities_state_handler: Callable[[], Any] | None = None,
+    provider_registry_handler: Callable[[], Any] | None = None,
+    connector_registry_handler: Callable[[], Any] | None = None,
+    platform_matrix_handler: Callable[[], Any] | None = None,
+    disable_connector_handler: Callable[[str], Any] | None = None,
     orchestration_state_handler: Callable[[], Any] | None = None,
     active_workspace_handler: Callable[[dict[str, Any]], Any] | None = None,
     permissions_handler: Callable[[], Any] | None = None,
@@ -51,6 +55,7 @@ def create_system_router(
     cancel_schedule_handler: Callable[[str], Any] | None = None,
     agent_trace_handler: Callable[[], Any] | None = None,
     experience_metrics_handler: Callable[[], Any] | None = None,
+    voice_diagnostics_handler: Callable[[], Any] | None = None,
     product_metrics_consent_handler: Callable[[], Any] | None = None,
     product_metrics_consent_patch_handler: Callable[[bool], Any] | None = None,
     mcp_state_handler: Callable[[], Any] | None = None,
@@ -349,6 +354,31 @@ def create_system_router(
         @router.get("/api/system/capabilities")
         async def capabilities_state():
             return await _call_handler(capabilities_state_handler, offload=True)
+
+    if provider_registry_handler is not None:
+        @router.get("/api/system/providers")
+        async def provider_registry_state():
+            return await _call_handler(provider_registry_handler, offload=True)
+
+    if voice_diagnostics_handler is not None:
+        @router.get("/api/system/voice-diagnostics")
+        async def voice_diagnostics_state():
+            return await _call_handler(voice_diagnostics_handler, offload=True)
+
+    if connector_registry_handler is not None:
+        @router.get("/api/system/connectors")
+        async def connector_registry_state():
+            return await _call_handler(connector_registry_handler, offload=True)
+
+    if platform_matrix_handler is not None:
+        @router.get("/api/system/platforms")
+        async def platform_matrix_state():
+            return await _call_handler(platform_matrix_handler, offload=True)
+
+    if disable_connector_handler is not None:
+        @router.post("/api/system/connectors/{connector_id:path}/disable")
+        async def disable_connector(connector_id: str):
+            return await _call_handler(disable_connector_handler, connector_id, offload=True)
 
     if orchestration_state_handler is not None:
         @router.get("/api/system/orchestration")

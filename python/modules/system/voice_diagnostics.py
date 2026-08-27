@@ -25,6 +25,21 @@ VoiceStage = Literal[
     "round_trip",
 ]
 VoiceEvidenceKind = Literal["synthetic_fixture", "real_device"]
+VoiceComfortScenarioName = Literal[
+    "deliberate_interrupt",
+    "hesitation",
+    "backchannel",
+    "background_speech",
+    "empty_asr",
+]
+
+VOICE_COMFORT_SCENARIOS: tuple[VoiceComfortScenarioName, ...] = (
+    "deliberate_interrupt",
+    "hesitation",
+    "backchannel",
+    "background_speech",
+    "empty_asr",
+)
 
 REAL_DEVICE_REQUIRED_STAGES: tuple[str, ...] = (
     "asr_final",
@@ -135,6 +150,33 @@ class VoiceDiagnosticSample:
             raise ValueError("playback_underruns must be non-negative")
 
 
+@dataclass(frozen=True)
+class VoiceComfortScenarioSample:
+    """Transcript-free result for one repeatable conversation comfort scenario."""
+
+    scenario: VoiceComfortScenarioName
+    stop_audio_latency_ms: float | None = None
+    interrupt_ack_latency_ms: float | None = None
+    false_interruption: bool = False
+    first_audio_latency_ms: float | None = None
+    continuous_turn_completed: bool | None = None
+    run_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.scenario not in VOICE_COMFORT_SCENARIOS:
+            raise ValueError("unsupported voice comfort scenario")
+        for field_name in (
+            "stop_audio_latency_ms",
+            "interrupt_ack_latency_ms",
+            "first_audio_latency_ms",
+        ):
+            value = getattr(self, field_name)
+            if value is not None:
+                _validate_latency(value, field_name)
+        if self.scenario == "deliberate_interrupt" and self.false_interruption:
+            raise ValueError("a deliberate interruption cannot be marked false")
+
+
 class VoiceMeasurementHandle:
     """Opaque capability for recording into one measurement run."""
 
@@ -150,6 +192,11 @@ class VoiceMeasurementHandle:
 
 
 DEFAULT_VOICE_LATENCY_BUDGETS_MS: dict[str, float] = {"interruption": 250.0}
+DEFAULT_COMFORT_BUDGETS_MS: dict[str, float] = {
+    "stop_audio_p95": 250.0,
+    "interrupt_ack_p95": 300.0,
+    "first_audio_p95": 1000.0,
+}
 
 
 def _clean(value: object) -> str | None:
@@ -164,26 +211,60 @@ def _safe_label(value: object) -> str | None:
     return cleaned
 
 
-def _safe_status(value: object, *, depth: int = 0) -> object:
-    """Project provider status without allowing arbitrary strings to escape."""
+_SAFE_STATUS_KEYS = frozenset({
+    "available",
+    "configured",
+    "healthy",
+    "initialized",
+    "ready",
+    "streaming",
+    "warmup_done",
+    "provider",
+    "model",
+    "error_code",
+    "state",
+    "status",
+})
+_SAFE_STATUS_CLOSED_VALUES = frozenset({
+    "ok",
+    "ready",
+    "healthy",
+    "degraded",
+    "unavailable",
+    "configured",
+    "not_configured",
+    "initializing",
+    "error",
+    "unknown",
+})
+
+
+def _safe_status(value: object, *, depth: int = 0, key: str | None = None) -> object:
+    """Project only closed provider status fields; never expose free text."""
     if depth > 3:
-        return "[redacted]"
+        return None
     if value is None or isinstance(value, (bool, int, float)):
         return value
     if isinstance(value, str):
-        return _safe_label(value)
+        cleaned = _clean(value)
+        if not cleaned or _SECRET_RE.search(cleaned):
+            return None
+        if key in {"state", "status"}:
+            return cleaned if cleaned in _SAFE_STATUS_CLOSED_VALUES else None
+        if key in {"provider", "model", "error_code"} and re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", cleaned):
+            return cleaned
+        return None
     if isinstance(value, Mapping):
         projected: dict[str, object] = {}
-        for key, item in value.items():
-            safe_key = _safe_label(key) or "[redacted]"
-            if re.search(r"(?i)(api[_-]?key|token|secret|password|authorization)", str(key)):
-                projected[safe_key] = "[redacted]"
-            else:
-                projected[safe_key] = _safe_status(item, depth=depth + 1)
+        for raw_key, item in value.items():
+            normalized_key = re.sub(r"[^a-z0-9_]", "", str(raw_key).lower())
+            if normalized_key not in _SAFE_STATUS_KEYS:
+                continue
+            projected[normalized_key] = _safe_status(item, depth=depth + 1, key=normalized_key)
+            if projected[normalized_key] is None:
+                projected.pop(normalized_key)
         return projected
-    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
-        return [_safe_status(item, depth=depth + 1) for item in value]
-    return "[redacted]"
+    return None
 
 
 def _validate_latency(value: float, field_name: str) -> None:
@@ -246,6 +327,9 @@ class VoiceDiagnostics:
         if max_samples < 1:
             raise ValueError("max_samples must be positive")
         self._samples: deque[VoiceDiagnosticSample] = deque(maxlen=max_samples)
+        self._comfort_samples: deque[VoiceComfortScenarioSample] = deque(
+            maxlen=max_samples
+        )
         self.p95_warning_ms = float(p95_warning_ms)
         self._run_id = self._new_run_id()
         self._measurement_token: object = object()
@@ -264,6 +348,7 @@ class VoiceDiagnostics:
         self._run_id = candidate or self._new_run_id()
         self._measurement_token = object()
         self._samples.clear()
+        self._comfort_samples.clear()
         return self._run_id
 
     def begin_measurement(self, run_id: str | None = None) -> VoiceMeasurementHandle:
@@ -336,6 +421,226 @@ class VoiceDiagnostics:
             sample for sample in self._samples if stage is None or sample.stage == stage
         )
 
+    def record_comfort_scenario(
+        self,
+        scenario: VoiceComfortScenarioName | str,
+        *,
+        run_id: str | None = None,
+        handle: VoiceMeasurementHandle | None = None,
+        stop_audio_latency_ms: float | None = None,
+        interrupt_ack_latency_ms: float | None = None,
+        false_interruption: bool = False,
+        first_audio_latency_ms: float | None = None,
+        continuous_turn_completed: bool | None = None,
+    ) -> VoiceComfortScenarioSample:
+        """Record a transcript-free synthetic scenario result.
+
+        These fixtures support repeatable regression checks only. Real-device release
+        qualification remains exclusively based on ``VoiceDiagnosticSample`` evidence.
+        ``run_id`` is a human-readable label used for current-run validation, not an
+        asynchronous replay-prevention credential. Async callbacks must pass the
+        opaque handle returned by :meth:`begin_measurement`; a caller that needs
+        protection from same-label restarts must retain and use that handle.
+        """
+        scenario_value = str(scenario).strip()
+        if scenario_value not in VOICE_COMFORT_SCENARIOS:
+            raise ValueError("unsupported voice comfort scenario")
+        selected_run_id = self._resolve_run_id(run_id=run_id, handle=handle)
+        sample = VoiceComfortScenarioSample(
+            scenario=scenario_value,
+            stop_audio_latency_ms=(
+                float(stop_audio_latency_ms)
+                if stop_audio_latency_ms is not None
+                else None
+            ),
+            interrupt_ack_latency_ms=(
+                float(interrupt_ack_latency_ms)
+                if interrupt_ack_latency_ms is not None
+                else None
+            ),
+            false_interruption=bool(false_interruption),
+            first_audio_latency_ms=(
+                float(first_audio_latency_ms)
+                if first_audio_latency_ms is not None
+                else None
+            ),
+            continuous_turn_completed=continuous_turn_completed,
+            run_id=selected_run_id,
+        )
+        self._comfort_samples.append(sample)
+        return sample
+
+    def comfort_snapshot(self) -> dict[str, Any]:
+        """Summarize deterministic comfort fixtures without claiming device quality."""
+
+        def latency_summary(field_name: str) -> dict[str, int | float | None]:
+            values = [
+                value
+                for sample in self._comfort_samples
+                if (value := getattr(sample, field_name)) is not None
+            ]
+            return {
+                "count": len(values),
+                "p50_ms": _percentile(values, 0.50),
+                "p95_ms": _percentile(values, 0.95),
+            }
+
+        non_interrupt_samples = [
+            sample
+            for sample in self._comfort_samples
+            if sample.scenario != "deliberate_interrupt"
+        ]
+        false_interruptions = sum(
+            sample.false_interruption for sample in non_interrupt_samples
+        )
+        continuous_turns = [
+            sample
+            for sample in self._comfort_samples
+            if sample.continuous_turn_completed is not None
+        ]
+        completed_turns = sum(
+            sample.continuous_turn_completed is True for sample in continuous_turns
+        )
+        scenario_counts = {
+            scenario: sum(sample.scenario == scenario for sample in self._comfort_samples)
+            for scenario in VOICE_COMFORT_SCENARIOS
+        }
+        missing_scenarios = [
+            scenario for scenario, count in scenario_counts.items() if count == 0
+        ]
+        snapshot = {
+            "sample_count": len(self._comfort_samples),
+            "run_id": self._run_id,
+            "scenario_counts": scenario_counts,
+            "missing_scenarios": missing_scenarios,
+            "coverage_complete": not missing_scenarios,
+            "stop_audio_latency": latency_summary("stop_audio_latency_ms"),
+            "interrupt_ack_latency": latency_summary("interrupt_ack_latency_ms"),
+            "first_audio_latency": latency_summary("first_audio_latency_ms"),
+            "false_interruption_rate": (
+                round(false_interruptions / len(non_interrupt_samples), 4)
+                if non_interrupt_samples
+                else None
+            ),
+            "false_interruption_count": false_interruptions,
+            "false_interruption_opportunities": len(non_interrupt_samples),
+            "continuous_turn_completion_rate": (
+                round(completed_turns / len(continuous_turns), 4)
+                if continuous_turns
+                else None
+            ),
+            "continuous_turn_completed": completed_turns,
+            "continuous_turn_attempts": len(continuous_turns),
+            "evidence_kind": "synthetic_fixture",
+            "claim": "synthetic_comfort_regression_only",
+            "real_device_qualification": "not_evaluated",
+        }
+        snapshot["comfort_gate"] = self.comfort_gate(snapshot=snapshot)
+        return snapshot
+
+    def comfort_gate(
+        self,
+        *,
+        snapshot: Mapping[str, Any] | None = None,
+        latency_budgets_ms: Mapping[str, float] | None = None,
+        max_false_interruption_rate: float = 0.10,
+        min_continuous_turn_completion_rate: float = 0.90,
+    ) -> dict[str, Any]:
+        """Turn synthetic comfort metrics into actionable local guidance.
+
+        This is a regression signal inspired by pause/backchannel/overlap
+        evaluation work; it is intentionally never a real-device qualification.
+        Missing measurements produce ``insufficient_data`` instead of a pass.
+        """
+        if not 0 <= max_false_interruption_rate <= 1:
+            raise ValueError("max_false_interruption_rate must be between 0 and 1")
+        if not 0 <= min_continuous_turn_completion_rate <= 1:
+            raise ValueError(
+                "min_continuous_turn_completion_rate must be between 0 and 1"
+            )
+        budgets = dict(latency_budgets_ms or DEFAULT_COMFORT_BUDGETS_MS)
+        for name, budget in budgets.items():
+            _validate_latency(float(budget), f"comfort latency budget for {name}")
+        report = snapshot if snapshot is not None else self.comfort_snapshot()
+        checks: list[dict[str, Any]] = []
+        failures: list[str] = []
+        missing_scenarios = report.get("missing_scenarios", [])
+        coverage_complete = report.get("coverage_complete") is True
+        if not coverage_complete or missing_scenarios:
+            missing = [str(item) for item in missing_scenarios]
+            detail = ", ".join(missing) if missing else "coverage_complete is false"
+            checks.append(
+                {
+                    "metric": "scenario_coverage",
+                    "missing_scenarios": missing,
+                    "status": "insufficient_data",
+                }
+            )
+            failures.append(f"missing comfort scenarios: {detail}")
+        else:
+            checks.append(
+                {
+                    "metric": "scenario_coverage",
+                    "missing_scenarios": [],
+                    "status": "pass",
+                }
+            )
+
+        latency_fields = {
+            "stop_audio_p95": ("stop_audio_latency", "stop audio"),
+            "interrupt_ack_p95": ("interrupt_ack_latency", "interrupt acknowledgement"),
+            "first_audio_p95": ("first_audio_latency", "first audio"),
+        }
+        for budget_name, (metric_name, label) in latency_fields.items():
+            budget = budgets.get(budget_name)
+            if budget is None:
+                continue
+            metric = report.get(metric_name) or {}
+            value = metric.get("p95_ms") if isinstance(metric, Mapping) else None
+            passed = value is not None and float(value) <= float(budget)
+            checks.append({"metric": budget_name, "value_ms": value, "budget_ms": budget, "status": "pass" if passed else "needs_attention"})
+            if value is None:
+                failures.append(f"{label} p95 has no samples")
+            elif not passed:
+                failures.append(f"{label} p95 exceeds {budget:g}ms")
+
+        false_rate = report.get("false_interruption_rate")
+        false_pass = false_rate is not None and float(false_rate) <= max_false_interruption_rate
+        checks.append({"metric": "false_interruption_rate", "value": false_rate, "budget": max_false_interruption_rate, "status": "pass" if false_pass else "needs_attention"})
+        if false_rate is None:
+            failures.append("false interruption rate has no opportunities")
+        elif not false_pass:
+            failures.append(f"false interruption rate exceeds {max_false_interruption_rate:g}")
+
+        completion_rate = report.get("continuous_turn_completion_rate")
+        completion_pass = completion_rate is not None and float(completion_rate) >= min_continuous_turn_completion_rate
+        checks.append({"metric": "continuous_turn_completion_rate", "value": completion_rate, "budget": min_continuous_turn_completion_rate, "status": "pass" if completion_pass else "needs_attention"})
+        if completion_rate is None:
+            failures.append("continuous turn completion has no attempts")
+        elif not completion_pass:
+            failures.append(f"continuous turn completion is below {min_continuous_turn_completion_rate:g}")
+
+        status = (
+            "insufficient_data"
+            if (not coverage_complete or missing_scenarios)
+            else "pass"
+            if not failures
+            else "insufficient_data"
+            if all("no " in item for item in failures)
+            else "needs_attention"
+        )
+        return {
+            "status": status,
+            "checks": checks,
+            "failures": failures,
+            "latency_budgets_ms": budgets,
+            "max_false_interruption_rate": max_false_interruption_rate,
+            "min_continuous_turn_completion_rate": min_continuous_turn_completion_rate,
+            "evidence_kind": "synthetic_fixture",
+            "claim": "synthetic_comfort_regression_only",
+            "real_device_qualification": "not_evaluated",
+        }
+
     def snapshot(self) -> dict[str, Any]:
         grouped: dict[str, list[VoiceDiagnosticSample]] = {}
         for sample in self._samples:
@@ -359,6 +664,7 @@ class VoiceDiagnostics:
             "sample_count": len(self._samples),
             "run_id": self._run_id,
             "stages": stages,
+            "comfort": self.comfort_snapshot(),
             "evidence_kinds": evidence_kinds,
             "evidence_claim": (
                 "real_device_measurement_requires_qualification"

@@ -1,10 +1,44 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
+  AUDIO_SPEECH_RMS_THRESHOLD,
+  hasSpeechEnergy,
   normalizeAudioProcessingSettings,
+  enumerateAudioDevices,
   StreamingPcmNormalizer,
 } from '../audio/audio-capture'
 
 describe('audio capture normalization', () => {
+  it('enumerates input and output endpoints without opening a device', async () => {
+    const enumerateDevices = vi.fn().mockResolvedValue([
+      { kind: 'audioinput', label: 'Mic' },
+      { kind: 'audioinput', label: '' },
+      { kind: 'audiooutput', label: 'Speakers' },
+      { kind: 'videoinput', label: 'Camera' },
+    ])
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { enumerateDevices },
+    })
+
+    await expect(enumerateAudioDevices()).resolves.toEqual({
+      inputCount: 2,
+      outputCount: 1,
+      inputLabels: ['Mic'],
+      outputLabels: ['Speakers'],
+    })
+    expect(enumerateDevices).toHaveBeenCalledOnce()
+  })
+
+  it('degrades to an empty inventory when endpoint enumeration is unavailable', async () => {
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: undefined })
+    await expect(enumerateAudioDevices()).resolves.toEqual({
+      inputCount: 0,
+      outputCount: 0,
+      inputLabels: [],
+      outputLabels: [],
+    })
+  })
+
   it('reports the audio processing settings actually selected by the device', () => {
     expect(normalizeAudioProcessingSettings({
       echoCancellation: true,
@@ -46,5 +80,11 @@ describe('audio capture normalization', () => {
     expect(tail[0]).toHaveLength(512)
     expect(tail[0]?.slice(0, 188).every(sample => sample === 0.5)).toBe(true)
     expect(tail[0]?.slice(188).every(sample => sample === 0)).toBe(true)
+  })
+
+  it('classifies speech energy without treating digital silence as speech', () => {
+    expect(hasSpeechEnergy(new Float32Array(512))).toBe(false)
+    expect(hasSpeechEnergy(new Float32Array(512).fill(AUDIO_SPEECH_RMS_THRESHOLD * 2))).toBe(true)
+    expect(hasSpeechEnergy(new Float32Array(512).fill(0.005))).toBe(false)
   })
 })

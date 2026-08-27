@@ -109,6 +109,9 @@
                   <el-button plain :loading="action === 'optional'" @click="runOptionalChecks">
                     <el-icon><Refresh /></el-icon>{{ t('onboarding.optional.check') }}
                   </el-button>
+                  <el-button plain :loading="action === 'voice'" @click="runVoiceChecks">
+                    <el-icon><Refresh /></el-icon>{{ t('onboarding.optional.voiceChain') }}
+                  </el-button>
                   <el-button plain :loading="action === 'microphone'" @click="checkMicrophone">{{ t('onboarding.optional.microphone') }}</el-button>
                   <el-button plain :loading="action === 'speaker'" @click="checkSpeaker">{{ t('onboarding.optional.speaker') }}</el-button>
                   <span class="mcp-note"><el-icon><Lock /></el-icon>{{ t('onboarding.optional.mcpOff') }}</span>
@@ -147,6 +150,7 @@ import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import OnboardingModelSetup from '../components/OnboardingModelSetup.vue'
 import OnboardingReadinessRail from '../components/OnboardingReadinessRail.vue'
 import { ONBOARDING_OPEN_EVENT } from '../onboardingEvents'
+import { enumerateAudioDevices } from '@/audio/audio-capture'
 
 const COMPLETION_KEY = 'yuizaki.onboarding.completed.v1'
 const OPTIONAL_PROBES: OnboardingProbeId[] = ['tts.status', 'asr.runtime', 'database.status', 'memory.status', 'host.avatar']
@@ -155,7 +159,7 @@ const snapshot = ref<OnboardingReadinessSnapshot | null>(null)
 const loading = ref(false)
 const loadError = ref('')
 const actionError = ref('')
-const action = ref<'backend' | 'cancel' | 'retry' | 'optional' | 'microphone' | 'speaker' | ''>('')
+const action = ref<'backend' | 'cancel' | 'retry' | 'optional' | 'voice' | 'microphone' | 'speaker' | ''>('')
 const optionalSkipped = ref(false)
 const showAllProbes = ref(false)
 const deviceResults = ref({ microphone: '', speaker: '' })
@@ -300,6 +304,9 @@ const refreshModelReadiness = (): Promise<void> => runAction('retry', () => onbo
   probeIds: ['llm.provider', 'llm.model_chat'],
 }))
 const runOptionalChecks = (): Promise<void> => runAction('optional', () => onboardingApi.value!.runProbe({ probeIds: OPTIONAL_PROBES }))
+const runVoiceChecks = (): Promise<void> => runAction('voice', () => onboardingApi.value!.runProbe({
+  probeIds: ['llm.provider', 'llm.model_chat', 'tts.status', 'asr.runtime'],
+}))
 const runRepair = (actionId: OnboardingRepairActionId): Promise<void> => {
   // Navigation repairs need the app shell visible before the destination route can render.
   if (actionId.startsWith('navigate:')) continueWithoutSetup()
@@ -338,7 +345,10 @@ const checkMicrophone = async (): Promise<void> => {
       throw new Error(t('onboarding.optional.microphoneUnsupported'))
     }
     stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    deviceResults.value.microphone = t('onboarding.optional.microphonePassed')
+    const inventory = await enumerateAudioDevices().catch(() => null)
+    deviceResults.value.microphone = inventory && inventory.inputCount > 0
+      ? `${t('onboarding.optional.microphonePassed')}（检测到 ${inventory.inputCount} 个输入设备）`
+      : t('onboarding.optional.microphonePassed')
     report = { probeId: 'host.microphone', outcome: 'ready', messageCode: 'permission_granted' }
   } catch (cause) {
     if (report.messageCode !== 'no_device') {
@@ -377,7 +387,10 @@ const checkSpeaker = async (): Promise<void> => {
     oscillator.start()
     oscillator.stop(context.currentTime + 0.18)
     await finished
-    deviceResults.value.speaker = t('onboarding.optional.speakerPlayed')
+    const inventory = await enumerateAudioDevices().catch(() => null)
+    deviceResults.value.speaker = inventory && inventory.outputCount > 0
+      ? `${t('onboarding.optional.speakerPlayed')}（检测到 ${inventory.outputCount} 个输出设备）`
+      : t('onboarding.optional.speakerPlayed')
     report = { probeId: 'host.speaker', outcome: 'ready', messageCode: 'test_completed' }
   } catch (cause) {
     deviceResults.value.speaker = t('onboarding.optional.speakerFailed', {

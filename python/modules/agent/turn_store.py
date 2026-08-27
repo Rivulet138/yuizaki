@@ -6,13 +6,12 @@ import json
 import sqlite3
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from .turn_service import TurnClaimLostError
-
 
 StoreBarrier = Callable[[str, dict[str, Any]], None]
 
@@ -73,6 +72,21 @@ class TurnCommitStore:
                   PRIMARY KEY (event_id, projection_name),
                   FOREIGN KEY (event_id) REFERENCES turn_outbox(event_id) ON DELETE CASCADE
                 );
+                CREATE TABLE IF NOT EXISTS connector_deliveries (
+                  delivery_key TEXT PRIMARY KEY,
+                  idempotency_key TEXT NOT NULL,
+                  connector_id TEXT NOT NULL,
+                  event_id TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  attempt_count INTEGER NOT NULL DEFAULT 0,
+                  claimed_by TEXT,
+                  claim_expires_at REAL,
+                  last_error TEXT,
+                  updated_at REAL NOT NULL,
+                  delivered_at REAL,
+                  message_json TEXT,
+                  reply_text TEXT
+                );
                 """
             )
             claim_columns = {
@@ -100,6 +114,16 @@ class TurnCommitStore:
                     conn.execute(
                         f"ALTER TABLE turn_outbox ADD COLUMN {column} {declaration}"
                     )
+            delivery_columns = {
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(connector_deliveries)").fetchall()
+            }
+            for column, declaration in {
+                "message_json": "TEXT",
+                "reply_text": "TEXT",
+            }.items():
+                if column not in delivery_columns:
+                    conn.execute(f"ALTER TABLE connector_deliveries ADD COLUMN {column} {declaration}")
 
     def _now(self) -> float:
         return float(self._wall_clock())
@@ -411,6 +435,311 @@ class TurnCommitStore:
             "created_at": row["created_at"],
             "persisted": True,
         }
+
+    def connector_delivery(self, delivery_key: str) -> dict[str, Any] | None:
+        key = str(delivery_key or "").strip()
+        if not key:
+            return None
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                """SELECT delivery_key, idempotency_key, connector_id, event_id,
+                          status, attempt_count, claimed_by, claim_expires_at,
+                          last_error, updated_at, delivered_at, message_json, reply_text
+                   FROM connector_deliveries WHERE delivery_key = ?""",
+                (key,),
+            ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def record_connector_turn_pending(
+        self,
+        delivery_key: str,
+        idempotency_key: str,
+        connector_id: str,
+        event_id: str,
+        owner_id: str,
+        *,
+        lease_seconds: float = 30.0,
+        message: Mapping[str, Any],
+    ) -> bool:
+        """Persist enough inbound context to retry a turn before it has a reply."""
+        key = str(delivery_key or "").strip()
+        if not key:
+            raise ValueError("delivery_key is required")
+        owner = str(owner_id or "").strip()
+        if not owner:
+            raise ValueError("owner_id is required")
+        now = self._now()
+        expires_at = now + max(0.1, float(lease_seconds))
+        message_json = json.dumps(dict(message), ensure_ascii=False)
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """INSERT OR IGNORE INTO connector_deliveries
+                   (delivery_key, idempotency_key, connector_id, event_id, status,
+                    attempt_count, claimed_by, claim_expires_at, last_error, updated_at,
+                    delivered_at, message_json, reply_text)
+                   VALUES (?, ?, ?, ?, 'processing', 0, ?, ?, NULL, ?, NULL, ?, NULL)""",
+                (key, idempotency_key, connector_id, event_id, owner, expires_at, now, message_json),
+            )
+            return cursor.rowcount == 1
+
+    def mark_connector_turn_failed(self, delivery_key: str, owner_id: str, error: str) -> bool:
+        """Make a pre-delivery turn failure visible and manually retryable."""
+        now = self._now()
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """UPDATE connector_deliveries
+                   SET status = 'failed', claimed_by = NULL, claim_expires_at = NULL,
+                       last_error = ?, updated_at = ?, delivered_at = NULL
+                   WHERE delivery_key = ? AND claimed_by = ? AND status = 'processing'""",
+                (str(error)[:2000], now, str(delivery_key), str(owner_id)),
+            )
+            return cursor.rowcount == 1
+
+    def discard_connector_turn_pending(self, delivery_key: str, owner_id: str) -> bool:
+        """Remove an unclaimed turn row when execution is cancelled before delivery."""
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """DELETE FROM connector_deliveries
+                   WHERE delivery_key = ? AND status = 'processing'
+                     AND claimed_by = ? AND reply_text IS NULL""",
+                (str(delivery_key), str(owner_id)),
+            )
+            return cursor.rowcount == 1
+
+    def recover_stale_connector_turn(self, delivery_key: str) -> bool:
+        """Fence and expose a processing row whose owning process lease expired."""
+        now = self._now()
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """UPDATE connector_deliveries
+                   SET status = 'failed', claimed_by = NULL, claim_expires_at = NULL,
+                       last_error = 'connector_turn_interrupted', updated_at = ?
+                   WHERE delivery_key = ? AND status = 'processing'
+                     AND claim_expires_at IS NOT NULL AND claim_expires_at <= ?""",
+                (now, str(delivery_key), now),
+            )
+            return cursor.rowcount == 1
+
+    def claim_connector_delivery(
+        self,
+        delivery_key: str,
+        idempotency_key: str,
+        connector_id: str,
+        event_id: str,
+        owner_id: str,
+        *,
+        lease_seconds: float = 30.0,
+        message: Mapping[str, Any] | None = None,
+        reply_text: str | None = None,
+    ) -> dict[str, Any]:
+        key = str(delivery_key or "").strip()
+        owner = str(owner_id or "").strip()
+        if not key or not owner:
+            raise ValueError("delivery_key and owner_id are required")
+        now = self._now()
+        expires_at = now + max(0.1, float(lease_seconds))
+        with self._lock, self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """SELECT status, attempt_count, claimed_by, claim_expires_at,
+                          delivered_at FROM connector_deliveries
+                   WHERE delivery_key = ?""",
+                (key,),
+            ).fetchone()
+            if row is not None and row["status"] == "delivered":
+                return {
+                    "status": "delivered",
+                    "attempt_count": int(row["attempt_count"] or 0),
+                    "delivered_at": row["delivered_at"],
+                }
+            current_owner = str(row["claimed_by"] or "") if row is not None else ""
+            current_expires = float(row["claim_expires_at"] or 0) if row is not None else 0.0
+            if current_owner and current_owner != owner and current_expires > now:
+                return {
+                    "status": "busy",
+                    "retry_after": max(0.01, current_expires - now),
+                }
+            attempts = int(row["attempt_count"] or 0) + 1 if row is not None else 1
+            message_json = json.dumps(dict(message), ensure_ascii=False) if message is not None else None
+            conn.execute(
+                """INSERT INTO connector_deliveries
+                   (delivery_key, idempotency_key, connector_id, event_id, status,
+                    attempt_count, claimed_by, claim_expires_at, last_error, updated_at, delivered_at,
+                    message_json, reply_text)
+                   VALUES (?, ?, ?, ?, 'sending', ?, ?, ?, NULL, ?, NULL, ?, ?)
+                   ON CONFLICT(delivery_key) DO UPDATE SET
+                     idempotency_key = excluded.idempotency_key,
+                     connector_id = excluded.connector_id,
+                     event_id = excluded.event_id,
+                     status = 'sending',
+                     attempt_count = excluded.attempt_count,
+                     claimed_by = excluded.claimed_by,
+                     claim_expires_at = excluded.claim_expires_at,
+                     last_error = NULL,
+                     updated_at = excluded.updated_at,
+                     delivered_at = NULL,
+                     message_json = COALESCE(excluded.message_json, connector_deliveries.message_json),
+                     reply_text = COALESCE(excluded.reply_text, connector_deliveries.reply_text)""",
+                (key, idempotency_key, connector_id, event_id, attempts, owner, expires_at, now, message_json, reply_text),
+            )
+        return {"status": "claimed", "attempt_count": attempts, "claim_expires_at": expires_at}
+
+    def claim_connector_turn_retry(
+        self,
+        delivery_key: str,
+        owner_id: str,
+        *,
+        lease_seconds: float = 15 * 60,
+    ) -> dict[str, Any]:
+        """Lease a failed pre-delivery turn without presenting it as sending."""
+        key = str(delivery_key or "").strip()
+        owner = str(owner_id or "").strip()
+        if not key or not owner:
+            raise ValueError("delivery_key and owner_id are required")
+        now = self._now()
+        expires_at = now + max(0.1, float(lease_seconds))
+        with self._lock, self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """SELECT status, attempt_count, claimed_by, claim_expires_at
+                   FROM connector_deliveries WHERE delivery_key = ?""",
+                (key,),
+            ).fetchone()
+            if row is None:
+                return {"status": "missing"}
+            if row["status"] == "delivered":
+                return {"status": "delivered", "attempt_count": int(row["attempt_count"] or 0)}
+            if row["status"] != "failed":
+                return {"status": "not_retryable"}
+            current_owner = str(row["claimed_by"] or "")
+            current_expires = float(row["claim_expires_at"] or 0)
+            if current_owner and current_owner != owner and current_expires > now:
+                return {"status": "busy", "retry_after": max(0.01, current_expires - now)}
+            attempts = int(row["attempt_count"] or 0) + 1
+            cursor = conn.execute(
+                """UPDATE connector_deliveries
+                   SET status = 'failed', attempt_count = ?, claimed_by = ?,
+                       claim_expires_at = ?, updated_at = ?
+                   WHERE delivery_key = ? AND status = 'failed' AND reply_text IS NULL""",
+                (attempts, owner, expires_at, now, key),
+            )
+            if cursor.rowcount != 1:
+                return {"status": "not_retryable"}
+        return {"status": "claimed", "attempt_count": attempts, "claim_expires_at": expires_at}
+
+    def promote_connector_turn_retry(
+        self,
+        delivery_key: str,
+        owner_id: str,
+        reply_text: str,
+        *,
+        send_lease_seconds: float = 60.0,
+    ) -> bool:
+        """Move a regenerated turn into the external delivery phase."""
+        now = self._now()
+        expires_at = now + max(0.1, float(send_lease_seconds))
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """UPDATE connector_deliveries
+                   SET status = 'sending', reply_text = ?, last_error = NULL,
+                       claim_expires_at = ?, updated_at = ?
+                   WHERE delivery_key = ? AND claimed_by = ? AND status = 'failed'""",
+                (str(reply_text), expires_at, now, str(delivery_key), str(owner_id)),
+            )
+            return cursor.rowcount == 1
+
+    def release_connector_turn_retry(
+        self,
+        delivery_key: str,
+        owner_id: str,
+        error: str,
+    ) -> bool:
+        """Release a failed turn retry so the user can try again immediately."""
+        now = self._now()
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """UPDATE connector_deliveries
+                   SET status = 'failed', claimed_by = NULL, claim_expires_at = NULL,
+                       last_error = ?, updated_at = ?
+                   WHERE delivery_key = ? AND claimed_by = ? AND status = 'failed'""",
+                (str(error)[:2000], now, str(delivery_key), str(owner_id)),
+            )
+            return cursor.rowcount == 1
+
+    def mark_connector_delivery_sent(self, delivery_key: str, owner_id: str) -> bool:
+        now = self._now()
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """UPDATE connector_deliveries
+                   SET status = 'delivered', claimed_by = NULL, claim_expires_at = NULL,
+                       updated_at = ?, delivered_at = ?
+                   WHERE delivery_key = ? AND claimed_by = ? AND status = 'sending'""",
+                (now, now, str(delivery_key), str(owner_id)),
+            )
+            return cursor.rowcount == 1
+
+    def list_connector_deliveries(
+        self,
+        *,
+        connector_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Return recent connector delivery attempts for operational inspection."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if connector_id:
+            clauses.append("connector_id = ?")
+            params.append(str(connector_id).strip().lower())
+        if status:
+            clauses.append("status = ?")
+            params.append(str(status).strip().lower())
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(max(1, min(500, int(limit))))
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """SELECT delivery_key, idempotency_key, connector_id, event_id, status,
+                          attempt_count, claimed_by, claim_expires_at, last_error,
+                          updated_at, delivered_at, message_json, reply_text
+                   FROM connector_deliveries""" + where + " ORDER BY updated_at DESC LIMIT ?",
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def reset_connector_delivery_for_retry(self, delivery_key: str) -> bool:
+        """Release a failed/stale delivery so a caller can claim a new attempt."""
+        key = str(delivery_key or "").strip()
+        if not key:
+            return False
+        now = self._now()
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """UPDATE connector_deliveries
+                   SET status = 'failed', claimed_by = NULL, claim_expires_at = NULL,
+                       updated_at = ?
+                   WHERE delivery_key = ? AND status IN ('failed', 'sending')""",
+                (now, key),
+            )
+            return cursor.rowcount == 1
+
+    def mark_connector_delivery_failed(
+        self,
+        delivery_key: str,
+        owner_id: str,
+        error: str,
+    ) -> bool:
+        now = self._now()
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """UPDATE connector_deliveries
+                   SET status = 'failed', claimed_by = NULL, claim_expires_at = NULL,
+                       last_error = ?, updated_at = ?, delivered_at = NULL
+                   WHERE delivery_key = ? AND claimed_by = ? AND status = 'sending'""",
+                (str(error)[:2000], now, str(delivery_key), str(owner_id)),
+            )
+            return cursor.rowcount == 1
 
     def list_commits(self, workspace_id: str, limit: int = 1000) -> list[dict[str, Any]]:
         """List authoritative committed-turn events for deterministic rebuilds."""

@@ -122,18 +122,27 @@ def test_lmstudio_provider_aliases_validate_in_runtime_settings_patch():
 
 @pytest.mark.asyncio
 async def test_llm_client_connect_disconnect():
-    config = importlib.import_module("modules.core.config").config
     LLMClient = importlib.import_module("modules.llm").LLMClient
     client = LLMClient(
-        config.llm.base_url,
-        config.llm.api_key,
-        config.llm.model,
-        config.llm.timeout,
+        "http://llm.test/v1",
+        "",
+        "test-model",
+        1,
     )
     await client.connect()
-    # 只检查内部 HTTP 客户端是否被创建
     assert getattr(client, "_http", None) is not None
     await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_llm_client_without_endpoint_stays_cold():
+    LLMClient = importlib.import_module("modules.llm").LLMClient
+    client = LLMClient("", "", "", 1)
+
+    await client.connect()
+
+    assert getattr(client, "_http", None) is None
+    assert client.status_snapshot()["available"] is False
 
 
 @pytest.mark.asyncio

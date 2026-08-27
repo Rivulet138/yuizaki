@@ -172,6 +172,23 @@ async def _await_if_needed(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
 
+async def _await_durable(value: Any) -> tuple[Any, bool]:
+    """Finish a durable write even when the caller cancellation races it."""
+    if not inspect.isawaitable(value):
+        return value, False
+    task = asyncio.ensure_future(value)
+    cancelled = False
+    try:
+        return await asyncio.shield(task), False
+    except asyncio.CancelledError:
+        cancelled = True
+        outcome = await asyncio.gather(task, return_exceptions=True)
+        result = outcome[0]
+        if isinstance(result, BaseException):
+            raise result
+        return result, cancelled
+
+
 def _strict_json_value(value: Any, *, path: str = "$") -> Any:
     """Return a JSON-shaped value or reject ambiguous fingerprint input."""
 
@@ -1066,13 +1083,21 @@ class TurnService:
                 claim_fencing_token=claim_fencing_token,
             )
             if self.ports.persist is not None:
-                commit.persistence_result = await _await_if_needed(self.ports.persist(commit))
+                commit.persistence_result, _persist_was_cancelled = await _await_durable(
+                    self.ports.persist(commit)
+                )
                 commit.persisted = True
                 authority = await self._load_persisted(trigger, ctx, key, fingerprint)
                 if authority is not None:
                     commit.result = authority.result
             if self.ports.dispatch is not None:
-                await _await_if_needed(self.ports.dispatch(commit))
+                try:
+                    await _await_if_needed(self.ports.dispatch(commit))
+                except asyncio.CancelledError:
+                    # The core result is already durable. Projection delivery
+                    # remains recoverable through the existing outbox/retry
+                    # path, so do not turn a completed turn into a lost one.
+                    pass
             await self._remember(commit)
             return commit
         finally:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -9,8 +8,10 @@ from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect
+from sqlalchemy.engine import make_url
 
 from database.models import Base
+from modules.core.paths import database_url_from_env
 
 
 def _project_root() -> Path:
@@ -20,8 +21,7 @@ def _project_root() -> Path:
 def load_alembic_config() -> Config:
     root = _project_root()
     cfg = Config(str(root / "alembic.ini"))
-    default_database_url = f"sqlite:///{(root / 'data' / 'chat.db').as_posix()}"
-    cfg.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL", "").strip() or default_database_url)
+    cfg.set_main_option("sqlalchemy.url", database_url_from_env())
     return cfg
 
 
@@ -29,7 +29,16 @@ def get_database_url(cfg: Config) -> str:
     return str(cfg.get_main_option("sqlalchemy.url"))
 
 
+def _ensure_sqlite_parent(database_url: str) -> None:
+    parsed_url = make_url(database_url)
+    database_name = parsed_url.database
+    if parsed_url.get_backend_name() != "sqlite" or database_name in (None, "", ":memory:"):
+        return
+    Path(database_name).expanduser().parent.mkdir(parents=True, exist_ok=True)
+
+
 def _inspect_db_state(database_url: str) -> dict[str, Any]:
+    _ensure_sqlite_parent(database_url)
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:

@@ -94,6 +94,16 @@ class _WorkspaceSwitchPipeline(_SemanticPipeline):
         return AgentPipelineResult(reply=f"reply:{ctx.workspace_id}")
 
 
+class _ErrorStreamingPipeline(_SemanticPipeline):
+    async def run_streaming(
+        self,
+        _ctx: AgentRequestContext,
+        _adapter: object,
+        _generation: object,
+    ) -> AgentPipelineResult:
+        raise RuntimeError("provider unavailable")
+
+
 def _runtime(pipeline: _SemanticPipeline, service: TurnService | None) -> SimpleNamespace:
     return SimpleNamespace(
         agent_pipeline=pipeline,
@@ -183,6 +193,44 @@ def test_http_stream_emits_action_before_final_stop_and_nothing_after_terminal()
     assert len(events) == 2
     assert events[0]["action_envelope"]["actions"][0]["type"] == "test_action"
     assert events[1]["choices"][0]["finish_reason"] == "stop"
+    assert events[1]["outcome"] == "completed"
+    assert events[1]["retryable"] is False
+    assert events[-1] == events[1]
+
+
+def test_http_stream_error_emits_explicit_terminal_after_diagnostic() -> None:
+    pipeline = _ErrorStreamingPipeline()
+    app = FastAPI()
+    app.include_router(create_ai_router(
+        get_config=lambda: SimpleNamespace(llm=SimpleNamespace(model="model")),
+        get_generation_mgr=GenerationManager,
+        get_llm_client=lambda: object(),
+        get_svc_client=lambda: None,
+        get_agent_runtime=lambda: _runtime(pipeline, None),
+        get_db_repo=lambda: None,
+        get_relationship_writer=lambda: None,
+        get_relationship_history=lambda: [],
+        get_relationship_summary=lambda: {},
+        logger=SimpleNamespace(error=lambda *_args, **_kwargs: None),
+        allow_legacy_turn_pipeline=True,
+    ))
+
+    response = TestClient(app).post("/v1/chat/completions", json={
+        "model": "model",
+        "messages": [{"role": "user", "content": "fail cleanly"}],
+        "stream": True,
+    })
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+
+    assert response.status_code == 200
+    assert events[0] == {"error": "Chat completion failed"}
+    assert events[1]["choices"][0]["finish_reason"] == "error"
+    assert events[1]["outcome"] == "failed"
+    assert events[1]["retryable"] is True
     assert events[-1] == events[1]
 
 

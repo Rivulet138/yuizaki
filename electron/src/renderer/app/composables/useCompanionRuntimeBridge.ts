@@ -1,6 +1,7 @@
 import { logger } from '@/logger'
 import { watch, type WatchStopHandle } from 'vue'
 import type { PetCompanionIdleProfile } from '@/../shared/pet-control'
+import { legacyDirectiveToAvatarCommand } from '@/../shared/avatar-command'
 import { resolveCompanionEmbodimentDelivery } from '@/../shared/companion-embodiment'
 import { useChatStore } from '@/stores/chatStore'
 import { useCompanionStore } from '@/stores/companionStore'
@@ -54,6 +55,19 @@ export function useCompanionRuntimeBridge() {
   const chatStore = useChatStore()
   const workspaceStore = useWorkspaceStore()
   const proactiveControls = useProactiveControls()
+  let avatarCommandSequence = 0
+  const avatarCommandStreamId = `companion:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
+  const createAutomationAvatarCommand = (directive: Parameters<typeof legacyDirectiveToAvatarCommand>[0]) => {
+    const sequence = avatarCommandSequence++
+    return legacyDirectiveToAvatarCommand(directive, {
+      id: `companion-avatar-${Date.now()}-${sequence}`,
+      streamId: avatarCommandStreamId,
+      sequence,
+      issuedAt: Date.now(),
+      priority: 40,
+      interrupt: 'replace',
+    })
+  }
   const runtimeSinks = {
     embodiment: (intent: Parameters<typeof resolveCompanionEmbodiment>[0]) => {
       const resolved = resolveCompanionEmbodimentDelivery(intent)
@@ -70,10 +84,24 @@ export function useCompanionRuntimeBridge() {
     },
     behavior: (state: Parameters<typeof petControlClient.setBehaviorState>[0], durationMs?: number) =>
       petControlClient.setBehaviorState(state, durationMs, { source: 'automation' as const }),
-    emotion: (emotionId: string, context: { signal: AbortSignal; eventVersion: string }) =>
-      petControlClient.triggerEmotion(emotionId, { source: 'automation' as const, ...context }),
+    emotion: (emotionId: string, context: { signal: AbortSignal; eventVersion: string }) => {
+      const command = createAutomationAvatarCommand({
+        expressionMix: [],
+        parameterOverrides: [],
+        intensity: 1,
+        durationMs: 1800,
+      })
+      command.actions.unshift({ type: 'affect', emotion: emotionId, intensity: 1, decayMs: 1800 })
+      return petControlClient.triggerAvatarCommand(command, { source: 'automation' as const, ...context })
+    },
     motion: (group: string, context: { signal: AbortSignal; eventVersion: string }) =>
-      petControlClient.triggerMotion(group, 0, { source: 'automation' as const, ...context }),
+      petControlClient.triggerAvatarCommand(createAutomationAvatarCommand({
+        expressionMix: [],
+        parameterOverrides: [],
+        motion: { group, index: 0 },
+        intensity: 1,
+        durationMs: 1000,
+      }), { source: 'automation' as const, ...context }),
     advice: (message: string) => chatStore.appendLocalAdvice(message, 'heartbeat'),
     notification: (message: string) => chatStore.addNotification(message),
   }

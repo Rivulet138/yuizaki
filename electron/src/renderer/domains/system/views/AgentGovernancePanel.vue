@@ -19,6 +19,140 @@
         </article>
       </section>
 
+      <el-card class="panel-card connector-card" shadow="never">
+        <template #header>
+          <div class="card-head">
+            <div>
+              <strong>连接器状态</strong>
+              <span>{{ connectorSummary.running }} 个运行中 · {{ connectorSummary.uninstalled }} 个未安装 · {{ connectorSummary.failures }} 个故障</span>
+            </div>
+            <el-button plain size="small" :loading="connectorsRequest.loading" @click="loadConnectors">刷新连接器</el-button>
+          </div>
+        </template>
+        <AsyncState :loading="connectorsRequest.loading" :error="connectorsRequest.error" @retry="loadConnectors">
+          <el-alert v-if="connectorMutationError" class="panel-alert" :title="connectorMutationError" type="error" show-icon :closable="false" />
+          <div v-if="connectorRows.length" class="connector-list">
+            <article v-for="connector in connectorRows" :key="connector.id" class="connector-item" :class="`connector-${connector.state}`">
+              <div class="connector-main">
+                <div>
+                  <strong>{{ connector.name }}</strong>
+                  <span>{{ connector.kind }} · {{ connector.permissionScope }}</span>
+                </div>
+                <el-tag size="small" :type="connectorTagType(connector.state)">{{ connectorStateLabel(connector.state) }}</el-tag>
+              </div>
+              <p>{{ connector.message }}</p>
+              <div class="connector-meta">
+                <span>能力：{{ connector.capabilities.join('、') }}</span>
+                <span>数据流：{{ connector.dataFlow.join('；') }}</span>
+              </div>
+              <div class="connector-footer">
+                <small v-if="connector.experimental">实验性，默认不启用</small>
+                <small v-else>{{ connector.source === 'mcp' ? 'MCP 服务' : 'Agent 插件' }}</small>
+                <el-button
+                  v-if="connector.canDisable && connector.state !== 'disabled'"
+                  type="danger"
+                  link
+                  size="small"
+                  :loading="disablingConnectorIds.has(connector.id)"
+                  :disabled="disablingConnectorIds.has(connector.id)"
+                  @click="disableConnectorItem(connector.id)"
+                >
+                  一键停用
+                </el-button>
+              </div>
+            </article>
+          </div>
+          <el-empty v-else description="暂无连接器状态" :image-size="64" />
+          <div class="connector-config-grid">
+            <section v-for="connectorId in messageConnectorIds" :key="connectorId" class="connector-config-panel">
+              <div class="connector-config-head">
+                <div>
+                  <strong>{{ connectorDisplayName(connectorId) }} 设置</strong>
+                  <span>{{ connectorConfigs[connectorId]?.webhookPath || `加载 ${connectorId} 配置` }}</span>
+                </div>
+                <el-switch v-model="connectorDrafts[connectorId].enabled" :disabled="savingConnectorIds.has(connectorId)" />
+              </div>
+              <div class="connector-config-flags" v-if="connectorId !== 'qq' && connectorId !== 'wechat'">
+                <el-tag size="small" :type="connectorConfigs[connectorId]?.botTokenConfigured ? 'success' : 'info'">{{ connectorId === 'discord' ? '降级 Bot Token' : 'Bot Token' }} {{ connectorConfigs[connectorId]?.botTokenConfigured ? '已配置' : '未配置' }}</el-tag>
+                <el-tag v-if="connectorId === 'telegram'" size="small" :type="connectorConfigs.telegram?.webhookSecretConfigured ? 'success' : 'info'">Webhook Secret {{ connectorConfigs.telegram?.webhookSecretConfigured ? '已配置' : '未配置' }}</el-tag>
+                <el-tag v-if="connectorId === 'discord'" size="small" :type="connectorConfigs.discord?.publicKeyConfigured ? 'success' : 'info'">Public Key {{ connectorConfigs.discord?.publicKeyConfigured ? '已配置' : '未配置' }}</el-tag>
+              </div>
+              <template v-if="connectorId === 'qq' || connectorId === 'wechat'">
+                <div class="connector-bridge-box">
+                  <el-alert title="仅支持个人账号兼容桥。桥接程序由用户自行运行，掉线、封号和协议变更风险由用户自行承担。" type="warning" :closable="false" show-icon />
+                  <div class="connector-secret-row">
+                    <el-input v-model="connectorDrafts[connectorId].bridgeUrl" placeholder="兼容桥地址，例如 http://127.0.0.1:3000" />
+                    <el-input v-model="connectorDrafts[connectorId].bridgeToken" type="password" show-password placeholder="桥接令牌（启用必填）" />
+                  </div>
+                  <div class="connector-config-actions">
+                    <el-select v-model="connectorDrafts[connectorId].bridgeProtocol" size="small" placeholder="桥协议">
+                      <el-option label="通用桥 API" value="generic" />
+                      <el-option v-if="connectorId === 'qq'" label="OneBot 11" value="onebot11" />
+                      <el-option v-if="connectorId === 'qq'" label="OneBot 12" value="onebot12" />
+                    </el-select>
+                    <el-button type="primary" size="small" :loading="accountBusyIds.has(connectorId)" @click="loginPersonalAccount(connectorId)">开始登录</el-button>
+                    <el-button plain size="small" :loading="accountBusyIds.has(connectorId)" @click="refreshPersonalAccount(connectorId)">刷新状态</el-button>
+                    <el-button type="danger" plain size="small" :disabled="accountBusyIds.has(connectorId)" @click="logoutPersonalAccount(connectorId)">退出账号</el-button>
+                    <el-button type="danger" link size="small" :disabled="accountBusyIds.has(connectorId)" @click="unbindPersonalAccount(connectorId)">清除桥接配置</el-button>
+                  </div>
+                  <div v-if="connectorAccounts[connectorId]" class="connector-account-status">
+                    <span>状态：{{ accountStateLabel(connectorAccounts[connectorId].loginState) }}</span>
+                    <span v-if="connectorAccounts[connectorId].accountName">账号：{{ connectorAccounts[connectorId].accountName }}</span>
+                    <a v-if="connectorAccounts[connectorId].loginUrl" :href="connectorAccounts[connectorId].loginUrl || undefined" target="_blank" rel="noreferrer">打开登录页</a>
+                  </div>
+                </div>
+              </template>
+              <div v-if="connectorId !== 'qq' && connectorId !== 'wechat'" class="connector-secret-row">
+                <el-input v-model="connectorDrafts[connectorId].botToken" type="password" show-password clearable :placeholder="connectorId === 'discord' ? '可选 Bot Token；Interaction 过期后用于频道降级' : 'Bot Token；留空表示不修改'" @input="connectorDrafts[connectorId].clearBotToken = false" />
+                <el-button v-if="connectorConfigs[connectorId]?.botTokenConfigured || connectorDrafts[connectorId].clearBotToken" type="danger" link size="small" @click="clearConnectorSecret(connectorId, 'botToken')">清除</el-button>
+              </div>
+              <div v-if="connectorId === 'telegram'" class="connector-secret-row">
+                <el-input v-model="connectorDrafts.telegram.webhookSecret" type="password" show-password clearable placeholder="Webhook Secret（启用必填）；留空不修改" @input="connectorDrafts.telegram.clearWebhookSecret = false" />
+                <el-button v-if="connectorConfigs.telegram?.webhookSecretConfigured || connectorDrafts.telegram.clearWebhookSecret" type="danger" link size="small" @click="clearConnectorSecret('telegram', 'webhookSecret')">清除</el-button>
+              </div>
+              <div v-if="connectorId === 'discord'" class="connector-secret-row">
+                <el-input v-model="connectorDrafts.discord.publicKey" clearable placeholder="Discord Public Key（64 位十六进制）；留空表示不修改" @input="connectorDrafts.discord.clearPublicKey = false" />
+                <el-button v-if="connectorConfigs.discord?.publicKeyConfigured || connectorDrafts.discord.clearPublicKey" type="danger" link size="small" @click="clearConnectorSecret('discord', 'publicKey')">清除</el-button>
+              </div>
+              <div class="connector-config-actions">
+                <el-button plain size="small" :loading="loadingConnectorConfigIds.has(connectorId)" @click="loadConnectorConfig(connectorId)">重新读取</el-button>
+                <el-button type="primary" size="small" :loading="savingConnectorIds.has(connectorId)" @click="saveConnectorConfig(connectorId)">保存设置</el-button>
+                <el-button plain size="small" :loading="connectorDeliveriesRequest.loading" @click="loadConnectorDeliveries(connectorId)">最近事件</el-button>
+              </div>
+              <div v-if="connectorDeliveryRows(connectorId).length" class="connector-delivery-list">
+                <div v-for="delivery in connectorDeliveryRows(connectorId).slice(0, 5)" :key="delivery.deliveryKey" class="connector-delivery-item">
+                  <div>
+                    <strong>{{ delivery.eventId }}</strong>
+                    <span>{{ connectorDeliveryStatusLabel(delivery.status) }} · 尝试 {{ delivery.attemptCount }} 次</span>
+                    <small v-if="delivery.lastError">{{ delivery.lastError }}</small>
+                  </div>
+                  <el-button
+                    v-if="delivery.retryable"
+                    type="warning"
+                    link
+                    size="small"
+                    :loading="retryingDeliveryKeys.has(delivery.deliveryKey)"
+                    @click="retryDeliveryItem(connectorId, delivery.deliveryKey)"
+                  >
+                    重投
+                  </el-button>
+                  <el-button
+                    v-if="delivery.cancellable"
+                    type="danger"
+                    link
+                    size="small"
+                    :loading="cancellingEventIds.has(delivery.eventId)"
+                    @click="cancelConnectorEventItem(connectorId, delivery.eventId)"
+                  >
+                    取消处理
+                  </el-button>
+                </div>
+              </div>
+            </section>
+          </div>
+        </AsyncState>
+      </el-card>
+
       <section class="governance-grid">
         <el-card class="panel-card mcp-card" shadow="never">
           <template #header>
@@ -322,9 +456,10 @@ import { onMounted, reactive, computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
+import { systemClient } from '@/api/client'
 import { useSystemDomain } from '../composables/useSystemDomain'
 import { usePluginDomain } from '../../plugin/composables/usePluginDomain'
-import type { MCPHistoryEntry, MCPInventoryItem, MCPServerConfigSnapshot, MCPServerPresetSnapshot, MCPServerStatusSnapshot, PermissionAuditRecord, RuntimeContributionSummary } from '@/../shared/agent'
+import type { ConnectorState, ConnectorStatus, MCPHistoryEntry, MCPInventoryItem, MCPServerConfigSnapshot, MCPServerPresetSnapshot, MCPServerStatusSnapshot, MessageConnectorConfigSnapshot, MessageConnectorConfigUpdate, PermissionAuditRecord, RuntimeContributionSummary } from '@/../shared/agent'
 import type { PluginContributionSummary } from '@/../shared/plugin'
 
 const {
@@ -341,6 +476,9 @@ const {
   removeMcpRequest,
   refreshMcpRequest,
   agentPluginsRequest,
+  connectors,
+  connectorsRequest,
+  disableConnectorRequest,
   toggleAgentPluginRequest,
   updateAgentPluginConfigRequest,
   loadPermissions,
@@ -353,6 +491,19 @@ const {
   removeMcp,
   refreshMcp,
   loadAgentPlugins,
+  loadConnectors,
+  connectorDeliveries,
+  connectorAccounts,
+  loadConnectorAccount,
+  loginConnectorAccount,
+  refreshConnectorAccount,
+  logoutConnectorAccount,
+  connectorDeliveriesRequest,
+  cancelConnectorEventRequest,
+  loadConnectorDeliveries,
+  retryConnectorDelivery,
+  cancelConnectorEvent,
+  disableConnector,
   toggleAgentPlugin,
   updateAgentPluginConfig,
 } = useSystemDomain()
@@ -379,6 +530,22 @@ const togglingMcpNames = ref(new Set<string>())
 const refreshingMcpNames = ref(new Set<string>())
 const revokingPermissionKeys = ref(new Set<string>())
 const togglingAgentPluginIds = ref(new Set<string>())
+const disablingConnectorIds = ref(new Set<string>())
+const loadingConnectorConfigIds = ref(new Set<string>())
+const savingConnectorIds = ref(new Set<string>())
+const retryingDeliveryKeys = ref(new Set<string>())
+const accountBusyIds = ref(new Set<string>())
+const messageConnectorIds = ['telegram', 'discord', 'qq', 'wechat'] as const
+type MessageConnectorId = typeof messageConnectorIds[number]
+const connectorConfigs = reactive<Partial<Record<MessageConnectorId, MessageConnectorConfigSnapshot>>>({})
+type ConnectorDraft = MessageConnectorConfigUpdate & { botToken: string; webhookSecret: string; publicKey: string; accountMode: string; bridgeUrl: string; bridgeProtocol: string; bridgeToken: string; clearBotToken: boolean; clearWebhookSecret: boolean; clearPublicKey: boolean; clearBridgeUrl: boolean; clearBridgeProtocol: boolean; clearBridgeToken: boolean }
+const newConnectorDraft = (): ConnectorDraft => ({ enabled: false, botToken: '', webhookSecret: '', publicKey: '', accountMode: 'personal_bridge', bridgeUrl: '', bridgeProtocol: 'generic', bridgeToken: '', clearBotToken: false, clearWebhookSecret: false, clearPublicKey: false, clearBridgeUrl: false, clearBridgeProtocol: false, clearBridgeToken: false })
+const connectorDrafts = reactive<Record<MessageConnectorId, ConnectorDraft>>({
+  telegram: newConnectorDraft(),
+  discord: newConnectorDraft(),
+  qq: newConnectorDraft(),
+  wechat: newConnectorDraft(),
+})
 const mcpFilter = ref<MCPFilter>('all')
 
 const addPending = (setRef: { value: Set<string> }, key: string) => {
@@ -439,6 +606,16 @@ const agentPluginRows = computed(() => agentPlugins.value?.plugins || [])
 const agentPluginContributionSummary = computed(() => agentPlugins.value?.contributionSummary || [])
 const electronPluginContributionSummary = computed(() => electronPluginSnapshot.value?.contributionSummary || [])
 const permissionAuditRows = computed(() => [...(permissions.value?.audit || [])].reverse())
+const connectorRows = computed<ConnectorStatus[]>(() => connectors.value?.connectors || [])
+const connectorSummary = computed(() => connectors.value?.summary || {
+  total: 0,
+  installed: 0,
+  enabled: 0,
+  running: 0,
+  failures: 0,
+  uninstalled: 0,
+  canDisable: 0,
+})
 
 const formatPluginConfig = (config?: Record<string, unknown>) => JSON.stringify(config ?? {}, null, 2)
 
@@ -468,12 +645,13 @@ const contributionComparisonRows = computed(() => contributionCategories.map((ca
   mcp: contributionCount(mcpContributionSummary.value, category),
 })))
 
-const refreshing = computed(() => mcpRequest.loading || permissionsRequest.loading || agentPluginsRequest.loading || pluginsRequest.loading)
-const extensionLoading = computed(() => agentPluginsRequest.loading || pluginsRequest.loading || mcpRequest.loading)
+const refreshing = computed(() => mcpRequest.loading || permissionsRequest.loading || agentPluginsRequest.loading || pluginsRequest.loading || connectorsRequest.loading)
+const extensionLoading = computed(() => agentPluginsRequest.loading || pluginsRequest.loading || mcpRequest.loading || connectorsRequest.loading)
 const extensionError = computed(() => agentPluginsRequest.error || pluginsRequest.error || mcpRequest.error)
 const mcpMutationError = computed(() => toggleMcpRequest.error || refreshMcpRequest.error || removeMcpRequest.error || installMcpPresetRequest.error)
 const permissionMutationError = computed(() => revokePermissionRequest.error || clearPermissionsRequest.error)
 const agentPluginMutationError = computed(() => toggleAgentPluginRequest.error || updateAgentPluginConfigRequest.error)
+const connectorMutationError = computed(() => disableConnectorRequest.error)
 const connectedMcpCount = computed(() => mcpRows.value.filter((row) => row.connected).length)
 const enabledMcpCount = computed(() => mcpRows.value.filter((row) => row.enabled).length)
 const failingMcpCount = computed(() => mcpRows.value.filter((row) => row.enabled && !row.connected).length)
@@ -499,6 +677,65 @@ const totalMcpInventory = computed(() => mcpRows.value.reduce((total, row) => to
 const approvedPermissionCount = computed(() => permissionRows.value.filter((row) => row.approved).length)
 const deniedPermissionCount = computed(() => permissionRows.value.filter((row) => !row.approved).length)
 const totalContributionCount = computed(() => contributionComparisonRows.value.reduce((total, row) => total + row.electron + row.agent + row.mcp, 0))
+
+const connectorStateLabel = (state: ConnectorState) => {
+  const labels: Record<ConnectorState, string> = {
+    running: '运行中',
+    disabled: '已停用',
+    failure: '故障',
+    uninstalled: '未安装',
+  }
+  return labels[state]
+}
+
+const connectorDisplayName = (connectorId: MessageConnectorId) => ({
+  telegram: 'Telegram',
+  discord: 'Discord',
+  qq: 'QQ 个人账号兼容桥',
+  wechat: '微信个人账号兼容桥',
+}[connectorId])
+
+const connectorTagType = (state: ConnectorState): 'success' | 'info' | 'warning' | 'danger' => {
+  if (state === 'running') return 'success'
+  if (state === 'failure') return 'danger'
+  if (state === 'disabled') return 'info'
+  return 'warning'
+}
+
+const connectorDeliveryRows = (connectorId: MessageConnectorId) => connectorDeliveries.value[connectorId] || []
+const connectorDeliveryStatusLabel = (status: string) => ({
+  delivered: '已送达',
+  processing: '处理中',
+  sending: '发送中（取消过晚）',
+  failed: '待重投',
+}[status] || status)
+
+const cancellingEventIds = ref(new Set<string>())
+
+const cancelConnectorEventItem = async (connectorId: MessageConnectorId, eventId: string) => {
+  addPending(cancellingEventIds, eventId)
+  try {
+    const result = await cancelConnectorEvent(connectorId, eventId)
+    if (result?.cancelled) ElMessage.success('事件处理已取消')
+    else ElMessage.warning(cancelConnectorEventRequest.error || '取消过晚；回复可能已经发送')
+  } catch (error) {
+    ElMessage.warning(error instanceof Error ? error.message : '取消状态未知；请刷新后检查')
+  } finally {
+    removePending(cancellingEventIds, eventId)
+  }
+}
+
+const retryDeliveryItem = async (connectorId: MessageConnectorId, deliveryKey: string) => {
+  addPending(retryingDeliveryKeys, deliveryKey)
+  try {
+    const result = await retryConnectorDelivery(connectorId, deliveryKey)
+    if (result?.ok) ElMessage.success(result.alreadySent ? '该事件已送达' : '回复已重新投递')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '重新投递失败')
+  } finally {
+    removePending(retryingDeliveryKeys, deliveryKey)
+  }
+}
 
 const governancePosture = computed(() => {
   if (failingMcpCount.value > 0) return '需要复核 MCP 连接'
@@ -694,11 +931,15 @@ const decisionLabel = (decision: string) => {
 const permissionAuditTitle = (item: PermissionAuditRecord) => item.capability_id || item.tool_name || item.capability_kind || '未命名能力'
 
 const refreshGovernance = async () => {
-  await Promise.all([loadPermissions(), loadMcp(), loadAgentPlugins(), loadElectronPlugins()])
+  await Promise.all([
+    loadPermissions(), loadMcp(), loadAgentPlugins(), loadElectronPlugins(), loadConnectors(), loadConnectorConfigs(),
+    ...messageConnectorIds.map((connectorId) => loadConnectorDeliveries(connectorId)),
+    loadConnectorAccount('qq'), loadConnectorAccount('wechat'),
+  ])
 }
 
 const refreshExtensions = async () => {
-  await Promise.all([loadAgentPlugins(), loadElectronPlugins(), loadMcp()])
+  await Promise.all([loadAgentPlugins(), loadElectronPlugins(), loadMcp(), loadConnectors()])
 }
 
 onMounted(() => {
@@ -854,6 +1095,162 @@ const toggleAgentPluginItem = async (pluginId: string, enabled: boolean) => {
   }
 }
 
+const disableConnectorItem = async (connectorId: string) => {
+  const connector = connectorRows.value.find((item) => item.id === connectorId)
+  if (!connector?.canDisable || connector.state === 'disabled') return
+  addPending(disablingConnectorIds, connectorId)
+  try {
+    const result = await disableConnector(connectorId)
+    if (result?.ok) {
+      if (messageConnectorIds.includes(connectorId as MessageConnectorId)) {
+        await loadConnectorConfig(connectorId as MessageConnectorId)
+      }
+      ElMessage.success('连接器已停用')
+    } else if (result?.error) {
+      ElMessage.error(result.error)
+    }
+  } finally {
+    removePending(disablingConnectorIds, connectorId)
+  }
+}
+
+const loadConnectorConfig = async (connectorId: MessageConnectorId) => {
+  addPending(loadingConnectorConfigIds, connectorId)
+  try {
+    const result = await systemClient.connectorConfig(connectorId)
+    connectorConfigs[connectorId] = result
+    connectorDrafts[connectorId].enabled = result.enabled
+    connectorDrafts[connectorId].botToken = ''
+    connectorDrafts[connectorId].webhookSecret = ''
+    connectorDrafts[connectorId].publicKey = ''
+    connectorDrafts[connectorId].accountMode = result.accountMode || 'personal_bridge'
+    connectorDrafts[connectorId].bridgeUrl = result.bridgeUrl || ''
+    connectorDrafts[connectorId].bridgeProtocol = result.bridgeProtocol || 'generic'
+    connectorDrafts[connectorId].bridgeToken = ''
+    connectorDrafts[connectorId].clearBotToken = false
+    connectorDrafts[connectorId].clearWebhookSecret = false
+    connectorDrafts[connectorId].clearPublicKey = false
+    connectorDrafts[connectorId].clearBridgeUrl = false
+    connectorDrafts[connectorId].clearBridgeProtocol = false
+    connectorDrafts[connectorId].clearBridgeToken = false
+    if (connectorId === 'qq' || connectorId === 'wechat') await loadConnectorAccount(connectorId)
+    return result
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : `${connectorId} 配置读取失败`)
+    return null
+  } finally {
+    removePending(loadingConnectorConfigIds, connectorId)
+  }
+}
+
+const clearConnectorSecret = (connectorId: MessageConnectorId, field: 'botToken' | 'webhookSecret' | 'publicKey' | 'bridgeUrl' | 'bridgeProtocol' | 'bridgeToken') => {
+  const draft = connectorDrafts[connectorId]
+  draft[field] = ''
+  draft[`clear${field[0].toUpperCase()}${field.slice(1)}` as keyof ConnectorDraft] = true
+}
+
+const loadConnectorConfigs = async () => {
+  await Promise.all(messageConnectorIds.map((connectorId) => loadConnectorConfig(connectorId)))
+}
+
+const saveConnectorConfig = async (connectorId: MessageConnectorId) => {
+  const draft = connectorDrafts[connectorId]
+  if (connectorId === 'discord' && draft.publicKey && !/^[0-9a-fA-F]{64}$/.test(draft.publicKey)) {
+    ElMessage.warning('Discord Public Key 必须是 64 位十六进制字符串')
+    return
+  }
+  const payload: MessageConnectorConfigUpdate = { enabled: draft.enabled }
+  if (draft.clearBotToken) payload.clearBotToken = true
+  else if (draft.botToken.trim()) payload.botToken = draft.botToken.trim()
+  if (connectorId === 'telegram') {
+    if (draft.clearWebhookSecret) payload.clearWebhookSecret = true
+    else if (draft.webhookSecret.trim()) payload.webhookSecret = draft.webhookSecret.trim()
+  }
+  if (connectorId === 'discord') {
+    if (draft.clearPublicKey) payload.clearPublicKey = true
+    else if (draft.publicKey.trim()) payload.publicKey = draft.publicKey.trim()
+  }
+  if (connectorId === 'qq' || connectorId === 'wechat') {
+    payload.accountMode = 'personal_bridge'
+    if (draft.clearBridgeUrl) payload.clearBridgeUrl = true
+    else if (draft.bridgeUrl.trim()) payload.bridgeUrl = draft.bridgeUrl.trim()
+    if (draft.clearBridgeProtocol) payload.clearBridgeProtocol = true
+    else if (draft.bridgeProtocol.trim()) payload.bridgeProtocol = draft.bridgeProtocol.trim()
+    if (draft.clearBridgeToken) payload.clearBridgeToken = true
+    else if (draft.bridgeToken.trim()) payload.bridgeToken = draft.bridgeToken.trim()
+  }
+  addPending(savingConnectorIds, connectorId)
+  try {
+    const result = await systemClient.updateConnectorConfig(connectorId, payload)
+    connectorConfigs[connectorId] = result.config
+    draft.enabled = result.config.enabled
+    draft.botToken = ''
+    draft.webhookSecret = ''
+    draft.publicKey = ''
+    draft.bridgeUrl = result.config.bridgeUrl || ''
+    draft.bridgeProtocol = result.config.bridgeProtocol || 'generic'
+    draft.bridgeToken = ''
+    draft.clearBotToken = false
+    draft.clearWebhookSecret = false
+    draft.clearPublicKey = false
+    draft.clearBridgeUrl = false
+    draft.clearBridgeProtocol = false
+    draft.clearBridgeToken = false
+    await loadConnectors()
+    ElMessage.success(`${connectorDisplayName(connectorId)} 设置已保存`)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '连接器设置保存失败')
+  } finally {
+    removePending(savingConnectorIds, connectorId)
+  }
+}
+
+const accountStateLabel = (state: string) => ({ connected: '已连接', awaiting_scan: '等待登录', signed_out: '未登录', error: '桥接错误' }[state] || state)
+const loginPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
+  addPending(accountBusyIds, connectorId)
+  try { const account = await loginConnectorAccount(connectorId); if (account) ElMessage.success(account.loginUrl ? '登录请求已创建，请打开登录页' : `连接状态：${accountStateLabel(account.loginState)}`) } catch (error) { ElMessage.error(error instanceof Error ? error.message : '登录请求失败') } finally { removePending(accountBusyIds, connectorId) }
+}
+const refreshPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
+  addPending(accountBusyIds, connectorId)
+  try { await refreshConnectorAccount(connectorId) } finally { removePending(accountBusyIds, connectorId) }
+}
+const logoutPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
+  addPending(accountBusyIds, connectorId)
+  try { await logoutConnectorAccount(connectorId); ElMessage.success('账号已退出') } finally { removePending(accountBusyIds, connectorId) }
+}
+
+const unbindPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
+  try {
+    await ElMessageBox.confirm('将停用连接器并清除桥地址、协议令牌和账号状态。', '清除桥接配置', {
+      type: 'warning',
+      confirmButtonText: '清除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  addPending(accountBusyIds, connectorId)
+  try {
+    const result = await systemClient.unbindConnectorAccount(connectorId)
+    connectorConfigs[connectorId] = result.config
+    connectorAccounts.value[connectorId] = result.account
+    const draft = connectorDrafts[connectorId]
+    draft.enabled = result.config.enabled
+    draft.bridgeUrl = result.config.bridgeUrl || ''
+    draft.bridgeProtocol = result.config.bridgeProtocol || 'generic'
+    draft.bridgeToken = ''
+    draft.clearBridgeUrl = false
+    draft.clearBridgeProtocol = false
+    draft.clearBridgeToken = false
+    await loadConnectors()
+    ElMessage.success('桥接配置已清除')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '桥接配置清除失败')
+  } finally {
+    removePending(accountBusyIds, connectorId)
+  }
+}
+
 const saveAgentPluginConfig = async (pluginId: string) => {
   const rawConfig = pluginConfigDrafts[pluginId]?.trim() || '{}'
   let config: unknown
@@ -882,6 +1279,32 @@ const saveAgentPluginConfig = async (pluginId: string) => {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.connector-account-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.connector-bridge-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+}
+
+.connector-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
 }
 
 .governance-toolbar {
@@ -983,6 +1406,196 @@ const saveAgentPluginConfig = async (pluginId: string) => {
 
 .panel-card {
   border-radius: var(--yui-radius-card);
+}
+
+.connector-card {
+  overflow: hidden;
+}
+
+.connector-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.connector-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-card);
+  background: var(--yui-surface-muted);
+}
+
+.connector-item p {
+  margin: 0;
+  color: var(--yui-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.connector-running {
+  border-color: rgba(34, 197, 94, 0.28);
+}
+
+.connector-disabled,
+.connector-uninstalled {
+  opacity: 0.82;
+}
+
+.connector-failure {
+  border-color: rgba(239, 68, 68, 0.28);
+  background: var(--yui-danger-soft);
+}
+
+.connector-main,
+.connector-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.connector-main > div:first-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.connector-main strong {
+  color: var(--yui-text);
+}
+
+.connector-main span,
+.connector-meta,
+.connector-footer small {
+  color: var(--yui-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.connector-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+
+.connector-footer {
+  align-items: center;
+}
+
+.connector-config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--yui-border);
+}
+
+.connector-config-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-card);
+  background: var(--yui-surface-muted);
+}
+
+.connector-config-head,
+.connector-config-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.connector-config-head > div:first-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.connector-config-head strong {
+  color: var(--yui-text);
+}
+
+.connector-config-head span {
+  color: var(--yui-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.connector-config-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.connector-config-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.connector-delivery-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--yui-border);
+}
+
+.connector-delivery-item {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--yui-radius-card);
+  background: var(--yui-panel-surface, var(--yui-surface-raised));
+}
+
+.connector-delivery-item > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.connector-delivery-item strong,
+.connector-delivery-item span,
+.connector-delivery-item small {
+  overflow-wrap: anywhere;
+}
+
+.connector-delivery-item strong {
+  color: var(--yui-text);
+  font-size: 12px;
+}
+
+.connector-delivery-item span,
+.connector-delivery-item small {
+  color: var(--yui-muted);
+  font-size: 11px;
+}
+
+.connector-secret-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.connector-secret-row .el-input {
+  min-width: 0;
+  flex: 1;
 }
 
 .card-head,
@@ -1361,6 +1974,19 @@ const saveAgentPluginConfig = async (pluginId: string) => {
 
   .agent-plugin-main,
   .plugin-config-row {
+    flex-direction: column;
+  }
+
+  .connector-list {
+    grid-template-columns: 1fr;
+  }
+
+  .connector-config-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .connector-main,
+  .connector-footer {
     flex-direction: column;
   }
 

@@ -183,6 +183,8 @@
                 <span>{{ executionLabel(item) }}</span>
                 <span>{{ item.observability?.trace ? '记录调用' : '未记录调用' }}</span>
                 <span>超时 {{ formatTimeout(item.timeoutMs) }}</span>
+                <span v-if="item.hasPostcondition" class="completion-meta">完成可验证</span>
+                <span v-else-if="item.hasRecheck" class="completion-meta">可复查</span>
               </div>
             </button>
           </div>
@@ -378,8 +380,9 @@
           <div v-if="recentToolLogs.length" class="log-list">
             <div v-for="(log, idx) in recentToolLogs" :key="`${log.sortKey}-${idx}`" class="log-item">
               <span>{{ log.time }}</span>
-              <el-tag size="small" :type="toolLogTagType(log.status)" effect="plain">{{ log.source }}</el-tag>
+              <el-tag size="small" :title="log.source" :type="toolLogTagType(log.actionStatus || log.status)" effect="plain">{{ toolActionStatusLabel(log.actionStatus || log.status) }}</el-tag>
               <strong>{{ log.text }}</strong>
+              <small v-if="log.evidence?.length" class="log-evidence">{{ log.evidence[0] }}</small>
             </div>
           </div>
           <el-empty v-else description="暂无工具调用记录" :image-size="64" />
@@ -401,6 +404,7 @@ import { curatedSkillRecommendations } from '../skillRecommendations'
 import type { PluginLoadFailure, PluginRuntimeState, PluginToolCapabilityContribution } from '../../../../shared/plugin'
 import type { CapabilityDescriptor, CapabilityKind, CapabilityRiskLevel, SkillCatalogItem } from '../../../../shared/capability'
 import type { AgentTraceSnapshot, MCPSnapshot, MCPServerConfigSnapshot, MCPServerStatusSnapshot, RuntimeLoopRecord, StepExecutionRecord } from '../../../../shared/agent'
+import { projectToolActionStatus, toolActionStatusLabel, toolEvidenceFromRecord, type ToolActionStatus } from '../toolActionProjection'
 
 type TagType = 'success' | 'warning' | 'danger' | 'info' | 'primary'
 type CapabilityKindFilter = CapabilityKind | ''
@@ -438,6 +442,8 @@ interface ToolLogItem {
   source: string
   status?: string | null
   sortKey: string
+  actionStatus?: ToolActionStatus
+  evidence?: string[]
 }
 
 interface HealthItem {
@@ -1516,6 +1522,7 @@ function toolLogTagType(status?: string | null): TagType {
   const raw = String(status || '').toLowerCase()
   if (raw.includes('error') || raw.includes('fail')) return 'danger'
   if (raw.includes('skip') || raw.includes('partial')) return 'warning'
+  if (raw.includes('completed') && !raw.includes('verified')) return 'info'
   if (raw === 'ok' || raw.includes('success') || raw.includes('complete')) return 'success'
   return 'info'
 }
@@ -1529,6 +1536,8 @@ function toolLogFromStep(step: StepExecutionRecord): ToolLogItem {
     source: 'trace',
     status: step.status,
     sortKey: step.timestamp || '',
+    actionStatus: projectToolActionStatus(step.status, undefined),
+    evidence: toolEvidenceFromRecord(step),
   }
 }
 
@@ -1546,6 +1555,8 @@ function toolLogFromRuntimeLoop(loop: RuntimeLoopRecord): ToolLogItem | null {
     source: 'runtime',
     status: loop.status,
     sortKey: loop.timestamp || '',
+    actionStatus: projectToolActionStatus(loop.status, data?.verificationStatus ?? data?.verification_status),
+    evidence: toolEvidenceFromRecord(data || {}),
   }
 }
 
@@ -2331,6 +2342,14 @@ onMounted(async () => {
   min-width: 0;
   color: var(--yui-text);
   overflow-wrap: anywhere;
+}
+
+.log-evidence {
+  min-width: 0;
+  color: #047857;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 :deep(.el-input__wrapper),

@@ -158,4 +158,25 @@ describe('companion diagnostic export', () => {
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.json).toContain('"schemaVersion": 1')
   })
+
+  it('retains forward-compatible numeric and boolean runtime telemetry without text', () => {
+    const bundle = createRedactedDiagnosticBundle({
+      data: {
+        experience: {
+          firstAudioP95Ms: 240,
+          interrupted: true,
+          providerLabel: 'private-provider',
+        },
+      },
+    })
+    const result = serializeRedactedDiagnosticBundle(bundle)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.json).toContain('firstAudioP95Ms')
+      expect(result.json).toContain('240')
+      expect(result.json).toContain('interrupted')
+      expect(result.json).not.toContain('private-provider')
+    }
+  })
 })

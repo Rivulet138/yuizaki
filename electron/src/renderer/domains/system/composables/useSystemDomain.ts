@@ -5,6 +5,9 @@ import type {
   AgentPluginMutationResponse,
   AgentPluginsSnapshot,
   BackupRestoreResponse,
+  ConnectorRegistrySnapshot,
+  ConnectorDeliveryItem,
+  ConnectorAccountSnapshot,
   AgentTraceSnapshot,
   CompanionRuntimeSnapshot,
   ExperienceMetricsSnapshot,
@@ -33,6 +36,9 @@ export function useSystemDomain() {
   const agentTrace = ref<AgentTraceSnapshot | null>(null)
   const companionRuntime = ref<CompanionRuntimeSnapshot | null>(null)
   const experienceMetrics = ref<ExperienceMetricsSnapshot | null>(null)
+  const connectors = ref<ConnectorRegistrySnapshot | null>(null)
+  const connectorDeliveries = ref<Record<string, ConnectorDeliveryItem[]>>({})
+  const connectorAccounts = ref<Record<string, ConnectorAccountSnapshot>>({})
 
   const diagnosticsRequest = useDomainRequest<DiagnosticsSnapshot>()
   const logsRequest = useDomainRequest<SystemLogsSnapshot>()
@@ -63,6 +69,12 @@ export function useSystemDomain() {
   const resolveCompanionOpportunityRequest = useDomainRequest<{ ok: boolean }>()
   const cancelHeartbeatGoalRequest = useDomainRequest<{ ok: boolean; goal_id: string }>()
   const experienceMetricsRequest = useDomainRequest<ExperienceMetricsSnapshot>()
+  const connectorsRequest = useDomainRequest<ConnectorRegistrySnapshot>()
+  const disableConnectorRequest = useDomainRequest<{ ok: boolean; connector?: ConnectorRegistrySnapshot['connectors'][number] | null; error?: string }>()
+  const connectorDeliveriesRequest = useDomainRequest<{ ok: boolean; connectorId: string; items: ConnectorDeliveryItem[] }>()
+  const retryConnectorDeliveryRequest = useDomainRequest<{ ok: boolean; alreadySent?: boolean; delivery?: ConnectorDeliveryItem }>()
+  const cancelConnectorEventRequest = useDomainRequest<{ ok: boolean; cancelled?: boolean; outcome?: 'cancelled' | 'too_late' | 'unknown'; status?: string }>()
+  const connectorAccountRequest = useDomainRequest<{ ok: boolean; account: ConnectorAccountSnapshot }>()
 
   const loadDiagnostics = async () => {
     const result = await diagnosticsRequest.execute(() => systemClient.diagnostics())
@@ -225,6 +237,60 @@ export function useSystemDomain() {
     }
   }
 
+  const loadConnectors = async () => {
+    const result = await connectorsRequest.execute(() => systemClient.connectors())
+    if (result) connectors.value = result
+    return result
+  }
+
+  const disableConnector = async (connectorId: string) => {
+    const result = await disableConnectorRequest.execute(() => systemClient.disableConnector(connectorId))
+    if (result?.ok) await loadConnectors()
+    return result
+  }
+
+  const loadConnectorDeliveries = async (connectorId: 'telegram' | 'discord' | 'qq' | 'wechat') => {
+    const result = await connectorDeliveriesRequest.execute(() => systemClient.connectorDeliveries(connectorId, 20))
+    if (result) connectorDeliveries.value[connectorId] = result.items || []
+    return result
+  }
+
+  const retryConnectorDelivery = async (connectorId: 'telegram' | 'discord' | 'qq' | 'wechat', deliveryKey: string) => {
+    const result = await retryConnectorDeliveryRequest.execute(() => systemClient.retryConnectorDelivery(connectorId, deliveryKey))
+    if (result?.ok) await loadConnectorDeliveries(connectorId)
+    return result
+  }
+
+  const cancelConnectorEvent = async (connectorId: 'telegram' | 'discord' | 'qq' | 'wechat', eventId: string) => {
+    const result = await cancelConnectorEventRequest.execute(() => systemClient.cancelConnectorEvent(connectorId, eventId))
+    await loadConnectorDeliveries(connectorId)
+    return result
+  }
+
+  const loadConnectorAccount = async (connectorId: 'qq' | 'wechat') => {
+    const result = await connectorAccountRequest.execute(() => systemClient.connectorAccount(connectorId))
+    if (result?.account) connectorAccounts.value[connectorId] = result.account
+    return result?.account
+  }
+
+  const loginConnectorAccount = async (connectorId: 'qq' | 'wechat') => {
+    const result = await connectorAccountRequest.execute(() => systemClient.loginConnectorAccount(connectorId))
+    if (result?.account) connectorAccounts.value[connectorId] = result.account
+    return result?.account
+  }
+
+  const refreshConnectorAccount = async (connectorId: 'qq' | 'wechat') => {
+    const result = await connectorAccountRequest.execute(() => systemClient.refreshConnectorAccount(connectorId))
+    if (result?.account) connectorAccounts.value[connectorId] = result.account
+    return result?.account
+  }
+
+  const logoutConnectorAccount = async (connectorId: 'qq' | 'wechat') => {
+    const result = await connectorAccountRequest.execute(() => systemClient.logoutConnectorAccount(connectorId))
+    if (result?.account) connectorAccounts.value[connectorId] = result.account
+    return result?.account
+  }
+
   const loadAgentPlugins = async () => {
     const result = await agentPluginsRequest.execute(() => systemClient.agentPlugins())
     if (result) {
@@ -308,6 +374,9 @@ export function useSystemDomain() {
     agentTrace,
     companionRuntime,
     experienceMetrics,
+    connectors,
+    connectorDeliveries,
+    connectorAccounts,
     diagnosticsRequest,
     logsRequest,
     backupTargetsRequest,
@@ -337,6 +406,12 @@ export function useSystemDomain() {
     resolveCompanionOpportunityRequest,
     cancelHeartbeatGoalRequest,
     experienceMetricsRequest,
+    connectorsRequest,
+    disableConnectorRequest,
+    connectorDeliveriesRequest,
+    retryConnectorDeliveryRequest,
+    cancelConnectorEventRequest,
+    connectorAccountRequest,
     loadDiagnostics,
     loadLogs,
     loadBackupTargets,
@@ -358,6 +433,15 @@ export function useSystemDomain() {
     loadAgentTrace,
     loadCompanionRuntime,
     loadExperienceMetrics,
+    loadConnectors,
+    loadConnectorDeliveries,
+    retryConnectorDelivery,
+    cancelConnectorEvent,
+    loadConnectorAccount,
+    loginConnectorAccount,
+    refreshConnectorAccount,
+    logoutConnectorAccount,
+    disableConnector,
     createOnceSchedule,
     createIntervalSchedule,
     removeSchedule,

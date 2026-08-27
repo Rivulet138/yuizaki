@@ -3,16 +3,20 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from modules.system.runtime_endpoints import build_voice_diagnostics_endpoint
 from modules.system.voice_diagnostics import (
     REAL_DEVICE_REQUIRED_STAGES,
     RECOVERY_REQUIRED_STAGES,
+    VOICE_COMFORT_SCENARIOS,
     VoiceDiagnostics,
     VoiceEvidenceProvenance,
 )
 from modules.system.voice_qualification_artifact import (
     JsonVoiceQualificationArtifactStore,
 )
+from routes.system_api import create_system_router
 
 
 def _real_device_provenance(**overrides: str) -> VoiceEvidenceProvenance:
@@ -36,6 +40,41 @@ def _real_device_provenance(**overrides: str) -> VoiceEvidenceProvenance:
     return VoiceEvidenceProvenance(**values)  # type: ignore[arg-type]
 
 
+def test_voice_diagnostics_endpoint_is_transcript_free_and_does_not_probe_devices() -> None:
+    class _Diagnostics:
+        def runtime_snapshot(self, *, asr=None, tts=None):
+            assert asr is not None
+            assert tts is not None
+            return {
+                "sample_count": 0,
+                "evidence_kinds": [],
+                "evidence_claim": "synthetic_regression_only",
+                "providers": {"asr": {"configured": True, "available": True}},
+                "capability": {"voice": "ready", "text_chat": "preserved", "text_chat_blocked_by_voice": False},
+                "recommendations": [],
+            }
+
+    endpoint = build_voice_diagnostics_endpoint(
+        diagnostics_provider=lambda: _Diagnostics(),
+        asr_client_provider=lambda: object(),
+        tts_client_provider=lambda: object(),
+    )
+    result = endpoint()
+    assert result["capability"]["voice"] == "ready"
+    assert "transcript" not in result
+
+    app = FastAPI()
+    app.include_router(create_system_router(
+        health_handler=lambda: {"status": "healthy"},
+        readiness_handler=lambda: {"ready": True},
+        system_status_handler=lambda: {"status": "ok"},
+        voice_diagnostics_handler=endpoint,
+    ))
+    response = TestClient(app).get("/api/system/voice-diagnostics")
+    assert response.status_code == 200
+    assert response.json()["capability"]["text_chat_blocked_by_voice"] is False
+
+
 def test_voice_diagnostics_reports_percentiles_errors_and_guidance() -> None:
     diagnostics = VoiceDiagnostics(p95_warning_ms=100)
     diagnostics.record("asr", 40, provider="local")
@@ -51,6 +90,152 @@ def test_voice_diagnostics_reports_percentiles_errors_and_guidance() -> None:
     assert snapshot["evidence_claim"] == "synthetic_regression_only"
     assert any("asr" in item and "p95" in item for item in snapshot["recommendations"])
     assert any("failures" in item for item in snapshot["recommendations"])
+
+
+def test_voice_comfort_scenarios_report_repeatable_conversation_metrics() -> None:
+    diagnostics = VoiceDiagnostics()
+    scenarios = (
+        ("deliberate_interrupt", 80, 110, False, None, True),
+        ("hesitation", None, None, False, 180, True),
+        ("backchannel", None, None, False, 160, True),
+        ("background_speech", None, None, True, 220, False),
+        ("empty_asr", None, None, False, 200, True),
+    )
+    for scenario, stop_ms, ack_ms, false_interrupt, first_audio_ms, completed in scenarios:
+        diagnostics.record_comfort_scenario(
+            scenario,
+            stop_audio_latency_ms=stop_ms,
+            interrupt_ack_latency_ms=ack_ms,
+            false_interruption=false_interrupt,
+            first_audio_latency_ms=first_audio_ms,
+            continuous_turn_completed=completed,
+        )
+
+    report = diagnostics.comfort_snapshot()
+
+    assert report["coverage_complete"] is True
+    assert set(report["scenario_counts"]) == set(VOICE_COMFORT_SCENARIOS)
+    assert report["stop_audio_latency"]["p95_ms"] == 80
+    assert report["interrupt_ack_latency"]["p95_ms"] == 110
+    assert report["first_audio_latency"] == {
+        "count": 4,
+        "p50_ms": 190,
+        "p95_ms": 217,
+    }
+    assert report["false_interruption_rate"] == 0.25
+    assert report["continuous_turn_completion_rate"] == 0.8
+    assert report["claim"] == "synthetic_comfort_regression_only"
+    assert report["real_device_qualification"] == "not_evaluated"
+    assert report["comfort_gate"]["status"] == "needs_attention"
+    assert any("false interruption rate" in item for item in report["comfort_gate"]["failures"])
+
+
+def test_comfort_gate_reports_insufficient_data_without_claiming_device_quality() -> None:
+    diagnostics = VoiceDiagnostics()
+
+    gate = diagnostics.comfort_gate()
+
+    assert gate["status"] == "insufficient_data"
+    assert len(gate["checks"]) == 6
+    assert gate["evidence_kind"] == "synthetic_fixture"
+    assert gate["real_device_qualification"] == "not_evaluated"
+
+
+def test_comfort_gate_requires_all_scenarios_even_when_metrics_pass() -> None:
+    diagnostics = VoiceDiagnostics()
+    for scenario in ("hesitation", "backchannel", "background_speech", "empty_asr"):
+        diagnostics.record_comfort_scenario(
+            scenario,
+            stop_audio_latency_ms=80,
+            interrupt_ack_latency_ms=110,
+            first_audio_latency_ms=180,
+            continuous_turn_completed=True,
+        )
+
+    gate = diagnostics.comfort_gate()
+
+    assert gate["status"] == "insufficient_data"
+    assert "deliberate_interrupt" in gate["checks"][0]["missing_scenarios"]
+    assert gate["failures"] == ["missing comfort scenarios: deliberate_interrupt"]
+
+
+def test_comfort_gate_passes_complete_low_friction_fixture() -> None:
+    diagnostics = VoiceDiagnostics()
+    for scenario in VOICE_COMFORT_SCENARIOS:
+        diagnostics.record_comfort_scenario(
+            scenario,
+            stop_audio_latency_ms=80 if scenario == "deliberate_interrupt" else None,
+            interrupt_ack_latency_ms=110 if scenario == "deliberate_interrupt" else None,
+            first_audio_latency_ms=180 if scenario != "deliberate_interrupt" else None,
+            continuous_turn_completed=True,
+            false_interruption=False,
+        )
+
+    gate = diagnostics.comfort_gate()
+
+    assert gate["status"] == "pass"
+    assert all(check["status"] == "pass" for check in gate["checks"])
+
+
+def test_comfort_fixture_never_changes_real_device_qualification() -> None:
+    diagnostics = VoiceDiagnostics()
+    diagnostics.record_comfort_scenario(
+        "deliberate_interrupt",
+        stop_audio_latency_ms=70,
+        interrupt_ack_latency_ms=90,
+        continuous_turn_completed=True,
+    )
+
+    qualification = diagnostics.qualification_snapshot()
+
+    assert qualification["status"] == "not_qualified"
+    assert qualification["sample_count"] == 0
+    assert diagnostics.snapshot()["sample_count"] == 0
+
+
+def test_comfort_scenario_callbacks_are_bound_to_measurement_run() -> None:
+    diagnostics = VoiceDiagnostics()
+    handle = diagnostics.begin_measurement("comfort-run-01")
+    sample = diagnostics.record_comfort_scenario("hesitation", handle=handle)
+    assert sample.run_id == "comfort-run-01"
+
+    diagnostics.begin_measurement("comfort-run-02")
+    with pytest.raises(ValueError, match="measurement handle is stale"):
+        diagnostics.record_comfort_scenario("backchannel", handle=handle)
+    with pytest.raises(ValueError, match="run is stale"):
+        diagnostics.record_comfort_scenario("backchannel", run_id="comfort-run-01")
+
+
+def test_comfort_measurement_handle_rejects_same_label_restart() -> None:
+    diagnostics = VoiceDiagnostics()
+    first_handle = diagnostics.begin_measurement("same-label")
+    diagnostics.begin_measurement("same-label")
+
+    with pytest.raises(ValueError, match="measurement handle is stale"):
+        diagnostics.record_comfort_scenario("hesitation", handle=first_handle)
+
+    # A label alone cannot distinguish a same-ID restart; async callers must use a handle.
+    sample = diagnostics.record_comfort_scenario("hesitation", run_id="same-label")
+    assert sample.run_id == "same-label"
+
+
+def test_comfort_scenario_validation_and_run_isolation() -> None:
+    diagnostics = VoiceDiagnostics()
+    with pytest.raises(ValueError, match="unsupported voice comfort scenario"):
+        diagnostics.record_comfort_scenario("unknown")
+    with pytest.raises(ValueError, match="cannot be marked false"):
+        diagnostics.record_comfort_scenario(
+            "deliberate_interrupt", false_interruption=True
+        )
+    with pytest.raises(ValueError, match="first_audio_latency_ms"):
+        diagnostics.record_comfort_scenario("empty_asr", first_audio_latency_ms=-1)
+
+    diagnostics.record_comfort_scenario("hesitation", continuous_turn_completed=True)
+    diagnostics.begin_run("comfort-run-02")
+    report = diagnostics.comfort_snapshot()
+    assert report["sample_count"] == 0
+    assert report["coverage_complete"] is False
+    assert report["continuous_turn_completion_rate"] is None
 
 
 def test_voice_runtime_snapshot_exposes_provider_readiness() -> None:
@@ -239,6 +424,31 @@ def test_provider_status_projection_redacts_nested_secrets_and_empty_voice_is_de
     assert snapshot["capability"]["voice"] == "degraded"
 
 
+def test_provider_status_projection_drops_transcript_and_free_text_fields() -> None:
+    diagnostics = VoiceDiagnostics()
+    snapshot = diagnostics.runtime_snapshot(
+        asr=SimpleNamespace(
+            is_available=True,
+            provider="local-asr",
+            status_snapshot=lambda: {
+                "available": True,
+                "warmup_done": True,
+                "message": "user said hello there",
+                "transcript": "private words",
+                "last_error": "provider stack with request text",
+                "nested": {"diagnostic": "do not expose"},
+            },
+        ),
+        tts=None,
+    )
+
+    status = snapshot["providers"]["asr"]["status"]
+    assert status == {"available": True, "warmup_done": True}
+    assert "user said hello there" not in str(snapshot)
+    assert "private words" not in str(snapshot)
+    assert "provider stack" not in str(snapshot)
+
+
 def test_provenance_labels_are_bounded_and_secret_safe() -> None:
     provenance = _real_device_provenance(
         machine="Bearer abc-secret-token",
@@ -333,7 +543,8 @@ def test_qualified_artifact_requires_external_attestation(tmp_path) -> None:
     with pytest.raises(ValueError, match="external attestation"):
         JsonVoiceQualificationArtifactStore(path).write(report)
 
-    verifier = lambda value: value["claim"] == "reproducible_real_device_measurement"
+    def verifier(value: dict[str, object]) -> bool:
+        return value["claim"] == "reproducible_real_device_measurement"
     store = JsonVoiceQualificationArtifactStore(path, attestation_verifier=verifier)
     store.write(report)
     assert store.read()["status"] == "qualified"

@@ -20,7 +20,7 @@ type ProtocolInteraction = {
 
 type ProtocolManifest = typeof manifestJson
 export const runtimeProtocolManifest: ProtocolManifest = manifestJson
-export const runtimeProtocolHash = '11d3256146f8e31a18d5f538eff800201db5832461522355b6d89c32256ba3ca'
+export const runtimeProtocolHash = '0257f446ff4ca88e904bf822f3b78d10301bccd1c859682c03826565f735af09'
 export const SocketEvents = runtimeProtocolManifest.production_protocol.socket_events
 export type SocketEventName = typeof SocketEvents[keyof typeof SocketEvents]
 

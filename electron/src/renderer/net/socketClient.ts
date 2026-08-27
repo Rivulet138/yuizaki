@@ -53,6 +53,15 @@ export type ToolCallOptions = {
   jobId?: string;
   source?: string;
   retry?: boolean;
+  version?: number;
+};
+export type ToolRecheckOptions = Pick<ToolCallOptions, 'requestId' | 'runId' | 'jobId' | 'source'>;
+export type ToolRecheckResult = {
+  id: string;
+  status: 'verified' | 'unverified' | 'error' | 'unavailable';
+  reason?: string;
+  evidence?: string[];
+  durationMs?: number;
 };
 
 export class SocketClient {
@@ -365,13 +374,59 @@ export class SocketClient {
 
   /** 发送工具调用 */
   sendToolCall(id: string, name: string, args: Record<string, unknown>, options: ToolCallOptions = {}): void {
-    const payload: Record<string, unknown> = { id, name, args };
+    const payload: Record<string, unknown> = { id, name, args, version: options.version ?? 1 };
     if (options.requestId) payload.request_id = options.requestId;
     if (options.runId) payload.run_id = options.runId;
     if (options.jobId) payload.job_id = options.jobId;
     if (options.source) payload.source = options.source;
     if (options.retry !== undefined) payload.retry = options.retry;
     this.emit(SocketEvents.TOOL_CALL, payload);
+  }
+
+  /** Probe a tool's current effect without repeating the original action. */
+  sendToolRecheck(id: string, name: string, args: Record<string, unknown>, options: ToolRecheckOptions = {}): void {
+    const payload: Record<string, unknown> = { id, name, args, version: 1 };
+    if (options.requestId) payload.request_id = options.requestId;
+    if (options.runId) payload.run_id = options.runId;
+    if (options.jobId) payload.job_id = options.jobId;
+    if (options.source) payload.source = options.source;
+    this.emit(SocketEvents.TOOL_RECHECK, payload);
+  }
+
+  requestToolRecheck(
+    id: string,
+    name: string,
+    args: Record<string, unknown>,
+    options: ToolRecheckOptions & { timeoutMs?: number } = {},
+  ): Promise<ToolRecheckResult> {
+    const timeoutMs = Math.max(250, Math.min(30_000, options.timeoutMs ?? 5_000));
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        this.off(SocketEvents.TOOL_RECHECK_RESULT, handler);
+        reject(new Error('Tool status check timed out'));
+      }, timeoutMs);
+      const handler: EventHandler = (value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+        const result = value as Record<string, unknown>;
+        if (result.id !== id) return;
+        window.clearTimeout(timer);
+        this.off(SocketEvents.TOOL_RECHECK_RESULT, handler);
+        const status = typeof result.status === 'string' ? result.status : 'error';
+        if (!['verified', 'unverified', 'error', 'unavailable'].includes(status)) {
+          reject(new Error('Invalid tool status check response'));
+          return;
+        }
+        resolve({
+          id,
+          status: status as ToolRecheckResult['status'],
+          ...(typeof result.reason === 'string' ? { reason: result.reason } : {}),
+          ...(Array.isArray(result.evidence) ? { evidence: result.evidence.filter((item): item is string => typeof item === 'string').slice(0, 6) } : {}),
+          ...(typeof result.durationMs === 'number' && Number.isFinite(result.durationMs) ? { durationMs: result.durationMs } : {}),
+        });
+      };
+      this.on(SocketEvents.TOOL_RECHECK_RESULT, handler);
+      this.sendToolRecheck(id, name, args, options);
+    });
   }
 
   /** 发送 RAG 查询 */
@@ -402,17 +457,28 @@ export class SocketClient {
     | 'realtime_speech_to_response'
     | 'realtime_speech_to_playback'
     | 'realtime_turn_complete'
-    | 'realtime_interrupt_ack',
+    | 'realtime_interrupt_ack'
+    | 'realtime_playback_stop'
+    | 'realtime_playback_recovery'
+    | 'realtime_provider_cancel',
   options: {
     sessionId?: string;
     generationId?: string;
     elapsedMs?: number;
+    ok?: boolean;
+    recovered?: boolean;
+    recoveryLatencyMs?: number;
+    playbackUnderruns?: number;
   } = {}): void {
     this.emit(SocketEvents.CLIENT_TIMING, {
       stage,
       session_id: options.sessionId || '',
       generation_id: options.generationId || '',
       ...(Number.isFinite(options.elapsedMs) ? { elapsed_ms: options.elapsedMs } : {}),
+      ...(typeof options.ok === 'boolean' ? { ok: options.ok } : {}),
+      ...(typeof options.recovered === 'boolean' ? { recovered: options.recovered } : {}),
+      ...(Number.isFinite(options.recoveryLatencyMs) ? { recovery_latency_ms: options.recoveryLatencyMs } : {}),
+      ...(Number.isFinite(options.playbackUnderruns) ? { playback_underruns: options.playbackUnderruns } : {}),
     });
   }
 

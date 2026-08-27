@@ -11,6 +11,7 @@ import type {
   PetModelCatalogPayload,
   PetModelDefinition,
   PetModelExpressionOption,
+  PetModelLicenseInfo,
   PetModelMotionOption,
   PetResolvedEmotionTrigger,
 } from '../shared/pet-control'
@@ -55,6 +56,10 @@ interface RawEmotionMapEntry {
 
 type RawEmotionMapFile = Record<string, RawEmotionMapEntry>
 type CubismAssetReference = { label: string; file: string }
+type AssetSidecarResolution =
+  | { status: 'found'; filePath: string }
+  | { status: 'missing' }
+  | { status: 'ambiguous' }
 
 const LIVE2D_ROOT_CANDIDATES = [
   path.resolve(__dirname, '../../src/renderer/public/live2d'),
@@ -65,6 +70,11 @@ const VRM_ROOT_CANDIDATES = [
   path.resolve(__dirname, '../../dist/renderer/vrm'),
 ]
 const EMOTION_MAP_FILE_NAME = 'emotion-map.json'
+const ASSET_SIDECAR_FILE_NAME = 'yuizaki-asset.json'
+const ASSET_SIDECAR_MAX_BYTES = 32 * 1024
+const ASSET_LICENSE_SPDX_MAX_LENGTH = 128
+const ASSET_LICENSE_ATTRIBUTION_MAX_LENGTH = 500
+const INVALID_ASSET_SIDECAR_MARKER = '{"schemaVersion":1,"license":null}'
 const USER_LIVE2D_ASSET_PREFIX = '/api/pet/assets/live2d/'
 const USER_VRM_ASSET_PREFIX = '/api/pet/assets/vrm/'
 
@@ -81,6 +91,13 @@ const titleCase = (value: string): string =>
 
 const basenameWithoutExt = (filePath: string): string =>
   path.basename(filePath, path.extname(filePath))
+
+const modelSidecarStem = (filePath: string): string => {
+  const fileName = path.basename(filePath)
+  return fileName.toLowerCase().endsWith('.model3.json')
+    ? fileName.slice(0, -'.model3.json'.length)
+    : basenameWithoutExt(fileName)
+}
 
 const isZipArchivePath = (filePath: string): boolean =>
   path.extname(filePath).toLowerCase() === '.zip'
@@ -196,6 +213,16 @@ const isPathInsideRealBase = (baseDir: string, targetPath: string): boolean => {
 const hasText = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const hasOnlyKeys = (value: Record<string, unknown>, allowedKeys: readonly string[]): boolean =>
+  Object.keys(value).every((key) => allowedKeys.includes(key))
+
+const isSafeSpdxDeclaration = (value: string): boolean =>
+  value.length <= ASSET_LICENSE_SPDX_MAX_LENGTH &&
+  /^[A-Za-z0-9][A-Za-z0-9.+\-(): ]*$/.test(value)
+
 const realpathOrNull = (inputPath: string): string | null => {
   try {
     return fs.realpathSync.native(inputPath)
@@ -243,6 +270,7 @@ export class PetModelCatalog {
       ...model,
       motions: [...model.motions],
       expressions: [...model.expressions],
+      ...(model.license ? { license: { ...model.license } } : {}),
       emotions: model.emotions.map((emotion) => ({
         ...emotion,
         motions: [...emotion.motions],
@@ -443,24 +471,40 @@ export class PetModelCatalog {
       (!relativeToUserRoot.startsWith('..') && !path.isAbsolute(relativeToUserRoot))
 
     let importedModelFile = vrmFile
+    let createdTargetDir: string | null = null
     if (!sourceAlreadyManaged) {
       const targetDir = this.resolveUniqueImportTarget(
         this.userVrmRootDir,
         stat.isDirectory() ? path.basename(sourceDir) : basenameWithoutExt(vrmFile),
       )
-      fs.mkdirSync(targetDir, { recursive: true })
-      if (stat.isDirectory()) {
-        fs.cpSync(sourceDir, targetDir, { recursive: true })
-        importedModelFile = path.join(targetDir, path.relative(sourceDir, vrmFile))
-      } else {
-        importedModelFile = path.join(targetDir, path.basename(vrmFile))
-        fs.copyFileSync(vrmFile, importedModelFile)
+      createdTargetDir = targetDir
+      try {
+        fs.mkdirSync(targetDir, { recursive: true })
+        if (stat.isDirectory()) {
+          fs.cpSync(sourceDir, targetDir, { recursive: true })
+          importedModelFile = path.join(targetDir, path.relative(sourceDir, vrmFile))
+        } else {
+          importedModelFile = path.join(targetDir, path.basename(vrmFile))
+          fs.copyFileSync(vrmFile, importedModelFile)
+          this.copyOptionalAssetSidecar(vrmFile, targetDir)
+        }
+      } catch (error) {
+        fs.rmSync(targetDir, { recursive: true, force: true })
+        throw error
       }
     }
 
-    this.refresh()
-    return this.findImportedLocalModel('vrm', previousLocalIds)
-      ?? this.requireImportedLocalModel(importedModelFile, this.userVrmRootDir, USER_VRM_ASSET_PREFIX)
+    try {
+      this.refresh()
+      return this.findImportedLocalModel('vrm', previousLocalIds)
+        ?? this.requireImportedLocalModel(importedModelFile, this.userVrmRootDir, USER_VRM_ASSET_PREFIX)
+    } catch (error) {
+      if (createdTargetDir) {
+        fs.rmSync(createdTargetDir, { recursive: true, force: true })
+        this.refresh()
+      }
+      throw error
+    }
   }
 
   removeLocalModel(modelId: string): boolean {
@@ -551,6 +595,11 @@ export class PetModelCatalog {
           ? `./vrm/${model.assetPath}`
           : `./live2d/${model.assetPath}`
       config.modelManifest = model.manifest ?? null
+      config.emotionPresets = model.emotions.map((emotion) => ({
+        ...emotion,
+        motions: emotion.motions.map((motion) => ({ ...motion })),
+        expressions: [...emotion.expressions],
+      }))
       if (model.animationPaths?.length) {
         config.animationPaths = [...model.animationPaths]
       }
@@ -916,6 +965,7 @@ export class PetModelCatalog {
       motions,
       expressions,
       emotions: this.extractEmotions(id, motions, expressions, manifest),
+      ...(source === 'local' ? { license: this.loadAssetLicense(modelFilePath) } : {}),
       manifest,
       promptContext: this.avatarManifestService.buildPromptContext(manifest).prompt,
     }
@@ -955,7 +1005,131 @@ export class PetModelCatalog {
       motions: [],
       expressions: [],
       emotions: [],
+      ...(source === 'local' ? { license: this.loadAssetLicense(vrmFilePath) } : {}),
       ...(animationPaths.length > 0 ? { animationPaths } : {}),
+    }
+  }
+
+  private loadAssetLicense(modelFilePath: string): PetModelLicenseInfo {
+    const resolution = this.resolveAssetSidecar(modelFilePath)
+    if (resolution.status === 'missing') {
+      return { status: 'missing' }
+    }
+    if (resolution.status === 'ambiguous') {
+      return { status: 'invalid' }
+    }
+    const sidecarPath = resolution.filePath
+
+    try {
+      const stat = fs.lstatSync(sidecarPath)
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > ASSET_SIDECAR_MAX_BYTES) {
+        return { status: 'invalid' }
+      }
+
+      const parsed: unknown = JSON.parse(fs.readFileSync(sidecarPath, 'utf8'))
+      if (!isPlainObject(parsed)) {
+        return { status: 'invalid' }
+      }
+      const license = parsed['license']
+      if (
+        parsed['schemaVersion'] !== 1 ||
+        !hasOnlyKeys(parsed, ['schemaVersion', 'license']) ||
+        !isPlainObject(license) ||
+        !hasOnlyKeys(license, ['spdx', 'redistributable', 'attribution'])
+      ) {
+        return { status: 'invalid' }
+      }
+
+      const spdx = typeof license['spdx'] === 'string' ? license['spdx'].trim() : ''
+      const redistribution = license['redistributable']
+      const hasAttribution = Object.prototype.hasOwnProperty.call(license, 'attribution')
+      const rawAttribution = license['attribution']
+      if (hasAttribution && typeof rawAttribution !== 'string') {
+        return { status: 'invalid' }
+      }
+      const attribution = hasAttribution
+        ? (rawAttribution as string).trim()
+        : undefined
+      if (
+        !spdx ||
+        !isSafeSpdxDeclaration(spdx) ||
+        typeof redistribution !== 'boolean' ||
+        (attribution !== undefined && (!attribution || attribution.length > ASSET_LICENSE_ATTRIBUTION_MAX_LENGTH))
+      ) {
+        return { status: 'invalid' }
+      }
+
+      return {
+        status: 'declared',
+        spdx,
+        redistributable: redistribution,
+        ...(attribution ? { attribution } : {}),
+      }
+    } catch {
+      return { status: 'invalid' }
+    }
+  }
+
+  private resolveAssetSidecar(modelFilePath: string): AssetSidecarResolution {
+    const modelDir = path.dirname(modelFilePath)
+    const modelSpecificPath = path.join(modelDir, `${modelSidecarStem(modelFilePath)}.yuizaki-asset.json`)
+    if (fs.existsSync(modelSpecificPath)) {
+      return { status: 'found', filePath: modelSpecificPath }
+    }
+
+    const genericPath = path.join(modelDir, ASSET_SIDECAR_FILE_NAME)
+    if (!fs.existsSync(genericPath)) {
+      return { status: 'missing' }
+    }
+
+    try {
+      const siblingModels = fs.readdirSync(modelDir, { withFileTypes: true })
+        .filter((entry) => entry.isFile())
+        .filter((entry) => {
+          const lowerName = entry.name.toLowerCase()
+          return lowerName.endsWith('.model3.json') || lowerName.endsWith('.vrm')
+        })
+      return siblingModels.length === 1
+        ? { status: 'found', filePath: genericPath }
+        : { status: 'ambiguous' }
+    } catch {
+      return { status: 'ambiguous' }
+    }
+  }
+
+  private copyOptionalAssetSidecar(sourceModelFile: string, targetDir: string): void {
+    const resolution = this.resolveAssetSidecar(sourceModelFile)
+    if (resolution.status === 'missing') {
+      return
+    }
+
+    const targetName = resolution.status === 'found'
+      ? path.basename(resolution.filePath)
+      : ASSET_SIDECAR_FILE_NAME
+    const targetPath = path.join(targetDir, targetName)
+    if (resolution.status === 'ambiguous') {
+      this.writeInvalidAssetSidecarMarker(targetPath)
+      return
+    }
+
+    try {
+      const stat = fs.lstatSync(resolution.filePath)
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > ASSET_SIDECAR_MAX_BYTES) {
+        this.writeInvalidAssetSidecarMarker(targetPath)
+        return
+      }
+      fs.copyFileSync(resolution.filePath, targetPath)
+    } catch (error) {
+      logger.warn('[PetModelCatalog] Optional model license sidecar could not be copied:', error)
+      this.writeInvalidAssetSidecarMarker(targetPath)
+    }
+  }
+
+  private writeInvalidAssetSidecarMarker(targetPath: string): void {
+    try {
+      fs.writeFileSync(targetPath, INVALID_ASSET_SIDECAR_MARKER, { encoding: 'utf8', flag: 'wx' })
+    } catch (error) {
+      logger.warn('[PetModelCatalog] Optional invalid-license marker could not be written:', error)
     }
   }
 

@@ -1000,6 +1000,10 @@ class LLMClient:
 
     async def connect(self) -> None:
         """Initialize HTTP client."""
+        if not self.base_url.strip():
+            self._http = None
+            logger.info("LLM client left cold because no provider endpoint is configured")
+            return
         self._http = httpx.AsyncClient(timeout=self.timeout)
         logger.info("LLM client connected to %s (provider=%s)", self.base_url, self.provider)
 

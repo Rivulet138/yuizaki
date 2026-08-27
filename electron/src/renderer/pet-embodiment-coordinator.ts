@@ -154,7 +154,11 @@ export class PetEmbodimentCoordinator {
     for (const timer of this.timers.values()) this.cancelTimeout(timer)
     this.timers.clear()
     this.requests.clear()
+    // Disposal must release transient channels as well as timers so a renderer
+    // teardown cannot leave a stale gaze/expression/viseme applied.
+    for (const channel of this.transients.keys()) this.resetTransient(channel)
     this.transients.clear()
+    this.resolved = 'idle'
   }
 
   private resolve(): void {

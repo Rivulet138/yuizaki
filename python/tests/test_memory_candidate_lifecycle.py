@@ -453,6 +453,132 @@ def test_rejected_candidate_is_terminal_and_deleted_candidates_are_auditable():
     assert {item["id"] for item in tombstone_list.json()["candidates"]} >= {deleted_id}
 
 
+def test_delete_preview_reports_physical_tombstone_and_reference_effects():
+    routes_module = __import__("modules.memory.routes", fromlist=["MemoryState", "create_memory_router"])
+    store = VectorStore(embedding_service=_Embedding())
+    state = routes_module.MemoryState(store=store)
+    app = FastAPI()
+    app.include_router(routes_module.create_memory_router(state, count_memory_references=lambda ids: len(ids) + 2))
+    client = TestClient(app)
+
+    ordinary = Document(id="ordinary-preview", text="ordinary", metadata={"scope": "workspace", "workspace_id": "default"})
+    candidate = _candidate_payload(task_id="preview-candidate")
+    store.add_document(ordinary)
+    store.add_metadata_document(Document(id=candidate["doc_id"], text=candidate["text"], metadata=candidate["metadata"]))
+
+    response = client.post("/memory/docs/delete-preview", json={"ids": [ordinary.id, candidate["doc_id"]]})
+    assert response.status_code == 200
+    assert response.json()["hard_delete_count"] == 1
+    assert response.json()["candidate_tombstone_count"] == 1
+    assert response.json()["affected_message_count"] == 3
+    assert response.json()["effects"]["recoverable"] is False
+
+
+def test_candidate_list_respects_explicit_scope_and_workspace_filters():
+    routes_module = __import__("modules.memory.routes", fromlist=["MemoryState", "create_memory_router"])
+    store = VectorStore(embedding_service=_Embedding())
+    state = routes_module.MemoryState(store=store)
+    app = FastAPI()
+    app.include_router(routes_module.create_memory_router(state))
+    client = TestClient(app)
+
+    first = _candidate_payload(task_id="task-scope-one")
+    second = _candidate_payload(task_id="task-scope-two")
+    second["metadata"]["workspace_id"] = "ws-other"
+    store.add_metadata_document(Document(id=first["doc_id"], text=first["text"], metadata=first["metadata"]))
+    store.add_metadata_document(Document(id=second["doc_id"], text=second["text"], metadata=second["metadata"]))
+
+    response = client.get("/memory/candidates?status=pending&scope=workspace&workspace_id=ws")
+    assert response.status_code == 200
+    assert {item["id"] for item in response.json()["candidates"]} == {first["doc_id"]}
+
+    other = client.get("/memory/candidates?status=pending&scope=workspace&workspace_id=ws-other")
+    assert other.status_code == 200
+    assert {item["id"] for item in other.json()["candidates"]} == {second["doc_id"]}
+
+
+def test_memory_export_respects_scope_state_and_rebuild_contract():
+    routes_module = __import__("modules.memory.routes", fromlist=["MemoryState", "create_memory_router"])
+    store = VectorStore(embedding_service=_Embedding())
+    state = routes_module.MemoryState(store=store)
+    app = FastAPI()
+    app.include_router(routes_module.create_memory_router(state))
+    client = TestClient(app)
+
+    active = _candidate_payload(task_id="task-export-active")
+    active["metadata"].update({"candidate": False, "review_status": "approved", "workspace_id": "ws"})
+    forgotten = _candidate_payload(task_id="task-export-forgotten")
+    forgotten["metadata"].update({"candidate": False, "review_status": "approved", "workspace_id": "ws", "soft_forgotten": True})
+    other = _candidate_payload(task_id="task-export-other")
+    other["metadata"].update({"candidate": False, "review_status": "approved", "workspace_id": "ws-other"})
+    for payload in (active, forgotten, other):
+        store.add_metadata_document(Document(id=payload["doc_id"], text=payload["text"], metadata=payload["metadata"]))
+
+    response = client.get("/memory/export?scope=workspace&workspace_id=ws")
+    assert response.status_code == 200
+    assert response.headers["content-disposition"].endswith('yuizaki-memory-export.json"')
+    body = response.json()
+    assert body["format"] == "yuizaki-memory-export"
+    assert body["include_state"] == "active"
+    assert {item["id"] for item in body["docs"]} == {active["doc_id"]}
+
+    all_states = client.get("/memory/export?scope=workspace&workspace_id=ws&include_state=all")
+    assert all_states.status_code == 200
+    assert {item["id"] for item in all_states.json()["docs"]} == {active["doc_id"], forgotten["doc_id"]}
+
+    invalid = client.get("/memory/export?scope=workspace&include_state=invalid")
+    assert invalid.status_code == 400
+
+
+def test_memory_import_validates_format_skips_candidates_and_restores_forgotten_state():
+    routes_module = __import__("modules.memory.routes", fromlist=["MemoryState", "create_memory_router"])
+    store = VectorStore(embedding_service=_Embedding())
+    state = routes_module.MemoryState(store=store)
+    app = FastAPI()
+    app.include_router(routes_module.create_memory_router(state))
+    client = TestClient(app)
+
+    response = client.post("/memory/import", json={
+        "format": "yuizaki-memory-export",
+        "version": 1,
+        "scope": "workspace",
+        "workspace_id": "ws",
+        "docs": [
+            {"id": "import-active", "text": "keep this", "metadata": {"type": "fact", "layer": "semantic"}},
+            {"id": "import-forgotten", "text": "restore hidden", "metadata": {"soft_forgotten": True}},
+            {"id": "import-candidate", "text": "never revive", "metadata": {"candidate": True, "review_status": "rejected"}},
+            {"id": "import-superseded", "text": "old value", "metadata": {"review_status": "superseded"}},
+        ],
+    })
+    assert response.status_code == 200
+    body = response.json()
+    assert body["imported_count"] == 2
+    assert {item["id"] for item in body["skipped"]} == {"import-candidate", "import-superseded"}
+    assert body["skipped_reason_counts"] == {"terminal_or_review_candidate": 2}
+    assert body["restored_soft_forgotten_count"] == 1
+    assert body["effects"]["authority_store"] == "updated"
+    assert body["effects"]["index"] == "rebuild_required"
+    assert body["effects"]["chat_references"] == "preserved"
+    imported = {doc.id: doc for doc in store.list_documents()}
+    assert imported["import-active"].metadata["workspace_id"] == "ws"
+    assert imported["import-forgotten"].metadata.get("soft_forgotten") is True
+    assert "import-candidate" not in imported
+    assert "import-superseded" not in imported
+
+    duplicate = client.post("/memory/import", json={
+        "format": "yuizaki-memory-export", "version": 1, "scope": "workspace", "workspace_id": "ws",
+        "docs": [{"id": "import-active", "text": "changed", "metadata": {}}],
+    })
+    assert duplicate.status_code == 200
+    assert duplicate.json()["skipped"][0]["reason"] == "id_exists"
+    assert duplicate.json()["skipped_reason_counts"] == {"id_exists": 1}
+
+    invalid = client.post("/memory/import", json={
+        "format": "other", "version": 1, "scope": "workspace", "workspace_id": "ws", "docs": [],
+    })
+    assert invalid.status_code == 422
+
+
 def test_candidate_non_revival_survives_sqlite_restart_index_rebuild_and_real_writer(tmp_path):
     db_path = tmp_path / "memory.db"
     first_store = SQLiteMemoryStore(db_path, embedding_service=_Embedding())

@@ -100,6 +100,19 @@ const writeLive2dFixture = (modelDir: string, modelName: string): string => {
   return modelFile
 }
 
+const writeAssetLicenseSidecar = (
+  modelDir: string,
+  license: Record<string, unknown> = {
+    spdx: 'CC-BY-4.0',
+    redistributable: true,
+    attribution: 'Yuizaki Test Creator',
+  },
+): string => {
+  const sidecarPath = path.join(modelDir, 'yuizaki-asset.json')
+  fs.writeFileSync(sidecarPath, JSON.stringify({ schemaVersion: 1, license }), 'utf8')
+  return sidecarPath
+}
+
 describe('PetModelCatalog', () => {
   it.each([
     ['models/hero.model3.json', true],
@@ -253,6 +266,7 @@ describe('PetModelCatalog', () => {
 
     try {
       writeLive2dFixture(modelDir, modelName)
+      writeAssetLicenseSidecar(modelDir)
 
       const imported = await catalog.importLocalLive2dModel(parentDir)
 
@@ -261,9 +275,17 @@ describe('PetModelCatalog', () => {
       expect(imported.assetPath.startsWith('/api/pet/assets/live2d/')).toBe(true)
       expect(imported.assetPath).toContain(encodeURIComponent(modelName))
       expect(imported.manifest?.modelJson).toBe(`${modelName}/${modelName}.model3.json`)
+      expect(imported.license).toEqual({
+        status: 'declared',
+        spdx: 'CC-BY-4.0',
+        redistributable: true,
+        attribution: 'Yuizaki Test Creator',
+      })
 
       const relativeAssetPath = decodeURIComponent(imported.assetPath.replace('/api/pet/assets/live2d/', ''))
-      expect(catalog.resolveLocalLive2dAsset(relativeAssetPath)).toBeTruthy()
+      const importedModelPath = catalog.resolveLocalLive2dAsset(relativeAssetPath)
+      expect(importedModelPath).toBeTruthy()
+      expect(fs.existsSync(path.join(path.dirname(importedModelPath!), 'yuizaki-asset.json'))).toBe(true)
       expect(catalog.removeLocalModel(imported.id)).toBe(true)
       expect(catalog.getModels().some((model) => model.id === imported.id)).toBe(false)
     } finally {
@@ -310,14 +332,30 @@ describe('PetModelCatalog', () => {
 
     try {
       fs.writeFileSync(vrmFile, 'vrm-binary-placeholder', 'utf8')
+      writeAssetLicenseSidecar(externalDir, {
+        spdx: 'LicenseRef-Creator-EULA',
+        redistributable: false,
+        attribution: 'VRM Creator',
+      })
       const imported = catalog.importLocalVrmModel(vrmFile)
 
       expect(imported.type).toBe('vrm')
       expect(imported.source).toBe('local')
       expect(imported.assetPath.startsWith('/api/pet/assets/vrm/')).toBe(true)
+      expect(imported.license).toEqual({
+        status: 'declared',
+        spdx: 'LicenseRef-Creator-EULA',
+        redistributable: false,
+        attribution: 'VRM Creator',
+      })
 
       const relativeAssetPath = decodeURIComponent(imported.assetPath.replace('/api/pet/assets/vrm/', ''))
-      expect(catalog.resolveLocalVrmAsset(relativeAssetPath)).toBeTruthy()
+      const importedModelPath = catalog.resolveLocalVrmAsset(relativeAssetPath)
+      expect(importedModelPath).toBeTruthy()
+      expect(fs.existsSync(path.join(path.dirname(importedModelPath!), 'yuizaki-asset.json'))).toBe(true)
+      const serializedCatalog = JSON.stringify(catalog.getCatalog(imported.id))
+      expect(serializedCatalog).not.toContain(externalDir)
+      expect(serializedCatalog).not.toContain(catalog.getUserVrmRootDir())
       expect(catalog.removeLocalModel(imported.id)).toBe(true)
       expect(catalog.getModels().some((model) => model.id === imported.id)).toBe(false)
     } finally {
@@ -338,11 +376,148 @@ describe('PetModelCatalog', () => {
       const imported = catalog.importLocalVrmModel(vrmFile)
 
       expect(imported.assetPath).toBe(`/api/pet/assets/vrm/${encodeURIComponent(fileName)}`)
+      expect(imported.license).toEqual({ status: 'missing' })
       expect(fs.existsSync(vrmFile)).toBe(true)
       expect(catalog.removeLocalModel(imported.id)).toBe(true)
       expect(fs.existsSync(vrmFile)).toBe(false)
     } finally {
       fs.rmSync(vrmFile, { force: true })
+    }
+  })
+
+  it('keeps local model import usable when the license sidecar is invalid', () => {
+    const catalog = new PetModelCatalog()
+    const externalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yuizaki-vrm-invalid-license-'))
+    const vrmFile = path.join(externalDir, 'invalid-license.vrm')
+
+    try {
+      fs.writeFileSync(vrmFile, 'vrm-binary-placeholder', 'utf8')
+      writeAssetLicenseSidecar(externalDir, {
+        spdx: 'MIT',
+        redistributable: true,
+        attribution: 'x'.repeat(501),
+      })
+
+      const imported = catalog.importLocalVrmModel(vrmFile)
+
+      expect(imported.license).toEqual({ status: 'invalid' })
+      expect(catalog.getModelById(imported.id)?.id).toBe(imported.id)
+      expect(catalog.removeLocalModel(imported.id)).toBe(true)
+    } finally {
+      fs.rmSync(externalDir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not parse oversized license sidecars or block local model import', () => {
+    const catalog = new PetModelCatalog()
+    const externalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yuizaki-vrm-oversized-license-'))
+    const vrmFile = path.join(externalDir, 'oversized-license.vrm')
+
+    try {
+      fs.writeFileSync(vrmFile, 'vrm-binary-placeholder', 'utf8')
+      fs.writeFileSync(path.join(externalDir, 'yuizaki-asset.json'), 'x'.repeat(33 * 1024), 'utf8')
+
+      const imported = catalog.importLocalVrmModel(vrmFile)
+
+      expect(imported.license).toEqual({ status: 'invalid' })
+      const relativeAssetPath = decodeURIComponent(imported.assetPath.replace('/api/pet/assets/vrm/', ''))
+      const importedModelPath = catalog.resolveLocalVrmAsset(relativeAssetPath)
+      const importedSidecarPath = path.join(path.dirname(importedModelPath!), 'yuizaki-asset.json')
+      expect(fs.statSync(importedSidecarPath).size).toBeLessThan(32 * 1024)
+      expect(catalog.removeLocalModel(imported.id)).toBe(true)
+    } finally {
+      fs.rmSync(externalDir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not apply one directory sidecar to multiple sibling models', () => {
+    const catalog = new PetModelCatalog()
+    const root = catalog.getUserVrmRootDir()
+    const folderName = uniqueName('ambiguous-license')
+    const modelDir = path.join(root, folderName)
+
+    try {
+      fs.mkdirSync(modelDir, { recursive: true })
+      fs.writeFileSync(path.join(modelDir, 'alpha.vrm'), 'alpha-vrm', 'utf8')
+      fs.writeFileSync(path.join(modelDir, 'beta.vrm'), 'beta-vrm', 'utf8')
+      writeAssetLicenseSidecar(modelDir)
+      writeAssetLicenseSidecar(modelDir, {
+        spdx: 'MIT',
+        redistributable: true,
+        attribution: 'Alpha Creator',
+      })
+      fs.renameSync(
+        path.join(modelDir, 'yuizaki-asset.json'),
+        path.join(modelDir, 'alpha.yuizaki-asset.json'),
+      )
+      writeAssetLicenseSidecar(modelDir)
+
+      catalog.refresh()
+      const siblingModels = catalog.getModels().filter((model) =>
+        model.type === 'vrm' && model.assetPath.includes(encodeURIComponent(folderName)))
+      const alpha = siblingModels.find((model) => model.assetPath.endsWith('/alpha.vrm'))
+      const beta = siblingModels.find((model) => model.assetPath.endsWith('/beta.vrm'))
+
+      expect(siblingModels).toHaveLength(2)
+      expect(alpha?.license).toEqual({
+        status: 'declared',
+        spdx: 'MIT',
+        redistributable: true,
+        attribution: 'Alpha Creator',
+      })
+      expect(beta?.license).toEqual({ status: 'invalid' })
+    } finally {
+      fs.rmSync(modelDir, { recursive: true, force: true })
+      catalog.refresh()
+    }
+  })
+
+  it('treats a non-string attribution as an invalid declaration without blocking import', () => {
+    const catalog = new PetModelCatalog()
+    const externalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yuizaki-vrm-attribution-type-'))
+    const vrmFile = path.join(externalDir, 'typed-license.vrm')
+
+    try {
+      fs.writeFileSync(vrmFile, 'vrm-binary-placeholder', 'utf8')
+      writeAssetLicenseSidecar(externalDir, {
+        spdx: 'MIT',
+        redistributable: true,
+        attribution: 42,
+      })
+
+      const imported = catalog.importLocalVrmModel(vrmFile)
+
+      expect(imported.license).toEqual({ status: 'invalid' })
+      expect(catalog.removeLocalModel(imported.id)).toBe(true)
+    } finally {
+      fs.rmSync(externalDir, { recursive: true, force: true })
+    }
+  })
+
+  it('degrades a sidecar copy failure without failing the VRM import', () => {
+    const catalog = new PetModelCatalog()
+    const externalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yuizaki-vrm-sidecar-copy-'))
+    const vrmFile = path.join(externalDir, 'copy-fallback.vrm')
+    const originalCopyFileSync = fs.copyFileSync.bind(fs)
+
+    try {
+      fs.writeFileSync(vrmFile, 'vrm-binary-placeholder', 'utf8')
+      writeAssetLicenseSidecar(externalDir)
+      const copySpy = vi.spyOn(fs, 'copyFileSync').mockImplementation((source, destination, mode) => {
+        if (path.basename(String(source)) === 'yuizaki-asset.json') {
+          throw new Error('sidecar copy fixture failure')
+        }
+        originalCopyFileSync(source, destination, mode)
+      })
+
+      const imported = catalog.importLocalVrmModel(vrmFile)
+
+      expect(imported.license).toEqual({ status: 'invalid' })
+      expect(catalog.removeLocalModel(imported.id)).toBe(true)
+      copySpy.mockRestore()
+    } finally {
+      vi.restoreAllMocks()
+      fs.rmSync(externalDir, { recursive: true, force: true })
     }
   })
 })

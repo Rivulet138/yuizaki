@@ -27,6 +27,7 @@ const memoryClientMocks = vi.hoisted(() => ({
   query: vi.fn().mockResolvedValue({ query: '', results: [] }),
   queryPipeline: vi.fn().mockResolvedValue({ query: '', results: [] }),
   queryRag: vi.fn().mockResolvedValue({ query: '', results: [] }),
+  recordRecallFeedback: vi.fn().mockResolvedValue({ status: 'recorded', id: 'doc-1', feedback: 'helpful', counts: { helpful: 1 } }),
   getIndexStatus: vi.fn().mockResolvedValue({ status: 'ready', count: 0 }),
 }))
 
@@ -161,5 +162,30 @@ describe('useMemoryDomain scoped workspace defaults', () => {
         final: 0.82,
       },
     }))
+  })
+
+  it('normalizes retrieval explanations and updates the local helpful count after feedback', async () => {
+    memoryClientMocks.query.mockResolvedValueOnce({
+      query: 'tea',
+      results: [{
+        id: 'doc-helpful',
+        text: 'prefers tea',
+        why_recalled: '与当前请求直接匹配',
+        evidence_type: 'anchor',
+        association: null,
+        metadata: { recall_feedback: { summary: { helpful: 2 } } },
+      }],
+    })
+    const domain = useMemoryDomain()
+
+    await domain.queryMemory({ query: 'tea', scope: 'workspace' })
+    await domain.recordRecallFeedback('doc-helpful', 'helpful')
+
+    expect(domain.queryResult.value?.results[0]).toEqual(expect.objectContaining({
+      why_recalled: '与当前请求直接匹配',
+      evidence_type: 'anchor',
+      metadata: { recall_feedback: { summary: { helpful: 1 } } },
+    }))
+    expect(memoryClientMocks.recordRecallFeedback).toHaveBeenCalledWith('doc-helpful', 'helpful')
   })
 })

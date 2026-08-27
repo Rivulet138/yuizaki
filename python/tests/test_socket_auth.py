@@ -38,3 +38,14 @@ def test_http_auth_skips_loopback_and_keeps_remote_token_boundary():
     assert verify_backend_api_authorization(
         "Bearer secret-token", "secret-token", client_host="192.168.1.20"
     ) == (True, "")
+
+
+def test_external_connector_webhooks_use_provider_auth_only_on_exact_post_paths():
+    for connector_id in ("telegram", "discord", "qq", "wechat"):
+        path = f"/api/system/connectors/{connector_id}/webhook"
+        assert backend_api_auth_required(path, "POST", client_host="203.0.113.10") is False
+        assert backend_api_auth_required(path, "GET", client_host="203.0.113.10") is True
+        assert backend_api_auth_required(f"{path}/extra", "POST", client_host="203.0.113.10") is True
+        assert backend_api_auth_required(
+            f"/api/system/connectors/{connector_id}/config", "GET", client_host="203.0.113.10"
+        ) is True

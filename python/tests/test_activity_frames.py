@@ -531,6 +531,40 @@ def test_feedback_is_idempotent_and_never_source_atomically_fences_pending(tmp_p
     )
 
 
+def test_negative_feedback_cancels_current_opportunity_and_temporarily_gates_future_ones(tmp_path: Path) -> None:
+    store = ActivityFrameStore(tmp_path / "frames.sqlite3")
+    service = ActivityFrameService(store, _TurnStore([]))
+    now = time.time()
+    frame = _frame(created_at=now, expires_at=now + 100_000)
+    assert store.upsert_frame(frame)
+    _enable(store, daily_budget=3, cooldown_seconds=0)
+    decision = store.evaluate("workspace-a", frame, now=now)
+    assert decision.allowed
+    assert store.reserve_opportunity(
+        "workspace-a",
+        job_id="job:feedback",
+        request_id="request:feedback",
+        frame_id=frame.frame_id,
+        source_kind=SOURCE_KIND,
+        local_date=decision.local_date,
+        now=now,
+    )
+
+    result = service.feedback("workspace-a", {
+        "feedbackId": "feedback:too-frequent",
+        "jobId": "job:feedback",
+        "requestId": "request:feedback",
+        "sourceKind": SOURCE_KIND,
+        "kind": "too_frequent",
+    })
+    assert result["ok"] is True
+    assert result["cancelledPending"] == 1
+    assert store.evaluate("workspace-a", frame, now=now + 1.0).reason == "feedback_too_frequent"
+    next_frame = _frame(source_id="turn:two", created_at=now, expires_at=now + 100_000)
+    assert store.upsert_frame(next_frame)
+    assert store.evaluate("workspace-a", next_frame, now=now + 3_601.0).allowed
+
+
 class _TurnStore:
     def __init__(self, events: list[dict[str, Any]]) -> None:
         self.events = events

@@ -46,6 +46,7 @@ class TimeContextPlugin(AgentPlugin):
                     source="builtin",
                     tool_name="time.now",
                 ),
+                effect_kind="read",
                 risk_level="safe",
             )
         ]

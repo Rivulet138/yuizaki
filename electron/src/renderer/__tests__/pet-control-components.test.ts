@@ -25,6 +25,12 @@ const model: PetModelDefinition = {
   motions: [{ id: 'idle:0', label: 'Idle', group: 'Idle', index: 0 }],
   expressions: [{ id: 'happy', label: 'Happy', kind: 'expression' }],
   emotions: [],
+  license: {
+    status: 'declared',
+    spdx: 'CC-BY-4.0',
+    redistributable: true,
+    attribution: 'Yui Studio',
+  },
   manifest: null,
   promptContext: '',
 }
@@ -115,5 +121,26 @@ describe('desktop pet control components', () => {
     expect(wrapper.find('.pet-model-manager__selection').exists()).toBe(false)
     expect(wrapper.find('.pet-model-manager__empty').exists()).toBe(true)
     expect(wrapper.find('.pet-model-manager__danger').exists()).toBe(false)
+  })
+
+  it('shows only the bounded license projection for local models', async () => {
+    const wrapper = mountModels()
+    const declared = wrapper.get('.pet-model-manager__license')
+    expect(declared.text()).toContain('CC-BY-4.0')
+    expect(declared.text()).toContain('Yui Studio')
+
+    const modelWithMissingLicense = {
+      ...model,
+      license: {
+        status: 'missing' as const,
+        localPath: 'E:/private/models/yui',
+      },
+    }
+    await wrapper.setProps({ currentModel: modelWithMissingLicense })
+
+    const missing = wrapper.get('.pet-model-manager__license')
+    expect(missing.classes()).toContain('pet-model-manager__license--missing')
+    expect(missing.text()).toMatch(/No license declared|未声明许可证|ライセンス未宣言/)
+    expect(missing.text()).not.toContain('E:/private')
   })
 })

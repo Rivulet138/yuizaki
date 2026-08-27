@@ -1,9 +1,96 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from collections.abc import Mapping
+from typing import Any
 
-from .relationship_runtime import collect_relationship_events
+from ..agent.perception import redact_sensitive_payload
+from ..llm.client import redact_error_text
 from .memory_query import build_style_aware_retrieval_strategy
+from .relationship_runtime import collect_relationship_events
+
+_MAX_JOB_EVENT_TEXT = 512
+_MAX_JOB_EVENT_LIST_ITEMS = 16
+_MAX_JOB_EVENT_DICT_ITEMS = 32
+_MAX_JOB_EVENT_DEPTH = 6
+_JOB_EVENT_CONTRACT_KEYS = (
+    "version", "type", "workspaceId", "sessionId", "turnId", "jobId",
+    "requestId", "revision", "interruptionEpoch", "source", "timestamp", "status",
+    "conversationId", "operationId", "stepIndex", "runId", "data",
+    "args", "toolName", "tool_name", "retryable", "replayArgsAvailable",
+    "recheckAvailable", "effectOutcome", "verification", "verificationStatus",
+    "verificationEvidence", "recovery", "failure", "available", "action", "handle",
+    "reason", "outcome", "category", "failedStep", "completedSteps",
+    "evidence", "message", "detail",
+)
+
+
+def _bounded_job_event_value(value: Any, *, depth: int = 0) -> Any:
+    if depth >= _MAX_JOB_EVENT_DEPTH:
+        return "[TRUNCATED]"
+    if isinstance(value, str):
+        value = redact_error_text(value)
+        if len(value) <= _MAX_JOB_EVENT_TEXT:
+            return value
+        return f"{value[:_MAX_JOB_EVENT_TEXT - 3]}..."
+    if isinstance(value, Mapping):
+        keys = [str(key) for key in value]
+        prioritized = [key for key in _JOB_EVENT_CONTRACT_KEYS if key in value]
+        selected = prioritized + [key for key in keys if key not in prioritized]
+        truncated = len(selected) > _MAX_JOB_EVENT_DICT_ITEMS
+        item_limit = _MAX_JOB_EVENT_DICT_ITEMS - 1 if truncated else _MAX_JOB_EVENT_DICT_ITEMS
+        projected = {
+            key[:128]: _bounded_job_event_value(value[key], depth=depth + 1)
+            for key in selected[:item_limit]
+        }
+        if truncated:
+            projected["__truncatedItems"] = len(selected) - item_limit
+        return projected
+    if isinstance(value, (list, tuple)):
+        truncated = len(value) > _MAX_JOB_EVENT_LIST_ITEMS
+        item_limit = _MAX_JOB_EVENT_LIST_ITEMS - 1 if truncated else _MAX_JOB_EVENT_LIST_ITEMS
+        projected = [
+            _bounded_job_event_value(item, depth=depth + 1)
+            for item in value[:item_limit]
+        ]
+        if truncated:
+            projected.append(f"[TRUNCATED {len(value) - item_limit} ITEMS]")
+        return projected
+    if isinstance(value, (bool, int, float)) or value is None:
+        return value
+    return _bounded_job_event_value(str(value), depth=depth)
+
+
+def _project_job_events(events: Any) -> list[dict[str, Any]]:
+    if not isinstance(events, (list, tuple)):
+        return []
+    projected_events: list[dict[str, Any]] = []
+    for event in events:
+        if not isinstance(event, Mapping):
+            continue
+        redacted = redact_sensitive_payload(event)
+        projected = _bounded_job_event_value(redacted)
+        if isinstance(projected, dict):
+            # Redacted arguments cannot be replayed locally. Keep retry UX
+            # available only when the server can re-check or owns a safe handle.
+            if projected.get("replayArgsAvailable") is True:
+                args = projected.get("args")
+                redacted_args = _contains_redaction(args)
+                has_recheck = projected.get("recheckAvailable") is True
+                has_handle = bool(projected.get("handle"))
+                if redacted_args and not (has_recheck or has_handle):
+                    projected["replayArgsAvailable"] = False
+            projected_events.append(projected)
+    return projected_events
+
+
+def _contains_redaction(value: Any) -> bool:
+    if isinstance(value, str):
+        return value in {"[REDACTED]", "<redacted>", "[redacted]"}
+    if isinstance(value, Mapping):
+        return any(_contains_redaction(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_redaction(item) for item in value)
+    return False
 
 
 def _unit_state(value: Any, default: float) -> float:
@@ -25,7 +112,7 @@ def build_companion_runtime_snapshot(
     limit: int = 8,
     scheduler: Any = None,
     job_event_log: Any = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     companion = db_repo.get_workspace_companion(active_workspace_id) if db_repo else None
     companion_id = companion.get("id") if isinstance(companion, dict) else None
     heartbeat = {
@@ -42,9 +129,9 @@ def build_companion_runtime_snapshot(
     }
     event_source = job_event_log or scheduler
     if job_event_log:
-        job_events = job_event_log.snapshot()
+        job_events = _project_job_events(job_event_log.snapshot())
     elif scheduler:
-        job_events = scheduler.snapshot_job_events()
+        job_events = _project_job_events(scheduler.snapshot_job_events())
     else:
         job_events = []
     jobs = {
@@ -93,8 +180,8 @@ def build_companion_runtime_snapshot(
         workspace_id=active_workspace_id,
     )
 
-    grouped: Dict[str, Dict[str, list[Dict[str, Any]]]] = {}
-    milestones: list[Dict[str, Any]] = []
+    grouped: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    milestones: list[dict[str, Any]] = []
     summary = summarize_relationship_events(events)
     for item in events:
         scope = str(item.get("scope") or "workspace")

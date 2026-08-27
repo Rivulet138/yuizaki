@@ -10,7 +10,6 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass
 import hashlib
 from importlib import import_module
-import inspect
 import ipaddress
 import logging
 import os
@@ -19,7 +18,6 @@ import time
 import uuid
 from typing import Any, Protocol, TypeVar, cast, overload
 from urllib.parse import urlsplit
-from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp
 
@@ -65,9 +63,8 @@ from modules.agent.turn_service import is_turn_service_perception_request
 from modules.agent.runtime_context import RuntimeContext
 from modules.agent_plugins.manager import PluginManager
 from modules.asr.transcriber import ASRManager
-from modules.core.state import Generation, GenerationManager
+from modules.core.state import GenerationManager
 from modules.llm.client import LLMClient
-from modules.memory.routes import MemoryRagQueryPayload
 from modules.ocr.payload import MAX_OCR_IMAGE_BYTES, estimate_base64_decoded_bytes
 from modules.ocr.recognizer import OCRClient
 from modules.llm.capabilities import infer_model_vision_support
@@ -78,13 +75,19 @@ from modules.system.memory_write_pipeline import build_user_signal_event
 from modules.tts.synthesizer import StreamingSentenceBuffer, TTSClient
 from modules.tts.visemes import normalize_viseme_cues
 from modules.pet_control import legacy_pet_control_to_avatar_command
+from socket_handlers.tool import build_tool_call_handler, build_tool_recheck_handler
+from socket_handlers.voice import build_svc_convert_handler
+from socket_handlers.system import register_system_handlers
+from socket_handlers.audio import build_audio_chunk_handler
+from socket_handlers.perception import build_ocr_request_handler
+from socket_handlers.memory import build_memory_query_handler
+from socket_handlers.interrupt import register_interrupt_handler
+from socket_handlers.llm import LLMRequestSupport, register_llm_handler
 
 from socket_events import (
     AudioEvents, LLMEvents, TTSEvents, SVCEvents, ToolEvents,
     MemoryEvents, ScreenshotEvents, PetEvents, SystemEvents, AgentEvents,
     LLMRequestData, LLMDeltaData, LLMFinalData,
-    ToolCallData, ToolResultData,
-    HeartbeatData,
 )
 
 logger = logging.getLogger("socket-server")
@@ -205,10 +208,6 @@ class WorkspaceCompanionRepository(Protocol):
 
 class JsonSender(Protocol):
     async def send_json(self, msg: JsonDict) -> None: ...
-
-
-class RetrievalPipelineProtocol(Protocol):
-    def recall(self, request: object) -> JsonDict: ...
 
 
 class SocketIOAsyncServer(Protocol):
@@ -622,6 +621,10 @@ class DesktopPetSocketServer:
             signal.set()
             cancelled = True
         return cancelled
+
+    def _advance_interruption_epoch(self) -> int:
+        self._interruption_epoch += 1
+        return self._interruption_epoch
 
     def computer_use_status(self) -> JsonDict:
         controller = self.runtime.computer_use_controller
@@ -1496,6 +1499,30 @@ class DesktopPetSocketServer:
         self._visual_analysis_skipped.pop(sid, None)
         self._visual_ocr_attempts.pop(sid, None)
         self._visual_ocr_frame_ids.pop(sid, None)
+
+    def _cancel_visual_turn_for_interrupt(
+        self,
+        sid: str,
+        request_id: str | None,
+        reason: str,
+    ) -> None:
+        self._discard_pending_visual_requests(
+            sid,
+            reason=reason,
+            request_id=request_id,
+        )
+        visual_task = self._visual_analysis_tasks.pop(sid, None)
+        if visual_task is not None and not visual_task.done():
+            visual_task.cancel()
+        latest_frame = self._latest_visual_frames.pop(sid, None)
+        if latest_frame is not None:
+            self._complete_visual_job(
+                latest_frame,
+                status="cancelled",
+                phase="discarded",
+                reason=reason,
+            )
+        self._latest_visual_observations.pop(sid, None)
 
     def _record_visual_frame(
         self,
@@ -2551,652 +2578,116 @@ class DesktopPetSocketServer:
             if callable(cancel_speculative):
                 cancel_speculative(sid)
 
-        # ─── 心跳 ──────────────────────────────
+        register_interrupt_handler(
+            sio=self.sio,
+            generation_manager_provider=lambda: self.generation_mgr,
+            advance_interruption_epoch=self._advance_interruption_epoch,
+            cancel_visual_turn=self._cancel_visual_turn_for_interrupt,
+            cancel_direct_tool_calls=self._cancel_direct_tool_calls,
+            record_interrupt=self.experience_metrics.record_interrupt,
+            logger=logger,
+        )
 
-        async def on_heartbeat(sid: str, _data: JsonDict) -> None:
-            await self.sio.emit(SystemEvents.HEARTBEAT, _event_payload(HeartbeatData(
-                timestamp=time.time(),
-                client_id=sid,
-            )), to=sid)
-        self.sio.on(SystemEvents.HEARTBEAT, handler=on_heartbeat)
-
-        async def on_interrupt(sid: str, data: JsonDict) -> None:
-            self._interruption_epoch += 1
-            session_id = _as_text(data.get("session_id"), sid)
-            request_id = _as_text(data.get("request_id"))
-            source = _as_text(data.get("source"), "manual").strip().lower()
-            self._discard_pending_visual_requests(
-                sid,
-                reason='agent_interrupted',
-                request_id=request_id or None,
-            )
-            visual_task = self._visual_analysis_tasks.pop(sid, None)
-            if visual_task is not None and not visual_task.done():
-                visual_task.cancel()
-            latest_frame = self._latest_visual_frames.pop(sid, None)
-            if latest_frame is not None:
-                self._complete_visual_job(latest_frame, status='cancelled', phase='discarded', reason='agent_interrupted')
-            self._latest_visual_observations.pop(sid, None)
-            processing_started = time.perf_counter()
-            interrupted_tool = self._cancel_direct_tool_calls(sid, request_id or None)
-            interrupted: Generation | None = None
-            if self.generation_mgr:
-                interrupted = self.generation_mgr.interrupt(session_id)
-                self.experience_metrics.record_interrupt(interrupted is not None or interrupted_tool, source)
-            else:
-                self.experience_metrics.record_interrupt(interrupted_tool, source)
-            await self.sio.emit(SystemEvents.INTERRUPT_ACK, {
-                "request_id": request_id,
-                "session_id": session_id,
-                "source": source if source in {"manual", "voice"} else "other",
-                "generation_id": interrupted.generation_id if interrupted is not None else "",
-                "hit_active_generation": interrupted is not None,
-                "hit_active_tool": interrupted_tool,
-                "server_processing_ms": round((time.perf_counter() - processing_started) * 1000, 1),
-            }, to=sid)
-        self.sio.on(SystemEvents.INTERRUPT, handler=on_interrupt)
-
-        async def on_client_timing(sid: str, data: JsonDict) -> None:
-            stage = _as_text(data.get("stage")).strip().lower()
-            if stage != "playback_start":
-                self.experience_metrics.record_client_timing(stage, data.get("elapsed_ms"))
-                return
-            if self.generation_mgr is None:
-                return
-            session_id = _as_text(data.get("session_id"), sid)
-            generation = self.generation_mgr.get(session_id)
-            generation_id = _as_text(data.get("generation_id"))
-            if generation is None or (generation_id and generation.generation_id != generation_id):
-                return
-            generation.mark("playback_start")
-            await self._emit_latency(sid, generation.latency_snapshot())
-        self.sio.on(SystemEvents.CLIENT_TIMING, handler=on_client_timing)
-
-        async def on_permission_response(_sid: str, data: JsonDict) -> None:
-            request_id = _as_text(data.get("request_id"))
-            allowed = bool(data.get("allowed", False))
-            remember = bool(data.get("remember", False))
-            expected_sid = self._permission_request_sid_map.get(request_id)
-            if not request_id or expected_sid is None:
-                logger.warning("Ignoring unknown permission response %s from sid %s", request_id, _sid)
-                await self.sio.emit(SystemEvents.ERROR, {
-                    "code": "PERMISSION_REQUEST_UNKNOWN",
-                    "message": "Permission response did not match a pending request",
-                }, to=_sid)
-                return
-            if expected_sid != _sid:
-                logger.warning("Ignoring permission response from unexpected sid %s for request %s", _sid, request_id)
-                await self.sio.emit(SystemEvents.ERROR, {
-                    "code": "PERMISSION_SESSION_MISMATCH",
-                    "message": "Permission response did not come from the requesting client",
-                }, to=_sid)
-                return
-            self._permission_request_sid_map.pop(request_id, None)
-            tool_name = self._permission_request_tool_map.pop(request_id, None)
-            permission_scope = self._permission_request_scope_map.pop(request_id, None)
-            self.tool_executor.policy_engine.resolve_pending(request_id, allowed, remember, tool_name, permission_scope)
-        self.sio.on(SystemEvents.PERMISSION_RESPONSE, handler=on_permission_response)
+        register_system_handlers(
+            sio=self.sio,
+            generation_manager_provider=lambda: self.generation_mgr,
+            experience_metrics=self.experience_metrics,
+            emit_latency=self._emit_latency,
+            permission_request_sid_map=self._permission_request_sid_map,
+            permission_request_tool_map=self._permission_request_tool_map,
+            permission_request_scope_map=self._permission_request_scope_map,
+            tool_executor=self.tool_executor,
+            logger=logger,
+        )
 
         # ─── 音频 / ASR ────────────────────────
 
-        async def on_audio_chunk(sid: str, data: JsonDict) -> None:
-            """接收音频块 → ASR 管线
-
-            前端约定：
-            - chunk: base64 编码的 PCM16 mono 数据
-            - sample_rate: 采样率（目前固定 16000）
-            - is_final: 是否为最后一个块（松弛 VAD，强制出最终结果）
-
-            后端约定（modules.core.state.ASRPipeline）：
-            - 采样率固定为 16kHz
-            - 每个 chunk = 512 samples = 1024 bytes
-            """
-
-            chunk_b64 = _as_text(data.get("chunk"))
-            is_final: bool = bool(data.get("is_final", False))
-
-            logger.debug("[SIO] audio:chunk from %s, len=%d, final=%s",
-                         sid, len(chunk_b64), is_final)
-
-            asr_manager = self.asr_manager
-            generation_mgr = self.generation_mgr
-            if asr_manager is None:
-                logger.debug("[SIO] ASR manager not initialized, dropping audio chunk")
-                return
-            if generation_mgr is None:
-                logger.debug("[SIO] generation manager not initialized, dropping audio chunk")
-                return
-
-            import base64
-            try:
-                pcm16_bytes = base64.b64decode(chunk_b64) if chunk_b64 else b""
-            except Exception as exc:  # pragma: no cover - 防御性
-                logger.warning("[SIO] failed to decode audio chunk: %s", exc)
-                return
-
-            # 适配 ASRManager 期望的 WebSocket 接口：只实现 send_json
-            if is_final:
-                self._voice_prepared_sessions.discard(sid)
-            elif pcm16_bytes and sid not in self._voice_prepared_sessions:
-                self._voice_prepared_sessions.add(sid)
-                self._schedule_voice_turn_preparation()
-
-            outer_server = self
-            session_id = _as_text(data.get("session_id"), sid)
-            asr_identity = {
-                "session_id": session_id,
-                "generation_id": _as_text(data.get("generation_id")),
-                "turn_id": _as_text(data.get("turn_id")),
-                "request_id": _as_text(data.get("request_id")),
-                "interruption_epoch": _as_int(data.get("interruption_epoch"), 0),
-                "version": _as_int(data.get("version"), 1),
-            }
-            class _SocketIOWSAdapter:
-                def __init__(self, server: SocketIOAsyncServer, client_sid: str):
-                    self._sio: SocketIOAsyncServer = server
-                    self._sid: str = client_sid
-
-                async def send_json(self, msg: JsonDict) -> None:
-                    msg_type = msg.get("type")
-                    if msg_type == "asr_partial":
-                        partial_text = _as_text(msg.get("text"))
-                        payload = {
-                            "text": partial_text,
-                            "confidence": 0.0,
-                            "lang": "zh",
-                            **asr_identity,
-                        }
-                        await self._sio.emit(AudioEvents.ASR_PARTIAL, payload, to=self._sid)
-                        outer_server.agent_pipeline.schedule_retrieval_prefetch(
-                            cache_key=self._sid,
-                            query=partial_text,
-                            session_id=self._sid,
-                            workspace_id=outer_server._active_workspace_id(),
-                        )
-                        schedule_speculative = getattr(
-                            outer_server.agent_pipeline,
-                            "schedule_speculative_context_prefetch",
-                            None,
-                        )
-                        if callable(schedule_speculative):
-                            latest_frame = outer_server._latest_visual_frame_for_sid(self._sid)
-                            schedule_speculative(
-                                cache_key=self._sid,
-                                query=partial_text,
-                                workspace_id=outer_server._active_workspace_id(),
-                                tool_registry=outer_server.tool_registry,
-                                visual_frame_id=_as_text(latest_frame.get("frame_id")) if latest_frame else None,
-                            )
-                    elif msg_type == "asr_final":
-                        final_text = _as_text(msg.get("text"))
-                        confirm_speculative = getattr(
-                            outer_server.agent_pipeline,
-                            "confirm_speculative_context_prefetch",
-                            None,
-                        )
-                        if callable(confirm_speculative):
-                            confirm_speculative(
-                                cache_key=self._sid,
-                                final_query=final_text,
-                                workspace_id=outer_server._active_workspace_id(),
-                                tool_registry=outer_server.tool_registry,
-                            )
-                        payload = {
-                            "text": final_text,
-                            "confidence": 0.0,
-                            "lang": "zh",
-                            **asr_identity,
-                        }
-                        await self._sio.emit(AudioEvents.ASR_FINAL, payload, to=self._sid)
-                    elif msg_type == "asr_vad_start":
-                        await self._sio.emit(AudioEvents.ASR_VAD_START, {
-                            "session_id": _as_text(msg.get("session_id"), self._sid),
-                            "confirmed_ms": _as_int(msg.get("confirmed_ms"), 0),
-                        }, to=self._sid)
-                    elif msg_type == "asr_speech_start":
-                        await self._sio.emit(AudioEvents.ASR_SPEECH_START, {
-                            "session_id": _as_text(msg.get("session_id"), self._sid),
-                            "confirmed_ms": _as_int(msg.get("confirmed_ms"), 0),
-                        }, to=self._sid)
-                    elif msg_type == "latency":
-                        await outer_server._emit_latency(self._sid, {
-                            key: value for key, value in msg.items() if key != "type"
-                        })
-                    else:
-                        logger.debug("[SIO] unhandled ASR message: %s", msg_type)
-
-            ws_adapter = _SocketIOWSAdapter(self.sio, sid)
-
-            await asr_manager.handle_audio_chunk(
-                ws_adapter,
-                sid,
-                generation_mgr,
-                pcm16_bytes,
-                is_final=is_final,
-            )
+        on_audio_chunk = build_audio_chunk_handler(
+            sio=self.sio,
+            asr_manager_provider=lambda: self.asr_manager,
+            generation_manager_provider=lambda: self.generation_mgr,
+            agent_pipeline_provider=lambda: self.agent_pipeline,
+            tool_registry_provider=lambda: self.tool_registry,
+            active_workspace_id=self._active_workspace_id,
+            latest_visual_frame_for_sid=self._latest_visual_frame_for_sid,
+            voice_prepared_sessions=self._voice_prepared_sessions,
+            schedule_voice_turn_preparation=self._schedule_voice_turn_preparation,
+            emit_latency=self._emit_latency,
+            logger=logger,
+        )
         self.sio.on(AudioEvents.CHUNK, handler=on_audio_chunk)
 
         # ─── LLM ───────────────────────────────
 
-        async def on_llm_request(sid: str, data: JsonDict) -> None:
-            """接收聊天请求 → LLM 流式回复（Socket.IO）"""
-            logger.info("[SIO] llm:request from %s", sid)
-            request_identity = _request_identity(data, _as_text(data.get("session_id"), sid))
-
-            llm_client = self.llm_client
-            if llm_client is None:
-                await self.sio.emit(SystemEvents.ERROR, {
-                    "code": "LLM_NOT_READY",
-                    "message": "LLM client not initialized",
-                    **request_identity,
-                }, to=sid)
-                return
-
-            generation_mgr = self.generation_mgr
-            if generation_mgr is None:
-                await self.sio.emit(SystemEvents.ERROR, {
-                    "code": "GEN_MGR_NOT_READY",
-                    "message": "Generation manager not initialized",
-                    **request_identity,
-                }, to=sid)
-                return
-
-            request_temperature = _optional_float(_request_option(data, "temperature"))
-            request_top_p = _optional_float(_request_option(data, "top_p"))
-            request_top_k = _as_int(_request_option(data, "top_k"), 0) if _request_option(data, "top_k") is not None else None
-            request_min_p = _optional_float(_request_option(data, "min_p"))
-            request_frequency_penalty = _optional_float(_request_option(data, "frequency_penalty"))
-            request_presence_penalty = _optional_float(_request_option(data, "presence_penalty"))
-            request_repetition_penalty = _optional_float(_request_option(data, "repetition_penalty"))
-            payload = LLMRequestData(
-                messages=_as_messages(data.get("messages")),
-                session_id=_as_text(data.get("session_id")),
-                temperature=request_temperature,
-                top_p=request_top_p,
-                top_k=request_top_k,
-                min_p=request_min_p,
-                frequency_penalty=request_frequency_penalty,
-                presence_penalty=request_presence_penalty,
-                repetition_penalty=request_repetition_penalty,
-                max_tokens=_as_int(_request_option(data, "max_tokens"), 8192),
-            )
-            pet_control_context = _as_json_dict(data.get("pet_control_context")) or None
-            requested_workspace_id = _as_text(data.get("workspace_id")) or None
-            workspace_id, workspace_allowed = self._resolve_socket_workspace_id(requested_workspace_id)
-            if not workspace_allowed:
-                await self.sio.emit(SystemEvents.ERROR, {
-                    "code": "WORKSPACE_MISMATCH",
-                    "message": "Socket request workspace does not match the active workspace",
-                    **request_identity,
-                }, to=sid)
-                return
-            request_id = _as_text(data.get("request_id")).strip() or f"agent_{uuid.uuid4().hex[:12]}"
-            model = _as_text(_request_option(data, "model")) or None
-            reasoning_effort = _as_text(_request_option(data, "reasoning_effort")) or None
-            mcp_enabled = _optional_bool(_request_option(data, "mcp_enabled"))
-            web_search_enabled = _optional_bool(_request_option(data, "web_search_enabled"))
-            tts_enabled = _request_tts_enabled(data)
-            prompt_profile = _request_prompt_profile(data)
-            response_mode = _request_response_mode(data)
-            thinking_mode = resolve_thinking_mode(
-                reasoning_effort,
-                response_mode=response_mode,
-                prompt_mode=_prompt_mode(prompt_profile),
-                mcp_enabled=mcp_enabled,
-                web_search_enabled=web_search_enabled,
-                messages=payload.messages,
-                model_hint=model or getattr(llm_client, "model", None),
-                provider_hint=getattr(llm_client, "provider", None),
-            )
-            reasoning_effort = resolve_reasoning_effort(
-                reasoning_effort,
-                response_mode=response_mode,
-                prompt_mode=_prompt_mode(prompt_profile),
-                mcp_enabled=mcp_enabled,
-                web_search_enabled=web_search_enabled,
-                messages=payload.messages,
-                model_hint=model or getattr(llm_client, "model", None),
-                provider_hint=getattr(llm_client, "provider", None),
-            )
-
-            session_id = payload.session_id or sid
-            generation_id = _as_text(data.get("generation_id")).strip() or None
-            turn_id = _as_text(data.get("turn_id")).strip() or None
-            interruption_epoch = max(0, _as_int(data.get("interruption_epoch"), 0))
-            envelope_version = max(1, _as_int(data.get("version"), 1))
-            gen = generation_mgr.start(
-                session_id,
-                generation_id=generation_id,
-                turn_id=turn_id,
-                request_id=request_id,
-                interruption_epoch=interruption_epoch,
-                envelope_version=envelope_version,
-                conversation_id=_as_text(data.get("conversation_id")),
-                operation_id=_as_text(data.get("operation_id")),
-                run_id=_as_text(data.get("run_id")),
-                step_index=max(0, _as_int(data.get("step_index"), 0)),
-            )
-            self._bind_generation_to_sid(sid, gen)
-            llm_sequence = 0
-            terminal_requested = False
-            terminal_replayed = False
-
-            # 适配 LLMClient.stream_chat 期望的 WebSocket 接口
-            outer_server = self
-
-            class _SocketIOWSAdapter:
-                def __init__(self, server: SocketIOAsyncServer, client_sid: str):
-                    self._sio: SocketIOAsyncServer = server
-                    self._sid: str = client_sid
-                    self._turn_context: AgentRequestContext | None = None
-
-                def bind_turn_context(self, ctx: AgentRequestContext) -> None:
-                    self._turn_context = ctx
-
-                async def send_json(self, msg: JsonDict) -> None:
-                    nonlocal llm_sequence, terminal_requested, terminal_replayed
-                    if not outer_server._generation_is_current(gen):
-                        return
-                    msg_type = msg.get("type")
-                    if msg_type == "token":
-                        token = _as_text(msg.get("content"))
-                        await self._sio.emit(LLMEvents.DELTA, _event_payload(LLMDeltaData(
-                            token=token,
-                            index=llm_sequence,
-                            session_id=session_id,
-                            generation_id=gen.generation_id,
-                            turn_id=gen.turn_id,
-                            request_id=gen.request_id,
-                            interruption_epoch=gen.interruption_epoch,
-                            version=gen.envelope_version,
-                            sequence=llm_sequence,
-                        )), to=self._sid)
-                        llm_sequence += 1
-                    elif msg_type == "done":
-                        terminal_requested = True
-                        terminal_replayed = bool(msg.get("replayed"))
-                        if hasattr(gen, "mark"):
-                            gen.mark("llm_completed")
-                    elif msg_type == "pet_control":
-                        avatar_command = outer_server._build_avatar_command(
-                            msg.get("pet_control", {}),
-                            session_id=session_id,
-                            request_id=request_id,
-                            capability_revision=_as_text((pet_control_context or {}).get("capabilityRevision")) or None,
-                        )
-                        await self._sio.emit(PetEvents.CONTROL, {
-                            "session_id": session_id,
-                            "generation_id": gen.generation_id,
-                            "turn_id": gen.turn_id,
-                            "request_id": gen.request_id,
-                            "interruption_epoch": gen.interruption_epoch,
-                            "version": gen.envelope_version,
-                            "pet_control": msg.get("pet_control", {}),
-                            **({"avatar_command": avatar_command} if avatar_command else {}),
-                        }, to=self._sid)
-                    elif msg_type == "error":
-                        await self._sio.emit(SystemEvents.ERROR, {
-                            "code": "LLM_ERROR",
-                            "message": msg.get("error", "LLM error"),
-                            "session_id": session_id,
-                            **_generation_identity(gen),
-                        }, to=self._sid)
-                    else:
-                        logger.debug("[SIO] unhandled LLM message: %s", msg_type)
-
-            ws_adapter = _SocketIOWSAdapter(self.sio, sid)
-
-            async def _run_llm_and_tts() -> None:
-                ctx = AgentRequestContext(
-                    sid=sid,
-                    session_id=session_id,
-                    request_id=request_id,
-                    turn_id=gen.turn_id,
-                    generation_id=gen.generation_id,
-                    interruption_epoch=gen.interruption_epoch,
-                    messages=self._with_latest_visual_context(sid, payload.messages),
-                    temperature=payload.temperature,
-                    top_p=payload.top_p,
-                    top_k=payload.top_k,
-                    min_p=payload.min_p,
-                    frequency_penalty=payload.frequency_penalty,
-                    presence_penalty=payload.presence_penalty,
-                    repetition_penalty=payload.repetition_penalty,
-                    max_tokens=payload.max_tokens,
-                    model=model,
-                    reasoning_effort=reasoning_effort,
-                    thinking_mode=thinking_mode,
-                    response_mode=response_mode,
-                    mcp_enabled=mcp_enabled,
-                    web_search_enabled=web_search_enabled,
-                    prompt_profile=prompt_profile,
-                    pet_control_context=pet_control_context,
-                    workspace_id=workspace_id,
-                    llm_client=llm_client,
-                    generation_mgr=generation_mgr,
-                    tool_registry=self.tool_registry,
-                    tool_executor=self.tool_executor,
-                    step_executor=self.step_executor,
-                    scheduler=self.scheduler,
-                    trace_store=self.trace_store,
-                    plugin_manager=self.plugin_manager,
-                    permission_scope=f"socket:{sid}",
-                )
-                self._bind_ctx_runtime(ctx)
-                ws_adapter.bind_turn_context(ctx)
-                turn_service = self._semantic_turn_service()
-                commit = None
-                if turn_service is None:
-                    result_obj = await self.agent_pipeline.run_streaming(ctx, ws_adapter, gen)
-                else:
-                    commit = await turn_service.execute_streaming_context(
-                        "socket", ctx, ws_adapter, gen,
-                    )
-                    result_obj = commit.result
-                if not self._generation_is_current(gen):
-                    return
-                if turn_service is not None:
-                    message_ids = await run_in_threadpool(self._resolve_turn_message_ids, ctx)
-                elif terminal_replayed:
-                    message_ids = {"user_message_id": None, "assistant_message_id": None}
-                else:
-                    message_ids = await run_in_threadpool(
-                        self._persist_chat_exchange,
-                        session_id=session_id,
-                        workspace_id=workspace_id,
-                        messages=payload.messages,
-                        assistant_text=result_obj.reply,
-                        model=model,
-                    )
-                persisted_assistant_message_id = message_ids["assistant_message_id"]
-                await run_in_threadpool(
-                    self._persist_message_metadata,
-                    persisted_assistant_message_id,
-                    result_obj.action_envelope,
-                )
-                if not self._generation_is_current(gen):
-                    return
-                await self.sio.emit(
-                    AgentEvents.RESULT,
-                    _agent_result_payload(
-                        result_obj.action_envelope or {},
-                        session_id,
-                        {**_generation_identity(gen), **self._turn_commit_fields(commit, result_obj)},
-                    ),
-                    to=sid,
-                )
-                if not self._generation_is_current(gen):
-                    return
-                final_payload = _event_payload(LLMFinalData(
-                    text=result_obj.reply,
-                    session_id=session_id,
-                    user_message_id=message_ids["user_message_id"],
-                    assistant_message_id=message_ids["assistant_message_id"],
-                    generation_id=gen.generation_id,
-                    turn_id=gen.turn_id,
-                    request_id=gen.request_id,
-                    interruption_epoch=gen.interruption_epoch,
-                    version=gen.envelope_version,
-                    sequence=llm_sequence,
-                    tts_expected=tts_enabled and self.tts_client is not None,
-                ))
-                final_payload.update(self._turn_commit_fields(commit, result_obj))
-                await self.sio.emit(LLMEvents.FINAL, final_payload, to=sid)
-                if hasattr(gen, "latency_snapshot"):
-                    await self._emit_latency(sid, gen.latency_snapshot())
-
-                # LLM 结束后触发 TTS（如果可用）
-                if terminal_requested and tts_enabled and self.tts_client and self._generation_is_current(gen):
-                    await self._run_tts_for_generation(session_id, sid)
-
-            gen.llm_task = asyncio.create_task(
-                _run_llm_and_tts(),
-                name=f"llm-sio-{gen.generation_id}",
-            )
-            self._attach_chat_task_error_handler(
-                gen.llm_task,
-                sid=sid,
-                session_id=session_id,
-                generation=gen,
-            )
-        self.sio.on(LLMEvents.REQUEST, handler=on_llm_request)
+        register_llm_handler(
+            sio=self.sio,
+            server=self,
+            support=LLMRequestSupport(
+                request_identity=_request_identity,
+                as_text=_as_text,
+                as_int=_as_int,
+                as_json_dict=_as_json_dict,
+                as_messages=_as_messages,
+                optional_float=_optional_float,
+                optional_bool=_optional_bool,
+                request_option=_request_option,
+                request_tts_enabled=_request_tts_enabled,
+                request_prompt_profile=_request_prompt_profile,
+                request_response_mode=_request_response_mode,
+                prompt_mode=_prompt_mode,
+                event_payload=_event_payload,
+                generation_identity=_generation_identity,
+                agent_result_payload=_agent_result_payload,
+            ),
+            logger=logger,
+        )
 
         # ─── 工具调用 ──────────────────────────
 
-        async def on_tool_call(sid: str, data: JsonDict) -> None:
-            """处理来自前端 / LLM 的工具调用请求。
-
-            当前支持两类工具：
-            - 本地桌面工具（Python 实现）: open_app, open_url, read_file, write_file
-            - 浏览器自动化工具（前缀 browser.*）经由 Node Playwright MCP server
-            """
-            call = ToolCallData(
-                id=_as_text(data.get("id")),
-                name=_as_text(data.get("name")),
-                args=_as_json_dict(data.get("args")),
-                request_id=_as_text(data.get("requestId") or data.get("request_id")) or None,
-                run_id=_as_text(data.get("runId") or data.get("run_id")) or None,
-                job_id=_as_text(data.get("jobId") or data.get("job_id")) or None,
-                source=_as_text(data.get("source")) or None,
-                retry=bool(data.get("retry", False)),
-            )
-
-            logger.info("[SIO] tool:call from %s: %s", sid, call.name)
-            tool_request_id = call.request_id or call.id or f"req:{uuid.uuid4().hex}"
-            tool_signal_key = f"{sid}:{tool_request_id}:{uuid.uuid4().hex}"
-            tool_cancellation_signal = asyncio.Event()
-            self._tool_cancellation_signals[tool_signal_key] = (
-                sid,
-                tool_request_id,
-                tool_cancellation_signal,
-            )
-            permission_request_ids: set[str] = set()
-            tool_ctx = AgentRequestContext(
-                sid=sid,
-                session_id=sid,
-                request_id=tool_request_id,
-                messages=[],
-                workspace_id=self._active_workspace_id(),
-                tool_registry=self.tool_registry,
-                tool_executor=self.tool_executor,
-                trace_store=self.trace_store,
-                plugin_manager=self.plugin_manager,
-                permission_scope=f"socket:{sid}",
-            )
-            tool_ctx.extra["turn_id"] = f"turn:{tool_request_id}"
-            self._bind_ctx_runtime(tool_ctx, include_visual=False)
-
-            async def _permission_request_cb(**payload: object) -> None:
-                request_id = payload.get("request_id")
-                if isinstance(request_id, str):
-                    permission_request_ids.add(request_id)
-                    self._permission_request_tool_map[request_id] = call.name
-                    self._permission_request_scope_map[request_id] = str(
-                        payload.get("permission_scope") or f"socket:{sid}"
-                    )
-                    self._permission_request_sid_map[request_id] = sid
-                await self.sio.emit(SystemEvents.PERMISSION_REQUEST, payload, to=sid)
-
-            try:
-                execute_kwargs: dict[str, object] = {
-                    "permission_request_cb": _permission_request_cb,
-                    "ctx": tool_ctx,
-                    "request_id": tool_request_id,
-                    "run_id": call.run_id,
-                    "job_id": call.job_id,
-                    "source": call.source,
-                    "cancellation_signal": tool_cancellation_signal,
-                    "retry": call.retry,
-                }
-                # Keep direct Socket.IO calls compatible with injected/legacy
-                # executors while forwarding the job metadata to the current
-                # ToolExecutor implementation.
-                execute = cast(Callable[..., Awaitable[Any]], self.tool_executor.execute)
-                try:
-                    execute_signature = inspect.signature(execute)
-                except (TypeError, ValueError):
-                    execute_signature = None
-                if execute_signature is not None and not any(
-                    parameter.kind == inspect.Parameter.VAR_KEYWORD
-                    for parameter in execute_signature.parameters.values()
-                ):
-                    execute_kwargs = {
-                        key: value
-                        for key, value in execute_kwargs.items()
-                        if key in execute_signature.parameters
-                    }
-                outcome = await execute(call.name, call.args, **execute_kwargs)
-
-                if outcome.success:
-                    result = ToolResultData(id=call.id, output=str(outcome.content))
-                    await self.sio.emit(ToolEvents.RESULT, _event_payload(result), to=sid)
-                else:
-                    err = ToolResultData(id=call.id, output="", error=str(outcome.error or 'Tool execution failed'))
-                    await self.sio.emit(ToolEvents.ERROR, _event_payload(err), to=sid)
-            except Exception as exc:
-                err = ToolResultData(id=call.id, output="", error=str(exc))
-                await self.sio.emit(ToolEvents.ERROR, _event_payload(err), to=sid)
-            finally:
-                self._tool_cancellation_signals.pop(tool_signal_key, None)
-                if tool_cancellation_signal.is_set():
-                    for permission_request_id in permission_request_ids:
-                        self._permission_request_sid_map.pop(permission_request_id, None)
-                        self._permission_request_tool_map.pop(permission_request_id, None)
-                        self._permission_request_scope_map.pop(permission_request_id, None)
+        on_tool_call = build_tool_call_handler(
+            sio=self.sio,
+            tool_executor=self.tool_executor,
+            tool_registry=self.tool_registry,
+            trace_store=self.trace_store,
+            plugin_manager=self.plugin_manager,
+            active_workspace_id=self._active_workspace_id,
+            bind_ctx_runtime=lambda ctx: self._bind_ctx_runtime(ctx, include_visual=False),
+            tool_cancellation_signals=self._tool_cancellation_signals,
+            permission_request_tool_map=self._permission_request_tool_map,
+            permission_request_scope_map=self._permission_request_scope_map,
+            permission_request_sid_map=self._permission_request_sid_map,
+            logger=logger,
+        )
         self.sio.on(ToolEvents.CALL, handler=on_tool_call)
+        on_tool_recheck = build_tool_recheck_handler(
+            sio=self.sio,
+            tool_executor=self.tool_executor,
+            tool_registry=self.tool_registry,
+            trace_store=self.trace_store,
+            plugin_manager=self.plugin_manager,
+            active_workspace_id=self._active_workspace_id,
+            bind_ctx_runtime=lambda ctx: self._bind_ctx_runtime(ctx, include_visual=False),
+            logger=logger,
+        )
+        self.sio.on(ToolEvents.RECHECK, handler=on_tool_recheck)
 
         # ─── SVC ────────────────────────────────
 
-        async def on_svc_convert(sid: str, data: JsonDict) -> None:
-            svc_client = self.svc_client
-            if svc_client is None:
-                await self.sio.emit(SVCEvents.DONE, {
-                    "status": "failed",
-                    "error": "SVC client not initialized",
-                }, to=sid)
-                return
-
-            try:
-                import uuid
-
-                generation_id = f"svc_{uuid.uuid4().hex[:10]}"
-                result = await svc_client.convert(
-                    generation_id,
-                    _as_text(data.get("audio")),
-                    speaker_id=_optional_int(data.get("speaker_id")),
-                    pitch=_optional_int(data.get("transpose")),
-                )
-                await self.sio.emit(SVCEvents.DONE, result, to=sid)
-            except Exception as exc:
-                logger.error("[SIO] SVC convert failed: %s", exc)
-                await self.sio.emit(SVCEvents.DONE, {
-                    "status": "failed",
-                    "error": "svc_convert_failed",
-                    "message": "SVC conversion failed",
-                }, to=sid)
+        on_svc_convert = build_svc_convert_handler(
+            sio=self.sio,
+            svc_client_provider=lambda: self.svc_client,
+            logger=logger,
+        )
         self.sio.on(SVCEvents.CONVERT, handler=on_svc_convert)
 
         # ─── Pet 状态 ──────────────────────────
+
+        handle_ocr_request = build_ocr_request_handler(
+            sio=self.sio,
+            ocr_client_provider=lambda: self.ocr_client,
+            max_image_bytes=MAX_OCR_IMAGE_BYTES,
+            logger=logger,
+        )
 
         async def on_screenshot_request(sid: str, data: JsonDict) -> None:
             logger.info("[SIO] screenshot:request from %s", sid)
@@ -3235,6 +2726,9 @@ class DesktopPetSocketServer:
                     "status": "ok",
                     "mode": "clear",
                 }, to=sid)
+                return
+
+            if await handle_ocr_request(sid, data):
                 return
 
             if not image_b64:
@@ -3321,41 +2815,13 @@ class DesktopPetSocketServer:
                 await self.sio.emit(ScreenshotEvents.RESULT, self._visual_result_payload(sid, frame), to=sid)
                 return
 
-            if mode != "ocr":
-                await self.sio.emit(ScreenshotEvents.RESULT, {
-                    **correlation,
-                    "error": "UNSUPPORTED_MODE",
-                    "message": f"mode '{mode}' not implemented",
-                }, to=sid)
-                return
-
-            try:
-                if estimated_bytes > MAX_OCR_IMAGE_BYTES:
-                    await self.sio.emit(ScreenshotEvents.RESULT, {
-                        **correlation,
-                        "error": "IMAGE_TOO_LARGE",
-                        "message": "image payload exceeds OCR limit",
-                        "max_bytes": MAX_OCR_IMAGE_BYTES,
-                        "estimated_bytes": estimated_bytes,
-                    }, to=sid)
-                    return
-                ocr_client = self.ocr_client
-                if not ocr_client:
-                    await self.sio.emit(ScreenshotEvents.RESULT, {
-                        **correlation,
-                        "error": "OCR_NOT_AVAILABLE",
-                        "message": "OCR client not initialized",
-                    }, to=sid)
-                    return
-                result = await ocr_client.recognize(image_b64)
-                await self.sio.emit(ScreenshotEvents.RESULT, result, to=sid)
-            except Exception as exc:
-                logger.error("[SIO] OCR error: %s", exc)
-                await self.sio.emit(ScreenshotEvents.RESULT, {
-                    **correlation,
-                    "error": "OCR_ERROR",
-                    "message": "OCR processing failed",
-                }, to=sid)
+            # OCR is handled by the narrow perception port above. This branch
+            # only remains as a guard for future screenshot modes.
+            await self.sio.emit(ScreenshotEvents.RESULT, {
+                **correlation,
+                "error": "UNSUPPORTED_MODE",
+                "message": f"mode '{mode}' not implemented",
+            }, to=sid)
         self.sio.on(ScreenshotEvents.REQUEST, handler=on_screenshot_request)
 
         async def on_pet_state(sid: str, data: JsonDict) -> None:
@@ -3366,55 +2832,13 @@ class DesktopPetSocketServer:
         # ─── RAG / 记忆 ────────────────────────
         # Phase 5 实现
 
-        async def on_rag_query(sid: str, data: JsonDict) -> None:
-            logger.info("[SIO] rag:query from %s", sid)
-            memory_pipeline = cast(RetrievalPipelineProtocol | None, self.runtime.agent_pipeline.retrieval_pipeline)
-            if memory_pipeline is None:
-                await self.sio.emit(MemoryEvents.RESULT, {
-                    "docs": [],
-                    "message": "retrieval pipeline not initialized",
-                }, to=sid)
-                return
-            raw_layers = data.get("layers")
-            requested_workspace_id = _as_text(data.get("workspace_id")) if data.get("workspace_id") is not None else None
-            workspace_id, workspace_allowed = self._resolve_socket_workspace_id(requested_workspace_id)
-            if not workspace_allowed:
-                await self.sio.emit(MemoryEvents.RESULT, {
-                    "docs": [],
-                    "error": "WORKSPACE_MISMATCH",
-                    "message": "Socket RAG workspace does not match the active workspace",
-                }, to=sid)
-                return
-            try:
-                payload = MemoryRagQueryPayload(
-                    query=_as_text(data.get("query")),
-                    top_k=_as_int(data.get("top_k"), 5),
-                    scope=_as_text(data.get("scope")) if data.get("scope") is not None else None,
-                    session_id=_as_text(data.get("session_id")) if data.get("session_id") is not None else None,
-                    workspace_id=workspace_id,
-                    layers=[str(item) for item in cast(list[object], raw_layers)] if isinstance(raw_layers, list) else None,
-                )
-            except ValidationError as exc:
-                await self.sio.emit(MemoryEvents.RESULT, {
-                    "docs": [],
-                    "error": "INVALID_MEMORY_QUERY",
-                    "message": str(exc),
-                }, to=sid)
-                return
-
-            from modules.memory.schema import RetrievalRequest
-
-            layers = payload.layers or _DEFAULT_RAG_LAYERS
-            request = RetrievalRequest(
-                query=payload.query,
-                scope=payload.scope,
-                session_id=payload.session_id,
-                workspace_id=payload.workspace_id,
-                top_k=payload.top_k,
-                layers=layers,
-            )
-            result = await run_in_threadpool(memory_pipeline.recall, request)
-            await self.sio.emit(MemoryEvents.RESULT, result, to=sid)
+        on_rag_query = build_memory_query_handler(
+            sio=self.sio,
+            retrieval_pipeline_provider=lambda: self.agent_pipeline.retrieval_pipeline,
+            workspace_resolver=self._resolve_socket_workspace_id,
+            default_layers=list(_DEFAULT_RAG_LAYERS),
+            logger=logger,
+        )
         self.sio.on(MemoryEvents.QUERY, handler=on_rag_query)
 
         # ─── 规则驱动 Agent 对话 ─────────────────

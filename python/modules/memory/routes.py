@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
+import logging
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
@@ -18,6 +21,7 @@ from typing import Any, Callable, Dict, Mapping
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 
@@ -37,6 +41,7 @@ from .vector_store import Document, MemoryType, is_memory_recallable
 
 VALID_MEMORY_LAYERS = {'profile', 'working', 'episodic', 'relationship', 'reflective', 'semantic', 'session'}
 VALID_MEMORY_SCOPES = {'global', 'workspace', 'session'}
+logger = logging.getLogger(__name__)
 SERVER_OWNED_METADATA_FIELDS = frozenset({
   'schema_version',
   'revision',
@@ -186,6 +191,19 @@ class MemorySoftForgetPayload(BaseModel):
   turn_id: str | None = None
 
 
+class MemoryFeedbackPayload(BaseModel):
+  model_config = ConfigDict(extra='forbid')
+  feedback: str
+
+  @field_validator('feedback')
+  @classmethod
+  def validate_feedback(cls, value: str) -> str:
+    normalized = str(value or '').strip().lower()
+    if normalized not in {'helpful', 'not_helpful', 'incorrect', 'dismissed'}:
+      raise ValueError('feedback must be helpful, not_helpful, incorrect, or dismissed')
+    return normalized
+
+
 class MemoryReviewPayload(BaseModel):
   model_config = ConfigDict(extra='forbid')
   decision: str
@@ -197,6 +215,38 @@ class MemoryReviewPayload(BaseModel):
     normalized = str(value or '').strip().lower()
     if normalized not in {'approve', 'reject'}:
       raise ValueError('decision must be approve or reject')
+    return normalized
+
+
+class MemoryImportPayload(BaseModel):
+  model_config = ConfigDict(extra='forbid')
+
+  format: str
+  version: int = Field(ge=1)
+  docs: list[MemoryDocPayload] = Field(min_length=1, max_length=5000)
+  scope: str = 'workspace'
+  workspace_id: str | None = None
+  session_id: str | None = None
+  conflict: str = 'skip'
+
+  @field_validator('format')
+  @classmethod
+  def validate_format(cls, value: str) -> str:
+    if value != 'yuizaki-memory-export':
+      raise ValueError('format must be yuizaki-memory-export')
+    return value
+
+  @field_validator('scope')
+  @classmethod
+  def validate_scope(cls, value: str) -> str:
+    return _validate_scope(value) or 'workspace'
+
+  @field_validator('conflict')
+  @classmethod
+  def validate_conflict(cls, value: str) -> str:
+    normalized = str(value or '').strip().lower()
+    if normalized not in {'skip'}:
+      raise ValueError('conflict must be skip')
     return normalized
 
 
@@ -277,6 +327,9 @@ class MemoryRagQueryPayload(BaseModel):
   session_id: str | None = None
   workspace_id: str | None = None
   layers: list[str] | None = None
+  expand_relations: bool = True
+  relation_limit: int = Field(default=20, ge=0, le=100)
+  relation_depth: int = Field(default=1, ge=1, le=3)
 
   @field_validator('scope')
   @classmethod
@@ -583,6 +636,79 @@ def _resolve_memory_scope(payload: Dict[str, Any]) -> str:
 
 
 @dataclass
+class MemoryIndexRebuildJob:
+  job_id: str
+  state: str
+  phase: str
+  total_count: int
+  processed_count: int = 0
+  started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+  updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+  finished_at: str | None = None
+  last_error: str | None = None
+  recoverable: bool = False
+  retry_of: str | None = None
+  result: Dict[str, Any] | None = None
+  index_generation: str | None = None
+  snapshot_revision: int | None = None
+  cursor_key: str | None = None
+  embedding_config_revision: str | None = None
+
+  @classmethod
+  def from_snapshot(cls, snapshot: Mapping[str, Any]) -> "MemoryIndexRebuildJob":
+    return cls(
+      job_id=str(snapshot.get("job_id") or ""),
+      state=str(snapshot.get("state") or "unknown"),
+      phase=str(snapshot.get("phase") or "unknown"),
+      total_count=max(0, int(snapshot.get("total_count") or 0)),
+      processed_count=max(0, int(snapshot.get("processed_count") or 0)),
+      started_at=str(snapshot.get("started_at") or datetime.now(timezone.utc).isoformat()),
+      updated_at=str(snapshot.get("updated_at") or datetime.now(timezone.utc).isoformat()),
+      finished_at=str(snapshot["finished_at"]) if snapshot.get("finished_at") else None,
+      last_error=str(snapshot["last_error"]) if snapshot.get("last_error") else None,
+      recoverable=bool(snapshot.get("recoverable")),
+      retry_of=str(snapshot["retry_of"]) if snapshot.get("retry_of") else None,
+      result=dict(snapshot["result"]) if isinstance(snapshot.get("result"), Mapping) else None,
+      index_generation=(
+        str(snapshot["index_generation"])
+        if snapshot.get("index_generation")
+        else None
+      ),
+      snapshot_revision=(
+        int(snapshot["snapshot_revision"])
+        if snapshot.get("snapshot_revision") is not None
+        else None
+      ),
+      cursor_key=str(snapshot["cursor_key"]) if snapshot.get("cursor_key") else None,
+      embedding_config_revision=(
+        str(snapshot["embedding_config_revision"])
+        if snapshot.get("embedding_config_revision")
+        else None
+      ),
+    )
+
+  def snapshot(self) -> Dict[str, Any]:
+    return {
+      "job_id": self.job_id,
+      "state": self.state,
+      "phase": self.phase,
+      "processed_count": self.processed_count,
+      "total_count": self.total_count,
+      "started_at": self.started_at,
+      "updated_at": self.updated_at,
+      "finished_at": self.finished_at,
+      "last_error": self.last_error,
+      "recoverable": self.recoverable,
+      "retry_of": self.retry_of,
+      "result": self.result,
+      "index_generation": self.index_generation,
+      "snapshot_revision": self.snapshot_revision,
+      "cursor_key": self.cursor_key,
+      "embedding_config_revision": self.embedding_config_revision,
+    }
+
+
+@dataclass
 class MemoryState:
   """In-memory state for documents and vector index."""
 
@@ -591,14 +717,56 @@ class MemoryState:
   status: str = "idle"   # idle | indexing | error
   io_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
   mutation_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+  rebuild_job: MemoryIndexRebuildJob | None = None
+  rebuild_task: asyncio.Task[Any] | None = field(default=None, repr=False)
+  rebuild_cancel_event: threading.Event | None = field(default=None, repr=False)
+  rebuild_launch_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
 
 def create_memory_router(
   state: MemoryState,
   get_active_workspace_id: Callable[[], str] | None = None,
   clear_memory_references: Callable[[list[str]], int] | None = None,
+  count_memory_references: Callable[[list[str]], int] | None = None,
 ) -> APIRouter:
   router = APIRouter(prefix="/memory", tags=["memory"])
+
+  def _persist_rebuild_job(job: MemoryIndexRebuildJob) -> None:
+    persist = getattr(state.store, "persist_rebuild_job", None)
+    if not callable(persist):
+      return
+    try:
+      persist(job.snapshot())
+    except Exception as exc:
+      logger.warning("Failed to persist memory index rebuild job %s: %s", job.job_id, exc)
+
+  if state.rebuild_job is None:
+    load = getattr(state.store, "load_latest_rebuild_job", None)
+    if callable(load):
+      try:
+        persisted = load()
+        if isinstance(persisted, Mapping) and persisted.get("job_id"):
+          restored_job = MemoryIndexRebuildJob.from_snapshot(persisted)
+          if restored_job.state in {"queued", "running", "cancelling"}:
+            restored_job.state = "interrupted"
+            restored_job.phase = "interrupted"
+            restored_job.finished_at = datetime.now(timezone.utc).isoformat()
+            restored_job.updated_at = restored_job.finished_at
+            restored_job.last_error = "memory service restarted before index rebuild completed"
+            restored_job.recoverable = True
+            state.status = "error"
+            mark_dirty = getattr(state.store, "mark_index_dirty", None)
+            if callable(mark_dirty):
+              mark_dirty()
+            _persist_rebuild_job(restored_job)
+          elif restored_job.state in {"failed", "interrupted"}:
+            state.status = "error"
+            mark_dirty = getattr(state.store, "mark_index_dirty", None)
+            if callable(mark_dirty):
+              mark_dirty()
+          state.rebuild_job = restored_job
+      except Exception as exc:
+        logger.warning("Failed to restore memory index rebuild state: %s", exc)
 
   def _active_workspace_id() -> str | None:
     if get_active_workspace_id is None:
@@ -930,6 +1098,66 @@ def create_memory_router(
       ]
     }
 
+  @router.get("/export")
+  async def export_memory(
+    scope: str | None = None,
+    workspace_id: str | None = None,
+    session_id: str | None = None,
+    include_state: str = 'active',
+  ) -> JSONResponse:
+    """Export memory records for an explicit local backup scope.
+
+    The export is intentionally metadata-first and excludes vector/index data;
+    the index can be rebuilt from the exported records after restore.
+    """
+    try:
+      resolved_scope = _validate_scope(scope) or 'workspace'
+      if include_state not in {'active', 'forgotten', 'all'}:
+        raise ValueError('include_state must be active, forgotten, or all')
+      resolved_workspace_id = _resolve_request_workspace_id(
+        workspace_id,
+        scope=resolved_scope,
+        default_for_workspace_scope=True,
+      )
+    except ValueError as exc:
+      raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    documents = await _run_store_call(state.store.list_documents)
+    exported_docs = [
+      {
+        'id': doc.id,
+        'text': doc.text,
+        'metadata': dict(doc.metadata or {}),
+      }
+      for doc in documents
+      if _doc_matches_scope(
+        doc,
+        scope=resolved_scope,
+        workspace_id=resolved_workspace_id,
+        session_id=session_id,
+      )
+      and (
+        include_state == 'all'
+        or (include_state == 'forgotten' and memory_state(doc.metadata) == 'forgotten')
+        or (include_state == 'active' and memory_state(doc.metadata) == 'active')
+      )
+    ]
+    payload = {
+      'format': 'yuizaki-memory-export',
+      'version': 1,
+      'exported_at': datetime.now(timezone.utc).isoformat(),
+      'scope': resolved_scope,
+      'workspace_id': resolved_workspace_id,
+      'session_id': session_id,
+      'include_state': include_state,
+      'count': len(exported_docs),
+      'docs': exported_docs,
+    }
+    return JSONResponse(
+      content=payload,
+      headers={'Content-Disposition': 'attachment; filename="yuizaki-memory-export.json"'},
+    )
+
   @router.get('/overview')
   async def memory_overview(
     scope: str | None = None,
@@ -1005,6 +1233,95 @@ def create_memory_router(
         'metadata': backend_status.metadata or {},
       },
       'latest_activity': latest,
+    }
+
+  @router.post('/import')
+  async def import_memory(payload: MemoryImportPayload) -> Dict[str, Any]:
+    """Restore safe records from a Yuizaki memory export.
+
+    Imported lifecycle metadata is rebuilt by the normal create path. Terminal
+    records are skipped so an export can never revive rejected, deleted, or
+    superseded memory entries.
+    """
+    if payload.version != 1:
+      raise HTTPException(status_code=400, detail='unsupported memory export version')
+    resolved_workspace_id = _resolve_request_workspace_id(
+      payload.workspace_id,
+      scope=payload.scope,
+      default_for_workspace_scope=True,
+    )
+    target_workspace_id = resolved_workspace_id if payload.scope == 'workspace' else None
+    target_session_id = payload.session_id if payload.scope == 'session' else None
+    existing_ids = {
+      doc.id for doc in await _run_store_call(state.store.list_documents)
+    }
+    imported: list[str] = []
+    skipped: list[Dict[str, Any]] = []
+    restored_count = 0
+    for source_doc in payload.docs:
+      source_metadata = dict(source_doc.metadata or {})
+      source_status = str(source_metadata.get('review_status') or '').strip().lower()
+      if source_metadata.get('candidate') or source_status in {'pending', 'rejected', 'deleted', 'superseded'}:
+        skipped.append({'id': source_doc.id, 'reason': 'terminal_or_review_candidate'})
+        continue
+      if source_doc.id and source_doc.id in existing_ids:
+        skipped.append({'id': source_doc.id, 'reason': 'id_exists'})
+        continue
+      imported_payload = MemoryDocPayload(
+        id=source_doc.id,
+        text=source_doc.text,
+        metadata=_sanitize_create_metadata(source_metadata),
+        scope=payload.scope,
+        workspace_id=target_workspace_id,
+        session_id=target_session_id,
+        type=source_doc.type,
+        layer=source_doc.layer,
+        importance=source_doc.importance,
+        confidence=source_doc.confidence,
+        confidence_source=source_doc.confidence_source,
+        source_kind=source_doc.source_kind,
+        source_id=source_doc.source_id,
+        turn_id=source_doc.turn_id,
+        evidence=source_doc.evidence,
+        dedupe=False,
+      )
+      try:
+        result = await add_doc(imported_payload)
+      except HTTPException as exc:
+        skipped.append({'id': source_doc.id, 'reason': 'write_failed', 'detail': exc.detail})
+        continue
+      if result.get('status') != 'ok':
+        skipped.append({'id': source_doc.id, 'reason': str(result.get('status') or 'write_skipped')})
+        continue
+      imported_id = str(result.get('id') or source_doc.id)
+      imported.append(imported_id)
+      existing_ids.add(imported_id)
+      if source_metadata.get('soft_forgotten'):
+        try:
+          await soft_forget_doc(imported_id, MemorySoftForgetPayload(reason='memory_import_restore'))
+          restored_count += 1
+        except HTTPException as exc:
+          skipped.append({'id': imported_id, 'reason': 'restore_state_failed', 'detail': exc.detail})
+    reason_counts: Dict[str, int] = {}
+    for item in skipped:
+      reason = str(item.get('reason') or 'unknown')
+      reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    return {
+      'status': 'ok',
+      'imported_ids': imported,
+      'imported_count': len(imported),
+      'skipped': skipped,
+      'skipped_count': len(skipped),
+      'skipped_reason_counts': reason_counts,
+      'restored_soft_forgotten_count': restored_count,
+      'effects': {
+        'authority_store': 'updated' if imported else 'unchanged',
+        'index': 'rebuild_required' if imported else 'unchanged',
+        'chat_references': 'preserved',
+      },
+      'scope': payload.scope,
+      'workspace_id': target_workspace_id,
+      'session_id': target_session_id,
     }
 
   @router.post('/maintenance/preview')
@@ -1181,6 +1498,46 @@ def create_memory_router(
       "deleted_count": len(doc_ids),
       "cleared_message_references": cleared_references,
       "storage": await _compact_storage(),
+    }
+
+  @router.post("/docs/delete-preview")
+  async def preview_delete_docs(payload: MemoryDocBatchDeletePayload) -> Dict[str, Any]:
+    doc_ids = payload.ids
+    documents = await _run_store_call(state.store.list_documents)
+    docs_by_id = {doc.id: doc for doc in documents}
+    missing_ids = [doc_id for doc_id in doc_ids if doc_id not in docs_by_id]
+    if missing_ids:
+      raise HTTPException(
+        status_code=404,
+        detail={
+          'error': 'memory_documents_not_found',
+          'message': 'Some memory documents were not found',
+          'missing_count': len(missing_ids),
+          'ids': missing_ids[:20],
+        },
+      )
+    for doc_id in doc_ids:
+      _ensure_doc_in_active_workspace(docs_by_id[doc_id])
+    candidate_count = sum(1 for doc_id in doc_ids if (docs_by_id[doc_id].metadata or {}).get('candidate'))
+    hard_delete_count = len(doc_ids) - candidate_count
+    reference_count = 0
+    reference_counter = count_memory_references
+    if reference_counter is not None and hard_delete_count:
+      hard_delete_ids = [doc_id for doc_id in doc_ids if not (docs_by_id[doc_id].metadata or {}).get('candidate')]
+      reference_count = int(await run_in_threadpool(lambda: reference_counter(hard_delete_ids)))
+    return {
+      'status': 'preview',
+      'ids': doc_ids,
+      'total_count': len(doc_ids),
+      'hard_delete_count': hard_delete_count,
+      'candidate_tombstone_count': candidate_count,
+      'affected_message_count': reference_count,
+      'effects': {
+        'authority_store': 'delete_or_tombstone',
+        'index': 'entries_removed',
+        'chat_references': 'cleared' if reference_count else 'unchanged',
+        'recoverable': False,
+      },
     }
 
   @router.put("/docs/{doc_id:path}")
@@ -1372,6 +1729,34 @@ def create_memory_router(
       "storage": await _compact_storage(),
     }
 
+  @router.post("/docs/{doc_id:path}/feedback")
+  @_serialized_mutation
+  async def feedback_doc(doc_id: str, payload: MemoryFeedbackPayload) -> Dict[str, Any]:
+    """Record recall feedback without changing memory text or revision."""
+    documents = await _run_store_call(state.store.list_documents)
+    existing = next((doc for doc in documents if doc.id == doc_id), None)
+    if existing is None:
+      raise HTTPException(status_code=404, detail="memory document not found")
+    _ensure_doc_in_active_workspace(existing)
+    metadata = dict(existing.metadata or {})
+    summary = metadata.get('recall_feedback')
+    summary = dict(summary) if isinstance(summary, dict) else {}
+    counts = summary.get('summary') or summary.get('counts')
+    counts = dict(counts) if isinstance(counts, dict) else {}
+    counts[payload.feedback] = int(counts.get(payload.feedback, 0) or 0) + 1
+    summary['summary'] = {str(key): max(0, int(value or 0)) for key, value in counts.items()}
+    summary.pop('counts', None)
+    events = summary.get('events')
+    events = list(events) if isinstance(events, list) else []
+    events.append({'feedback': payload.feedback, 'at': datetime.now(timezone.utc).isoformat()})
+    summary['events'] = events[-50:]
+    metadata['recall_feedback'] = summary
+    updater = getattr(state.store, 'update_metadata', None)
+    if not callable(updater):
+      raise HTTPException(status_code=501, detail='memory backend does not support metadata feedback')
+    await _run_store_call(updater, doc_id, metadata)
+    return {'status': 'recorded', 'id': doc_id, 'feedback': payload.feedback, 'counts': summary['summary']}
+
   @router.post("/docs/{doc_id:path}/correction")
   async def correct_doc(doc_id: str, payload: MemoryCorrectionPayload) -> Dict[str, Any]:
     """Apply a conversational correction while retaining origin provenance and audit history."""
@@ -1410,11 +1795,31 @@ def create_memory_router(
     return {'status': metadata['review_status'], 'id': doc_id}
 
   @router.get("/candidates")
-  async def list_memory_candidates(status: str | None = None) -> Dict[str, Any]:
-    """List review candidates without exposing them through retrieval."""
+  async def list_memory_candidates(
+    status: str | None = None,
+    scope: str | None = None,
+    workspace_id: str | None = None,
+    session_id: str | None = None,
+  ) -> Dict[str, Any]:
+    """List review candidates for the active memory scope.
+
+    Candidates are separate from recallable documents. The UI must not infer
+    review state from confidence alone because low-quality active memories and
+    review-only candidates have different lifecycle rules.
+    """
     requested = str(status or 'pending').strip().lower()
     if requested not in {'pending', 'approved', 'rejected', 'deleted', 'all'}:
       raise HTTPException(status_code=400, detail='unsupported candidate status')
+    try:
+      resolved_scope = _validate_scope(scope) if scope else None
+      resolved_workspace_id = _resolve_request_workspace_id(
+        workspace_id,
+        scope=resolved_scope,
+        default_for_workspace_scope=resolved_scope == 'workspace',
+      )
+    except ValueError as exc:
+      raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     documents = await _run_store_call(state.store.list_documents)
     items: list[Dict[str, Any]] = []
     for doc in documents:
@@ -1424,10 +1829,18 @@ def create_memory_router(
       review_status = str(metadata.get('review_status') or 'pending').lower()
       if requested != 'all' and review_status != requested:
         continue
-      try:
-        _ensure_doc_in_active_workspace(doc)
-      except HTTPException:
-        continue
+      if resolved_scope is None:
+        try:
+          _ensure_doc_in_active_workspace(doc)
+        except HTTPException:
+          continue
+      elif not _doc_matches_scope(
+          doc,
+          scope=resolved_scope,
+          workspace_id=resolved_workspace_id,
+          session_id=session_id,
+        ):
+          continue
       items.append({'id': doc.id, 'text': doc.text, 'metadata': metadata})
     return {'status': 'ok', 'candidates': items, 'count': len(items)}
 
@@ -1549,6 +1962,161 @@ def create_memory_router(
       "revision": current_revision + 1,
     }
 
+  def _touch_rebuild_job(job: MemoryIndexRebuildJob) -> None:
+    job.updated_at = datetime.now(timezone.utc).isoformat()
+    _persist_rebuild_job(job)
+
+  def _rebuild_progress(processed: int, total: int, phase: str) -> None:
+    job = state.rebuild_job
+    if job is None:
+      return
+    normalized_phase = str(phase or "indexing")
+    if normalized_phase in {"indexing", "complete"}:
+      job.processed_count = max(job.processed_count, int(processed), 0)
+      job.total_count = max(job.total_count, job.processed_count, int(total))
+    job.phase = normalized_phase
+    _touch_rebuild_job(job)
+
+  def _rebuild_checkpoint(cursor_key: str, processed: int, total: int, phase: str) -> None:
+    job = state.rebuild_job
+    if job is None:
+      return
+    job.cursor_key = str(cursor_key) or None
+    job.processed_count = max(job.processed_count, int(processed), 0)
+    job.total_count = max(job.total_count, job.processed_count, int(total))
+    job.phase = str(phase or "indexing")
+    _touch_rebuild_job(job)
+
+  def _invoke_index_rebuild(
+    job: MemoryIndexRebuildJob,
+    cancel_event: threading.Event,
+  ) -> Dict[str, Any]:
+    rebuild = state.store.rebuild_index
+    parameters = inspect.signature(rebuild).parameters
+    kwargs: Dict[str, Any] = {}
+    if "progress_callback" in parameters:
+      kwargs["progress_callback"] = _rebuild_progress
+    if "should_cancel" in parameters:
+      kwargs["should_cancel"] = cancel_event.is_set
+    if "checkpoint_callback" in parameters:
+      kwargs["checkpoint_callback"] = _rebuild_checkpoint
+    for name, value in (
+      ("snapshot_revision", job.snapshot_revision),
+      ("index_generation", job.index_generation),
+      ("cursor_key", job.cursor_key),
+      ("embedding_config_revision", job.embedding_config_revision),
+      ("processed_count", job.processed_count),
+    ):
+      if name in parameters and value is not None:
+        kwargs[name] = value
+    return rebuild(**kwargs)
+
+  async def _run_index_rebuild_job(job: MemoryIndexRebuildJob, cancel_event: threading.Event) -> None:
+    job.state = "running"
+    job.phase = "indexing"
+    _touch_rebuild_job(job)
+    try:
+      result = await run_in_threadpool(lambda: _invoke_index_rebuild(job, cancel_event))
+      if cancel_event.is_set() or str(result.get("status", "")).lower() == "cancelled":
+        job.state = "cancelled"
+        job.phase = "cancelled"
+        job.recoverable = True
+        state.status = "idle"
+      else:
+        job.result = dict(result)
+        job.processed_count = int(result.get("indexed_count", job.processed_count))
+        job.total_count = int(result.get("document_count", job.total_count))
+        job.state = "completed"
+        job.phase = "completed"
+        job.recoverable = False
+        state.status = "idle"
+    except asyncio.CancelledError:
+      cancel_event.set()
+      job.state = "interrupted"
+      job.phase = "interrupted"
+      job.last_error = "memory service stopped while rebuilding the index"
+      job.recoverable = True
+      state.status = "error"
+      raise
+    except Exception as exc:
+      cancelled = cancel_event.is_set() or exc.__class__.__name__ == "MemoryIndexRebuildCancelled"
+      job.state = "cancelled" if cancelled else "failed"
+      job.phase = job.state
+      job.last_error = None if cancelled else str(exc)
+      job.recoverable = True
+      state.status = "idle" if cancelled else "error"
+    finally:
+      job.finished_at = datetime.now(timezone.utc).isoformat()
+      _touch_rebuild_job(job)
+
+  async def _start_index_rebuild(*, retry_of: str | None = None) -> Dict[str, Any]:
+    async with state.rebuild_launch_lock:
+      if state.rebuild_task is not None and not state.rebuild_task.done():
+        current = state.rebuild_job
+        return {
+          "status": "indexing",
+          "index_status": state.status,
+          "job": current.snapshot() if current else None,
+        }
+
+      documents = await _run_store_call(state.store.list_documents)
+      checkpoint_context: Mapping[str, Any] | None = None
+      get_checkpoint_context = getattr(state.store, "get_rebuild_checkpoint_context", None)
+      if callable(get_checkpoint_context):
+        resolved_context = await _run_store_call(get_checkpoint_context)
+        if isinstance(resolved_context, Mapping):
+          checkpoint_context = resolved_context
+
+      previous_job = state.rebuild_job if retry_of else None
+      snapshot_revision: int | None = None
+      embedding_config_revision: str | None = None
+      index_generation: str | None = None
+      cursor_key: str | None = None
+      processed_count = 0
+      if checkpoint_context is not None:
+        snapshot_revision = int(checkpoint_context["snapshot_revision"])
+        embedding_config_revision = str(checkpoint_context["embedding_config_revision"])
+        resumable_job = previous_job if (
+          previous_job is not None
+          and checkpoint_context.get("durable_resume")
+          and previous_job.index_generation
+          and previous_job.snapshot_revision == snapshot_revision
+          and previous_job.embedding_config_revision == embedding_config_revision
+        ) else None
+        if resumable_job is not None:
+          index_generation = resumable_job.index_generation
+          cursor_key = resumable_job.cursor_key
+          processed_count = resumable_job.processed_count
+        else:
+          index_generation = uuid4().hex
+
+      job = MemoryIndexRebuildJob(
+        job_id=uuid4().hex,
+        state="queued",
+        phase="queued",
+        total_count=len(documents),
+        processed_count=processed_count,
+        retry_of=retry_of,
+        index_generation=index_generation,
+        snapshot_revision=snapshot_revision,
+        cursor_key=cursor_key,
+        embedding_config_revision=embedding_config_revision,
+      )
+      cancel_event = threading.Event()
+      state.rebuild_job = job
+      state.rebuild_cancel_event = cancel_event
+      state.status = "indexing"
+      mark_dirty = getattr(state.store, "mark_index_dirty", None)
+      if callable(mark_dirty):
+        mark_dirty()
+      _persist_rebuild_job(job)
+      state.rebuild_task = asyncio.create_task(_run_index_rebuild_job(job, cancel_event))
+      return {
+        "status": "indexing",
+        "index_status": state.status,
+        "job": job.snapshot(),
+      }
+
   @router.get("/index/status")
   async def index_status() -> Dict[str, Any]:
     backend_status = await _run_store_call(state.store.get_status)
@@ -1558,6 +2126,7 @@ def create_memory_router(
     metadata.update({
       "document_count": len(documents),
       "recallable_count": recallable_count,
+      "rebuild_job": state.rebuild_job.snapshot() if state.rebuild_job else None,
     })
     return {
       "status": state.status,
@@ -1566,28 +2135,43 @@ def create_memory_router(
       "healthy": backend_status.healthy,
       "message": backend_status.message,
       "metadata": metadata,
+      "job": state.rebuild_job.snapshot() if state.rebuild_job else None,
     }
 
   @router.post("/index/rebuild")
   async def rebuild_index() -> Dict[str, Any]:
-    if state.status == "indexing":
-      return {"status": "indexing", "index_status": state.status}
-    state.status = "indexing"
-    try:
-      result = await _run_store_call(state.store.rebuild_index)
-      state.status = "idle"
-      backend_status = await _run_store_call(state.store.get_status)
-      return {
-        **result,
-        "status": result.get("status", "rebuilt"),
-        "index_status": state.status,
-        "healthy": backend_status.healthy,
-        "message": backend_status.message,
-        "metadata": backend_status.metadata,
-      }
-    except Exception as exc:
-      state.status = "error"
-      raise HTTPException(status_code=500, detail=f"memory index rebuild failed: {exc}") from exc
+    return await _start_index_rebuild()
+
+  @router.get("/index/rebuild/{job_id}")
+  async def rebuild_index_job(job_id: str) -> Dict[str, Any]:
+    job = state.rebuild_job
+    if job is None or job.job_id != job_id:
+      raise HTTPException(status_code=404, detail="memory index rebuild job not found")
+    return {"status": job.state, "index_status": state.status, "job": job.snapshot()}
+
+  @router.post("/index/rebuild/{job_id}/cancel")
+  async def cancel_rebuild_index_job(job_id: str) -> Dict[str, Any]:
+    job = state.rebuild_job
+    if job is None or job.job_id != job_id:
+      raise HTTPException(status_code=404, detail="memory index rebuild job not found")
+    if job.state not in {"queued", "running", "cancelling"}:
+      return {"status": job.state, "index_status": state.status, "job": job.snapshot()}
+    if state.rebuild_cancel_event is not None:
+      state.rebuild_cancel_event.set()
+    job.state = "cancelling"
+    job.phase = "cancelling"
+    job.recoverable = True
+    _touch_rebuild_job(job)
+    return {"status": "cancelling", "index_status": state.status, "job": job.snapshot()}
+
+  @router.post("/index/rebuild/{job_id}/retry")
+  async def retry_rebuild_index_job(job_id: str) -> Dict[str, Any]:
+    job = state.rebuild_job
+    if job is None or job.job_id != job_id:
+      raise HTTPException(status_code=404, detail="memory index rebuild job not found")
+    if job.state not in {"cancelled", "failed", "interrupted"}:
+      raise HTTPException(status_code=409, detail="memory index rebuild job is not recoverable")
+    return await _start_index_rebuild(retry_of=job_id)
 
   @router.post("/query")
   @router.post("/rag/query")
@@ -1620,6 +2204,9 @@ def create_memory_router(
       layers=payload.layers or ['profile', 'working', 'episodic', 'relationship', 'reflective', 'semantic'],
       memory_types=memory_types,
       recency_weight=recency_weight,
+      relation_expansion=payload.expand_relations,
+      relation_limit=payload.relation_limit,
+      relation_depth=payload.relation_depth,
     )
     pipeline = state.pipeline or RetrievalPipeline(state.store)
     try:

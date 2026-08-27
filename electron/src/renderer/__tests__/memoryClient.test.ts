@@ -113,6 +113,35 @@ describe('memoryClient', () => {
     )
   })
 
+  it('maps index rebuild progress, cancellation, and retry to job routes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ status: 'running', index_status: 'indexing', job: { job_id: 'job/1' } }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await memoryClient.getIndexRebuildJob('job/1')
+    await memoryClient.cancelIndexRebuild('job/1')
+    await memoryClient.retryIndexRebuild('job/1')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      `${CONTROL_ORIGIN}/memory/index/rebuild/job%2F1`,
+      expect.any(Object),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `${CONTROL_ORIGIN}/memory/index/rebuild/job%2F1/cancel`,
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      `${CONTROL_ORIGIN}/memory/index/rebuild/job%2F1/retry`,
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
   it('encodes memory document ids before using them in route paths', async () => {
     window.sessionStorage.setItem('yuizaki.control.token', 'memory-token')
     const fetchMock = vi.fn().mockResolvedValue({
@@ -158,6 +187,25 @@ describe('memoryClient', () => {
     expect(fetchMock).not.toHaveBeenCalledWith(
       `${CONTROL_ORIGIN}/memory/docs/memory-1`,
       expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
+  it('records low-friction recall feedback on the canonical memory route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ status: 'recorded', id: 'memory-1', feedback: 'helpful', counts: { helpful: 1 } }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await memoryClient.recordRecallFeedback('folder/memory 1', 'helpful')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${CONTROL_ORIGIN}/memory/docs/folder%2Fmemory%201/feedback`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ feedback: 'helpful' }),
+      }),
     )
   })
 

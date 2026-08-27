@@ -44,6 +44,8 @@ class ToolEvents:
     CALL   = "tool:call"              # ↑ 客户端 → 服务端 (LLM 决定)
     RESULT = "tool:result"            # ↓ 服务端 → 客户端: 成功结果
     ERROR  = "tool:error"             # ↓ 服务端 → 客户端: 调用失败
+    RECHECK = "tool:recheck"           # ↑ 客户端 → 服务端: 无副作用状态探测
+    RECHECK_RESULT = "tool:recheck-result"  # ↓ 服务端 → 客户端: 探测结果
 
 
 class MemoryEvents:
@@ -184,7 +186,11 @@ class TTSChunkData:
     visemes: List[TTSVisemeCueData] = field(default_factory=list)
 
 
+TOOL_PROTOCOL_VERSION = 1
+
 @dataclass
+
+
 class ToolCallData:
     """工具调用请求"""
     id: str
@@ -195,6 +201,7 @@ class ToolCallData:
     job_id: Optional[str] = None
     source: Optional[str] = None
     retry: bool = False
+    version: int = TOOL_PROTOCOL_VERSION
 
 
 @dataclass
@@ -203,6 +210,21 @@ class ToolResultData:
     id: str
     output: str = ""
     error: Optional[str] = None
+    version: int = TOOL_PROTOCOL_VERSION
+    status: str = "completed"
+    outcome: str = "known_success"
+    effect_outcome: Optional[str] = None
+    verification_status: Optional[str] = None
+    recheck_available: bool = False
+    retryable: bool = False
+    data: Optional[Dict[str, Any]] = None
+    request_id: Optional[str] = None
+    run_id: Optional[str] = None
+    job_id: Optional[str] = None
+    source: Optional[str] = None
+    verification_evidence: Optional[List[str]] = None
+    recheck_error: Optional[str] = None
+    result_summary: Optional[str] = None
 
 
 @dataclass

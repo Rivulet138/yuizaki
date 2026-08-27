@@ -77,7 +77,12 @@ def test_default_local_read_tools_do_not_require_confirmation(tmp_path):
 def test_local_summary_mutations_do_not_require_a_second_admin_token():
     summary_api = importlib.import_module("routes.summary_api")
     state = {"demo": {"acked": False}}
-    limiter = lambda: SimpleNamespace(check=lambda _key: SimpleNamespace(allowed=True, retry_after=0))
+
+    def limiter():
+        return SimpleNamespace(
+            check=lambda _key: SimpleNamespace(allowed=True, retry_after=0)
+        )
+
     app = FastAPI()
     app.include_router(summary_api.create_summary_router(
         get_generation_mgr=lambda: None,

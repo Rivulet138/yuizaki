@@ -39,6 +39,7 @@ async def test_required_model_probe_uses_non_persistent_connection_test() -> Non
 
     assert snapshot["readyForText"] is True
     test_connection.assert_awaited_once_with()
+    assert next(item for item in snapshot["probes"] if item["id"] == "llm.model_chat")["durationMs"] is not None
     assert not hasattr(llm, "generation_manager")
     assert not hasattr(llm, "history")
 
@@ -68,6 +69,8 @@ async def test_timeout_is_bounded_and_reported() -> None:
 
     assert probe["status"] == "unavailable"
     assert probe["evidence"] == {"category": "timeout"}
+    assert probe["durationMs"] is not None
+    assert probe["durationMs"] >= 0
 
 
 @pytest.mark.asyncio

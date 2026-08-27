@@ -6,7 +6,7 @@ const MAX_OBJECT_KEYS = 200
 
 const secretKeyPattern = /(authorization|cookie|credential|password|secret|token|api.?key|client.?key)/i
 const omittedPayloadKeyPattern = /^(args|messages|content|reply|reply_preview|description|goal|summary|message|error|title|reason|resultSummary|result_summary|cancellationReason|cancellation_reason|screenshot|image|imageData|image_data|imageUrl|image_url|frame|frameData|frame_data|pcm|audio|audioData|audio_data|rawMemory|raw_memory|memoryText|memory_text|memoryContent|memory_content|clipboardText|clipboard_text|fileText|file_text|query|prompt|input|transcript|user_text|userText|raw_user_text|rawUserText)$/i
-const allowedContainerKeyPattern = /^(trace|jobs|entries|stepChain|runtimeLoopEntries|schedulerEntries|data|failure|recovery|condition|configuredBudget|consumedUsage)$/i
+const allowedContainerKeyPattern = /^(trace|jobs|entries|stepChain|runtimeLoopEntries|schedulerEntries|data|failure|recovery|condition|configuredBudget|consumedUsage|runtime|experience|voice|providers|connectors|platforms|memory|avatar|companion|collection)$/i
 const allowedMetadataKeyPattern = /^(traceType|timestamp|type|kind|status|stage|mode|source|version|schemaVersion|workspaceId|workspace_id|sessionId|session_id|turnId|turn_id|jobId|job_id|requestId|request_id|conversationId|conversation_id|operationId|operation_id|runId|run_id|taskId|task_id|stepId|step_id|failedStep|failed_step|failedStepId|failed_step_id|revision|interruptionEpoch|interruption_epoch|sequence|stepIndex|step_index|planner|steps|scheduler|runtimeLoop|runtime_loop|progress|retryable|available|action|scope|singleUse|single_use|ttlSeconds|ttl_seconds|completedSteps|completed_steps|failureCategory|failure_category|category|tool|dependsOn|depends_on|success|firstTimestamp|lastTimestamp|ownerAgentId|owner_agent_id|ownerAgentRole|owner_agent_role|agentId|agent_id|agentRole|agent_role|autonomyMode|autonomy_mode|urgency|turnStage|idempotencyKey|semanticFingerprint|generationId|maxIterations|max_iterations|outputTokens|output_tokens|retryBudget|retry_budget|toolBudget|tool_budget|iterations|retries|toolCalls|tool_calls|attempts)$/i
 const identifierKeyPattern = /^(workspaceId|workspace_id|sessionId|session_id|turnId|turn_id|jobId|job_id|requestId|request_id|conversationId|conversation_id|operationId|operation_id|runId|run_id|taskId|task_id|stepId|step_id|failedStep|failed_step|failedStepId|failed_step_id|ownerAgentId|owner_agent_id|agentId|agent_id|idempotencyKey|semanticFingerprint|generationId|tool)$/i
 const identifierListKeyPattern = /^(completedSteps|completed_steps|dependsOn|depends_on)$/i
@@ -87,6 +87,10 @@ const sanitize = (value: unknown, context: SanitizeContext, key = ''): unknown =
       result[key] = REDACTED
     } else if (omittedPayloadKeyPattern.test(key)) {
       result[key] = OMITTED
+    } else if (typeof child === 'number' || typeof child === 'boolean') {
+      // Numeric/boolean telemetry is safe to retain even when a newer report
+      // adds a metric key that this exporter has not learned yet.
+      result[key] = sanitize(child, context, key)
     } else if (allowedContainerKeyPattern.test(key) || allowedMetadataKeyPattern.test(key)) {
       result[key] = sanitize(child, context, key)
     } else {

@@ -364,13 +364,21 @@ def create_ai_router(
                         yield f"data: {json.dumps({'action_envelope': serialize_permission_payload(result_obj.action_envelope)})}\n\n"
                     terminal: dict[str, Any] = {
                         "choices": [{"delta": {"content": final_reply}, "finish_reason": "stop"}],
+                        "outcome": result_obj.outcome,
+                        "retryable": result_obj.retryable,
                     }
                     if commit is not None:
                         terminal["turn_commit"] = _commit_metadata(commit)
                     yield f"data: {json.dumps(terminal)}\n\n"
                 except Exception as e:
                     logger.error("Chat error: %s", e, exc_info=True)
-                    yield f"data: {json.dumps({'error': _chat_error_message(e)})}\n\n"
+                    error_message = _chat_error_message(e)
+                    yield f"data: {json.dumps({'error': error_message})}\n\n"
+                    yield f"data: {json.dumps({
+                        'choices': [{'delta': {'content': ''}, 'finish_reason': 'error'}],
+                        'outcome': 'failed',
+                        'retryable': True,
+                    })}\n\n"
             return StreamingResponse(stream_generator(), media_type="text/event-stream")
         session_id = _resolve_chat_session_id(req.session_id)
         try:

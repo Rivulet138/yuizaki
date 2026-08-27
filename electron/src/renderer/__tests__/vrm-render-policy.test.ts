@@ -74,4 +74,37 @@ describe('VRM render policy', () => {
     expect(requestFrame).toHaveBeenCalled()
     expect(render).toHaveBeenCalledTimes(5)
   })
+
+  it('cross-fades to the first available clip when a requested motion is missing', () => {
+    const fallbackClip = { name: 'idle-loop' }
+    const action = {
+      reset: vi.fn(),
+      setLoop: vi.fn(),
+      setEffectiveWeight: vi.fn(),
+      fadeIn: vi.fn(),
+      play: vi.fn(),
+    }
+    const clipAction = vi.fn(() => action)
+    const hostMarkActivity = vi.fn()
+    const adapter = new VrmRuntimeAdapter({
+      container: document.createElement('div'),
+      config: {
+        modelId: 'vrm-fallback', modelType: 'vrm', modelPath: 'test.vrm', animationPaths: [],
+        scale: 0.4, positionX: null, positionY: null, placement: 'bottom-right',
+        lipSyncProfile: { gain: 1, noiseGate: 0, maxOpen: 1, attack: 1, release: 1 },
+      },
+      showNotice: vi.fn(), hideNotice: vi.fn(), reportState: vi.fn(), markActivity: hostMarkActivity,
+    })
+    Object.assign(adapter as object, {
+      animationMixer: { clipAction, stopAllAction: vi.fn() },
+      animationClips: [fallbackClip],
+    })
+
+    const result = adapter.executeAvatarAction({ type: 'motion', group: 'missing' })
+
+    expect(result.status).toBe('degraded')
+    expect(clipAction).toHaveBeenCalledWith(fallbackClip)
+    expect(action.fadeIn).toHaveBeenCalled()
+    expect(hostMarkActivity).toHaveBeenCalledWith('vrm-motion:idle-loop')
+  })
 })

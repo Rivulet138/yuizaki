@@ -1194,5 +1194,8 @@ describe('companion runtime controller', () => {
     expect(runtimeBridge).toContain('resolveCompanionEmbodimentDelivery')
     expect(runtimeBridge).toContain('resolved.motionAllowed')
     expect(runtimeBridge).toContain("resolved.behavior === 'waiting' ? 'waiting' : 'idle'")
+    expect(runtimeBridge).toContain('triggerAvatarCommand')
+    expect(runtimeBridge).not.toContain('petControlClient.triggerEmotion(')
+    expect(runtimeBridge).not.toContain('petControlClient.triggerMotion(')
   })
 })

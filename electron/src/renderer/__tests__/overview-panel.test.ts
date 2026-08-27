@@ -14,8 +14,13 @@ const clientMocks = vi.hoisted(() => ({
   settingsLoad: vi.fn(),
   companionRuntime: vi.fn(),
   heartbeat: vi.fn(),
+  providers: vi.fn(),
+  connectors: vi.fn(),
+  platforms: vi.fn(),
+  voiceDiagnostics: vi.fn(),
   petState: vi.fn(),
   petCatalog: vi.fn(),
+  getAvatarCapabilities: vi.fn(),
 }))
 
 vi.mock('../api/client', () => ({
@@ -29,6 +34,10 @@ vi.mock('../api/client', () => ({
   systemClient: {
     companionRuntime: clientMocks.companionRuntime,
     heartbeat: clientMocks.heartbeat,
+    providers: clientMocks.providers,
+    connectors: clientMocks.connectors,
+    platforms: clientMocks.platforms,
+    voiceDiagnostics: clientMocks.voiceDiagnostics,
   },
   settingsClient: {
     load: clientMocks.settingsLoad,
@@ -47,6 +56,7 @@ vi.mock('@/utils/petControl', () => ({
   petControl: {
     getState: clientMocks.petState,
     getCatalog: clientMocks.petCatalog,
+    getAvatarCapabilities: clientMocks.getAvatarCapabilities,
     setModel: vi.fn(),
     setScale: vi.fn(),
     setOpacity: vi.fn(),
@@ -142,6 +152,27 @@ describe('OverviewPanel chain self check', () => {
     })
     clientMocks.getSessions.mockResolvedValue({ sessions: [] })
     clientMocks.getGovernanceReport.mockResolvedValue({ trends: [], alerts: [], summary: {} })
+    clientMocks.providers.mockResolvedValue({
+      providers: [
+        { id: 'llm', kind: 'llm', label: 'LLM', provider: 'custom', model: 'demo', configured: true, available: true, healthy: true, optional: false, capabilities: [], message: '', source: 'test' },
+      ],
+      summary: { total: 1, configured: 1, available: 1, healthy: 1, requiredHealthy: true },
+    })
+    clientMocks.connectors.mockResolvedValue({
+      connectors: [],
+      summary: { total: 0, installed: 0, enabled: 0, running: 0, failures: 0, uninstalled: 0, canDisable: 0 },
+    })
+    clientMocks.platforms.mockResolvedValue({ host: { system: 'test', displayServer: 'test' }, platforms: [], statusLegend: [], schemaVersion: 1, generatedAt: '' })
+    clientMocks.voiceDiagnostics.mockResolvedValue({
+      sample_count: 0,
+      stages: {},
+      comfort: {},
+      evidence_kinds: [],
+      evidence_claim: 'none',
+      providers: {},
+      capability: { voice: 'not_measured', text_chat: 'available', text_chat_blocked_by_voice: false },
+      recommendations: [],
+    })
     clientMocks.getReadiness.mockResolvedValue({
       ready: false,
       checks: {
@@ -170,6 +201,14 @@ describe('OverviewPanel chain self check', () => {
       ready: false,
     })
     clientMocks.petCatalog.mockResolvedValue({ activeModelId: null, models: [] })
+    clientMocks.getAvatarCapabilities.mockResolvedValue({
+      success: true,
+      capabilities: {
+        revision: 'test', modelType: 'live2d', modelId: null, generatedAt: 0,
+        actions: { behavior: true, affect: false, gaze: true, motion: false, expression: false, parameterPatch: false, viseme: false, cancel: true },
+        expressions: [], motions: [], parameters: [],
+      },
+    })
   })
 
   afterEach(() => {
@@ -193,7 +232,37 @@ describe('OverviewPanel chain self check', () => {
     expect(wrapper.text()).toContain('LLM 未选择模型')
     expect(wrapper.text()).toContain('ASR 缺少地址')
     expect(wrapper.text()).toContain('桌宠模型未加载')
+    expect(wrapper.text()).toContain('运行状态清单')
+    expect(wrapper.text()).toContain('模型与语音服务')
+    expect(wrapper.text()).toContain('1/1 健康')
+    expect(wrapper.text()).toContain('语音体验')
+    expect(wrapper.text()).toContain('暂无')
+    expect(clientMocks.voiceDiagnostics).toHaveBeenCalled()
     expect(clientMocks.companionRuntime).not.toHaveBeenCalled()
+  })
+
+  it('shows measured voice quality separately from provider configuration', async () => {
+    clientMocks.voiceDiagnostics.mockResolvedValue({
+      sample_count: 12,
+      stages: {
+        first_audio: { p95_ms: 480 },
+        interruption: { p95_ms: 190 },
+      },
+      comfort: {},
+      evidence_kinds: ['synthetic_fixture'],
+      evidence_claim: 'synthetic_comfort_regression_only',
+      providers: {},
+      capability: { voice: 'configured', text_chat: 'available', text_chat_blocked_by_voice: false },
+      recommendations: ['首包延迟偏高'],
+    })
+    const wrapper = mount(OverviewPanel, { global })
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('本地 fixture')
+    expect(wrapper.text()).toContain('480 ms')
+    expect(wrapper.text()).toContain('190 ms')
+    expect(wrapper.text()).toContain('首包延迟偏高')
   })
 
   it('pauses pet synchronization while hidden and refreshes once on resume', async () => {

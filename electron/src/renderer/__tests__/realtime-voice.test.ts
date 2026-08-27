@@ -214,6 +214,273 @@ describe('RealtimeVoiceSession', () => {
     session.close()
   })
 
+  it('treats an empty audio commit as a recoverable empty turn', async () => {
+    const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
+    const session = new RealtimeVoiceSession()
+    const errors: unknown[] = []
+    const turns: unknown[] = []
+    session.on('error', error => errors.push(error))
+    session.on('turn-complete', turn => turns.push(turn))
+
+    await session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })
+    session.stopPushToTalk()
+    const channel = MockPeerConnection.latest!.channel
+    channel.serverEvent({
+      type: 'error',
+      error: { code: 'input_audio_buffer_commit_empty', message: 'buffer is empty' },
+    })
+
+    expect(errors).toEqual([])
+    expect(turns).toEqual([])
+    expect(session.getStatus()).toBe('ready')
+    session.close()
+  })
+
+  it('does not let a late empty error from an interrupted turn reset the next turn', async () => {
+    vi.useFakeTimers()
+    try {
+      const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
+      const session = new RealtimeVoiceSession()
+      const turns: Array<{ userText: string; assistantText: string }> = []
+      session.on('turn-complete', turn => turns.push(turn))
+
+      await session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })
+      vi.advanceTimersByTime(300)
+      session.stopPushToTalk()
+      const channel = MockPeerConnection.latest!.channel
+      session.interrupt()
+      vi.advanceTimersByTime(250)
+      await session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })
+      vi.advanceTimersByTime(300)
+      session.stopPushToTalk()
+
+      const create = channel.sent
+        .map(payload => JSON.parse(payload))
+        .filter(payload => payload.type === 'response.create')
+        .at(-1)
+      const metadata = create.response.metadata
+
+      channel.serverEvent({ type: 'input_audio_buffer.committed', item_id: 'old-item' })
+      channel.serverEvent({
+        type: 'error',
+        error: { code: 'input_audio_buffer_commit_empty', message: 'old buffer was empty' },
+      })
+      channel.serverEvent({ type: 'input_audio_buffer.committed', item_id: 'new-item' })
+      channel.serverEvent({
+        type: 'conversation.item.input_audio_transcription.completed',
+        item_id: 'new-item',
+        transcript: 'new input',
+      })
+      channel.serverEvent({ type: 'response.created', response: { id: 'new-response', metadata } })
+      channel.serverEvent({
+        type: 'response.output_audio_transcript.done',
+        response_id: 'new-response',
+        transcript: 'new answer',
+      })
+      channel.serverEvent({
+        type: 'response.done',
+        response: { id: 'new-response', status: 'completed', output: [] },
+      })
+      vi.advanceTimersByTime(600)
+
+      expect(turns).toEqual([expect.objectContaining({ userText: 'new input', assistantText: 'new answer' })])
+      session.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('uses commit event identity when an old tombstone overlaps a new empty commit', async () => {
+    vi.useFakeTimers()
+    try {
+      const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
+      const session = new RealtimeVoiceSession()
+      await session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })
+      vi.advanceTimersByTime(300)
+      session.stopPushToTalk()
+      const channel = MockPeerConnection.latest!.channel
+      const commitIds = () => channel.sent
+        .map(payload => JSON.parse(payload))
+        .filter(payload => payload.type === 'input_audio_buffer.commit')
+        .map(payload => payload.event_id)
+
+      const firstCommitId = commitIds()[0]
+      session.interrupt()
+      vi.advanceTimersByTime(250)
+      await session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })
+      vi.advanceTimersByTime(300)
+      session.stopPushToTalk()
+      const secondCommitId = commitIds()[1]
+
+      channel.serverEvent({ type: 'input_audio_buffer.committed', item_id: 'old-item' })
+      channel.serverEvent({
+        type: 'error',
+        error: { code: 'input_audio_buffer_commit_empty', event_id: secondCommitId },
+      })
+
+      expect(firstCommitId).toEqual(expect.any(String))
+      expect(secondCommitId).toEqual(expect.any(String))
+      expect(session.getStatus()).toBe('ready')
+      session.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a late committed event after an old empty error from consuming the new commit', async () => {
+    vi.useFakeTimers()
+    try {
+      const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
+      const session = new RealtimeVoiceSession()
+      await session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })
+      vi.advanceTimersByTime(300)
+      session.stopPushToTalk()
+      const channel = MockPeerConnection.latest!.channel
+      session.interrupt()
+      vi.advanceTimersByTime(250)
+      await session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })
+      vi.advanceTimersByTime(300)
+      session.stopPushToTalk()
+
+      channel.serverEvent({
+        type: 'error',
+        error: { code: 'input_audio_buffer_commit_empty' },
+      })
+      channel.serverEvent({ type: 'input_audio_buffer.committed', item_id: 'old-item' })
+      channel.serverEvent({ type: 'input_audio_buffer.committed', item_id: 'new-item' })
+
+      expect(session.getStatus()).toBe('responding')
+      session.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('confirms continuous barge-in only after sustained speech', async () => {
+    vi.useFakeTimers()
+    try {
+      const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
+      const session = new RealtimeVoiceSession()
+      const playbackStops: unknown[] = []
+      session.on('playback-stop', payload => playbackStops.push(payload))
+      await session.connect({ workspaceId: 'default', sessionId: 'voice', voiceMode: 'continuous' })
+      const channel = MockPeerConnection.latest!.channel
+
+      channel.serverEvent({ type: 'input_audio_buffer.speech_started' })
+      channel.serverEvent({ type: 'response.created', response: { id: 'continuous-response' } })
+      channel.serverEvent({ type: 'output_audio_buffer.started', response_id: 'continuous-response' })
+      channel.serverEvent({ type: 'input_audio_buffer.speech_started' })
+      vi.advanceTimersByTime(159)
+
+      expect(playbackStops).toHaveLength(0)
+      expect(channel.sent.map(payload => JSON.parse(payload).type)).not.toContain('response.cancel')
+
+      vi.advanceTimersByTime(1)
+
+      const sentTypes = channel.sent.map(payload => JSON.parse(payload).type)
+      expect(playbackStops).toHaveLength(1)
+      expect(session.getStatus()).toBe('recording')
+      expect(sentTypes.filter(type => type === 'response.cancel')).toHaveLength(1)
+      expect(sentTypes.filter(type => type === 'output_audio_buffer.clear')).toHaveLength(1)
+      session.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('rejects a short continuous VAD candidate without stopping current playback', async () => {
+    vi.useFakeTimers()
+    try {
+      const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
+      const session = new RealtimeVoiceSession()
+      const playbackStops: unknown[] = []
+      session.on('playback-stop', payload => playbackStops.push(payload))
+      await session.connect({ workspaceId: 'default', sessionId: 'voice', voiceMode: 'continuous' })
+      const channel = MockPeerConnection.latest!.channel
+
+      channel.serverEvent({ type: 'response.created', response: { id: 'continuous-response' } })
+      channel.serverEvent({ type: 'output_audio_buffer.started', response_id: 'continuous-response' })
+      const statusBeforeCandidate = session.getStatus()
+
+      channel.serverEvent({ type: 'input_audio_buffer.speech_started' })
+      vi.advanceTimersByTime(80)
+      channel.serverEvent({ type: 'input_audio_buffer.speech_stopped' })
+      vi.advanceTimersByTime(160)
+
+      expect(playbackStops).toHaveLength(0)
+      expect(session.getStatus()).toBe(statusBeforeCandidate)
+      expect(channel.sent.map(payload => JSON.parse(payload).type)).not.toContain('response.cancel')
+      session.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('deduplicates continuous barge-in candidates and cancels them on close', async () => {
+    vi.useFakeTimers()
+    try {
+      const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
+      const session = new RealtimeVoiceSession()
+      const speechStarts: unknown[] = []
+      session.on('speech-start', payload => speechStarts.push(payload))
+      await session.connect({ workspaceId: 'default', sessionId: 'voice', voiceMode: 'continuous' })
+      const channel = MockPeerConnection.latest!.channel
+
+      channel.serverEvent({ type: 'response.created', response: { id: 'continuous-response' } })
+      channel.serverEvent({ type: 'input_audio_buffer.speech_started' })
+      channel.serverEvent({ type: 'input_audio_buffer.speech_started' })
+      expect(speechStarts).toHaveLength(1)
+
+      session.close()
+      vi.advanceTimersByTime(160)
+
+      expect(channel.sent.map(payload => JSON.parse(payload).type)).not.toContain('response.cancel')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('cancels a continuous barge-in candidate when continuous listening stops', async () => {
+    vi.useFakeTimers()
+    try {
+      const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
+      const session = new RealtimeVoiceSession()
+      await session.connect({ workspaceId: 'default', sessionId: 'voice', voiceMode: 'continuous' })
+      const channel = MockPeerConnection.latest!.channel
+
+      channel.serverEvent({ type: 'response.created', response: { id: 'continuous-response' } })
+      channel.serverEvent({ type: 'input_audio_buffer.speech_started' })
+      session.stopContinuous()
+      vi.advanceTimersByTime(160)
+
+      expect(channel.sent.map(payload => JSON.parse(payload).type)).not.toContain('response.cancel')
+      expect(session.getStatus()).toBe('ready')
+      session.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps explicit interruption immediate while continuous barge-in is gated', async () => {
+    vi.useFakeTimers()
+    try {
+      const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
+      const session = new RealtimeVoiceSession()
+      await session.connect({ workspaceId: 'default', sessionId: 'voice', voiceMode: 'continuous' })
+      const channel = MockPeerConnection.latest!.channel
+
+      channel.serverEvent({ type: 'response.created', response: { id: 'continuous-response' } })
+      session.interrupt()
+
+      const sentTypes = channel.sent.map(payload => JSON.parse(payload).type)
+      expect(sentTypes.filter(type => type === 'response.cancel')).toHaveLength(1)
+      expect(sentTypes.filter(type => type === 'output_audio_buffer.clear')).toHaveLength(1)
+      session.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps a session alive when a transient disconnect recovers within the grace period', async () => {
     const { RealtimeVoiceSession } = await import('@/audio/realtime-voice')
     const session = new RealtimeVoiceSession()
@@ -420,7 +687,9 @@ describe('RealtimeVoiceSession', () => {
       await session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })
       session.stopPushToTalk()
       session.interrupt()
-      await session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })
+      const nextTurn = session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })
+      vi.advanceTimersByTime(250)
+      await nextTurn
       expect(acknowledgements).toHaveLength(1)
       vi.advanceTimersByTime(250)
       expect(acknowledgements).toHaveLength(1)
@@ -762,8 +1031,7 @@ describe('RealtimeVoiceSession', () => {
     })
     await vi.waitFor(() => expect(resolveAgent).not.toBeNull())
 
-    await expect(session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' }))
-      .rejects.toThrow('being interrupted')
+    await expect(session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })).resolves.toBeUndefined()
     resolveAgent?.({ choices: [{ message: { content: 'Late result' } }] })
     await Promise.resolve()
     await Promise.resolve()
@@ -937,8 +1205,7 @@ describe('RealtimeVoiceSession', () => {
       response: { id: 'response-old', metadata: create.response.metadata },
     })
 
-    await expect(session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' }))
-      .rejects.toThrow('being interrupted')
+    await expect(session.startPushToTalk({ workspaceId: 'default', sessionId: 'voice' })).resolves.toBeUndefined()
     expect(channel.sent.map((payload) => JSON.parse(payload).type)).toContain('response.cancel')
     session.close()
   })

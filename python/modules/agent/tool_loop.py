@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -8,9 +9,13 @@ from collections.abc import Awaitable
 from typing import Any, cast
 
 from ..llm.capabilities import infer_model_capability_support
+from .failure_recovery import (
+    ProviderRuntimeFailure,
+    classify_provider_runtime_exception,
+)
 from .permission_receipt import serialize_permission_receipt
 from .tool_executor import ToolExecutor
-from .tool_registry import ToolDefinition, ToolRegistry
+from .tool_registry import ToolDefinition, ToolRegistry, tool_may_change_state
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +74,84 @@ def _with_loop_contract(
     return result
 
 
+def _cancellation_requested(cancel_event: Any, generation: Any) -> bool:
+    current_task = asyncio.current_task()
+    task_cancelled = bool(
+        current_task is not None and current_task.cancelling()
+    )
+    event_cancelled = bool(
+        cancel_event is not None and cancel_event.is_set()
+    )
+    generation_cancelled = bool(
+        generation is not None
+        and (
+            getattr(generation, "cancel", None) is not None
+            and generation.cancel.is_set()
+            or bool(getattr(generation, "invalidated", False))
+        )
+    )
+    return task_cancelled or event_cancelled or generation_cancelled
+
+
+async def _wait_for_cancellation(cancel_event: Any, generation: Any) -> None:
+    while not _cancellation_requested(cancel_event, generation):
+        await asyncio.sleep(0.02)
+
+
+async def _await_with_cancellation(
+    awaitable: Awaitable[Any],
+    cancel_event: Any,
+    generation: Any,
+) -> tuple[Any, bool]:
+    task = asyncio.ensure_future(awaitable)
+    if cancel_event is None and generation is None:
+        return await task, False
+    if _cancellation_requested(cancel_event, generation):
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        return None, True
+    cancellation_task = asyncio.create_task(
+        _wait_for_cancellation(cancel_event, generation)
+    )
+    try:
+        done, _pending = await asyncio.wait(
+            {task, cancellation_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if cancellation_task in done and _cancellation_requested(
+            cancel_event, generation
+        ):
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            return None, True
+        return await task, False
+    except asyncio.CancelledError:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        raise
+    finally:
+        cancellation_task.cancel()
+        await asyncio.gather(cancellation_task, return_exceptions=True)
+
+
+def _cancelled_loop_result(
+    tool_calls: list[dict[str, Any]],
+    configured_budget: dict[str, int | None],
+    consumed_usage: dict[str, int | str],
+) -> dict[str, Any]:
+    return _with_loop_contract(
+        {
+            "reply": "",
+            "tool_calls": tool_calls,
+            "outcome": "cancelled",
+            "retryable": False,
+        },
+        configured_budget,
+        consumed_usage,
+        "cancelled",
+    )
+
+
 async def run_streaming_tool_loop(
     llm_client: Any,
     messages: list[dict[str, Any]],
@@ -122,22 +205,37 @@ async def run_streaming_tool_loop(
     ))
     untrusted_mcp_seen = False
     tool_calls_seen: list[dict[str, Any]] = []
+    state_changing_tool_succeeded = False
     for _ in range(bounded_iterations):
-        if cancel_event is not None and cancel_event.is_set():
-            return _with_loop_contract(
-                {"reply": "", "tool_calls": tool_calls_seen},
-                configured_budget, consumed_usage, "cancelled",
+        if _cancellation_requested(cancel_event, generation):
+            return _cancelled_loop_result(
+                tool_calls_seen, configured_budget, consumed_usage
             )
-        if generation is not None and (
-            getattr(generation, "cancel", None) is not None
-            and generation.cancel.is_set()
-            or bool(getattr(generation, "invalidated", False))
-        ):
-            return _with_loop_contract(
-                {"reply": "", "tool_calls": tool_calls_seen},
-                configured_budget, consumed_usage, "cancelled",
+        try:
+            result, provider_cancelled = await _await_with_cancellation(
+                cast(Awaitable[Any], adapter(working_messages, tools=tools, **kwargs)),
+                cancel_event,
+                generation,
             )
-        result = await cast(Awaitable[Any], adapter(working_messages, tools=tools, **kwargs))
+            if provider_cancelled:
+                return _cancelled_loop_result(
+                    tool_calls_seen, configured_budget, consumed_usage
+                )
+        except asyncio.CancelledError:
+            return _cancelled_loop_result(
+                tool_calls_seen, configured_budget, consumed_usage
+            )
+        except Exception as exc:
+            provider_failure = classify_provider_runtime_exception(exc)
+            if provider_failure is None:
+                raise
+            return _provider_runtime_failure_result(
+                provider_failure,
+                tool_calls=tool_calls_seen,
+                state_change_may_have_occurred=state_changing_tool_succeeded,
+                configured_budget=configured_budget,
+                consumed_usage=consumed_usage,
+            )
         consumed_usage["iterations"] = int(consumed_usage["iterations"]) + 1
         if not isinstance(result, dict):
             return _with_loop_contract(
@@ -156,6 +254,10 @@ async def run_streaming_tool_loop(
             return _with_loop_contract(result, configured_budget, consumed_usage, "completed")
         working_messages.append({"role": "assistant", "content": reply, "tool_calls": calls})
         for call in calls:
+            if _cancellation_requested(cancel_event, generation):
+                return _cancelled_loop_result(
+                    tool_calls_seen, configured_budget, consumed_usage
+                )
             if int(consumed_usage["tool_calls"]) >= tool_budget:
                 return _with_loop_contract(
                     {"reply": "", "tool_calls": tool_calls_seen}, configured_budget,
@@ -197,6 +299,9 @@ async def run_streaming_tool_loop(
                     and (definition := tool_registry.get(str(tool_name))) is not None
                     and _requires_untrusted_followup_confirmation(definition)
                 ),
+                cancellation_signal=(
+                    lambda: _cancellation_requested(cancel_event, generation)
+                ),
             )
             if outcome.source == "mcp":
                 untrusted_mcp_seen = True
@@ -210,6 +315,9 @@ async def run_streaming_tool_loop(
                 "error": outcome.error,
             }
             tool_calls_seen.append(record)
+            definition = tool_registry.get(str(tool_name))
+            if bool(outcome.success) and definition is not None and tool_may_change_state(definition):
+                state_changing_tool_succeeded = True
             working_messages.append({
                 "role": "tool",
                 "tool_call_id": call.get("id"),
@@ -232,6 +340,10 @@ async def run_streaming_tool_loop(
                     },
                     configured_budget, consumed_usage, "unknown_effect",
                 )
+            if _cancellation_requested(cancel_event, generation):
+                return _cancelled_loop_result(
+                    tool_calls_seen, configured_budget, consumed_usage
+                )
             receipt = outcome.permission_receipt
             if receipt is not None and receipt.retryable is False:
                 return _with_loop_contract(
@@ -252,21 +364,79 @@ async def run_streaming_tool_loop(
 
 
 _OPENAI_TOOL_NAME_MAX_LENGTH = 64
-_SIDE_EFFECT_TOOL_MARKERS = (
-    "create", "delete", "execute", "install", "launch", "open", "post", "remove",
-    "run", "send", "set", "update", "upload", "write",
-)
+def _provider_runtime_failure_result(
+    failure: ProviderRuntimeFailure,
+    *,
+    tool_calls: list[dict[str, Any]],
+    state_change_may_have_occurred: bool,
+    configured_budget: dict[str, int | None],
+    consumed_usage: dict[str, int | str],
+) -> dict[str, Any]:
+    if state_change_may_have_occurred:
+        return _with_loop_contract(
+            {
+                "reply": "模型连接中断；工具可能已执行，请先查看结果后再决定是否重试。",
+                "tool_calls": tool_calls,
+                "outcome": "unknown_effect",
+                "retryable": False,
+                "failure": {
+                    "kind": failure.kind,
+                    "message": "provider_disconnected_after_state_change",
+                    "status": "unknown_effect",
+                    "retryable": False,
+                },
+                "recovery": {
+                    "available": False,
+                    "action": "review_tool_result",
+                    "retryable": False,
+                    "confirmation_required": False,
+                    "reason": "provider_disconnected_after_state_change",
+                },
+                "persist_history": False,
+            },
+            configured_budget,
+            consumed_usage,
+            "provider_disconnected_after_state_change",
+        )
+    if failure.reason == "provider_timeout":
+        reply = "模型响应超时，请稍后重试。"
+    elif failure.reason == "provider_request_rejected":
+        reply = "模型请求未被服务接受，请检查模型配置。"
+    else:
+        reply = "模型服务暂时不可用，请检查连接后重试。"
+    recovery_available = bool(failure.retryable)
+    recovery_action = "retry_turn" if recovery_available else "check_provider_settings"
+    return _with_loop_contract(
+        {
+            "reply": reply,
+            "tool_calls": tool_calls,
+            "outcome": "failed",
+            "retryable": failure.retryable,
+            "failure": {
+                "kind": failure.kind,
+                "message": failure.reason,
+                "status": "failed",
+                "retryable": failure.retryable,
+            },
+            "recovery": {
+                "available": recovery_available,
+                "action": recovery_action,
+                "retryable": failure.retryable,
+                "confirmation_required": False,
+                "reason": failure.reason,
+            },
+            "persist_history": False,
+        },
+        configured_budget,
+        consumed_usage,
+        failure.reason,
+    )
 
 
 def _requires_untrusted_followup_confirmation(tool: ToolDefinition) -> bool:
     if tool.source in {"mcp", "plugin"} and not tool.require_confirm:
         return False
-    normalized_name = re.sub(r"[^a-z0-9]+", "_", tool.name.lower())
-    return bool(
-        tool.risk_level != "safe"
-        or tool.require_confirm
-        or any(marker in normalized_name.split("_") for marker in _SIDE_EFFECT_TOOL_MARKERS)
-    )
+    return tool_may_change_state(tool)
 
 
 def _openai_safe_tool_name(name: str, used_names: set[str]) -> str:

@@ -17,8 +17,10 @@ from .runtime_endpoints import (
     build_capability_snapshot,
     build_clear_permissions_endpoint,
     build_companion_opportunity_outcome_endpoint,
+    build_connector_registry_endpoint,
     build_create_interval_schedule_endpoint,
     build_create_once_schedule_endpoint,
+    build_disable_connector_endpoint,
     build_experience_metrics_endpoint,
     build_health_endpoint,
     build_heartbeat_goal_cancel_endpoint,
@@ -31,6 +33,8 @@ from .runtime_endpoints import (
     build_orchestration_snapshot,
     build_orchestration_state_endpoint,
     build_permissions_state_endpoint,
+    build_platform_capability_endpoint,
+    build_provider_registry_endpoint,
     build_readiness_endpoint,
     build_refresh_mcp_endpoint,
     build_remove_imported_skills_endpoint,
@@ -45,6 +49,7 @@ from .runtime_endpoints import (
     build_toggle_mcp_endpoint,
     build_toggle_schedule_endpoint,
     build_update_agent_plugin_config_endpoint,
+    build_voice_diagnostics_endpoint,
 )
 
 
@@ -70,6 +75,10 @@ class RuntimeHandlers:
     activity_frame_delete: Callable[..., Any]
     proactive_feedback: Callable[..., Any]
     capabilities_state: Callable[..., Any]
+    provider_registry: Callable[..., Any]
+    connector_registry: Callable[..., Any]
+    platform_matrix: Callable[..., Any]
+    disable_connector: Callable[..., Any]
     orchestration_state: Callable[..., Any]
     active_workspace: Callable[..., Any]
     memory_pipeline_query: Callable[..., Any]
@@ -85,6 +94,7 @@ class RuntimeHandlers:
     cancel_schedule: Callable[..., Any]
     agent_trace_state: Callable[..., Any]
     experience_metrics_state: Callable[..., Any]
+    voice_diagnostics_state: Callable[..., Any]
     product_metrics_consent_state: Callable[..., Any]
     product_metrics_consent_patch: Callable[..., Any]
     mcp_state: Callable[..., Any]
@@ -128,6 +138,7 @@ def build_runtime_handlers(
     retrieval_pipeline_provider: Callable[[], Any],
     relationship_summary_provider: Callable[[], Any],
     companion_runtime_provider: Callable[[int], dict[str, Any]],
+    voice_diagnostics_provider: Callable[[], Any] | None = None,
     build_memory_query_request: Callable[..., Any],
     llm_health_provider: Callable[..., Any],
     tts_health_provider: Callable[..., Any],
@@ -135,11 +146,16 @@ def build_runtime_handlers(
     asr_health_provider: Callable[..., Any],
     ocr_health_provider: Callable[..., Any],
     memory_health_provider: Callable[..., Any],
+    llm_client_provider: Callable[[], Any] | None,
+    tts_client_provider: Callable[[], Any] | None,
+    asr_manager_provider: Callable[[], Any] | None,
+    vision_client_provider: Callable[[], Any] | None,
     generation_manager_provider: Callable[[], Any],
     svc_client_provider: Callable[[], Any],
     memory_status_provider: Callable[[], Any],
     onboarding_readiness: Any,
     product_metrics_consent_store: Any,
+    message_connector_registry: Any | None = None,
 ) -> RuntimeHandlers:
     skill_store = SkillCatalogStore()
     activity_endpoints = build_activity_frame_endpoints(
@@ -207,6 +223,31 @@ def build_runtime_handlers(
             tool_registry_provider=lambda: sio_server.runtime.tool_registry if sio_server.runtime else None,
             capability_snapshot_builder=build_capability_snapshot,
         ),
+        provider_registry=build_provider_registry_endpoint(
+            config_snapshot_provider=config_snapshot_provider,
+            health_providers={
+                "llm": llm_health_provider,
+                "tts": tts_health_provider,
+                "asr": asr_health_provider,
+            },
+            client_providers={
+                "llm": llm_client_provider or (lambda: None),
+                "tts": tts_client_provider or (lambda: None),
+                "asr": asr_manager_provider or (lambda: None),
+                "vision": vision_client_provider or (lambda: None),
+            },
+        ),
+        connector_registry=build_connector_registry_endpoint(
+            mcp_manager=sio_server.mcp_manager,
+            plugin_manager=sio_server.plugin_manager,
+            adapter_registry=message_connector_registry,
+        ),
+        platform_matrix=build_platform_capability_endpoint(),
+        disable_connector=build_disable_connector_endpoint(
+            mcp_manager=sio_server.mcp_manager,
+            plugin_manager=sio_server.plugin_manager,
+            adapter_registry=message_connector_registry,
+        ),
         orchestration_state=build_orchestration_state_endpoint(
             orchestration_snapshot_builder=build_orchestration_snapshot,
         ),
@@ -234,6 +275,11 @@ def build_runtime_handlers(
         cancel_schedule=build_cancel_schedule_endpoint(sio_server.scheduler),
         agent_trace_state=build_agent_trace_state_endpoint(sio_server.trace_store),
         experience_metrics_state=build_experience_metrics_endpoint(sio_server.experience_metrics),
+        voice_diagnostics_state=build_voice_diagnostics_endpoint(
+            diagnostics_provider=voice_diagnostics_provider or (lambda: None),
+            asr_client_provider=asr_manager_provider,
+            tts_client_provider=tts_client_provider,
+        ),
         product_metrics_consent_state=product_metrics_consent_state,
         product_metrics_consent_patch=product_metrics_consent_patch,
         mcp_state=build_mcp_state_endpoint(sio_server.mcp_manager),
@@ -277,6 +323,10 @@ def build_system_router_from_handlers(
         activity_frame_delete_handler=handlers.activity_frame_delete,
         proactive_feedback_handler=handlers.proactive_feedback,
         capabilities_state_handler=handlers.capabilities_state,
+        provider_registry_handler=handlers.provider_registry,
+        connector_registry_handler=handlers.connector_registry,
+        platform_matrix_handler=handlers.platform_matrix,
+        disable_connector_handler=handlers.disable_connector,
         orchestration_state_handler=handlers.orchestration_state,
         active_workspace_handler=handlers.active_workspace,
         permissions_handler=handlers.permissions_state,
@@ -291,6 +341,7 @@ def build_system_router_from_handlers(
         cancel_schedule_handler=handlers.cancel_schedule,
         agent_trace_handler=handlers.agent_trace_state,
         experience_metrics_handler=handlers.experience_metrics_state,
+        voice_diagnostics_handler=handlers.voice_diagnostics_state,
         product_metrics_consent_handler=handlers.product_metrics_consent_state,
         product_metrics_consent_patch_handler=handlers.product_metrics_consent_patch,
         mcp_state_handler=handlers.mcp_state,

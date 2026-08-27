@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from sqlalchemy import create_engine, func
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -14,7 +15,7 @@ from uuid import uuid4
 
 from typing import Any
 
-from modules.core.paths import data_dir_from_env
+from modules.core.paths import data_dir_from_env, database_url_from_env
 
 from .models import ChatMessage, ChatSession, UserStatistics, UserSettings, Workspace, Companion
 
@@ -46,25 +47,41 @@ class DatabaseError(RepositoryError):
 class DatabaseRepository:
     """数据库操作类"""
 
-    def __init__(self, db_path: str = DEFAULT_DB_PATH_STR):
+    def __init__(self, db_path: str | Path | None = None):
         """初始化数据库连接
 
         Args:
-            db_path: SQLite 数据库文件路径
+            db_path: Optional explicit SQLite database file path. When omitted,
+                DATABASE_URL takes precedence over YUIZAKI_DATA_DIR/chat.db.
         """
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        if db_path is None:
+            database_url = database_url_from_env()
+        else:
+            explicit_path = Path(db_path).expanduser()
+            explicit_path.parent.mkdir(parents=True, exist_ok=True)
+            database_url = f"sqlite:///{explicit_path.as_posix()}"
+
+        parsed_url = make_url(database_url)
+        is_sqlite = parsed_url.get_backend_name() == "sqlite"
+        database_name = parsed_url.database
+        self.db_path = (
+            Path(database_name).expanduser()
+            if is_sqlite and database_name not in (None, "", ":memory:")
+            else None
+        )
+        if self.db_path is not None:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.database_url = database_url
 
         # 创建数据库引擎
-        self.engine = create_engine(
-            f"sqlite:///{self.db_path}",
-            connect_args={"check_same_thread": False},
-            echo=False
-        )
+        engine_options: dict[str, Any] = {"echo": False}
+        if is_sqlite:
+            engine_options["connect_args"] = {"check_same_thread": False}
+        self.engine = create_engine(database_url, **engine_options)
 
         # 创建会话工厂
         self.SessionLocal = sessionmaker(bind=self.engine)
-        logger.info(f"Database initialized at {self.db_path}")
+        logger.info("Database initialized at %s", self.db_path or parsed_url.render_as_string())
 
     def close(self) -> None:
         """Dispose database engine and release pooled connections."""
@@ -412,6 +429,34 @@ class DatabaseRepository:
         except Exception as exc:
             session.rollback()
             raise DatabaseError(f"failed_to_clear_memory_references: {exc}") from exc
+        finally:
+            session.close()
+
+    def count_memory_references(self, memory_ids: list[str]) -> int:
+        """Count messages whose memory trace references any target id."""
+        target_ids = {str(memory_id).strip() for memory_id in memory_ids if str(memory_id).strip()}
+        if not target_ids:
+            return 0
+
+        session = self.SessionLocal()
+        try:
+            affected = 0
+            messages = session.query(ChatMessage).filter(ChatMessage.memory_trace.isnot(None)).all()
+            for message in messages:
+                try:
+                    trace = json.loads(message.memory_trace or "[]")
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(trace, list):
+                    continue
+                if any(
+                    isinstance(source, dict) and str(source.get("id") or "").strip() in target_ids
+                    for source in trace
+                ):
+                    affected += 1
+            return affected
+        except Exception as exc:
+            raise DatabaseError(f"failed_to_count_memory_references: {exc}") from exc
         finally:
             session.close()
 
@@ -849,8 +894,12 @@ class DatabaseRepository:
                 "total_messages": total_messages,
                 "total_sessions": total_sessions,
                 "total_tokens": total_tokens,
-                "db_path": str(self.db_path),
-                "db_size_mb": self.db_path.stat().st_size / (1024 * 1024) if self.db_path.exists() else 0
+                "db_path": str(self.db_path) if self.db_path is not None else None,
+                "db_size_mb": (
+                    self.db_path.stat().st_size / (1024 * 1024)
+                    if self.db_path is not None and self.db_path.exists()
+                    else 0
+                ),
             }
         except Exception as exc:
             logger.exception(f"Failed to get database stats: {exc}")

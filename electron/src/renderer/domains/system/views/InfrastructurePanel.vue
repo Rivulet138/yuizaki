@@ -8,6 +8,10 @@
         </div>
         <div class="hero-actions">
           <el-button type="primary" :loading="refreshing" @click="refreshAll">刷新状态</el-button>
+          <el-button plain :loading="runtimeDiagnosticExporting" @click="downloadRuntimeDiagnostic">
+            <el-icon><Download /></el-icon>
+            导出运行诊断
+          </el-button>
           <span>{{ controlServerLabel }}</span>
         </div>
       </section>
@@ -191,6 +195,22 @@
                   <strong>{{ restorePreview.dryRun ? '恢复预览' : '恢复结果' }}</strong>
                   <el-tag size="small" :type="restorePreview.dryRun ? 'warning' : 'success'">{{ restorePreview.dryRun ? '尚未写入' : '已执行' }}</el-tag>
                 </div>
+                <div v-if="restorePreview.summary" class="restore-impact-grid">
+                  <div><span>目标</span><strong>{{ restorePreview.summary.totalTargets }}</strong></div>
+                  <div><span>{{ restorePreview.dryRun ? '将恢复' : '已恢复' }}</span><strong>{{ restorePreview.summary.restoreCount }}</strong></div>
+                  <div><span>{{ restorePreview.dryRun ? '将覆盖' : '已覆盖' }}</span><strong>{{ restorePreview.summary.overwriteCount }}</strong></div>
+                  <div><span>跳过</span><strong>{{ restorePreview.summary.skippedCount }}</strong></div>
+                  <div><span>当前缺失</span><strong>{{ restorePreview.summary.missingCurrentCount }}</strong></div>
+                </div>
+                <div v-if="restoreEffectEntries.length" class="restore-effects">
+                  <div class="restore-effects-title">子系统影响</div>
+                  <div class="restore-effects-list">
+                    <div v-for="effect in restoreEffectEntries" :key="effect.key" class="restore-effect-item">
+                      <span>{{ effect.label }}</span>
+                      <el-tag size="small" :type="restoreEffectTagType(effect.status)">{{ restoreEffectLabel(effect.status) }}</el-tag>
+                    </div>
+                  </div>
+                </div>
                 <div class="restore-plan-list">
                   <article v-for="item in restorePreview.restorePlan" :key="item.path" class="restore-plan-item" :class="{ skipped: item.skippedReason, restored: item.restored }">
                     <div>
@@ -274,11 +294,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Download } from '@element-plus/icons-vue'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import { systemClient } from '@/api/client'
+import { memoryClient } from '@/api/clients/memory-client'
+import { petControl } from '@/utils/petControl'
+import {
+  createRedactedDiagnosticBundle,
+  serializeRedactedDiagnosticBundle,
+} from '@/app/runtime/companionDiagnosticExport'
+import { createRuntimeDiagnosticReport } from '@/app/runtime/runtimeDiagnosticReport'
 import { useSystemDomain } from '../composables/useSystemDomain'
-import type { BackupRestorePlanItem, BackupRestoreResponse, BackupTarget } from '../../../../shared/agent'
+import type { BackupRestoreEffectStatus, BackupRestorePlanItem, BackupRestoreResponse, BackupTarget } from '../../../../shared/agent'
 
 interface RuntimeResourceSnapshot {
   measuredAt: string
@@ -330,11 +358,104 @@ const runtimeSnapshot = ref<RuntimeResourceSnapshot | null>(null)
 const runtimeLoading = ref(false)
 const runtimeClearing = ref(false)
 const runtimeError = ref('')
+const runtimeDiagnosticExporting = ref(false)
 const runtimeAvailable = computed(() => Boolean(window.petApi?.runtime?.getResourceSnapshot && window.petApi?.runtime?.clearSessionCache))
+
+const downloadRuntimeDiagnostic = async () => {
+  if (runtimeDiagnosticExporting.value) return
+  runtimeDiagnosticExporting.value = true
+  try {
+    const sources = await Promise.allSettled([
+      Promise.resolve(diagnostics.value ?? systemClient.diagnostics()),
+      systemClient.experienceMetrics(),
+      systemClient.voiceDiagnostics(),
+      systemClient.providers(),
+      systemClient.connectors(),
+      systemClient.platforms(),
+      memoryClient.getIndexStatus(),
+      petControl.getAvatarCapabilities(),
+      systemClient.companionRuntime(),
+    ])
+    const values = sources.map((source) => source.status === 'fulfilled' ? source.value : null)
+    const successfulSources = sources.filter((source) => source.status === 'fulfilled').length
+    const voiceSnapshot = values[2] as Record<string, unknown> | null
+    const voiceCapability = voiceSnapshot?.capability as Record<string, unknown> | undefined
+    const avatarResponse = values[7] as { capabilities?: Record<string, unknown> } | null
+    const avatarCapabilities = avatarResponse?.capabilities
+    const report = createRuntimeDiagnosticReport({
+      runtime: (() => {
+        const snapshot = values[0] as Record<string, unknown> | null
+        return snapshot ? {
+          status: snapshot.status,
+          petWindowVisible: snapshot.petWindowVisible,
+          petOverlayVisible: snapshot.petOverlayVisible,
+          pluginCount: snapshot.pluginCount,
+          pluginErrorCount: snapshot.pluginErrorCount,
+          activePluginExecutions: snapshot.activePluginExecutions,
+          runtimeExceptionCount: Array.isArray(snapshot.runtimeExceptions) ? snapshot.runtimeExceptions.length : 0,
+        } : null
+      })(),
+      experience: values[1],
+      voice: voiceSnapshot ? {
+        sampleCount: voiceSnapshot.sample_count,
+        evidenceKindCount: Array.isArray(voiceSnapshot.evidence_kinds) ? voiceSnapshot.evidence_kinds.length : 0,
+        evidenceClaimAvailable: typeof voiceSnapshot.evidence_claim === 'string' && voiceSnapshot.evidence_claim.length > 0,
+        capabilityState: voiceCapability?.voice,
+        textChatState: voiceCapability?.text_chat,
+        textChatBlockedByVoice: voiceCapability?.text_chat_blocked_by_voice,
+      } : null,
+      providers: values[3],
+      connectors: values[4],
+      platforms: values[5],
+      memory: values[6],
+      avatar: avatarCapabilities ? {
+        expressionCount: Array.isArray(avatarCapabilities.expressions) ? avatarCapabilities.expressions.length : 0,
+        motionCount: Array.isArray(avatarCapabilities.motions) ? avatarCapabilities.motions.length : 0,
+        parameterCount: Array.isArray(avatarCapabilities.parameters) ? avatarCapabilities.parameters.length : 0,
+        actions: avatarCapabilities.actions,
+      } : null,
+      companion: values[8],
+      collection: {
+        requestedSourceCount: sources.length,
+        successfulSourceCount: successfulSources,
+        failedSourceCount: sources.length - successfulSources,
+      },
+    })
+    const redacted = createRedactedDiagnosticBundle({ data: report.report })
+    const serialized = serializeRedactedDiagnosticBundle(redacted)
+    if (!serialized.ok) throw new Error('运行诊断报告未通过本地脱敏检查')
+    const url = URL.createObjectURL(new Blob([serialized.json], { type: 'application/json' }))
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `yuizaki-runtime-diagnostic-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+    document.body.append(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+    ElMessage.success(`运行诊断已导出（${successfulSources}/${sources.length} 个来源可用）`)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '运行诊断导出失败')
+  } finally {
+    runtimeDiagnosticExporting.value = false
+  }
+}
 const runtimeProcesses = computed(() => [...(runtimeSnapshot.value?.processes ?? [])]
   .sort((left, right) => right.privateKb - left.privateKb)
   .slice(0, 8))
 const canConfirmRestore = computed(() => Boolean(restoreBackupDir.value.trim() && restorePreview.value?.dryRun && restorePreview.value.restorePlan.some((item) => !item.skippedReason && item.backedUpAtSnapshot)))
+const restoreEffectEntries = computed(() => {
+  const effects = restorePreview.value?.effects
+  if (!effects) return []
+  return [
+    { key: 'database', label: '聊天数据库', status: effects.database },
+    { key: 'memoryIndex', label: '记忆索引', status: effects.memoryIndex },
+    { key: 'settings', label: '运行配置', status: effects.settings },
+    { key: 'governance', label: '治理状态', status: effects.governance },
+    { key: 'audioCache', label: '音频缓存', status: effects.audioCache },
+    { key: 'petState', label: '桌宠状态', status: effects.petState },
+    { key: 'plugins', label: '插件目录', status: effects.plugins },
+  ]
+})
 const controlServerLabel = computed(() => {
   const panelUrl = diagnostics.value?.panelUrl
   return panelUrl ? `控制服务 · ${panelUrl}` : '控制服务 · 等待检测'
@@ -689,6 +810,23 @@ const restorePlanTagType = (item: BackupRestorePlanItem): 'success' | 'warning' 
   if (item.restored) return 'success'
   if (item.skippedReason || !item.backedUpAtSnapshot) return 'info'
   return 'warning'
+}
+
+const restoreEffectLabel = (status: BackupRestoreEffectStatus) => {
+  const labels: Record<BackupRestoreEffectStatus, string> = {
+    will_restore: '将恢复',
+    restored: '已恢复',
+    rebuild_required: '需重建',
+    unchanged: '不变',
+    skipped: '已跳过',
+  }
+  return labels[status]
+}
+
+const restoreEffectTagType = (status: BackupRestoreEffectStatus): 'success' | 'warning' | 'info' => {
+  if (status === 'restored') return 'success'
+  if (status === 'will_restore' || status === 'rebuild_required') return 'warning'
+  return 'info'
 }
 
 onMounted(() => {
@@ -1054,6 +1192,69 @@ onMounted(() => {
 
 .restore-summary-head {
   justify-content: space-between;
+}
+
+.restore-impact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.restore-impact-grid > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--yui-border);
+  border-radius: 8px;
+  background: var(--yui-surface);
+}
+
+.restore-impact-grid span,
+.restore-effects-title {
+  color: var(--yui-muted);
+  font-size: 11px;
+}
+
+.restore-impact-grid strong {
+  color: var(--yui-text);
+  font-size: 17px;
+}
+
+.restore-effects {
+  display: grid;
+  gap: 7px;
+}
+
+.restore-effects-title {
+  font-weight: 700;
+}
+
+.restore-effects-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 7px;
+}
+
+.restore-effect-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--yui-border);
+  border-radius: 8px;
+  background: var(--yui-surface);
+}
+
+.restore-effect-item > span {
+  overflow: hidden;
+  color: var(--yui-text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .restore-plan-list {

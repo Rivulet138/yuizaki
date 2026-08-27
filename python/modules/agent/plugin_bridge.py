@@ -110,6 +110,7 @@ def register_plugin_tools(registry: ToolRegistry, snapshot: dict[str, Any]) -> N
                 source="plugin",
                 parameters={"type": "object", "properties": {"args": {"type": "object"}}},
                 handler=_handler,
+                effect_kind="unknown",
                 risk_level="medium",
                 require_confirm=False,
                 tags=["plugin", str(plugin_id), *[f"contrib:{category}" for category in contribution_categories]],

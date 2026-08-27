@@ -507,15 +507,67 @@ const restoreBackupEntry = (sourcePath: string, destinationPath: string, type: B
   }
 }
 
+type RestorePlanItem = {
+  path: string
+  currentlyExists: boolean
+  backedUpAtSnapshot: boolean
+  restored: boolean
+  skippedReason?: string
+}
+
+type RestoreEffectStatus = 'will_restore' | 'restored' | 'rebuild_required' | 'unchanged' | 'skipped'
+
+type RestoreEffectSummary = {
+  database: RestoreEffectStatus
+  memoryIndex: RestoreEffectStatus
+  settings: RestoreEffectStatus
+  governance: RestoreEffectStatus
+  audioCache: RestoreEffectStatus
+  petState: RestoreEffectStatus
+  plugins: RestoreEffectStatus
+}
+
+type RestoreSummary = {
+  totalTargets: number
+  restoreCount: number
+  skippedCount: number
+  overwriteCount: number
+  missingCurrentCount: number
+}
+
+const buildRestoreImpact = (restorePlan: RestorePlanItem[], dryRun: boolean): { summary: RestoreSummary; effects: RestoreEffectSummary } => {
+  const restorable = restorePlan.filter((item) => item.backedUpAtSnapshot && !item.skippedReason)
+  const summary: RestoreSummary = {
+    totalTargets: restorePlan.length,
+    restoreCount: restorable.length,
+    skippedCount: restorePlan.length - restorable.length,
+    overwriteCount: restorable.filter((item) => item.currentlyExists).length,
+    missingCurrentCount: restorable.filter((item) => !item.currentlyExists).length,
+  }
+
+  const statusFor = (suffix: string): RestoreEffectStatus => {
+    const item = restorePlan.find((candidate) => candidate.path.replace(/\\/g, '/').endsWith(suffix))
+    if (!item || !item.backedUpAtSnapshot || item.skippedReason) return item ? 'skipped' : 'unchanged'
+    return dryRun ? 'will_restore' : item.restored ? 'restored' : 'skipped'
+  }
+
+  const memoryStatus = statusFor('/python/data/memory.db')
+  const effects: RestoreEffectSummary = {
+    database: statusFor('/python/data/chat.db'),
+    memoryIndex: memoryStatus === 'unchanged' ? 'unchanged' : memoryStatus === 'skipped' ? 'skipped' : 'rebuild_required',
+    settings: statusFor('/python/config/settings.json'),
+    governance: statusFor('/python/data/governance_alert_state.json'),
+    audioCache: statusFor('/python/audio_cache'),
+    petState: statusFor('/pet-state.json'),
+    plugins: statusFor('/plugins'),
+  }
+
+  return { summary, effects }
+}
+
 const buildRestorePlan = (manifest: BackupManifest, realBackupDir: string, dryRun: boolean) => {
   const allowedTargets = new Set(collectBackupTargets().map((target) => comparablePath(target)))
-  const restorePlan: Array<{
-    path: string
-    currentlyExists: boolean
-    backedUpAtSnapshot: boolean
-    restored: boolean
-    skippedReason?: string
-  }> = []
+  const restorePlan: RestorePlanItem[] = []
 
   for (const target of manifest.targets ?? []) {
     if (!allowedTargets.has(comparablePath(target.path))) {
@@ -526,13 +578,7 @@ const buildRestorePlan = (manifest: BackupManifest, realBackupDir: string, dryRu
       }
     }
 
-    const plan: {
-      path: string
-      currentlyExists: boolean
-      backedUpAtSnapshot: boolean
-      restored: boolean
-      skippedReason?: string
-    } = {
+    const plan: RestorePlanItem = {
       path: target.path,
       currentlyExists: fs.existsSync(target.path),
       backedUpAtSnapshot: target.exists,
@@ -583,7 +629,7 @@ const buildRestorePlan = (manifest: BackupManifest, realBackupDir: string, dryRu
     restorePlan.push(plan)
   }
 
-  return { restorePlan }
+  return { restorePlan, impact: buildRestoreImpact(restorePlan, dryRun) }
 }
 
 const collectEnvironmentChecks = () => {
@@ -650,6 +696,9 @@ const PYTHON_JSON_PROXY_PATHS = new Set([
   '/api/summary/alerts/clear',
   '/api/system/permissions',
   '/api/system/capabilities',
+  '/api/system/providers',
+  '/api/system/connectors',
+  '/api/system/platforms',
   '/api/system/orchestration',
   '/api/system/schedules',
   '/api/system/mcp',
@@ -680,6 +729,7 @@ const isPythonJsonProxyPath = (pathname: string): boolean =>
   pathname.startsWith('/api/system/schedules/') ||
   pathname.startsWith('/api/system/mcp/') ||
   pathname.startsWith('/api/system/agent-plugins/') ||
+  pathname.startsWith('/api/system/connectors/') ||
   /^\/api\/messages\/[^/]+$/.test(pathname) ||
   /^\/api\/sessions\/[^/]+$/.test(pathname) ||
   /^\/api\/sessions\/[^/]+\/messages$/.test(pathname) ||
@@ -839,6 +889,8 @@ export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, ur
       backupDir: realBackupDir,
       manifest,
       restorePlan: restoreResult.restorePlan,
+      summary: restoreResult.impact.summary,
+      effects: restoreResult.impact.effects,
     })
     return true
   }

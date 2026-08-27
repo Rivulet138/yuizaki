@@ -11,7 +11,7 @@ const orderedMarkers = [
   ['# YUIZAKI_E2E_LINUX_BLOCK_START', '# YUIZAKI_E2E_LINUX_BLOCK_END'],
 ]
 
-const structuredContractCount = 7
+const structuredContractCount = 8
 
 const count = (text, fragment) => text.split(fragment).length - 1
 
@@ -72,7 +72,7 @@ const parseSteps = (lines, block) => {
     }
     let stepEnd = index + 1
     while (stepEnd < block.end && (lines[stepEnd].trim() === '' || indentation(lines[stepEnd]) > stepIndent)) stepEnd += 1
-    const step = { index: steps.length, line: index + 1, fields: {}, runLines: [] }
+    const step = { index: steps.length, line: index + 1, fields: {}, runLines: [], withFields: {} }
     const inlineField = parseField(afterDash)
     if (inlineField) step.fields[inlineField.key] = unquote(inlineField.value)
     for (let cursor = index + 1; cursor < stepEnd; cursor += 1) {
@@ -81,6 +81,13 @@ const parseSteps = (lines, block) => {
       if (!field) continue
       const value = unquote(field.value)
       step.fields[field.key] = value
+      if (field.key === 'with') {
+        for (let withIndex = cursor + 1; withIndex < stepEnd; withIndex += 1) {
+          if (indentation(lines[withIndex]) !== stepIndent + 4) continue
+          const withField = parseField(lines[withIndex])
+          if (withField) step.withFields[withField.key] = unquote(withField.value)
+        }
+      }
       if (field.key === 'run') {
         if (/^[|>][-+]?\s*$/.test(value)) {
           for (let commandIndex = cursor + 1; commandIndex < stepEnd; commandIndex += 1) {
@@ -133,7 +140,8 @@ const parseWorkflow = (text) => {
   const lines = text.replace(/\r\n/g, '\n').split('\n')
   const jobsBlock = findBlock(lines, 0, 'jobs')
   const jobs = new Map()
-  if (!jobsBlock) return { jobs, lines }
+  const jobCounts = new Map()
+  if (!jobsBlock) return { jobs, jobCounts, lines }
   for (let index = jobsBlock.start + 1; index < jobsBlock.end;) {
     if (indentation(lines[index]) !== 2) {
       index += 1
@@ -155,18 +163,32 @@ const parseWorkflow = (text) => {
     const defaultsRunBlock = defaultsBlock && findBlock(lines, 6, 'run', defaultsBlock.start + 1, defaultsBlock.end)
     const defaultWorkingDirectoryField = defaultsRunBlock
       && findBlock(lines, 8, 'working-directory', defaultsRunBlock.start + 1, defaultsRunBlock.end)
+    const defaultShellField = defaultsRunBlock
+      && findBlock(lines, 8, 'shell', defaultsRunBlock.start + 1, defaultsRunBlock.end)
+    const runsOnField = findBlock(lines, 4, 'runs-on', index + 1, jobEnd)
+    const conditionField = findBlock(lines, 4, 'if', index + 1, jobEnd)
+    const continueOnErrorField = findBlock(lines, 4, 'continue-on-error', index + 1, jobEnd)
     const os = osField ? parseInlineSequence(parseField(lines[osField.start])?.value ?? '') : []
+    jobCounts.set(field.key, (jobCounts.get(field.key) ?? 0) + 1)
     jobs.set(field.key, {
       steps: stepsBlock ? parseSteps(lines, stepsBlock) : [],
       matrixOs: os,
       matrixInclude: includeBlock ? parseMappingSequence(lines, includeBlock) : [],
+      runsOn: runsOnField ? unquote(parseField(lines[runsOnField.start])?.value ?? '') : '',
+      condition: conditionField ? unquote(parseField(lines[conditionField.start])?.value ?? '') : '',
+      continueOnError: continueOnErrorField
+        ? unquote(parseField(lines[continueOnErrorField.start])?.value ?? '')
+        : '',
       defaultWorkingDirectory: defaultWorkingDirectoryField
         ? unquote(parseField(lines[defaultWorkingDirectoryField.start])?.value ?? '')
+        : '',
+      defaultShell: defaultShellField
+        ? unquote(parseField(lines[defaultShellField.start])?.value ?? '')
         : '',
     })
     index = jobEnd
   }
-  return { jobs, lines }
+  return { jobs, jobCounts, lines }
 }
 
 const normalizeExpression = (value) => {
@@ -217,6 +239,7 @@ const validateE2EPipeline = (steps, target) => {
   const errors = []
   const protectedSpecs = [
     { key: 'unit', name: 'Run Electron E2E Unit Tests', command: 'npm run test:e2e:unit' },
+    { key: 'runtime', name: 'Run Python Runtime Recovery Smoke', command: 'npm run test:runtime-smoke' },
     { key: 'redaction', name: 'Run Electron E2E Redaction Test', command: target.redactionCommand },
     { key: 'e2e', name: 'Run Electron E2E', command: target.e2eCommand },
   ]
@@ -241,11 +264,12 @@ const validateE2EPipeline = (steps, target) => {
   const orderedIndices = [
     ...prerequisiteIndices,
     protectedSteps.get('unit')?.index ?? Number.POSITIVE_INFINITY,
+    protectedSteps.get('runtime')?.index ?? Number.POSITIVE_INFINITY,
     protectedSteps.get('redaction')?.index ?? Number.POSITIVE_INFINITY,
     protectedSteps.get('e2e')?.index ?? Number.POSITIVE_INFINITY,
   ]
   if (!orderedIndices.every((index, position) => position === 0 || index > orderedIndices[position - 1])) {
-    errors.push(`Electron E2E (${target.label}) must preserve npm ci -> install:runtime -> build -> unit -> redaction -> default E2E order`)
+    errors.push(`Electron E2E (${target.label}) must preserve npm ci -> install:runtime -> build -> unit -> runtime smoke -> redaction -> default E2E order`)
   }
   return errors
 }
@@ -264,6 +288,12 @@ const validateNamedCommandStep = (jobName, steps, spec) => {
     if (!isTargetOsCondition(condition, spec.osLabel)) errors.push(`${spec.name} if condition does not select ${spec.osLabel}`)
   } else if (condition) {
     errors.push(`${spec.name} must run unconditionally for every matrix entry`)
+  }
+  if (Object.hasOwn(step.fields, 'continue-on-error')) {
+    errors.push(`${spec.name} must not set continue-on-error`)
+  }
+  if (Object.hasOwn(step.fields, 'shell')) {
+    errors.push(`${spec.name} must not override the command shell`)
   }
   if (spec.workingDirectories) {
     const workingDirectory = unquote(step.fields['working-directory'] ?? '')
@@ -381,6 +411,62 @@ const validatePythonJob = (job) => {
   return errors
 }
 
+const validateQdrantIntegrationJob = (job) => {
+  const errors = []
+  if (job.runsOn !== 'ubuntu-latest') {
+    errors.push('qdrant-integration runs-on must be ubuntu-latest')
+  }
+  if (job.condition) errors.push('qdrant-integration must run unconditionally')
+  if (job.continueOnError) errors.push('qdrant-integration must not set continue-on-error')
+  if (job.defaultShell) errors.push('qdrant-integration must not override defaults.run.shell')
+  const checkoutSteps = job.steps.filter((step) => step.fields.uses === 'actions/checkout@v4')
+  if (checkoutSteps.length !== 1) {
+    errors.push(`qdrant-integration must contain exactly one actions/checkout@v4 step, received ${checkoutSteps.length}`)
+  } else if (checkoutSteps[0].fields.if || Object.hasOwn(checkoutSteps[0].fields, 'continue-on-error')) {
+    errors.push('qdrant-integration actions/checkout@v4 must run unconditionally without continue-on-error')
+  }
+  const setupPythonSteps = job.steps.filter((step) => step.fields.uses === 'actions/setup-python@v5')
+  if (setupPythonSteps.length !== 1) {
+    errors.push(`qdrant-integration must contain exactly one actions/setup-python@v5 step, received ${setupPythonSteps.length}`)
+  } else {
+    const setupPython = setupPythonSteps[0]
+    if (setupPython.fields.if || Object.hasOwn(setupPython.fields, 'continue-on-error')) {
+      errors.push('qdrant-integration actions/setup-python@v5 must run unconditionally without continue-on-error')
+    }
+    const expectedWith = {
+      'python-version': '3.12',
+      cache: 'pip',
+      'cache-dependency-path': 'python/requirements-dev-lock-linux.txt',
+    }
+    if (Object.keys(setupPython.withFields).length !== Object.keys(expectedWith).length
+      || Object.entries(expectedWith).some(([key, value]) => setupPython.withFields[key] !== value)) {
+      errors.push('qdrant-integration actions/setup-python@v5 must pin Python 3.12 and the Linux dependency cache')
+    }
+  }
+  const install = validateNamedCommandStep('qdrant-integration', job.steps, {
+    name: 'Install Qdrant integration dependencies',
+    effectiveWorkingDirectories: ['python', './python', '${{ github.workspace }}/python'],
+    defaultWorkingDirectory: job.defaultWorkingDirectory,
+    commands: [
+      'python -m pip install --upgrade pip',
+      'pip install -r requirements-dev-lock-linux.txt',
+      'pip check',
+      'python scripts/check_installed_lock.py --lock requirements-dev-lock-linux.txt',
+    ],
+  })
+  const integration = validateNamedCommandStep('qdrant-integration', job.steps, {
+    name: 'Run real Qdrant recovery integration',
+    effectiveWorkingDirectories: ['', '.', './', '${{ github.workspace }}'],
+    defaultWorkingDirectory: job.defaultWorkingDirectory,
+    commands: ['python scripts/run_qdrant_integration.py'],
+  })
+  errors.push(...install.errors, ...integration.errors)
+  if (install.step && integration.step && install.step.index >= integration.step.index) {
+    errors.push('qdrant-integration must preserve dependency install -> real integration order')
+  }
+  return errors
+}
+
 export const validateProtectedCi = (text) => {
   const errors = []
   const workflow = parseWorkflow(text)
@@ -418,6 +504,12 @@ export const validateProtectedCi = (text) => {
   const pythonJob = workflow.jobs.get('python-test')
   if (!pythonJob) errors.push('missing jobs.python-test')
   else errors.push(...validatePythonJob(pythonJob))
+  const qdrantIntegrationJob = workflow.jobs.get('qdrant-integration')
+  if ((workflow.jobCounts.get('qdrant-integration') ?? 0) !== 1) {
+    errors.push(`jobs.qdrant-integration must occur exactly once, received ${workflow.jobCounts.get('qdrant-integration') ?? 0}`)
+  }
+  if (!qdrantIntegrationJob) errors.push('missing jobs.qdrant-integration')
+  else errors.push(...validateQdrantIntegrationJob(qdrantIntegrationJob))
   return errors
 }
 

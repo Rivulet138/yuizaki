@@ -4,9 +4,9 @@ import math
 import threading
 import time
 from collections import OrderedDict, deque
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
-from typing import Any, Callable, Mapping
-
+from typing import Any
 
 TRACKED_GENERATION_STAGES = (
     "llm_request",
@@ -34,6 +34,9 @@ TRACKED_CLIENT_STAGES = (
     "realtime_speech_to_playback",
     "realtime_turn_complete",
     "realtime_interrupt_ack",
+    "realtime_playback_stop",
+    "realtime_playback_recovery",
+    "realtime_provider_cancel",
 )
 INTERRUPT_SOURCES = ("manual", "voice", "other")
 VISUAL_ANALYSIS_OUTCOMES = ("ready", "empty", "error", "stale")
@@ -78,6 +81,10 @@ class ExperienceMetricsStore:
         self._client_stage_samples: dict[str, deque[float]] = {
             stage: deque(maxlen=self.max_entries) for stage in TRACKED_CLIENT_STAGES
         }
+        self._playback_recovery_attempts = 0
+        self._playback_recovery_successes = 0
+        self._playback_recovery_underruns = 0
+        self._playback_recovery_latency: deque[float] = deque(maxlen=self.max_entries)
         self._interrupt_requests = 0
         self._interrupt_hits = 0
         self._interrupts_by_source = {
@@ -182,13 +189,29 @@ class ExperienceMetricsStore:
                 self._interrupt_hits += 1
                 source_metrics["hits"] += 1
 
-    def record_client_timing(self, stage: str, elapsed_ms: object) -> bool:
+    def record_client_timing(
+        self,
+        stage: str,
+        elapsed_ms: object,
+        metadata: Mapping[str, object] | None = None,
+    ) -> bool:
         """Record an allowlisted, content-free timing measured by the renderer."""
         value = _finite_milliseconds(elapsed_ms)
         if stage not in self._client_stage_samples or value is None:
             return False
         with self._lock:
             self._client_stage_samples[stage].append(value)
+            if stage == "realtime_playback_recovery":
+                details = metadata or {}
+                self._playback_recovery_attempts += 1
+                if details.get("ok") is True and details.get("recovered") is True:
+                    self._playback_recovery_successes += 1
+                recovery_latency = _finite_milliseconds(details.get("recovery_latency_ms"))
+                if recovery_latency is not None:
+                    self._playback_recovery_latency.append(recovery_latency)
+                underruns = _finite_milliseconds(details.get("playback_underruns"))
+                if underruns is not None:
+                    self._playback_recovery_underruns += int(underruns)
         return True
 
     def record_tool_outcome(self, success: bool) -> None:
@@ -248,6 +271,10 @@ class ExperienceMetricsStore:
             client_stage_samples = {
                 stage: list(values) for stage, values in self._client_stage_samples.items()
             }
+            playback_recovery_attempts = self._playback_recovery_attempts
+            playback_recovery_successes = self._playback_recovery_successes
+            playback_recovery_underruns = self._playback_recovery_underruns
+            playback_recovery_latency = list(self._playback_recovery_latency)
             visual_frames = self._visual_frames
             visual_analysis_requests = self._visual_analysis_requests
             visual_analysis_skipped = self._visual_analysis_skipped
@@ -301,6 +328,16 @@ class ExperienceMetricsStore:
                 "successes": tool_successes,
                 "failures": tool_failures,
                 "success_rate": self._rate(tool_successes, tool_calls),
+            },
+            "voice_runtime": {
+                "playback_recovery": {
+                    "attempts": playback_recovery_attempts,
+                    "successes": playback_recovery_successes,
+                    "failures": playback_recovery_attempts - playback_recovery_successes,
+                    "success_rate": self._rate(playback_recovery_successes, playback_recovery_attempts),
+                    "underruns": playback_recovery_underruns,
+                    "latency": self._summary(playback_recovery_latency),
+                },
             },
             "visual": {
                 "frames": visual_frames,

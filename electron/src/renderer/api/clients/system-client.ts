@@ -3,6 +3,13 @@ import type {
   AgentPluginMutationResponse,
   AgentPluginsSnapshot,
   BackupRestoreResponse,
+  ConnectorRegistrySnapshot,
+  PlatformCapabilitySnapshot,
+  VoiceDiagnosticsSnapshot,
+  ConnectorDeliverySnapshot,
+  ConnectorAccountSnapshot,
+  MessageConnectorConfigSnapshot,
+  MessageConnectorConfigUpdate,
   AgentTraceSnapshot,
   ExperienceMetricsSnapshot,
   BackupTargetsSnapshot,
@@ -18,12 +25,39 @@ import type {
   ScheduleCancellationResponse,
   SchedulesSnapshot,
   SystemLogsSnapshot,
+  ProviderRegistrySnapshot,
 } from '@/../shared/agent'
 import type { CapabilitiesSnapshot, SkillCatalogItem, SkillCatalogSnapshot } from '@/../shared/capability'
 import type { OrchestrationSnapshot } from '@/../shared/orchestration'
 
 const SYSTEM_MAINTENANCE_TIMEOUT_MS = 30 * 60 * 1000
 const MCP_OPERATION_TIMEOUT_MS = 2 * 60 * 1000
+
+type RawConnectorDelivery = {
+  delivery_key?: unknown
+  idempotency_key?: unknown
+  connector_id?: unknown
+  event_id?: unknown
+  status?: unknown
+  attempt_count?: unknown
+  last_error?: unknown
+  updated_at?: unknown
+  delivered_at?: unknown
+}
+
+const normalizeConnectorDelivery = (row: RawConnectorDelivery): ConnectorDeliveryItem => ({
+  deliveryKey: String(row.delivery_key || ''),
+  idempotencyKey: String(row.idempotency_key || ''),
+  connectorId: String(row.connector_id || ''),
+  eventId: String(row.event_id || ''),
+  status: String(row.status || 'unknown'),
+  attemptCount: Number(row.attempt_count || 0),
+  lastError: row.last_error ? String(row.last_error) : null,
+  updatedAt: Number(row.updated_at || 0),
+  deliveredAt: row.delivered_at == null ? null : Number(row.delivered_at),
+  retryable: row.status === 'failed',
+  cancellable: row.status === 'processing',
+})
 
 export const systemClient = {
   pythonHealth: async () => {
@@ -105,6 +139,36 @@ export const systemClient = {
   }),
   cancelHeartbeatGoal: async (goalId: string, reason = 'cancelled') => requestJson<{ ok: boolean; goal_id: string }>(`${CONTROL_ORIGIN}/api/system/heartbeat/goals/${encodeURIComponent(goalId)}/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) }),
   capabilities: async () => requestJson<CapabilitiesSnapshot>(`${CONTROL_ORIGIN}/api/system/capabilities`),
+  providers: async () => requestJson<ProviderRegistrySnapshot>(`${CONTROL_ORIGIN}/api/system/providers`),
+  voiceDiagnostics: async () => requestJson<VoiceDiagnosticsSnapshot>(`${CONTROL_ORIGIN}/api/system/voice-diagnostics`),
+  connectors: async () => requestJson<ConnectorRegistrySnapshot>(`${CONTROL_ORIGIN}/api/system/connectors`),
+  platforms: async () => requestJson<PlatformCapabilitySnapshot>(`${CONTROL_ORIGIN}/api/system/platforms`),
+  disableConnector: async (connectorId: string) => requestJson<{ ok: boolean; connector?: ConnectorRegistrySnapshot['connectors'][number] | null; error?: string }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/disable`, { method: 'POST' }),
+  connectorConfig: async (connectorId: MessageConnectorConfigSnapshot['id']) => requestJson<MessageConnectorConfigSnapshot>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/config`),
+  updateConnectorConfig: async (connectorId: MessageConnectorConfigSnapshot['id'], payload: MessageConnectorConfigUpdate) => requestJson<{ ok: boolean; config: MessageConnectorConfigSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }),
+  connectorAccount: async (connectorId: 'qq' | 'wechat') => requestJson<{ ok: boolean; account: ConnectorAccountSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/account`),
+  loginConnectorAccount: async (connectorId: 'qq' | 'wechat') => requestJson<{ ok: boolean; account: ConnectorAccountSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/account/login`, { method: 'POST' }),
+  refreshConnectorAccount: async (connectorId: 'qq' | 'wechat') => requestJson<{ ok: boolean; account: ConnectorAccountSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/account/status`),
+  logoutConnectorAccount: async (connectorId: 'qq' | 'wechat') => requestJson<{ ok: boolean; account: ConnectorAccountSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/account/logout`, { method: 'POST' }),
+  unbindConnectorAccount: async (connectorId: 'qq' | 'wechat') => requestJson<{ ok: boolean; account: ConnectorAccountSnapshot; config: MessageConnectorConfigSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/account`, { method: 'DELETE' }),
+  connectorDeliveries: async (connectorId: MessageConnectorConfigSnapshot['id'], limit = 20) => {
+    const result = await requestJson<{ ok: boolean; connector_id: string; items: RawConnectorDelivery[] }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/deliveries?limit=${encodeURIComponent(String(limit))}`)
+    return { ok: result.ok, connectorId: result.connector_id, items: (result.items || []).map(normalizeConnectorDelivery) } satisfies ConnectorDeliverySnapshot
+  },
+  retryConnectorDelivery: async (connectorId: MessageConnectorConfigSnapshot['id'], deliveryKey: string) => {
+    const result = await requestJson<{ ok: boolean; already_sent?: boolean; delivery?: RawConnectorDelivery }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/deliveries/${encodeURIComponent(deliveryKey)}/retry`, { method: 'POST' })
+    return {
+      ok: result.ok,
+      alreadySent: result.already_sent,
+      delivery: result.delivery ? normalizeConnectorDelivery(result.delivery) : undefined,
+    }
+  },
+  cancelConnectorEvent: async (connectorId: MessageConnectorConfigSnapshot['id'], eventId: string) =>
+    requestJson<{ ok: boolean; cancelled?: boolean; outcome?: 'cancelled' | 'too_late' | 'unknown'; status?: string }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/events/${encodeURIComponent(eventId)}/cancel`, { method: 'POST' }),
   orchestration: async () => requestJson<OrchestrationSnapshot>(`${CONTROL_ORIGIN}/api/system/orchestration`),
   importedSkills: async () => requestJson<SkillCatalogSnapshot>(`${CONTROL_ORIGIN}/api/system/skills/imported`),
   saveImportedSkills: async (items: SkillCatalogItem[]) => requestJson<SkillCatalogSnapshot>(`${CONTROL_ORIGIN}/api/system/skills/imported`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) }),

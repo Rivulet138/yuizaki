@@ -38,6 +38,9 @@ class RetrievalRequest:
     memory_types: list[str] | None = None
     recency_weight: float = 0.2
     quality_weight: float = 0.15
+    relation_expansion: bool = True
+    relation_limit: int = 20
+    relation_depth: int = 1
 
 
 @dataclass
@@ -71,3 +74,14 @@ class RetrievalTrace:
     scan_limit_reached: bool = False
     ranking_strategy: str = "hybrid_semantic_lexical"
     score_weights: dict[str, float] = field(default_factory=dict)
+    anchor_ids: list[str] = field(default_factory=list)
+    expanded_ids: list[str] = field(default_factory=list)
+    expansion_edges: list[dict[str, str]] = field(default_factory=list)
+    evidence_ids: list[str] = field(default_factory=list)
+    expansion_depth: int = 0
+    expansion_truncated: bool = False
+    relation_latency_ms: float = 0.0
+    relation_attempted: int = 0
+    relation_accepted: int = 0
+    evidence_coverage: float = 0.0
+    relation_token_estimate: int = 0

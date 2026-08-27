@@ -24,10 +24,18 @@ export interface AudioCaptureStatus {
   };
   level: number;
   peak: number;
+  speechDetected: boolean;
   chunksSent: number;
   bytesSent: number;
   error: string | null;
   startedAt: number | null;
+}
+
+export interface AudioDeviceInventory {
+  inputCount: number;
+  outputCount: number;
+  inputLabels: string[];
+  outputLabels: string[];
 }
 
 interface AudioCaptureStartOptions {
@@ -37,6 +45,8 @@ interface AudioCaptureStartOptions {
 }
 
 const DEFAULT_MAX_RECORDING_MS = 120_000;
+export const AUDIO_SPEECH_RMS_THRESHOLD = 0.015;
+const SILENCE_PREROLL_CHUNKS = 6;
 const createEnvelopeId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 const normalizeMicrophoneError = (error: unknown): string => {
@@ -64,6 +74,9 @@ const computeRms = (samples: Float32Array): number => {
   return Math.sqrt(sum / samples.length);
 };
 
+export const hasSpeechEnergy = (samples: Float32Array, threshold = AUDIO_SPEECH_RMS_THRESHOLD): boolean =>
+  computeRms(samples) >= threshold;
+
 const readBooleanSetting = (value: unknown): boolean | null =>
   typeof value === 'boolean' ? value : null;
 
@@ -72,6 +85,23 @@ export const normalizeAudioProcessingSettings = (settings?: MediaTrackSettings) 
   noiseSuppression: readBooleanSetting(settings?.noiseSuppression),
   autoGainControl: readBooleanSetting(settings?.autoGainControl),
 });
+
+/** Enumerate available endpoints without opening a device or persisting labels. */
+export const enumerateAudioDevices = async (): Promise<AudioDeviceInventory> => {
+  const enumerate = navigator.mediaDevices?.enumerateDevices;
+  if (typeof enumerate !== 'function') {
+    return { inputCount: 0, outputCount: 0, inputLabels: [], outputLabels: [] };
+  }
+  const devices = await enumerate.call(navigator.mediaDevices);
+  const inputs = devices.filter((device) => device.kind === 'audioinput');
+  const outputs = devices.filter((device) => device.kind === 'audiooutput');
+  return {
+    inputCount: inputs.length,
+    outputCount: outputs.length,
+    inputLabels: inputs.map((device) => device.label.trim()).filter(Boolean).slice(0, 8),
+    outputLabels: outputs.map((device) => device.label.trim()).filter(Boolean).slice(0, 8),
+  };
+};
 
 export class StreamingPcmNormalizer {
   private readonly ratio: number;
@@ -165,6 +195,8 @@ export class AudioCapture {
   private sampleRate = 16000;
   private chunkSize = 512; // samples per chunk (32ms @ 16kHz)
   private envelope: { sessionId: string; generationId: string; turnId: string; requestId: string; interruptionEpoch: number; version: 1 } | null = null;
+  private speechDetected = false;
+  private silencePreroll: Float32Array[] = [];
   private readonly status = reactive<AudioCaptureStatus>({
     phase: 'idle',
     permission: 'unknown',
@@ -179,6 +211,7 @@ export class AudioCapture {
     },
     level: 0,
     peak: 0,
+    speechDetected: false,
     chunksSent: 0,
     bytesSent: 0,
     error: null,
@@ -305,6 +338,8 @@ export class AudioCapture {
     }
     this.pcmNormalizer = null;
     this.envelope = null;
+    this.speechDetected = false;
+    this.silencePreroll = [];
 
     if (this.processor) {
       this.processor.disconnect();
@@ -348,6 +383,20 @@ export class AudioCapture {
 
   private sendAudioChunk(pcmData: Float32Array, socketClient: SocketClient): void {
     this.updateLevel(pcmData);
+    if (!this.speechDetected) {
+      this.silencePreroll.push(pcmData.slice());
+      if (this.silencePreroll.length > SILENCE_PREROLL_CHUNKS) this.silencePreroll.shift();
+      if (!hasSpeechEnergy(pcmData)) return;
+      this.speechDetected = true;
+      this.status.speechDetected = true;
+      for (const preroll of this.silencePreroll) this.sendAudioChunkNow(preroll, socketClient);
+      this.silencePreroll = [];
+      return;
+    }
+    this.sendAudioChunkNow(pcmData, socketClient);
+  }
+
+  private sendAudioChunkNow(pcmData: Float32Array, socketClient: SocketClient): void {
     if (!socketClient.isConnected()) {
       this.status.error = 'Socket.IO 连接已断开';
       return;
@@ -397,6 +446,7 @@ export class AudioCapture {
     this.status.elapsedMs = 0;
     this.status.level = 0;
     this.status.peak = 0;
+    this.status.speechDetected = false;
     this.status.chunksSent = 0;
     this.status.bytesSent = 0;
     this.status.inputSampleRate = null;
@@ -407,6 +457,8 @@ export class AudioCapture {
     };
     this.status.error = null;
     this.status.startedAt = null;
+    this.speechDetected = false;
+    this.silencePreroll = [];
   }
 
   private startTimers(maxDurationMs: number): void {

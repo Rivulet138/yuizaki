@@ -62,6 +62,26 @@ def _bounded_id(value: Any, field: str) -> str:
     return normalized
 
 
+def _feedback_gate(
+    kind: str | None,
+    created_at: float | None,
+    *,
+    now: float,
+    settings: ProactiveSettings,
+) -> str | None:
+    """Translate recent negative feedback into a temporary, reversible gate."""
+    if not kind or created_at is None:
+        return None
+    age = max(0.0, now - float(created_at))
+    if kind == "too_frequent" and age < max(float(settings.cooldown_seconds), 3600.0):
+        return "feedback_too_frequent"
+    if kind == "wrong_time" and age < 86400.0:
+        return "feedback_wrong_time"
+    if kind == "not_useful" and age < max(float(settings.cooldown_seconds), 3600.0):
+        return "feedback_not_useful"
+    return None
+
+
 def deterministic_frame_id(source_kind: str, source_id: str) -> str:
     material = f"{source_kind}\0{source_id}\0{PROJECTION_VERSION}".encode()
     return "af_" + hashlib.sha256(material).hexdigest()
@@ -752,6 +772,12 @@ class ActivityFrameStore:
                    WHERE workspace_id = ? AND source_kind = ? AND status = 'delivered'""",
                 (workspace, frame.source_kind),
             ).fetchone()["at"]
+            latest_feedback = conn.execute(
+                """SELECT kind, created_at FROM proactive_feedback
+                   WHERE workspace_id = ? AND source_kind = ?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (workspace, frame.source_kind),
+            ).fetchone()
             duplicate = conn.execute(
                 """SELECT 1 FROM proactive_opportunities
                    WHERE workspace_id = ? AND frame_id = ? LIMIT 1""",
@@ -771,6 +797,15 @@ class ActivityFrameStore:
             reason = "quiet_hours"
         elif not interruptible:
             reason = "not_interruptible"
+        elif latest_feedback is not None and (
+            feedback_reason := _feedback_gate(
+                str(latest_feedback["kind"]),
+                float(latest_feedback["created_at"]),
+                now=current,
+                settings=settings,
+            )
+        ) is not None:
+            reason = feedback_reason
         elif last_delivered is not None and current - float(last_delivered) < settings.cooldown_seconds:
             reason = "cooldown"
         elif delivered + pending >= settings.daily_budget:
@@ -846,6 +881,19 @@ class ActivityFrameStore:
                    WHERE workspace_id = ? AND source_kind = ? AND status = 'delivered'""",
                 (workspace, source_kind),
             ).fetchone()["at"]
+            latest_feedback = conn.execute(
+                """SELECT kind, created_at FROM proactive_feedback
+                   WHERE workspace_id = ? AND source_kind = ?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (workspace, source_kind),
+            ).fetchone()
+            if latest_feedback is not None and _feedback_gate(
+                str(latest_feedback["kind"]),
+                float(latest_feedback["created_at"]),
+                now=current,
+                settings=settings,
+            ) is not None:
+                return False
             if (
                 last_delivered is not None
                 and current - float(last_delivered) < settings.cooldown_seconds
@@ -1121,6 +1169,16 @@ class ActivityFrameStore:
                 (workspace, feedback, job_id, request_id, source_kind, kind, current),
             )
             cancelled: list[tuple[str, str]] = []
+            if kind in {"not_useful", "too_frequent", "wrong_time"}:
+                cursor = conn.execute(
+                    """UPDATE proactive_opportunities
+                       SET status = 'cancelled', resolved_at = ?
+                       WHERE workspace_id = ? AND job_id = ? AND request_id = ?
+                         AND source_kind = ? AND status = 'pending'""",
+                    (current, workspace, job_id, request_id, source_kind),
+                )
+                if cursor.rowcount == 1:
+                    cancelled = [(job_id, request_id)]
             if kind == "never_source":
                 row = conn.execute(
                     "SELECT settings_json, revision FROM proactive_settings WHERE workspace_id = ?",
@@ -1485,6 +1543,11 @@ class ActivityFrameService:
                 workspace_id,
                 source_kind,
                 "feedback_never_source",
+            )
+        elif cancelled:
+            self._settle_cancelled_opportunities(
+                [{"job_id": job_id, "request_id": request_id} for job_id, request_id in cancelled],
+                reason=f"feedback_{payload['kind']}",
             )
         return {
             "ok": True,

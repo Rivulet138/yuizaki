@@ -48,3 +48,6 @@ If the pet is blank or unstable, verify the asset path, try a lower performance 
 Linux CI 可以验证构建和脚本化冒烟路径，但无法覆盖所有桌面合成器、音频设备、GPU 驱动或虚拟形象资源。报告问题时请记录操作系统、桌面会话、服务商、模型和硬件。
 
 Linux CI can validate builds and scripted smoke paths, but it cannot represent every desktop compositor, audio device, GPU driver, or avatar asset. Record the OS, desktop session, provider, model, and hardware when reporting an issue.
+
+Provider, port, and optional model settings are documented in
+[Configuration](CONFIGURATION.md).

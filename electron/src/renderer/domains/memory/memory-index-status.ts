@@ -17,15 +17,22 @@ export const getMemoryIndexUiStatus = (
   }
 
   const runtimeStatus = status.status.toLowerCase()
+  const rebuildState = status.job?.state
   const indexDirty = status.metadata?.index_dirty === true
   const indexReady = status.healthy !== false
     && status.metadata?.index_healthy !== false
     && !indexDirty
 
-  if (status.healthy === false || runtimeStatus.includes('error') || runtimeStatus.includes('fail')) {
+  if (status.healthy === false) {
     return { label: '后端异常', availabilityLabel: '权威库异常', tone: 'danger' }
   }
-  if (runtimeStatus === 'indexing') {
+  if (rebuildState === 'failed' || rebuildState === 'interrupted' || runtimeStatus.includes('error') || runtimeStatus.includes('fail')) {
+    return { label: '重建失败', availabilityLabel: '权威库可用', tone: 'warning' }
+  }
+  if (rebuildState === 'cancelled') {
+    return { label: '已取消', availabilityLabel: '权威库可用', tone: 'info' }
+  }
+  if (runtimeStatus === 'indexing' || rebuildState === 'queued' || rebuildState === 'running' || rebuildState === 'cancelling') {
     return { label: '重建中', availabilityLabel: '索引重建中', tone: 'info' }
   }
   if (indexDirty) {

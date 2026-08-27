@@ -68,6 +68,13 @@ describe('SocketClient contract helpers', () => {
       generationId: 'generation-1',
       elapsedMs: 48.25,
     })
+    client.sendClientTiming('realtime_playback_recovery', {
+      elapsedMs: 36,
+      ok: true,
+      recovered: true,
+      recoveryLatencyMs: 34,
+      playbackUnderruns: 1,
+    })
 
     expect(emitSpy).toHaveBeenNthCalledWith(1, SocketEvents.INTERRUPT, {
       session_id: 'session-1',
@@ -79,6 +86,16 @@ describe('SocketClient contract helpers', () => {
       session_id: 'session-1',
       generation_id: 'generation-1',
       elapsed_ms: 48.25,
+    })
+    expect(emitSpy).toHaveBeenNthCalledWith(3, SocketEvents.CLIENT_TIMING, {
+      stage: 'realtime_playback_recovery',
+      session_id: '',
+      generation_id: '',
+      elapsed_ms: 36,
+      ok: true,
+      recovered: true,
+      recovery_latency_ms: 34,
+      playback_underruns: 1,
     })
   })
 
@@ -92,6 +109,7 @@ describe('SocketClient contract helpers', () => {
       jobId: 'job-original',
       source: 'desktop',
       retry: true,
+      version: 1,
     })
 
     expect(emitSpy).toHaveBeenCalledWith(SocketEvents.TOOL_CALL, {
@@ -103,7 +121,31 @@ describe('SocketClient contract helpers', () => {
       job_id: 'job-original',
       source: 'desktop',
       retry: true,
+      version: 1,
     })
+  })
+
+  it('waits for the correlated tool recheck result and surfaces unavailable status', async () => {
+    const { client, socket } = createConnectedClient()
+    socket.emit.mockImplementation((event, payload) => {
+      if (event !== SocketEvents.TOOL_RECHECK) return
+      const handler = socket.on.mock.calls.find(([name]) => name === SocketEvents.TOOL_RECHECK_RESULT)?.[1]
+      window.setTimeout(() => handler({ id: payload.id, status: 'unavailable', reason: 'job_identity_mismatch' }), 5)
+    })
+
+    await expect(client.requestToolRecheck('check-1', 'write_file', { path: 'a', content: 'b' }, {
+      requestId: 'request-1', runId: 'run-1', jobId: 'job-1', timeoutMs: 100,
+    })).resolves.toEqual({
+      id: 'check-1', status: 'unavailable', reason: 'job_identity_mismatch',
+    })
+    expect(socket.off).toHaveBeenCalledWith(SocketEvents.TOOL_RECHECK_RESULT, expect.any(Function))
+  })
+
+  it('times out a tool recheck when no correlated result arrives', async () => {
+    const { client, socket } = createConnectedClient()
+    await expect(client.requestToolRecheck('check-timeout', 'write_file', {}, { timeoutMs: 250 }))
+      .rejects.toThrow(/timed out/i)
+    expect(socket.off).toHaveBeenCalledWith(SocketEvents.TOOL_RECHECK_RESULT, expect.any(Function))
   })
 
   it('waits for one exact heartbeat echo and returns a redacted audit', async () => {

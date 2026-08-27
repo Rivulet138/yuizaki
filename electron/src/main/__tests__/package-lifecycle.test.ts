@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { PackageLifecycle, type PackageArtifactStore, type PackageManifest, type PackageState, type PackageStateStore } from '../package-lifecycle'
+import { canonicalizePackageManifest, PackageLifecycle, type PackageArtifactStore, type PackageAssetManifest, type PackageManifest, type PackageState, type PackageStateStore } from '../package-lifecycle'
 
 class FakeStore implements PackageArtifactStore {
   readonly installed = new Map<string, Buffer>()
@@ -25,6 +25,21 @@ const manifest = (version: string, artifact: Buffer, capabilities: PackageManife
   packageId: 'official.avatar.feibi', version, sha256: createHash('sha256').update(artifact).digest('hex'), signature: 'sig', keyId: 'official-2026', capabilities,
 })
 
+const assetManifest = (artifactSha256: string): PackageAssetManifest => ({
+  schemaVersion: 1,
+  displayName: 'Feibi companion pack',
+  assets: [
+    { kind: 'motion', path: 'motions/wave.motion3.json', sha256: artifactSha256 },
+    { kind: 'voice', path: 'voices/default.wav', sha256: artifactSha256 },
+    { kind: 'role', path: 'role/persona.json', sha256: artifactSha256 },
+  ],
+  license: {
+    spdx: 'CC-BY-4.0',
+    redistributable: true,
+    attribution: 'Example creator',
+  },
+})
+
 describe('PackageLifecycle', () => {
   it('requires a valid signature, checksum, runtime, and capability set', () => {
     const store = new FakeStore()
@@ -32,6 +47,41 @@ describe('PackageLifecycle', () => {
     expect(lifecycle.install(manifest('1.0.0', Buffer.from('one')), Buffer.from('one')).operation).toBe('install')
     expect(() => lifecycle.install({ ...manifest('2.0.0', Buffer.from('two')), capabilities: ['voice'] }, Buffer.from('two'))).toThrow('capability')
     expect(() => lifecycle.install({ ...manifest('3.0.0', Buffer.from('three')), minRuntime: '43' }, Buffer.from('three'))).toThrow('too old')
+  })
+
+  it('validates and signs role, voice, and motion asset declarations deterministically', () => {
+    const store = new FakeStore()
+    const artifact = Buffer.from('asset-pack')
+    const checksum = createHash('sha256').update(artifact).digest('hex')
+    const declared = assetManifest(checksum)
+    const packageManifest = {
+      ...manifest('1.0.0', artifact, ['avatar', 'voice']),
+      assetManifest: declared,
+    }
+    const reordered = {
+      ...packageManifest,
+      assetManifest: { ...declared, assets: [...declared.assets].reverse() },
+    }
+
+    expect(canonicalizePackageManifest(packageManifest)).toEqual(canonicalizePackageManifest(reordered))
+    const lifecycle = new PackageLifecycle(store, () => true, '42.7.0', new Set(['avatar', 'voice']))
+    expect(lifecycle.install(packageManifest, artifact).operation).toBe('install')
+  })
+
+  it('rejects unsafe asset paths and undeclared asset capabilities', () => {
+    const artifact = Buffer.from('asset-pack')
+    const checksum = createHash('sha256').update(artifact).digest('hex')
+    const lifecycle = new PackageLifecycle(new FakeStore(), () => true, '42.7.0', new Set(['avatar', 'voice']))
+    const base = assetManifest(checksum)
+
+    expect(() => lifecycle.install({
+      ...manifest('1.0.0', artifact, ['avatar', 'voice']),
+      assetManifest: { ...base, assets: [{ ...base.assets[0]!, path: '../escape.motion3.json' }] },
+    }, artifact)).toThrow('path is unsafe')
+    expect(() => lifecycle.install({
+      ...manifest('1.0.0', artifact, ['avatar']),
+      assetManifest: base,
+    }, artifact)).toThrow('capability is not declared')
   })
 
   it('updates, rolls back, and preserves state without touching user data', () => {

@@ -172,50 +172,62 @@ def apply_behavior_modifiers(
     if event is None:
         return None
 
+    # Keep proactive copy warm but bounded: relationship, milestone and style
+    # signals may all be present at once, yet stacking them makes a short
+    # desktop prompt feel performative. Apply at most one social prefix.
+    prefix_applied = False
+
+    def prepend_prefix(prefix: str) -> None:
+        nonlocal prefix_applied
+        if prefix_applied:
+            return
+        event['message'] = f"{prefix}{event['message']}"
+        prefix_applied = True
+
     if recall_count > 0:
         if 'profile' in trace_layers:
-            event['message'] = f"我记得你的偏好，{event['message']}"
+            prepend_prefix('我记得你的偏好，')
             event['emotion_id'] = 'happy'
         elif 'session' in trace_layers:
-            event['message'] = f"结合你当前会话的内容，{event['message']}"
+            prepend_prefix('结合你当前会话的内容，')
             event['motion_group'] = 'Tap'
             if recall_count >= 3:
                 event['prompt'] = 'focus-current-session'
         elif 'episodic' in trace_layers:
-            event['message'] = f"想到你最近经历的事情，{event['message']}"
+            prepend_prefix('想到你最近经历的事情，')
             event['motion_group'] = 'Flick'
         event['trace_layers'] = trace_layers
         event['trace_recall_count'] = recall_count
 
     if 'trust_shift' in recent_kinds:
-        event['message'] = f"最近我们之间更有默契了，{event['message']}"
+        prepend_prefix('最近我们之间更有默契了，')
         event['prompt'] = 'relationship-warmth'
         event['motion_group'] = 'Tap'
         event['emotion_id'] = 'happy'
     elif 'care_signal' in recent_kinds:
-        event['message'] = f"我留意到你最近状态需要照顾，{event['message']}"
+        prepend_prefix('我留意到你最近状态需要照顾，')
         event['emotion_id'] = 'calm'
         event['motion_group'] = 'Idle'
     elif 'support_request' in recent_kinds:
-        event['message'] = f"我在这里支持你，{event['message']}"
+        prepend_prefix('我在这里支持你，')
         event['emotion_id'] = 'calm'
         event['motion_group'] = 'Tap'
         event['prompt'] = 'supportive-response'
     elif 'comfort_event' in recent_kinds:
-        event['message'] = f"我会好好陪着你，{event['message']}"
+        prepend_prefix('我会好好陪着你，')
         event['emotion_id'] = 'calm'
         event['motion_group'] = 'Idle'
         event['prompt'] = 'comfort-mode'
 
     if relationship_summary.get('relationship_stage') == 'close':
-        event['message'] = f"我们已经很熟悉了，{event['message']}"
+        prepend_prefix('我们已经很熟悉了，')
         if event.get('type') in {'idle_prompt', 'suggestion'}:
-            event['message'] = f"如果你愿意，我现在就可以顺手帮你处理。{event['message']}"
+            prepend_prefix('如果你愿意，我现在就可以顺手帮你处理。')
     elif relationship_summary.get('relationship_stage') == 'stable':
-        event['message'] = f"我会稳定地陪着你，{event['message']}"
+        prepend_prefix('我会稳定地陪着你，')
 
     if relationship_summary.get('milestone_salience') == 'high':
-        event['message'] = f"我记得我们之间那些重要时刻，{event['message']}"
+        prepend_prefix('我记得我们之间那些重要时刻，')
         if event.get('type') in {'idle_prompt', 'suggestion'}:
             event['prompt'] = 'milestone-aware-support'
 
@@ -227,21 +239,21 @@ def apply_behavior_modifiers(
         event['motion_group'] = 'Idle'
 
     if attachment_style == 'attached':
-        event['message'] = f"我会更贴近地陪着你，{event['message']}"
+        prepend_prefix('我会更贴近地陪着你，')
         if event.get('type') == 'idle_prompt':
             event['prompt'] = 'closer-bonding'
         event['motion_group'] = 'Tap'
     elif attachment_style == 'independent':
-        event['message'] = f"我会在旁边稳稳支持你，{event['message']}"
+        prepend_prefix('我会在旁边稳稳支持你，')
         event['motion_group'] = 'Idle'
 
     if support_style == 'analytical' and event.get('type') == 'reminder':
-        event['message'] = f"我帮你把问题拆清楚，{event['message']}"
+        prepend_prefix('我帮你把问题拆清楚，')
         event['prompt'] = 'analytical-support'
     elif support_style == 'gentle' and event.get('type') in {'idle_prompt', 'suggestion'}:
-        event['message'] = f"我会温柔地陪着你，{event['message']}"
+        prepend_prefix('我会温柔地陪着你，')
     elif support_style == 'cheerful' and event.get('type') in {'idle_prompt', 'suggestion', 'reminder'}:
-        event['message'] = f"我会更积极一点帮你推进，{event['message']}"
+        prepend_prefix('我会更积极一点帮你推进，')
         if event.get('emotion_id') == 'calm':
             event['emotion_id'] = 'happy'
         event['motion_group'] = 'Flick'

@@ -173,7 +173,7 @@ describe('OnboardingGate', () => {
         probe('backend.service', 'ready'),
         probe('llm.provider', 'ready'),
         probe('llm.model_chat', 'ready'),
-        probe('tts.status', 'degraded', { requiredForText: false }),
+        probe('tts.status', 'degraded', { requiredForText: false, durationMs: 37 }),
         probe('asr.runtime', 'unavailable', { requiredForText: false }),
       ],
     })
@@ -184,6 +184,7 @@ describe('OnboardingGate', () => {
     expect(wrapper.text()).toContain('文本对话已就绪')
     expect(wrapper.text()).toContain('可选功能')
     expect(wrapper.text()).toContain('功能受限')
+    expect(wrapper.text()).toContain('本次检查耗时 37 ms')
     expect(wrapper.text()).toContain('当前不可用')
     expect(wrapper.findAll('[role="status"]')).toHaveLength(1)
     expect(wrapper.findAll('[role="alert"]')).toHaveLength(0)
@@ -232,6 +233,36 @@ describe('OnboardingGate', () => {
     expect(wrapper.text()).toContain('取消检查')
     await wrapper.findAll('button').find(button => button.text().includes('取消检查'))!.trigger('click')
     expect(api.cancelRun).toHaveBeenCalledWith({ runId: 'run-1' })
+  })
+
+  it('runs the complete voice provider chain only after an explicit user action', async () => {
+    const ready = createSnapshot({
+      state: 'ready',
+      readyForText: true,
+      probes: [
+        probe('host.runtime', 'ready'),
+        probe('backend.service', 'ready'),
+        probe('llm.provider', 'ready'),
+        probe('llm.model_chat', 'ready'),
+        probe('tts.status', 'degraded', { requiredForText: false }),
+        probe('asr.runtime', 'unavailable', { requiredForText: false }),
+      ],
+    })
+    const api = createApi(ready)
+    installApi(api)
+    const wrapper = mount(OnboardingGate, { global })
+    await flushPromises()
+
+    const voiceButton = wrapper.findAll('button').find(button => button.text().includes('测试语音链路'))
+    expect(voiceButton).toBeDefined()
+    expect(api.runProbe).not.toHaveBeenCalled()
+    await voiceButton!.trigger('click')
+    await flushPromises()
+
+    expect(api.runProbe).toHaveBeenCalledWith({
+      probeIds: ['llm.provider', 'llm.model_chat', 'tts.status', 'asr.runtime'],
+    })
+    wrapper.unmount()
   })
 
   it('polls an empty idle startup snapshot until main publishes a terminal backend state', async () => {

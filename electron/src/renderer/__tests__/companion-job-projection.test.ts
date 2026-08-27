@@ -4,6 +4,7 @@ import {
   canConfirmUnknownEffectRetry,
   canResumeCompanionJob,
   canRetryCompanionJob,
+  canRecheckCompanionJob,
   companionJobToAgentStep,
   isTerminalCompanionJob,
   projectCompanionJob,
@@ -43,7 +44,10 @@ describe('companion job projection', () => {
     const unknownEffect = event({
       type: 'AgentJobUnknownEffect',
       status: 'unknown_effect',
-      data: { tool_name: 'desktop.close_window', args: { window_id: 'opaque-window-1' } },
+      data: {
+        tool_name: 'desktop.close_window', args: { window_id: 'opaque-window-1' },
+        replayArgsAvailable: true,
+      },
     })
 
     expect(projectCompanionJob(unknownEffect).effectOutcome).toBe('unknown_effect')
@@ -80,11 +84,27 @@ describe('companion job projection', () => {
         args: { window_id: 'opaque-window-1' },
         effectOutcome: 'unknown_effect',
         retryable: false,
+        replayArgsAvailable: true,
       },
     })
 
     expect(canRetryCompanionJob(unknownEffect)).toBe(false)
     expect(canConfirmUnknownEffectRetry(unknownEffect)).toBe(true)
+  })
+
+  it('does not replay unknown effects when retained arguments were redacted', () => {
+    const redacted = event({
+      status: 'failed',
+      data: {
+        tool_name: 'external.send',
+        args: { token: '[REDACTED]', target: 'channel' },
+        effectOutcome: 'unknown_effect',
+        replayArgsAvailable: false,
+      },
+    })
+
+    expect(canRetryCompanionJob(redacted)).toBe(false)
+    expect(canConfirmUnknownEffectRetry(redacted)).toBe(false)
   })
 
   it('projects bounded failure evidence from the terminal tool contract', () => {
@@ -106,6 +126,89 @@ describe('companion job projection', () => {
       failedStep: 'verify-window-closed',
       completedSteps: ['find-window', 'request-close'],
     })
+  })
+
+  it('projects comfortable action completion states and verification evidence', () => {
+    expect(projectCompanionJob(event({ status: 'running' })).actionStatus).toBe('executing')
+    expect(projectCompanionJob(event({ status: 'failed' })).actionStatus).toBe('failed')
+    expect(projectCompanionJob(event({ status: 'unknown_effect' })).actionStatus).toBe('unknown_effect')
+
+    const verified = projectCompanionJob(event({
+      type: 'AgentJobCompleted',
+      status: 'completed',
+      data: {
+        tool_name: 'filesystem.write',
+        verification: { status: 'verified', evidence: 'File exists with expected contents' },
+      },
+    }))
+    expect(verified.actionStatus).toBe('verified')
+    expect(verified.verificationStatus).toBe('verified')
+    expect(verified.evidence).toEqual(['File exists with expected contents'])
+
+    const completed = projectCompanionJob(event({
+      type: 'AgentJobCompleted',
+      status: 'completed',
+      data: { tool_name: 'desktop.focus_window' },
+    }))
+    expect(completed.actionStatus).toBe('completed')
+    expect(completed.verificationStatus).toBe('')
+    expect(completed.evidence).toEqual([])
+  })
+
+  it('does not treat evidence as proof when verification explicitly failed or is pending', () => {
+    const pending = projectCompanionJob(event({
+      status: 'completed',
+      data: {
+        tool_name: 'desktop.focus_window',
+        verificationStatus: 'unverified',
+        verificationEvidence: ['Window handle was observed, but focus was not confirmed'],
+      },
+    }))
+    expect(pending.actionStatus).toBe('completed')
+    expect(pending.verificationStatus).toBe('unverified')
+    expect(pending.evidence).toHaveLength(1)
+
+    const failed = projectCompanionJob(event({
+      status: 'completed',
+      data: {
+        tool_name: 'desktop.focus_window',
+        verificationStatus: 'error',
+        verificationEvidence: ['Status probe failed'],
+      },
+    }))
+    expect(failed.actionStatus).toBe('completed')
+    expect(failed.verificationStatus).toBe('error')
+  })
+
+  it('does not add confirmation to active or completed low-risk reads', () => {
+    const read = event({
+      status: 'running',
+      data: { tool_name: 'filesystem.read', args: { path: '/tmp/example' } },
+    })
+    expect(projectCompanionJob(read).actionStatus).toBe('executing')
+    expect(canConfirmUnknownEffectRetry(read)).toBe(false)
+    expect(canRetryCompanionJob({ ...read, status: 'completed' })).toBe(false)
+  })
+
+  it('offers a side-effect-free recheck only when the tool advertises a probe', () => {
+    const completed = event({
+      status: 'completed',
+      data: { tool_name: 'filesystem.write', args: { path: 'x', content: 'ok' }, recheckAvailable: true },
+    })
+    expect(canRecheckCompanionJob(completed)).toBe(true)
+    expect(canRecheckCompanionJob({ ...completed, data: { ...completed.data, recheckAvailable: false } })).toBe(false)
+    expect(canRecheckCompanionJob({ ...completed, status: 'failed' })).toBe(false)
+
+    const unknownEffect = event({
+      status: 'cancelled',
+      data: {
+        tool_name: 'desktop.close_window',
+        args: { window_id: 'opaque-window-1' },
+        effectOutcome: 'unknown_effect',
+        recheckAvailable: true,
+      },
+    })
+    expect(canRecheckCompanionJob(unknownEffect)).toBe(true)
   })
 
   it('offers failed-step resume only with a scoped opaque recovery handle', () => {
@@ -149,11 +252,13 @@ describe('companion job projection', () => {
       data: {
         resultSummary: 'provider token=summary-secret failed',
         error: 'Authorization: Bearer error-secret',
+        verificationEvidence: 'token=evidence-secret',
       },
     }))
 
     expect(projection.resultSummary).not.toContain('summary-secret')
     expect(projection.error).not.toContain('error-secret')
-    expect(`${projection.resultSummary} ${projection.error}`).toContain('[redacted]')
+    expect(projection.evidence.join(' ')).not.toContain('evidence-secret')
+    expect(`${projection.resultSummary} ${projection.error} ${projection.evidence.join(' ')}`).toContain('[redacted]')
   })
 })

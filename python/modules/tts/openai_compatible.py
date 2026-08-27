@@ -4,7 +4,6 @@ import asyncio
 import io
 import logging
 import time
-import wave
 from pathlib import Path
 from typing import Any
 
@@ -300,6 +299,8 @@ def _round_ms(value: float | None) -> float | None:
 
 def _wav_duration_ms(audio: bytes) -> float | None:
     """Read duration without decoding; malformed provider output stays compatible."""
+    import wave
+
     try:
         with wave.open(io.BytesIO(audio), "rb") as wav_file:
             frame_rate = wav_file.getframerate()

@@ -438,8 +438,11 @@ class CompanionJobEventLog:
                 self._events[scoped_job_id] = events
             if events:
                 previous = events[-1]
-                if previous["status"] in _TERMINAL_STATUSES:
+                is_recheck = bool(data and data.get("recheck") is True)
+                if previous["status"] in _TERMINAL_STATUSES and not (is_recheck and status == "completed"):
                     raise ValueError(f"terminal companion job cannot transition: {job_id}")
+                if is_recheck:
+                    data = {**dict(previous.get("data") or {}), **dict(data or {})}
                 normalized_timestamp = max(0.0, float(timestamp))
                 if status == "progress" and previous["status"] == "progress":
                     last_progress_at = self._last_progress_at.get(scoped_job_id)
@@ -495,7 +498,7 @@ class CompanionJobEventLog:
             self._events.move_to_end(scoped_job_id)
             if status in _TERMINAL_STATUSES:
                 self._terminal_jobs.add(scoped_job_id)
-            if self.presentation_log is not None:
+            if self.presentation_log is not None and not (data and data.get("recheck") is True):
                 # Presentation is a projection. A projection outage or full
                 # presentation buffer must never change the established job
                 # log's accepted event, capacity, or transition semantics.
@@ -530,6 +533,46 @@ class CompanionJobEventLog:
     def snapshot(self) -> list[dict[str, Any]]:
         with self._lock:
             return [deepcopy(event) for events in self._events.values() for event in events]
+
+    def latest(self, job_id: str, workspace_id: str | None = None) -> dict[str, Any] | None:
+        """Return the authoritative latest event for one scoped job."""
+        with self._lock:
+            for events in self._events.values():
+                if not events or events[-1]["jobId"] != job_id:
+                    continue
+                if workspace_id is not None and events[-1]["workspaceId"] != workspace_id:
+                    continue
+                return deepcopy(events[-1])
+        return None
+
+    def append_recheck(
+        self,
+        *,
+        job_id: str,
+        workspace_id: str,
+        timestamp: float,
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Append verification evidence while preserving the original job identity."""
+        latest = self.latest(job_id, workspace_id)
+        if latest is None:
+            raise LookupError(f"companion job not found: {job_id}")
+        return self.append(
+            workspace_id=str(latest["workspaceId"]),
+            session_id=str(latest["sessionId"]),
+            turn_id=str(latest["turnId"]),
+            job_id=job_id,
+            conversation_id=latest.get("conversationId"),
+            operation_id=latest.get("operationId"),
+            step_index=latest.get("stepIndex"),
+            run_id=latest.get("runId"),
+            request_id=str(latest["requestId"]),
+            interruption_epoch=int(latest.get("interruptionEpoch") or 0),
+            source=str(latest["source"]),
+            timestamp=timestamp,
+            status="completed",
+            data={**data, "recheck": True},
+        )
 
     def active_job_ids(self) -> list[str]:
         with self._lock:

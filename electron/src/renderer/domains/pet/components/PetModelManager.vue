@@ -60,6 +60,20 @@
             {{ capability.label }}
           </span>
         </div>
+        <div
+          v-if="currentModel.source === 'local' && currentModel.license"
+          class="pet-model-manager__license"
+          :class="`pet-model-manager__license--${currentModel.license.status}`"
+        >
+          <strong>{{ t('pet.model.license') }}</strong>
+          <template v-if="currentModel.license.status === 'declared'">
+            <span>{{ currentModel.license.spdx }}</span>
+            <span>{{ currentModel.license.redistributable ? t('pet.model.redistributionAllowed') : t('pet.model.redistributionDisallowed') }}</span>
+            <span v-if="currentModel.license.attribution">{{ t('pet.model.attribution', { attribution: currentModel.license.attribution }) }}</span>
+          </template>
+          <span v-else-if="currentModel.license.status === 'invalid'">{{ t('pet.model.licenseInvalid') }}</span>
+          <span v-else>{{ t('pet.model.licenseMissing') }}</span>
+        </div>
       </div>
 
       <small v-if="syncHint" class="pet-model-manager__warning">{{ syncHint }}</small>
@@ -261,6 +275,29 @@ const capabilityItems = computed(() => {
   border-color: color-mix(in srgb, var(--yui-accent) 34%, var(--yui-border));
   background: var(--yui-accent-soft);
   color: var(--yui-accent);
+}
+
+.pet-model-manager__license {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-left: 3px solid var(--yui-accent);
+  border-radius: 4px;
+  background: var(--yui-surface-muted);
+  color: var(--yui-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.pet-model-manager__license strong {
+  color: var(--yui-text);
+}
+
+.pet-model-manager__license--missing,
+.pet-model-manager__license--invalid {
+  border-left-color: var(--el-color-warning);
 }
 
 .pet-model-manager__warning {

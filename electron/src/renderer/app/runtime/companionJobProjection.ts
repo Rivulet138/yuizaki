@@ -15,10 +15,14 @@ export interface CompanionJobProjection {
   artifactCount: number | null
   artifacts: ChatArtifactRef[]
   effectOutcome: string
+  verificationStatus: string
   failureCategory: string
   failedStep: string
   completedSteps: string[]
   recoveryHandle: string
+  /** User-facing completion state; wire status remains backward compatible. */
+  actionStatus: 'executing' | 'completed' | 'verified' | 'failed' | 'unknown_effect' | 'cancelled'
+  evidence: string[]
 }
 
 const text = (value: unknown): string => typeof value === 'string' ? value.trim() : ''
@@ -32,6 +36,32 @@ const record = (value: unknown): Record<string, unknown> | null =>
     ? value as Record<string, unknown>
     : null
 const normalizedMarker = (value: unknown): string => text(value).toLowerCase().replace(/[\s-]+/g, '_')
+
+const evidenceList = (data: Record<string, unknown>): string[] => {
+  const values = [data.evidence, data.verificationEvidence, data.verification_evidence, data.postconditionEvidence]
+  const nested = record(data.verification)
+  if (nested) values.push(nested.evidence, nested.message, nested.detail)
+  return values.flatMap(value => Array.isArray(value) ? value : [value])
+    .map(value => text(value).replace(/\s+/g, ' ').slice(0, 240))
+    .filter(Boolean).slice(0, 6).map(redactDiagnosticText)
+}
+
+const actionStatus = (event: CompanionEventEnvelope, data: Record<string, unknown>) => {
+  if (event.status === 'unknown_effect' || effectOutcome(event) === 'unknown_effect') return 'unknown_effect' as const
+  if (event.status === 'failed') return 'failed' as const
+  if (event.status === 'cancelled' || event.status === 'interrupted') return 'cancelled' as const
+  if (event.status === 'completed') {
+    const verification = record(data.verification)
+    const marker = normalizedMarker(data.verificationStatus ?? data.verification_status ?? verification?.status ?? data.postcondition)
+    // Evidence is useful context, but it must not upgrade an explicitly
+    // unverified/error result into a verified real-world effect.
+    if (['verified', 'passed', 'success', 'succeeded', 'ok'].includes(marker)) return 'verified' as const
+    // Transport completion only proves that the handler returned; a verifier or
+    // postcondition evidence is required before claiming the real-world effect.
+    return 'completed' as const
+  }
+  return 'executing' as const
+}
 
 const effectOutcome = (event: CompanionEventEnvelope): string => text(
   event.data?.effectOutcome ?? event.data?.effect_outcome ?? event.data?.outcome,
@@ -98,6 +128,15 @@ export const canRetryCompanionJob = (event: CompanionEventEnvelope): boolean => 
   return event.source === 'scheduler' && typeof event.data?.taskId === 'string'
 }
 
+export const canRecheckCompanionJob = (event: CompanionEventEnvelope): boolean =>
+  isToolCompanionJob(event)
+  && (
+    projectCompanionJob(event).actionStatus === 'completed'
+    || isUnknownEffectEvent(event)
+  )
+  && event.data?.recheckAvailable === true
+  && companionJobToolArgs(event) !== null
+
 export const canResumeCompanionJob = (event: CompanionEventEnvelope): boolean => {
   const projection = projectCompanionJob(event)
   const recovery = event.data?.recovery && typeof event.data.recovery === 'object' && !Array.isArray(event.data.recovery)
@@ -118,6 +157,7 @@ export const canConfirmUnknownEffectRetry = (event: CompanionEventEnvelope): boo
   (event.status === 'failed' || event.status === 'cancelled' || event.status === 'interrupted' || event.status === 'unknown_effect')
   && isToolCompanionJob(event)
   && isUnknownEffectEvent(event)
+  && event.data?.replayArgsAvailable === true
   && companionJobToolArgs(event) !== null
 
 export const projectCompanionJob = (event: CompanionEventEnvelope): CompanionJobProjection => {
@@ -129,6 +169,11 @@ export const projectCompanionJob = (event: CompanionEventEnvelope): CompanionJob
   const recovery = data.recovery && typeof data.recovery === 'object' && !Array.isArray(data.recovery)
     ? data.recovery as Record<string, unknown>
     : null
+  const evidence = evidenceList(data)
+  const verification = record(data.verification)
+  const verificationStatus = normalizedMarker(
+    data.verificationStatus ?? data.verification_status ?? verification?.status,
+  )
   return {
     id: event.jobId,
     title: text(data.title) || text(data.task_name) || text(data.taskName) || text(data.behaviorType)
@@ -145,10 +190,13 @@ export const projectCompanionJob = (event: CompanionEventEnvelope): CompanionJob
       : Math.max(0, Math.round(explicitArtifactCount)),
     artifacts,
     effectOutcome: effectOutcome(event),
+    verificationStatus,
     failureCategory: text(data.failureCategory ?? data.failure_category ?? data.category).slice(0, 120),
     failedStep: text(data.failedStep ?? data.failed_step ?? data.stepId ?? data.step_id).slice(0, 120),
     completedSteps: textList(data.completedSteps ?? data.completed_steps),
     recoveryHandle: text(recovery?.handle ?? data.recoveryHandle ?? data.recovery_handle).slice(0, 160),
+    actionStatus: actionStatus(event, data),
+    evidence,
   }
 }
 

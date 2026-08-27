@@ -8,6 +8,7 @@ import type {
 	MemoryMetadata,
 	MemoryOverview,
 	MemoryReviewStatus,
+	MemoryRecallFeedback,
 } from "@/api/clients/memory-client";
 
 export interface MemoryDoc {
@@ -68,6 +69,17 @@ export interface MemoryRetrievalTrace {
 	filtered_count?: number;
 	filtered_out_count?: number;
 	filter_reasons: Record<string, number>;
+	anchor_ids?: string[];
+	expanded_ids?: string[];
+	expansion_edges?: Array<{ from: string; to: string; relation: string }>;
+	evidence_ids?: string[];
+	expansion_depth?: number;
+	expansion_truncated?: boolean;
+	relation_latency_ms?: number;
+	relation_attempted?: number;
+	relation_accepted?: number;
+	evidence_coverage?: number;
+	relation_token_estimate?: number;
 	top_score?: number;
 	average_score?: number;
 	latency_ms?: number;
@@ -86,6 +98,9 @@ interface MemoryQueryResult {
 		text: string;
 		score?: number;
 		score_components?: Record<string, number>;
+		why_recalled?: string;
+		evidence_type?: string;
+		association?: string;
 		layer?: string;
 		metadata?: Record<string, unknown>;
 	}>;
@@ -103,6 +118,9 @@ interface BackendQueryItem {
 	text?: unknown;
 	score?: unknown;
 	score_components?: unknown;
+	why_recalled?: unknown;
+	evidence_type?: unknown;
+	association?: unknown;
 	layer?: unknown;
 	metadata?: Record<string, unknown>;
 	doc?: BackendDocument;
@@ -215,6 +233,26 @@ const normalizeTrace = (raw: unknown): MemoryRetrievalTrace | undefined => {
 		layers: normalizeStringList(trace.layers),
 		recall_count: numberOrUndefined(trace.recall_count),
 		selected_ids: normalizeStringList(trace.selected_ids),
+		anchor_ids: normalizeStringList(trace.anchor_ids),
+		expanded_ids: normalizeStringList(trace.expanded_ids),
+		expansion_edges: Array.isArray(trace.expansion_edges)
+			? trace.expansion_edges
+					.filter((edge): edge is Record<string, unknown> => Boolean(edge) && typeof edge === "object")
+					.map((edge) => ({
+						from: String(edge.from ?? ""),
+						to: String(edge.to ?? ""),
+						relation: String(edge.relation ?? ""),
+					}))
+					.filter((edge) => edge.from && edge.to)
+			: [],
+		evidence_ids: normalizeStringList(trace.evidence_ids),
+		expansion_depth: numberOrUndefined(trace.expansion_depth),
+		expansion_truncated: typeof trace.expansion_truncated === "boolean" ? trace.expansion_truncated : undefined,
+		relation_latency_ms: numberOrUndefined(trace.relation_latency_ms),
+		relation_attempted: numberOrUndefined(trace.relation_attempted),
+		relation_accepted: numberOrUndefined(trace.relation_accepted),
+		evidence_coverage: numberOrUndefined(trace.evidence_coverage),
+		relation_token_estimate: numberOrUndefined(trace.relation_token_estimate),
 		candidate_limit: numberOrUndefined(trace.candidate_limit),
 		candidate_count: numberOrUndefined(trace.candidate_count),
 		filtered_count: numberOrUndefined(trace.filtered_count),
@@ -252,6 +290,9 @@ const normalizeQueryResult = (raw: unknown): MemoryQueryResult => {
 				text: String(result.text ?? doc?.text ?? ""),
 				score: numberOrUndefined(result.score),
 				score_components: normalizeStringNumberRecord(result.score_components),
+				why_recalled: stringOrUndefined(result.why_recalled),
+				evidence_type: stringOrUndefined(result.evidence_type),
+				association: stringOrUndefined(result.association),
 				layer:
 					typeof result.layer === "string"
 						? result.layer
@@ -270,6 +311,7 @@ export function useMemoryDomain() {
 	const activeWorkspace = computed(() => workspaceStore.activeWorkspace);
 	const docs = ref<MemoryDoc[]>([]);
 	const forgottenDocs = ref<MemoryDoc[]>([]);
+	const reviewCandidates = ref<MemoryDoc[]>([]);
 	const overview = ref<MemoryOverview | null>(null);
 	const queryResult = ref<MemoryQueryResult | null>(null);
 
@@ -290,6 +332,7 @@ export function useMemoryDomain() {
 	const docsRequest = useDomainRequest<{ docs: unknown[] }>();
 	const forgottenDocsRequest = useDomainRequest<{ docs: unknown[] }>();
 	const overviewRequest = useDomainRequest<MemoryOverview>();
+	const candidatesRequest = useDomainRequest<{ status: string; candidates: unknown[]; count: number }>();
 	const addRequest = useDomainRequest<{
 		status?: string;
 		id?: string;
@@ -319,6 +362,22 @@ export function useMemoryDomain() {
 	const loadOverview = async (options?: MemoryDocListOptions) => {
 		const result = await overviewRequest.execute(() => memoryClient.getOverview(options));
 		if (result) overview.value = result;
+		return result;
+	};
+
+	const loadCandidates = async (options?: MemoryDocListOptions) => {
+		const result = await candidatesRequest.execute(() => memoryClient.getCandidates({ ...options, status: "pending" }));
+		if (result) {
+			reviewCandidates.value = Array.isArray(result.candidates)
+				? result.candidates.map(normalizeDoc)
+				: [];
+		}
+		return result;
+	};
+
+	const reviewCandidate = async (id: string, decision: "approve" | "reject", reason?: string) => {
+		const result = await memoryClient.reviewCandidate(id, { decision, reason });
+		if (result) reviewCandidates.value = reviewCandidates.value.filter((item) => item.id !== id);
 		return result;
 	};
 
@@ -395,6 +454,9 @@ export function useMemoryDomain() {
 		workspace_id?: string;
 		scope?: string;
 		layers?: string[];
+		expand_relations?: boolean;
+		relation_limit?: number;
+		relation_depth?: number;
 	}) => {
 		const resolvedScope = resolveScope(payload);
 		const resolvedWorkspaceId = resolveScopedWorkspaceId(payload);
@@ -406,6 +468,9 @@ export function useMemoryDomain() {
 			workspace_id: resolvedWorkspaceId,
 			scope: resolvedScope,
 			layers: payload.layers,
+			expand_relations: payload.expand_relations,
+			relation_limit: payload.relation_limit,
+			relation_depth: payload.relation_depth,
 		}));
 		if (result) {
 			queryResult.value = normalizeQueryResult(result);
@@ -421,6 +486,9 @@ export function useMemoryDomain() {
 		scope?: string;
 		layers?: string[];
 		recency_weight?: number;
+		expand_relations?: boolean;
+		relation_limit?: number;
+		relation_depth?: number;
 	}) => {
 		const resolvedScope = resolveScope(payload);
 		const resolvedWorkspaceId = resolveScopedWorkspaceId(payload);
@@ -441,6 +509,9 @@ export function useMemoryDomain() {
 					"semantic",
 				],
 				recency_weight: payload.recency_weight ?? 0.2,
+				expand_relations: payload.expand_relations,
+				relation_limit: payload.relation_limit,
+				relation_depth: payload.relation_depth,
 			}),
 		);
 		if (result) {
@@ -448,27 +519,44 @@ export function useMemoryDomain() {
 		}
 	};
 
+	const recordRecallFeedback = async (id: string, feedback: MemoryRecallFeedback) => {
+		const result = await memoryClient.recordRecallFeedback(id, feedback);
+		const item = queryResult.value?.results.find((candidate) => candidate.id === id);
+		if (item) {
+			item.metadata = {
+				...(item.metadata || {}),
+				recall_feedback: { summary: result.counts },
+			};
+		}
+		return result;
+	};
+
 	return {
 		docs,
 		forgottenDocs,
+		reviewCandidates,
 		overview,
 		queryResult,
 		docsRequest,
 		forgottenDocsRequest,
 		overviewRequest,
+		candidatesRequest,
 		addRequest,
 		updateRequest,
 		queryRequest,
 		rawQueryRequest,
 		loadDocs,
 		loadForgottenDocs,
+		loadCandidates,
 		loadOverview,
 		addMemory,
 		updateDoc,
 		correctDoc,
 		softForgetDoc,
 		restoreDoc,
+		reviewCandidate,
 		queryMemory,
 		queryRawRag,
+		recordRecallFeedback,
 	};
 }

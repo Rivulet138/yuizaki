@@ -245,7 +245,11 @@ describe('system routes', () => {
         new URL('http://127.0.0.1:38945/api/system/backup/restore'),
         {} as HttpRouteContext,
       )
-      const restorePayload = restoreResponse.getJson() as { restorePlan: Array<{ path: string; restored: boolean }> }
+      const restorePayload = restoreResponse.getJson() as {
+        restorePlan: Array<{ path: string; restored: boolean }>
+        summary: { totalTargets: number; restoreCount: number; skippedCount: number; overwriteCount: number; missingCurrentCount: number }
+        effects: { database: string; memoryIndex: string }
+      }
 
       expect(restoreHandled).toBe(true)
       expect(restoreResponse.getStatus()).toBe(200)
@@ -253,6 +257,11 @@ describe('system routes', () => {
       expect(fs.readFileSync(memoryDbPath, 'utf8')).toBe('memory-snapshot-version')
       expect(restorePayload.restorePlan.find((target) => target.path === chatDbPath)?.restored).toBe(true)
       expect(restorePayload.restorePlan.find((target) => target.path === memoryDbPath)?.restored).toBe(true)
+      expect(restorePayload.summary.totalTargets).toBeGreaterThanOrEqual(2)
+      expect(restorePayload.summary.restoreCount).toBe(restorePayload.summary.overwriteCount)
+      expect(restorePayload.summary.skippedCount).toBe(restorePayload.summary.totalTargets - restorePayload.summary.restoreCount)
+      expect(restorePayload.effects.database).toBe('restored')
+      expect(restorePayload.effects.memoryIndex).toBe('rebuild_required')
     } finally {
       fs.rmSync(projectRoot, { recursive: true, force: true })
     }
@@ -290,12 +299,21 @@ describe('system routes', () => {
         new URL('http://127.0.0.1:38945/api/system/backup/restore'),
         {} as HttpRouteContext,
       )
-      const restorePayload = restoreResponse.getJson() as { dryRun: boolean; restorePlan: Array<{ path: string; restored: boolean }> }
+      const restorePayload = restoreResponse.getJson() as {
+        dryRun: boolean
+        restorePlan: Array<{ path: string; restored: boolean }>
+        summary: { restoreCount: number; overwriteCount: number; missingCurrentCount: number }
+        effects: { database: string }
+      }
 
       expect(restoreHandled).toBe(true)
       expect(restoreResponse.getStatus()).toBe(200)
       expect(restorePayload.dryRun).toBe(true)
       expect(restorePayload.restorePlan.find((target) => target.path === chatDbPath)?.restored).toBe(false)
+      expect(restorePayload.summary.restoreCount).toBeGreaterThan(0)
+      expect(restorePayload.summary.overwriteCount).toBe(1)
+      expect(restorePayload.summary.missingCurrentCount).toBe(restorePayload.summary.restoreCount - 1)
+      expect(restorePayload.effects.database).toBe('will_restore')
       expect(fs.readFileSync(chatDbPath, 'utf8')).toBe('mutated-version')
     } finally {
       fs.rmSync(projectRoot, { recursive: true, force: true })
@@ -889,6 +907,36 @@ describe('system routes', () => {
       {} as HttpRouteContext,
     )
     expect(handled).toBe(false)
+  })
+
+  it('proxies provider, platform, connector config and delivery operations', async () => {
+    const { handleSystemRoutes } = await import('../http/routes/system-routes')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+    const cases = [
+      { method: 'GET', pathName: '/api/system/providers' },
+      { method: 'GET', pathName: '/api/system/platforms' },
+      { method: 'GET', pathName: '/api/system/connectors' },
+      { method: 'GET', pathName: '/api/system/connectors/qq/config' },
+      { method: 'PUT', pathName: '/api/system/connectors/wechat/config', body: { enabled: false } },
+      { method: 'GET', pathName: '/api/system/connectors/telegram/deliveries?limit=20' },
+      { method: 'POST', pathName: '/api/system/connectors/telegram/deliveries/connector%3Atelegram%3Aevent-1/retry', body: {} },
+    ]
+
+    for (const item of cases) {
+      const { response, getStatus } = createJsonResponse()
+      const handled = await handleSystemRoutes(
+        createJsonRequest(item.body ?? {}),
+        response,
+        item.method,
+        new URL(`http://127.0.0.1:38945${item.pathName}`),
+        {} as HttpRouteContext,
+      )
+      expect(handled).toBe(true)
+      expect(getStatus()).toBe(200)
+    }
   })
 
   it('returns a bounded JSON error when proxied Python requests time out', async () => {

@@ -4,6 +4,8 @@ export type CapabilityType = 'tool' | 'skill' | 'command'
 
 export type CapabilityRiskLevel = 'safe' | 'low' | 'medium' | 'high' | 'critical'
 
+export type CapabilityEffectKind = 'read' | 'write' | 'unknown'
+
 export interface CapabilityDescriptor {
   id: string
   name: string
@@ -27,6 +29,9 @@ export interface CapabilityDescriptor {
     stage?: string
   }
   parameters?: Record<string, unknown>
+  effectKind?: CapabilityEffectKind
+  hasPostcondition?: boolean
+  hasRecheck?: boolean
 }
 
 export interface CapabilitiesSnapshot {

@@ -54,4 +54,54 @@ describe('memory index UI status', () => {
       tone: 'success',
     })
   })
+
+  it('keeps a rebuild failure distinct from an authority failure', () => {
+    expect(getMemoryIndexUiStatus({
+      status: 'error',
+      count: 4,
+      healthy: true,
+      metadata: { index_healthy: false, index_dirty: true },
+      job: {
+        job_id: 'job-1', state: 'failed', phase: 'failed', processed_count: 2, total_count: 4,
+        started_at: '2026-08-27T00:00:00Z', updated_at: '2026-08-27T00:00:01Z',
+        last_error: 'embedding unavailable', recoverable: true,
+      },
+    }, false)).toEqual({
+      label: '重建失败',
+      availabilityLabel: '权威库可用',
+      tone: 'warning',
+    })
+  })
+
+  it('shows a cancelled rebuild without implying memory loss', () => {
+    expect(getMemoryIndexUiStatus({
+      status: 'idle',
+      count: 4,
+      healthy: true,
+      metadata: { index_healthy: false, index_dirty: true },
+      job: {
+        job_id: 'job-2', state: 'cancelled', phase: 'cancelled', processed_count: 2, total_count: 4,
+        started_at: '2026-08-27T00:00:00Z', updated_at: '2026-08-27T00:00:01Z',
+        recoverable: true,
+      },
+    }, false)).toEqual({
+      label: '已取消',
+      availabilityLabel: '权威库可用',
+      tone: 'info',
+    })
+  })
+
+  it('surfaces an unavailable index as a backend failure instead of loading forever', () => {
+    expect(getMemoryIndexUiStatus({
+      status: 'error',
+      count: 4,
+      healthy: false,
+      message: 'control service unavailable',
+      metadata: { index_healthy: false, degraded: true },
+    }, false)).toEqual({
+      label: '后端异常',
+      availabilityLabel: '权威库异常',
+      tone: 'danger',
+    })
+  })
 })

@@ -1,10 +1,13 @@
 
 <template>
   <PanelShell title="记忆管理" subtitle="查看、编辑和控制记忆召回" tone="companion" density="compact">
-    <template #status><span class="local-status" role="status">本机保存 · {{ scopeLabel(currentMemoryScope) }}</span></template>
+    <template #status><span class="local-status" role="status">本机保存 · {{ scopeLabel(currentMemoryScope) }} · 索引 {{ indexStatusLabel }}</span></template>
     <template #actions>
       <label class="scope-control"><span>当前范围</span><el-select :model-value="currentMemoryScope" size="small" :disabled="workspaceScopeSaving" aria-label="当前记忆范围" @change="updateDefaultMemoryScope"><el-option v-for="scope in memoryScopeOptions" :key="scope.value" :label="scope.label" :value="scope.value" /></el-select></label>
       <el-button data-testid="memory-advanced-tools-toggle" circle plain :icon="Tools" :type="advancedToolsVisible ? 'primary' : 'default'" title="高级工具" aria-label="打开高级工具" :aria-expanded="advancedToolsVisible" @click="advancedToolsVisible = true" />
+      <el-button data-testid="memory-export" circle plain :icon="Download" title="导出当前范围" aria-label="导出当前范围" :loading="exportLoading" @click="exportMemory" />
+      <el-button data-testid="memory-import" circle plain :icon="Upload" title="导入记忆备份" aria-label="导入记忆备份" :loading="importLoading" @click="memoryImportInput?.click()" />
+      <input ref="memoryImportInput" class="memory-import-input" type="file" accept="application/json,.json" aria-label="选择记忆备份文件" @change="handleMemoryImportFile" />
       <el-button data-testid="memory-refresh" circle plain :icon="Refresh" title="刷新记忆" aria-label="刷新记忆" :loading="docsRequest.loading" @click="refreshMemoryState" />
     </template>
 
@@ -20,6 +23,31 @@
           <div class="health-stat"><strong>{{ overview?.recallable ?? docs.length }}</strong><span>可召回</span></div>
           <div class="health-stat" :class="{ attention: reviewDocs.length > 0 }"><strong>{{ reviewDocs.length }}</strong><span>待确认</span></div>
         </div>
+      </section>
+      <section v-if="importReport" class="memory-import-report" aria-live="polite">
+        <div class="import-report-head">
+          <strong>最近一次导入结果</strong>
+          <el-button link size="small" @click="importReport = null">关闭</el-button>
+        </div>
+        <div class="import-report-grid">
+          <span>写入 <strong>{{ importReport.imported_count }}</strong> 条</span>
+          <span>跳过 <strong>{{ importReport.skipped_count }}</strong> 条</span>
+          <span>恢复停止召回 <strong>{{ importReport.restored_soft_forgotten_count ?? 0 }}</strong> 条</span>
+          <span>索引状态 <strong>{{ importReport.effects?.index === 'rebuild_required' ? '需要重建' : '未变化' }}</strong></span>
+        </div>
+        <div v-if="importReport.skipped_count" class="import-report-reasons">
+          <span v-for="(count, reason) in (importReport.skipped_reason_counts || {})" :key="reason">{{ importReasonLabel(reason) }}：{{ count }}</span>
+        </div>
+        <details v-if="importReport.skipped.length" class="import-report-details">
+          <summary>查看跳过记录（{{ importReport.skipped.length }}）</summary>
+          <ul>
+            <li v-for="(item, index) in importReport.skipped.slice(0, 50)" :key="`${item.id || 'unknown'}-${index}`">
+              <strong>{{ item.id || '无 ID' }}</strong><span>{{ importReasonLabel(item.reason) }}</span><small v-if="item.detail">{{ compactText(String(item.detail), 120) }}</small>
+            </li>
+          </ul>
+          <p v-if="importReport.skipped.length > 50">仅显示前 50 条，共 {{ importReport.skipped.length }} 条。</p>
+        </details>
+        <p class="import-report-note">权威库：{{ importReport.effects?.authority_store === 'updated' ? '已更新' : '未变化' }}；聊天引用：已保留。</p>
       </section>
       <nav class="memory-tabs" role="tablist" aria-label="记忆视图">
         <button v-for="(tab, index) in memoryTabs" :id="`memory-tab-${tab.value}`" :key="tab.value" type="button" role="tab" :tabindex="activeTab === tab.value ? 0 : -1" :aria-selected="activeTab === tab.value" :aria-controls="`memory-panel-${tab.value}`" @click="activeTab = tab.value" @keydown="onMemoryTabKeydown($event, index)">
@@ -47,19 +75,19 @@
           @update-inspector-draft="Object.assign(inspectorDraft, $event)"
         />
       </div>
-      <div v-show="activeTab === 'review'" id="memory-panel-review" role="tabpanel" aria-labelledby="memory-tab-review" class="tab-panel"><MemoryReviewQueue :docs="reviewDocs" :compact-text="compactText" :quality-percent="qualityPercent" @review="openEditDoc" /></div>
+      <div v-show="activeTab === 'review'" id="memory-panel-review" role="tabpanel" aria-labelledby="memory-tab-review" class="tab-panel"><MemoryReviewQueue :docs="reviewDocs" :compact-text="compactText" :quality-percent="qualityPercent" :processing-id="reviewProcessingId" :loading="candidatesRequest?.loading" :error="candidatesRequest?.error" @review="openEditDoc" @decide="decideReviewCandidate" @retry="refreshMemoryState" /></div>
       <div v-show="activeTab === 'overview'" id="memory-panel-overview" role="tabpanel" aria-labelledby="memory-tab-overview" class="tab-panel">
         <MemoryOverview
           :overview="overview" :forgotten-docs="forgottenDocs" :layers="layerStats" :selected-layer="filterLayer"
           :loading="overviewRequest.loading || forgottenDocsRequest.loading" :error="overviewRequest.error || forgottenDocsRequest.error"
-          :restoring-doc-ids="restoringDocIds" @select-layer="openLayerInLibrary" @restore="restoreForgottenDoc"
+          :restoring-doc-ids="restoringDocIds" @select-layer="openLayerInLibrary" @restore="restoreForgottenDoc" @retry="refreshMemoryState"
         />
       </div>
     </div>
 
     <el-drawer v-model="advancedToolsVisible" title="高级记忆工具" size="min(560px, 92vw)" append-to-body>
       <MemoryAdvancedTools
-        :index-status="indexStatus" :index-status-label="indexStatusLabel" :index-availability-label="indexAvailabilityLabel" :index-status-tone="indexStatusTone"
+        :index-status="indexStatus" :rebuild-job="indexStatus?.job ?? null" :index-status-label="indexStatusLabel" :index-availability-label="indexAvailabilityLabel" :index-status-tone="indexStatusTone"
         :doc-count="docs.length" :rebuild-index-loading="rebuildIndexLoading" :query-form="queryForm" :layers="layers"
         :effective-query-layers="effectiveQueryLayers" :query-loading="queryRequest.loading" :raw-query-loading="rawQueryRequest.loading"
         :query-error="queryRequest.error" :query-result="queryResult" :query-trace="queryTrace" :query-summary="querySummary"
@@ -68,8 +96,9 @@
         :maintenance-preview-matches-policy="maintenancePreviewMatchesPolicy" :maintenance-saving="maintenanceSaving"
         :maintenance-preview-loading="maintenancePreviewLoading" :maintenance-apply-loading="maintenanceApplyLoading"
         :format-latency="formatLatency" :compact-text="compactText" :maintenance-reason-label="maintenanceReasonLabel"
-        @rebuild-index="rebuildMemoryIndex" @query="submitQuery" @raw-query="submitRawQuery" @toggle-query-layer="toggleQueryLayer"
-        @reset-query-layers="resetQueryLayers" @select-result="selectDocFromAdvanced" @write-document="submitDocument"
+         @rebuild-index="rebuildMemoryIndex" @cancel-rebuild-index="cancelMemoryIndexRebuild" @query="submitQuery" @raw-query="submitRawQuery" @toggle-query-layer="toggleQueryLayer"
+         @reset-query-layers="resetQueryLayers" @select-result="selectDocFromAdvanced" @write-document="submitDocument"
+         @feedback="handleRecallFeedback"
         @save-maintenance="saveMemoryPolicy" @preview-maintenance="previewMemoryMaintenance" @apply-maintenance="applyMemoryMaintenance"
         @update-query="Object.assign(queryForm, $event)" @update-document="Object.assign(docForm, $event)" @update-maintenance="Object.assign(maintenancePolicy, $event)"
       />
@@ -90,9 +119,9 @@
 
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, provide, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Collection, DataAnalysis, Refresh, Tools, User } from '@element-plus/icons-vue'
+import { Collection, DataAnalysis, Download, Refresh, Tools, Upload, User } from '@element-plus/icons-vue'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import MemoryAdvancedTools from '../components/MemoryAdvancedTools.vue'
 import MemoryLibrary from '../components/MemoryLibrary.vue'
@@ -104,7 +133,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { systemClient } from '@/api/client'
 import { memoryClient } from '@/api/clients/memory-client'
-import type { MemoryIndexStatus, MemoryMaintenancePolicyPayload, MemoryMaintenancePreview } from '@/api/clients/memory-client'
+import type { MemoryDeletePreview, MemoryImportResult, MemoryIndexRebuildJob, MemoryIndexStatus, MemoryMaintenancePolicyPayload, MemoryMaintenancePreview } from '@/api/clients/memory-client'
 import { getMemoryIndexUiStatus } from '../memory-index-status'
 import type { MemoryDoc, MemoryDuplicateCandidate } from '../composables/useMemoryDomain'
 import { memoryInspectorActionsKey } from '../components/memory-panel-types'
@@ -116,9 +145,9 @@ type MemoryScope = 'global' | 'workspace' | 'session'
 type MemoryTab = 'library' | 'review' | 'overview'
 
 const {
-  docs, forgottenDocs, overview, queryResult,
-  docsRequest, forgottenDocsRequest, overviewRequest, addRequest, updateRequest, queryRequest, rawQueryRequest,
-  loadDocs, loadForgottenDocs, loadOverview, addMemory, updateDoc, softForgetDoc, restoreDoc, queryMemory, queryRawRag,
+  docs, forgottenDocs, reviewCandidates, overview, queryResult,
+  docsRequest, forgottenDocsRequest, overviewRequest, candidatesRequest, addRequest, updateRequest, queryRequest, rawQueryRequest,
+  loadDocs, loadForgottenDocs, loadCandidates, loadOverview, addMemory, updateDoc, softForgetDoc, restoreDoc, reviewCandidate, queryMemory, queryRawRag, recordRecallFeedback,
 } = useMemoryDomain()
 const e2eMode = Boolean(window.petApi?.e2e)
 const sessionStore = useSessionStore()
@@ -132,6 +161,7 @@ const currentMemoryScope = computed<MemoryScope>(() => normalizeMemoryScope(acti
 const indexStatus = ref<MemoryIndexStatus | null>(null)
 const retrievalStrategy = ref<{ label: string; layers: string[] }>({ label: '', layers: [] })
 const advancedToolsVisible = ref(false)
+const reviewProcessingId = ref('')
 const activeTab = ref<MemoryTab>('library')
 const searchText = ref('')
 const filterLayer = ref('')
@@ -142,7 +172,7 @@ const selectedDocId = ref('')
 const selectedQueryLayers = ref<string[]>([])
 const form = reactive({ text: '', type: 'chat', layer: 'working', importance: 0.6, confidence: 0.86, source: 'manual' })
 const docForm = reactive({ id: '', text: '', metadataJson: '' })
-const queryForm = reactive({ query: '', scope: currentMemoryScope.value, top_k: 5 })
+const queryForm = reactive({ query: '', scope: currentMemoryScope.value, top_k: 5, expand_relations: true, relation_limit: 20, relation_depth: 1 })
 const editDialogVisible = ref(false)
 const editForm = reactive({ id: '', text: '', type: 'fact', layer: 'semantic', importance: 0.5, confidence: 0.72, source: 'manual', metadataJson: '' })
 const inspectorDraft = reactive({
@@ -151,8 +181,15 @@ const inspectorDraft = reactive({
 })
 const docWriteLoading = ref(false)
 const rebuildIndexLoading = ref(false)
+let activeRebuildJobId = ''
+let memoryPanelDisposed = false
 const batchActionLoading = ref(false)
 const workspaceScopeSaving = ref(false)
+const exportLoading = ref(false)
+const importLoading = ref(false)
+const importReport = ref<MemoryImportResult | null>(null)
+const deletePreview = ref<MemoryDeletePreview | null>(null)
+const memoryImportInput = ref<HTMLInputElement | null>(null)
 const inspectorDraftSaving = ref(false)
 const forgettingDocIds = ref(new Set<string>())
 const restoringDocIds = ref(new Set<string>())
@@ -395,9 +432,11 @@ const queryHitIds = computed(() => new Set([
   ...((queryResult.value?.results ?? []).map(item => item.id).filter(Boolean)),
 ]))
 
-const reviewDocs = computed(() => recallableDocs.value
-  .filter(doc => Number(doc.confidence ?? 1) < 0.72 || Number(doc.quality_score ?? 1) < 0.66)
-  .sort((left, right) => Math.min(Number(left.confidence ?? 1), Number(left.quality_score ?? 1)) - Math.min(Number(right.confidence ?? 1), Number(right.quality_score ?? 1))))
+const reviewDocs = computed(() => reviewCandidates.value.slice().sort((left, right) => {
+  const leftScore = Math.min(Number(left.confidence ?? 1), Number(left.quality_score ?? 1))
+  const rightScore = Math.min(Number(right.confidence ?? 1), Number(right.quality_score ?? 1))
+  return leftScore - rightScore
+}))
 const memoryTabs = computed(() => [
   { value: 'library' as const, label: '记忆库', count: docs.value.length, icon: Collection, description: '搜索、添加和修正她当前可以使用的记忆。' },
   { value: 'review' as const, label: '待确认', count: reviewDocs.value.length, icon: User, description: '检查低置信度或质量较低的内容，避免错误延续。' },
@@ -598,7 +637,25 @@ const scopedDocOptions = () => ({
 const loadScopedDocs = () => loadDocs(scopedDocOptions())
 
 const refreshIndexStatus = async () => {
-  indexStatus.value = await memoryClient.getIndexStatus()
+  try {
+    indexStatus.value = await memoryClient.getIndexStatus()
+    const job = indexStatus.value.job
+    if (job && ['queued', 'running', 'cancelling'].includes(job.state) && activeRebuildJobId !== job.job_id) {
+      rebuildIndexLoading.value = true
+      void monitorMemoryIndexRebuild(job.job_id, false)
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '无法读取索引状态'
+    indexStatus.value = {
+      status: 'error',
+      count: docs.value.length,
+      backend: 'unavailable',
+      healthy: false,
+      message,
+      metadata: { index_healthy: false, index_dirty: true, degraded: true },
+    }
+    throw error
+  }
 }
 
 const refreshMemoryState = async () => {
@@ -607,6 +664,7 @@ const refreshMemoryState = async () => {
     loadDocs(options),
     loadOverview(options),
     loadForgottenDocs(options),
+    loadCandidates(options),
   ])
   if (e2eMode) return
   try {
@@ -616,18 +674,177 @@ const refreshMemoryState = async () => {
   }
 }
 
+const exportMemory = async () => {
+  if (exportLoading.value) return
+  exportLoading.value = true
+  try {
+    const payload = await memoryClient.exportDocs({ ...scopedDocOptions(), includeState: 'all' })
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `yuizaki-memory-${currentMemoryScope.value}-${new Date().toISOString().slice(0, 10)}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success(`已导出 ${payload.count} 条记忆`)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '导出记忆失败')
+  } finally {
+    exportLoading.value = false
+  }
+}
+
+const handleMemoryImportFile = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  importLoading.value = true
+  importReport.value = null
+  try {
+    if (file.size > 10 * 1024 * 1024) throw new Error('导入文件不能超过 10 MB')
+    const parsed: unknown = JSON.parse(await file.text())
+    if (!parsed || typeof parsed !== 'object') throw new Error('导入文件不是有效 JSON')
+    const envelope = parsed as { format?: unknown; version?: unknown; docs?: unknown }
+    if (envelope.format !== 'yuizaki-memory-export' || envelope.version !== 1 || !Array.isArray(envelope.docs)) {
+      throw new Error('不支持的记忆备份格式或版本')
+    }
+    const importDocs = envelope.docs.filter((item): item is { id?: string; text: string; metadata?: Record<string, unknown> } => {
+      if (!item || typeof item !== 'object') return false
+      const candidate = item as { id?: unknown; text?: unknown; metadata?: unknown }
+      return typeof candidate.text === 'string' && candidate.text.trim().length > 0
+        && (candidate.id === undefined || typeof candidate.id === 'string')
+        && (candidate.metadata === undefined || (candidate.metadata !== null && typeof candidate.metadata === 'object' && !Array.isArray(candidate.metadata)))
+    })
+    if (!importDocs.length) throw new Error('备份中没有可导入的记忆')
+    const existingIds = new Set(docs.value.map(doc => doc.id))
+    const duplicateCount = importDocs.filter(doc => doc.id && existingIds.has(doc.id)).length
+    await ElMessageBox.confirm(
+      `将导入 ${importDocs.length} 条记忆到“${scopeLabel(currentMemoryScope.value)}”。${duplicateCount ? `其中 ${duplicateCount} 条 ID 已存在，将自动跳过。` : ''}`,
+      '确认导入记忆',
+      { confirmButtonText: '开始导入', cancelButtonText: '取消', type: 'info' },
+    )
+    const result = await memoryClient.importDocs({
+      format: 'yuizaki-memory-export',
+      version: 1,
+      docs: importDocs.map(doc => ({ id: doc.id, text: doc.text, metadata: doc.metadata })),
+      scope: currentMemoryScope.value,
+      workspace_id: currentMemoryScope.value === 'workspace' ? activeWorkspace.value?.id : undefined,
+      session_id: currentMemoryScope.value === 'session' ? sessionStore.activeSession?.id : undefined,
+      conflict: 'skip',
+    })
+    importReport.value = result
+    ElMessage.success(`导入完成：${result.imported_count} 条，跳过 ${result.skipped_count} 条`)
+    await refreshMemoryState()
+  } catch (error) {
+    if (error !== 'cancel' && !(error instanceof Error && error.message === 'cancel')) {
+      ElMessage.error(error instanceof Error ? error.message : '导入记忆失败')
+    }
+  } finally {
+    input.value = ''
+    importLoading.value = false
+  }
+}
+
+const importReasonLabel = (reason: string) => ({
+  id_exists: 'ID 已存在',
+  terminal_or_review_candidate: '候选或终态记录',
+  write_failed: '写入失败',
+  restore_state_failed: '恢复状态失败',
+}[reason] || reason)
+
+const decideReviewCandidate = async ({ doc, decision }: { doc: MemoryDoc; decision: 'approve' | 'reject' }) => {
+  if (reviewProcessingId.value) return
+  reviewProcessingId.value = doc.id
+  try {
+    await reviewCandidate(doc.id, decision, decision === 'approve' ? 'user_approved' : 'user_rejected')
+    ElMessage.success(decision === 'approve' ? '已保留这条记忆' : '已拒绝这条候选')
+    await refreshMemoryState()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '复核操作失败')
+  } finally {
+    reviewProcessingId.value = ''
+  }
+}
+
+const rebuildTerminalStates = new Set<MemoryIndexRebuildJob['state']>(['cancelled', 'failed', 'interrupted', 'completed'])
+const waitForRebuildPoll = () => new Promise(resolve => window.setTimeout(resolve, 500))
+
+const projectRebuildJob = (job: MemoryIndexRebuildJob, indexState: string) => {
+  const current = indexStatus.value
+  indexStatus.value = {
+    status: indexState,
+    count: current?.count ?? docs.value.length,
+    backend: current?.backend,
+    healthy: current?.healthy ?? true,
+    message: current?.message,
+    metadata: current?.metadata,
+    job,
+  }
+}
+
+const monitorMemoryIndexRebuild = async (jobId: string, announceCompletion: boolean) => {
+  activeRebuildJobId = jobId
+  try {
+    while (!memoryPanelDisposed && activeRebuildJobId === jobId) {
+      const response = await memoryClient.getIndexRebuildJob(jobId)
+      projectRebuildJob(response.job, response.index_status)
+      if (rebuildTerminalStates.has(response.job.state)) {
+        if (response.job.state === 'completed') {
+          const indexedCount = Number(response.job.result?.indexed_count ?? response.job.processed_count)
+          if (announceCompletion) ElMessage.success(`索引已重建：${indexedCount} 条`)
+          await refreshMemoryState()
+        } else if (response.job.state === 'cancelled') {
+          if (announceCompletion) ElMessage.info('索引重建已取消，记忆库仍可使用')
+          await refreshIndexStatus()
+        } else if (announceCompletion) {
+          ElMessage.error(response.job.last_error || '重建索引失败，可直接重试')
+        }
+        break
+      }
+      await waitForRebuildPoll()
+    }
+  } catch (error) {
+    if (!memoryPanelDisposed) {
+      // A backend restart can discard the in-memory job; refresh once so stale
+      // progress is not left looking active and the authority status is visible.
+      if (error instanceof Error && /404|not found/i.test(error.message)) {
+        await refreshIndexStatus().catch(() => undefined)
+      } else {
+        ElMessage.error(error instanceof Error ? error.message : '无法读取索引重建进度')
+      }
+    }
+  } finally {
+    if (activeRebuildJobId === jobId) {
+      activeRebuildJobId = ''
+      rebuildIndexLoading.value = false
+    }
+  }
+}
+
 const rebuildMemoryIndex = async () => {
   if (rebuildIndexLoading.value) return
   rebuildIndexLoading.value = true
   try {
-    const result = await memoryClient.rebuildIndex()
-    const indexedCount = result.indexed_count ?? result.document_count
-    ElMessage.success(indexedCount !== undefined ? `索引已重建：${indexedCount} 条` : '索引已重建')
-    await refreshMemoryState()
+    const previousJob = indexStatus.value?.job
+    const response = previousJob?.recoverable && rebuildTerminalStates.has(previousJob.state)
+      ? await memoryClient.retryIndexRebuild(previousJob.job_id)
+      : await memoryClient.rebuildIndex()
+    projectRebuildJob(response.job, response.index_status)
+    await monitorMemoryIndexRebuild(response.job.job_id, true)
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '重建索引失败')
-  } finally {
     rebuildIndexLoading.value = false
+    ElMessage.error(error instanceof Error ? error.message : '重建索引失败')
+  }
+}
+
+const cancelMemoryIndexRebuild = async () => {
+  const job = indexStatus.value?.job
+  if (!job || !['queued', 'running', 'cancelling'].includes(job.state)) return
+  try {
+    const response = await memoryClient.cancelIndexRebuild(job.job_id)
+    projectRebuildJob(response.job, response.index_status)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '取消索引重建失败')
   }
 }
 
@@ -734,6 +951,9 @@ const submitQuery = async () => {
     session_id: queryForm.scope === 'session' ? sessionStore.activeSession?.id : undefined,
     scope: queryForm.scope,
     layers: selectedQueryLayers.value.length ? effectiveQueryLayers.value : undefined,
+    expand_relations: queryForm.expand_relations,
+    relation_limit: queryForm.relation_limit,
+    relation_depth: queryForm.relation_depth,
   })
 }
 
@@ -745,7 +965,19 @@ const submitRawQuery = async () => {
     session_id: queryForm.scope === 'session' ? sessionStore.activeSession?.id : undefined,
     scope: queryForm.scope,
     layers: effectiveQueryLayers.value,
+    expand_relations: queryForm.expand_relations,
+    relation_limit: queryForm.relation_limit,
+    relation_depth: queryForm.relation_depth,
   })
+}
+
+const handleRecallFeedback = async (payload: { id: string; feedback: 'helpful' | 'not_helpful' | 'incorrect' | 'dismissed' }) => {
+  try {
+    await recordRecallFeedback(payload.id, payload.feedback)
+    ElMessage.success(payload.feedback === 'helpful' ? '已记录，这条记忆会继续优先保留' : '已记录，你可以随时在记忆库中修正或停止召回')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '记录召回反馈失败')
+  }
 }
 
 const openEditDoc = (doc: MemoryDoc) => {
@@ -902,8 +1134,9 @@ const batchDeleteVisibleDocs = async () => {
   const previousSelectedDocId = selectedDocId.value
   const nextSelectedId = docs.value.find(doc => !targetIds.has(doc.id))?.id || ''
   try {
+    deletePreview.value = await memoryClient.previewDelete(ids)
     await ElMessageBox.confirm(
-      '这些记忆将从存储中永久删除。',
+      deletePreviewMessage(deletePreview.value),
       `永久删除 ${targets.length} 条记忆`,
       {
         confirmButtonText: '永久删除',
@@ -982,8 +1215,9 @@ const submitEditDoc = async () => {
 const removeDoc = async (id: string) => {
   if (removingDocIds.value.has(id)) return
   try {
+    deletePreview.value = await memoryClient.previewDelete([id])
     await ElMessageBox.confirm(
-      '这条记忆将从存储中永久删除。',
+      deletePreviewMessage(deletePreview.value),
       '永久删除记忆',
       {
         confirmButtonText: '永久删除',
@@ -1008,6 +1242,14 @@ const removeDoc = async (id: string) => {
   } finally {
     setDocRemoving(id, false)
   }
+}
+
+const deletePreviewMessage = (preview: MemoryDeletePreview) => {
+  const parts = [`共 ${preview.total_count} 条：${preview.hard_delete_count} 条物理删除`]
+  if (preview.candidate_tombstone_count) parts.push(`${preview.candidate_tombstone_count} 条候选仅保留防复活 tombstone`)
+  if (preview.affected_message_count) parts.push(`将清理 ${preview.affected_message_count} 条聊天引用`)
+  parts.push('索引对应条目会移除，操作不可恢复。')
+  return parts.join('；')
 }
 
 const forgetDoc = async (id: string) => {
@@ -1225,7 +1467,13 @@ watch(
   },
 )
 
+onBeforeUnmount(() => {
+  memoryPanelDisposed = true
+  activeRebuildJobId = ''
+})
+
 onMounted(async () => {
+  memoryPanelDisposed = false
   queryForm.scope = currentMemoryScope.value
   await refreshMemoryState()
   openRequestedMemoryDoc()
@@ -1247,6 +1495,18 @@ onMounted(async () => {
 
 <style scoped>
 .memory-panel { display: flex; min-height: 0; flex-direction: column; gap: 14px; }
+.memory-import-input { display: none; }
+.memory-import-report { display: flex; flex-direction: column; gap: 9px; padding: 12px 14px; border: 1px solid var(--yui-border); border-radius: var(--yui-radius-card); background: var(--yui-surface-muted); }
+.import-report-head, .import-report-grid, .import-report-reasons { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.import-report-head { justify-content: space-between; }
+.import-report-grid span, .import-report-reasons span, .import-report-note { color: var(--yui-muted); font-size: 11px; }
+.import-report-grid strong { color: var(--yui-text); }
+.import-report-reasons span { padding: 3px 7px; border-radius: var(--yui-radius-control); background: var(--yui-warning-soft); }
+.import-report-note { margin: 0; }
+.import-report-details summary { margin: 0; }
+.import-report-details ul { display: flex; max-height: 220px; flex-direction: column; gap: 6px; margin: 8px 0 0; padding: 0; overflow: auto; list-style: none; }
+.import-report-details li { display: grid; grid-template-columns: minmax(100px, 0.6fr) minmax(120px, 0.6fr) minmax(0, 1fr); gap: 8px; align-items: start; padding: 7px 9px; border: 1px solid var(--yui-border); border-radius: var(--yui-radius-control); }
+.import-report-details li span, .import-report-details li small, .import-report-details > p { color: var(--yui-muted); font-size: 11px; overflow-wrap: anywhere; }
 .local-status { color: var(--yui-muted); font-size: 11px; }
 .scope-control { display: flex; align-items: center; gap: 7px; color: var(--yui-muted); font-size: 11px; }
 .scope-control :deep(.el-select) { width: 108px; }
@@ -1274,5 +1534,6 @@ onMounted(async () => {
 .dialog-grid :deep(.el-select), :deep(.el-dialog .el-select) { width: 100%; }
 details summary { margin-bottom: 10px; color: var(--yui-muted); cursor: pointer; font-size: 12px; }
 @media (max-width: 760px) { .scope-control span { display: none; }.memory-welcome { align-items: stretch; flex-direction: column; gap: 12px; }.memory-health { width: 100%; }.scope-pill, .health-stat { flex: 1; }.memory-tabs { position: sticky; top: 0; z-index: 2; background: var(--yui-panel-surface, var(--yui-surface)); }.memory-tabs button { flex: 1; justify-content: center; padding-inline: 8px; }.tab-context { align-items: flex-start; flex-direction: column; gap: 2px; }.dialog-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .import-report-details li { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }
 </style>

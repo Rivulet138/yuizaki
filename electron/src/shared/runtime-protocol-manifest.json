@@ -25,6 +25,8 @@
       "TOOL_CALL": "tool:call",
       "TOOL_RESULT": "tool:result",
       "TOOL_ERROR": "tool:error",
+      "TOOL_RECHECK": "tool:recheck",
+      "TOOL_RECHECK_RESULT": "tool:recheck-result",
       "AGENT_CHAT": "agent:chat",
       "AGENT_UPDATE": "agent:update",
       "AGENT_RESULT": "agent:result",

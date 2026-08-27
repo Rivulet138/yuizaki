@@ -2,6 +2,7 @@ import type { Live2DSprite } from 'easy-live2d'
 import type * as PIXI from 'pixi.js'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Live2DCoreModel } from '../runtime/live2d-core-model'
+import { createLive2DModel, destroyCurrentModel } from '../pet-model-runtime'
 
 class FakeTicker {
   add = vi.fn()
@@ -193,5 +194,164 @@ describe('Live2DRuntimeAdapter companion idle profile replay', () => {
 
     expect(fakeModel.startMotion).toHaveBeenCalledTimes(2)
     expect(fakeModel.startMotion).toHaveBeenLastCalledWith(expect.objectContaining({ group: 'Flick' }))
+  })
+
+  it('resolves custom emotion IDs to their declared expression and motion targets', async () => {
+    const viewport = new FakeContainer()
+    let currentModel: Live2DSprite | null = null
+    const adapter = new Live2DRuntimeAdapter({
+      app: { ticker: new FakeTicker() } as unknown as PIXI.Application,
+      getModel: () => currentModel,
+      setModel: (model) => {
+        currentModel = model
+      },
+      getViewport: () => viewport as unknown as PIXI.Container,
+      ensureViewport: () => viewport as unknown as PIXI.Container,
+      config: {
+        modelId: 'custom-model',
+        modelType: 'live2d',
+        modelPath: './custom.model3.json',
+        modelManifest: {
+          id: 'custom-model',
+          name: 'Custom',
+          summary: '',
+          persona: { tone: '', traits: [], styleRules: [] },
+          modelJson: 'custom.model3.json',
+          modelTransform: { scale: 1, offsetX: 0, offsetY: 0 },
+          transformDefaults: { scale: 1, offsetX: 0, offsetY: 0 },
+          expressions: [{ id: 'smile', label: 'Smile', kind: 'emotion', prompt: '', binding: { mode: 'preset', params: {} } }],
+          parameterControls: [],
+          motions: { wave: { file: 'wave.motion3.json', group: 'Wave' } },
+        },
+        emotionPresets: [{
+          id: 'celebrate-custom',
+          label: 'Celebrate',
+          expressions: ['smile'],
+          motions: [{ group: 'Wave', index: 0, label: 'Wave' }],
+        }],
+        scale: 0.28,
+        positionX: null,
+        positionY: null,
+        placement: 'bottom-right',
+      },
+      showNotice: vi.fn(),
+      hideNotice: vi.fn(),
+      installEasyLive2DInteractivity: vi.fn(),
+      setupModelInteractivity: vi.fn(),
+      applyModelTransform: vi.fn(),
+      reportState: vi.fn(),
+      syncMouseCaptureFromLastPoint: vi.fn(),
+      markActivity: vi.fn(),
+    })
+
+    await adapter.loadModel({ modelPath: './custom.model3.json' })
+    const result = adapter.executeAvatarAction({ type: 'affect', emotion: 'celebrate-custom' })
+
+    expect(result.status).toBe('completed')
+    expect(fakeModel.setExpression).toHaveBeenCalledWith({ expressionId: 'smile' })
+    expect(fakeModel.startMotion).toHaveBeenCalledWith(expect.objectContaining({ group: 'Wave', no: 0 }))
+
+    vi.clearAllMocks()
+    const reducedResult = adapter.executeAvatarAction({
+      type: 'affect',
+      emotion: 'celebrate-custom',
+      intensity: 0.35,
+      motion: null,
+    })
+    expect(reducedResult.status).toBe('completed')
+    expect(fakeModel.setExpression).toHaveBeenCalledWith({ expressionId: 'smile' })
+    expect(fakeModel.startMotion).not.toHaveBeenCalled()
+  })
+
+  it('keeps the previous model when the replacement fails to load', async () => {
+    const viewport = new FakeContainer()
+    let currentModel: Live2DSprite | null = null
+    const adapter = new Live2DRuntimeAdapter({
+      app: { ticker: new FakeTicker() } as unknown as PIXI.Application,
+      getModel: () => currentModel,
+      setModel: (model) => { currentModel = model },
+      getViewport: () => viewport as unknown as PIXI.Container,
+      ensureViewport: () => viewport as unknown as PIXI.Container,
+      config: {
+        modelId: 'model', modelType: 'live2d', modelPath: './first.model3.json',
+        scale: 0.28, positionX: null, positionY: null, placement: 'bottom-right',
+      },
+      showNotice: vi.fn(), hideNotice: vi.fn(), installEasyLive2DInteractivity: vi.fn(),
+      setupModelInteractivity: vi.fn(), applyModelTransform: vi.fn(), reportState: vi.fn(),
+      syncMouseCaptureFromLastPoint: vi.fn(), markActivity: vi.fn(),
+    })
+
+    await adapter.loadModel({ modelPath: './first.model3.json' })
+    const previousModel = currentModel
+    vi.mocked(createLive2DModel).mockImplementationOnce(() => { throw new Error('missing model') })
+
+    await expect(adapter.loadModel({ modelPath: './missing.model3.json' })).rejects.toThrow('missing model')
+
+    expect(currentModel).toBe(previousModel)
+    expect(viewport.removeChild).not.toHaveBeenCalledWith(previousModel)
+    expect(vi.mocked(destroyCurrentModel)).not.toHaveBeenCalledWith(expect.anything(), previousModel)
+  })
+
+  it('disposes a candidate whose ready promise rejects without touching the previous model', async () => {
+    const viewport = new FakeContainer()
+    let currentModel: Live2DSprite | null = null
+    const adapter = new Live2DRuntimeAdapter({
+      app: { ticker: new FakeTicker() } as unknown as PIXI.Application,
+      getModel: () => currentModel,
+      setModel: (model) => { currentModel = model },
+      getViewport: () => viewport as unknown as PIXI.Container,
+      ensureViewport: () => viewport as unknown as PIXI.Container,
+      config: {
+        modelId: 'model', modelType: 'live2d', modelPath: './first.model3.json',
+        scale: 0.28, positionX: null, positionY: null, placement: 'bottom-right',
+      },
+      showNotice: vi.fn(), hideNotice: vi.fn(), installEasyLive2DInteractivity: vi.fn(),
+      setupModelInteractivity: vi.fn(), applyModelTransform: vi.fn(), reportState: vi.fn(),
+      syncMouseCaptureFromLastPoint: vi.fn(), markActivity: vi.fn(),
+    })
+
+    await adapter.loadModel({ modelPath: './first.model3.json' })
+    const previousModel = currentModel
+    const candidate = { ...fakeModel, ready: Promise.reject(new Error('invalid model')) } as unknown as Live2DSprite
+    vi.mocked(createLive2DModel).mockReturnValueOnce(candidate)
+    vi.mocked(destroyCurrentModel).mockClear()
+
+    await expect(adapter.loadModel({ modelPath: './invalid.model3.json' })).rejects.toThrow('invalid model')
+
+    expect(currentModel).toBe(previousModel)
+    expect(vi.mocked(destroyCurrentModel)).toHaveBeenCalledWith(expect.anything(), candidate)
+    expect(vi.mocked(destroyCurrentModel)).not.toHaveBeenCalledWith(expect.anything(), previousModel)
+    expect(viewport.removeChild).not.toHaveBeenCalledWith(previousModel)
+  })
+
+  it('atomically swaps only after the replacement is created and disposes the old model', async () => {
+    const viewport = new FakeContainer()
+    let currentModel: Live2DSprite | null = null
+    const adapter = new Live2DRuntimeAdapter({
+      app: { ticker: new FakeTicker() } as unknown as PIXI.Application,
+      getModel: () => currentModel,
+      setModel: (model) => { currentModel = model },
+      getViewport: () => viewport as unknown as PIXI.Container,
+      ensureViewport: () => viewport as unknown as PIXI.Container,
+      config: {
+        modelId: 'model', modelType: 'live2d', modelPath: './first.model3.json',
+        scale: 0.28, positionX: null, positionY: null, placement: 'bottom-right',
+      },
+      showNotice: vi.fn(), hideNotice: vi.fn(), installEasyLive2DInteractivity: vi.fn(),
+      setupModelInteractivity: vi.fn(), applyModelTransform: vi.fn(), reportState: vi.fn(),
+      syncMouseCaptureFromLastPoint: vi.fn(), markActivity: vi.fn(),
+    })
+
+    const firstModel = { ...fakeModel, anchor: { set: vi.fn() } } as unknown as Live2DSprite
+    const secondModel = { ...fakeModel, anchor: { set: vi.fn() } } as unknown as Live2DSprite
+    vi.mocked(createLive2DModel).mockImplementationOnce(() => firstModel).mockImplementationOnce(() => secondModel)
+    vi.mocked(destroyCurrentModel).mockClear()
+
+    await adapter.loadModel({ modelPath: './first.model3.json' })
+    await adapter.loadModel({ modelPath: './second.model3.json' })
+
+    expect(currentModel).toBe(secondModel)
+    expect(viewport.removeChild).toHaveBeenCalledWith(firstModel)
+    expect(vi.mocked(destroyCurrentModel)).toHaveBeenCalledWith(expect.anything(), firstModel)
   })
 })

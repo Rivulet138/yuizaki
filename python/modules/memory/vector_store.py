@@ -10,7 +10,7 @@ import importlib
 import logging
 import os
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -51,6 +51,42 @@ def memory_recency_score(metadata: Dict[str, Any], *, now: datetime | None = Non
     current = current.replace(tzinfo=timezone.utc)
   age_days = max(0.0, (current.astimezone(timezone.utc) - instant.astimezone(timezone.utc)).total_seconds() / 86400)
   return 1.0 / (1.0 + age_days / 30.0)
+
+
+def memory_feedback_quality_score(
+  metadata: Dict[str, Any],
+  baseline: float,
+  *,
+  minimum_samples: int = 3,
+) -> float:
+  """Apply a bounded, low-noise adjustment from explicit recall feedback."""
+  quality = max(0.0, min(1.0, float(baseline)))
+  feedback = metadata.get("recall_feedback")
+  if not isinstance(feedback, dict):
+    return quality
+  counts = feedback.get("summary")
+  if not isinstance(counts, dict):
+    counts = feedback.get("counts")
+  if not isinstance(counts, dict):
+    return quality
+
+  def _count(key: str) -> int:
+    try:
+      return max(0, int(counts.get(key, 0) or 0))
+    except (TypeError, ValueError):
+      return 0
+
+  helpful = _count("helpful")
+  not_helpful = _count("not_helpful")
+  incorrect = _count("incorrect")
+  total = helpful + not_helpful + incorrect + _count("dismissed")
+  if total < max(1, int(minimum_samples)):
+    return quality
+
+  signal = (helpful - not_helpful - 1.25 * incorrect) / total
+  confidence = min(1.0, total / 8.0)
+  adjustment = max(-0.2, min(0.2, 0.2 * signal * confidence))
+  return max(0.0, min(1.0, quality + adjustment))
 
 
 def memory_score_components(
@@ -189,6 +225,38 @@ class Document:
   id: str
   text: str
   metadata: Dict[str, Any]
+
+
+class MemoryIndexRebuildCancelled(RuntimeError):
+  """Raised when a cooperative memory-index rebuild stops at a document boundary."""
+
+  code = "memory_index_rebuild_cancelled"
+
+  def __init__(self, *, processed: int, total: int, phase: str) -> None:
+    self.processed = processed
+    self.total = total
+    self.phase = phase
+    super().__init__(f"Memory index rebuild cancelled during {phase} ({processed}/{total})")
+
+
+def _rebuild_cancel_requested(should_cancel: Callable[[], bool] | Any | None) -> bool:
+  if should_cancel is None:
+    return False
+  if callable(should_cancel):
+    return bool(should_cancel())
+  is_set = getattr(should_cancel, "is_set", None)
+  return bool(is_set()) if callable(is_set) else bool(should_cancel)
+
+
+def _raise_if_rebuild_cancelled(
+  should_cancel: Callable[[], bool] | Any | None,
+  *,
+  processed: int,
+  total: int,
+  phase: str,
+) -> None:
+  if _rebuild_cancel_requested(should_cancel):
+    raise MemoryIndexRebuildCancelled(processed=processed, total=total, phase=phase)
 
 
 def is_memory_recallable(
@@ -355,6 +423,8 @@ class VectorStore:
     self._reranker_candidate_count = max(5, min(100, int(reranker_candidate_count)))
     self._docs: Dict[str, Document] = {}
     self._vectors: Dict[str, np.ndarray] = {}
+    self._index_lock = threading.RLock()
+    self._index_generation = 0
     self._score_context = threading.local()
 
   def _score_component_cache(self) -> Dict[tuple[str, str, float, float], Dict[str, float]]:
@@ -380,27 +450,68 @@ class VectorStore:
 
   def add_document(self, doc: Document) -> None:
     vec = _embed_document(self._embedding_service, doc.text)
-    self._docs[doc.id] = doc
-    self._vectors[doc.id] = vec.astype(np.float32)
+    with self._index_lock:
+      self._docs[doc.id] = doc
+      self._vectors[doc.id] = vec.astype(np.float32)
+      self._index_generation += 1
 
   def add_metadata_document(self, doc: Document) -> None:
     self._docs[doc.id] = doc
 
+  def update_metadata(self, doc_id: str, metadata: Dict[str, Any]) -> None:
+    with self._index_lock:
+      document = self._docs.get(doc_id)
+      if document is None:
+        raise KeyError(doc_id)
+      document.metadata = dict(metadata)
+      self._index_generation += 1
+
   def delete_document(self, doc_id: str) -> None:
-    self._docs.pop(doc_id, None)
-    self._vectors.pop(doc_id, None)
+    with self._index_lock:
+      self._docs.pop(doc_id, None)
+      self._vectors.pop(doc_id, None)
+      self._index_generation += 1
 
   def list_documents(self) -> List[Document]:
     return list(self._docs.values())
 
-  def rebuild_index(self) -> dict[str, Any]:
-    docs = list(self._docs.values())
-    self._vectors = {}
+  def rebuild_index(
+    self,
+    progress_callback: Callable[[int, int, str], None] | None = None,
+    should_cancel: Callable[[], bool] | Any | None = None,
+  ) -> dict[str, Any]:
+    with self._index_lock:
+      docs = list(self._docs.values())
+      generation = self._index_generation
+    total = len(docs)
+    rebuilt_vectors: dict[str, np.ndarray] = {}
     indexed = 0
     skipped = 0
+    _raise_if_rebuild_cancelled(should_cancel, processed=0, total=total, phase="indexing")
     for doc in docs:
-      self._vectors[doc.id] = _embed_document(self._embedding_service, doc.text).astype(np.float32)
+      rebuilt_vectors[doc.id] = _embed_document(self._embedding_service, doc.text).astype(np.float32)
       indexed += 1
+      if progress_callback is not None:
+        progress_callback(indexed, total, "indexing")
+      _raise_if_rebuild_cancelled(should_cancel, processed=indexed, total=total, phase="indexing")
+    with self._index_lock:
+      if generation != self._index_generation:
+        # Writes that completed while embeddings were computed already have a
+        # fresher vector; preserve those values and discard deleted IDs.
+        current_vectors = dict(self._vectors)
+        rebuilt_vectors = {
+          doc_id: current_vectors.get(doc_id, vector)
+          for doc_id, vector in rebuilt_vectors.items()
+          if doc_id in self._docs
+        }
+        rebuilt_vectors.update({
+          doc_id: vector
+          for doc_id, vector in current_vectors.items()
+          if doc_id in self._docs and doc_id not in rebuilt_vectors
+        })
+      self._vectors = rebuilt_vectors
+    if progress_callback is not None:
+      progress_callback(indexed, total, "complete")
     return {
       "status": "rebuilt",
       "backend": self.backend_name,
@@ -515,8 +626,8 @@ class VectorStore:
 
       recency_score = memory_recency_score(doc.metadata, now=now)
 
-      quality_score = float(doc.metadata.get("quality_score") or doc.metadata.get("confidence") or 0.6)
-      quality_score = max(0.0, min(1.0, quality_score))
+      quality_baseline = float(doc.metadata.get("quality_score") or doc.metadata.get("confidence") or 0.6)
+      quality_score = memory_feedback_quality_score(doc.metadata, quality_baseline)
       lexical_score = lexical_overlap_score(query, doc.text)
       learned_score = float(learned_scores[position]) if learned_enabled and position < len(learned_scores) else 0.0
       weights = memory_score_weights(

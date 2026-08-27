@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import base64
 import binascii
+import errno
 import hashlib
 import hmac
+import re
 import secrets
 import time
 from collections.abc import Mapping, Sequence
@@ -63,6 +65,15 @@ class ResumeTokenExpired(ResumeTokenError):
 
 class ResumeTokenScopeMismatch(ResumeTokenError):
     pass
+
+
+@dataclass(frozen=True)
+class ProviderRuntimeFailure:
+    """A retryable provider transport failure safe to expose as a closed reason."""
+
+    kind: FailureKind
+    reason: str
+    retryable: bool = True
 
 
 @dataclass(frozen=True)
@@ -134,6 +145,90 @@ def classify_failure(
     if any(token in text for token in ("process crash", "restart after", "runtime terminated")):
         return "internal"
     return "tool" if status_key in {"error", "failed", "tool_error"} else "internal"
+
+
+def classify_provider_runtime_exception(exc: Exception) -> ProviderRuntimeFailure | None:
+    """Recognize transient provider failures without swallowing code defects.
+
+    SDK exception types are matched by their stable class names so the agent
+    core does not need imports from every optional provider package.
+    """
+
+    if isinstance(exc, TimeoutError):
+        return ProviderRuntimeFailure(kind="timeout", reason="provider_timeout")
+    if isinstance(exc, ConnectionError):
+        return ProviderRuntimeFailure(kind="provider", reason="provider_unavailable")
+
+    exception_name = type(exc).__name__.lower()
+    if exception_name in {
+        "apitimeouterror",
+        "connecttimeout",
+        "pooltimeout",
+        "readtimeout",
+        "writetimeout",
+    }:
+        return ProviderRuntimeFailure(kind="timeout", reason="provider_timeout")
+    if exception_name in {
+        "apiconnectionerror",
+        "connecterror",
+        "networkerror",
+        "ratelimiterror",
+        "remotedisconnected",
+        "serverdisconnectederror",
+    }:
+        return ProviderRuntimeFailure(kind="provider", reason="provider_unavailable")
+
+    status_code = _provider_http_status(exc)
+    if status_code is None:
+        # The local LLM client preserves the HTTP code in its stable wrapper
+        # message while chaining the original httpx exception as __cause__.
+        match = re.match(r"^LLM API (\d{3}):", str(exc).strip(), re.IGNORECASE)
+        if match:
+            status_code = int(match.group(1))
+    if status_code == 408:
+        return ProviderRuntimeFailure(kind="timeout", reason="provider_timeout")
+    if status_code == 429 or (
+        status_code is not None and 500 <= status_code <= 599
+    ):
+        return ProviderRuntimeFailure(kind="provider", reason="provider_unavailable")
+    if status_code is not None and 400 <= status_code <= 499:
+        return ProviderRuntimeFailure(
+            kind="provider", reason="provider_request_rejected", retryable=False
+        )
+
+    network_errnos = {
+        errno.ECONNABORTED,
+        errno.ECONNREFUSED,
+        errno.ECONNRESET,
+        errno.EHOSTUNREACH,
+        errno.ENETDOWN,
+        errno.ENETUNREACH,
+        errno.ETIMEDOUT,
+        10051,
+        10053,
+        10054,
+        10060,
+        10061,
+        10064,
+        10065,
+    }
+    if isinstance(exc, OSError) and getattr(exc, "errno", None) in network_errnos:
+        return ProviderRuntimeFailure(kind="provider", reason="provider_unavailable")
+    return None
+
+
+def _provider_http_status(exc: Exception) -> int | None:
+    candidates = [getattr(exc, "status_code", None), getattr(exc, "status", None)]
+    response = getattr(exc, "response", None)
+    if response is not None:
+        candidates.extend([
+            getattr(response, "status_code", None),
+            getattr(response, "status", None),
+        ])
+    for value in candidates:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return None
 
 
 def plan_hash(steps: Sequence[Any]) -> str:
@@ -359,6 +454,7 @@ __all__ = [
     "FAILURE_KINDS",
     "FailureKind",
     "FailureRecoveryManager",
+    "ProviderRuntimeFailure",
     "ResumeTokenCodec",
     "ResumeTokenError",
     "ResumeTokenExpired",
@@ -366,6 +462,7 @@ __all__ = [
     "ResumeTokenTampered",
     "StepFailure",
     "classify_failure",
+    "classify_provider_runtime_exception",
     "plan_hash",
     "retry_closure",
 ]

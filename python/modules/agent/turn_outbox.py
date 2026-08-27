@@ -108,6 +108,7 @@ class TurnOutboxDispatcher:
         delivered_idempotency_keys: list[str] = []
         projection_deliveries = 0
         errors: list[dict[str, Any]] = []
+        cancellation_deferred = False
         dead_lettered = 0
         retry_after: float | None = None
         for _ in range(max(1, int(limit))):
@@ -126,15 +127,24 @@ class TurnOutboxDispatcher:
             event_id = int(event["event_id"])
             event_key = str(event.get("idempotency_key") or "")
             acknowledged = self.store.acknowledged_projections(event_id)
-            projection_result = await self._deliver_projections(
-                event,
-                context,
-                acknowledged,
+            delivery_task = asyncio.create_task(
+                self._deliver_projections(event, context, acknowledged),
+                name=f"turn-outbox-delivery:{event_id}",
             )
+            try:
+                projection_result = await asyncio.shield(delivery_task)
+            except asyncio.CancelledError:
+                # Finish all projection cleanup and durable per-projection
+                # ACKs before allowing cancellation to unwind the dispatcher.
+                projection_result = await delivery_task
+                cancellation_deferred = True
             projection_deliveries += int(projection_result["projection_deliveries"])
             errors.extend(projection_result["errors"])
             dead_lettered += int(projection_result["dead_lettered"])
             retry_after = projection_result["retry_after"] or retry_after
+            cancellation_deferred = cancellation_deferred or bool(
+                projection_result.get("cancellation_deferred", False)
+            )
             if projection_result["failed"]:
                 break
             if all(projection.name in acknowledged for projection in self.projections):
@@ -149,6 +159,10 @@ class TurnOutboxDispatcher:
                         "error": "outbox claim expired before terminal acknowledgement",
                     })
                     break
+                if cancellation_deferred:
+                    # Propagate the caller cancellation only after the
+                    # terminal ACK closes the durable delivery lifecycle.
+                    raise asyncio.CancelledError
             if target_key is not None and event_key == target_key:
                 break
         target_delivered = (
@@ -216,12 +230,13 @@ class TurnOutboxDispatcher:
         )
         projection_deliveries = 0
         errors: list[dict[str, Any]] = []
+        cancellation_deferred = False
         try:
             for projection in self.projections:
                 if projection.name in acknowledged:
                     continue
                 try:
-                    cancellation_deferred = await self._invoke_projection(
+                    projection_cancelled = await self._invoke_projection(
                         projection,
                         event,
                         context,
@@ -251,6 +266,7 @@ class TurnOutboxDispatcher:
                         "errors": errors,
                         "dead_lettered": int(bool(failure.get("dead_lettered"))),
                         "retry_after": None if failure.get("dead_lettered") else retry_delay,
+                        "cancellation_deferred": False,
                     }
                 if not self.store.acknowledge_projection(
                     event_id,
@@ -270,17 +286,24 @@ class TurnOutboxDispatcher:
                         "errors": errors,
                         "dead_lettered": int(bool(failure.get("dead_lettered"))),
                         "retry_after": None if failure.get("dead_lettered") else retry_delay,
+                        "cancellation_deferred": False,
                     }
                 acknowledged.add(projection.name)
                 projection_deliveries += 1
-                if cancellation_deferred:
-                    raise asyncio.CancelledError
+                if projection_cancelled:
+                    # The projection side effect and its durable ACK are now
+                    # complete. Defer propagating cancellation until the
+                    # enclosing dispatcher has written the terminal outbox
+                    # ACK, otherwise a completed effect remains falsely
+                    # pending and will be replayed on recovery.
+                    cancellation_deferred = True
             return {
                 "failed": False,
                 "projection_deliveries": projection_deliveries,
                 "errors": errors,
                 "dead_lettered": 0,
                 "retry_after": None,
+                "cancellation_deferred": cancellation_deferred,
             }
         finally:
             renew_task.cancel()

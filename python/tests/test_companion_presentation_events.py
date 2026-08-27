@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import pytest
-
 from modules.agent.companion_events import (
-    CompanionJobEventLog,
     CompanionJobEventAdapter,
+    CompanionJobEventLog,
     CompanionPresentationCapacityError,
     CompanionPresentationEventLog,
     CompanionPresentationStaleEventError,
     CompanionPresentationTerminalError,
 )
+from modules.system.companion_runtime import _project_job_events
 
 
 def _append(log: CompanionPresentationEventLog, stream: str, event_type: str, revision: int | None = None):
@@ -127,3 +127,24 @@ def test_job_log_projects_accepted_events_without_changing_legacy_behavior() -> 
     assert adapter.append({"type": "token", "streamId": "token-stream", "revision": 1}) is None
     assert len(jobs.snapshot()) == 3
     assert len(presentation.snapshot()) == 3
+
+
+def test_redacted_job_args_disable_local_replay_without_server_recheck() -> None:
+    projected = _project_job_events([{
+        "type": "AgentJobFailed",
+        "status": "failed",
+        "args": {"path": "[REDACTED]"},
+        "replayArgsAvailable": True,
+    }])
+    assert projected[0]["replayArgsAvailable"] is False
+
+
+def test_redacted_job_args_allow_replay_when_server_recheck_is_available() -> None:
+    projected = _project_job_events([{
+        "type": "AgentJobFailed",
+        "status": "failed",
+        "args": {"path": "[REDACTED]"},
+        "replayArgsAvailable": True,
+        "recheckAvailable": True,
+    }])
+    assert projected[0]["replayArgsAvailable"] is True

@@ -8,6 +8,7 @@ export type RealtimeVoiceStatus =
   | 'ready'
   | 'recording'
   | 'responding'
+  | 'interrupting'
   | 'error'
   | 'closed'
 
@@ -77,6 +78,7 @@ interface ClientSecretResponse {
 
 type RealtimeServerEvent = {
   type?: unknown
+  event_id?: unknown
   delta?: unknown
   transcript?: unknown
   response?: unknown
@@ -110,10 +112,12 @@ interface PendingRealtimeAgentJob {
 }
 
 interface PendingInputCommit {
+  commitEventId: string
   generationId: string
   turnId: string
   requestId: string
   interruptionEpoch: number
+  retired?: boolean
 }
 
 type RealtimeVoiceListener<K extends keyof RealtimeVoiceEventMap> =
@@ -125,6 +129,7 @@ const MIN_PUSH_TO_TALK_MS = 120
 // second of dead air after audio has already finished.
 const TRANSCRIPT_GRACE_MS = 600
 const INTERRUPT_ACK_FALLBACK_MS = 250
+const CONTINUOUS_BARGE_IN_CONFIRM_MS = 160
 const ICE_GATHER_TIMEOUT_MS = 2_000
 const DISCONNECT_GRACE_MS = 5_000
 const MAX_REUSABLE_SESSION_MS = 55 * 60 * 1_000
@@ -208,6 +213,8 @@ export class RealtimeVoiceSession {
   private speechEndedAt: number | null = null
   private interruptStartedAt: number | null = null
   private interruptAckTimer: number | null = null
+  private interruptAckPromise: Promise<void> | null = null
+  private resolveInterruptAck: (() => void) | null = null
   private responseActive = false
   private playbackReported = false
   private inputTranscript = ''
@@ -234,6 +241,10 @@ export class RealtimeVoiceSession {
   private retiredResponseIds = new Set<string>()
   private retiredInputItemIds = new Set<string>()
   private pendingInputCommits: PendingInputCommit[] = []
+  // Provider commit errors can arrive after an interrupted turn has already
+  // been replaced. Keep retired identities as tombstones so an unscoped
+  // late error cannot consume the newer turn's pending commit.
+  private retiredInputCommits: PendingInputCommit[] = []
   private petControlContext: PetControlContextPayload | null = null
   private completedToolCallIds = new Set<string>()
   private pendingAgentJobs = new Map<string, PendingRealtimeAgentJob>()
@@ -243,6 +254,8 @@ export class RealtimeVoiceSession {
   private voiceMode: 'push-to-talk' | 'continuous' = 'push-to-talk'
   private vadEagerness: 'low' | 'medium' | 'high' | 'auto' = 'auto'
   private speechStartedAt: number | null = null
+  private bargeInCandidateStartedAt: number | null = null
+  private bargeInCandidateTimer: number | null = null
 
   on<K extends keyof RealtimeVoiceEventMap>(
     event: K,
@@ -312,13 +325,10 @@ export class RealtimeVoiceSession {
   async startPushToTalk(options: RealtimeVoiceSessionOptions): Promise<void> {
     await this.connect(options)
     void this.outputAudioContext?.resume().catch(() => undefined)
-    if (this.interruptStartedAt !== null) {
-      this.acknowledgeInterrupt()
-    }
     if (this.responseActive) {
       this.interrupt()
-      throw new Error('Previous realtime response is being interrupted')
     }
+    await this.waitForInterruptAcknowledgement()
     if (this.finalizeTimer !== null) {
       throw new Error('Previous realtime transcript is still finalizing')
     }
@@ -344,6 +354,7 @@ export class RealtimeVoiceSession {
 
   stopContinuous(): void {
     if (this.voiceMode !== 'continuous') return
+    this.clearBargeInCandidate()
     const track = this.mediaStream?.getAudioTracks()[0]
     if (track) track.enabled = false
     this.pressStartedAt = null
@@ -369,13 +380,15 @@ export class RealtimeVoiceSession {
       this.setStatus('ready')
       return false
     }
+    const commitEventId = createTurnId()
     this.pendingInputCommits.push({
+      commitEventId,
       generationId: this.currentGenerationId,
       turnId: this.currentTurnId,
       requestId: this.currentRequestId,
       interruptionEpoch: this.currentInterruptionEpoch,
     })
-    this.sendEvent({ type: 'input_audio_buffer.commit' })
+    this.sendEvent({ type: 'input_audio_buffer.commit', event_id: commitEventId })
     this.sendEvent({
       type: 'response.create',
       response: {
@@ -397,11 +410,17 @@ export class RealtimeVoiceSession {
 
   interrupt(): void {
     if (!this.isConnected()) return
+    if (this.interruptStartedAt !== null) return
+    this.clearBargeInCandidate()
+    for (const pending of this.pendingInputCommits) pending.retired = true
     this.operationEpoch += 1
     this.currentTurnCancelled = true
     this.abortPendingToolCalls()
     this.clearInterruptAckTimer()
     this.interruptStartedAt = performance.now()
+    this.interruptAckPromise = new Promise((resolve) => {
+      this.resolveInterruptAck = resolve
+    })
     this.sendEvent({ type: 'response.cancel' })
     this.emit('provider-cancel', { elapsedMs: Math.max(0, performance.now() - this.interruptStartedAt) })
     this.sendEvent({ type: 'output_audio_buffer.clear' })
@@ -409,7 +428,7 @@ export class RealtimeVoiceSession {
     this.audioElement?.pause()
     this.emit('playback-stop', { elapsedMs: Math.max(0, performance.now() - this.interruptStartedAt) })
     this.stopOutputLipSync()
-    this.setStatus('ready')
+    this.setStatus('interrupting')
     this.interruptAckTimer = window.setTimeout(() => {
       this.interruptAckTimer = null
       this.acknowledgeInterrupt()
@@ -553,17 +572,23 @@ export class RealtimeVoiceSession {
     if (this.voiceMode === 'continuous' && type === 'input_audio_buffer.speech_started') {
       const startedAt = performance.now()
       if (this.responseActive || this.outputLipSyncActive) {
-        this.interrupt()
-        this.resetTurn()
+        this.startBargeInCandidate(startedAt)
+        return
       } else if (this.responseDone || this.currentTurnCancelled) {
         this.resetTurn()
       }
-      this.speechStartedAt = startedAt
-      this.emit('speech-start', { elapsedMs: this.speechEndedAt === null ? 0 : Math.max(0, startedAt - this.speechEndedAt) })
-      this.setStatus('recording')
+      this.beginContinuousSpeech(startedAt)
       return
     }
     if (this.voiceMode === 'continuous' && type === 'input_audio_buffer.speech_stopped') {
+      if (this.bargeInCandidateTimer !== null) {
+        const startedAt = this.bargeInCandidateStartedAt
+        this.clearBargeInCandidate()
+        if (startedAt !== null) {
+          this.emit('speech-end', { elapsedMs: Math.max(0, performance.now() - startedAt) })
+        }
+        return
+      }
       this.speechEndedAt = performance.now()
       this.emit('speech-end', { elapsedMs: this.speechStartedAt === null ? 0 : Math.max(0, this.speechEndedAt - this.speechStartedAt) })
       this.setStatus('responding')
@@ -574,6 +599,7 @@ export class RealtimeVoiceSession {
     if (type === 'input_audio_buffer.committed') {
       const itemId = readString(event.item_id).trim()
       const pending = this.pendingInputCommits.shift()
+      if (pending?.retired) this.rememberRetiredInputCommit(pending)
       if (!itemId || this.retiredInputItemIds.has(itemId)) return
       if (this.voiceMode === 'continuous' && !pending) {
         this.currentInputItemId = itemId
@@ -671,10 +697,13 @@ export class RealtimeVoiceSession {
     }
     if (type === 'error') {
       const errorRecord = event.error && typeof event.error === 'object'
-        ? event.error as { message?: unknown; code?: unknown }
+        ? event.error as { message?: unknown; code?: unknown; event_id?: unknown }
         : {}
       const code = readString(errorRecord.code)
-      if (code === 'input_audio_buffer_commit_empty') return
+      if (code === 'input_audio_buffer_commit_empty') {
+        this.settleEmptyInputTurn(readString(errorRecord.event_id).trim())
+        return
+      }
       this.emit('error', {
         message: readString(errorRecord.message) || 'Realtime voice returned an error',
         fatal: false,
@@ -1090,6 +1119,7 @@ export class RealtimeVoiceSession {
   }
 
   private resetTurn(): void {
+    this.clearBargeInCandidate()
     this.retireCurrentServerIdentities()
     if (this.finalizeTimer !== null) {
       window.clearTimeout(this.finalizeTimer)
@@ -1220,12 +1250,93 @@ export class RealtimeVoiceSession {
     this.interruptAckTimer = null
   }
 
+  private startBargeInCandidate(startedAt: number): void {
+    if (this.bargeInCandidateTimer !== null) return
+    this.bargeInCandidateStartedAt = startedAt
+    this.emit('speech-start', {
+      elapsedMs: this.speechEndedAt === null ? 0 : Math.max(0, startedAt - this.speechEndedAt),
+    })
+    this.bargeInCandidateTimer = window.setTimeout(() => {
+      const candidateStartedAt = this.bargeInCandidateStartedAt
+      this.bargeInCandidateTimer = null
+      this.bargeInCandidateStartedAt = null
+      if (candidateStartedAt === null) return
+      if (this.responseActive || this.outputLipSyncActive) {
+        this.interrupt()
+        this.resetTurn()
+      } else if (this.responseDone || this.currentTurnCancelled) {
+        this.resetTurn()
+      }
+      this.beginContinuousSpeech(candidateStartedAt, false)
+    }, CONTINUOUS_BARGE_IN_CONFIRM_MS)
+  }
+
+  private beginContinuousSpeech(startedAt: number, emitStart = true): void {
+    this.speechStartedAt = startedAt
+    if (emitStart) {
+      this.emit('speech-start', {
+        elapsedMs: this.speechEndedAt === null ? 0 : Math.max(0, startedAt - this.speechEndedAt),
+      })
+    }
+    this.setStatus('recording')
+  }
+
+  private clearBargeInCandidate(): void {
+    if (this.bargeInCandidateTimer !== null) {
+      window.clearTimeout(this.bargeInCandidateTimer)
+      this.bargeInCandidateTimer = null
+    }
+    this.bargeInCandidateStartedAt = null
+  }
+
   private acknowledgeInterrupt(): void {
     if (this.interruptStartedAt === null) return
     this.clearInterruptAckTimer()
     const elapsedMs = Math.max(0, performance.now() - this.interruptStartedAt)
     this.interruptStartedAt = null
+    const resolve = this.resolveInterruptAck
+    this.resolveInterruptAck = null
+    this.interruptAckPromise = null
+    resolve?.()
+    if (this.status === 'interrupting') this.setStatus('ready')
     this.emit('interrupt-ack', { elapsedMs })
+  }
+
+  private async waitForInterruptAcknowledgement(): Promise<void> {
+    if (this.interruptAckPromise) await this.interruptAckPromise
+  }
+
+  private settleEmptyInputTurn(commitEventId?: string): void {
+    if (commitEventId) {
+      const retiredIndex = this.retiredInputCommits.findIndex(item => item.commitEventId === commitEventId)
+      if (retiredIndex >= 0) {
+        this.retiredInputCommits.splice(retiredIndex, 1)
+        return
+      }
+      const pendingIndex = this.pendingInputCommits.findIndex(item => item.commitEventId === commitEventId)
+      if (pendingIndex < 0) return
+      const [pending] = this.pendingInputCommits.splice(pendingIndex, 1)
+      if (!pending) return
+      if (pending.retired || pending.generationId !== this.currentGenerationId || pending.turnId !== this.currentTurnId) return
+      this.responseActive = false
+      this.resetTurn()
+      this.setStatus(this.voiceMode === 'continuous' ? 'recording' : 'ready')
+      return
+    }
+    // Older providers omit error identity. Never guess while an interrupted
+    // commit or more than one active commit is still in flight.
+    if (this.retiredInputCommits.length > 0 || this.pendingInputCommits.length !== 1) return
+    const pending = this.pendingInputCommits.shift()
+    if (!pending) return
+    if (pending.retired || pending.generationId !== this.currentGenerationId || pending.turnId !== this.currentTurnId) return
+    this.responseActive = false
+    this.resetTurn()
+    this.setStatus(this.voiceMode === 'continuous' ? 'recording' : 'ready')
+  }
+
+  private rememberRetiredInputCommit(commit: PendingInputCommit): void {
+    this.retiredInputCommits.push(commit)
+    while (this.retiredInputCommits.length > 16) this.retiredInputCommits.shift()
   }
 
   private failConnection(peer: RTCPeerConnection): void {
@@ -1248,8 +1359,12 @@ export class RealtimeVoiceSession {
   private disposeConnection(): void {
     this.operationEpoch += 1
     this.abortPendingToolCalls()
+    this.clearBargeInCandidate()
     this.clearInterruptAckTimer()
     this.interruptStartedAt = null
+    this.resolveInterruptAck?.()
+    this.resolveInterruptAck = null
+    this.interruptAckPromise = null
     this.completedToolCallIds.clear()
     this.clearDisconnectTimer()
     if (this.finalizeTimer !== null) {
@@ -1287,6 +1402,7 @@ export class RealtimeVoiceSession {
     this.retiredResponseIds.clear()
     this.retiredInputItemIds.clear()
     this.pendingInputCommits = []
+    this.retiredInputCommits = []
   }
 }
 

@@ -88,11 +88,13 @@ describe('RealtimeVoiceEventBridge', () => {
     const bridge = new RealtimeVoiceEventBridge(source)
     bridge.listen('transcript-stable', () => undefined)
     bridge.listen('playback-start', () => undefined)
+    bridge.listen('interrupt-ack', () => undefined)
     listeners.get('transcript-stable')?.({ elapsedMs: 210 } as never)
     listeners.get('playback-start')?.({ elapsedMs: 380 } as never)
+    listeners.get('interrupt-ack')?.({ elapsedMs: 95 } as never)
 
     const snapshot = bridge.getDiagnosticSnapshot()
-    expect(snapshot.sampleCount).toBe(2)
+    expect(snapshot.sampleCount).toBe(3)
     expect(snapshot.stages.asr_final).toEqual({
       count: 1, p50Ms: 210, p95Ms: 210, errorCount: 0,
       recoveryAttempts: 0, recoverySuccesses: 0, recoveryP50Ms: null, recoveryP95Ms: null,
@@ -100,6 +102,11 @@ describe('RealtimeVoiceEventBridge', () => {
     })
     expect(snapshot.stages.first_audio).toEqual({
       count: 1, p50Ms: 380, p95Ms: 380, errorCount: 0,
+      recoveryAttempts: 0, recoverySuccesses: 0, recoveryP50Ms: null, recoveryP95Ms: null,
+      playbackUnderruns: 0,
+    })
+    expect(snapshot.stages.interrupt_ack).toEqual({
+      count: 1, p50Ms: 95, p95Ms: 95, errorCount: 0,
       recoveryAttempts: 0, recoverySuccesses: 0, recoveryP50Ms: null, recoveryP95Ms: null,
       playbackUnderruns: 0,
     })

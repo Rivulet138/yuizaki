@@ -1474,6 +1474,7 @@ def register_desktop_action_tools(
         context_handler=lambda _args, ctx, _receipt, _permit: _result(
             "desktop.list_windows", lambda: resolved.list_targets(ctx)
         ),
+        effect_kind="read",
         risk_level="safe",
         tags=["desktop", "window", "discovery", "lease"],
         scopes=["desktop:read"],
@@ -1496,6 +1497,7 @@ def register_desktop_action_tools(
             "desktop.preview_action",
             lambda: resolved.preview(ctx, target_lease=args.get("target_lease"), action=args.get("action")),
         ),
+        effect_kind="read",
         risk_level="safe",
         tags=["desktop", "window", "preview", "dry-run"],
         scopes=["desktop:preview"],
@@ -1525,6 +1527,7 @@ def register_desktop_action_tools(
                     execution_permit=permit,
                 ),
             ),
+            effect_kind="write",
             execution_permit_claims=lambda args, ctx: resolved._permit_claims(
                 ctx, action, args.get("target_lease")
             ),

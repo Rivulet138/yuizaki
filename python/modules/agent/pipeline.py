@@ -1,277 +1,42 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-import re
-import time
-from dataclasses import dataclass
 from datetime import UTC, datetime
-from difflib import SequenceMatcher
 from typing import Any, cast
 
 from ..core.state import Generation
-from ..llm.context_window import message_content_to_text
 from ..memory.pipeline import RetrievalPipeline
-from ..memory.schema import RetrievalRequest
-from ..pet_control import filter_pet_control_payload
 from .action_compiler import compile_action_envelope
 from .context import (
     AgentPipelineResult,
     AgentRequestContext,
-    TerminalTurnOutcome,
-    bind_runtime_bindings,
-    get_runtime_bindings,
 )
-from .interpret import interpret_user_text
+from .context_prefetch import ContextPrefetchCoordinator
+from .context_stage import ContextStage
+from .execution_stage import ExecutionStage
 from .models import (
-    PlannerStepRecord,
-    PlannerTrace,
     RuntimeLoopRecord,
-    StepConditionRecord,
 )
-from .planner import (
-    Planner,
-    PlanStep,
-    PlanStepUnion,
-    PlanValidationError,
-    StepCondition,
+from .pipeline_contracts import (
+    execution_trace_payload as _execution_trace_payload,
 )
-from .prompt_assembly import PromptBlock, build_prompt_assembly
-from .route_policy import resolve_route_from_intent
-from .tool_loop import run_streaming_tool_loop
+from .planner import Planner
+from .planning_stage import PlanningStage
+from .projection_stage import ProjectionStage
+from .visual_intent import (
+    VisualContextDecision,
+    classify_visual_context_request,
+    visual_context_requested,
+)
 
 logger = logging.getLogger(__name__)
 
-_SPECULATIVE_CONTEXT_TTL_SECONDS = 8.0
-_SPECULATIVE_CONTEXT_MAX_ENTRIES = 32
-_VISUAL_QUERY_PHRASES = (
-    "你看到",
-    "看一下这个",
-    "看看这个",
-    "what do you see",
-    "look at this",
-)
-_CHINESE_VISUAL_REQUEST = re.compile(
-    r"(?:(?:请|帮我|你能)?(?:看|看看|看一下|查看|检查|识别|读取|分析|描述)"
-    r".{0,12}(?:屏幕|画面|窗口|桌面|显示器|截图|这个页面))|"
-    r"(?:(?:屏幕|画面|窗口|桌面|显示器|截图|页面)(?:上|里|中|现在)"
-    r".{0,10}(?:有什么|是什么|显示什么|怎么了))"
-)
-_ENGLISH_VISUAL_REQUEST = re.compile(
-    r"\b(?:(?:look at|check|inspect|read|analy[sz]e|describe)"
-    r".{0,48}(?:screen|desktop|window|screenshot|page)|"
-    r"(?:can|could) you see.{0,32}(?:screen|desktop|window|screenshot|page)|"
-    r"what changed.{0,24}(?:screen|desktop|window|screenshot|page)|"
-    r"(?:what(?:'s| is)|tell me what(?:'s| is))\s+(?:currently\s+)?on\s+"
-    r"(?:my|the|this)\s+(?:screen|desktop|window|screenshot|page))\b"
-)
-
-
-@dataclass(frozen=True)
-class VisualContextDecision:
-    requested: bool
-    confidence: float
-    reason: str
-    confirmation_required: bool = False
-
-
-def _normalize_query(value: str) -> str:
-    return " ".join((value or "").lower().split())
-
-
-def _query_matches_partial(
-    partial_query: str,
-    final_query: str,
-    *,
-    min_coverage: float = 0.55,
-) -> bool:
-    partial = _normalize_query(partial_query)
-    final = _normalize_query(final_query)
-    if not partial or not final:
-        return False
-    coverage = len(partial) / max(1, len(final))
-    similarity = SequenceMatcher(None, partial, final).ratio()
-    return coverage >= min_coverage and (final.startswith(partial) or similarity >= 0.82)
-
-
-def classify_visual_context_request(query: str) -> VisualContextDecision:
-    normalized = _normalize_query(query)
-    if not normalized:
-        return VisualContextDecision(False, 0.0, "empty_query")
-    if _CHINESE_VISUAL_REQUEST.search(normalized):
-        return VisualContextDecision(True, 0.98, "explicit_chinese_screen_request")
-    if _ENGLISH_VISUAL_REQUEST.search(normalized):
-        return VisualContextDecision(True, 0.98, "explicit_english_screen_request")
-
-    matched_phrase = next(
-        (phrase for phrase in _VISUAL_QUERY_PHRASES if phrase in normalized),
-        None,
-    )
-    if matched_phrase is not None:
-        return VisualContextDecision(
-            False,
-            0.62,
-            f"ambiguous_deictic_request:{matched_phrase}",
-            confirmation_required=True,
-        )
-    return VisualContextDecision(False, 0.05, "no_visual_request_signal")
-
-
-def _visual_context_requested(query: str) -> bool:
-    return classify_visual_context_request(query).requested
-
-
-def visual_context_requested(query: str) -> bool:
-    return _visual_context_requested(query)
-
-
-def _coerce_pet_control(value: Any) -> dict[str, Any] | None:
-    return value if isinstance(value, dict) else None
-
-
-def _coerce_tool_calls(value: Any) -> list[dict[str, Any]]:
-    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
-
-
-def _coerce_step_results(value: Any) -> list[dict[str, Any]]:
-    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
-
-
-def _coerce_execution_summary(value: Any) -> dict[str, Any] | None:
-    return value if isinstance(value, dict) else None
-
-
-def _coerce_budget_record(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _coerce_failure_record(value: Any) -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        return None
-    result = {
-        key: value[key]
-        for key in ("step_id", "kind", "message", "retryable", "status", "cause", "timestamp")
-        if key in value
-    }
-    completed_steps = value.get("completed_steps")
-    if isinstance(completed_steps, (list, tuple)):
-        result["completed_steps"] = [
-            str(item).strip()[:120]
-            for item in completed_steps[:20]
-            if str(item).strip()
-        ]
-    return result
-
-
-def _coerce_recovery_record(value: Any) -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        return None
-    return {
-        key: value[key]
-        for key in (
-            "available", "action", "failed_step_id", "retryable",
-            "confirmation_required", "reason", "scope", "single_use", "ttl_seconds",
-            "handle",
-        )
-        if key in value
-    }
-
-
-def _terminal_contract(
-    payload: dict[str, Any],
-    step_results: list[dict[str, Any]] | None = None,
-) -> tuple[TerminalTurnOutcome, bool]:
-    statuses = {
-        str(item.get("status") or item.get("outcome") or "")
-        for item in (step_results or [])
-    }
-    if payload.get("outcome") == "unknown_effect" or "unknown_effect" in statuses:
-        return "unknown_effect", False
-    receipt = payload.get("permission_receipt")
-    summary = _coerce_execution_summary(payload.get("execution_summary")) or {}
-    stopped_reason = str(payload.get("stopped_reason") or summary.get("stopped_reason") or "")
-    failure = payload.get("failure")
-    if (
-        receipt is not None
-        or stopped_reason.startswith("permission_")
-        or summary.get("status") == "failed"
-    ):
-        retryable = bool(failure.get("retryable")) if isinstance(failure, dict) else False
-        return "failed", retryable
-    return "completed", False
-
-
-def _default_loop_budget(ctx: AgentRequestContext, *, max_iterations: int) -> dict[str, Any]:
-    retry_budget = ctx.extra.get("retry_budget", ctx.extra.get("retry_limit", 0))
-    tool_budget = ctx.extra.get("tool_budget", max(1, max_iterations) * 8)
-    return {
-        "max_iterations": max_iterations,
-        "output_tokens": ctx.max_tokens,
-        "retry_budget": int(retry_budget) if isinstance(retry_budget, int) and not isinstance(retry_budget, bool) else 0,
-        "tool_budget": int(tool_budget) if isinstance(tool_budget, int) and not isinstance(tool_budget, bool) else max(1, max_iterations) * 8,
-    }
-
-
-def _default_consumed_usage(*, iterations: int, output_tokens: int, stop_reason: str) -> dict[str, Any]:
-    return {
-        "iterations": max(0, iterations),
-        "output_tokens": max(0, output_tokens),
-        "retries": 0,
-        "tool_calls": 0,
-        "attempts": 0,
-        "stop_reason": stop_reason,
-    }
-
-
-def _planner_condition_record(condition: StepCondition | None) -> StepConditionRecord | None:
-    if condition is None:
-        return None
-    return StepConditionRecord(
-        source_step_id=condition.source_step_id,
-        mode=condition.mode,
-        status_in=list(condition.status_in),
-        status_not_in=list(condition.status_not_in),
-        content_contains=list(condition.content_contains),
-        error_contains=list(condition.error_contains),
-        all_of=[record for item in condition.all_of if (record := _planner_condition_record(item)) is not None],
-        any_of=[record for item in condition.any_of if (record := _planner_condition_record(item)) is not None],
-        none_of=[record for item in condition.none_of if (record := _planner_condition_record(item)) is not None],
-    )
-
-
-def _execution_trace_payload(
-    step_results: list[dict[str, Any]],
-    execution_summary: dict[str, Any] | None,
-    execution_policy: dict[str, Any],
-    extra: dict[str, Any] | None = None,
-) -> list[dict[str, Any]]:
-    if not step_results and execution_summary is None and not extra:
-        return []
-    payload: dict[str, Any] = dict(extra or {})
-    payload["step_results"] = step_results
-    if execution_summary is not None:
-        payload["execution_summary"] = execution_summary
-    payload["execution_policy"] = execution_policy
-    return [payload]
-
-
-def _requires_structured_immediate_execution(steps: list[Any]) -> bool:
-    return any(
-        getattr(step, "kind", "") in {"tool", "join"} or getattr(step, "condition", None) is not None
-        for step in steps
-    ) or len(steps) > 1
-
-
-def _force_agent_tool_loop(ctx: AgentRequestContext, plan: Any) -> None:
-    if not ctx.web_search_enabled:
-        return
-    if not getattr(plan, "immediate_steps", None):
-        return
-    for step in plan.immediate_steps:
-        if getattr(step, "kind", "") == "agent":
-            ctx.extra["force_tool_loop"] = True
-            return
-
+__all__ = [
+    "AgentPipeline",
+    "VisualContextDecision",
+    "classify_visual_context_request",
+    "visual_context_requested",
+]
 
 class AgentPipeline:
 
@@ -302,27 +67,22 @@ class AgentPipeline:
         )
     def __init__(self, retrieval_pipeline: RetrievalPipeline | None = None) -> None:
         self.planner = Planner()
-        self.retrieval_pipeline = retrieval_pipeline
-        self._retrieval_prefetch_tasks: dict[str, asyncio.Task[None]] = {}
-        self._retrieval_prefetch_cache: dict[str, dict[str, Any]] = {}
-        self._speculative_context_cache: dict[str, dict[str, Any]] = {}
+        self._planning_stage = PlanningStage()
+        self._projection_stage = ProjectionStage()
+        self._execution_stage = ExecutionStage()
+        self._context_stage = ContextStage()
+        self._context_prefetch = ContextPrefetchCoordinator(retrieval_pipeline)
+
+    @property
+    def retrieval_pipeline(self) -> RetrievalPipeline | None:
+        return self._context_prefetch.retrieval_pipeline
+
+    @retrieval_pipeline.setter
+    def retrieval_pipeline(self, value: RetrievalPipeline | None) -> None:
+        self._context_prefetch.retrieval_pipeline = value
 
     def bind_retrieval_pipeline(self, retrieval_pipeline: RetrievalPipeline) -> None:
-        self.retrieval_pipeline = retrieval_pipeline
-
-    @staticmethod
-    def _rank_tool_names(tool_registry: Any, query: str) -> list[str]:
-        rank_candidates = getattr(tool_registry, "rank_candidates", None)
-        if not callable(rank_candidates):
-            return []
-        try:
-            ranked = rank_candidates(query, limit=8)
-            if not isinstance(ranked, list):
-                return []
-            return [str(tool.name) for tool in ranked if getattr(tool, "name", None)]
-        except Exception as exc:  # noqa: BLE001 - candidate prefetch is best-effort
-            logger.debug("Tool candidate prefetch failed: %s", exc)
-            return []
+        self._context_prefetch.bind_retrieval_pipeline(retrieval_pipeline)
 
     def schedule_speculative_context_prefetch(
         self,
@@ -333,25 +93,10 @@ class AgentPipeline:
         tool_registry: Any,
         visual_frame_id: str | None,
     ) -> bool:
-        clean_query = " ".join((query or "").split())
-        if not cache_key or len(clean_query) < 2:
-            return False
-        visual_decision = classify_visual_context_request(clean_query)
-        self._speculative_context_cache[cache_key] = {
-            "partial_query": clean_query,
-            "workspace_id": workspace_id,
-            "recorded_at": time.monotonic(),
-            "tool_candidates": self._rank_tool_names(tool_registry, clean_query),
-            "visual_requested": visual_decision.requested,
-            "visual_confidence": visual_decision.confidence,
-            "visual_reason": visual_decision.reason,
-            "visual_confirmation_required": visual_decision.confirmation_required,
-            "visual_frame_id": visual_frame_id,
-            "confirmed": False,
-        }
-        while len(self._speculative_context_cache) > _SPECULATIVE_CONTEXT_MAX_ENTRIES:
-            self._speculative_context_cache.pop(next(iter(self._speculative_context_cache)))
-        return True
+        return self._context_prefetch.schedule_speculative_context_prefetch(
+            cache_key=cache_key, query=query, workspace_id=workspace_id,
+            tool_registry=tool_registry, visual_frame_id=visual_frame_id,
+        )
 
     def confirm_speculative_context_prefetch(
         self,
@@ -361,47 +106,10 @@ class AgentPipeline:
         workspace_id: str | None,
         tool_registry: Any,
     ) -> bool:
-        clean_final = " ".join((final_query or "").split())
-        if not cache_key or not clean_final:
-            self._speculative_context_cache.pop(cache_key, None)
-            return False
-
-        cached = self._speculative_context_cache.get(cache_key)
-        cached_is_fresh = bool(
-            cached
-            and cached.get("workspace_id") == workspace_id
-            and time.monotonic() - float(cached.get("recorded_at") or 0) <= _SPECULATIVE_CONTEXT_TTL_SECONDS
+        return self._context_prefetch.confirm_speculative_context_prefetch(
+            cache_key=cache_key, final_query=final_query,
+            workspace_id=workspace_id, tool_registry=tool_registry,
         )
-        partial_matches = bool(
-            cached_is_fresh
-            and cached
-            and _query_matches_partial(
-                str(cached.get("partial_query") or ""),
-                clean_final,
-                min_coverage=0.3,
-            )
-        )
-        prefetched_candidates = list(cached.get("tool_candidates") or []) if partial_matches and cached else []
-        final_candidates = self._rank_tool_names(tool_registry, clean_final)
-        merged_candidates = [name for name in prefetched_candidates if name in final_candidates]
-        merged_candidates.extend(name for name in final_candidates if name not in merged_candidates)
-        visual_decision = classify_visual_context_request(clean_final)
-        self._speculative_context_cache[cache_key] = {
-            "partial_query": str(cached.get("partial_query") or "") if cached else "",
-            "final_query": clean_final,
-            "workspace_id": workspace_id,
-            "recorded_at": time.monotonic(),
-            "tool_candidates": merged_candidates[:8],
-            "visual_requested": visual_decision.requested,
-            "visual_confidence": visual_decision.confidence,
-            "visual_reason": visual_decision.reason,
-            "visual_confirmation_required": visual_decision.confirmation_required,
-            "visual_frame_id": cached.get("visual_frame_id") if partial_matches and cached else None,
-            "partial_match": partial_matches,
-            "confirmed": True,
-            "voice": True,
-        }
-        return True
 
     def take_speculative_context_prefetch(
         self,
@@ -410,26 +118,15 @@ class AgentPipeline:
         final_query: str,
         workspace_id: str | None,
     ) -> dict[str, Any] | None:
-        cached = self._speculative_context_cache.pop(cache_key, None)
-        if not cached or cached.get("workspace_id") != workspace_id or cached.get("confirmed") is not True:
-            return None
-        if time.monotonic() - float(cached.get("recorded_at") or 0) > _SPECULATIVE_CONTEXT_TTL_SECONDS:
-            return None
-        if _normalize_query(str(cached.get("final_query") or "")) != _normalize_query(final_query):
-            return None
-        return dict(cached)
+        return self._context_prefetch.take_speculative_context_prefetch(
+            cache_key=cache_key, final_query=final_query, workspace_id=workspace_id,
+        )
 
     def cancel_speculative_context_prefetch(self, cache_key: str) -> None:
-        self._speculative_context_cache.pop(cache_key, None)
+        self._context_prefetch.cancel_speculative_context_prefetch(cache_key)
 
     def speculative_visual_requested(self, cache_key: str) -> bool:
-        cached = self._speculative_context_cache.get(cache_key)
-        if not cached or cached.get("visual_requested") is not True:
-            return False
-        if time.monotonic() - float(cached.get("recorded_at") or 0) > _SPECULATIVE_CONTEXT_TTL_SECONDS:
-            self._speculative_context_cache.pop(cache_key, None)
-            return False
-        return True
+        return self._context_prefetch.speculative_visual_requested(cache_key)
 
     def schedule_retrieval_prefetch(
         self,
@@ -439,63 +136,12 @@ class AgentPipeline:
         session_id: str | None,
         workspace_id: str | None,
     ) -> bool:
-        clean_query = " ".join(query.split())
-        if self.retrieval_pipeline is None or not cache_key or len(clean_query) < 4:
-            return False
-        self.cancel_retrieval_prefetch(cache_key, clear_cache=False)
-        task = asyncio.create_task(
-            self._run_retrieval_prefetch(cache_key, clean_query, session_id, workspace_id),
-            name=f"retrieval-prefetch-{cache_key}",
+        return self._context_prefetch.schedule_retrieval_prefetch(
+            cache_key=cache_key, query=query, session_id=session_id, workspace_id=workspace_id,
         )
-        self._retrieval_prefetch_tasks[cache_key] = task
-        task.add_done_callback(lambda completed, key=cache_key: self._prefetch_done(key, completed))
-        return True
 
     def cancel_retrieval_prefetch(self, cache_key: str, *, clear_cache: bool = True) -> None:
-        task = self._retrieval_prefetch_tasks.pop(cache_key, None)
-        if task is not None and not task.done():
-            task.cancel()
-        if clear_cache:
-            self._retrieval_prefetch_cache.pop(cache_key, None)
-
-    async def _run_retrieval_prefetch(
-        self,
-        cache_key: str,
-        query: str,
-        session_id: str | None,
-        workspace_id: str | None,
-    ) -> None:
-        pipeline = self.retrieval_pipeline
-        if pipeline is None:
-            return
-        request = RetrievalRequest(
-            query=query,
-            scope="workspace" if workspace_id else ("session" if session_id else None),
-            session_id=session_id,
-            workspace_id=workspace_id,
-            top_k=5,
-            layers=['profile', 'working', 'episodic', 'relationship', 'reflective', 'semantic'],
-        )
-        data = await asyncio.to_thread(pipeline.recall, request)
-        if not isinstance(data, dict) or not data.get("results"):
-            return
-        self._retrieval_prefetch_cache[cache_key] = {
-            "query": query,
-            "workspace_id": workspace_id,
-            "recorded_at": time.monotonic(),
-            "data": data,
-        }
-        while len(self._retrieval_prefetch_cache) > 32:
-            self._retrieval_prefetch_cache.pop(next(iter(self._retrieval_prefetch_cache)))
-
-    def _prefetch_done(self, cache_key: str, task: asyncio.Task[None]) -> None:
-        if self._retrieval_prefetch_tasks.get(cache_key) is task:
-            self._retrieval_prefetch_tasks.pop(cache_key, None)
-        if task.cancelled():
-            return
-        error = task.exception()
-        if error is not None:
-            logger.debug("Retrieval prefetch failed for %s: %s", cache_key, error)
+        self._context_prefetch.cancel_retrieval_prefetch(cache_key, clear_cache=clear_cache)
 
     async def _take_retrieval_prefetch(
         self,
@@ -504,21 +150,9 @@ class AgentPipeline:
         final_query: str,
         workspace_id: str | None,
     ) -> dict[str, Any] | None:
-        task = self._retrieval_prefetch_tasks.get(cache_key)
-        if task is not None and not task.done():
-            try:
-                await asyncio.wait_for(asyncio.shield(task), timeout=0.12)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
-                pass
-        cached = self._retrieval_prefetch_cache.pop(cache_key, None)
-        if not cached or cached.get("workspace_id") != workspace_id:
-            return None
-        if time.monotonic() - float(cached.get("recorded_at") or 0) > 8:
-            return None
-        if not _query_matches_partial(str(cached.get("query") or ""), final_query):
-            return None
-        data = cached.get("data")
-        return data if isinstance(data, dict) else None
+        return await self._context_prefetch.take_retrieval_prefetch(
+            cache_key=cache_key, final_query=final_query, workspace_id=workspace_id,
+        )
 
     def _extract_user_text(self, ctx: AgentRequestContext) -> str:
         for message in reversed(ctx.messages):
@@ -576,184 +210,20 @@ class AgentPipeline:
         if ctx.plugin_manager:
             ctx = await ctx.plugin_manager.before_llm(ctx)
 
-        user_text = self._extract_user_text(ctx)
-        visual_decision = classify_visual_context_request(user_text)
-        ctx.extra["visual_context_requested"] = visual_decision.requested
-        ctx.extra["visual_context_confidence"] = visual_decision.confidence
-        ctx.extra["visual_context_reason"] = visual_decision.reason
-        ctx.extra["visual_confirmation_required"] = visual_decision.confirmation_required
-        if visual_decision.confirmation_required:
-            prompt_blocks = [
-                block
-                for block in (ctx.extra.get("additional_prompt_blocks") or [])
-                if isinstance(block, PromptBlock)
-            ]
-            if not any(block.block_id == "visual_confirmation_required" for block in prompt_blocks):
-                prompt_blocks.append(PromptBlock(
-                    block_id="visual_confirmation_required",
-                    source="agent_pipeline",
-                    trust="trusted",
-                    authority="policy",
-                    order=210,
-                    content=(
-                        "The user's wording may refer to visual context, but it does not explicitly authorize "
-                        "screen or window capture. Do not claim to see the desktop. Ask the user to explicitly "
-                        "confirm that Yuizaki should inspect the screen, window, or screenshot."
-                    ),
-                ))
-            ctx.extra["additional_prompt_blocks"] = prompt_blocks
-        interpret_result = interpret_user_text(user_text)
-        ctx.extra["interpret_result"] = interpret_result
-        bindings = get_runtime_bindings(ctx)
-        relationship_summary = bindings.relationship_summary or {}
-        relationship_stage = str(relationship_summary.get("relationship_stage") or "warming")
-        autonomy_mode = getattr(ctx, "autonomy_mode", "companion")
-        recent_signal_kinds = [str(item.get("kind") or "") for item in (ctx.extra.get("recent_signal_docs") or []) if isinstance(item, dict)]
-        has_workspace_tool_preset = bool(ctx.extra.get("workspace_tool_preset"))
-        top_route = resolve_route_from_intent(
-            interpret_result,
-            relationship_stage,
-            autonomy_mode,
-            recent_signal_kinds=recent_signal_kinds,
-            has_workspace_tool_preset=has_workspace_tool_preset,
-        )
-        ctx.extra["top_route"] = top_route
-        plan = self.planner.plan(user_text, interpret_result=interpret_result)
-        _force_agent_tool_loop(ctx, plan)
-        self._append_runtime_loop(
+        plan = self._planning_stage.run(
             ctx,
-            stage="interpret",
-            summary=f"Intent={interpret_result.intent}, urgency={interpret_result.urgency}, route={top_route.owner_agent_role}",
-            agent_id=top_route.owner_agent_id,
-            agent_role=top_route.owner_agent_role,
-            data={
-                "goal": plan.goal,
-                "mode": plan.mode,
-                "step_count": len(plan.steps),
-                "intent": interpret_result.intent,
-                "urgency": interpret_result.urgency,
-                "emotional_signal": interpret_result.emotional_signal,
-                "tool_hint": interpret_result.tool_hint,
-                "web_search_enabled": ctx.web_search_enabled is True,
-                "force_tool_loop": ctx.extra.get("force_tool_loop") is True,
-                "autonomy_mode": autonomy_mode,
-                "relationship_stage": relationship_stage,
-                "top_route_reason": top_route.route_reason,
-                "has_workspace_tool_preset": has_workspace_tool_preset,
-                "visual_context_requested": visual_decision.requested,
-                "visual_context_confidence": visual_decision.confidence,
-                "visual_context_reason": visual_decision.reason,
-                "visual_confirmation_required": visual_decision.confirmation_required,
-            },
+            user_text=self._extract_user_text(ctx),
+            planner=self.planner,
+            append_runtime_loop=self._append_runtime_loop,
         )
-        if ctx.trace_store:
-            trace = PlannerTrace(
-                timestamp=datetime.now(UTC).isoformat(),
-                session_id=ctx.session_id,
-                goal=plan.goal,
-                mode=plan.mode,
-            steps=[
-                PlannerStepRecord(
-                    id=step.id,
-                    title=step.title,
-                    kind=step.kind,
-                    description=step.description,
-                    depends_on=list(step.depends_on),
-                    condition=_planner_condition_record(step.condition),
-                )
-                for step in plan.steps
-            ],
-                request_id=ctx.request_id,
-            )
-            ctx.trace_store.append("planner", trace.to_dict())
         return ctx, plan
 
     async def finalize_result(self, ctx: AgentRequestContext, result_obj: AgentPipelineResult) -> AgentPipelineResult:
-        if result_obj.outcome == "unknown_effect":
-            result_obj.retryable = False
-        original_envelope = dict(result_obj.action_envelope or {})
-        original_tool_calls = list(result_obj.tool_calls or [])
-        if ctx.plugin_manager:
-            result_obj = await ctx.plugin_manager.after_llm(result_obj, ctx)
-            result_obj = await ctx.plugin_manager.before_dispatch(result_obj, ctx)
-
-        trace_suffix: list[dict[str, Any]] = []
-        original_actions = original_envelope.get("actions")
-        if isinstance(original_actions, list):
-            tool_trace = next(
-                (
-                    action for action in original_actions
-                    if isinstance(action, dict) and action.get("type") == "tool_trace"
-                ),
-                None,
-            )
-            payload = tool_trace.get("payload") if isinstance(tool_trace, dict) else None
-            if (
-                isinstance(payload, list)
-                and payload[:len(original_tool_calls)] == original_tool_calls
-            ):
-                trace_suffix = [
-                    item for item in payload[len(original_tool_calls):]
-                    if isinstance(item, dict)
-                ]
-
-        result_obj.pet_control = filter_pet_control_payload(
-            result_obj.pet_control,
-            ctx.pet_control_context,
-        )
-        result_obj.tool_calls = _coerce_tool_calls(result_obj.tool_calls)
-        result_obj.action_envelope = compile_action_envelope(
-            reply=str(result_obj.reply or ""),
-            pet_control=result_obj.pet_control,
-            tool_calls=[*result_obj.tool_calls, *trace_suffix],
-            memory_sources=[
-                source for source in (ctx.extra.get("memory_sources") or [])
-                if isinstance(source, dict)
-            ],
-            source=str(original_envelope.get("source") or "agent"),
-            request_id=str(original_envelope.get("request_id") or ctx.request_id or "") or None,
-        )
-        self._append_runtime_loop(
+        return await self._projection_stage.run(
             ctx,
-            stage="ask_act",
-            summary="Prepared reply and actions for dispatch.",
-            agent_id="yuizaki.companion-orchestrator",
-            agent_role="orchestrator",
-            data={
-                "reply_length": len(result_obj.reply or ""),
-                "tool_call_count": len(result_obj.tool_calls or []),
-                "has_pet_control": bool(result_obj.pet_control),
-                "outcome": result_obj.outcome,
-                "retryable": result_obj.retryable,
-                "configured_budget": dict(result_obj.configured_budget),
-                "consumed_usage": dict(result_obj.consumed_usage),
-            },
+            result_obj,
+            append_runtime_loop=self._append_runtime_loop,
         )
-        bindings = get_runtime_bindings(ctx)
-        relationship_summary = bindings.relationship_summary or {}
-        self._append_runtime_loop(
-            ctx,
-            stage="reflect",
-            summary="Recorded execution outcome for future policy and memory adjustment.",
-            agent_id="yuizaki.memory-reflector",
-            agent_role="reflector",
-            data={
-                "relationship_stage": relationship_summary.get("relationship_stage"),
-                "proactive_budget": relationship_summary.get("proactive_budget"),
-            },
-        )
-        self._append_runtime_loop(
-            ctx,
-            stage="update_relationship",
-            summary="Prepared relationship update signals from current execution.",
-            agent_id="yuizaki.memory-reflector",
-            agent_role="reflector",
-            data={
-                "relationship_history_count": len(bindings.relationship_history or []),
-                "retrieved_chunk_count": len(bindings.retrieved_chunks or []),
-            },
-        )
-        return result_obj
 
     async def normalize_input(self, ctx: AgentRequestContext) -> AgentRequestContext:
         ctx.messages = list(ctx.messages or [])
@@ -761,557 +231,81 @@ class AgentPipeline:
         return ctx
 
     async def enrich_context(self, ctx: AgentRequestContext) -> AgentRequestContext:
-        # Apply workspace tool and MCP preset filtering.
-        if ctx.workspace_id and ctx.tool_registry:
-            bindings = get_runtime_bindings(ctx)
-            db_repo = bindings.db_repo or ctx.extra.get("db_repo")
-            if db_repo:
-                try:
-                    workspaces = await asyncio.to_thread(db_repo.list_workspaces)
-                    workspace = next((w for w in workspaces if w.get("id") == ctx.workspace_id), None)
-                    if workspace:
-                        import json as _json
-                        raw_tool_preset = workspace.get("tool_preset")
-                        if isinstance(raw_tool_preset, str) and raw_tool_preset.strip():
-                            try:
-                                allowed_tools = _json.loads(raw_tool_preset)
-                                if isinstance(allowed_tools, list):
-                                    allowed_set = {str(t) for t in allowed_tools if isinstance(t, str)}
-                                    ctx.extra["workspace_tool_preset"] = sorted(allowed_set)
-                            except _json.JSONDecodeError:
-                                pass
-                        raw_mcp_preset = workspace.get("mcp_preset_id")
-                        if isinstance(raw_mcp_preset, str) and raw_mcp_preset.strip():
-                            ctx.extra["workspace_mcp_preset"] = [raw_mcp_preset.strip()]
-                except Exception as exc:  # noqa: BLE001 - malformed optional preset degrades locally
-                    logger.warning("[pipeline] workspace tool_preset parse failed: %s", exc)
-
-        user_text = ""
-        for message in reversed(ctx.messages):
-            if message.get("role") == "user":
-                user_text = message_content_to_text(message.get("content", ""))
-                break
-
-        if not user_text.strip():
-            return ctx
-
-        if self.retrieval_pipeline is not None:
-            try:
-                data = await self._take_retrieval_prefetch(
-                    cache_key=ctx.sid,
-                    final_query=user_text,
-                    workspace_id=ctx.workspace_id,
-                )
-                prefetch_hit = data is not None
-                if data is None:
-                    request = RetrievalRequest(
-                        query=user_text,
-                        scope="workspace" if ctx.workspace_id else ("session" if ctx.session_id else None),
-                        session_id=ctx.session_id,
-                        workspace_id=ctx.workspace_id,
-                        top_k=5,
-                        layers=['profile', 'working', 'episodic', 'relationship', 'reflective', 'semantic'],
-                    )
-                    data = await asyncio.to_thread(self.retrieval_pipeline.recall, request)
-                ctx.extra["retrieval_prefetch_hit"] = prefetch_hit
-                results = data.get("results", [])
-                chunks: list[str] = []
-                memory_sources: list[dict[str, Any]] = []
-                for item in results:
-                    if not isinstance(item, dict):
-                        continue
-                    doc = item.get("doc") or {}
-                    if not isinstance(doc, dict):
-                        continue
-                    text = str(doc.get("text", ""))
-                    if text:
-                        chunks.append(text)
-                    doc_id = str(doc.get("id") or item.get("id") or "").strip()
-                    clean_text = " ".join(text.split())
-                    if not doc_id or not clean_text or len(memory_sources) >= 5:
-                        continue
-                    raw_metadata = doc.get("metadata")
-                    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
-                    layer = str(doc.get("layer") or metadata.get("layer") or "").strip()
-                    source = str(doc.get("source") or metadata.get("source") or "").strip()
-                    score = item.get("score")
-                    memory_sources.append({
-                        "id": doc_id,
-                        "text": f"{clean_text[:317]}..." if len(clean_text) > 320 else clean_text,
-                        **({"layer": layer} if layer else {}),
-                        **({"source": source} if source else {}),
-                        **({"score": float(score)} if isinstance(score, (int, float)) else {}),
-                    })
-                if chunks:
-                    bindings = get_runtime_bindings(ctx)
-                    bindings.retrieved_chunks = chunks[:5]
-                    bind_runtime_bindings(
-                        ctx,
-                        db_repo=bindings.db_repo,
-                        relationship_event_writer=bindings.relationship_event_writer,
-                        relationship_history=bindings.relationship_history,
-                        relationship_summary=bindings.relationship_summary,
-                        retrieved_chunks=bindings.retrieved_chunks,
-                    )
-                    ctx.extra["retrieved_chunks"] = chunks[:5]
-                    ctx.extra["memory_sources"] = memory_sources
-                    recent_signal_docs: list[dict[str, str]] = []
-                    for item in results[:5]:
-                        doc_payload = item.get("doc") or {}
-                        metadata = doc_payload.get("metadata") if isinstance(doc_payload, dict) else {}
-                        metadata_payload = metadata if isinstance(metadata, dict) else {}
-                        relationship_event = metadata_payload.get("relationship_event") or {}
-                        relationship_payload = relationship_event if isinstance(relationship_event, dict) else {}
-                        kind = relationship_payload.get("kind") or metadata_payload.get("type") or ""
-                        recent_signal_docs.append({"kind": str(kind)})
-                    ctx.extra["recent_signal_docs"] = recent_signal_docs
-                    self._append_runtime_loop(
-                        ctx,
-                        stage="recall",
-                        summary="Retrieved memory and context chunks for prompt assembly.",
-                        agent_id="yuizaki.companion-orchestrator",
-                        agent_role="orchestrator",
-                        data={
-                            "retrieved_chunk_count": len(chunks[:5]),
-                            "query": user_text,
-                            "recent_signal_kinds": [item.get("kind") for item in ctx.extra.get("recent_signal_docs", []) if isinstance(item, dict)],
-                        },
-                    )
-            except Exception as exc:  # noqa: BLE001 - recall failure must preserve the text path
-                ctx.extra["rag_error"] = str(exc)
-                self._append_runtime_loop(
-                    ctx,
-                    stage="recall",
-                    summary="Recall failed; continuing without retrieved chunks.",
-                    status="error",
-                    agent_id="yuizaki.companion-orchestrator",
-                    agent_role="orchestrator",
-                    data={"error": str(exc)},
-                )
-
-        bindings = get_runtime_bindings(ctx)
-        db_repo = bindings.db_repo or ctx.extra.get("db_repo")
-        relationship_history = bindings.relationship_history or ctx.extra.get("relationship_history")
-        retrieved_chunks = bindings.retrieved_chunks or ctx.extra.get("retrieved_chunks")
-        interpret_result = ctx.extra.get("interpret_result") if hasattr(ctx, "extra") else None
-        ctx.messages = await asyncio.to_thread(
-            build_prompt_assembly,
-            db_repo=db_repo,
-            generation_mgr=ctx.generation_mgr,
-            workspace_id=ctx.workspace_id,
-            session_id=ctx.session_id,
-            messages=ctx.messages,
-            interpret_result=interpret_result,
-            retrieved_chunks=retrieved_chunks,
-            relationship_history=relationship_history,
-            pet_control_context=ctx.pet_control_context,
-            prompt_profile=ctx.prompt_profile,
-            response_mode=ctx.response_mode,
-            additional_blocks=[
-                block for block in (ctx.extra.get("additional_prompt_blocks") or [])
-                if isinstance(block, PromptBlock)
-            ],
-        )
-
-        self._append_runtime_loop(
+        return await self._context_stage.run(
             ctx,
-            stage="decide",
-            summary="Prepared prompt context and selected execution path.",
-            agent_id="yuizaki.companion-orchestrator",
-            agent_role="orchestrator",
-            data={
-                "has_db_repo": bool(db_repo),
-                "relationship_history_count": len(relationship_history or []),
-                "retrieved_chunk_count": len(retrieved_chunks or []),
-                "autonomy_mode": getattr(ctx, "autonomy_mode", "companion"),
-                "interpret_intent": getattr(interpret_result, "intent", None),
-            },
+            retrieval_pipeline=self.retrieval_pipeline,
+            take_retrieval_prefetch=self._take_retrieval_prefetch,
+            append_runtime_loop=self._append_runtime_loop,
+            logger=logger,
         )
-
-        return ctx
 
     async def run(self, ctx: AgentRequestContext) -> AgentPipelineResult:
         if ctx.autonomy_mode == "silent":
             return self._silent_result(ctx)
         ctx, plan = await self.prepare_context(ctx)
-        autonomy_mode = getattr(ctx, "autonomy_mode", "companion")
-
-        if autonomy_mode == "assistant" and any(step.kind == "schedule" for step in plan.steps):
-            plan.steps = [step for step in plan.steps if step.kind != "schedule"]
-            if any(step.kind in {"agent", "tool", "join"} for step in plan.steps):
-                plan.mode = "immediate"
-
-        if (
-            autonomy_mode == "reflector"
-            and any(step.kind == "tool" for step in plan.steps)
-        ):
-            plan.outcome = "refused"
-            plan.refusal_reason = "reflector_mode_cannot_execute_tools"
-
-        plan.scheduled_steps = [step for step in plan.steps if step.kind == "schedule"]
-        plan.immediate_steps = [
-            step for step in plan.steps if step.kind in {"agent", "tool", "join"}
-        ]
-
-        if plan.outcome != "execute":
-            reply = plan.clarification_question or plan.refusal_reason or "The plan cannot be executed safely."
-            self._append_runtime_loop(
-                ctx,
-                stage="decide",
-                status="stopped",
-                summary="Planning produced a non-execution outcome.",
-                data={"plan_outcome": plan.outcome, "reason": plan.refusal_reason},
-            )
-            result_obj = AgentPipelineResult(
-                reply=reply,
-                pet_control=None,
-                tool_calls=[],
-                action_envelope=compile_action_envelope(
-                    reply=reply,
-                    pet_control=None,
-                    tool_calls=[{
-                        "plan_outcome": plan.outcome,
-                        "clarification_question": plan.clarification_question,
-                        "refusal_reason": plan.refusal_reason,
-                    }],
-                    source="planner",
-                    request_id=ctx.request_id,
-                ),
-            )
-            return await self.finalize_result(ctx, result_obj)
-
-        if ctx.step_executor is None:
-            plan.outcome = "refused"
-            plan.refusal_reason = "step_executor_not_available"
-            return await self.finalize_result(ctx, AgentPipelineResult(
-                reply=plan.refusal_reason,
-                pet_control=None,
-                tool_calls=[],
-                action_envelope=compile_action_envelope(
-                    reply=plan.refusal_reason,
-                    pet_control=None,
-                    tool_calls=[{"plan_outcome": plan.outcome, "refusal_reason": plan.refusal_reason}],
-                    source="planner",
-                    request_id=ctx.request_id,
-                ),
-            ))
-
-        if any(isinstance(step, PlanStep) for step in plan.steps):
-            legacy_steps = cast(list[PlanStep], cast(object, plan.steps))
-            adapted_steps = ctx.step_executor.adapt_legacy_plan(legacy_steps)
-            adapted_by_id = {step.id: step for step in adapted_steps}
-            plan.steps = adapted_steps
-            plan.immediate_steps = [adapted_by_id[step.id] for step in plan.immediate_steps]
-            plan.scheduled_steps = [adapted_by_id[step.id] for step in plan.scheduled_steps]
-
-        result = await ctx.step_executor.execute_plan(ctx, plan.steps)
-
-        reply = str(result.get("reply") or "")
-        pet_control = _coerce_pet_control(result.get("pet_control"))
-        tool_calls = _coerce_tool_calls(result.get("tool_calls"))
-        step_results = _coerce_step_results(result.get("step_results"))
-        execution_summary = _coerce_execution_summary(result.get("execution_summary"))
-        rollback_results = _coerce_step_results(result.get("rollback_results"))
-        created_tasks = [
-            item for item in step_results
-            if item.get("kind") == "schedule" and item.get("status") == "created"
-        ]
-        if rollback_results:
-            reply = "计划任务的即时执行部分失败，已回滚已创建的调度任务。"
-        elif created_tasks:
-            if plan.mode == "scheduled_once":
-                schedule_reply = f"已为你创建一次性任务，将在 {plan.delay_seconds} 秒后执行。"
-            elif plan.mode == "scheduled_interval":
-                schedule_reply = f"已为你创建循环任务，将每隔 {plan.interval_seconds} 秒执行一次。"
-            else:
-                schedule_reply = "已为你创建计划任务，并将继续执行即时部分。"
-            reply = f"{schedule_reply}\n\n{reply}" if reply else schedule_reply
-        elif not reply and result.get("error"):
-            reply = str(result["error"])
-
-        result_obj = AgentPipelineResult(
-            reply=reply,
-            pet_control=pet_control,
-            tool_calls=tool_calls,
-            action_envelope=compile_action_envelope(
-                reply=reply,
-                pet_control=pet_control,
-                tool_calls=tool_calls + _execution_trace_payload(
-                    step_results,
-                    execution_summary,
-                    {
-                        "stop_on_failure": True,
-                        "tool_retry_limit": getattr(ctx.step_executor, 'max_tool_retries', 0) if ctx.step_executor else 0,
-                        "schedule_rollback_on_immediate_failure": True,
-                    },
-                    {
-                        "scheduled_tasks": [item.get("task_id") for item in created_tasks if item.get("task_id")],
-                        "mode": plan.mode,
-                        "plan_steps": [step.title for step in plan.steps],
-                    },
-                ),
-                source="planner" if created_tasks else "agent",
-                request_id=ctx.request_id,
-            ),
-            failure=_coerce_failure_record(result.get("failure")),
-            recovery=_coerce_recovery_record(result.get("recovery")),
-            outcome=_terminal_contract(result, step_results)[0],
-            retryable=_terminal_contract(result, step_results)[1],
-            configured_budget=_coerce_budget_record(result.get("configured_budget")),
-            consumed_usage=_coerce_budget_record(result.get("consumed_usage")),
+        result_obj = await self._execution_stage.run(
+            ctx,
+            plan,
+            append_runtime_loop=self._append_runtime_loop,
         )
         return await self.finalize_result(ctx, result_obj)
 
     async def run_streaming(self, ctx: AgentRequestContext, ws_adapter: Any, generation: Generation) -> AgentPipelineResult:
         if ctx.autonomy_mode == "silent":
+            result_obj = self._silent_result(ctx)
             generation.tokens = []
-            return self._silent_result(ctx)
+            cast_generation = cast(Any, generation)
+            cast_generation.pet_control = None
+            if ws_adapter is not None:
+                await ws_adapter.send_json({
+                    "type": "done",
+                    "session_id": generation.session_id,
+                    "generation_id": generation.generation_id,
+                    "content": "",
+                    "outcome": result_obj.outcome,
+                    "retryable": result_obj.retryable,
+                    "stopped_reason": "silent_autonomy_mode",
+                })
+            return result_obj
         ctx, plan = await self.prepare_context(ctx)
-        autonomy_mode = getattr(ctx, "autonomy_mode", "companion")
-        if autonomy_mode == "assistant" and any(step.kind == "schedule" for step in plan.steps):
-            plan.steps = [step for step in plan.steps if step.kind != "schedule"]
-            if any(step.kind in {"agent", "tool", "join"} for step in plan.steps):
-                plan.mode = "immediate"
-        if autonomy_mode == "reflector" and any(step.kind == "tool" for step in plan.steps):
-            plan.outcome = "refused"
-            plan.refusal_reason = "reflector_mode_cannot_execute_tools"
-        plan.scheduled_steps = [step for step in plan.steps if step.kind == "schedule"]
-        plan.immediate_steps = [
-            step for step in plan.steps if step.kind in {"agent", "tool", "join"}
-        ]
+        stage_result = await self._execution_stage.run_streaming(
+            ctx,
+            plan,
+            ws_adapter=ws_adapter,
+            generation=generation,
+        )
+        result_obj = await self.finalize_result(ctx, stage_result.result)
+        generation.tokens = [result_obj.reply] if result_obj.reply else []
+        cast_generation = cast(Any, generation)
+        cast_generation.pet_control = result_obj.pet_control
 
-        if plan.outcome != "execute":
-            reply = plan.clarification_question or plan.refusal_reason or "The plan cannot be executed safely."
-            generation.tokens = [reply]
-            if ws_adapter is not None:
+        if stage_result.persist_history and result_obj.reply and ctx.generation_mgr:
+            append_history = getattr(ctx.generation_mgr, "append_history", None)
+            if callable(append_history):
+                append_history(ctx.session_id, "assistant", result_obj.reply)
+
+        if ws_adapter is not None:
+            if result_obj.reply and not stage_result.reply_emitted:
                 await ws_adapter.send_json({
-                    "type": "done",
-                    "session_id": generation.session_id,
-                    "generation_id": generation.generation_id,
-                    "reply": reply,
-                    "plan_outcome": plan.outcome,
-                })
-            return await self.finalize_result(ctx, AgentPipelineResult(
-                reply=reply,
-                pet_control=None,
-                tool_calls=[],
-                action_envelope=compile_action_envelope(
-                    reply=reply,
-                    pet_control=None,
-                    tool_calls=[{"plan_outcome": plan.outcome, "refusal_reason": plan.refusal_reason}],
-                    source="planner",
-                    request_id=ctx.request_id,
-                ),
-            ))
-
-        if ctx.step_executor is None:
-            return AgentPipelineResult(reply="step_executor_not_available", pet_control=None, tool_calls=[])
-        if any(isinstance(step, PlanStep) for step in plan.steps):
-            legacy_steps = cast(list[PlanStep], cast(object, plan.steps))
-            adapted_steps = ctx.step_executor.adapt_legacy_plan(legacy_steps)
-            adapted_by_id = {step.id: step for step in adapted_steps}
-            plan.steps = adapted_steps
-            plan.immediate_steps = [adapted_by_id[step.id] for step in plan.immediate_steps]
-            plan.scheduled_steps = [adapted_by_id[step.id] for step in plan.scheduled_steps]
-        try:
-            validation_capability = ctx.step_executor.preflight_plan(ctx, plan.steps)
-        except PlanValidationError as exc:
-            reason = f"invalid_plan:{exc}"
-            generation.tokens = [reason]
-            return AgentPipelineResult(
-                reply=reason,
-                pet_control=None,
-                tool_calls=[],
-                action_envelope=compile_action_envelope(
-                    reply=reason,
-                    pet_control=None,
-                    tool_calls=[{"plan_outcome": "refused", "refusal_reason": reason}],
-                    source="planner",
-                    request_id=ctx.request_id,
-                ),
-            )
-        sliced_step_ids = {
-            step.id for step in [*plan.scheduled_steps, *plan.immediate_steps]
-        }
-        analysis_steps = [
-            step for step in plan.steps
-            if step.kind == "analysis" and step.id not in sliced_step_ids
-        ]
-        if analysis_steps:
-            await ctx.step_executor.execute_analysis_steps(
-                ctx,
-                cast(list[PlanStepUnion], analysis_steps),
-                validation_capability=validation_capability,
-            )
-        if plan.scheduled_steps and ctx.scheduler:
-            await ctx.step_executor.execute_schedule_steps(
-                ctx,
-                plan.scheduled_steps,
-                validation_capability=validation_capability,
-            )
-
-        if plan.immediate_steps and (ctx.extra.get("force_tool_loop") is True or _requires_structured_immediate_execution(plan.immediate_steps)):
-            result = await ctx.step_executor.execute_immediate_steps(
-                ctx,
-                plan.immediate_steps,
-                validation_capability=validation_capability,
-            )
-            reply = str(result.get("reply") or "")
-            pet_control = _coerce_pet_control(result.get("pet_control"))
-            tool_calls = _coerce_tool_calls(result.get("tool_calls"))
-            step_results = _coerce_step_results(result.get("step_results"))
-            execution_summary = _coerce_execution_summary(result.get("execution_summary"))
-
-            generation.tokens = [reply] if reply else []
-            if reply and ctx.generation_mgr:
-                ctx.generation_mgr.append_history(ctx.session_id, "assistant", reply)
-            if pet_control:
-                cast(Any, generation).pet_control = pet_control
-
-            if ws_adapter is not None:
-                if reply:
-                    await ws_adapter.send_json({
-                        "type": "token",
-                        "session_id": generation.session_id,
-                        "generation_id": generation.generation_id,
-                        "content": reply,
-                    })
-                if pet_control:
-                    await ws_adapter.send_json({
-                        "type": "pet_control",
-                        "session_id": generation.session_id,
-                        "generation_id": generation.generation_id,
-                        "pet_control": pet_control,
-                    })
-                await ws_adapter.send_json({
-                    "type": "done",
-                    "session_id": generation.session_id,
-                    "generation_id": generation.generation_id,
-                    "content": reply,
-                })
-
-            result_obj = AgentPipelineResult(
-                reply=reply,
-                pet_control=pet_control,
-                tool_calls=tool_calls,
-                action_envelope=compile_action_envelope(
-                    reply=reply,
-                    pet_control=pet_control,
-                    tool_calls=tool_calls + _execution_trace_payload(
-                        step_results,
-                        execution_summary,
-                        {
-                            "stop_on_failure": True,
-                            "tool_retry_limit": getattr(ctx.step_executor, 'max_tool_retries', 0),
-                        },
-                    ),
-                    source="agent",
-                    request_id=ctx.request_id,
-                ),
-                failure=_coerce_failure_record(result.get("failure")),
-                recovery=_coerce_recovery_record(result.get("recovery")),
-                outcome=_terminal_contract(result, step_results)[0],
-                retryable=_terminal_contract(result, step_results)[1],
-                configured_budget=_coerce_budget_record(result.get("configured_budget")),
-                consumed_usage=_coerce_budget_record(result.get("consumed_usage")),
-            )
-            return await self.finalize_result(ctx, result_obj)
-
-        if not ctx.llm_client or not ctx.generation_mgr:
-            raise RuntimeError("LLM client or generation manager not available")
-        streaming_result = None
-        if ctx.tool_registry is not None and ctx.tool_executor is not None:
-            streaming_result = await run_streaming_tool_loop(
-                ctx.llm_client,
-                ctx.messages,
-                tool_registry=ctx.tool_registry,
-                tool_executor=ctx.tool_executor,
-                generation=generation,
-                emit=(lambda content: ws_adapter.send_json({
                     "type": "token",
                     "session_id": generation.session_id,
                     "generation_id": generation.generation_id,
-                    "content": content,
-                })) if ws_adapter is not None else None,
-                ctx=ctx,
-                permission_request_cb=ctx.permission_request_cb,
-                plugin_manager=ctx.plugin_manager,
-                max_iterations=int(ctx.extra.get("streaming_tool_max_iterations", 3)),
-                max_output_tokens=ctx.max_tokens,
-                retry_budget=ctx.extra.get("retry_budget", ctx.extra.get("retry_limit", 0)),
-                tool_budget=ctx.extra.get("tool_budget"),
-                model=ctx.model,
-                allowed_tool_names=ctx.extra.get("allowed_tool_names"),
-                allowed_mcp_server_names=ctx.extra.get("allowed_mcp_server_names"),
-                preferred_tool_names=ctx.extra.get("preferred_tool_names"),
-                include_mcp_tools=ctx.mcp_enabled is not False,
-                include_web_search_tools=bool(ctx.web_search_enabled),
-            )
-        if streaming_result is not None:
-            reply = str(streaming_result.get("reply") or "")
-            generation.tokens = [reply] if reply else []
-            if reply:
-                ctx.generation_mgr.append_history(ctx.session_id, "assistant", reply)
-            result_obj = AgentPipelineResult(
-                reply=reply,
-                pet_control=None,
-                tool_calls=_coerce_tool_calls(streaming_result.get("tool_calls")),
-                action_envelope=compile_action_envelope(
-                    reply=reply,
-                    pet_control=None,
-                    tool_calls=_coerce_tool_calls(streaming_result.get("tool_calls")),
-                    source="agent",
-                    request_id=ctx.request_id or f"act_{generation.generation_id}",
-                ),
-                outcome=_terminal_contract(streaming_result)[0],
-                retryable=_terminal_contract(streaming_result)[1],
-                configured_budget=_coerce_budget_record(streaming_result.get("configured_budget")),
-                consumed_usage=_coerce_budget_record(streaming_result.get("consumed_usage")),
-            )
-            if ws_adapter is not None:
+                    "content": result_obj.reply,
+                })
+            if result_obj.pet_control is not None:
                 await ws_adapter.send_json({
-                    "type": "done",
+                    "type": "pet_control",
                     "session_id": generation.session_id,
                     "generation_id": generation.generation_id,
-                    "content": reply,
+                    "pet_control": result_obj.pet_control,
                 })
-            return await self.finalize_result(ctx, result_obj)
-
-        await ctx.llm_client.stream_chat(
-            ws_adapter,
-            generation,
-            ctx.generation_mgr,
-            ctx.messages,
-            max_output_tokens=ctx.max_tokens,
-            pet_control_context=ctx.pet_control_context,
-            model=ctx.model,
-            temperature=ctx.temperature,
-            top_p=ctx.top_p,
-            top_k=ctx.top_k,
-            min_p=ctx.min_p,
-            frequency_penalty=ctx.frequency_penalty,
-            presence_penalty=ctx.presence_penalty,
-            repetition_penalty=ctx.repetition_penalty,
-            reasoning_effort=ctx.reasoning_effort,
-            thinking=ctx.thinking_mode,
-        )
-
-        result_obj = AgentPipelineResult(
-            reply=generation.full_text,
-            pet_control=getattr(generation, 'pet_control', None),
-            tool_calls=[],
-            action_envelope=compile_action_envelope(
-                reply=generation.full_text,
-                pet_control=getattr(generation, 'pet_control', None),
-                tool_calls=[{"mode": plan.mode, "plan_steps": [step.title for step in plan.steps]}],
-                source="agent",
-                request_id=ctx.request_id or f"act_{generation.generation_id}",
-            ),
-            configured_budget=_default_loop_budget(ctx, max_iterations=1),
-            consumed_usage=_default_consumed_usage(
-                iterations=1,
-                output_tokens=len(generation.tokens),
-                stop_reason="completed",
-            ),
-        )
-        return await self.finalize_result(ctx, result_obj)
+            await ws_adapter.send_json({
+                "type": "done",
+                "session_id": generation.session_id,
+                "generation_id": generation.generation_id,
+                "content": result_obj.reply,
+                "outcome": result_obj.outcome,
+                "retryable": result_obj.retryable,
+                **(stage_result.terminal_metadata or {}),
+            })
+        return result_obj

@@ -1,4 +1,4 @@
-import type { PetControlDirective, PetLipSyncViseme, PetModelType } from './pet-control'
+import type { PetControlDirective, PetEmotionMotionTarget, PetLipSyncViseme, PetModelType } from './pet-control'
 
 export const AVATAR_COMMAND_VERSION = 1 as const
 export const AVATAR_COMMAND_DELIVERY_TTL_MS = 1000
@@ -36,6 +36,11 @@ export interface AvatarBehaviorAction {
 export interface AvatarAffectAction {
   type: 'affect'
   emotion: string
+  /** Optional resolved preset targets. Kept on the command so custom emotion IDs
+   * do not have to equal an expression name in the runtime adapter. */
+  expressionName?: string
+  /** `null` explicitly suppresses preset motion under a comfort policy. */
+  motion?: PetEmotionMotionTarget | null
   intensity?: number
   decayMs?: number
 }
@@ -178,6 +183,18 @@ export interface AvatarCapabilityValidationResult {
   message?: string
 }
 
+export interface AvatarActionFallbackResult {
+  action: AvatarAction | null
+  degraded: boolean
+  message?: string
+}
+
+export interface ReducedMotionAvatarActionResult {
+  action: AvatarAction | null
+  degraded: boolean
+  message?: string
+}
+
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, Number.isFinite(value) ? value : min))
 
@@ -186,13 +203,24 @@ const clampDuration = (value: number): number => Math.round(clamp(value, 0, 1000
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
 
+const isEmotionMotionTarget = (value: unknown): value is PetEmotionMotionTarget =>
+  isRecord(value)
+  && typeof value['group'] === 'string'
+  && value['group'].length > 0
+  && typeof value['index'] === 'number'
+  && Number.isInteger(value['index'])
+  && value['index'] >= 0
+
 const isAvatarAction = (value: unknown): value is AvatarAction => {
   if (!isRecord(value) || typeof value['type'] !== 'string') return false
   switch (value['type']) {
     case 'behavior':
       return typeof value['behavior'] === 'string'
     case 'affect':
-      return typeof value['emotion'] === 'string' && value['emotion'].length > 0
+      return typeof value['emotion'] === 'string'
+        && value['emotion'].length > 0
+        && (value['expressionName'] === undefined || (typeof value['expressionName'] === 'string' && value['expressionName'].length > 0))
+        && (value['motion'] === undefined || value['motion'] === null || isEmotionMotionTarget(value['motion']))
     case 'gaze':
       return isRecord(value['target'])
         && typeof value['target']['x'] === 'number'
@@ -335,11 +363,18 @@ export const validateAvatarCommandAgainstCapabilities = (
   const unsupportedActionIndexes = command.actions.flatMap((action, index) => {
     if (!capabilities.actions[action.type]) return [index]
     if (action.type === 'expression' && !capabilities.expressions.includes(action.name)) return [index]
-    if (action.type === 'motion' && action.group) {
-      const hasMatchingMotion = capabilities.motions.some((motion) => (
-        motion.group === action.group
-        && (action.index === undefined || motion.index === action.index)
-      ))
+    if (action.type === 'motion') {
+      const semantic = action.semantic?.trim().toLowerCase()
+      const hasMatchingMotion = capabilities.motions.some((motion) => {
+        if (action.group) {
+          return motion.group === action.group
+            && (action.index === undefined || motion.index === action.index)
+        }
+        return Boolean(semantic && (
+          motion.group.toLowerCase() === semantic
+          || motion.label?.toLowerCase() === semantic
+        ))
+      })
       if (!hasMatchingMotion) return [index]
     }
     if (action.type === 'parameterPatch') {
@@ -358,6 +393,120 @@ export const validateAvatarCommandAgainstCapabilities = (
     ...(unsupportedActionIndexes.length > 0
       ? { message: 'One or more avatar actions are unsupported by the active model' }
       : {}),
+  }
+}
+
+/**
+ * Resolve a best-effort action when a model does not expose the requested
+ * expression or motion. This keeps the companion responsive while retaining
+ * a degraded result so callers can surface the limitation.
+ */
+export const resolveAvatarActionFallback = (
+  action: AvatarAction,
+  capabilities: AvatarCapabilitySnapshot,
+): AvatarActionFallbackResult => {
+  if (action.type === 'expression' || action.type === 'affect') {
+    const requested = action.type === 'expression' ? action.name : action.emotion
+    const hasRequested = capabilities.expressions.some((name) => name.toLowerCase() === requested.toLowerCase())
+    if (hasRequested && capabilities.actions[action.type]) {
+      return { action, degraded: false }
+    }
+    const fallback = capabilities.expressions[0]
+    if (!fallback) return { action: null, degraded: true, message: `No expression fallback available for ${requested}` }
+    const fallbackAction: AvatarExpressionAction = action.type === 'expression'
+      ? { ...action, name: fallback }
+      : {
+        type: 'expression',
+        name: fallback,
+        weight: action.intensity ?? 1,
+        ...(typeof action.decayMs === 'number' ? { fadeOutMs: action.decayMs } : {}),
+      }
+    return {
+      action: fallbackAction,
+      degraded: true,
+      message: `${action.type} '${requested}' unavailable; used '${fallback}'`,
+    }
+  }
+
+  if (action.type === 'motion') {
+    const requested = action.group ?? action.semantic ?? 'motion'
+    const semantic = action.semantic?.trim().toLowerCase()
+    const matchingMotion = capabilities.motions.find((motion) => {
+      if (action.group) {
+        return motion.group === action.group
+          && (action.index === undefined || motion.index === action.index)
+      }
+      return Boolean(semantic && (
+        motion.group.toLowerCase() === semantic
+        || motion.label?.toLowerCase() === semantic
+      ))
+    })
+    if (matchingMotion && capabilities.actions.motion) {
+      return {
+        action: action.group
+          ? action
+          : { ...action, group: matchingMotion.group, index: action.index ?? matchingMotion.index },
+        degraded: false,
+      }
+    }
+    const fallback = capabilities.motions[0]
+    if (!fallback) return { action: null, degraded: true, message: `No motion fallback available for ${requested}` }
+    return {
+      action: { ...action, group: fallback.group, index: fallback.index },
+      degraded: true,
+      message: `Motion '${requested}' unavailable; used '${fallback.label ?? fallback.group}'`,
+    }
+  }
+
+  return { action, degraded: false }
+}
+
+const REDUCED_MOTION_EXPRESSION_CAP = 0.35
+
+/**
+ * Preserve conversational state and lip sync while preventing model-initiated
+ * spatial animation from bypassing the user's OS motion preference.
+ */
+export const resolveReducedMotionAvatarAction = (
+  action: AvatarAction,
+): ReducedMotionAvatarActionResult => {
+  switch (action.type) {
+    case 'motion':
+      return { action: null, degraded: true, message: 'Motion suppressed by reduced-motion preference' }
+    case 'gaze':
+      return { action: null, degraded: true, message: 'Gaze animation suppressed by reduced-motion preference' }
+    case 'parameterPatch':
+      return { action: null, degraded: true, message: 'Parameter animation suppressed by reduced-motion preference' }
+    case 'behavior':
+      if (action.behavior !== 'react' && action.behavior !== 'backchannel') {
+        return { action, degraded: false }
+      }
+      return {
+        action: { ...action, behavior: 'listen' },
+        degraded: true,
+        message: `${action.behavior} behavior softened by reduced-motion preference`,
+      }
+    case 'affect': {
+      const intensity = Math.min(action.intensity ?? 1, REDUCED_MOTION_EXPRESSION_CAP)
+      if (intensity === action.intensity && action.motion === null) return { action, degraded: false }
+      return {
+        action: { ...action, intensity, motion: null },
+        degraded: true,
+        message: 'Affect intensity softened and preset motion suppressed by reduced-motion preference',
+      }
+    }
+    case 'expression': {
+      const weight = Math.min(action.weight ?? 1, REDUCED_MOTION_EXPRESSION_CAP)
+      if (weight === action.weight) return { action, degraded: false }
+      return {
+        action: { ...action, weight },
+        degraded: true,
+        message: 'Expression intensity softened by reduced-motion preference',
+      }
+    }
+    case 'viseme':
+    case 'cancel':
+      return { action, degraded: false }
   }
 }
 

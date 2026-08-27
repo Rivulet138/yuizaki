@@ -20,6 +20,8 @@ import {
 } from "../shared/pet-control";
 import {
 	normalizeAvatarCommand,
+	resolveAvatarActionFallback,
+	resolveReducedMotionAvatarAction,
 	validateAvatarCommandAgainstCapabilities,
 	type AvatarAction,
 	type AvatarActionType,
@@ -113,6 +115,7 @@ interface PetConfig {
 	modelId: string | null;
 	modelPath: string;
 	modelManifest: AvatarManifest | null;
+	emotionPresets: import("../shared/pet-control").PetEmotionPreset[];
 	animationPaths: string[];
 	scale: number;
 	positionX: number | null;
@@ -128,6 +131,7 @@ const DEFAULT_CONFIG: PetConfig = {
 	modelId: null,
 	modelPath: "",
 	modelManifest: null,
+	emotionPresets: [],
 	animationPaths: [],
 	scale: 0.28,
 	positionX: null,
@@ -151,6 +155,9 @@ const IDLE_FPS = 30;
 const IDLE_THRESHOLD_MS = 30000;
 const MODEL_LOAD_MAX_RETRIES = 3;
 const MODEL_LOAD_RETRY_BASE_MS = 250;
+// A provider or asset loader that never settles must still reach the existing
+// visible retry/terminal path so the pet window cannot look permanently hung.
+const MODEL_LOAD_TIMEOUT_MS = 20_000;
 const PET_EVENT_DISPATCH_INTERVAL_MS: Record<DesktopPetEventName, number> = {
 	onPetClicked: 180,
 	onPetDragged: 600,
@@ -386,6 +393,33 @@ class PetRenderer {
 			return;
 		}
 		const loadGeneration = this.beginModelLoadGeneration();
+		const modelLabel = this.config.modelType === "vrm" ? "VRM" : "Live2D";
+		this.showNotice(`正在加载 ${modelLabel} 桌宠...`);
+		const reusableRuntime = this.config.modelType === "vrm"
+			? this.vrmRuntime
+			: this.live2dRuntime;
+		if (reusableRuntime) {
+			try {
+				await this.loadRuntimeWithRecovery(
+					() => reusableRuntime.loadModel({ modelPath, animationPaths: this.resolveAnimationPaths() }),
+					loadGeneration,
+					this.config.modelType,
+				);
+				if (loadGeneration !== this.modelLoadGeneration) return;
+				reusableRuntime.setCompanionIdleProfile?.(this.companionIdleProfile);
+				this.applyRuntimePerformancePolicy();
+				this.publishAvatarCapabilities();
+				this.reportState(true);
+			} catch (error) {
+				if (loadGeneration !== this.modelLoadGeneration) return;
+				this.reportModelLoadTerminal(this.config.modelType, modelPath, error);
+				this.showNotice(
+					`${modelLabel} 桌宠加载失败，已保留当前模型。${error instanceof Error ? ` ${error.message}` : ""}`,
+				);
+				this.reportState(true);
+			}
+			return;
+		}
 
 		this.avatarCapabilities = null;
 		this.invalidateLive2DVisualCalibration();
@@ -504,7 +538,7 @@ class PetRenderer {
 		while (true) {
 			if (generation !== this.modelLoadGeneration || this.destroyed) return;
 			try {
-				await load();
+				await this.loadWithTimeout(load);
 				if (generation === this.modelLoadGeneration) {
 					console.info("[PetRenderer] model load recovered", { modelType, attempt });
 				}
@@ -514,6 +548,9 @@ class PetRenderer {
 				if (attempt >= MODEL_LOAD_MAX_RETRIES) throw error;
 				attempt += 1;
 				const delayMs = MODEL_LOAD_RETRY_BASE_MS * 2 ** (attempt - 1);
+				this.showNotice(
+					`桌宠加载遇到问题，正在重试 (${attempt}/${MODEL_LOAD_MAX_RETRIES})...`,
+				);
 				console.warn("[PetRenderer] model load retry scheduled", {
 					modelType,
 					attempt,
@@ -524,6 +561,22 @@ class PetRenderer {
 				const shouldContinue = await this.waitForModelLoadRetry(delayMs, generation);
 				if (!shouldContinue) return;
 			}
+		}
+	}
+
+	private async loadWithTimeout(load: () => Promise<void>): Promise<void> {
+		let timeoutId: number | null = null;
+		try {
+			await Promise.race([
+				load(),
+				new Promise<never>((_, reject) => {
+					timeoutId = window.setTimeout(() => {
+						reject(new Error("Pet model load timed out"));
+					}, MODEL_LOAD_TIMEOUT_MS);
+				}),
+			]);
+		} finally {
+			if (timeoutId !== null) window.clearTimeout(timeoutId);
 		}
 	}
 
@@ -747,42 +800,72 @@ class PetRenderer {
 		const unsupported = new Set(capabilityResult.unsupportedActionIndexes);
 		const channels = new Set<AvatarCancelableActionType>();
 		const messages: string[] = [];
+		const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 		command.actions.forEach((action, index) => {
+			let effectiveAction = action;
 			if (unsupported.has(index)) {
+				const fallback = resolveAvatarActionFallback(action, capabilities);
 				degraded = true;
+				if (!fallback.action) {
+					if (fallback.message) messages.push(fallback.message);
+					return;
+				}
+				effectiveAction = fallback.action;
+				if (fallback.message) messages.push(fallback.message);
+			} else {
+				// Semantic motion names are resolved to concrete group/index values
+				// even when the capability check accepted the semantic alias.
+				const resolved = resolveAvatarActionFallback(action, capabilities);
+				if (resolved.action) effectiveAction = resolved.action;
+				if (resolved.degraded) {
+					degraded = true;
+					if (resolved.message) messages.push(resolved.message);
+				}
+			}
+			if (reducedMotion) {
+				const comfort = resolveReducedMotionAvatarAction(effectiveAction);
+				if (comfort.degraded) {
+					degraded = true;
+					if (comfort.message) messages.push(comfort.message);
+				}
+				if (!comfort.action) return;
+				effectiveAction = comfort.action;
+			}
+			if (effectiveAction.type === "cancel") {
+				this.cancelAvatarTarget(effectiveAction, runtime);
 				return;
 			}
-			if (action.type === "cancel") {
-				this.cancelAvatarTarget(action, runtime);
+			channels.add(effectiveAction.type);
+			if (effectiveAction.type === "behavior") {
+				this.embodiment.requestBehavior(this.mapAvatarBehavior(effectiveAction.behavior), effectiveAction.durationMs ?? 0, command.id);
 				return;
 			}
-			channels.add(action.type);
-			if (action.type === "behavior") {
-				this.embodiment.requestBehavior(this.mapAvatarBehavior(action.behavior), action.durationMs ?? 0, command.id);
-				return;
-			}
-			if (action.type === "gaze") {
-				this.embodiment.beginTransient("gaze", action.holdMs ?? 800, command.id);
-			} else if (action.type === "expression") {
-				this.embodiment.beginTransient("expression", (action.fadeInMs ?? 160) + (action.fadeOutMs ?? 1200), command.id);
-			} else if (action.type === "affect") {
-				this.embodiment.beginTransient("expression", action.decayMs ?? 1200, command.id);
-			} else if (action.type === "viseme") {
-				if (action.active === false) this.embodiment.cancelOwner(command.id, "viseme");
+			if (effectiveAction.type === "gaze") {
+				this.embodiment.beginTransient("gaze", effectiveAction.holdMs ?? 800, command.id);
+			} else if (effectiveAction.type === "expression") {
+				this.embodiment.beginTransient("expression", (effectiveAction.fadeInMs ?? 160) + (effectiveAction.fadeOutMs ?? 1200), command.id);
+			} else if (effectiveAction.type === "affect") {
+				this.embodiment.beginTransient("expression", effectiveAction.decayMs ?? 1200, command.id);
+			} else if (effectiveAction.type === "viseme") {
+				if (effectiveAction.active === false) this.embodiment.cancelOwner(command.id, "viseme");
 				else this.embodiment.beginTransient("viseme", 120, command.id);
 			}
-			const result = runtime.executeAvatarAction(action);
+			const result = runtime.executeAvatarAction(effectiveAction);
 			if (result.status !== "completed") {
 				degraded = true;
 				if (result.message) messages.push(result.message);
 			}
 		});
-		this.avatarActiveCommands.set(command.id, {
-			streamId: command.streamId,
-			priority: command.priority,
-			until: Date.now() + this.avatarCommandDuration(command),
-			channels,
-		});
+		// A command whose actions were all suppressed or cancelled must not claim
+		// an active channel; otherwise an invisible command can block later work.
+		if (channels.size > 0) {
+			this.avatarActiveCommands.set(command.id, {
+				streamId: command.streamId,
+				priority: command.priority,
+				until: Date.now() + this.avatarCommandDuration(command),
+				channels,
+			});
+		}
 		this.reportAvatarCommandResult({
 			commandId: command.id,
 			sequence: command.sequence,
@@ -1227,6 +1310,11 @@ class PetRenderer {
 		if (patch.modelManifest !== undefined) {
 			this.config.modelManifest = patch.modelManifest ?? null;
 		}
+		if (Array.isArray(patch.emotionPresets)) {
+			this.config.emotionPresets = patch.emotionPresets.filter((preset) => (
+				preset && typeof preset.id === "string" && Array.isArray(preset.expressions) && Array.isArray(preset.motions)
+			));
+		}
 		if (Array.isArray(patch.animationPaths)) {
 			this.config.animationPaths = patch.animationPaths
 				.filter((animationPath): animationPath is string => typeof animationPath === "string")
@@ -1283,6 +1371,7 @@ class PetRenderer {
 
 		this.live2dRuntime?.applyConfig({
 			modelManifest: this.config.modelManifest,
+			emotionPresets: this.config.emotionPresets,
 			lipSyncProfile: this.config.lipSyncProfile,
 		});
 		this.vrmRuntime?.applyConfig({

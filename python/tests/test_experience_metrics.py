@@ -1,5 +1,4 @@
 import pytest
-
 from modules.agent.tool_executor import ToolExecutor
 from modules.agent.tool_registry import ToolDefinition, ToolRegistry
 from modules.agent.tool_result import ToolResultEnvelope
@@ -134,6 +133,52 @@ def test_renderer_interrupt_ack_timings_are_allowlisted_and_summarized() -> None
         "p50_ms": 50.0,
         "p95_ms": 56.8,
     }
+
+
+def test_realtime_playback_events_keep_content_free_recovery_evidence() -> None:
+    store = ExperienceMetricsStore()
+
+    assert store.record_client_timing("realtime_playback_stop", 18.0) is True
+    assert store.record_client_timing("realtime_provider_cancel", 4.0) is True
+    assert store.record_client_timing(
+        "realtime_playback_recovery",
+        36.0,
+        {
+            "ok": True,
+            "recovered": True,
+            "recovery_latency_ms": 34.0,
+            "playback_underruns": 1,
+            "transcript": "must not be retained",
+        },
+    ) is True
+    assert store.record_client_timing(
+        "realtime_playback_recovery",
+        52.0,
+        {
+            "ok": False,
+            "recovered": False,
+            "recovery_latency_ms": 50.0,
+            "playback_underruns": 2,
+        },
+    ) is True
+
+    snapshot = store.snapshot()
+    assert snapshot["latency"]["realtime_playback_stop"]["latest_ms"] == 18.0
+    assert snapshot["latency"]["realtime_provider_cancel"]["latest_ms"] == 4.0
+    assert snapshot["voice_runtime"]["playback_recovery"] == {
+        "attempts": 2,
+        "successes": 1,
+        "failures": 1,
+        "success_rate": 0.5,
+        "underruns": 3,
+        "latency": {
+            "samples": 2,
+            "latest_ms": 50.0,
+            "p50_ms": 42.0,
+            "p95_ms": 49.2,
+        },
+    }
+    assert "must not be retained" not in str(snapshot)
 
 
 def test_visual_metrics_track_routing_and_latency_without_content() -> None:

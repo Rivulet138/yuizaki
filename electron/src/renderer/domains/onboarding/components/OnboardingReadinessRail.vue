@@ -22,6 +22,9 @@
           <span>{{ statusLabel(probe) }}</span>
         </div>
         <p>{{ probeMessage(probe) }}</p>
+        <small v-if="typeof probe.durationMs === 'number'" class="readiness-duration">
+          {{ t('onboarding.duration', { ms: Math.round(probe.durationMs) }) }}
+        </small>
         <div v-if="repairAction(probe) || settingsAction(probe)" class="readiness-item-actions">
           <el-button
             v-if="repairAction(probe)"
@@ -180,6 +183,7 @@ const probeMessage = (probe: OnboardingProbeResult): string => {
   font-size: 12px;
   line-height: 1.45;
 }
+.readiness-duration { display: block; margin-top: 3px; color: var(--yui-text-muted, #526176); font-size: 11px; }
 .readiness-item-actions { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .repair-button { margin: 4px 0 0; padding-inline: 0; }
 

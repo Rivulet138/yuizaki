@@ -1,7 +1,6 @@
 import { ElMessage } from 'element-plus'
 import { onMounted, onUnmounted, watch } from 'vue'
-import type { PetExpressionMixPayload } from '@/../shared/pet-control'
-import { legacyDirectiveToAvatarCommand, type AvatarAction, type AvatarCommand } from '@/../shared/avatar-command'
+import { legacyDirectiveToAvatarCommand, type AvatarCommand } from '@/../shared/avatar-command'
 import { audioCapture } from '@/audio/audio-capture'
 import { realtimeVoiceSession } from '@/audio/realtime-voice'
 import { PetSentenceEmotionScheduler, type PetTtsPlaybackStartedDetail } from '@/pet-sentence-emotion-scheduler'
@@ -128,22 +127,17 @@ export function useVoiceConversationBridge() {
       const expressionMix = payload.expression_mix ?? payload.expressionMix
       const parameterOverrides = payload.parameter_overrides ?? payload.parameterOverrides
       const durationMs = payload.duration_ms ?? payload.durationMs
-      const expressionMixPayload: PetExpressionMixPayload | null =
-        Array.isArray(expressionMix) && expressionMix.length > 0
-          ? {
-              expressions: expressionMix,
-              parameterOverrides,
-              intensity: payload.intensity,
-              durationMs,
-            }
-          : Array.isArray(parameterOverrides) && parameterOverrides.length > 0
-            ? {
-                expressions: [],
-                parameterOverrides,
-                intensity: payload.intensity,
-                durationMs,
-              }
-            : null
+      const expressionMixItems = Array.isArray(expressionMix)
+        ? expressionMix.filter((item) => Boolean(item?.expression))
+        : []
+      const normalizedExpressionMix = expressionMixItems.length > 0
+        ? expressionMixItems
+        : resolvedExpression
+          ? [{ expression: resolvedExpression, weight: payload.intensity ?? 1 }]
+          : []
+      const normalizedParameterOverrides = Array.isArray(parameterOverrides)
+        ? parameterOverrides.filter((item) => Boolean(item?.id) && Number.isFinite(item?.value))
+        : []
       const hasAvatarCommand = Boolean(payload.avatar_command && typeof payload.avatar_command === 'object')
 
       if (payload.model_id || payload.model_type) {
@@ -151,22 +145,20 @@ export function useVoiceConversationBridge() {
         await refreshPetControlContext()
       }
 
-      if (payload.emotion_id) {
-        if (!hasAvatarCommand && payload.model_type !== 'vrm') {
-          await petControl.triggerEmotion(payload.emotion_id, {
-            source: 'automation',
-          })
-        }
-      }
-
       const motionGroup = payload.motion_group ?? payload.motion?.group
       const motionIndex = payload.motion_index ?? payload.motion?.index ?? 0
-      if (hasAvatarCommand || payload.model_type === 'vrm') {
+      const hasLegacyEmbodiment = Boolean(
+        payload.emotion_id
+        || motionGroup
+        || normalizedExpressionMix.length > 0
+        || normalizedParameterOverrides.length > 0,
+      )
+      if (hasAvatarCommand || hasLegacyEmbodiment) {
         const sequence = avatarCommandSequence
         avatarCommandSequence += 1
         const directive = {
-          expressionMix: expressionMix ?? [],
-          parameterOverrides: parameterOverrides ?? [],
+          expressionMix: normalizedExpressionMix,
+          parameterOverrides: normalizedParameterOverrides,
           ...(motionGroup ? { motion: { group: motionGroup, index: motionIndex } } : {}),
           intensity: payload.intensity ?? 1,
           durationMs: durationMs ?? 1800,
@@ -182,29 +174,15 @@ export function useVoiceConversationBridge() {
                 capabilityRevision: chatStore.getPetControlContext()?.capabilityRevision,
                 interrupt: 'replace',
               })
-        if (!payload.avatar_command && payload.emotion_id && command) {
+        if (!payload.avatar_command && payload.emotion_id) {
           command.actions.unshift({
             type: 'affect',
             emotion: payload.emotion_id,
             intensity: payload.intensity ?? 1,
             decayMs: durationMs ?? 1800,
-          } satisfies AvatarAction)
+          })
         }
         await petControl.triggerAvatarCommand(command, {
-          source: 'automation',
-        })
-      } else if (motionGroup) {
-        await petControl.triggerMotion(motionGroup, motionIndex, {
-          source: 'automation',
-        })
-      }
-
-      if (expressionMixPayload && !hasAvatarCommand && payload.model_type !== 'vrm') {
-        await petControl.triggerExpressionMix(expressionMixPayload, {
-          source: 'automation',
-        })
-      } else if (resolvedExpression && !hasAvatarCommand && payload.model_type !== 'vrm') {
-        await petControl.triggerExpression(resolvedExpression, {
           source: 'automation',
         })
       }

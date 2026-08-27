@@ -30,6 +30,23 @@ const createChildProcess = () => {
   return child
 }
 
+const healthyRuntimeResponse = () => {
+  const options = spawnMock.mock.calls.at(-1)?.[2] as {
+    env?: Record<string, string | undefined>
+  } | undefined
+  const env = options?.env
+  return {
+    data: {
+      ok: true,
+      runtime: {
+        instance_id: env?.['YUIZAKI_RUNTIME_INSTANCE_ID'],
+        generation: env?.['YUIZAKI_RUNTIME_GENERATION'],
+        startup_nonce: env?.['YUIZAKI_RUNTIME_STARTUP_NONCE'],
+      },
+    },
+  }
+}
+
 describe('PythonService', () => {
   const clearBackendEnv = () => {
     delete process.env['DESKTOP_PET_BACKEND_URL']
@@ -45,6 +62,7 @@ describe('PythonService', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     clearBackendEnv()
     spawnMock.mockReset()
     axiosGetMock.mockReset()
@@ -57,7 +75,7 @@ describe('PythonService', () => {
     process.env['SERVER_PORT'] = '8123'
     vi.spyOn(fs, 'existsSync').mockReturnValue(true)
     spawnMock.mockReturnValue(createChildProcess())
-    axiosGetMock.mockResolvedValue({ data: { status: 'healthy' } })
+    axiosGetMock.mockImplementation(async () => healthyRuntimeResponse())
 
     const { PythonService } = await import('../python')
     await new PythonService('backend-token').start()
@@ -75,7 +93,7 @@ describe('PythonService', () => {
   it('passes the dedicated desktop action token only through the child environment', async () => {
     vi.spyOn(fs, 'existsSync').mockReturnValue(true)
     spawnMock.mockReturnValue(createChildProcess())
-    axiosGetMock.mockResolvedValue({ data: { status: 'healthy' } })
+    axiosGetMock.mockImplementation(async () => healthyRuntimeResponse())
 
     const { PythonService } = await import('../python')
     await new PythonService('general-token', {}, 'perception-token', 'desktop-host-token').start()
@@ -93,7 +111,7 @@ describe('PythonService', () => {
     process.env['DESKTOP_PET_BACKEND_URL'] = 'http://127.0.0.1:8234/health'
     vi.spyOn(fs, 'existsSync').mockReturnValue(true)
     spawnMock.mockReturnValue(createChildProcess())
-    axiosGetMock.mockResolvedValue({ data: { ok: true } })
+    axiosGetMock.mockImplementation(async () => healthyRuntimeResponse())
 
     const { PythonService } = await import('../python')
     await new PythonService().start()
@@ -141,9 +159,18 @@ describe('PythonService', () => {
     await expect(new PythonService().health()).resolves.toBe(false)
   })
 
+  it('does not accept status-only health for an internal runtime without an identity', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    axiosGetMock.mockResolvedValue({ data: { ok: true } })
+
+    const { PythonService } = await import('../python')
+
+    await expect(new PythonService().health()).resolves.toBe(false)
+  })
+
   it('cancels an in-flight start, rejects its stale health result, and allows retry without an orphan', async () => {
     vi.spyOn(fs, 'existsSync').mockReturnValue(true)
-    let resolveFirstHealth: ((value: { data: { ok: boolean } }) => void) | undefined
+    let resolveFirstHealth: ((value: ReturnType<typeof healthyRuntimeResponse>) => void) | undefined
     axiosGetMock.mockImplementationOnce(() => new Promise((resolve) => { resolveFirstHealth = resolve }))
     const firstChild = createChildProcess()
     firstChild.kill.mockImplementation(() => {
@@ -158,16 +185,201 @@ describe('PythonService', () => {
     const firstStart = service.start()
     await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledOnce())
     const cancellation = service.cancelStart()
-    resolveFirstHealth?.({ data: { ok: true } })
+    resolveFirstHealth?.(healthyRuntimeResponse())
 
     await expect(firstStart).rejects.toThrow(/cancelled/)
     await cancellation
     expect(firstChild.kill).toHaveBeenCalledWith('SIGTERM')
     expect(service.getStatus().state).toBe('cancelled')
 
-    axiosGetMock.mockResolvedValue({ data: { ok: true } })
+    axiosGetMock.mockImplementation(async () => healthyRuntimeResponse())
     await expect(service.start()).resolves.toBeUndefined()
     expect(spawnMock).toHaveBeenCalledTimes(2)
     expect(service.getStatus().state).toBe('running')
+  })
+
+  it('restarts an unexpectedly exited process with bounded exponential backoff', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    const firstChild = createChildProcess()
+    spawnMock
+      .mockReturnValueOnce(firstChild)
+      .mockImplementation(() => {
+        throw new Error('spawn failed')
+      })
+    axiosGetMock.mockImplementation(async () => healthyRuntimeResponse())
+
+    const { PythonService } = await import('../python')
+    const service = new PythonService()
+    await service.start()
+    firstChild.emit('exit', 1, null)
+
+    expect(service.getStatus().state).toBe('failed')
+    await expect(service.health()).resolves.toBe(false)
+    await vi.advanceTimersByTimeAsync(999)
+    expect(spawnMock).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(spawnMock).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1999)
+    expect(spawnMock).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(spawnMock).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(3999)
+    expect(spawnMock).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(spawnMock).toHaveBeenCalledTimes(4)
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(spawnMock).toHaveBeenCalledTimes(4)
+    expect(service.getStatus()).toMatchObject({ state: 'failed', error: 'spawn failed' })
+  })
+
+  it('requires the current spawned runtime identity before reporting running', async () => {
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    const child = createChildProcess()
+    spawnMock.mockReturnValue(child)
+    axiosGetMock.mockResolvedValue({
+      data: {
+        ok: true,
+        runtime: {
+          instance_id: 'stale-instance',
+          generation: '0',
+          startup_nonce: 'stale-nonce',
+        },
+      },
+    })
+
+    const { PythonService } = await import('../python')
+    const service = new PythonService('', {}, '', '', {
+      startupMaxAttempts: 2,
+      startupRetryDelayMs: 1,
+    })
+    const starting = service.start()
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledOnce())
+    child.emit('exit', 1, null)
+
+    await expect(starting).rejects.toThrow(/exited before becoming healthy/)
+    expect(service.getStatus()).toMatchObject({ state: 'failed', instanceId: null })
+  })
+
+  it('rejects a process error during startup and keeps recovery bounded', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    const child = createChildProcess()
+    spawnMock.mockReturnValue(child)
+    axiosGetMock.mockImplementation(() => new Promise(() => undefined))
+
+    const { PythonService } = await import('../python')
+    const service = new PythonService('', {}, '', '', {
+      maxAttempts: 1,
+      baseDelayMs: 10,
+    })
+    const starting = service.start()
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledOnce())
+    child.emit('error', new Error('spawn stream failed'))
+
+    await expect(starting).rejects.toThrow(/process error.*spawn stream failed/i)
+    expect(service.getStatus()).toMatchObject({ state: 'failed', instanceId: null })
+    await vi.advanceTimersByTimeAsync(10)
+    expect(spawnMock).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(spawnMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('resets recovery backoff after a successful health probe', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    const firstChild = createChildProcess()
+    const recoveredChild = createChildProcess()
+    const secondRecoveredChild = createChildProcess()
+    spawnMock
+      .mockReturnValueOnce(firstChild)
+      .mockReturnValueOnce(recoveredChild)
+      .mockReturnValueOnce(secondRecoveredChild)
+    axiosGetMock.mockImplementation(async () => healthyRuntimeResponse())
+
+    const { PythonService } = await import('../python')
+    const service = new PythonService()
+    await service.start()
+
+    firstChild.emit('exit', 1, null)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(service.getStatus().state).toBe('running')
+    const firstNonce = (spawnMock.mock.calls[0]?.[2] as { env?: Record<string, string> })
+      .env?.['YUIZAKI_RUNTIME_STARTUP_NONCE']
+    const secondNonce = (spawnMock.mock.calls[1]?.[2] as { env?: Record<string, string> })
+      .env?.['YUIZAKI_RUNTIME_STARTUP_NONCE']
+    expect(firstNonce).toMatch(/^[a-f0-9]{48}$/)
+    expect(secondNonce).toMatch(/^[a-f0-9]{48}$/)
+    expect(secondNonce).not.toBe(firstNonce)
+    expect(axiosGetMock).toHaveBeenCalledTimes(2)
+
+    recoveredChild.emit('exit', 1, null)
+    await vi.advanceTimersByTimeAsync(999)
+    expect(spawnMock).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(spawnMock).toHaveBeenCalledTimes(3)
+    expect(service.getStatus().state).toBe('running')
+  })
+
+  it('never restarts a process terminated by an explicit stop', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    const child = createChildProcess()
+    child.kill.mockImplementation(() => {
+      queueMicrotask(() => child.emit('exit', 0, null))
+      return true
+    })
+    spawnMock.mockReturnValue(child)
+    axiosGetMock.mockImplementation(async () => healthyRuntimeResponse())
+
+    const { PythonService } = await import('../python')
+    const service = new PythonService()
+    await service.start()
+    await service.stop()
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(spawnMock).toHaveBeenCalledTimes(1)
+    expect(service.getStatus().state).toBe('idle')
+    await expect(service.health()).resolves.toBe(false)
+  })
+
+  it('clears a pending unexpected-exit recovery when start is cancelled', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    const child = createChildProcess()
+    spawnMock.mockReturnValue(child)
+    axiosGetMock.mockImplementation(async () => healthyRuntimeResponse())
+
+    const { PythonService } = await import('../python')
+    const service = new PythonService()
+    await service.start()
+    child.emit('exit', 1, null)
+    await service.cancelStart()
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(spawnMock).toHaveBeenCalledTimes(1)
+    expect(service.getStatus().state).toBe('cancelled')
+  })
+
+  it('fails promptly when the child exits while startup health is pending', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    const child = createChildProcess()
+    spawnMock.mockReturnValue(child)
+    axiosGetMock.mockImplementation(() => new Promise(() => undefined))
+
+    const { PythonService } = await import('../python')
+    const service = new PythonService()
+    const start = service.start()
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledOnce())
+    child.emit('exit', 1, null)
+
+    await expect(start).rejects.toThrow(/exited before becoming healthy/)
+    expect(service.getStatus().state).toBe('failed')
+    await vi.advanceTimersByTimeAsync(999)
+    expect(spawnMock).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(spawnMock).toHaveBeenCalledTimes(2)
   })
 })

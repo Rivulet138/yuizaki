@@ -1,6 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PetSentenceEmotionCue } from '../../shared/pet-control'
+
+const petControlMocks = vi.hoisted(() => ({
+  triggerAvatarCommand: vi.fn(() => Promise.resolve({ status: 'accepted' })),
+  triggerEmotion: vi.fn(),
+  triggerMotion: vi.fn(),
+  triggerExpression: vi.fn(),
+  triggerExpressionMix: vi.fn(),
+}))
+
+vi.mock('../utils/petControl', () => ({ petControl: petControlMocks }))
+
 import {
+  applySentenceEmotionCue,
   normalizeSentenceEmotionCues,
   PetSentenceEmotionScheduler,
   resolveSentenceEmotionCueSchedule,
@@ -10,6 +22,7 @@ import {
 describe('pet sentence emotion scheduler', () => {
   afterEach(() => {
     vi.useRealTimers()
+    Object.values(petControlMocks).forEach((mock) => mock.mockClear())
   })
 
   it('normalizes snake_case sentence emotion cues and drops no-op cues', () => {
@@ -96,5 +109,29 @@ describe('pet sentence emotion scheduler', () => {
     callbacks.forEach((callback) => callback())
 
     expect(applied).toEqual([{ emotionId: 'current' }])
+  })
+
+  it('routes automation cues through AvatarCommand instead of legacy direct APIs', async () => {
+    await applySentenceEmotionCue({
+      emotionId: 'happy',
+      motionGroup: 'TapBody',
+      motionIndex: 2,
+      expressionName: 'smile',
+      intensity: 0.7,
+      durationMs: 900,
+    })
+
+    expect(petControlMocks.triggerAvatarCommand).toHaveBeenCalledOnce()
+    const [command, options] = petControlMocks.triggerAvatarCommand.mock.calls[0]
+    expect(options).toEqual({ source: 'automation' })
+    expect(command.actions).toEqual([
+      { type: 'affect', emotion: 'happy', intensity: 0.7, decayMs: 900 },
+      { type: 'expression', name: 'smile', weight: 0.7, fadeOutMs: 900 },
+      { type: 'motion', group: 'TapBody', index: 2, intensity: 0.7 },
+    ])
+    expect(petControlMocks.triggerEmotion).not.toHaveBeenCalled()
+    expect(petControlMocks.triggerMotion).not.toHaveBeenCalled()
+    expect(petControlMocks.triggerExpression).not.toHaveBeenCalled()
+    expect(petControlMocks.triggerExpressionMix).not.toHaveBeenCalled()
   })
 })

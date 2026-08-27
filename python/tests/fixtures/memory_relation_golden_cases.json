@@ -1,0 +1,30 @@
+[
+  {
+    "id": "relation-expansion-evidence",
+    "query": "What event supports the launch answer?",
+    "expected_ids": ["launch-answer", "launch-event"],
+    "required_evidence_ids": ["launch-event"],
+    "lifecycle_forbidden_ids": ["launch-event-forgotten"],
+    "scope_forbidden_ids": ["launch-event-other-workspace"]
+  },
+  {
+    "id": "relation-current-fact",
+    "query": "What is the current deployment region?",
+    "expected_ids": ["region-current"],
+    "lifecycle_forbidden_ids": ["region-old"],
+    "consistency_forbidden_ids": ["region-old"]
+  },
+  {
+    "id": "relation-expired-fact",
+    "query": "Which temporary access code is still valid?",
+    "expected_ids": [],
+    "lifecycle_forbidden_ids": ["access-expired"],
+    "abstention_expected": true
+  },
+  {
+    "id": "relation-no-evidence",
+    "query": "What is the user's undisclosed passport number?",
+    "expected_ids": [],
+    "abstention_expected": true
+  }
+]
