@@ -1,4 +1,4 @@
-# Yuizaki / 唯知崎
+# Yuizaki / 结崎
 
 Yuizaki is a local-first AI desktop companion for Windows and Linux. It combines a transparent Live2D or VRM pet with text chat, optional voice and vision, local memory, tools, MCP services, schedules, and visible Agent activity.
 
