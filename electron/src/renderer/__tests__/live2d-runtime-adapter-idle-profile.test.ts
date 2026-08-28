@@ -10,7 +10,11 @@ class FakeTicker {
 }
 
 class FakeContainer {
-  addChild = vi.fn()
+  constructor(private readonly onAddChild?: (child: Live2DSprite) => void) {}
+
+  addChild = vi.fn((child: Live2DSprite) => {
+    this.onAddChild?.(child)
+  })
   removeChild = vi.fn()
 }
 
@@ -292,6 +296,133 @@ describe('Live2DRuntimeAdapter companion idle profile replay', () => {
     expect(vi.mocked(destroyCurrentModel)).not.toHaveBeenCalledWith(expect.anything(), previousModel)
   })
 
+  it('attaches a candidate to the viewport before waiting for model readiness', async () => {
+    let currentModel: Live2DSprite | null = null
+    let resolveReady: (() => void) | undefined
+    const ready = new Promise<void>((resolve) => {
+      resolveReady = resolve
+    })
+    const candidate = {
+      ...fakeModel,
+      anchor: { set: vi.fn() },
+      ready,
+    } as unknown as Live2DSprite
+    const viewport = new FakeContainer((child) => {
+      expect(child).toBe(candidate)
+      expect(currentModel).toBeNull()
+      resolveReady?.()
+    })
+    vi.mocked(createLive2DModel).mockReturnValueOnce(candidate)
+    const adapter = new Live2DRuntimeAdapter({
+      app: { ticker: new FakeTicker() } as unknown as PIXI.Application,
+      getModel: () => currentModel,
+      setModel: (model) => { currentModel = model },
+      getViewport: () => viewport as unknown as PIXI.Container,
+      ensureViewport: () => viewport as unknown as PIXI.Container,
+      config: {
+        modelId: 'model', modelType: 'live2d', modelPath: './candidate.model3.json',
+        scale: 0.28, positionX: null, positionY: null, placement: 'bottom-right',
+      },
+      showNotice: vi.fn(), hideNotice: vi.fn(), installEasyLive2DInteractivity: vi.fn(),
+      setupModelInteractivity: vi.fn(), applyModelTransform: vi.fn(), reportState: vi.fn(),
+      syncMouseCaptureFromLastPoint: vi.fn(), markActivity: vi.fn(),
+    })
+
+    const loadPromise = adapter.loadModel({ modelPath: './candidate.model3.json' })
+
+    await vi.waitFor(() => {
+      expect(viewport.addChild).toHaveBeenCalledWith(candidate)
+    }, { timeout: 250 })
+    await loadPromise
+
+    expect(currentModel).toBe(candidate)
+  })
+
+  it('disposes an unresolved candidate before starting a replacement load', async () => {
+    const viewport = new FakeContainer()
+    let currentModel: Live2DSprite | null = null
+    let resolveFirstReady: (() => void) | undefined
+    const firstCandidate = {
+      ...fakeModel,
+      anchor: { set: vi.fn() },
+      ready: new Promise<void>((resolve) => {
+        resolveFirstReady = resolve
+      }),
+    } as unknown as Live2DSprite
+    const secondCandidate = {
+      ...fakeModel,
+      anchor: { set: vi.fn() },
+      ready: Promise.resolve(),
+    } as unknown as Live2DSprite
+    vi.mocked(createLive2DModel)
+      .mockReturnValueOnce(firstCandidate)
+      .mockReturnValueOnce(secondCandidate)
+    const adapter = new Live2DRuntimeAdapter({
+      app: { ticker: new FakeTicker() } as unknown as PIXI.Application,
+      getModel: () => currentModel,
+      setModel: (model) => { currentModel = model },
+      getViewport: () => viewport as unknown as PIXI.Container,
+      ensureViewport: () => viewport as unknown as PIXI.Container,
+      config: {
+        modelId: 'model', modelType: 'live2d', modelPath: './first.model3.json',
+        scale: 0.28, positionX: null, positionY: null, placement: 'bottom-right',
+      },
+      showNotice: vi.fn(), hideNotice: vi.fn(), installEasyLive2DInteractivity: vi.fn(),
+      setupModelInteractivity: vi.fn(), applyModelTransform: vi.fn(), reportState: vi.fn(),
+      syncMouseCaptureFromLastPoint: vi.fn(), markActivity: vi.fn(),
+    })
+
+    const firstLoad = adapter.loadModel({ modelPath: './first.model3.json' })
+    await vi.waitFor(() => expect(viewport.addChild).toHaveBeenCalledWith(firstCandidate), { timeout: 250 })
+
+    await adapter.loadModel({ modelPath: './second.model3.json' })
+
+    expect(currentModel).toBe(secondCandidate)
+    expect(viewport.removeChild).toHaveBeenCalledWith(firstCandidate)
+    expect(vi.mocked(destroyCurrentModel)).toHaveBeenCalledWith(expect.anything(), firstCandidate)
+
+    resolveFirstReady?.()
+    await firstLoad
+  })
+
+  it('disposes an unresolved candidate when the adapter is destroyed', async () => {
+    const viewport = new FakeContainer()
+    let currentModel: Live2DSprite | null = null
+    let resolveReady: (() => void) | undefined
+    const candidate = {
+      ...fakeModel,
+      anchor: { set: vi.fn() },
+      ready: new Promise<void>((resolve) => {
+        resolveReady = resolve
+      }),
+    } as unknown as Live2DSprite
+    vi.mocked(createLive2DModel).mockReturnValueOnce(candidate)
+    const adapter = new Live2DRuntimeAdapter({
+      app: { ticker: new FakeTicker() } as unknown as PIXI.Application,
+      getModel: () => currentModel,
+      setModel: (model) => { currentModel = model },
+      getViewport: () => viewport as unknown as PIXI.Container,
+      ensureViewport: () => viewport as unknown as PIXI.Container,
+      config: {
+        modelId: 'model', modelType: 'live2d', modelPath: './pending.model3.json',
+        scale: 0.28, positionX: null, positionY: null, placement: 'bottom-right',
+      },
+      showNotice: vi.fn(), hideNotice: vi.fn(), installEasyLive2DInteractivity: vi.fn(),
+      setupModelInteractivity: vi.fn(), applyModelTransform: vi.fn(), reportState: vi.fn(),
+      syncMouseCaptureFromLastPoint: vi.fn(), markActivity: vi.fn(),
+    })
+
+    const load = adapter.loadModel({ modelPath: './pending.model3.json' })
+    await vi.waitFor(() => expect(viewport.addChild).toHaveBeenCalledWith(candidate), { timeout: 250 })
+
+    adapter.destroy()
+
+    expect(viewport.removeChild).toHaveBeenCalledWith(candidate)
+    expect(vi.mocked(destroyCurrentModel)).toHaveBeenCalledWith(expect.anything(), candidate)
+    resolveReady?.()
+    await load
+  })
+
   it('disposes a candidate whose ready promise rejects without touching the previous model', async () => {
     const viewport = new FakeContainer()
     let currentModel: Live2DSprite | null = null
@@ -319,6 +450,8 @@ describe('Live2DRuntimeAdapter companion idle profile replay', () => {
     await expect(adapter.loadModel({ modelPath: './invalid.model3.json' })).rejects.toThrow('invalid model')
 
     expect(currentModel).toBe(previousModel)
+    expect(viewport.addChild).toHaveBeenCalledWith(candidate)
+    expect(viewport.removeChild).toHaveBeenCalledWith(candidate)
     expect(vi.mocked(destroyCurrentModel)).toHaveBeenCalledWith(expect.anything(), candidate)
     expect(vi.mocked(destroyCurrentModel)).not.toHaveBeenCalledWith(expect.anything(), previousModel)
     expect(viewport.removeChild).not.toHaveBeenCalledWith(previousModel)

@@ -108,6 +108,7 @@ interface Live2DHostContext {
 export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
   readonly modelType = 'live2d' as const
   private loadGeneration = 0
+  private pendingModelDisposer: (() => void) | null = null
   private expressionMixTicker: ((ticker: PIXI.Ticker) => void) | null = null
   private activeMixState:
     | {
@@ -310,26 +311,31 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
     }
 
     const generation = ++this.loadGeneration
+    this.disposePendingModelLoad()
     const modelPath = config.modelPath ?? this.host.config.modelPath
     let model: Live2DSprite | null = null
+    let viewport: PIXI.Container | null = null
+    let modelAttached = false
+    const disposeCandidate = () => {
+      if (this.pendingModelDisposer === disposeCandidate) {
+        this.pendingModelDisposer = null
+      }
+      if (!model) return
+      if (modelAttached && viewport) {
+        viewport.removeChild(model)
+        modelAttached = false
+      }
+      destroyCurrentModel(this.host.app, model)
+      model = null
+    }
     try {
       await ensureCubismCore()
       if (generation !== this.loadGeneration) return
       Live2DConfig.MotionGroupIdle = 'Idle'
       Live2DConfig.MouseFollow = false
       model = createLive2DModel(modelPath)
-      const ready = (model as Live2DSprite & { ready?: Promise<void> }).ready
-      if (ready && typeof ready.then === 'function') {
-        await ready
-      }
-      if (!model) {
-        this.host.showNotice('Live2D model is empty.')
-        return
-      }
-
       model.anchor.set(0.5, 1)
       model.label = this.host.config.modelId ?? model.label
-      this.host.config.modelPath = modelPath
 
       if ('setSize' in model && typeof model.setSize === 'function') {
         model.setSize({ height: window.innerHeight * 0.78, width: window.innerWidth * 0.32 })
@@ -342,28 +348,41 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
       if ('interactiveChildren' in model) {
         ;(model as PIXI.Container & { interactiveChildren?: boolean }).interactiveChildren = false
       }
-    } catch (error) {
-      if (model) {
-        destroyCurrentModel(this.host.app, model)
+
+      // easy-live2d resolves ready from its render path, so the candidate must be
+      // attached before readiness can complete.
+      viewport = this.host.ensureViewport()
+      viewport.addChild(model)
+      modelAttached = true
+      this.pendingModelDisposer = disposeCandidate
+      const ready = (model as Live2DSprite & { ready?: Promise<void> }).ready
+      if (ready && typeof ready.then === 'function') {
+        await ready
       }
-      this.host.showNotice('Live2D model failed to load.')
+    } catch (error) {
+      disposeCandidate()
+      if (generation === this.loadGeneration) {
+        this.host.showNotice('Live2D model failed to load.')
+      }
       throw error instanceof Error ? error : new Error('Live2D model failed to load')
+    }
+    if (generation !== this.loadGeneration) {
+      disposeCandidate()
+      return
     }
     if (!model) {
       this.host.showNotice('Live2D model is empty.')
       throw new Error('Live2D model is empty')
     }
-    if (generation !== this.loadGeneration) {
-      destroyCurrentModel(this.host.app, model)
-      return
-    }
 
-    const viewport = this.host.ensureViewport()
+    if (this.pendingModelDisposer === disposeCandidate) {
+      this.pendingModelDisposer = null
+    }
     const previousModel = this.host.getModel()
+    this.host.config.modelPath = modelPath
     this.host.setModel(model)
     this.host.installEasyLive2DInteractivity()
     this.host.setupModelInteractivity()
-    viewport.addChild(model)
     if (previousModel) {
       viewport.removeChild(previousModel)
       destroyCurrentModel(this.host.app, previousModel)
@@ -376,6 +395,11 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
     this.host.reportState(true)
     this.host.syncMouseCaptureFromLastPoint('model-loaded', true)
     this.startBehaviorControllers()
+  }
+
+  cancelPendingLoad(): void {
+    this.loadGeneration += 1
+    this.disposePendingModelLoad()
   }
 
   applyConfig(config: PetControlConfigPatch): void {
@@ -728,7 +752,7 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
 
   destroy(): void {
     // Invalidate in-flight model creation before disposing the current instance.
-    this.loadGeneration += 1
+    this.cancelPendingLoad()
     this.stopBehaviorControllers()
     this.activeMixState = null
     this.stopExpressionMixLoop()
@@ -742,6 +766,12 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
       viewport.removeChild(currentModel)
     }
     this.host.setModel(destroyCurrentModel(this.host.app, currentModel))
+  }
+
+  private disposePendingModelLoad(): void {
+    const dispose = this.pendingModelDisposer
+    this.pendingModelDisposer = null
+    dispose?.()
   }
 
   private startBehaviorControllers(): void {

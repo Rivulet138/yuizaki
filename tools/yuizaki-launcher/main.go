@@ -431,6 +431,11 @@ func (r *commandRunner) Run(ctx context.Context) error {
 		if err := r.ensurePetVisible(ctx); err != nil {
 			cfg.logger.Log("launcher", "pet restore warning: "+err.Error())
 		}
+		if cfg.smoke {
+			if err := r.waitPetReady(ctx, 30*time.Second); err != nil {
+				return err
+			}
+		}
 	}
 	if !cfg.noOpen {
 		r.openPanel()
@@ -920,6 +925,48 @@ func (r *commandRunner) smoke(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (r *commandRunner) waitPetReady(ctx context.Context, timeout time.Duration) error {
+	url := r.cfg.controlURL + "/api/pet/state"
+	headers := r.authHeaders()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if r.petReady(ctx, url, headers, 5*time.Second) {
+			r.cfg.logger.Log("smoke", "desktop pet renderer is ready")
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(1 * time.Second):
+		}
+	}
+	return fmt.Errorf("desktop pet renderer did not become ready within %s", timeout)
+}
+
+func (r *commandRunner) petReady(ctx context.Context, url string, headers map[string]string, timeout time.Duration) bool {
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+	if err != nil {
+		return false
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return false
+	}
+	var state struct {
+		Ready bool `json:"ready"`
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&state) == nil && state.Ready
 }
 
 func (r *commandRunner) ensurePetVisible(ctx context.Context) error {

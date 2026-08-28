@@ -404,6 +404,7 @@ class PetRenderer {
 					() => reusableRuntime.loadModel({ modelPath, animationPaths: this.resolveAnimationPaths() }),
 					loadGeneration,
 					this.config.modelType,
+					() => reusableRuntime.cancelPendingLoad?.(),
 				);
 				if (loadGeneration !== this.modelLoadGeneration) return;
 				reusableRuntime.setCompanionIdleProfile?.(this.companionIdleProfile);
@@ -510,6 +511,7 @@ class PetRenderer {
 				() => runtime.loadModel({ modelPath, animationPaths: this.resolveAnimationPaths() }),
 				loadGeneration,
 				"live2d",
+				() => runtime.cancelPendingLoad(),
 			);
 			if (loadGeneration !== this.modelLoadGeneration) {
 				return;
@@ -533,6 +535,7 @@ class PetRenderer {
 		load: () => Promise<void>,
 		generation: number,
 		modelType: "live2d" | "vrm",
+		cancelPendingLoad?: () => void,
 	): Promise<void> {
 		let attempt = 0;
 		while (true) {
@@ -545,6 +548,7 @@ class PetRenderer {
 				return;
 			} catch (error) {
 				if (generation !== this.modelLoadGeneration || this.destroyed) return;
+				cancelPendingLoad?.();
 				if (attempt >= MODEL_LOAD_MAX_RETRIES) throw error;
 				attempt += 1;
 				const delayMs = MODEL_LOAD_RETRY_BASE_MS * 2 ** (attempt - 1);

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,6 +97,37 @@ func TestMCPIsEnabledByDefault(t *testing.T) {
 	}
 	if mcpEnabled(map[string]string{"YUIZAKI_WITH_MCP": "0"}) {
 		t.Fatal("YUIZAKI_WITH_MCP=0 must disable MCP startup")
+	}
+}
+
+func TestPetReadyRequiresSuccessfulReadyState(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		statusCode int
+		body       string
+		want       bool
+	}{
+		{name: "ready", statusCode: http.StatusOK, body: `{"ready":true}`, want: true},
+		{name: "not ready", statusCode: http.StatusOK, body: `{"ready":false}`},
+		{name: "invalid response", statusCode: http.StatusOK, body: `not-json`},
+		{name: "request failed", statusCode: http.StatusServiceUnavailable, body: `{"ready":true}`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(test.statusCode)
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+
+			runner := &commandRunner{}
+			if got := runner.petReady(context.Background(), server.URL, nil, time.Second); got != test.want {
+				t.Fatalf("petReady() = %v, want %v", got, test.want)
+			}
+		})
 	}
 }
 

@@ -14,7 +14,12 @@ type TestablePetRenderer = {
   setExternalLipSync: (payload: { level: number; active: boolean; source: 'realtime' | 'tts-pcm' }) => void
   beginModelLoadGeneration: () => number
   waitForModelLoadRetry: (delayMs: number, generation: number) => Promise<boolean>
-  loadRuntimeWithRecovery: (load: () => Promise<void>, generation: number, modelType: 'live2d' | 'vrm') => Promise<void>
+  loadRuntimeWithRecovery: (
+    load: () => Promise<void>,
+    generation: number,
+    modelType: 'live2d' | 'vrm',
+    cancelPendingLoad?: () => void,
+  ) => Promise<void>
   showNotice: (text: string) => void
   destroy: () => void
 }
@@ -236,12 +241,14 @@ describe('PetRenderer AvatarCommand scheduling', () => {
       if (attempts === 1) return new Promise<void>(() => undefined)
       return Promise.resolve()
     })
+    const cancelPendingLoad = vi.fn()
 
-    const recovery = renderer.loadRuntimeWithRecovery(load, generation, 'vrm')
+    const recovery = renderer.loadRuntimeWithRecovery(load, generation, 'vrm', cancelPendingLoad)
     for (let index = 0; index < 6; index += 1) await Promise.resolve()
     vi.advanceTimersByTime(20_000)
     for (let index = 0; index < 6; index += 1) await Promise.resolve()
     expect(showNotice).toHaveBeenCalledWith(expect.stringContaining('正在重试 (1/3)'))
+    expect(cancelPendingLoad).toHaveBeenCalledTimes(1)
 
     vi.advanceTimersByTime(250)
     await recovery

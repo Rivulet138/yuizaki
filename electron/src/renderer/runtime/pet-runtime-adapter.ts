@@ -13,6 +13,7 @@ export interface PetRuntimeRenderPolicy {
 export interface PetRuntimeAdapter {
   readonly modelType: 'live2d' | 'vrm'
   loadModel(config: PetControlConfigPatch): Promise<void>
+  cancelPendingLoad?(): void
   applyConfig(config: PetControlConfigPatch): void
   getCapabilities(): AvatarCapabilitySnapshot
   executeAvatarAction(action: AvatarAction): AvatarActionExecutionResult
