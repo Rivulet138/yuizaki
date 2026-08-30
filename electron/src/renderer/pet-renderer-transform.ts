@@ -37,8 +37,11 @@ export function computeBaseModelScale(options: {
     const localBounds = options.model.getLocalBounds()
     const localWidth = Math.max(localBounds.width, 220)
     const localHeight = Math.max(localBounds.height, 360)
-    const widthScale = (options.viewportWidth * 0.28) / localWidth
-    const heightScale = (options.viewportHeight * 0.62) / localHeight
+    // Keep the companion visually present on high-resolution desktop windows.
+    // The previous fit target made the default model occupy too little of the
+    // available work area, especially for tall Live2D assets.
+    const widthScale = (options.viewportWidth * 0.36) / localWidth
+    const heightScale = (options.viewportHeight * 0.78) / localHeight
     const nextBaseScale = Math.min(MAX_BASE_MODEL_SCALE, widthScale, heightScale)
     return { baseScale: nextBaseScale, nextCache: nextBaseScale }
   } catch {
@@ -52,6 +55,7 @@ export function computeModelTransform(options: {
   minScale: number
   maxScale: number
   baseScale: number
+  modelCalibrationScale?: number
   viewportWidth: number
   viewportHeight: number
   positionX?: number | null
@@ -68,7 +72,10 @@ export function computeModelTransform(options: {
   const minScaleFactor = options.minScale / safeDefaultScale
   const maxScaleFactor = options.maxScale / safeDefaultScale
   const scaleFactor = clamp(clampedConfigScale / safeDefaultScale, minScaleFactor, maxScaleFactor)
-  const nextScale = options.baseScale * scaleFactor
+  const calibrationScale = Number.isFinite(options.modelCalibrationScale) && (options.modelCalibrationScale ?? 0) > 0
+    ? Math.min(16, Math.max(0.08, options.modelCalibrationScale ?? 1))
+    : 1
+  const nextScale = options.baseScale * calibrationScale * scaleFactor
   const debugWidth = options.viewportWidth * INTERACTION_WIDTH_RATIO
   const debugHeight = options.viewportHeight * INTERACTION_HEIGHT_RATIO
   const anchor = resolveModelAnchor({

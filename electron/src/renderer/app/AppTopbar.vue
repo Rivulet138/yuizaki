@@ -22,10 +22,6 @@
         <el-option v-for="option in languageOptions" :key="option.value" :label="option.label" :value="option.value" />
       </el-select>
 
-      <button class="icon-action" type="button" :title="adminMode ? t('topbar.admin.hide') : t('topbar.admin.show')" :aria-label="adminMode ? t('topbar.admin.hide') : t('topbar.admin.show')" @click="$emit('toggle-admin-mode')">
-        <el-icon><Operation /></el-icon>
-      </button>
-
       <button class="icon-action" type="button" :title="theme === 'dark' ? t('shell.theme.light') : t('shell.theme.dark')" :aria-label="theme === 'dark' ? t('shell.theme.light') : t('shell.theme.dark')" @click="$emit('toggle-theme')">
         <el-icon>
           <Sunny v-if="theme === 'dark'" />
@@ -59,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { Bell, Close, FullScreen, Minus, Moon, Operation, Sunny } from '@element-plus/icons-vue'
+import { Bell, Close, FullScreen, Minus, Moon, Sunny } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 import { useI18n } from '@/i18n'
 
@@ -76,14 +72,12 @@ defineProps<{
   companions: Array<{ id: string; name: string }>
   isElectronPanel?: boolean
   notificationCount?: number
-  adminMode?: boolean
   theme?: 'light' | 'dark'
   companionState: string
   companionStateLabel: string
 }>()
 
 const emit = defineEmits<{
-  (e: 'toggle-admin-mode'): void
   (e: 'change-locale', value: string): void
   (e: 'change-companion', value: string): void
   (e: 'minimize'): void

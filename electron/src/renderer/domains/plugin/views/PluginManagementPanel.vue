@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="桌宠插件" subtitle="查看插件权限、启停状态和执行结果" tone="companion">
+  <PanelShell title="桌宠插件" tone="companion">
     <div class="plugin-console">
 <section class="plugin-toolbar" aria-label="插件操作">
         <div class="toolbar-summary">
@@ -55,7 +55,7 @@
             :error="pluginsRequest.error"
             :empty="pluginRows.length === 0"
             empty-text="暂无技能"
-            @retry="loadPlugins"
+            :show-retry="false"
           >
             <div v-if="filteredPluginRows.length" class="plugin-grid">
               <button

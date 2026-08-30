@@ -12,7 +12,6 @@ export interface PetWindowRuntimeOptions {
   apiOrigin: string
   controlToken: string
   tab?: string
-  e2eToken?: string
 }
 
 interface PendingRendererMessage {
@@ -47,7 +46,6 @@ export class PetWindow {
         nodeIntegration: false,
         contextIsolation: true,
         sandbox: true,
-        ...(runtime?.e2eToken ? { additionalArguments: [`--yuizaki-e2e-token=${runtime.e2eToken}`] } : {}),
       },
       transparent: true,
       frame: false,

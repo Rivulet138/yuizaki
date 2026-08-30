@@ -1,5 +1,5 @@
 <template>
-  <el-popover placement="top-end" :width="380" trigger="click" popper-class="chat-runtime-popper">
+  <el-popover placement="top-end" :width="380" trigger="click" popper-class="chat-runtime-popper" @show="emit('refresh-audio-devices')">
     <template #reference>
       <button class="runtime-settings-button" type="button" aria-label="对话运行设置" title="对话运行设置">
         <el-icon><Operation /></el-icon>
@@ -29,6 +29,31 @@
           size="small"
           @update:model-value="emitField('voice_mode', $event)"
         />
+      </label>
+
+      <label class="runtime-field">
+        <span>抢话灵敏度</span>
+        <el-segmented
+          :model-value="modelValue.vad_eagerness"
+          :options="vadEagernessOptions"
+          size="small"
+          @update:model-value="emitField('vad_eagerness', $event)"
+        />
+      </label>
+
+      <label class="runtime-field">
+        <span>麦克风</span>
+        <el-select
+          :model-value="modelValue.audio_input_device_id"
+          size="small"
+          clearable
+          :loading="audioDevicesLoading"
+          placeholder="系统默认"
+          @update:model-value="emitField('audio_input_device_id', $event)"
+        >
+          <el-option label="系统默认" value="" />
+          <el-option v-for="device in audioInputDevices" :key="device.deviceId" :label="device.label" :value="device.deviceId" />
+        </el-select>
       </label>
 
       <label class="runtime-field">
@@ -97,6 +122,8 @@ export type ChatRuntimeSettingsModel = ChatAdvancedOptionsModel & {
   model: string
   response_mode: string
   voice_mode: 'push-to-talk' | 'continuous'
+  vad_eagerness: 'low' | 'medium' | 'high' | 'auto'
+  audio_input_device_id: string
   reasoning_effort: string
   mcp_enabled: boolean
   pet_link_enabled: boolean
@@ -104,10 +131,18 @@ export type ChatRuntimeSettingsModel = ChatAdvancedOptionsModel & {
 }
 
 type SelectOption = { label: string; value: string }
+export type AudioInputDeviceOption = { deviceId: string; label: string }
 
 const voiceModeOptions = [
   { label: '按键', value: 'push-to-talk' },
   { label: '连续', value: 'continuous' },
+]
+
+const vadEagernessOptions = [
+  { label: '低', value: 'low' },
+  { label: '中', value: 'medium' },
+  { label: '高', value: 'high' },
+  { label: '自动', value: 'auto' },
 ]
 
 defineProps<{
@@ -120,6 +155,8 @@ defineProps<{
   modelLabel: string
   mcpSummary: string
   promptActive: boolean
+  audioInputDevices: AudioInputDeviceOption[]
+  audioDevicesLoading?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -127,6 +164,7 @@ const emit = defineEmits<{
   'toggle-tts': [enabled: boolean]
   'open-prompt': []
   'refresh-models': []
+  'refresh-audio-devices': []
 }>()
 
 const emitField = (field: keyof ChatRuntimeSettingsModel, value: unknown) => {

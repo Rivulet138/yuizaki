@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="行为运行调试" subtitle="查看心跳与行为事件的运行状态" tone="admin">
+  <PanelShell title="行为运行调试" tone="admin">
     <div class="persona-panel">
       <div class="panel-toolbar">
         <div>

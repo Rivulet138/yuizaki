@@ -75,6 +75,11 @@ class PlanningStage:
             else interpret_user_text(user_text)
         )
         ctx.extra["interpret_result"] = interpret_result
+        intent_envelope = interpret_result.to_envelope(
+            evidence_ids=["user_text"],
+            confirmation_required=visual_decision.confirmation_required,
+        )
+        ctx.extra["intent_envelope"] = intent_envelope
         bindings = get_runtime_bindings(ctx)
         relationship_summary = bindings.relationship_summary or {}
         relationship_stage = str(relationship_summary.get("relationship_stage") or "warming")
@@ -122,6 +127,7 @@ class PlanningStage:
                 "visual_context_confidence": visual_decision.confidence,
                 "visual_context_reason": visual_decision.reason,
                 "visual_confirmation_required": visual_decision.confirmation_required,
+                "intent_envelope": intent_envelope.to_dict(),
             },
         )
         self._append_planner_trace(ctx, plan)

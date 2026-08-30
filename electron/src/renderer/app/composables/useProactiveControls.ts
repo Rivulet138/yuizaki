@@ -5,6 +5,7 @@ import {
   isProactiveQuietHoursClear,
   type ActivityFrameSummary,
   type ProactiveFeedbackKind,
+  type ProactiveFeedbackSummary,
   type ProactiveOpportunityIdentity,
   type ProactiveSettings,
   type ProactiveSettingsPatch,
@@ -21,6 +22,7 @@ interface ProactiveApi {
   rebuildFrames: typeof proactiveClient.rebuildFrames
   deleteFrame: typeof proactiveClient.deleteFrame
   feedback: typeof proactiveClient.feedback
+  feedbackSummary?: typeof proactiveClient.feedbackSummary
 }
 
 const feedbackIdentityPrefix = (opportunity: ProactiveOpportunityIdentity): string =>
@@ -70,6 +72,7 @@ export const createProactiveControls = (api: ProactiveApi = proactiveClient) => 
   const error = ref<string | null>(null)
   const pendingFeedback = ref(new Set<string>())
   const acknowledgedFeedback = ref(new Map<string, ProactiveFeedbackKind>())
+  const feedbackSummary = ref<ProactiveFeedbackSummary | null>(null)
   const hiddenFrameIds = ref(new Set<string>())
   const feedbackIds = new Map<string, string>()
   let requestGeneration = 0
@@ -99,8 +102,19 @@ export const createProactiveControls = (api: ProactiveApi = proactiveClient) => 
     try {
       const [nextSettings, nextFrames] = await Promise.all([api.settings(), api.frames()])
       if (!isCurrent(generation)) return false
+      let nextFeedbackSummary: ProactiveFeedbackSummary | null = null
+      if (api.feedbackSummary) {
+        try {
+          const candidate = await api.feedbackSummary()
+          if (candidate.workspaceId === nextSettings.workspaceId) nextFeedbackSummary = candidate
+        } catch {
+          // A telemetry summary is advisory; policy and activity frames remain usable.
+        }
+      }
+      if (!isCurrent(generation)) return false
       settings.value = nextSettings
       frames.value = nextFrames
+      feedbackSummary.value = nextFeedbackSummary
       loaded.value = true
       policyClosed.value = false
       migrateLegacyPresetMarker()
@@ -109,6 +123,7 @@ export const createProactiveControls = (api: ProactiveApi = proactiveClient) => 
       if (!isCurrent(generation)) return false
       settings.value = createFailClosedProactiveSettings()
       frames.value = []
+      feedbackSummary.value = null
       loaded.value = false
       policyClosed.value = true
       error.value = loadError instanceof Error ? loadError.message : 'proactive_load_failed'
@@ -196,6 +211,14 @@ export const createProactiveControls = (api: ProactiveApi = proactiveClient) => 
           sourceEnabled: { ...settings.value.sourceEnabled, [opportunity.sourceKind]: false },
         }
       }
+      if (api.feedbackSummary) {
+        try {
+          const candidate = await api.feedbackSummary()
+          if (candidate.workspaceId === settings.value.workspaceId) feedbackSummary.value = candidate
+        } catch {
+          // Keep the last known summary when the optional refresh is unavailable.
+        }
+      }
       feedbackIds.delete(identity)
       return true
     } catch (feedbackError) {
@@ -232,6 +255,7 @@ export const createProactiveControls = (api: ProactiveApi = proactiveClient) => 
     rebuilding,
     error,
     acknowledgedFeedback,
+    feedbackSummary,
     load,
     updateSettings,
     deleteFrame,

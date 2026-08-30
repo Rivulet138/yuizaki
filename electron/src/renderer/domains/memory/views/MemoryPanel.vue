@@ -1,9 +1,9 @@
 
 <template>
-  <PanelShell title="记忆管理" subtitle="查看、编辑和控制记忆召回" tone="companion" density="compact">
+  <PanelShell title="记忆管理" tone="companion" density="compact">
     <template #status><span class="local-status" role="status">本机保存 · {{ scopeLabel(currentMemoryScope) }} · 索引 {{ indexStatusLabel }}</span></template>
     <template #actions>
-      <label class="scope-control"><span>当前范围</span><el-select :model-value="currentMemoryScope" size="small" :disabled="workspaceScopeSaving" aria-label="当前记忆范围" @change="updateDefaultMemoryScope"><el-option v-for="scope in memoryScopeOptions" :key="scope.value" :label="scope.label" :value="scope.value" /></el-select></label>
+      <label class="scope-control"><span>当前范围</span><el-select :model-value="currentMemoryScope" size="small" :disabled="workspaceScopeSaving" aria-label="当前记忆范围" @change="updateDefaultMemoryScope"><el-option v-for="scope in memoryScopeOptions" :key="scope.value" :label="scope.label" :value="scope.value" :disabled="scope.value === 'session' && !sessionStore.activeSession" /></el-select></label>
       <el-button data-testid="memory-advanced-tools-toggle" circle plain :icon="Tools" :type="advancedToolsVisible ? 'primary' : 'default'" title="高级工具" aria-label="打开高级工具" :aria-expanded="advancedToolsVisible" @click="advancedToolsVisible = true" />
       <el-button data-testid="memory-export" circle plain :icon="Download" title="导出当前范围" aria-label="导出当前范围" :loading="exportLoading" @click="exportMemory" />
       <el-button data-testid="memory-import" circle plain :icon="Upload" title="导入记忆备份" aria-label="导入记忆备份" :loading="importLoading" @click="memoryImportInput?.click()" />
@@ -12,14 +12,8 @@
     </template>
 
     <div class="memory-panel">
-      <section class="memory-welcome" aria-labelledby="memory-welcome-title">
-        <div class="welcome-copy">
-          <span class="welcome-kicker"><el-icon><User /></el-icon> 当前范围</span>
-          <h3 id="memory-welcome-title">记忆状态</h3>
-          <p>数据保存在本机。可查看来源、修改内容、停止召回或恢复。</p>
-        </div>
-        <div class="memory-health" aria-label="当前记忆状态">
-          <div class="scope-pill"><span>当前范围</span><strong>{{ scopeLabel(currentMemoryScope) }}</strong></div>
+      <section class="memory-welcome" aria-label="记忆状态">
+        <div class="memory-health">
           <div class="health-stat"><strong>{{ overview?.recallable ?? docs.length }}</strong><span>可召回</span></div>
           <div class="health-stat" :class="{ attention: reviewDocs.length > 0 }"><strong>{{ reviewDocs.length }}</strong><span>待确认</span></div>
         </div>
@@ -54,10 +48,8 @@
           <el-icon aria-hidden="true"><component :is="tab.icon" /></el-icon><span class="tab-label">{{ tab.label }}</span><span v-if="tab.count !== undefined" class="tab-count">{{ tab.count }}</span>
         </button>
       </nav>
-      <div class="tab-context" role="status"><strong>{{ activeTabMeta.label }}</strong><span>{{ activeTabMeta.description }}</span></div>
-
       <div v-show="activeTab === 'library'" id="memory-panel-library" role="tabpanel" aria-labelledby="memory-tab-library" class="tab-panel">
-        <MemoryQuickCapture :form="form" :layers="layers" :type-options="memoryTypePresets" :source-options="memorySourceOptions" :selected-layer-description="selectedLayerDefinition.desc" :duplicate-candidates="duplicateCandidates" :loading="addRequest.loading" @update-form="Object.assign(form, $event)" @submit="submitMemory" />
+        <MemoryQuickCapture :form="form" :layers="layers" :type-options="memoryTypePresets" :source-options="memorySourceOptions" :duplicate-candidates="duplicateCandidates" :loading="addRequest.loading" @update-form="Object.assign(form, $event)" @submit="submitMemory" />
         <MemoryLibrary
           :visible-docs="visibleDocs" :filtered-count="filteredDocs.length" :remaining-count="remainingFilteredDocCount" :selected-doc="selectedDoc"
           :view-mode="docViewMode" :sort-mode="docSortMode" :filter-layer="filterLayer" :search-text="searchText" :view-options="docViewOptions"
@@ -67,7 +59,7 @@
           :inspector-draft-dirty="inspectorDraftDirty" :inspector-draft-saving="inspectorDraftSaving" :forgetting-doc-ids="forgettingDocIds" :removing-doc-ids="removingDocIds"
           :doc-view-count="docViewCount" :is-query-hit="isQueryHit" :layer-tag-type="layerTagType" :format-score="formatScore"
           :doc-updated-label="docUpdatedLabel" :doc-scope-label="docScopeLabel" :doc-source-label="docSourceLabel" :quality-percent="qualityPercent"
-          :metadata-preview="metadataPreview" :doc-audit-entries="docAuditEntries" :audit-action-label="auditActionLabel" :audit-entry-summary="auditEntrySummary"
+          :metadata-preview="metadataPreview" :doc-audit-entries="docAuditEntries" :audit-action-label="auditActionLabel" :audit-entry-summary="auditEntrySummary" :operations="operations" :operations-loading="operationsRequest.loading" :operations-error="operationsRequest.error"
           @update:view-mode="docViewMode = $event" @update:sort-mode="docSortMode = $event" @update:filter-layer="filterLayer = $event" @update:search-text="searchText = $event"
           @select="selectDoc" @edit="openEditDoc" @boost="boostDocImportance" @forget="forgetDoc" @remove="removeDoc" @move-layer="moveDocLayer"
           @retry="loadScopedDocs" @show-more="showMoreDocs" @reset-filters="resetDocFilters" @batch-boost="batchBoostVisibleDocs"
@@ -89,18 +81,18 @@
       <MemoryAdvancedTools
         :index-status="indexStatus" :rebuild-job="indexStatus?.job ?? null" :index-status-label="indexStatusLabel" :index-availability-label="indexAvailabilityLabel" :index-status-tone="indexStatusTone"
         :doc-count="docs.length" :rebuild-index-loading="rebuildIndexLoading" :query-form="queryForm" :layers="layers"
-        :effective-query-layers="effectiveQueryLayers" :query-loading="queryRequest.loading" :raw-query-loading="rawQueryRequest.loading"
-        :query-error="queryRequest.error" :query-result="queryResult" :query-trace="queryTrace" :query-summary="querySummary"
-        :filter-reason-text="filterReasonText" :selected-trace-ids="selectedTraceIds" :hidden-trace-id-count="hiddenTraceIdCount"
-        :document-form="docForm" :document-loading="docWriteLoading" :maintenance-policy="maintenancePolicy" :maintenance-preview="maintenancePreview"
+        :effective-query-layers="effectiveQueryLayers" :query-loading="queryRequest.loading"
+        :query-error="queryRequest.error" :query-result="queryResult" :query-summary="querySummary"
+        :filter-reason-text="filterReasonText"
+        :maintenance-policy="maintenancePolicy" :maintenance-preview="maintenancePreview"
         :maintenance-preview-matches-policy="maintenancePreviewMatchesPolicy" :maintenance-saving="maintenanceSaving"
         :maintenance-preview-loading="maintenancePreviewLoading" :maintenance-apply-loading="maintenanceApplyLoading"
         :format-latency="formatLatency" :compact-text="compactText" :maintenance-reason-label="maintenanceReasonLabel"
-         @rebuild-index="rebuildMemoryIndex" @cancel-rebuild-index="cancelMemoryIndexRebuild" @query="submitQuery" @raw-query="submitRawQuery" @toggle-query-layer="toggleQueryLayer"
-         @reset-query-layers="resetQueryLayers" @select-result="selectDocFromAdvanced" @write-document="submitDocument"
+         @rebuild-index="rebuildMemoryIndex" @cancel-rebuild-index="cancelMemoryIndexRebuild" @query="submitQuery" @toggle-query-layer="toggleQueryLayer"
+         @reset-query-layers="resetQueryLayers" @select-result="selectDocFromAdvanced"
          @feedback="handleRecallFeedback"
         @save-maintenance="saveMemoryPolicy" @preview-maintenance="previewMemoryMaintenance" @apply-maintenance="applyMemoryMaintenance"
-        @update-query="Object.assign(queryForm, $event)" @update-document="Object.assign(docForm, $event)" @update-maintenance="Object.assign(maintenancePolicy, $event)"
+        @update-query="Object.assign(queryForm, $event)" @update-maintenance="Object.assign(maintenancePolicy, $event)"
       />
     </el-drawer>
 
@@ -131,7 +123,6 @@ import MemoryReviewQueue from '../components/MemoryReviewQueue.vue'
 import { normalizeDuplicateCandidates, useMemoryDomain } from '../composables/useMemoryDomain'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { systemClient } from '@/api/client'
 import { memoryClient } from '@/api/clients/memory-client'
 import type { MemoryDeletePreview, MemoryImportResult, MemoryIndexRebuildJob, MemoryIndexStatus, MemoryMaintenancePolicyPayload, MemoryMaintenancePreview } from '@/api/clients/memory-client'
 import { getMemoryIndexUiStatus } from '../memory-index-status'
@@ -145,11 +136,10 @@ type MemoryScope = 'global' | 'workspace' | 'session'
 type MemoryTab = 'library' | 'review' | 'overview'
 
 const {
-  docs, forgottenDocs, reviewCandidates, overview, queryResult,
-  docsRequest, forgottenDocsRequest, overviewRequest, candidatesRequest, addRequest, updateRequest, queryRequest, rawQueryRequest,
-  loadDocs, loadForgottenDocs, loadCandidates, loadOverview, addMemory, updateDoc, softForgetDoc, restoreDoc, reviewCandidate, queryMemory, queryRawRag, recordRecallFeedback,
+  docs, operations, forgottenDocs, reviewCandidates, overview, queryResult,
+  docsRequest, forgottenDocsRequest, overviewRequest, candidatesRequest, addRequest, updateRequest, queryRequest, operationsRequest,
+  loadDocs, loadForgottenDocs, loadCandidates, loadOperations, loadOverview, addMemory, updateDoc, softForgetDoc, restoreDoc, reviewCandidate, queryMemory, recordRecallFeedback,
 } = useMemoryDomain()
-const e2eMode = Boolean(window.petApi?.e2e)
 const sessionStore = useSessionStore()
 const workspaceStore = useWorkspaceStore()
 const activeWorkspace = computed(() => workspaceStore.activeWorkspace)
@@ -157,9 +147,11 @@ const normalizeMemoryScope = (scope?: string | null): MemoryScope => {
   if (scope === 'global' || scope === 'session') return scope
   return 'workspace'
 }
-const currentMemoryScope = computed<MemoryScope>(() => normalizeMemoryScope(activeWorkspace.value?.memory_scope))
+const currentMemoryScope = computed<MemoryScope>(() => {
+  const scope = normalizeMemoryScope(activeWorkspace.value?.memory_scope)
+  return scope === 'session' && !sessionStore.activeSession ? 'workspace' : scope
+})
 const indexStatus = ref<MemoryIndexStatus | null>(null)
-const retrievalStrategy = ref<{ label: string; layers: string[] }>({ label: '', layers: [] })
 const advancedToolsVisible = ref(false)
 const reviewProcessingId = ref('')
 const activeTab = ref<MemoryTab>('library')
@@ -171,7 +163,6 @@ const docSortMode = ref<DocSortMode>('updated')
 const selectedDocId = ref('')
 const selectedQueryLayers = ref<string[]>([])
 const form = reactive({ text: '', type: 'chat', layer: 'working', importance: 0.6, confidence: 0.86, source: 'manual' })
-const docForm = reactive({ id: '', text: '', metadataJson: '' })
 const queryForm = reactive({ query: '', scope: currentMemoryScope.value, top_k: 5, expand_relations: true, relation_limit: 20, relation_depth: 1 })
 const editDialogVisible = ref(false)
 const editForm = reactive({ id: '', text: '', type: 'fact', layer: 'semantic', importance: 0.5, confidence: 0.72, source: 'manual', metadataJson: '' })
@@ -179,7 +170,6 @@ const inspectorDraft = reactive({
   id: '', text: '', type: 'fact', layer: 'semantic', importance: 0.5, confidence: 0.72, source: 'manual',
   validFrom: '', validTo: '', expiresAt: '',
 })
-const docWriteLoading = ref(false)
 const rebuildIndexLoading = ref(false)
 let activeRebuildJobId = ''
 let memoryPanelDisposed = false
@@ -420,11 +410,9 @@ const updateDefaultMemoryScope = async (value: string) => {
 }
 
 
-const recallableDocs = computed(() => docs.value)
-
 const layerStats = computed(() => layers.map(layer => ({
   ...layer,
-  count: overview.value?.by_layer[layer.value] ?? recallableDocs.value.filter(doc => doc.layer === layer.value).length,
+  count: overview.value?.by_layer[layer.value] ?? docs.value.filter(doc => doc.layer === layer.value).length,
 })))
 const queryTrace = computed(() => queryResult.value?.trace ?? null)
 const queryHitIds = computed(() => new Set([
@@ -443,7 +431,6 @@ const memoryTabs = computed(() => [
   { value: 'overview' as const, label: '概览', icon: DataAnalysis, description: '查看范围、分层、活动和已停止召回的内容。' },
 ])
 
-const activeTabMeta = computed(() => memoryTabs.value.find(tab => tab.value === activeTab.value) || memoryTabs.value[0])
 
 const onMemoryTabKeydown = (event: KeyboardEvent, index: number) => {
   const key = event.key
@@ -458,8 +445,6 @@ const onMemoryTabKeydown = (event: KeyboardEvent, index: number) => {
   activeTab.value = tabs[nextIndex].value
   void nextTick(() => document.getElementById(`memory-tab-${tabs[nextIndex].value}`)?.focus())
 }
-
-const selectedLayerDefinition = computed(() => layers.find(layer => layer.value === form.layer) || layers[1])
 
 const indexUiStatus = computed(() => getMemoryIndexUiStatus(indexStatus.value, docsRequest.loading))
 const indexStatusLabel = computed(() => indexUiStatus.value.label)
@@ -476,11 +461,9 @@ const querySummary = computed(() => {
 const defaultQueryLayers = ['profile', 'working', 'episodic', 'relationship', 'reflective', 'semantic']
 const effectiveQueryLayers = computed(() => {
   if (selectedQueryLayers.value.length) return selectedQueryLayers.value
-  return retrievalStrategy.value.layers.length ? retrievalStrategy.value.layers : defaultQueryLayers
+  return defaultQueryLayers
 })
 
-const selectedTraceIds = computed(() => queryTrace.value?.selected_ids.slice(0, 8) ?? [])
-const hiddenTraceIdCount = computed(() => Math.max(0, (queryTrace.value?.selected_ids.length ?? 0) - selectedTraceIds.value.length))
 const filterReasonText = computed(() => {
   const reasons = queryTrace.value?.filter_reasons ?? {}
   return Object.entries(reasons)
@@ -550,6 +533,26 @@ const filteredDocs = computed(() => {
 const visibleDocs = computed(() => filteredDocs.value.slice(0, visibleDocLimit.value))
 const remainingFilteredDocCount = computed(() => Math.max(0, filteredDocs.value.length - visibleDocs.value.length))
 const selectedDoc = computed(() => filteredDocs.value.find(doc => doc.id === selectedDocId.value) || filteredDocs.value[0] || null)
+watch(
+  () => [
+    selectedDoc.value?.id,
+    currentMemoryScope.value,
+    activeWorkspace.value.id,
+    sessionStore.activeSession?.id,
+  ] as const,
+  ([id, scope, workspaceId, sessionId]) => {
+    if (!id) {
+    operationsRequest.reset()
+    return
+    }
+    void loadOperations(id, {
+      scope,
+      workspaceId: scope === 'global' ? undefined : workspaceId,
+      sessionId: scope === 'session' ? sessionId : undefined,
+    })
+  },
+  { immediate: true },
+)
 const hasDocFilters = computed(() => docViewMode.value !== 'all' || docSortMode.value !== 'updated' || Boolean(filterLayer.value) || Boolean(searchText.value.trim()))
 const batchTargetDocs = computed(() => hasDocFilters.value ? filteredDocs.value : [])
 const batchTargetCount = computed(() => batchTargetDocs.value.length)
@@ -601,7 +604,7 @@ const resetQueryLayers = () => {
 }
 
 const rollbackMemoryDoc = async (doc: MemoryDoc, revision: number) => {
-  const result = await memoryClient.rollbackDoc(doc.id, revision)
+  const result = await memoryClient.rollbackDoc(doc.id, revision, docSessionId(doc))
   if (result?.status === 'rolled_back' || result?.status === 'updated' || result?.status === 'ok') {
     ElMessage.success(`已恢复到版本 ${revision}`)
     selectedDocId.value = doc.id
@@ -666,7 +669,6 @@ const refreshMemoryState = async () => {
     loadForgottenDocs(options),
     loadCandidates(options),
   ])
-  if (e2eMode) return
   try {
     await refreshIndexStatus()
   } catch (error) {
@@ -756,7 +758,7 @@ const decideReviewCandidate = async ({ doc, decision }: { doc: MemoryDoc; decisi
   if (reviewProcessingId.value) return
   reviewProcessingId.value = doc.id
   try {
-    await reviewCandidate(doc.id, decision, decision === 'approve' ? 'user_approved' : 'user_rejected')
+    await reviewCandidate(doc.id, decision, decision === 'approve' ? 'user_approved' : 'user_rejected', docSessionId(doc))
     ElMessage.success(decision === 'approve' ? '已保留这条记忆' : '已拒绝这条候选')
     await refreshMemoryState()
   } catch (error) {
@@ -882,67 +884,6 @@ const parseJsonObject = (rawValue: string, label: string) => {
   return parsed as Record<string, unknown>
 }
 
-const parseMetadata = () => parseJsonObject(docForm.metadataJson, 'Metadata')
-
-const submitDocument = async () => {
-  if (!docForm.text.trim()) return
-  docWriteLoading.value = true
-  duplicateCandidates.value = []
-  try {
-    const documentText = docForm.text.trim()
-    const metadata = parseMetadata()
-    const scopedMetadata = {
-      layer: 'semantic',
-      scope: currentMemoryScope.value,
-      workspace_id: currentMemoryScope.value === 'global' ? undefined : activeWorkspace.value?.id,
-      session_id: currentMemoryScope.value === 'session' ? sessionStore.activeSession?.id : undefined,
-      ...metadata,
-    }
-    const result = await memoryClient.addDoc({
-      id: docForm.id.trim() || undefined,
-      text: documentText,
-      metadata: scopedMetadata,
-      scope: currentMemoryScope.value,
-      workspace_id: currentMemoryScope.value === 'global' ? undefined : activeWorkspace.value?.id,
-
-      session_id: currentMemoryScope.value === 'session' ? sessionStore.activeSession?.id : undefined,
-      layer: typeof scopedMetadata.layer === 'string' ? scopedMetadata.layer : undefined,
-    })
-    if (result.skipped) {
-      duplicateCandidates.value = normalizeDuplicateCandidates(result.duplicate_candidates)
-      ElMessage.warning(result.reason || '发现相似文档，已返回合并候选')
-      return
-    }
-    ElMessage.success(`文档已写入：${result.id}`)
-    docForm.id = ''
-    docForm.text = ''
-    docForm.metadataJson = ''
-    if (e2eMode) {
-      const createdMetadata = scopedMetadata as Record<string, unknown>
-      docs.value = [{
-        id: result.id,
-        text: documentText,
-        type: typeof createdMetadata.type === 'string' ? createdMetadata.type : 'fact',
-        layer: typeof createdMetadata.layer === 'string' ? createdMetadata.layer : 'semantic',
-        importance: Number.isFinite(Number(createdMetadata.importance)) ? Number(createdMetadata.importance) : undefined,
-        confidence: Number.isFinite(Number(createdMetadata.confidence)) ? Number(createdMetadata.confidence) : undefined,
-        updated_at: typeof createdMetadata.updated_at === 'string' ? createdMetadata.updated_at : undefined,
-        source: typeof createdMetadata.source === 'string' ? createdMetadata.source : undefined,
-        scope: typeof createdMetadata.scope === 'string' ? createdMetadata.scope : currentMemoryScope.value,
-        expires_at: typeof createdMetadata.expires_at === 'string' ? createdMetadata.expires_at : undefined,
-        metadata: createdMetadata,
-      }, ...docs.value.filter(doc => doc.id !== result.id)]
-      selectedDocId.value = result.id
-    } else {
-      void refreshMemoryState()
-    }
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '写入文档失败')
-  } finally {
-    docWriteLoading.value = false
-  }
-}
-
 const submitQuery = async () => {
   if (!queryForm.query.trim()) return
   await queryMemory({
@@ -957,23 +898,11 @@ const submitQuery = async () => {
   })
 }
 
-const submitRawQuery = async () => {
-  if (!queryForm.query.trim()) return
-  await queryRawRag({
-    query: queryForm.query.trim(),
-    top_k: queryForm.top_k,
-    session_id: queryForm.scope === 'session' ? sessionStore.activeSession?.id : undefined,
-    scope: queryForm.scope,
-    layers: effectiveQueryLayers.value,
-    expand_relations: queryForm.expand_relations,
-    relation_limit: queryForm.relation_limit,
-    relation_depth: queryForm.relation_depth,
-  })
-}
 
 const handleRecallFeedback = async (payload: { id: string; feedback: 'helpful' | 'not_helpful' | 'incorrect' | 'dismissed' }) => {
   try {
-    await recordRecallFeedback(payload.id, payload.feedback)
+    const doc = queryResult.value?.results.find(item => item.id === payload.id)
+    await recordRecallFeedback(payload.id, payload.feedback, doc ? docSessionId(doc) : scopedDocOptions().sessionId)
     ElMessage.success(payload.feedback === 'helpful' ? '已记录，这条记忆会继续优先保留' : '已记录，你可以随时在记忆库中修正或停止召回')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '记录召回反馈失败')
@@ -1134,7 +1063,7 @@ const batchDeleteVisibleDocs = async () => {
   const previousSelectedDocId = selectedDocId.value
   const nextSelectedId = docs.value.find(doc => !targetIds.has(doc.id))?.id || ''
   try {
-    deletePreview.value = await memoryClient.previewDelete(ids)
+    deletePreview.value = await memoryClient.previewDelete(ids, scopedDocOptions().sessionId)
     await ElMessageBox.confirm(
       deletePreviewMessage(deletePreview.value),
       `永久删除 ${targets.length} 条记忆`,
@@ -1155,7 +1084,7 @@ const batchDeleteVisibleDocs = async () => {
   try {
     docs.value = docs.value.filter(doc => !targetIds.has(doc.id))
     if (targetIds.has(selectedDocId.value)) selectedDocId.value = nextSelectedId
-    const result = await memoryClient.removeDocs(ids)
+    const result = await memoryClient.removeDocs(ids, scopedDocOptions().sessionId)
     batchDeleteProgress.done = result.deleted_count ?? ids.length
     ElMessage.success(`已永久删除 ${batchDeleteProgress.done} 条记忆`)
     await refreshIndexStatus().catch(error => console.debug('[MemoryPanel] failed to refresh index status after batch delete:', error))
@@ -1214,8 +1143,9 @@ const submitEditDoc = async () => {
 
 const removeDoc = async (id: string) => {
   if (removingDocIds.value.has(id)) return
+  const doc = docs.value.find(item => item.id === id)
   try {
-    deletePreview.value = await memoryClient.previewDelete([id])
+    deletePreview.value = await memoryClient.previewDelete([id], doc ? docSessionId(doc) : scopedDocOptions().sessionId)
     await ElMessageBox.confirm(
       deletePreviewMessage(deletePreview.value),
       '永久删除记忆',
@@ -1233,7 +1163,7 @@ const removeDoc = async (id: string) => {
   setDocRemoving(id, true)
   try {
     const fallbackId = filteredDocs.value.find(doc => doc.id !== id)?.id || ''
-    await memoryClient.removeDoc(id)
+    await memoryClient.removeDoc(id, doc ? docSessionId(doc) : scopedDocOptions().sessionId)
     ElMessage.success('已永久删除这条记忆')
     if (selectedDocId.value === id) selectedDocId.value = fallbackId
     await refreshMemoryState()
@@ -1267,7 +1197,8 @@ const forgetDoc = async (id: string) => {
   setPendingDocId(forgettingDocIds, id, true)
   try {
     const fallbackId = filteredDocs.value.find(doc => doc.id !== id)?.id || ''
-    await softForgetDoc(id, { reason: 'user_soft_forget' })
+    const doc = docs.value.find(item => item.id === id)
+    await softForgetDoc(id, { reason: 'user_soft_forget', session_id: doc ? docSessionId(doc) : scopedDocOptions().sessionId })
     if (selectedDocId.value === id) selectedDocId.value = fallbackId
     ElMessage.success('已停止召回这条记忆')
     await refreshMemoryState()
@@ -1282,7 +1213,8 @@ const restoreForgottenDoc = async (id: string) => {
   if (restoringDocIds.value.has(id)) return
   setPendingDocId(restoringDocIds, id, true)
   try {
-    await restoreDoc(id, { reason: 'user_restore' })
+    const doc = forgottenDocs.value.find(item => item.id === id) || docs.value.find(item => item.id === id)
+    await restoreDoc(id, { reason: 'user_restore', session_id: doc ? docSessionId(doc) : scopedDocOptions().sessionId })
     ElMessage.success('这条记忆已恢复召回')
     await refreshMemoryState()
   } catch (error) {
@@ -1477,18 +1409,6 @@ onMounted(async () => {
   queryForm.scope = currentMemoryScope.value
   await refreshMemoryState()
   openRequestedMemoryDoc()
-  if (e2eMode) return
-  try {
-    const payload = await systemClient.companionRuntime(4)
-    if (payload.retrieval_strategy) {
-      retrievalStrategy.value = {
-        label: payload.retrieval_strategy.label || '',
-        layers: payload.retrieval_strategy.layers || [],
-      }
-    }
-  } catch (error) {
-    console.debug('[MemoryPanel] failed to load retrieval strategy:', error)
-  }
 })
 </script>
 
@@ -1510,15 +1430,11 @@ onMounted(async () => {
 .local-status { color: var(--yui-muted); font-size: 11px; }
 .scope-control { display: flex; align-items: center; gap: 7px; color: var(--yui-muted); font-size: 11px; }
 .scope-control :deep(.el-select) { width: 108px; }
-.memory-welcome { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 18px; border: 1px solid var(--yui-border); border-radius: var(--yui-radius-card); background: color-mix(in srgb, var(--yui-accent-soft) 58%, var(--yui-surface)); }
-.welcome-copy { min-width: 0; }
-.welcome-kicker { display: inline-flex; align-items: center; gap: 5px; color: var(--yui-accent); font-size: 11px; font-weight: 700; }
-.welcome-copy h3 { margin: 5px 0 4px; color: var(--yui-text); font-size: 17px; line-height: 1.3; }
-.welcome-copy p { max-width: 58ch; margin: 0; color: var(--yui-muted); font-size: 12px; line-height: 1.55; }
-.memory-health { display: flex; flex: 0 0 auto; align-items: stretch; gap: 8px; }
-.scope-pill, .health-stat { display: flex; min-width: 72px; flex-direction: column; justify-content: center; gap: 3px; padding: 8px 10px; border: 1px solid var(--yui-border); border-radius: var(--yui-radius-control); background: color-mix(in srgb, var(--yui-surface) 80%, transparent); }
-.scope-pill span, .health-stat span { color: var(--yui-muted); font-size: 10px; }
-.scope-pill strong, .health-stat strong { color: var(--yui-text); font-size: 13px; }
+.memory-welcome { display: flex; align-items: center; justify-content: flex-end; min-height: 34px; }
+.memory-health { display: flex; align-items: stretch; gap: 8px; }
+.health-stat { display: flex; min-width: 72px; flex-direction: column; justify-content: center; gap: 3px; padding: 8px 10px; border: 1px solid var(--yui-border); border-radius: var(--yui-radius-control); background: color-mix(in srgb, var(--yui-surface) 80%, transparent); }
+.health-stat span { color: var(--yui-muted); font-size: 10px; }
+.health-stat strong { color: var(--yui-text); font-size: 13px; }
 .health-stat.attention { border-color: color-mix(in srgb, #d97706 42%, var(--yui-border)); background: var(--yui-warning-soft); }
 .memory-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--yui-border); }
 .memory-tabs button { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 8px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--yui-muted); font: inherit; font-size: 13px; cursor: pointer; }
@@ -1526,14 +1442,12 @@ onMounted(async () => {
 .memory-tabs button .tab-count { display: inline-grid; min-width: 18px; min-height: 18px; margin-left: 2px; place-items: center; border-radius: 9px; background: var(--yui-surface-muted); font-size: 10px; }
 .memory-tabs button[aria-selected="true"] .tab-count { background: var(--yui-accent-soft); color: var(--yui-accent); }
 .memory-tabs button:focus-visible { outline: 2px solid var(--yui-accent); outline-offset: -2px; }
-.tab-context { display: flex; align-items: baseline; gap: 8px; min-height: 18px; color: var(--yui-muted); font-size: 12px; }
-.tab-context strong { color: var(--yui-text); font-size: 12px; }
 .tab-panel { min-width: 0; }
 .tab-panel > :deep(* + *) { margin-top: 18px; }
 .dialog-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .dialog-grid :deep(.el-select), :deep(.el-dialog .el-select) { width: 100%; }
 details summary { margin-bottom: 10px; color: var(--yui-muted); cursor: pointer; font-size: 12px; }
-@media (max-width: 760px) { .scope-control span { display: none; }.memory-welcome { align-items: stretch; flex-direction: column; gap: 12px; }.memory-health { width: 100%; }.scope-pill, .health-stat { flex: 1; }.memory-tabs { position: sticky; top: 0; z-index: 2; background: var(--yui-panel-surface, var(--yui-surface)); }.memory-tabs button { flex: 1; justify-content: center; padding-inline: 8px; }.tab-context { align-items: flex-start; flex-direction: column; gap: 2px; }.dialog-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .scope-control span { display: none; }.memory-health { width: 100%; }.health-stat { flex: 1; }.memory-tabs { position: sticky; top: 0; z-index: 2; background: var(--yui-panel-surface, var(--yui-surface)); }.memory-tabs button { flex: 1; justify-content: center; padding-inline: 8px; }.dialog-grid { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .import-report-details li { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }
 </style>

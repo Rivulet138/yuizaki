@@ -8,6 +8,11 @@ const SECRET_PATTERNS = [
   /\b(?:api[_-]?key|access[_-]?token|password|secret)\s*[:=]\s*[^\s,;]+/gi,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
 ]
+const SENSITIVE_APPLICATION_PATTERNS = [
+  /password|1password|lastpass|keychain/i,
+  /bank|finance|payment|支付宝|微信支付/i,
+  /medical|health|医院|病历/i,
+]
 
 export interface PerceptionScope {
   workspaceId: string
@@ -31,6 +36,7 @@ export interface AuthorizedPerceptionDependencies {
   captureTargetWindow?: (sourceId: string, signal: AbortSignal) => Promise<{ data: Buffer; title?: string }>
   selectTargetWindow?: (signal: AbortSignal) => Promise<{ sourceId: string } | null>
   readActiveApplication?: (signal: AbortSignal) => Promise<{ name: string; title?: string }>
+  isSensitiveApplication?: (application: { name: string; title: string }) => boolean
   selectFile?: (suggestedPath: string | undefined, signal: AbortSignal) => Promise<{ path: string; name: string; text?: string } | null>
   readClipboard?: (signal: AbortSignal) => Promise<string>
 }
@@ -296,7 +302,11 @@ export class AuthorizedPerceptionBridge {
         const read = this.dependencies.readActiveApplication
         if (!read) throw new Error('unavailable')
         const result = await read(signal)
-        return { name: redactText(result.name), title: redactText(result.title ?? '') }
+        const application = { name: result.name ?? '', title: result.title ?? '' }
+        const sensitive = this.dependencies.isSensitiveApplication?.(application)
+          ?? SENSITIVE_APPLICATION_PATTERNS.some((pattern) => pattern.test(`${application.name} ${application.title}`))
+        if (sensitive) return { name: '[SENSITIVE_APPLICATION]', title: '[REDACTED]' }
+        return { name: redactText(application.name), title: redactText(application.title) }
       }
       case 'selected_file': {
         const select = this.dependencies.selectFile

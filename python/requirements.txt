@@ -13,6 +13,7 @@ httpx>=0.28,<1
 aiofiles>=25,<26
 python-multipart>=0.0.32,<1
 python-socketio>=5.16,<6
+websocket-client>=1.9,<2
 
 # Database
 sqlalchemy>=2.0.50,<3

@@ -23,14 +23,6 @@ import {
 let runtimeController: CompanionRuntimeController | null = null
 let runtimeVisibilityHandler: (() => void) | null = null
 let stopPetLinkWatcher: WatchStopHandle | null = null
-let e2eClockOffsetMs = 0
-
-export const advanceCompanionCooldownForE2E = (): number => {
-  if (!window.petApi?.e2e) throw new Error('Companion E2E clock is unavailable')
-  e2eClockOffsetMs += 16 * 60_000
-  return e2eClockOffsetMs
-}
-
 export const reportCompanionRuntimeSinkError = (failure: { sink: CompanionRuntimeSinkName; message: string }) => {
   const payload = {
     event: 'companion_runtime.sink_failure',
@@ -146,10 +138,6 @@ export function useCompanionRuntimeBridge() {
         outcome,
         ...(reason ? { reason } : {}),
       }),
-      ...(window.petApi?.e2e ? {
-        now: () => Date.now() + e2eClockOffsetMs,
-        pollIntervalMs: 250,
-      } : {}),
     })
     installCompanionRuntimeController(runtimeController)
   }

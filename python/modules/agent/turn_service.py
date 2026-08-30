@@ -286,6 +286,7 @@ class TurnService:
         "source",
         "source_id",
         "source_kind",
+        "stream_draft",
         "task_id",
         "task_mode",
         "task_name",

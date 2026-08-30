@@ -21,13 +21,6 @@ export interface MemoryOption {
   label: string
 }
 
-export interface MemoryMetric {
-  label: string
-  value: string | number
-  detail: string
-  tone: string
-}
-
 export interface MemoryCaptureForm {
   text: string
   type: string
@@ -35,12 +28,6 @@ export interface MemoryCaptureForm {
   importance: number
   confidence: number
   source: string
-}
-
-export interface MemoryDocumentForm {
-  id: string
-  text: string
-  metadataJson: string
 }
 
 export interface MemoryQueryForm {

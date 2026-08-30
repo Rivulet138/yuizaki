@@ -51,7 +51,7 @@ export class PythonService {
 
   constructor(
     private readonly backendApiToken: string = process.env['YUIZAKI_BACKEND_API_TOKEN']?.trim() || '',
-    private readonly providerCredentialEnvironment: Record<string, string> = {},
+    private providerCredentialEnvironment: Record<string, string> = {},
     private readonly hostPerceptionToken: string = process.env['YUIZAKI_HOST_PERCEPTION_TOKEN']?.trim() || '',
     private readonly hostDesktopActionToken: string = '',
     recoveryOptions: PythonServiceRecoveryOptions = {},
@@ -129,6 +129,10 @@ export class PythonService {
 
   isRunning(): boolean {
     return this.state === 'running' || this.process !== null
+  }
+
+  updateProviderCredentialEnvironment(environment: Record<string, string>): void {
+    this.providerCredentialEnvironment = { ...environment }
   }
 
   getStatus(): {

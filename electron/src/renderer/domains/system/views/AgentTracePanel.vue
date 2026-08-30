@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="任务追踪" subtitle="查看任务执行结果、计划任务和请求链路" tone="admin">
+  <PanelShell title="任务追踪" tone="admin">
     <template #actions>
       <el-button size="small" plain :disabled="!selectedTrace" @click="downloadDiagnosticBundle">导出诊断</el-button>
       <el-button size="small" plain :loading="refreshLoading" @click="refreshAll">刷新</el-button>
@@ -65,7 +65,7 @@
             <el-tag size="small" type="info" effect="plain">{{ companionJobs.length }} recent</el-tag>
           </div>
         </div>
-        <AsyncState :loading="companionRuntimeRequest.loading" :error="companionRuntimeRequest.error" @retry="loadCompanionRuntime">
+        <AsyncState :loading="companionRuntimeRequest.loading" :error="companionRuntimeRequest.error" :show-retry="false">
           <div v-if="companionJobs.length" class="job-list">
             <article v-for="job in companionJobs" :key="job.jobId" class="job-card">
               <div class="job-card-main">
@@ -131,7 +131,7 @@
             </div>
           </div>
 
-          <AsyncState :loading="schedulesRequest.loading" :error="schedulesRequest.error" @retry="loadSchedules">
+        <AsyncState :loading="schedulesRequest.loading" :error="schedulesRequest.error" :show-retry="false">
             <div v-if="schedules?.length" class="schedule-list">
               <article v-for="task in schedules" :key="task.id" class="schedule-card">
                 <div class="schedule-topline">
@@ -213,7 +213,7 @@
 
             <el-alert v-if="unlinkedTraceCount" class="trace-alert" type="warning" :closable="false" show-icon :title="`${unlinkedTraceCount} 条追踪事件缺少 request_id，已临时分组为未关联运行`" />
 
-            <AsyncState :loading="agentTraceRequest.loading" :error="agentTraceRequest.error" @retry="loadAgentTrace">
+        <AsyncState :loading="agentTraceRequest.loading" :error="agentTraceRequest.error" :show-retry="false">
               <div v-if="filteredTraceGroups.length" class="run-list">
                 <button
                   v-for="group in filteredTraceGroups"

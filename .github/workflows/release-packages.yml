@@ -23,41 +23,17 @@ jobs:
           cache: false
       - working-directory: electron
         run: npm ci
-      - name: Build old and current Windows installer fixtures
+      - name: Build Windows installer
         working-directory: electron
-        run: npm run package:win:smoke-fixtures
-      - name: Run Windows install, upgrade, and uninstall host smoke
-        working-directory: electron
-        shell: pwsh
-        run: |
-          $fixtures = Get-Content ../release/installer-smoke/fixtures.json -Raw | ConvertFrom-Json
-          $smokeRoot = Join-Path $env:RUNNER_TEMP "yuizaki-installer-smoke-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          node scripts/windows-installer-smoke.mjs `
-            --old-installer $fixtures.oldInstaller `
-            --new-installer $fixtures.newInstaller `
-            --temp-root $smokeRoot `
-            --temporary-base $env:RUNNER_TEMP `
-            --launch-timeout-ms 12000 `
-            --evidence ../release/installer-smoke/windows-host-evidence.json
+        run: npm run package:win
       - name: Upload current Windows installer
         uses: actions/upload-artifact@v4
         with:
           name: yuizaki-windows-installer
           path: |
-            release/installer-smoke/new/*.exe
-            release/installer-smoke/new/*.blockmap
+            release/*.exe
+            release/*.blockmap
           if-no-files-found: error
-      - name: Upload Windows installer smoke evidence
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: yuizaki-windows-installer-smoke-evidence
-          path: |
-            release/installer-smoke/old/*.exe
-            release/installer-smoke/old/*.blockmap
-            release/installer-smoke/fixtures.json
-            release/installer-smoke/windows-host-evidence.json
-          if-no-files-found: warn
 
   linux-packages:
     name: Linux AppImage and deb

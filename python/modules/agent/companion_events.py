@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections import OrderedDict
 from collections.abc import Mapping
 from copy import deepcopy
@@ -71,6 +72,16 @@ def _int_or_default(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _normalize_event_timestamp(value: Any) -> float:
+    try:
+        timestamp = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("companion event timestamp must be numeric") from exc
+    if not math.isfinite(timestamp):
+        raise ValueError("companion event timestamp must be finite")
+    return max(0.0, timestamp)
 
 
 @dataclass(frozen=True)
@@ -424,6 +435,7 @@ class CompanionJobEventLog:
     ) -> dict[str, Any]:
         normalized_step_index = None if step_index is None else max(0, int(step_index))
         projection_key = str(idempotency_key or "").strip() or None
+        normalized_timestamp = _normalize_event_timestamp(timestamp)
         with self._lock:
             scoped_job_id = self._storage_key(workspace_id, job_id)
             if projection_key is not None and projection_key in self._projection_events:
@@ -443,7 +455,6 @@ class CompanionJobEventLog:
                     raise ValueError(f"terminal companion job cannot transition: {job_id}")
                 if is_recheck:
                     data = {**dict(previous.get("data") or {}), **dict(data or {})}
-                normalized_timestamp = max(0.0, float(timestamp))
                 if status == "progress" and previous["status"] == "progress":
                     last_progress_at = self._last_progress_at.get(scoped_job_id)
                     if last_progress_at is not None and normalized_timestamp - last_progress_at < 0.1:
@@ -475,7 +486,7 @@ class CompanionJobEventLog:
                 "revision": self._next_revision.get(scoped_job_id, 1),
                 "interruptionEpoch": max(0, int(interruption_epoch)),
                 "source": source,
-                "timestamp": max(0.0, float(timestamp)) * 1000,
+                "timestamp": normalized_timestamp * 1000,
                 "status": status,
             }
             if conversation_id:
@@ -492,7 +503,7 @@ class CompanionJobEventLog:
             self._next_revision[scoped_job_id] = int(event["revision"]) + 1
             self._trim_job_events(events)
             if status == "progress":
-                self._last_progress_at[scoped_job_id] = max(0.0, float(timestamp))
+                self._last_progress_at[scoped_job_id] = normalized_timestamp
             else:
                 self._last_progress_at.pop(scoped_job_id, None)
             self._events.move_to_end(scoped_job_id)

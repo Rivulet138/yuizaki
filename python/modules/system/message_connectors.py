@@ -20,7 +20,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
 ConnectorHttpPost = Callable[[str, Mapping[str, str], Mapping[str, Any]], Mapping[str, Any]]
@@ -46,6 +46,8 @@ _REMOVED_OFFICIAL_FIELDS = frozenset({
     "clearApiBaseUrl",
 })
 
+_SECRET_CONFIG_FIELDS = frozenset({"botToken", "webhookSecret", "publicKey", "bridgeToken"})
+
 
 def _env_bool(value: str | None, default: bool = False) -> bool:
     if value is None:
@@ -59,6 +61,30 @@ def _text(value: Any) -> str:
 
 def _bounded_text(value: Any, limit: int) -> str:
     return _text(value)[:limit]
+
+
+def _validate_bridge_url(value: Any) -> str:
+    """Validate a bridge origin before it can receive connector credentials."""
+    normalized = _bounded_text(value, 512)
+    if not normalized:
+        return ""
+    try:
+        parsed = urlsplit(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("bridge URL must use http:// or https:// with a hostname")
+        if parsed.username or parsed.password:
+            raise ValueError("bridge URL must not contain URL credentials")
+        if parsed.fragment:
+            raise ValueError("bridge URL must not contain a fragment")
+        if any(ord(char) < 0x20 for char in normalized):
+            raise ValueError("bridge URL contains control characters")
+        if parsed.port is not None and not 1 <= parsed.port <= 65535:
+            raise ValueError("bridge URL port is invalid")
+    except ValueError:
+        raise
+    except (TypeError, UnicodeError) as exc:
+        raise ValueError("bridge URL is invalid") from exc
+    return normalized.rstrip("/")
 
 
 def _default_http_json(
@@ -287,10 +313,18 @@ class MessageConnectorRegistry:
             return
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = self._state_path.with_suffix(self._state_path.suffix + ".tmp")
+        persisted_connectors = {
+            connector_id: {
+                key: value
+                for key, value in connector_config.items()
+                if key not in _SECRET_CONFIG_FIELDS
+            }
+            for connector_id, connector_config in self._config.items()
+        }
         temp_path.write_text(json.dumps({
             "version": 1,
             "disabled": sorted(self._disabled),
-            "connectors": self._config,
+            "connectors": persisted_connectors,
         }, ensure_ascii=False, indent=2), encoding="utf-8")
         temp_path.replace(self._state_path)
 
@@ -409,6 +443,7 @@ class MessageConnectorRegistry:
             else:
                 message = "适配器已启用，等待 webhook"
             spec = specs[connector_id]
+            readiness = self.readiness_snapshot(connector_id)
             rows.append({
                 "id": connector_id,
                 "name": spec["name"],
@@ -425,8 +460,41 @@ class MessageConnectorRegistry:
                 "lastError": self._last_error[connector_id],
                 "source": "adapter",
                 "account": self.account_status(connector_id) if connector_id in {"qq", "wechat"} else None,
+                "readiness": readiness,
             })
         return rows
+
+    def readiness_snapshot(self, connector_id: str) -> dict[str, Any] | None:
+        """Project configuration readiness without probing a provider or bridge.
+
+        A ready result only means the local configuration is complete enough to
+        start staging.  It deliberately does not claim that a public webhook,
+        provider account, or bridge is reachable.
+        """
+        connector_id = _text(connector_id).lower()
+        if connector_id not in self._CONNECTOR_ORDER:
+            return None
+
+        enabled = self._enabled(connector_id) and connector_id not in self._disabled
+        installed = self._installed(connector_id)
+        reasons: list[dict[str, str]] = []
+        if not installed:
+            reasons.append({"code": "not_configured", "detail": "连接器必需配置尚未完成"})
+        if not enabled:
+            reasons.append({"code": "disabled", "detail": "连接器当前未启用"})
+        if installed and not self._verification_configured(connector_id):
+            reasons.append({"code": "verification_not_configured", "detail": "入站请求校验尚未配置"})
+
+        status = "ready_for_staging" if installed and enabled and not reasons else "not_qualified"
+        return {
+            "schemaVersion": "yuizaki.connector-readiness.v1",
+            "status": status,
+            "networkChecked": False,
+            "externalProviderVerified": False,
+            "requiresPublicHttps": connector_id in {"telegram", "discord"},
+            "reasons": reasons,
+            "claim": "configuration_only_not_provider_qualification",
+        }
 
     def disable(self, connector_id: str) -> dict[str, Any] | None:
         connector_id = _text(connector_id).lower()
@@ -496,6 +564,88 @@ class MessageConnectorRegistry:
         if connector_id not in {"qq", "wechat"}:
             return None
         return self.refresh_account_status(connector_id)
+
+    def probe(self, connector_id: str) -> dict[str, Any]:
+        """Run a bounded, read-only provider check without changing connector state.
+
+        The response intentionally contains only normalized health metadata. No
+        provider payload, token, message body, or account identifier is echoed.
+        """
+        connector_id = _text(connector_id).lower()
+        if connector_id not in self._CONNECTOR_ORDER:
+            raise MessageConnectorError("unknown_connector", "不支持的消息连接器", status_code=404)
+
+        checked_at = float(self._clock())
+        base: dict[str, Any] = {
+            "schemaVersion": "yuizaki.connector-probe.v1",
+            "connectorId": connector_id,
+            "checkedAt": checked_at,
+            "externalSideEffects": False,
+            "networkChecked": False,
+        }
+        if connector_id == "discord" and not self._token(connector_id):
+            if not self._public_key(connector_id):
+                return {**base, "ok": False, "status": "unconfigured", "errorCode": "missing_public_key"}
+            return {
+                **base,
+                "ok": True,
+                "status": "signature_ready",
+                "verificationConfigured": True,
+            }
+
+        if connector_id in {"qq", "wechat"}:
+            try:
+                result = self._bridge_call(connector_id, "status")
+            except MessageConnectorError as exc:
+                return {
+                    **base,
+                    "ok": False,
+                    "status": "unreachable",
+                    "errorCode": exc.code,
+                    "verificationConfigured": bool(self._bridge_token(connector_id)),
+                }
+            status = _text(result.get("state") or result.get("status")) or "unknown"
+            healthy = result.get("ok") is not False and status not in {"error", "offline", "disconnected"}
+            return {
+                **base,
+                "ok": healthy,
+                "status": "reachable" if healthy else "provider_error",
+                "bridgeStatus": status[:32],
+                "verificationConfigured": bool(self._bridge_token(connector_id)),
+                "networkChecked": True,
+            }
+
+        token = self._token(connector_id)
+        if not token:
+            return {**base, "ok": False, "status": "unconfigured", "errorCode": "missing_bot_token"}
+        if connector_id == "telegram":
+            url = f"https://api.telegram.org/bot{quote(token, safe='')}/getMe"
+            headers: Mapping[str, str] = {}
+        else:
+            url = "https://discord.com/api/v10/users/@me"
+            headers = {"Authorization": f"Bot {token}"}
+        try:
+            result = self._http_get(url, headers)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            return {
+                **base,
+                "ok": False,
+                "status": "unreachable",
+                "errorCode": type(exc).__name__[:80],
+                "networkChecked": True,
+            }
+        if not isinstance(result, Mapping):
+            return {**base, "ok": False, "status": "invalid_response", "errorCode": "provider_response_invalid", "networkChecked": True}
+        status_code = result.get("status_code")
+        provider_ok = result.get("ok") is True or (isinstance(status_code, int) and 200 <= status_code < 300)
+        return {
+            **base,
+            "ok": provider_ok,
+            "status": "reachable" if provider_ok else "provider_rejected",
+            "statusCode": status_code if isinstance(status_code, int) and 100 <= status_code <= 599 else None,
+            "verificationConfigured": bool(self._secret(connector_id)) if connector_id == "telegram" else bool(self._public_key(connector_id)),
+            "networkChecked": True,
+        }
 
     def _bridge_request_headers(self, connector_id: str) -> dict[str, str]:
         token = self._bridge_token(connector_id)
@@ -606,6 +756,11 @@ class MessageConnectorRegistry:
                 continue
             if field in payload:
                 existing[field] = _bounded_text(payload.get(field), limit)
+        if connector_id in {"qq", "wechat"} and "bridgeUrl" in payload:
+            try:
+                existing["bridgeUrl"] = _validate_bridge_url(payload.get("bridgeUrl"))
+            except ValueError as exc:
+                raise MessageConnectorError("invalid_bridge_url", str(exc), status_code=422) from exc
         if "enabled" in payload:
             existing["enabled"] = bool(payload.get("enabled"))
         if connector_id in {"qq", "wechat"}:

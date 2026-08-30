@@ -1,5 +1,5 @@
 <template>
-  <PanelShell :title="t('settings.title')" :subtitle="t('settings.subtitle')" tone="admin">
+  <PanelShell :title="t('settings.title')" tone="admin">
     <template #actions>
       <el-button plain @click="openOnboarding">{{ t('onboarding.reopen') }}</el-button>
     </template>
@@ -87,7 +87,6 @@
                 </div>
               </template>
               <input ref="llmImportInput" class="sr-only-input" type="file" accept="application/json,.json" @change="handleLlmImportFile" />
-              <p class="panel-action-note">{{ t('settings.llm.actionHint') }}</p>
               <el-form label-position="top" @submit.prevent>
                 <div class="llm-workspace">
                   <aside class="llm-profile-rail">
@@ -119,10 +118,6 @@
                     <div class="profile-card">
                       <span>{{ t('settings.llm.activeProfile') }}</span>
                       <strong>{{ activeLlmProfileLabel }}</strong>
-                    </div>
-                    <div class="credential-card" :class="{ empty: !hasLlmApiKey }">
-                      <span>{{ t('settings.llm.credentialTitle') }}</span>
-                      <strong>{{ llmAuthSummary }}</strong>
                     </div>
                     <div class="llm-connection-summary">
                       <div class="summary-row">
@@ -262,7 +257,6 @@
                   </div>
                 </div>
               </template>
-              <p class="panel-action-note">{{ t('settings.tts.actionHint') }}</p>
               <el-form label-position="top" @submit.prevent>
                 <div class="voice-main-form single">
                   <div v-if="ttsStatus || ttsStatusRequest.loading || ttsStatusRequest.error" class="tts-runtime-panel">

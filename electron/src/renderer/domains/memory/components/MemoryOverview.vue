@@ -3,7 +3,6 @@
     <div class="overview-heading">
       <div>
         <h3 id="memory-overview-title">记忆概览</h3>
-        <p>统计当前范围内的文档数量、状态和最近变更。</p>
       </div>
       <span v-if="loading" class="loading-label" role="status">正在刷新…</span>
     </div>
@@ -14,14 +13,14 @@
     </div>
 
     <dl class="metric-grid" aria-label="记忆状态统计">
-      <div><dt>全部记忆</dt><dd>{{ overview?.total ?? 0 }}</dd><small>含不可召回文档</small></div>
-      <div><dt>可召回</dt><dd>{{ overview?.recallable ?? 0 }}</dd><small>可用于检索</small></div>
-      <div><dt>待复核</dt><dd>{{ reviewCount }}</dd><small>需要人工确认</small></div>
-      <div><dt>已停止召回</dt><dd>{{ forgottenCount }}</dd><small>可恢复的记录</small></div>
+      <div><dt>全部</dt><dd>{{ overview?.total ?? 0 }}</dd></div>
+      <div><dt>可召回</dt><dd>{{ overview?.recallable ?? 0 }}</dd></div>
+      <div><dt>待复核</dt><dd>{{ reviewCount }}</dd></div>
+      <div><dt>已停止</dt><dd>{{ forgottenCount }}</dd></div>
     </dl>
 
     <section class="overview-section" aria-labelledby="memory-layer-title">
-        <div class="section-heading"><h4 id="memory-layer-title">按层级统计</h4><span>点击层级查看文档</span></div>
+        <div class="section-heading"><h4 id="memory-layer-title">按层级</h4></div>
       <div class="layer-list">
         <button v-for="layer in layers" :key="layer.value" type="button" :aria-pressed="selectedLayer === layer.value" @click="emit('select-layer', layer.value)">
           <strong>{{ layer.label }}</strong><span>{{ layer.desc }}</span><b>{{ layer.count ?? 0 }}</b>
@@ -91,7 +90,7 @@ const activityLabel = (action?: string, state?: string) => ({
 .overview-error { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid rgba(239,68,68,.28); border-radius: var(--yui-radius-card); background: var(--yui-danger-soft); color: #991b1b; font-size: 12px; }
 h3,h4 { margin: 0; color: var(--yui-text); }
 h3 { font-size: 15px; } h4 { font-size: 13px; }
-.overview-heading p,.section-heading span,.loading-label,.empty-copy { margin: 4px 0 0; color: var(--yui-muted); font-size: 12px; }
+.section-heading span,.loading-label,.empty-copy { margin: 4px 0 0; color: var(--yui-muted); font-size: 12px; }
 .metric-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); margin: 0; border-block: 1px solid var(--yui-border); }
 .metric-grid div { min-width: 0; padding: 14px; border-right: 1px solid var(--yui-border); }
 .metric-grid div:last-child { border-right: 0; }

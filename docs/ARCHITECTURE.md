@@ -67,7 +67,7 @@ The Agent emits intent-level avatar commands. `electron/src/renderer/pet-rendere
 
 ## Perception / 环境感知
 
-Vision is request-scoped. Electron obtains the authorized frame through the perception bridge; Python OCR or vision providers analyze it for the active request. Consent, request identity, expiry, and single-use handling are implemented in `electron/src/main/authorized-perception-bridge.ts`, `python/modules/agent/perception.py`, and the perception Socket handler. There is no permanent screenshot or camera loop.
+Vision is request-scoped. Electron obtains the authorized frame through the perception bridge; Python OCR or vision providers analyze it for the active request. Consent, request identity, expiry, and single-use handling are implemented in `electron/src/main/authorized-perception-bridge.ts`, `python/modules/agent/perception.py`, and the perception Socket handler. Active-application metadata is also request-scoped: built-in password, finance/payment, and medical application patterns are masked before projection, and the main process may add a user-configured matcher. There is no permanent screenshot or camera loop.
 
 ## Persistence and memory / 持久化与记忆
 

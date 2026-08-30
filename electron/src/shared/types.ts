@@ -29,6 +29,7 @@ export interface ChatMemorySource {
   confidence?: number;
   traceId?: string;
   eventId?: string;
+  sessionId?: string;
   modelVersion?: string;
   correctionState?: 'none' | 'corrected' | 'forgotten';
 }
@@ -58,6 +59,7 @@ export type ChatReasoningEffort =
 export type ChatPromptMode = 'auto' | 'work' | 'daily';
 export type ChatResponseMode = 'instant' | 'balanced' | 'deep';
 export type ChatVoiceMode = 'push-to-talk' | 'continuous';
+export type ChatVadEagerness = 'low' | 'medium' | 'high' | 'auto';
 
 export interface ChatPromptRoleCard {
   enabled?: boolean;
@@ -117,6 +119,8 @@ export interface ChatOptions {
   reasoning_effort?: ChatReasoningEffort;
   response_mode?: ChatResponseMode;
   voice_mode?: ChatVoiceMode;
+  vad_eagerness?: ChatVadEagerness;
+  audio_input_device_id?: string;
   mcp_enabled?: boolean;
   web_search_enabled?: boolean;
   tts_enabled?: boolean;
@@ -301,6 +305,24 @@ export interface SIOToolResultData {
   id: string;
   output: string;
   error?: string;
+  schemaVersion?: 'yuizaki.tool-event.v1' | string;
+  version?: number;
+  status?: 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'discarded' | 'unknown_effect';
+  outcome?: 'known_success' | 'known_failure' | 'unknown_effect' | string;
+  effectOutcome?: 'known_success' | 'known_failure' | 'unknown_effect' | string;
+  verificationStatus?: 'verified' | 'unverified' | 'error' | 'cancelled' | string | null;
+  verificationTarget?: string;
+  verificationParameters?: Record<string, unknown>;
+  verificationEvidence?: string[];
+  verificationRetryable?: boolean;
+  unknownEffect?: boolean;
+  recheckAvailable?: boolean;
+  retryable?: boolean;
+  data?: Record<string, unknown> | null;
+  request_id?: string;
+  run_id?: string;
+  job_id?: string;
+  source?: string;
 }
 
 export interface SIOScreenshotRequestData {

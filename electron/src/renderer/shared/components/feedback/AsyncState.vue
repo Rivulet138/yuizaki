@@ -22,7 +22,7 @@
     <div>
       <strong>{{ errorTitle || '加载失败' }}</strong>
       <p>{{ error }}</p>
-      <button class="retry-btn" @click="$emit('retry')">{{ retryText || '重试' }}</button>
+       <button v-if="props.showRetry" class="retry-btn" @click="$emit('retry')">{{ retryText || '重试' }}</button>
     </div>
   </div>
   <div v-else-if="empty" class="async-state async-state--empty">
@@ -39,7 +39,7 @@
 import { onMounted, onUnmounted } from 'vue'
 import { createReducedMotionObserver } from '@/app/runtime/reducedMotion'
 
-defineProps<{
+const props = withDefaults(defineProps<{
   loading?: boolean
   error?: string
   empty?: boolean
@@ -47,7 +47,8 @@ defineProps<{
   loadingText?: string
   errorTitle?: string
   retryText?: string
-}>()
+  showRetry?: boolean
+}>(), { showRetry: true })
 
 defineEmits<{ (e: 'retry'): void }>()
 

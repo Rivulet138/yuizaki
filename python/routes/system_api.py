@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 
 def _custom_stdio_mcp_enabled() -> bool:
@@ -36,6 +37,7 @@ def create_system_router(
     activity_frames_rebuild_handler: Callable[[dict[str, Any]], Any] | None = None,
     activity_frame_delete_handler: Callable[[str], Any] | None = None,
     proactive_feedback_handler: Callable[[dict[str, Any]], Any] | None = None,
+    proactive_feedback_summary_handler: Callable[[], Any] | None = None,
     capabilities_state_handler: Callable[[], Any] | None = None,
     provider_registry_handler: Callable[[], Any] | None = None,
     connector_registry_handler: Callable[[], Any] | None = None,
@@ -56,6 +58,10 @@ def create_system_router(
     agent_trace_handler: Callable[[], Any] | None = None,
     experience_metrics_handler: Callable[[], Any] | None = None,
     voice_diagnostics_handler: Callable[[], Any] | None = None,
+    voice_diagnostics_begin_handler: Callable[[dict[str, Any]], Any] | None = None,
+    voice_diagnostics_comfort_handler: Callable[[dict[str, Any]], Any] | None = None,
+    voice_diagnostics_comfort_signal_handler: Callable[[dict[str, Any]], Any] | None = None,
+    voice_diagnostics_sample_handler: Callable[[dict[str, Any]], Any] | None = None,
     product_metrics_consent_handler: Callable[[], Any] | None = None,
     product_metrics_consent_patch_handler: Callable[[bool], Any] | None = None,
     mcp_state_handler: Callable[[], Any] | None = None,
@@ -70,6 +76,31 @@ def create_system_router(
     imported_skills_state_handler: Callable[[], Any] | None = None,
     save_imported_skills_handler: Callable[[list[dict[str, Any]]], Any] | None = None,
     remove_imported_skills_handler: Callable[[list[str]], Any] | None = None,
+    stream_status_handler: Callable[[], Any] | None = None,
+    stream_moderation_handler: Callable[[], Any] | None = None,
+    stream_moderation_update_handler: Callable[[dict[str, Any]], Any] | None = None,
+    stream_preview_handler: Callable[[dict[str, Any]], Any] | None = None,
+    stream_probe_handler: Callable[[dict[str, Any]], Any] | None = None,
+    stream_obs_configure_handler: Callable[[dict[str, Any]], Any] | None = None,
+    stream_obs_profiles_handler: Callable[[], Any] | None = None,
+    stream_events_handler: Callable[[int], Any] | None = None,
+    stream_actions_handler: Callable[[int], Any] | None = None,
+    stream_event_enqueue_handler: Callable[[dict[str, Any]], Any] | None = None,
+    stream_takeover_handler: Callable[[bool], Any] | None = None,
+    stream_execute_handler: Callable[[dict[str, Any]], Any] | None = None,
+    stream_twitch_eventsub_handler: Callable[[bytes, Mapping[str, Any]], Any] | None = None,
+    stream_twitch_irc_handler: Callable[[str], Any] | None = None,
+    stream_twitch_reconfigure_handler: Callable[..., Any] | None = None,
+    stream_twitch_probe_handler: Callable[[], Any] | None = None,
+    stream_twitch_subscriptions_handler: Callable[[dict[str, Any]], Any] | None = None,
+    stream_twitch_connect_handler: Callable[[], Any] | None = None,
+    stream_twitch_disconnect_handler: Callable[[], Any] | None = None,
+    stream_twitch_tick_handler: Callable[[], Any] | None = None,
+    stream_drafts_handler: Callable[[int], Any] | None = None,
+    stream_draft_generate_handler: Callable[[dict[str, Any]], Any] | None = None,
+    stream_draft_consume_handler: Callable[[dict[str, Any]], Any] | None = None,
+    stream_draft_consumer_status_handler: Callable[[], Any] | None = None,
+    stream_draft_consumer_toggle_handler: Callable[[dict[str, Any]], Any] | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["system"])
 
@@ -222,7 +253,7 @@ def create_system_router(
             _strict_payload(body, {"probeIds"})
             try:
                 return await _call_handler(onboarding_readiness_run_handler, _probe_ids(body))
-            except ValueError as exc:
+            except (TypeError, ValueError) as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     if onboarding_readiness_retry_handler is not None:
@@ -236,7 +267,7 @@ def create_system_router(
                 return await _call_handler(onboarding_readiness_retry_handler, run_id, _probe_ids(payload))
             except LookupError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
-            except ValueError as exc:
+            except (TypeError, ValueError) as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     if onboarding_readiness_cancel_handler is not None:
@@ -350,6 +381,11 @@ def create_system_router(
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    if proactive_feedback_summary_handler is not None:
+        @router.get("/api/system/proactive/feedback-summary")
+        async def proactive_feedback_summary():
+            return await _call_handler(proactive_feedback_summary_handler, offload=True)
+
     if capabilities_state_handler is not None:
         @router.get("/api/system/capabilities")
         async def capabilities_state():
@@ -364,6 +400,70 @@ def create_system_router(
         @router.get("/api/system/voice-diagnostics")
         async def voice_diagnostics_state():
             return await _call_handler(voice_diagnostics_handler, offload=True)
+
+    if voice_diagnostics_begin_handler is not None:
+        @router.post("/api/system/voice-diagnostics/run")
+        async def voice_diagnostics_begin(payload: dict[str, Any] | None = None):
+            body = payload or {}
+            _strict_payload(body, {"run_id"})
+            try:
+                return await _call_handler(voice_diagnostics_begin_handler, body, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if voice_diagnostics_comfort_handler is not None:
+        @router.post("/api/system/voice-diagnostics/comfort")
+        async def voice_diagnostics_comfort(payload: dict[str, Any]):
+            _strict_payload(
+                payload,
+                {
+                    "scenario",
+                    "stop_audio_latency_ms",
+                    "interrupt_ack_latency_ms",
+                    "false_interruption",
+                    "first_audio_latency_ms",
+                    "continuous_turn_completed",
+                    "run_id",
+                },
+            )
+            try:
+                return await _call_handler(voice_diagnostics_comfort_handler, payload, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if voice_diagnostics_comfort_signal_handler is not None:
+        @router.post("/api/system/voice-diagnostics/comfort-signal")
+        async def voice_diagnostics_comfort_signal(payload: dict[str, Any]):
+            _strict_payload(
+                payload,
+                {"signal", "source", "confidence", "duration_ms", "run_id"},
+            )
+            try:
+                return await _call_handler(voice_diagnostics_comfort_signal_handler, payload, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if voice_diagnostics_sample_handler is not None:
+        @router.post("/api/system/voice-diagnostics/sample")
+        async def voice_diagnostics_sample(payload: dict[str, Any]):
+            _strict_payload(
+                payload,
+                {
+                    "stage",
+                    "latency_ms",
+                    "ok",
+                    "provider",
+                    "error_kind",
+                    "recovered",
+                    "recovery_latency_ms",
+                    "playback_underruns",
+                    "run_id",
+                },
+            )
+            try:
+                return await _call_handler(voice_diagnostics_sample_handler, payload, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     if connector_registry_handler is not None:
         @router.get("/api/system/connectors")
@@ -535,5 +635,251 @@ def create_system_router(
         async def remove_imported_skills(payload: dict[str, Any]):
             ids = _validate_imported_skill_ids(payload)
             return await _call_handler(remove_imported_skills_handler, ids, offload=True)
+
+    if stream_status_handler is not None:
+        @router.get("/api/system/stream")
+        async def stream_status():
+            return await _call_handler(stream_status_handler, offload=True)
+
+    if stream_moderation_handler is not None:
+        @router.get("/api/system/stream/moderation")
+        async def stream_moderation():
+            return await _call_handler(stream_moderation_handler, offload=True)
+
+    if stream_moderation_update_handler is not None:
+        @router.patch("/api/system/stream/moderation")
+        async def stream_moderation_update(payload: dict[str, Any]):
+            _strict_payload(payload, {"enabled", "blockedTerms", "slowModeSeconds", "maxMessagesPerMinute"})
+            try:
+                return await _call_handler(stream_moderation_update_handler, payload, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    if stream_preview_handler is not None:
+        @router.post("/api/system/stream/preview")
+        async def stream_preview(payload: dict[str, Any]):
+            _strict_payload(payload, {"action", "params"})
+            try:
+                return await _call_handler(stream_preview_handler, payload, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if stream_probe_handler is not None:
+        @router.post("/api/system/stream/probe")
+        async def stream_probe(payload: dict[str, Any] | None = None):
+            body = payload or {}
+            _strict_payload(body, {"endpoint", "password"})
+            try:
+                return await _call_handler(stream_probe_handler, body, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if stream_obs_configure_handler is not None:
+        @router.put("/api/system/stream/obs")
+        async def stream_obs_configure(payload: dict[str, Any]):
+            _strict_payload(payload, {"endpoint", "password", "allowRemote", "clearPassword"})
+            try:
+                return await _call_handler(stream_obs_configure_handler, payload, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if stream_obs_profiles_handler is not None:
+        @router.get("/api/system/stream/obs/profiles")
+        async def stream_obs_profiles():
+            try:
+                return await _call_handler(stream_obs_profiles_handler, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    if stream_events_handler is not None:
+        @router.get("/api/system/stream/events")
+        async def stream_events(limit: int = 50):
+            if not 1 <= limit <= 100:
+                raise HTTPException(status_code=422, detail="limit must be between 1 and 100")
+            return await _call_handler(stream_events_handler, limit, offload=True)
+
+    if stream_actions_handler is not None:
+        @router.get("/api/system/stream/actions")
+        async def stream_actions(limit: int = 50):
+            if not 1 <= limit <= 100:
+                raise HTTPException(status_code=422, detail="limit must be between 1 and 100")
+            return await _call_handler(stream_actions_handler, limit, offload=True)
+
+    if stream_event_enqueue_handler is not None:
+        @router.post("/api/system/stream/events")
+        async def stream_event_enqueue(payload: dict[str, Any]):
+            _strict_payload(payload, {"kind", "text", "author"})
+            try:
+                return await _call_handler(stream_event_enqueue_handler, payload, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if stream_takeover_handler is not None:
+        @router.post("/api/system/stream/takeover")
+        async def stream_takeover(payload: dict[str, Any]):
+            _strict_payload(payload, {"enabled"})
+            enabled = payload.get("enabled")
+            if not isinstance(enabled, bool):
+                raise HTTPException(status_code=422, detail="enabled must be a boolean")
+            try:
+                return await _call_handler(stream_takeover_handler, enabled, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if stream_execute_handler is not None:
+        @router.post("/api/system/stream/execute")
+        async def stream_execute(payload: dict[str, Any]):
+            _strict_payload(payload, {"requestId", "action", "confirmed", "params"})
+            try:
+                return await _call_handler(stream_execute_handler, payload, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    if stream_twitch_eventsub_handler is not None:
+        @router.post("/api/system/stream/twitch/eventsub")
+        async def stream_twitch_eventsub(request: Request):
+            try:
+                result = await _call_handler(
+                    stream_twitch_eventsub_handler,
+                    await request.body(),
+                    dict(request.headers),
+                    offload=True,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=403, detail=str(exc)) from exc
+            if isinstance(result, dict) and isinstance(result.get("challenge"), str):
+                return PlainTextResponse(result["challenge"], status_code=200)
+            return JSONResponse(result)
+
+    if stream_twitch_irc_handler is not None:
+        @router.post("/api/system/stream/twitch/irc")
+        async def stream_twitch_irc(payload: dict[str, Any]):
+            _strict_payload(payload, {"line"})
+            line = payload.get("line")
+            if not isinstance(line, str) or not line.strip():
+                raise HTTPException(status_code=422, detail="line is required")
+            try:
+                return await _call_handler(stream_twitch_irc_handler, line, offload=True)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if stream_twitch_reconfigure_handler is not None:
+        @router.post("/api/system/stream/twitch/reconfigure")
+        async def stream_twitch_reconfigure():
+            try:
+                return await _call_handler(stream_twitch_reconfigure_handler, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        @router.put("/api/system/stream/twitch/config")
+        async def stream_twitch_config(payload: dict[str, Any]):
+            _strict_payload(payload, {
+                "clientId", "eventsubSecret", "eventsubToken", "chatToken",
+                "broadcasterId", "senderId", "moderatorId", "channel", "username",
+                "eventsubCallbackUrl", "subscriptionProvider",
+                "clearClientId", "clearEventsubSecret", "clearEventsubToken", "clearChatToken",
+                "clearBroadcasterId", "clearSenderId", "clearModeratorId", "clearChannel",
+                "clearUsername", "clearEventsubCallbackUrl", "clearSubscriptionProvider",
+            })
+            try:
+                return await _call_handler(stream_twitch_reconfigure_handler, payload, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    if stream_twitch_probe_handler is not None:
+        @router.post("/api/system/stream/twitch/probe")
+        async def stream_twitch_probe():
+            try:
+                return await _call_handler(stream_twitch_probe_handler, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if stream_twitch_subscriptions_handler is not None:
+        @router.put("/api/system/stream/twitch/subscriptions")
+        async def stream_twitch_subscriptions(payload: dict[str, Any]):
+            _strict_payload(payload, {"subscriptions"})
+            try:
+                return await _call_handler(stream_twitch_subscriptions_handler, payload, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if stream_twitch_connect_handler is not None:
+        @router.post("/api/system/stream/twitch/connect")
+        async def stream_twitch_connect():
+            try:
+                return await _call_handler(stream_twitch_connect_handler, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if stream_twitch_disconnect_handler is not None:
+        @router.post("/api/system/stream/twitch/disconnect")
+        async def stream_twitch_disconnect():
+            try:
+                return await _call_handler(stream_twitch_disconnect_handler, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if stream_twitch_tick_handler is not None:
+        @router.post("/api/system/stream/twitch/tick")
+        async def stream_twitch_tick():
+            try:
+                return await _call_handler(stream_twitch_tick_handler, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if stream_drafts_handler is not None:
+        @router.get("/api/system/stream/drafts")
+        async def stream_drafts(limit: int = 20):
+            if not 1 <= limit <= 100:
+                raise HTTPException(status_code=422, detail="limit must be between 1 and 100")
+            try:
+                return await _call_handler(stream_drafts_handler, limit, offload=True)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if stream_draft_generate_handler is not None:
+        @router.post("/api/system/stream/drafts")
+        async def stream_draft_generate(payload: dict[str, Any]):
+            _strict_payload(payload, {"eventId", "workspaceId", "sessionId", "retry"})
+            try:
+                return await _call_handler(stream_draft_generate_handler, payload)
+            except ValueError as exc:
+                code = str(getattr(exc, "code", "") or "")
+                status = 404 if code == "event_not_found" else 403 if code == "workspace_mismatch" else 503 if code in {"turn_service_unavailable", "llm_unavailable"} else 422
+                raise HTTPException(status_code=status, detail=str(exc)) from exc
+
+    if stream_draft_consume_handler is not None:
+        @router.post("/api/system/stream/drafts/consume")
+        async def stream_draft_consume(payload: dict[str, Any] | None = None):
+            body = dict(payload or {})
+            _strict_payload(body, {"limit", "workspaceId", "sessionId"})
+            try:
+                return await _call_handler(stream_draft_consume_handler, body)
+            except ValueError as exc:
+                code = str(getattr(exc, "code", "") or "")
+                status = 403 if code == "workspace_mismatch" else 422
+                raise HTTPException(status_code=status, detail=str(exc)) from exc
+
+    if stream_draft_consumer_status_handler is not None:
+        @router.get("/api/system/stream/draft-consumer")
+        async def stream_draft_consumer_status():
+            return await _call_handler(stream_draft_consumer_status_handler, offload=True)
+
+    if stream_draft_consumer_toggle_handler is not None:
+        @router.post("/api/system/stream/draft-consumer")
+        async def stream_draft_consumer_toggle(payload: dict[str, Any]):
+            _strict_payload(payload, {"enabled"})
+            try:
+                return await _call_handler(stream_draft_consumer_toggle_handler, payload)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return router

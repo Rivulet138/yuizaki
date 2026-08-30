@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import math
+import re
 from collections.abc import Callable, Coroutine, Mapping
 from typing import Any, cast
 
@@ -64,7 +66,11 @@ __all__ = [
     "build_toggle_mcp_endpoint",
     "build_toggle_schedule_endpoint",
     "build_update_agent_plugin_config_endpoint",
+    "build_voice_diagnostics_comfort_endpoint",
+    "build_voice_diagnostics_comfort_signal_endpoint",
+    "build_voice_diagnostics_begin_endpoint",
     "build_voice_diagnostics_endpoint",
+    "build_voice_diagnostics_sample_endpoint",
 ]
 
 
@@ -105,6 +111,9 @@ def build_activity_frame_endpoints(
     def feedback(payload: dict[str, Any]) -> dict[str, Any]:
         return _service().feedback(active_workspace_id_provider(), payload)
 
+    def feedback_summary() -> dict[str, Any]:
+        return _service().feedback_summary(active_workspace_id_provider())
+
     return {
         "get_settings": get_settings,
         "patch_settings": patch_settings,
@@ -112,6 +121,7 @@ def build_activity_frame_endpoints(
         "rebuild": rebuild,
         "delete_frame": delete_frame,
         "feedback": feedback,
+        "feedback_summary": feedback_summary,
     }
 
 
@@ -331,6 +341,20 @@ def build_voice_diagnostics_endpoint(
                 "providers": {},
                 "capability": {"voice": "degraded", "text_chat": "preserved", "text_chat_blocked_by_voice": False},
                 "recommendations": ["voice diagnostics are not initialized"],
+                "qualification": {
+                    "status": "not_qualified",
+                    "sample_count": 0,
+                    "required_stages": [],
+                    "recovery_quality": {"attempts": 0, "successes": 0, "success_rate": None},
+                    "gaps": [{"kind": "diagnostics_unavailable"}],
+                    "claim": "must_not_be_used_as_real_device_qualification",
+                },
+                "release_gate": {
+                    "status": "not_qualified",
+                    "qualification_status": "not_qualified",
+                    "failures": [{"kind": "diagnostics_unavailable"}],
+                    "claim": "must_not_be_used_as_voice_release_qualification",
+                },
             }
         runtime_snapshot = getattr(diagnostics, "runtime_snapshot", None)
         if not callable(runtime_snapshot):
@@ -341,7 +365,407 @@ def build_voice_diagnostics_endpoint(
         )
         if not isinstance(snapshot, Mapping):
             raise TypeError("voice diagnostics runtime snapshot must be an object")
-        return cast(dict[str, Any], dict(snapshot))
+        projected = cast(dict[str, Any], dict(snapshot))
+
+        # Qualification reports can contain machine/device/provider provenance.
+        # Keep only bounded gate metadata in the API/UI projection; the full
+        # redacted artifact remains an explicit release-runner concern.
+        qualification_fn = getattr(diagnostics, "qualification_snapshot", None)
+        release_gate_fn = getattr(diagnostics, "release_gate", None)
+        if callable(qualification_fn):
+            try:
+                raw_qualification = qualification_fn()
+            except (TypeError, ValueError, RuntimeError, OSError):
+                raw_qualification = None
+            if isinstance(raw_qualification, Mapping):
+                gaps: list[dict[str, Any]] = []
+                raw_gaps = raw_qualification.get("gaps")
+                if isinstance(raw_gaps, list):
+                    for item in raw_gaps[:32]:
+                        if not isinstance(item, Mapping):
+                            continue
+                        gap: dict[str, Any] = {}
+                        for key in ("kind", "stage", "required", "actual", "fields"):
+                            value = item.get(key)
+                            if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+                                gap[key] = value
+                            elif key == "fields" and isinstance(value, list):
+                                gap[key] = [str(field)[:96] for field in value[:32]]
+                        if gap:
+                            gaps.append(gap)
+                recovery = raw_qualification.get("recovery_quality")
+                recovery_summary = {
+                    "attempts": 0,
+                    "successes": 0,
+                    "success_rate": None,
+                }
+                if isinstance(recovery, Mapping):
+                    attempts = recovery.get("attempts")
+                    successes = recovery.get("successes")
+                    success_rate = recovery.get("success_rate")
+                    if isinstance(attempts, int) and not isinstance(attempts, bool) and attempts >= 0:
+                        recovery_summary["attempts"] = attempts
+                    if isinstance(successes, int) and not isinstance(successes, bool) and successes >= 0:
+                        recovery_summary["successes"] = successes
+                    if isinstance(success_rate, (int, float)) and not isinstance(success_rate, bool) and math.isfinite(float(success_rate)) and 0 <= float(success_rate) <= 1:
+                        recovery_summary["success_rate"] = float(success_rate)
+                projected["qualification"] = {
+                    "status": raw_qualification.get("status") if raw_qualification.get("status") in {"qualified", "not_qualified"} else "not_qualified",
+                    "sample_count": raw_qualification.get("sample_count") if isinstance(raw_qualification.get("sample_count"), int) and raw_qualification.get("sample_count") >= 0 else 0,
+                    "required_stages": [str(stage)[:96] for stage in raw_qualification.get("required_stages", [])[:32]] if isinstance(raw_qualification.get("required_stages"), list) else [],
+                    "recovery_quality": recovery_summary,
+                    "gaps": gaps,
+                    "claim": str(raw_qualification.get("claim") or "must_not_be_used_as_real_device_qualification")[:160],
+                }
+        if callable(release_gate_fn):
+            try:
+                raw_gate = release_gate_fn()
+            except (TypeError, ValueError, RuntimeError, OSError):
+                raw_gate = None
+            if isinstance(raw_gate, Mapping):
+                failures: list[dict[str, Any]] = []
+                raw_failures = raw_gate.get("failures")
+                if isinstance(raw_failures, list):
+                    for item in raw_failures[:32]:
+                        if not isinstance(item, Mapping):
+                            continue
+                        failure: dict[str, Any] = {}
+                        for key in ("kind", "stage", "budget_ms", "p95_ms", "required", "actual"):
+                            value = item.get(key)
+                            if isinstance(value, (str, int, float)) and not isinstance(value, bool) and (not isinstance(value, float) or math.isfinite(value)):
+                                failure[key] = value
+                        if failure:
+                            failures.append(failure)
+                projected["release_gate"] = {
+                    "status": raw_gate.get("status") if raw_gate.get("status") in {"pass", "fail"} else "fail",
+                    "qualification_status": raw_gate.get("qualification_status") if raw_gate.get("qualification_status") in {"qualified", "not_qualified"} else "not_qualified",
+                    "failures": failures,
+                    "claim": str(raw_gate.get("claim") or "must_not_be_used_as_voice_release_qualification")[:160],
+                }
+        return projected
+
+    return _endpoint
+
+
+def build_voice_diagnostics_begin_endpoint(
+    *,
+    diagnostics_provider: Callable[[], Any],
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Start an isolated renderer voice-diagnostics run.
+
+    Runtime voice samples are intentionally scoped to one renderer session.  A
+    new run clears the bounded in-memory/persisted measurements so a workspace
+    switch or reconnect cannot make old comfort data look like current data.
+    The caller receives only the safe run label; no transcript, audio, or
+    credentials are accepted by this endpoint.
+    """
+
+    allowed = {"run_id"}
+    safe_label = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/ -]{0,95}$")
+    secret_pattern = re.compile(r"(?i)(bearer\s+|api[_-]?key\s*[=:]|token\s*[=:]|secret\s*[=:])")
+
+    def _endpoint(payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise TypeError("voice diagnostics run payload must be an object")
+        unknown = set(payload) - allowed
+        if unknown:
+            raise ValueError(f"Unknown fields: {', '.join(sorted(unknown))}")
+        run_id = payload.get("run_id")
+        if run_id is not None:
+            if (
+                not isinstance(run_id, str)
+                or not run_id.strip()
+                or len(run_id.strip()) > 96
+                or secret_pattern.search(run_id)
+                or not safe_label.fullmatch(run_id.strip())
+            ):
+                raise ValueError("run_id must be a non-empty safe label of 96 characters or less")
+            run_id = run_id.strip()
+        diagnostics = diagnostics_provider()
+        if diagnostics is None:
+            raise RuntimeError("voice diagnostics are not initialized")
+        begin_run = getattr(diagnostics, "begin_run", None)
+        snapshot = getattr(diagnostics, "snapshot", None)
+        if not callable(begin_run) or not callable(snapshot):
+            raise TypeError("voice diagnostics run lifecycle is unavailable")
+        selected_run_id = begin_run(run_id=run_id)
+        current = snapshot()
+        if not isinstance(current, Mapping):
+            raise TypeError("voice diagnostics snapshot must be an object")
+        return {
+            "ok": True,
+            "run_id": selected_run_id,
+            "sample_count": int(current.get("sample_count", 0)),
+            "schemaVersion": "yuizaki.voice-diagnostics-run.v1",
+        }
+
+    return _endpoint
+
+
+def build_voice_diagnostics_comfort_endpoint(
+    *,
+    diagnostics_provider: Callable[[], Any],
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Record one transcript-free comfort fixture and return a safe snapshot."""
+
+    allowed = {
+        "scenario",
+        "stop_audio_latency_ms",
+        "interrupt_ack_latency_ms",
+        "false_interruption",
+        "first_audio_latency_ms",
+        "continuous_turn_completed",
+        "run_id",
+    }
+    latency_fields = {
+        "stop_audio_latency_ms",
+        "interrupt_ack_latency_ms",
+        "first_audio_latency_ms",
+    }
+    secret_pattern = re.compile(r"(?i)(bearer\s+|api[_-]?key\s*[=:]|token\s*[=:]|secret\s*[=:])")
+    run_id_pattern = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/ -]{0,95}$")
+
+    def _endpoint(payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise TypeError("voice comfort payload must be an object")
+        unknown = set(payload) - allowed
+        if unknown:
+            raise ValueError(f"Unknown fields: {', '.join(sorted(unknown))}")
+
+        scenario = payload.get("scenario")
+        if not isinstance(scenario, str) or not scenario.strip() or len(scenario.strip()) > 64:
+            raise ValueError("scenario must be a non-empty string of 64 characters or less")
+
+        normalized: dict[str, Any] = {"scenario": scenario.strip()}
+        for field_name in latency_fields:
+            if field_name not in payload or payload[field_name] is None:
+                normalized[field_name] = None
+                continue
+            value = payload[field_name]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(f"{field_name} must be a finite non-negative number")
+            numeric = float(value)
+            if not math.isfinite(numeric) or numeric < 0 or numeric > 120_000:
+                raise ValueError(f"{field_name} must be between 0 and 120000")
+            normalized[field_name] = numeric
+
+        for field_name in ("false_interruption", "continuous_turn_completed"):
+            if field_name not in payload or payload[field_name] is None:
+                normalized[field_name] = False if field_name == "false_interruption" else None
+            elif not isinstance(payload[field_name], bool):
+                raise TypeError(f"{field_name} must be a boolean")
+            else:
+                normalized[field_name] = payload[field_name]
+
+        if "run_id" in payload and payload["run_id"] is not None:
+            run_id = payload["run_id"]
+            if (
+                not isinstance(run_id, str)
+                or not run_id.strip()
+                or len(run_id.strip()) > 96
+                or secret_pattern.search(run_id)
+                or not run_id_pattern.fullmatch(run_id.strip())
+            ):
+                raise ValueError("run_id must be a non-empty safe label of 96 characters or less")
+            normalized["run_id"] = run_id.strip()
+        else:
+            normalized["run_id"] = None
+
+        diagnostics = diagnostics_provider()
+        if diagnostics is None:
+            raise RuntimeError("voice diagnostics are not initialized")
+        record = getattr(diagnostics, "record_comfort_scenario", None)
+        snapshot = getattr(diagnostics, "comfort_snapshot", None)
+        if not callable(record) or not callable(snapshot):
+            raise TypeError("voice comfort diagnostics are unavailable")
+        record(**normalized)
+        result = snapshot()
+        if not isinstance(result, Mapping):
+            raise TypeError("voice comfort snapshot must be an object")
+        return dict(result)
+
+    return _endpoint
+
+
+def build_voice_diagnostics_comfort_signal_endpoint(
+    *,
+    diagnostics_provider: Callable[[], Any],
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Record one explicit transcript/audio-free comfort signal."""
+
+    allowed = {"signal", "source", "confidence", "duration_ms", "run_id"}
+    signals = {"hesitation", "backchannel", "background_speech"}
+    sources = {"provider_vad", "local_vad", "classifier"}
+    safe_label = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/ -]{0,95}$")
+    secret_pattern = re.compile(r"(?i)(bearer\s+|api[_-]?key\s*[=:]|token\s*[=:]|secret\s*[=:])")
+
+    def _number(payload: dict[str, Any], field_name: str, *, maximum: float) -> float | None:
+        value = payload.get(field_name)
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError(f"{field_name} must be a finite non-negative number")
+        numeric = float(value)
+        if not math.isfinite(numeric) or numeric < 0 or numeric > maximum:
+            raise ValueError(f"{field_name} must be between 0 and {maximum:g}")
+        return numeric
+
+    def _endpoint(payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise TypeError("voice comfort signal payload must be an object")
+        unknown = set(payload) - allowed
+        if unknown:
+            raise ValueError(f"Unknown fields: {', '.join(sorted(unknown))}")
+        signal = payload.get("signal")
+        source = payload.get("source")
+        if not isinstance(signal, str) or signal.strip() not in signals:
+            raise ValueError("signal is unsupported")
+        if not isinstance(source, str) or source.strip() not in sources:
+            raise ValueError("source is unsupported")
+        confidence = _number(payload, "confidence", maximum=1.0)
+        if confidence is None:
+            raise ValueError("confidence is required")
+        duration_ms = _number(payload, "duration_ms", maximum=120_000)
+        run_id = payload.get("run_id")
+        if run_id is not None:
+            if (
+                not isinstance(run_id, str)
+                or not run_id.strip()
+                or len(run_id.strip()) > 96
+                or secret_pattern.search(run_id)
+                or not safe_label.fullmatch(run_id.strip())
+            ):
+                raise ValueError("run_id must be a non-empty safe label of 96 characters or less")
+            run_id = run_id.strip()
+        normalized = {
+            "signal": signal.strip(),
+            "source": source.strip(),
+            "confidence": confidence,
+            "duration_ms": duration_ms,
+            "run_id": run_id,
+        }
+        diagnostics = diagnostics_provider()
+        if diagnostics is None:
+            raise RuntimeError("voice diagnostics are not initialized")
+        record = getattr(diagnostics, "record_comfort_signal", None)
+        snapshot = getattr(diagnostics, "comfort_signal_snapshot", None)
+        if not callable(record) or not callable(snapshot):
+            raise TypeError("voice comfort signal diagnostics are unavailable")
+        record(**normalized)
+        result = snapshot()
+        if not isinstance(result, Mapping):
+            raise TypeError("voice comfort signal snapshot must be an object")
+        return {
+            **dict(result),
+            "ok": True,
+            "accepted": True,
+            "signal": normalized["signal"],
+            "source": normalized["source"],
+        }
+
+    return _endpoint
+
+
+def build_voice_diagnostics_sample_endpoint(
+    *,
+    diagnostics_provider: Callable[[], Any],
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Record one bounded, transcript-free realtime voice stage sample."""
+
+    allowed = {
+        "stage",
+        "latency_ms",
+        "ok",
+        "provider",
+        "error_kind",
+        "recovered",
+        "recovery_latency_ms",
+        "playback_underruns",
+        "run_id",
+    }
+    stages = {
+        "capture",
+        "asr",
+        "asr_final",
+        "llm",
+        "first_token",
+        "tts",
+        "first_audio",
+        "interruption",
+        "playback",
+        "playback_recovery",
+        "round_trip",
+    }
+    safe_label = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/ -]{0,95}$")
+    secret_pattern = re.compile(r"(?i)(bearer\s+|api[_-]?key\s*[=:]|token\s*[=:]|secret\s*[=:])")
+
+    def _number(payload: dict[str, Any], field_name: str, *, maximum: float = 120_000) -> float | None:
+        value = payload.get(field_name)
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError(f"{field_name} must be a finite non-negative number")
+        numeric = float(value)
+        if not math.isfinite(numeric) or numeric < 0 or numeric > maximum:
+            raise ValueError(f"{field_name} must be between 0 and {maximum:g}")
+        return numeric
+
+    def _label(payload: dict[str, Any], field_name: str) -> str | None:
+        value = payload.get(field_name)
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise TypeError(f"{field_name} must be a safe label")
+        cleaned = value.strip()
+        if not cleaned or len(cleaned) > 96 or secret_pattern.search(cleaned) or not safe_label.fullmatch(cleaned):
+            raise ValueError(f"{field_name} must be a safe label of 96 characters or less")
+        return cleaned
+
+    def _endpoint(payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise TypeError("voice diagnostic sample payload must be an object")
+        unknown = set(payload) - allowed
+        if unknown:
+            raise ValueError(f"Unknown fields: {', '.join(sorted(unknown))}")
+        stage = payload.get("stage")
+        if not isinstance(stage, str) or stage.strip() not in stages:
+            raise ValueError("stage is unsupported")
+        latency_ms = _number(payload, "latency_ms")
+        if latency_ms is None:
+            raise ValueError("latency_ms is required")
+        ok = payload.get("ok", True)
+        if not isinstance(ok, bool):
+            raise TypeError("ok must be a boolean")
+        recovered = payload.get("recovered")
+        if recovered is not None and not isinstance(recovered, bool):
+            raise TypeError("recovered must be a boolean")
+        playback_underruns = payload.get("playback_underruns")
+        if playback_underruns is not None and (
+            isinstance(playback_underruns, bool)
+            or not isinstance(playback_underruns, int)
+            or not 0 <= playback_underruns <= 10_000
+        ):
+            raise ValueError("playback_underruns must be an integer between 0 and 10000")
+        run_id = _label(payload, "run_id")
+        normalized = {
+            "stage": stage.strip(),
+            "latency_ms": latency_ms,
+            "ok": ok,
+            "provider": _label(payload, "provider"),
+            "error_kind": _label(payload, "error_kind"),
+            "recovered": recovered,
+            "recovery_latency_ms": _number(payload, "recovery_latency_ms"),
+            "playback_underruns": playback_underruns,
+            "run_id": run_id,
+        }
+        diagnostics = diagnostics_provider()
+        if diagnostics is None:
+            raise RuntimeError("voice diagnostics are not initialized")
+        record = getattr(diagnostics, "record", None)
+        if not callable(record):
+            raise TypeError("voice diagnostics recorder is unavailable")
+        record(**normalized)
+        return {"ok": True, "accepted": True, "stage": normalized["stage"]}
 
     return _endpoint
 

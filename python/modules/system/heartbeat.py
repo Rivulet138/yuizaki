@@ -467,6 +467,11 @@ class HeartbeatScheduler:
             'behaviorType': event.get('type'),
             'tick': self.state.tick_count,
             'triggerReason': event.get('trigger_reason'),
+            'reasonCode': event.get('reason_code') or event.get('trigger_reason'),
+            'sceneConfidence': event.get('scene_confidence', 0.0),
+            'userWorkState': event.get('user_work_state', 'unknown'),
+            'expectedBenefit': event.get('expected_benefit', 'unspecified'),
+            'interruptCost': event.get('interrupt_cost', 'unknown'),
             'goalId': goal_id,
         }
         for source_key, output_key in (
@@ -533,6 +538,11 @@ class HeartbeatScheduler:
             'source_kind': 'completed_turn_followup',
             'source_id': str(pending.get('source_id') or ''),
             'trigger_reason': 'completed_turn_followup',
+            'reason_code': str((pending.get('data') or {}).get('reasonCode') or 'completed_turn_followup'),
+            'scene_confidence': float((pending.get('data') or {}).get('sceneConfidence', 0.0) or 0.0),
+            'user_work_state': str((pending.get('data') or {}).get('userWorkState') or 'unknown'),
+            'expected_benefit': str((pending.get('data') or {}).get('expectedBenefit') or 'unspecified'),
+            'interrupt_cost': str((pending.get('data') or {}).get('interruptCost') or 'unknown'),
             'frame_id': str(pending.get('frame_id') or ''),
             'expires_at': float(pending.get('expires_at') or 0.0),
             'content_code': 'completed_turn_followup',

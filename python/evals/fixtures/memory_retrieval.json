@@ -1,0 +1,90 @@
+[
+  {
+    "id": "role-isolation",
+    "scenario": "memory_role",
+    "query": "用户喜欢咖啡",
+    "scope": "workspace",
+    "workspace_id": "ws-a",
+    "memory_role": "user_fact",
+    "top_k": 3,
+    "expected_ids": ["fact-coffee"],
+    "forbidden_ids": ["permission-mail"],
+    "forbidden_memory_roles": ["tool_permission"],
+    "expected_memory_roles": {"fact-coffee": "user_fact"},
+    "documents": [
+      {"id": "fact-coffee", "text": "用户喜欢咖啡。", "metadata": {"layer": "profile", "scope": "workspace", "workspace_id": "ws-a", "memory_role": "user_fact", "quality_score": 0.95}},
+      {"id": "permission-mail", "text": "允许发送邮件给联系人。", "metadata": {"layer": "semantic", "scope": "workspace", "workspace_id": "ws-a", "memory_role": "tool_permission", "quality_score": 0.95}}
+    ]
+  },
+  {
+    "id": "workspace-scope",
+    "scenario": "scope",
+    "query": "用户喜欢咖啡",
+    "scope": "workspace",
+    "workspace_id": "ws-a",
+    "top_k": 3,
+    "expected_ids": ["fact-coffee"],
+    "scope_forbidden_ids": ["fact-tea-ws-b"],
+    "documents": [
+      {"id": "fact-coffee", "text": "用户喜欢咖啡。", "metadata": {"layer": "profile", "scope": "workspace", "workspace_id": "ws-a", "memory_role": "user_fact"}},
+      {"id": "fact-tea-ws-b", "text": "用户喜欢咖啡。", "metadata": {"layer": "profile", "scope": "workspace", "workspace_id": "ws-b", "memory_role": "user_fact"}}
+    ]
+  },
+  {
+    "id": "expired-memory",
+    "scenario": "lifecycle",
+    "query": "临时项目密钥",
+    "scope": "session",
+    "session_id": "s-expired",
+    "top_k": 3,
+    "expected_ids": [],
+    "lifecycle_forbidden_ids": ["expired-secret"],
+    "abstention_expected": true,
+    "documents": [
+      {"id": "expired-secret", "text": "临时项目密钥已过期。", "metadata": {"layer": "working", "scope": "session", "session_id": "s-expired", "memory_role": "user_fact", "valid_to": "2020-01-01T00:00:00Z"}}
+    ]
+  },
+  {
+    "id": "permission-review-only",
+    "scenario": "memory_role",
+    "query": "允许发送邮件给联系人",
+    "scope": "workspace",
+    "workspace_id": "ws-a",
+    "top_k": 3,
+    "expected_ids": [],
+    "forbidden_ids": ["permission-mail"],
+    "forbidden_memory_roles": ["tool_permission"],
+    "abstention_expected": true,
+    "documents": [
+      {"id": "permission-mail", "text": "允许发送邮件给联系人。", "metadata": {"layer": "semantic", "scope": "workspace", "workspace_id": "ws-a", "memory_role": "tool_permission"}}
+    ]
+  },
+  {
+    "id": "relation-evidence",
+    "scenario": "relation",
+    "query": "周五 发布计划",
+    "scope": "workspace",
+    "workspace_id": "ws-a",
+    "top_k": 1,
+    "relation_expansion": true,
+    "relation_limit": 5,
+    "required_evidence_ids": ["alpha-decision"],
+    "expected_ids": ["alpha-plan"],
+    "documents": [
+      {"id": "alpha-plan", "text": "项目 alpha 的发布计划是周五。", "metadata": {"layer": "episodic", "scope": "workspace", "workspace_id": "ws-a", "memory_role": "task_experience", "turn_id": "turn-alpha", "occurred_at": "2026-01-01T10:00:00Z"}},
+      {"id": "alpha-decision", "text": "灰度策略已确认。", "metadata": {"layer": "episodic", "scope": "workspace", "workspace_id": "ws-a", "memory_role": "task_experience", "turn_id": "turn-alpha", "occurred_at": "2026-01-01T10:05:00Z"}}
+    ]
+  },
+  {
+    "id": "missing-premise",
+    "scenario": "abstention",
+    "query": "未提供的项目编号对应的状态",
+    "scope": "session",
+    "session_id": "s-missing",
+    "top_k": 3,
+    "expected_ids": [],
+    "abstention_expected": true,
+    "missing_premises": ["project_id"],
+    "documents": []
+  }
+]

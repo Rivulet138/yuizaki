@@ -4,6 +4,9 @@ import { Config as Live2DConfig } from "easy-live2d";
 import * as PIXI from "pixi.js";
 import {
 	DEFAULT_PET_CONTROL_STATE,
+	PET_SCALE_DEFAULT,
+	PET_SCALE_MIN,
+	PET_SCALE_MAX,
 	normalizePetLipSyncProfile,
 	type AvatarManifest,
 	type PetCompanionIdleProfile,
@@ -95,11 +98,6 @@ import {
 	scanAlphaBounds,
 	type VisualBounds,
 } from "./pet-renderer-transform";
-import {
-	DEFAULT_PET_TEST_STATE,
-	type PetTestState,
-	syncPetTestState,
-} from "./pet-test-state";
 import type {
 	Live2DAttentionTarget,
 	Live2DBehaviorState,
@@ -133,7 +131,7 @@ const DEFAULT_CONFIG: PetConfig = {
 	modelManifest: null,
 	emotionPresets: [],
 	animationPaths: [],
-	scale: 0.28,
+	scale: PET_SCALE_DEFAULT,
 	positionX: null,
 	positionY: null,
 	placement: "bottom-right",
@@ -142,9 +140,9 @@ const DEFAULT_CONFIG: PetConfig = {
 	lipSyncProfile: { ...DEFAULT_PET_CONTROL_STATE.lipSyncProfile },
 };
 
-const DEFAULT_SCALE = 0.28;
-const MIN_SCALE = 0.12;
-const MAX_SCALE = 0.6;
+const DEFAULT_SCALE = PET_SCALE_DEFAULT;
+const MIN_SCALE = PET_SCALE_MIN;
+const MAX_SCALE = PET_SCALE_MAX;
 const PASSTHROUGH_MIN_SWITCH_MS = 140;
 const HOVER_HYSTERESIS_PX = 14;
 const DOUBLE_CLICK_INTERVAL_MS = 280;
@@ -219,6 +217,7 @@ class PetRenderer {
 	private model: Live2DSprite | null = null;
 	private live2dViewport: PIXI.Container | null = null;
 	private live2dVisualLocalBounds: VisualBounds | null = null;
+	private live2dVisualScaleCorrection = 1;
 	private live2dBaseScale: number | null = null;
 	private visualCalibrationFrame: number | null = null;
 	private visualCalibrationGeneration = 0;
@@ -267,7 +266,7 @@ class PetRenderer {
 	private scalePersistTimer: number | null = null;
 	private positionPersistTimer: number | null = null;
 	private dragCooldownUntil = 0;
-	private readonly testState: PetTestState = { ...DEFAULT_PET_TEST_STATE };
+	private interactionBounds: PetInteractionBoundsPayload | null = null;
 	private vrmRuntime: VrmRuntimeAdapterType | null = null;
 	private live2dRuntime: Live2DRuntimeAdapter | null = null;
 	private avatarCapabilities: AvatarCapabilitySnapshot | null = null;
@@ -303,7 +302,6 @@ class PetRenderer {
 
 		this.container = element;
 		this.config = { ...DEFAULT_CONFIG };
-		this.syncTestState();
 	}
 
 	async init(): Promise<void> {
@@ -956,9 +954,6 @@ class PetRenderer {
 		}
 
 		this.live2dRuntime?.triggerMotion?.(group, index);
-		this.testState.lastMotionGroup = group;
-		this.testState.lastMotionIndex = index;
-		this.syncTestState();
 		this.markActivity(`motion:${group}`);
 	}
 
@@ -970,9 +965,6 @@ class PetRenderer {
 		this.live2dRuntime?.triggerRandomMotion?.();
 		const groups = ["Idle", "Tap", "Tap@Body", "Flick", "Flick@Body"];
 		const group = groups[Math.floor(Math.random() * groups.length)];
-		this.testState.lastMotionGroup = group;
-		this.testState.lastMotionIndex = null;
-		this.syncTestState();
 		this.markActivity(`motion:${group}`);
 	}
 
@@ -982,8 +974,6 @@ class PetRenderer {
 		}
 
 		this.live2dRuntime?.triggerExpression?.(name);
-		this.testState.lastExpressionName = name;
-		this.syncTestState();
 		this.markActivity(`expression:${name}`);
 	}
 
@@ -1011,8 +1001,6 @@ class PetRenderer {
 				normalizedDirective.motion.group,
 				normalizedDirective.motion.index,
 			);
-			this.testState.lastMotionGroup = normalizedDirective.motion.group;
-			this.testState.lastMotionIndex = normalizedDirective.motion.index;
 		}
 
 		const normalizedPayload: PetExpressionMixPayload = {
@@ -1022,13 +1010,6 @@ class PetRenderer {
 			durationMs: normalizedDirective.durationMs,
 		};
 		this.live2dRuntime?.triggerExpressionMix?.(normalizedPayload);
-		const primary = normalizedPayload.expressions?.[0]?.expression ?? null;
-		if (primary) {
-			this.testState.lastExpressionName = primary;
-		}
-		if (primary || normalizedDirective.motion) {
-			this.syncTestState();
-		}
 		this.markActivity("pet-control-directive");
 	}
 
@@ -1055,14 +1036,6 @@ class PetRenderer {
 	triggerEmotion(trigger: PetResolvedEmotionTrigger): void {
 		if (this.config.modelType === "live2d") {
 			this.live2dRuntime?.triggerEmotion(trigger);
-			if (trigger.expressionName) {
-				this.testState.lastExpressionName = trigger.expressionName;
-			}
-			if (trigger.motion) {
-				this.testState.lastMotionGroup = trigger.motion.group;
-				this.testState.lastMotionIndex = trigger.motion.index;
-			}
-			this.syncTestState();
 		}
 	}
 
@@ -1403,8 +1376,7 @@ class PetRenderer {
 				placement: this.config.placement,
 				lipSyncProfile: this.config.lipSyncProfile,
 			});
-			this.testState.interactionBounds = null;
-			this.syncTestState();
+			this.interactionBounds = null;
 			this.reportRendererMetrics("transform-vrm");
 			return;
 		}
@@ -1436,6 +1408,11 @@ class PetRenderer {
 			minScale: MIN_SCALE,
 			maxScale: MAX_SCALE,
 			baseScale: baseScaleResult.baseScale,
+			modelCalibrationScale: (
+				this.config.modelManifest?.modelTransform?.scale
+					?? this.config.modelManifest?.transformDefaults?.scale
+					?? 1
+			) * this.live2dVisualScaleCorrection,
 			viewportWidth,
 			viewportHeight,
 			positionX: this.config.positionX,
@@ -1518,8 +1495,7 @@ class PetRenderer {
 			interactionBounds,
 		});
 
-		this.testState.interactionBounds = interactionBounds;
-		this.syncTestState();
+		this.interactionBounds = interactionBounds;
 
 		this.reportRendererMetrics("transform");
 		this.syncMouseCaptureFromLastPoint("transform");
@@ -1562,6 +1538,7 @@ class PetRenderer {
 	private invalidateLive2DVisualCalibration(): void {
 		this.visualCalibrationGeneration += 1;
 		this.live2dVisualLocalBounds = null;
+		this.live2dVisualScaleCorrection = 1;
 		if (this.visualCalibrationFrame !== null) {
 			window.cancelAnimationFrame(this.visualCalibrationFrame);
 			this.visualCalibrationFrame = null;
@@ -1717,6 +1694,15 @@ class PetRenderer {
 			});
 			const scaleX = this.live2dViewport.scale.x;
 			const scaleY = this.live2dViewport.scale.y;
+			const currentVisibleWidth = Math.max(1, screenBounds.width);
+			const currentVisibleHeight = Math.max(1, screenBounds.height);
+			const targetVisibleWidth = Math.max(1, window.innerWidth * 0.36);
+			const targetVisibleHeight = Math.max(1, window.innerHeight * 0.78);
+			const calibrationCorrection = Math.min(
+				targetVisibleWidth / currentVisibleWidth,
+				targetVisibleHeight / currentVisibleHeight,
+			);
+			this.live2dVisualScaleCorrection = clamp(calibrationCorrection, 1, 16);
 			this.live2dVisualLocalBounds = {
 				x: (screenBounds.x - this.live2dViewport.position.x) / scaleX,
 				y: (screenBounds.y - this.live2dViewport.position.y) / scaleY,
@@ -1734,6 +1720,7 @@ class PetRenderer {
 				framebufferAlphaBounds,
 				visualLocalBounds: this.live2dVisualLocalBounds,
 				finalVisualBounds: this.getLive2DVisualBounds(),
+				visualScaleCorrection: this.live2dVisualScaleCorrection,
 				viewport: { width: window.innerWidth, height: window.innerHeight },
 				framebuffer: { width: pixelWidth, height: pixelHeight },
 			}));
@@ -1745,6 +1732,7 @@ class PetRenderer {
 
 	private restoreLive2DPlacement(): void {
 		this.live2dVisualLocalBounds = null;
+		this.live2dVisualScaleCorrection = 1;
 		this.applyModelTransform();
 	}
 
@@ -1783,8 +1771,6 @@ class PetRenderer {
 		});
 
 		this.model.onLive2D("hit", ({ hitAreaName }: { hitAreaName: string }) => {
-			this.testState.lastHitAreaName = hitAreaName;
-			this.syncTestState();
 			this.modelHovering = true;
 			this.requestMousePassthrough(false, `hit:${hitAreaName}`, true);
 			this.updateCursor(true);
@@ -1820,10 +1806,6 @@ class PetRenderer {
 			}
 
 			const hit = safeHitTest(event);
-			this.testState.lastPointerDownAt = Date.now();
-			this.testState.lastPointerDownHit = hit;
-			this.syncTestState();
-
 			const button = extractMouseButton(event);
 			const dragStart = resolvePointerDragStart({
 				button,
@@ -1875,8 +1857,6 @@ class PetRenderer {
 			this.isDraggingWindow = true;
 			this.dragLastScreen = screenPoint;
 			this.dragLastClient = fallbackClientPoint;
-			this.testState.lastDragStartAt = Date.now();
-			this.syncTestState();
 			this.requestMousePassthrough(false, "drag-lock", true);
 			this.canvas?.setPointerCapture?.(event.pointerId);
 			this.updateCursor(true);
@@ -1902,8 +1882,6 @@ class PetRenderer {
 			this.setAttentionFromClientPoint(clientPoint, 0.82, 1600);
 			this.setBehaviorState("waiting", 2200);
 			this.requestMousePassthrough(false, "model-rightdown", true);
-			this.testState.lastRightClickTriggeredAt = Date.now();
-			this.syncTestState();
 			this.showQuickMenu(event.clientX ?? 0, event.clientY ?? 0);
 			this.emitPetEvent("onPetClicked", {
 				gesture: "context_menu",
@@ -1937,7 +1915,7 @@ class PetRenderer {
 	}
 
 	private getInteractionBounds(buffer = 0): PIXI.Rectangle | null {
-		return getInteractionBounds(this.testState.interactionBounds, buffer);
+		return getInteractionBounds(this.interactionBounds, buffer);
 	}
 
 	private isPointInsideInteractionArea(
@@ -2331,8 +2309,6 @@ class PetRenderer {
 			this.lastClickAt = 0;
 			this.focusedInteraction = !this.focusedInteraction;
 			this.setBehaviorState(this.focusedInteraction ? "focused" : "waiting", 3200);
-			this.testState.lastClickTriggeredAt = Date.now();
-			this.syncTestState();
 			this.emitPetEvent("onPetClicked", {
 				gesture: "double_click",
 				mode: this.focusedInteraction ? "focused" : "companion",
@@ -2351,8 +2327,6 @@ class PetRenderer {
 			this.singleClickTimer = null;
 			this.setBehaviorState("curious", 1700);
 			this.playRandomMotion();
-			this.testState.lastClickTriggeredAt = Date.now();
-			this.syncTestState();
 			this.emitPetEvent("onPetClicked", { gesture: "single_click" });
 			this.markActivity("model-click");
 		}, DOUBLE_CLICK_INTERVAL_MS + 24);
@@ -2479,8 +2453,6 @@ class PetRenderer {
 					this.dragMoved ||
 					Math.abs(dragDelta.deltaX) > 0 ||
 					Math.abs(dragDelta.deltaY) > 0;
-				this.testState.dragMoveCount += 1;
-				this.syncTestState();
 				if (!wasMoved) {
 					this.setBehaviorState("focused", 1100);
 					this.emitPetEvent("onPetDragged", {
@@ -2545,10 +2517,6 @@ class PetRenderer {
 			moved,
 			isDraggingWindow: wasDraggingWindow,
 		});
-
-		this.testState.lastMouseUpAt = Date.now();
-		this.testState.lastMouseUpTriggeredClick = clickAllowed;
-		this.syncTestState();
 
 		this.mouseDownOnModel = false;
 		this.dragMoved = false;
@@ -2689,13 +2657,7 @@ class PetRenderer {
 		this.markActivity("window-drag-end");
 		this.dragMoved = result.nextDragMoved;
 		this.modelHovering = result.nextModelHovering;
-		this.testState.lastDragEndAt = result.draggedAt;
-		this.syncTestState();
 		this.syncMouseCaptureFromLastPoint("drag-end", true);
-	}
-
-	private syncTestState(): void {
-		syncPetTestState(this.testState);
 	}
 
 	private emitPetEvent(event: DesktopPetEventName, payload: Record<string, unknown>): void {

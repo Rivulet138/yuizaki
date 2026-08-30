@@ -187,6 +187,7 @@ class TTSChunkData:
 
 
 TOOL_PROTOCOL_VERSION = 1
+TOOL_EVENT_SCHEMA_VERSION = "yuizaki.tool-event.v1"
 
 @dataclass
 

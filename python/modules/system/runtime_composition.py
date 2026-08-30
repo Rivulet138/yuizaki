@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from ..agent.skill_store import SkillCatalogStore
+from ..core.paths import data_dir_from_env
 from .active_workspace_state import ActiveWorkspaceState
 from .runtime_endpoints import (
     build_active_workspace_endpoint,
@@ -49,8 +50,13 @@ from .runtime_endpoints import (
     build_toggle_mcp_endpoint,
     build_toggle_schedule_endpoint,
     build_update_agent_plugin_config_endpoint,
+    build_voice_diagnostics_comfort_endpoint,
+    build_voice_diagnostics_comfort_signal_endpoint,
+    build_voice_diagnostics_begin_endpoint,
     build_voice_diagnostics_endpoint,
+    build_voice_diagnostics_sample_endpoint,
 )
+from .stream_drafts import StreamDraftError, StreamDraftService
 
 
 @dataclass(frozen=True)
@@ -74,6 +80,7 @@ class RuntimeHandlers:
     activity_frames_rebuild: Callable[..., Any]
     activity_frame_delete: Callable[..., Any]
     proactive_feedback: Callable[..., Any]
+    proactive_feedback_summary: Callable[..., Any]
     capabilities_state: Callable[..., Any]
     provider_registry: Callable[..., Any]
     connector_registry: Callable[..., Any]
@@ -109,6 +116,37 @@ class RuntimeHandlers:
     imported_skills_state: Callable[..., Any]
     save_imported_skills: Callable[..., Any]
     remove_imported_skills: Callable[..., Any]
+    voice_diagnostics_sample: Callable[..., Any] = lambda _payload: {}
+    voice_diagnostics_begin: Callable[..., Any] = lambda _payload: {}
+    stream_status: Callable[..., Any] = dict
+    stream_moderation: Callable[..., Any] = dict
+    stream_moderation_update: Callable[..., Any] = lambda _payload: {}
+    stream_preview: Callable[..., Any] = lambda _payload: {}
+    stream_probe: Callable[..., Any] = lambda _payload: {}
+    stream_obs_configure: Callable[..., Any] = lambda _payload: {}
+    stream_obs_profiles: Callable[..., Any] = dict
+    stream_events: Callable[..., Any] = lambda _limit=50: {}
+    stream_actions: Callable[..., Any] = lambda _limit=50: {}
+    stream_event_enqueue: Callable[..., Any] = lambda _payload: {}
+    stream_takeover: Callable[..., Any] = lambda _enabled: {}
+    stream_execute: Callable[..., Any] = lambda _payload: {}
+    stream_twitch_eventsub: Callable[..., Any] = lambda _body, _headers: {}
+    stream_twitch_irc: Callable[..., Any] = lambda _line: {}
+    stream_twitch_reconfigure: Callable[..., Any] = dict
+    stream_twitch_probe: Callable[..., Any] = dict
+    stream_twitch_subscriptions: Callable[..., Any] = dict
+    stream_twitch_connect: Callable[..., Any] = dict
+    stream_twitch_disconnect: Callable[..., Any] = dict
+    stream_twitch_tick: Callable[..., Any] = dict
+    voice_diagnostics_comfort: Callable[..., Any] = lambda _payload: {}
+    voice_diagnostics_comfort_signal: Callable[..., Any] = lambda _payload: {}
+    stream_drafts: Callable[..., Any] = lambda _limit=20: {}
+    stream_draft_generate: Callable[..., Any] = lambda _payload: {}
+    stream_draft_consume: Callable[..., Any] = lambda _payload=None: {}
+    stream_draft_consumer_status: Callable[..., Any] = dict
+    stream_draft_consumer_toggle: Callable[..., Any] = lambda _payload: {}
+    stream_draft_consumer_start: Callable[..., Any] = dict
+    stream_draft_consumer_stop: Callable[..., Any] = dict
 
 
 def product_metrics_consent_snapshot(product_metrics_consent_store: Any) -> dict[str, Any]:
@@ -156,8 +194,10 @@ def build_runtime_handlers(
     onboarding_readiness: Any,
     product_metrics_consent_store: Any,
     message_connector_registry: Any | None = None,
+    stream_runtime_provider: Callable[[], Any] | None = None,
 ) -> RuntimeHandlers:
-    skill_store = SkillCatalogStore()
+    runtime = getattr(sio_server, "runtime", None)
+    skill_store = getattr(runtime, "skill_catalog_store", None) or SkillCatalogStore()
     activity_endpoints = build_activity_frame_endpoints(
         service_provider=lambda: sio_server.runtime.activity_frame_service if sio_server.runtime else None,
         active_workspace_id_provider=active_workspace_id_provider,
@@ -169,6 +209,84 @@ def build_runtime_handlers(
     def product_metrics_consent_patch(consented: bool) -> dict[str, Any]:
         product_metrics_consent_store.save(consented)
         return product_metrics_consent_state()
+
+    stream_runtime = stream_runtime_provider() if stream_runtime_provider is not None else None
+    stream_status = getattr(stream_runtime, "snapshot", dict)
+    stream_moderation = getattr(stream_runtime, "moderation", dict)
+    stream_moderation_update = getattr(stream_runtime, "configure_moderation", lambda _payload: {})
+    stream_preview = getattr(stream_runtime, "preview", lambda _payload: {})
+    stream_probe = getattr(stream_runtime, "probe", lambda _payload: {})
+    stream_obs_configure = getattr(stream_runtime, "configure_obs", lambda _payload: {})
+    stream_obs_profiles = getattr(stream_runtime, "obs_profiles", dict)
+    stream_events = getattr(stream_runtime, "events", lambda _limit=50: {})
+    stream_actions = getattr(stream_runtime, "actions", lambda _limit=50: {})
+    stream_event_enqueue = getattr(stream_runtime, "enqueue_event", lambda _payload: {})
+    stream_takeover = getattr(stream_runtime, "set_takeover", lambda _enabled: {})
+    stream_execute = getattr(stream_runtime, "execute", lambda _payload: {})
+    stream_twitch_eventsub = getattr(stream_runtime, "ingest_twitch_eventsub", lambda _body, _headers: {})
+    stream_twitch_irc = getattr(stream_runtime, "ingest_twitch_irc", lambda _line: {})
+    stream_twitch_reconfigure = getattr(stream_runtime, "reconfigure_twitch", dict)
+    stream_twitch_probe = getattr(stream_runtime, "probe_twitch", dict)
+    stream_twitch_subscriptions = getattr(stream_runtime, "configure_twitch_subscriptions", dict)
+    stream_twitch_connect = getattr(stream_runtime, "connect_twitch", dict)
+    stream_twitch_disconnect = getattr(stream_runtime, "disconnect_twitch", dict)
+    stream_twitch_tick = getattr(stream_runtime, "tick_twitch", dict)
+    def _stream_relationship_history() -> Any:
+        runtime_context = getattr(sio_server, "runtime_context", None)
+        provider = getattr(runtime_context, "relationship_history_provider", None)
+        return provider() if callable(provider) else []
+
+    stream_draft_service = StreamDraftService(
+        stream_runtime=stream_runtime,
+        turn_service_provider=lambda: (
+            sio_server.runtime.turn_service
+            if getattr(sio_server, "runtime", None) is not None
+            else None
+        ),
+        runtime_provider=lambda: sio_server,
+        active_workspace_id_provider=active_workspace_id_provider,
+        db_repo_provider=db_repo_provider,
+        relationship_history_provider=_stream_relationship_history,
+        relationship_summary_provider=relationship_summary_provider,
+        drafts_path=data_dir_from_env() / "stream_drafts.json",
+    )
+    stream_draft_consumer = stream_draft_service.configure_consumer(
+        state_path=data_dir_from_env() / "stream_draft_consumer.json",
+        interval_seconds=2.0,
+        max_per_run=1,
+    )
+
+    async def stream_draft_consumer_toggle(payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        body = dict(payload or {})
+        enabled = body.get("enabled")
+        if not isinstance(enabled, bool):
+            raise TypeError("enabled must be a boolean")
+        stream_draft_consumer.set_enabled(enabled)
+        if enabled:
+            return await stream_draft_consumer.start()
+        return await stream_draft_consumer.stop()
+
+    def stream_execute_with_draft(payload: Mapping[str, Any] | None = None) -> Any:
+        body = dict(payload or {})
+        params = body.get("params")
+        draft_id = params.get("draftId") if isinstance(params, Mapping) else None
+        try:
+            result = stream_execute(body)
+        except Exception as exc:
+            if isinstance(draft_id, str):
+                outcome = "unknown_effect" if "unknown_effect" in str(exc) else "failed"
+                try:
+                    stream_draft_service.mark_delivery(draft_id, outcome)
+                except StreamDraftError:
+                    pass
+            raise
+        outcome = result.get("outcome") if isinstance(result, Mapping) else None
+        if isinstance(draft_id, str) and outcome in {"known_success", "unknown_effect", "failed"}:
+            try:
+                stream_draft_service.mark_delivery(draft_id, str(outcome))
+            except StreamDraftError:
+                pass
+        return result
 
     return RuntimeHandlers(
         health=build_health_endpoint(health_handler=health_checker.check_all),
@@ -219,6 +337,7 @@ def build_runtime_handlers(
         activity_frames_rebuild=activity_endpoints["rebuild"],
         activity_frame_delete=activity_endpoints["delete_frame"],
         proactive_feedback=activity_endpoints["feedback"],
+        proactive_feedback_summary=activity_endpoints["feedback_summary"],
         capabilities_state=build_capabilities_state_endpoint(
             tool_registry_provider=lambda: sio_server.runtime.tool_registry if sio_server.runtime else None,
             capability_snapshot_builder=build_capability_snapshot,
@@ -280,6 +399,18 @@ def build_runtime_handlers(
             asr_client_provider=asr_manager_provider,
             tts_client_provider=tts_client_provider,
         ),
+        voice_diagnostics_begin=build_voice_diagnostics_begin_endpoint(
+            diagnostics_provider=voice_diagnostics_provider or (lambda: None),
+        ),
+        voice_diagnostics_comfort=build_voice_diagnostics_comfort_endpoint(
+            diagnostics_provider=voice_diagnostics_provider or (lambda: None),
+        ),
+        voice_diagnostics_comfort_signal=build_voice_diagnostics_comfort_signal_endpoint(
+            diagnostics_provider=voice_diagnostics_provider or (lambda: None),
+        ),
+        voice_diagnostics_sample=build_voice_diagnostics_sample_endpoint(
+            diagnostics_provider=voice_diagnostics_provider or (lambda: None),
+        ),
         product_metrics_consent_state=product_metrics_consent_state,
         product_metrics_consent_patch=product_metrics_consent_patch,
         mcp_state=build_mcp_state_endpoint(sio_server.mcp_manager),
@@ -294,6 +425,33 @@ def build_runtime_handlers(
         imported_skills_state=build_imported_skills_state_endpoint(skill_store),
         save_imported_skills=build_save_imported_skills_endpoint(skill_store),
         remove_imported_skills=build_remove_imported_skills_endpoint(skill_store),
+        stream_status=stream_status,
+        stream_moderation=stream_moderation,
+        stream_moderation_update=stream_moderation_update,
+        stream_preview=stream_preview,
+        stream_probe=stream_probe,
+        stream_obs_configure=stream_obs_configure,
+        stream_obs_profiles=stream_obs_profiles,
+        stream_events=stream_events,
+        stream_actions=stream_actions,
+        stream_event_enqueue=stream_event_enqueue,
+        stream_takeover=stream_takeover,
+        stream_execute=stream_execute_with_draft,
+        stream_twitch_eventsub=stream_twitch_eventsub,
+        stream_twitch_irc=stream_twitch_irc,
+        stream_twitch_reconfigure=stream_twitch_reconfigure,
+        stream_twitch_probe=stream_twitch_probe,
+        stream_twitch_subscriptions=stream_twitch_subscriptions,
+        stream_twitch_connect=stream_twitch_connect,
+        stream_twitch_disconnect=stream_twitch_disconnect,
+        stream_twitch_tick=stream_twitch_tick,
+        stream_drafts=stream_draft_service.snapshot,
+        stream_draft_generate=stream_draft_service.generate,
+        stream_draft_consume=stream_draft_service.consume_pending,
+        stream_draft_consumer_status=stream_draft_consumer.snapshot,
+        stream_draft_consumer_toggle=stream_draft_consumer_toggle,
+        stream_draft_consumer_start=stream_draft_consumer.start,
+        stream_draft_consumer_stop=stream_draft_consumer.stop,
     )
 
 
@@ -322,6 +480,7 @@ def build_system_router_from_handlers(
         activity_frames_rebuild_handler=handlers.activity_frames_rebuild,
         activity_frame_delete_handler=handlers.activity_frame_delete,
         proactive_feedback_handler=handlers.proactive_feedback,
+        proactive_feedback_summary_handler=handlers.proactive_feedback_summary,
         capabilities_state_handler=handlers.capabilities_state,
         provider_registry_handler=handlers.provider_registry,
         connector_registry_handler=handlers.connector_registry,
@@ -342,6 +501,10 @@ def build_system_router_from_handlers(
         agent_trace_handler=handlers.agent_trace_state,
         experience_metrics_handler=handlers.experience_metrics_state,
         voice_diagnostics_handler=handlers.voice_diagnostics_state,
+        voice_diagnostics_begin_handler=handlers.voice_diagnostics_begin,
+        voice_diagnostics_comfort_handler=handlers.voice_diagnostics_comfort,
+        voice_diagnostics_comfort_signal_handler=handlers.voice_diagnostics_comfort_signal,
+        voice_diagnostics_sample_handler=handlers.voice_diagnostics_sample,
         product_metrics_consent_handler=handlers.product_metrics_consent_state,
         product_metrics_consent_patch_handler=handlers.product_metrics_consent_patch,
         mcp_state_handler=handlers.mcp_state,
@@ -356,4 +519,29 @@ def build_system_router_from_handlers(
         imported_skills_state_handler=handlers.imported_skills_state,
         save_imported_skills_handler=handlers.save_imported_skills,
         remove_imported_skills_handler=handlers.remove_imported_skills,
+        stream_status_handler=handlers.stream_status,
+        stream_moderation_handler=handlers.stream_moderation,
+        stream_moderation_update_handler=handlers.stream_moderation_update,
+        stream_preview_handler=handlers.stream_preview,
+        stream_probe_handler=handlers.stream_probe,
+        stream_obs_configure_handler=handlers.stream_obs_configure,
+        stream_obs_profiles_handler=handlers.stream_obs_profiles,
+        stream_events_handler=handlers.stream_events,
+        stream_actions_handler=handlers.stream_actions,
+        stream_event_enqueue_handler=handlers.stream_event_enqueue,
+        stream_takeover_handler=handlers.stream_takeover,
+        stream_execute_handler=handlers.stream_execute,
+        stream_twitch_eventsub_handler=handlers.stream_twitch_eventsub,
+        stream_twitch_irc_handler=handlers.stream_twitch_irc,
+        stream_twitch_reconfigure_handler=handlers.stream_twitch_reconfigure,
+        stream_twitch_probe_handler=handlers.stream_twitch_probe,
+        stream_twitch_subscriptions_handler=handlers.stream_twitch_subscriptions,
+        stream_twitch_connect_handler=handlers.stream_twitch_connect,
+        stream_twitch_disconnect_handler=handlers.stream_twitch_disconnect,
+        stream_twitch_tick_handler=handlers.stream_twitch_tick,
+        stream_drafts_handler=handlers.stream_drafts,
+        stream_draft_generate_handler=handlers.stream_draft_generate,
+        stream_draft_consume_handler=handlers.stream_draft_consume,
+        stream_draft_consumer_status_handler=handlers.stream_draft_consumer_status,
+        stream_draft_consumer_toggle_handler=handlers.stream_draft_consumer_toggle,
     )

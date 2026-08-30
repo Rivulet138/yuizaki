@@ -5,9 +5,11 @@ import json
 import logging
 import re
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 from ..core.paths import data_dir_from_env
+
 logger = logging.getLogger(__name__)
 
 ALLOWED_CATEGORIES = {
@@ -24,6 +26,7 @@ ALLOWED_CATEGORIES = {
     "general",
 }
 ALLOWED_FITS = {"high", "medium", "low"}
+SKILL_CATALOG_SCHEMA_VERSION = "yuizaki.skill-catalog.v1"
 
 
 def _string_field(value: Any, *, max_length: int = 500) -> str:
@@ -127,6 +130,10 @@ def _normalize_skill_payload(payload: Any, fallback_id: str) -> dict[str, Any] |
         "fit": fit,
         "installed": True,
         "enabled_codex": True,
+        # Imported entries are a catalog projection until a trusted runtime
+        # binding exists; they must not be presented as executable tools.
+        "executionReady": False,
+        "runtimeBinding": "catalog_only",
         "directory": _string_field(payload.get("directory"), max_length=500) or None,
         "repo": _string_field(payload.get("repo"), max_length=300) or None,
         "url": _string_field(payload.get("url"), max_length=500) or None,
@@ -143,6 +150,8 @@ def _skill_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
         "total": len(items),
         "built_in": len(items),
         "ready": len(items),
+        "execution_ready": sum(1 for item in items if item.get("executionReady") is True),
+        "catalog_only": sum(1 for item in items if item.get("runtimeBinding") == "catalog_only"),
         "planned": 0,
         "high_fit": sum(1 for item in items if item.get("fit") == "high"),
         "medium_fit": sum(1 for item in items if item.get("fit") == "medium"),
@@ -154,63 +163,118 @@ def _skill_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
 class SkillCatalogStore:
     def __init__(self, path: str | Path | None = None) -> None:
         self.path = Path(path) if path is not None else data_dir_from_env() / "imported_skills.json"
+        self._lock = RLock()
         self.items: dict[str, dict[str, Any]] = {}
         self.load()
 
     def load(self) -> None:
-        try:
-            if not self.path.exists():
+        with self._lock:
+            try:
+                if not self.path.exists():
+                    self.items = {}
+                    return
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+                raw_items = data.get("items") if isinstance(data, dict) else data
+                if not isinstance(raw_items, list):
+                    self.items = {}
+                    return
+                normalized = [
+                    item
+                    for index, payload in enumerate(raw_items)
+                    if (item := _normalize_skill_payload(payload, f"stored-{index + 1}")) is not None
+                ]
+                self.items = {item["id"]: item for item in normalized}
+            except (OSError, TypeError, ValueError) as exc:
+                logger.warning("Failed to load imported skills: %s", exc)
                 self.items = {}
-                return
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-            raw_items = data.get("items") if isinstance(data, dict) else data
-            if not isinstance(raw_items, list):
-                self.items = {}
-                return
-            normalized = [
-                item
-                for index, payload in enumerate(raw_items)
-                if (item := _normalize_skill_payload(payload, f"stored-{index + 1}")) is not None
-            ]
-            self.items = {item["id"]: item for item in normalized}
-        except Exception as exc:
-            logger.warning("Failed to load imported skills: %s", exc)
-            self.items = {}
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            json.dumps({"items": self.list_items()}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "schemaVersion": SKILL_CATALOG_SCHEMA_VERSION,
+                "items": self.list_items(),
+            }
+            temporary_path = self.path.with_suffix(f"{self.path.suffix}.tmp")
+            temporary_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            temporary_path.replace(self.path)
 
     def list_items(self) -> list[dict[str, Any]]:
-        return sorted((dict(item) for item in self.items.values()), key=lambda item: str(item.get("name") or "").lower())
+        with self._lock:
+            return sorted((dict(item) for item in self.items.values()), key=lambda item: str(item.get("name") or "").lower())
+
+    def get(self, skill_id: str) -> dict[str, Any] | None:
+        """Return a defensive copy of one catalog item."""
+        with self._lock:
+            item = self.items.get(str(skill_id).strip())
+            return dict(item) if item is not None else None
+
+    def set_runtime_binding(
+        self,
+        skill_id: str,
+        *,
+        tool_name: str,
+        scopes: list[str] | tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        """Attach an in-process binding after the runtime verified its target.
+
+        Bindings are intentionally ephemeral: the catalog file remains an
+        untrusted metadata source and is normalized back to ``catalog_only``
+        on restart until a live runtime registers the tool again.
+        """
+        with self._lock:
+            item = self.items.get(str(skill_id).strip())
+            if item is None:
+                raise KeyError(f"unknown skill: {skill_id}")
+            item["executionReady"] = True
+            item["runtimeBinding"] = "tool"
+            item["runtimeTarget"] = str(tool_name).strip()[:160]
+            item["runtimeScopes"] = [str(scope).strip()[:160] for scope in scopes if str(scope).strip()][:32]
+            return dict(item)
+
+    def clear_runtime_binding(self, skill_id: str) -> dict[str, Any] | None:
+        """Remove an ephemeral runtime binding and return the catalog item."""
+        with self._lock:
+            item = self.items.get(str(skill_id).strip())
+            if item is None:
+                return None
+            item["executionReady"] = False
+            item["runtimeBinding"] = "catalog_only"
+            item.pop("runtimeTarget", None)
+            item.pop("runtimeScopes", None)
+            return dict(item)
 
     def snapshot(self) -> dict[str, Any]:
-        items = self.list_items()
-        return {
-            "items": items,
-            "summary": _skill_summary(items),
-        }
+        with self._lock:
+            items = self.list_items()
+            return {
+                "schemaVersion": SKILL_CATALOG_SCHEMA_VERSION,
+                "items": items,
+                "summary": _skill_summary(items),
+            }
 
     def replace(self, items: list[dict[str, Any]]) -> dict[str, Any]:
-        normalized = [
-            item
-            for index, payload in enumerate(items)
-            if (item := _normalize_skill_payload(payload, f"skill-{index + 1}")) is not None
-        ]
-        self.items = {item["id"]: item for item in normalized}
-        self.save()
-        return self.snapshot()
+        with self._lock:
+            normalized = [
+                item
+                for index, payload in enumerate(items)
+                if (item := _normalize_skill_payload(payload, f"skill-{index + 1}")) is not None
+            ]
+            self.items = {item["id"]: item for item in normalized}
+            self.save()
+            return self.snapshot()
 
     def remove_many(self, skill_ids: list[str]) -> dict[str, Any]:
-        remove_ids = {str(skill_id).strip() for skill_id in skill_ids if str(skill_id).strip()}
-        before = len(self.items)
-        for skill_id in remove_ids:
-            self.items.pop(skill_id, None)
-        removed = before - len(self.items)
-        self.save()
-        snapshot = self.snapshot()
-        snapshot.update({"ok": True, "removed": removed})
-        return snapshot
+        with self._lock:
+            remove_ids = {str(skill_id).strip() for skill_id in skill_ids if str(skill_id).strip()}
+            before = len(self.items)
+            for skill_id in remove_ids:
+                self.items.pop(skill_id, None)
+            removed = before - len(self.items)
+            self.save()
+            snapshot = self.snapshot()
+            snapshot.update({"ok": True, "removed": removed})
+            return snapshot

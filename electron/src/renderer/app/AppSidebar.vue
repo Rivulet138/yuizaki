@@ -1,21 +1,5 @@
 <template>
-  <button
-    v-if="compactOpen"
-    class="compact-nav-backdrop"
-    type="button"
-    aria-label="收起导航"
-    @click="closeCompactNavigation"
-  />
-  <aside class="sidebar" :class="{ 'compact-open': compactOpen }" :aria-label="t('sidebar.aria')">
-    <button
-      class="compact-nav-toggle"
-      type="button"
-      :aria-label="compactOpen ? '收起导航' : '展开导航'"
-      :aria-expanded="compactOpen"
-      @click="compactOpen = !compactOpen"
-    >
-      <el-icon><Close v-if="compactOpen" /><Menu v-else /></el-icon>
-    </button>
+  <aside class="sidebar" :aria-label="t('sidebar.aria')">
     <div class="brand">
       <img
         v-if="yuizakiConfig.decorations.letterDecor"
@@ -26,69 +10,21 @@
       <span class="brand-name">結崎</span>
     </div>
 
-    <div class="menu-section-label">{{ t('sidebar.primary') }}</div>
     <nav class="menu">
-      <router-link
-        v-for="menu in menus"
-        :key="menu.id"
-        :to="`/w/${activeWorkspaceId}/${menu.id}`"
-        class="menu-item"
-        active-class="active"
-        :aria-label="menu.title"
-        :title="menu.title"
-        @click="closeCompactNavigation"
-      >
-        <el-icon class="menu-icon"><component :is="menu.icon" /></el-icon>
-        <span class="menu-label">{{ menu.title }}</span>
-      </router-link>
-    </nav>
-
-    <div v-if="adminMenus.length" class="menu-divider" />
-
-    <button
-      v-if="adminMenus.length"
-      class="admin-toggle"
-      type="button"
-      :aria-expanded="adminExpanded"
-      :aria-label="t('sidebar.admin')"
-      :title="t('sidebar.admin')"
-      @click="adminExpanded = !adminExpanded"
-    >
-      <span class="admin-toggle-label">{{ t('sidebar.admin') }}</span>
-      <el-icon class="admin-toggle-icon" :class="{ expanded: adminExpanded }"><ArrowDown /></el-icon>
-    </button>
-    <nav v-if="adminMenus.length && adminExpanded" class="menu admin-menu">
-      <section v-for="group in adminMenuGroups" :key="group.id" class="admin-group" :aria-label="group.label">
-        <div class="admin-group-label">{{ group.label }}</div>
+      <section v-for="group in menuGroups" :key="group.id" class="menu-group" :aria-label="group.label">
+        <div class="menu-group-label">{{ group.label }}</div>
         <router-link
           v-for="menu in group.items"
-          :key="`admin-${menu.id}`"
+          :key="menu.id"
           :to="`/w/${activeWorkspaceId}/${menu.id}`"
-          class="menu-item admin"
+          class="menu-item"
           active-class="active"
           :aria-label="menu.title"
           :title="menu.title"
-          @click="closeCompactNavigation"
         >
           <el-icon class="menu-icon"><component :is="menu.icon" /></el-icon>
           <span class="menu-label">{{ menu.title }}</span>
         </router-link>
-        <details v-if="group.relatedItems.length" class="related-routes">
-          <summary>{{ t('sidebar.related') }}</summary>
-          <router-link
-            v-for="menu in group.relatedItems"
-            :key="`related-${menu.id}`"
-            :to="`/w/${activeWorkspaceId}/${menu.id}`"
-            class="menu-item admin related"
-            active-class="active"
-            :aria-label="menu.title"
-            :title="menu.title"
-            @click="closeCompactNavigation"
-          >
-            <el-icon class="menu-icon"><component :is="menu.icon" /></el-icon>
-            <span class="menu-label">{{ menu.title }}</span>
-          </router-link>
-        </details>
       </section>
     </nav>
 
@@ -99,7 +35,7 @@
         title="桌宠场景设置"
         aria-label="桌宠场景设置"
         data-testid="workspace-settings"
-        @click="openWorkspaceSettings"
+        @click="emit('open-workspace-settings')"
       >
         <el-icon class="menu-icon"><Setting /></el-icon>
         <span class="menu-label">场景设置</span>
@@ -109,8 +45,8 @@
 </template>
 
 <script setup lang="ts">
-import { ArrowDown, Close, Menu, Setting } from '@element-plus/icons-vue'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { Setting } from '@element-plus/icons-vue'
+import { computed } from 'vue'
 import type { Component } from 'vue'
 import { yuizakiConfig } from '@/config/yuizaki'
 import { t } from '@/i18n'
@@ -120,67 +56,29 @@ type SidebarMenu = { id: string; title: string; icon: Component; desc?: string }
 const props = defineProps<{
   activeWorkspaceId: string
   menus: SidebarMenu[]
-  adminMenus: SidebarMenu[]
 }>()
 const emit = defineEmits<{
   (e: 'open-workspace-settings'): void
 }>()
-// Keep the full desktop tool index visible on first render. The toggle remains
-// available for users who prefer a compact primary-only sidebar.
-const adminExpanded = ref(true)
-const compactOpen = ref(false)
-
-const closeCompactNavigation = () => {
-  compactOpen.value = false
-}
-
-const openWorkspaceSettings = () => {
-  closeCompactNavigation()
-  emit('open-workspace-settings')
-}
-
-const handleEscape = (event: KeyboardEvent) => {
-  if (event.key === 'Escape' && compactOpen.value) closeCompactNavigation()
-}
-
-onMounted(() => window.addEventListener('keydown', handleEscape))
-onUnmounted(() => window.removeEventListener('keydown', handleEscape))
-
-const adminGroupDefinitions = [
-  { id: 'permissions', labelKey: 'sidebar.groups.skillsConnectionsPermissions', canonicalIds: ['tool'], relatedIds: ['plugins', 'agent-governance'] },
-  { id: 'tasks', labelKey: 'sidebar.groups.audit', canonicalIds: ['agent-trace'], relatedIds: [] },
-  { id: 'system', labelKey: 'sidebar.groups.runtime', canonicalIds: ['overview', 'infrastructure'], relatedIds: ['deploy'] },
-  { id: 'developer', labelKey: 'sidebar.groups.debug', canonicalIds: ['settings', 'pet'], relatedIds: ['prompt', 'persona-memory', 'svc', 'i18n'] },
+const menuGroupDefinitions = [
+  { id: 'conversation', label: '对话', ids: ['chat', 'memory', 'prompt', 'persona-memory'] },
+  { id: 'system', label: '运行', ids: ['overview', 'infrastructure', 'deploy'] },
+  { id: 'tools', label: '工具', ids: ['tool', 'svc', 'plugins'] },
+  { id: 'audit', label: '审计', ids: ['agent-trace', 'agent-governance'] },
+  { id: 'settings', label: '设置', ids: ['settings', 'pet', 'i18n'] },
 ]
 
-const adminMenuGroups = computed(() => {
-  const remaining = new Set(props.adminMenus.map((menu) => menu.id))
-  const groups = adminGroupDefinitions
-    .map((group) => {
-      const items = group.canonicalIds
-        .map((id) => props.adminMenus.find((menu) => menu.id === id))
-        .filter((menu): menu is SidebarMenu => Boolean(menu))
-      const relatedItems = group.relatedIds
-        .map((id) => props.adminMenus.find((menu) => menu.id === id))
-        .filter((menu): menu is SidebarMenu => Boolean(menu))
-      items.forEach((menu) => remaining.delete(menu.id))
-      relatedItems.forEach((menu) => remaining.delete(menu.id))
-      return { ...group, label: t(group.labelKey), items, relatedItems }
-    })
-    .filter((group) => group.items.length > 0 || group.relatedItems.length > 0)
-
-  const otherItems = props.adminMenus.filter((menu) => remaining.has(menu.id))
-  if (otherItems.length) {
-    groups.push({
-      id: 'other',
-      labelKey: 'sidebar.groups.other',
-      label: t('sidebar.groups.other'),
-      canonicalIds: otherItems.map((item) => item.id),
-      relatedIds: [],
-      items: otherItems,
-      relatedItems: [],
-    })
-  }
+const menuGroups = computed(() => {
+  const remaining = new Set(props.menus.map((menu) => menu.id))
+  const groups = menuGroupDefinitions.map((group) => {
+    const items = group.ids
+      .map((id) => props.menus.find((menu) => menu.id === id))
+      .filter((menu): menu is SidebarMenu => Boolean(menu))
+    items.forEach((menu) => remaining.delete(menu.id))
+    return { ...group, items }
+  }).filter((group) => group.items.length > 0)
+  const otherItems = props.menus.filter((menu) => remaining.has(menu.id))
+  if (otherItems.length) groups.push({ id: 'other', label: '其他', ids: otherItems.map((menu) => menu.id), items: otherItems })
   return groups
 })
 </script>
@@ -207,23 +105,6 @@ const adminMenuGroups = computed(() => {
 
 .sidebar::before {
   content: none;
-}
-
-.compact-nav-toggle {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  min-width: 44px;
-  min-height: 44px;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-control, 6px);
-  color: var(--yui-text);
-  background: var(--yui-surface);
-  cursor: pointer;
-}
-
-.compact-nav-backdrop {
-  display: none;
 }
 
 .brand,
@@ -452,19 +333,6 @@ const adminMenuGroups = computed(() => {
 }
 
 @media (max-width: 980px) {
-  .compact-nav-backdrop {
-    position: absolute;
-    inset: 0;
-    z-index: 29;
-    display: block;
-    width: 100%;
-    height: 100%;
-    padding: 0;
-    border: 0;
-    background: rgba(15, 23, 42, 0.22);
-    cursor: default;
-  }
-
   .sidebar {
     width: 76px;
     min-width: 76px;
@@ -481,50 +349,6 @@ const adminMenuGroups = computed(() => {
   .menu-divider,
   .menu-item.active::after {
     display: none;
-  }
-
-  .compact-nav-toggle {
-    display: flex;
-    flex: 0 0 auto;
-    margin: 0 auto 8px;
-  }
-
-  .sidebar:not(.compact-open) .related-routes {
-    display: none;
-  }
-
-  .sidebar.compact-open {
-    position: absolute;
-    inset: 0 auto 0 0;
-    z-index: 30;
-    width: min(280px, calc(100vw - 24px));
-    min-width: min(280px, calc(100vw - 24px));
-    padding: 12px;
-    box-shadow: 10px 0 28px rgba(15, 23, 42, 0.18);
-  }
-
-  .sidebar.compact-open .brand-wordmark,
-  .sidebar.compact-open .brand-name,
-  .sidebar.compact-open .menu-section-label,
-  .sidebar.compact-open .menu-label,
-  .sidebar.compact-open .admin-toggle-label,
-  .sidebar.compact-open .admin-group-label,
-  .sidebar.compact-open .menu-divider {
-    display: block;
-  }
-
-  .sidebar.compact-open .brand {
-    display: flex;
-  }
-
-  .sidebar.compact-open .compact-nav-toggle {
-    margin-right: 0;
-  }
-
-  .sidebar.compact-open .admin-toggle,
-  .sidebar.compact-open .menu-item {
-    justify-content: flex-start;
-    padding: 0 10px;
   }
 
   .brand {
@@ -581,4 +405,27 @@ const adminMenuGroups = computed(() => {
     min-height: 44px;
   }
 }
+
+.menu-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.menu-group + .menu-group {
+  margin-top: 10px;
+}
+
+.menu-group-label {
+  padding: 0 10px 2px;
+  color: var(--yui-muted);
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.sidebar > .menu {
+  flex: 1 1 auto;
+}
+
 </style>

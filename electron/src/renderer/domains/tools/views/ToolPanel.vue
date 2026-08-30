@@ -1,7 +1,6 @@
 <template>
   <PanelShell
     title="能力与工具"
-    subtitle="检查工具权限、MCP、技能和最近调用"
     tone="tool"
   >
     <div class="tool-panel">
@@ -29,7 +28,7 @@
         <div class="section-heading">
           <div>
             <h3>MCP 服务</h3>
-            <p>{{ mcpRows.length }} 个服务器，已连接 {{ mcpConnectedCount }}，异常 {{ mcpErrorCount }}，未启用 {{ mcpDisabledCount }}</p>
+            <p>{{ mcpRows.length }} 台 · {{ mcpConnectedCount }} 连 · {{ mcpErrorCount }} 异常 · {{ mcpDisabledCount }} 关闭</p>
           </div>
           <div class="section-actions">
             <el-button plain :icon="Refresh" :loading="loadingMcp" @click="loadMcpServers">刷新</el-button>
@@ -50,6 +49,267 @@
           <span><i class="disabled"></i>{{ mcpDisabledCount }} 未启用</span>
         </div>
         <el-empty v-else description="暂无 MCP 服务" :image-size="48" />
+      </section>
+
+      <section class="stream-summary panel-card" aria-label="直播能力状态">
+        <div class="section-heading">
+          <div>
+            <h3>直播能力</h3>
+            <p>{{ streamSummaryText }}</p>
+          </div>
+          <div class="section-actions">
+            <el-tag :type="streamStatusTagType" effect="light">{{ streamStatusLabel }}</el-tag>
+            <el-button plain :loading="loadingStreamProbe" @click="probeStream">探测适配器</el-button>
+            <el-button plain :icon="Refresh" :loading="loadingStream" @click="loadStream">刷新</el-button>
+          </div>
+        </div>
+        <el-alert v-if="streamLoadError" class="panel-alert" type="warning" :closable="false" show-icon>
+          <div class="alert-row"><span>{{ streamLoadError }}</span></div>
+        </el-alert>
+        <div v-if="streamSnapshot" class="stream-status-line">
+          <span>适配器：{{ streamSnapshot.adapter?.name || streamSnapshot.adapter?.id || '未连接' }}</span>
+          <span>{{ streamSnapshot.adapter?.configured ? '已配置' : '未配置' }}</span>
+          <span>{{ streamSnapshot.policy?.humanApprovalRequired !== false ? '需要人工确认' : '可自动执行' }}</span>
+          <span>Twitch EventSub：{{ streamSnapshot.platforms?.twitch?.revoked ? '订阅已撤销，需重新配置' : streamSnapshot.platforms?.twitch?.eventsubConfigured ? '已配置，仅接收入站事件' : '未配置' }}</span>
+          <span>Twitch 出站聊天：{{ streamSnapshot.platforms?.twitch?.outboundActions ? '已配置，仍需确认' : '未配置' }}</span>
+          <span>Twitch IRC：{{ twitchIrcStatusLabel }}</span>
+          <el-button
+            v-if="!streamSnapshot.platforms?.twitch?.ircConnection?.desired"
+            size="small"
+            text
+            :loading="connectingTwitch"
+            @click="connectTwitch"
+          >连接 IRC</el-button>
+          <el-button
+            v-else
+            size="small"
+            text
+            :loading="disconnectingTwitch"
+            @click="disconnectTwitch"
+          >断开 IRC</el-button>
+          <el-button
+            v-if="streamSnapshot.platforms?.twitch?.revoked"
+            size="small"
+            text
+            :loading="reconfiguringTwitch"
+            @click="reconfigureTwitch"
+          >标记已重新配置</el-button>
+          <span v-if="streamSnapshot.platforms?.twitch?.inboundRateLimitPerMinute">Twitch 入站配额：{{ streamSnapshot.platforms.twitch.inboundRateLimitPerMinute }}/分钟</span>
+          <span v-if="streamSnapshot.platforms?.twitch?.throttledEvents">已限流：{{ streamSnapshot.platforms.twitch.throttledEvents }} 条</span>
+        </div>
+        <div class="stream-safety-controls stream-twitch-config">
+          <div>
+            <strong>Twitch 凭据</strong>
+            <small>{{ twitchConfigStatusText }}</small>
+          </div>
+          <div class="stream-twitch-fields">
+            <el-input v-model="twitchClientIdDraft" size="small" clearable placeholder="Client ID" />
+            <el-input v-model="twitchEventsubSecretDraft" size="small" type="password" show-password clearable placeholder="EventSub Secret" />
+            <el-input v-model="twitchEventsubTokenDraft" size="small" type="password" show-password clearable placeholder="EventSub Token（可选）" />
+            <el-input v-model="twitchChatTokenDraft" size="small" type="password" show-password clearable placeholder="Chat Token" />
+            <el-input v-model="twitchBroadcasterIdDraft" size="small" clearable placeholder="Broadcaster ID" />
+            <el-input v-model="twitchSenderIdDraft" size="small" clearable placeholder="Sender ID" />
+            <el-input v-model="twitchModeratorIdDraft" size="small" clearable placeholder="Moderator ID（可选）" />
+            <el-input v-model="twitchChannelDraft" size="small" clearable placeholder="频道名（不含 #）" />
+            <el-input v-model="twitchUsernameDraft" size="small" clearable placeholder="IRC 用户名" />
+            <el-input v-model="twitchEventsubCallbackUrlDraft" size="small" clearable placeholder="EventSub HTTPS 回调（可选）" />
+            <el-select v-model="twitchSubscriptionProviderDraft" size="small" clearable placeholder="订阅管理方式">
+              <el-option label="仅本地计划" value="none" />
+              <el-option label="本地 staging" value="in-memory-staging" />
+              <el-option label="Twitch Helix" value="helix" />
+            </el-select>
+            <div class="stream-twitch-actions">
+              <el-button size="small" plain :loading="savingTwitchConfig" @click="saveTwitchConfig">保存并重配置</el-button>
+              <el-button size="small" plain :loading="probingTwitchConfig" @click="probeTwitchConfig">只读检查</el-button>
+              <el-button size="small" text type="danger" :loading="savingTwitchConfig" @click="clearTwitchConfig">清除凭据</el-button>
+            </div>
+          </div>
+        </div>
+        <div class="stream-safety-controls stream-obs-config">
+          <div>
+            <strong>OBS WebSocket</strong>
+            <small>{{ streamSnapshot?.adapter?.passwordConfigured ? '密码已配置' : '密码未配置' }} · 临时保存</small>
+          </div>
+          <div class="stream-obs-fields">
+            <el-input v-model="obsEndpointDraft" size="small" placeholder="ws://127.0.0.1:4455" clearable />
+            <el-input v-model="obsPasswordDraft" size="small" type="password" show-password clearable placeholder="OBS 密码（可选，仅内存）" />
+            <el-checkbox v-model="obsAllowRemote" size="small">允许非本机 endpoint</el-checkbox>
+            <el-button size="small" plain :loading="configuringObs" @click="configureObs">保存并探测</el-button>
+            <el-button v-if="streamSnapshot?.adapter?.passwordConfigured" size="small" text type="danger" :loading="configuringObs" @click="clearObsPassword">清除密码</el-button>
+          </div>
+        </div>
+        <div class="stream-safety-controls stream-profile-controls">
+          <div>
+            <strong>OBS 配置档</strong>
+            <small>{{ obsProfiles.length ? `${obsCurrentProfile || '未选择'} · ${obsProfiles.length} 个` : '未读取' }}</small>
+          </div>
+          <div class="stream-profile-fields">
+            <el-select v-model="obsProfileDraft" size="small" filterable allow-create clearable placeholder="配置档名称">
+              <el-option v-for="profile in obsProfiles" :key="profile.profileName" :label="profile.profileName" :value="profile.profileName" />
+            </el-select>
+            <el-button size="small" plain :loading="loadingObsProfiles" @click="loadObsProfiles">读取配置档</el-button>
+            <el-button size="small" type="warning" plain :loading="previewingStreamCapability === 'stream.profile_switch'" :disabled="!obsProfileDraft.trim() || Boolean(previewingStreamCapability)" @click="previewObsProfileSwitch">预览切换</el-button>
+          </div>
+        </div>
+        <div class="stream-safety-controls stream-subscription-controls">
+          <div>
+            <strong>EventSub 本地订阅计划</strong>
+            <small>{{ streamSubscriptionStatusLabel }}</small>
+          </div>
+          <el-checkbox-group v-model="twitchSubscriptionDraft" class="stream-subscription-options" :disabled="loadingTwitchSubscriptions">
+            <el-checkbox v-for="option in twitchSubscriptionOptions" :key="option.value" :value="option.value">{{ option.label }}</el-checkbox>
+          </el-checkbox-group>
+          <el-button size="small" plain :loading="loadingTwitchSubscriptions" @click="saveTwitchSubscriptions">保存计划</el-button>
+        </div>
+        <div class="stream-safety-controls">
+          <div>
+            <strong>本地人工接管</strong>
+            <small>{{ streamTakeoverEnabled ? '已启用 · 需确认' : '未启用' }}</small>
+          </div>
+          <el-button
+            size="small"
+            plain
+            :type="streamTakeoverEnabled ? 'warning' : 'default'"
+            :loading="loadingStreamTakeover"
+            @click="toggleStreamTakeover"
+          >{{ streamTakeoverEnabled ? '关闭接管' : '启用接管' }}</el-button>
+        </div>
+        <div class="stream-safety-controls stream-moderation-controls">
+          <div>
+            <strong>聊天内容治理</strong>
+            <small>{{ streamModerationSummary }}</small>
+          </div>
+          <el-switch v-model="streamModerationEnabled" :disabled="loadingStreamModeration" />
+          <el-button size="small" plain :loading="loadingStreamModeration" @click="saveStreamModeration">保存治理</el-button>
+          <div class="stream-moderation-fields">
+            <el-input v-model="streamModerationTermsInput" size="small" clearable placeholder="敏感词，用逗号分隔" />
+            <el-input-number v-model="streamModerationSlowModeSeconds" size="small" :min="0" :max="3600" :step="1" controls-position="right" aria-label="慢模式秒数" />
+            <el-input-number v-model="streamModerationMaxMessagesPerMinute" size="small" :min="1" :max="600" :step="1" controls-position="right" aria-label="每分钟最多消息数" />
+          </div>
+        </div>
+        <div class="stream-safety-controls">
+          <div>
+            <strong>自动生成本地草稿</strong>
+            <small>{{ streamDraftConsumer?.running ? '运行中 · 仅草稿' : streamDraftConsumer?.enabled ? '已启用' : '已关闭' }}</small>
+          </div>
+          <el-button
+            size="small"
+            plain
+            :type="streamDraftConsumer?.enabled ? 'warning' : 'default'"
+            :loading="loadingStreamDraftConsumer"
+            @click="toggleStreamDraftConsumer"
+          >{{ streamDraftConsumer?.enabled ? '关闭自动草稿' : '启用自动草稿' }}</el-button>
+        </div>
+        <div v-if="streamCapabilities.length" class="stream-capability-list">
+          <div v-for="item in streamCapabilities" :key="item.id" class="stream-capability-row">
+            <div>
+              <strong>{{ item.name || item.id }}</strong>
+              <small>{{ item.available ? (item.executionReady ? '可执行' : item.needsConfig ? '需配置 OBS' : '仅本地') : '未连接' }} · {{ streamRiskLabel(item.riskLevel) }}</small>
+            </div>
+            <el-button
+              size="small"
+              plain
+              :loading="previewingStreamCapability === item.id"
+              :disabled="!item.available || Boolean(previewingStreamCapability)"
+              @click="previewStream(item.id)"
+            >预览</el-button>
+          </div>
+        </div>
+        <el-empty v-else description="暂无可用能力" :image-size="48" />
+        <div v-if="streamSnapshot?.preview" class="stream-preview-note">
+          <strong>预览：{{ streamSnapshot.preview.summary || streamSnapshot.preview.action || streamSnapshot.preview.kind }}</strong>
+          <span>风险：{{ streamRiskLabel(streamSnapshot.preview.riskLevel) }} · 参数：{{ formatStreamParams(streamSnapshot.preview.params) }}</span>
+          <span v-if="streamSnapshot.preview.steps?.length">{{ streamSnapshot.preview.steps.join(' → ') }}</span>
+          <el-button
+            size="small"
+            type="primary"
+            plain
+            :loading="loadingStreamExecute"
+            :disabled="!streamSnapshot.preview.requestId || Boolean(streamExecution?.ok) || !streamPreviewExecutionReady"
+            @click="confirmStreamExecution"
+          >{{ streamPreviewExecutionReady ? '确认执行' : '需配置 OBS' }}</el-button>
+        </div>
+        <div v-if="streamExecution" class="stream-execution-note" :class="{ failed: !streamExecution.ok }">
+          <strong>{{ streamExecution.ok ? '执行完成' : '执行失败' }}</strong>
+          <span>结果：{{ streamExecution.outcome || (streamExecution.ok ? 'known_success' : 'failed') }} · 验证：{{ streamExecution.verificationStatus || '未提供' }}</span>
+          <span v-if="streamExecution.auditEvent">审计事件已记录</span>
+          <el-button v-if="!streamExecution.ok" size="small" plain :loading="loadingStreamExecute" @click="confirmStreamExecution">手动重试</el-button>
+        </div>
+        <div class="stream-actions-heading">
+          <strong>直播动作审计</strong>
+          <el-button size="small" text :loading="loadingStreamActions" @click="loadStreamActions">刷新审计</el-button>
+        </div>
+        <div v-if="streamActions.length" class="stream-action-list">
+          <div v-for="action in streamActions" :key="`${action.requestId}:${action.at}:${action.status}`" class="stream-action-row">
+            <div>
+              <strong>{{ action.action }}</strong>
+              <small>{{ formatStreamActionStatus(action.status) }} · {{ formatStreamEventTime(action.at) }}</small>
+            </div>
+            <span :class="`stream-action-status status-${action.status}`">{{ formatStreamActionStatus(action.status) }}</span>
+            <small v-if="action.verificationStatus || action.errorCode">{{ action.verificationStatus || action.errorCode }}</small>
+          </div>
+        </div>
+        <el-empty v-else description="暂无直播动作审计" :image-size="40" />
+        <div v-if="streamProbeSummary" class="stream-probe-note">探测：{{ streamProbeSummary }}</div>
+        <div class="stream-events-heading">
+          <strong>最近本地事件</strong>
+            <div class="stream-event-heading-actions">
+              <el-button size="small" text :loading="consumingStreamDrafts" @click="consumeStreamDrafts">生成未处理草稿</el-button>
+              <el-button size="small" text :loading="loadingStreamEvents" @click="loadStreamEvents">刷新事件</el-button>
+            </div>
+        </div>
+        <div v-if="streamEvents.length" class="stream-event-list">
+          <div v-for="event in streamEvents" :key="event.eventId || event.id || `${event.kind}-${event.createdAt || event.receivedAt}`" class="stream-event-row">
+            <span>{{ event.kind }}</span>
+            <strong>{{ event.text || event.message || '（无文本）' }}</strong>
+            <small>{{ event.author || event.source || '本地' }} · {{ formatStreamEventTime(event.createdAt ?? event.receivedAt ?? event.at) }} · {{ event.delivered ? '已投递' : '仅本地队列' }}</small>
+            <div class="stream-event-actions">
+              <el-button
+                size="small"
+                text
+                :loading="generatingStreamDraft === streamEventId(event)"
+                :disabled="!streamEventId(event) || Boolean(generatingStreamDraft)"
+                @click="generateStreamDraft(event)"
+              >生成草稿</el-button>
+              <span v-if="streamDraftByEventId.get(streamEventId(event))" class="stream-draft-status">
+                {{ streamDraftByEventId.get(streamEventId(event))?.status === 'generated' ? '已有草稿' : '草稿失败' }}
+              </span>
+            </div>
+          </div>
+        </div>
+        <el-empty v-else description="暂无本地事件" :image-size="40" />
+        <div class="stream-drafts-heading">
+          <strong>回复草稿</strong>
+          <el-button size="small" text :loading="loadingStreamDrafts" @click="loadStreamDrafts">刷新草稿</el-button>
+        </div>
+        <div v-if="streamDrafts.length" class="stream-draft-list">
+          <div v-for="draft in streamDrafts" :key="draft.draftId" class="stream-draft-row">
+            <div>
+              <strong>{{ draft.author || '观众' }}</strong>
+              <small>{{ draft.eventText || '（无原始消息）' }}</small>
+            </div>
+            <p v-if="draft.reply">{{ draft.reply }}</p>
+            <p v-else class="stream-draft-error">{{ draft.error || '未生成回复' }}</p>
+            <el-button
+              v-if="draft.status === 'generated' && draft.reply && draft.sendStatus !== 'known_success' && draft.sendStatus !== 'unknown_effect'"
+              size="small"
+              plain
+              :loading="previewingStreamCapability === `stream.chat_send:${draft.draftId}`"
+              :disabled="Boolean(previewingStreamCapability)"
+              @click="previewDraftSend(draft)"
+            >预览发送</el-button>
+            <el-button
+              v-if="draft.status === 'failed'"
+              size="small"
+              text
+              :loading="generatingStreamDraft === draft.eventId"
+              :disabled="Boolean(generatingStreamDraft)"
+              @click="retryStreamDraft(draft)"
+            >重新生成</el-button>
+            <small>{{ streamDraftDeliveryLabel(draft) }} · {{ formatStreamEventTime(draft.createdAt) }}</small>
+          </div>
+        </div>
+        <el-empty v-else description="暂无草稿" :image-size="40" />
       </section>
 
       <section class="capability-workspace panel-card">
@@ -265,6 +525,7 @@
             <div class="skill-meta">
               <el-tag v-if="!skill.imported" size="small" type="success" effect="plain">内置</el-tag>
               <el-tag v-else size="small" type="warning" effect="plain">自定义</el-tag>
+              <el-tag v-if="skill.imported && skill.runtimeBinding === 'catalog_only'" size="small" type="info" effect="plain">仅目录</el-tag>
               <el-tag v-if="skill.fit === 'high'" size="small" type="primary" effect="plain">高适配</el-tag>
               <el-tag v-else-if="skill.fit === 'medium'" size="small" type="info" effect="plain">中适配</el-tag>
             </div>
@@ -325,7 +586,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useI18n } from '@/i18n'
 import { curatedSkillRecommendations } from '../skillRecommendations'
 import type { PluginLoadFailure, PluginRuntimeState, PluginToolCapabilityContribution } from '../../../../shared/plugin'
-import type { CapabilityDescriptor, CapabilityKind, CapabilityRiskLevel, SkillCatalogItem } from '../../../../shared/capability'
+import type { CapabilityDescriptor, CapabilityKind, CapabilityRiskLevel, SkillCatalogItem, StreamActionRecord, StreamActionsSnapshot, StreamCapabilityDescriptor, StreamDraftConsumerSnapshot, StreamDraftsSnapshot, StreamExecuteResponse, StreamLocalEvent, StreamObsProfile, StreamReplyDraft, StreamRuntimeSnapshot } from '../../../../shared/capability'
 import type { AgentTraceSnapshot, MCPSnapshot, MCPServerConfigSnapshot, MCPServerStatusSnapshot, RuntimeLoopRecord, StepExecutionRecord } from '../../../../shared/agent'
 import { projectToolActionStatus, toolActionStatusLabel, toolEvidenceFromRecord, type ToolActionStatus } from '../toolActionProjection'
 
@@ -389,6 +650,15 @@ const pluginLoadFailures = ref<PluginLoadFailure[]>([])
 const capabilities = ref<CapabilityDescriptor[]>([])
 const agentTrace = ref<AgentTraceSnapshot | null>(null)
 const mcpSnapshot = ref<MCPSnapshot | null>(null)
+const streamSnapshot = ref<StreamRuntimeSnapshot | null>(null)
+const streamProbe = ref<Record<string, unknown> | null>(null)
+const obsProfiles = ref<StreamObsProfile[]>([])
+const obsCurrentProfile = ref('')
+const streamEvents = ref<StreamLocalEvent[]>([])
+const streamDrafts = ref<StreamReplyDraft[]>([])
+const streamActions = ref<StreamActionRecord[]>([])
+const streamExecution = ref<StreamExecuteResponse | null>(null)
+const streamPendingExecution = ref<{ requestId: string; action: string; params: Record<string, unknown> } | null>(null)
 
 const filterKind = ref<CapabilityKindFilter>('')
 const filterRisk = ref<CapabilityRiskFilter>('')
@@ -405,10 +675,54 @@ const selectedSkillIds = ref(new Set<string>())
 const loadingCapabilities = ref(false)
 const loadingPlugins = ref(false)
 const loadingMcp = ref(false)
+const loadingStream = ref(false)
+const loadingStreamProbe = ref(false)
+const loadingObsProfiles = ref(false)
+const loadingStreamEvents = ref(false)
+const loadingStreamDrafts = ref(false)
+const loadingStreamActions = ref(false)
+const consumingStreamDrafts = ref(false)
+const loadingStreamDraftConsumer = ref(false)
+const loadingTwitchSubscriptions = ref(false)
+const loadingStreamModeration = ref(false)
+const streamDraftConsumer = ref<StreamDraftConsumerSnapshot | null>(null)
+const generatingStreamDraft = ref('')
+const reconfiguringTwitch = ref(false)
+const connectingTwitch = ref(false)
+const disconnectingTwitch = ref(false)
+const loadingStreamTakeover = ref(false)
+const loadingStreamExecute = ref(false)
+const streamTakeoverEnabled = ref(false)
+const streamModerationEnabled = ref(true)
+const streamModerationTermsInput = ref('')
+const streamModerationSlowModeSeconds = ref(0)
+const streamModerationMaxMessagesPerMinute = ref(30)
+const obsEndpointDraft = ref('')
+const obsPasswordDraft = ref('')
+const obsAllowRemote = ref(false)
+const obsProfileDraft = ref('')
+const configuringObs = ref(false)
+const savingTwitchConfig = ref(false)
+const probingTwitchConfig = ref(false)
+const twitchConfigStatus = ref<{ secureStorageAvailable: boolean; configured: Record<string, boolean> } | null>(null)
+const twitchClientIdDraft = ref('')
+const twitchEventsubSecretDraft = ref('')
+const twitchEventsubTokenDraft = ref('')
+const twitchChatTokenDraft = ref('')
+const twitchBroadcasterIdDraft = ref('')
+const twitchSenderIdDraft = ref('')
+const twitchModeratorIdDraft = ref('')
+const twitchChannelDraft = ref('')
+const twitchUsernameDraft = ref('')
+const twitchEventsubCallbackUrlDraft = ref('')
+const twitchSubscriptionProviderDraft = ref('none')
+const twitchSubscriptionDraft = ref<string[]>([])
+const previewingStreamCapability = ref('')
 const loadingImportedSkills = ref(false)
 const savingImportedSkills = ref(false)
 const capabilityLoadError = ref('')
 const mcpLoadError = ref('')
+const streamLoadError = ref('')
 const importedSkillStorageError = ref('')
 const importedSkillBackendReady = ref(false)
 let pluginLoadSequence = 0
@@ -542,6 +856,57 @@ const mcpRows = computed<MCPRow[]>(() => {
 const mcpConnectedCount = computed(() => mcpRows.value.filter(item => item.connected).length)
 const mcpErrorCount = computed(() => mcpRows.value.filter(isMcpErrored).length)
 const mcpDisabledCount = computed(() => mcpRows.value.filter(item => !item.enabled).length)
+const streamCapabilities = computed<StreamCapabilityDescriptor[]>(() => streamSnapshot.value?.capabilities ?? [])
+const streamDraftByEventId = computed(() => {
+  const index = new Map<string, StreamReplyDraft>()
+  for (const draft of streamDrafts.value) {
+    if (draft.eventId) index.set(draft.eventId, draft)
+  }
+  return index
+})
+const streamStatusLabel = computed(() => {
+  const state = streamSnapshot.value?.state || 'disconnected'
+  const labels: Record<string, string> = {
+    disconnected: '未连接', ready: '已就绪', preview: '预览中', live: '直播中', ending: '结束中', ended: '已结束', error: '故障',
+  }
+  return labels[state] || state
+})
+const streamStatusTagType = computed<TagType>(() => {
+  const state = streamSnapshot.value?.state
+  if (state === 'live' || state === 'ready') return 'success'
+  if (state === 'preview') return 'primary'
+  if (state === 'error') return 'danger'
+  return 'info'
+})
+const streamSummaryText = computed(() => {
+  if (!streamSnapshot.value) return '读取直播适配器状态与可预览动作'
+  const available = streamCapabilities.value.filter(item => item.available).length
+  return `${available}/${streamCapabilities.value.length} 可预览`
+})
+const streamPreviewExecutionReady = computed(() => {
+  const action = streamSnapshot.value?.preview?.action || streamSnapshot.value?.preview?.kind
+  if (!action) return false
+  return streamCapabilities.value.find(item => item.id === action)?.executionReady === true
+})
+const streamProbeSummary = computed(() => {
+  if (!streamProbe.value) return ''
+  const values = Object.entries(streamProbe.value).slice(0, 4).map(([key, value]) => `${key}=${String(value)}`)
+  return values.length ? values.join('，') : '已完成，未返回附加信息'
+})
+
+const twitchSubscriptionOptions = [
+  { value: 'channel.chat.message', label: '聊天消息' },
+  { value: 'channel.follow', label: '关注事件' },
+  { value: 'channel.subscribe', label: '订阅事件' },
+]
+const streamSubscriptionStatusLabel = computed(() => {
+  const plan = streamSnapshot.value?.platforms?.twitch?.subscriptionPlan
+  if (!plan) return '未读取'
+  if (plan.status === 'planned') return `已保存 ${plan.desired?.length || 0} 类 · 本地`
+  if (plan.status === 'revoked') return '已撤销 · 需重配'
+  if (plan.status === 'unconfigured') return '缺少 Secret'
+  return '未选择'
+})
 
 const skillCategoryOptions = computed(() => (
   [...new Set(allSkillItems.value.map(item => item.category).filter(Boolean))]
@@ -549,11 +914,11 @@ const skillCategoryOptions = computed(() => (
 ))
 
 const healthItems = computed<HealthItem[]>(() => [
-  { key: 'ready', label: '可直接执行', value: readyCapabilityCount.value, detail: '低风险或已选 MCP/插件', tone: 'emerald' },
-  { key: 'approval', label: '内置确认', value: approvalRequiredCount.value, detail: '执行前会提示', tone: 'amber' },
-  { key: 'mcp-error', label: 'MCP 异常', value: mcpErrorCount.value, detail: '连接或清单错误', tone: mcpErrorCount.value ? 'rose' : 'emerald' },
-  { key: 'plugin-error', label: '插件异常', value: pluginIssueCount.value, detail: '阻断、降级或装载失败', tone: pluginIssueCount.value ? 'rose' : 'emerald' },
-  { key: 'trace', label: '有调用记录', value: recentToolLogs.value.length, detail: '最近工具链路', tone: 'blue' },
+  { key: 'ready', label: '可执行', value: readyCapabilityCount.value, detail: '低风险', tone: 'emerald' },
+  { key: 'approval', label: '需确认', value: approvalRequiredCount.value, detail: '执行前确认', tone: 'amber' },
+  { key: 'mcp-error', label: 'MCP 异常', value: mcpErrorCount.value, detail: '连接/清单', tone: mcpErrorCount.value ? 'rose' : 'emerald' },
+  { key: 'plugin-error', label: '插件异常', value: pluginIssueCount.value, detail: '加载/阻断', tone: pluginIssueCount.value ? 'rose' : 'emerald' },
+  { key: 'trace', label: '调用记录', value: recentToolLogs.value.length, detail: '最近链路', tone: 'blue' },
 ])
 
 const sourceCards = computed<SourceCard[]>(() => [
@@ -1019,6 +1384,8 @@ function normalizeImportedSkill(candidate: unknown, fallbackId: string): Importe
     fit: normalizeSkillFit(stringField(candidate.fit)),
     installed: true,
     enabled_codex: true,
+    executionReady: false,
+    runtimeBinding: 'catalog_only',
     directory: stringField(candidate.directory) || null,
     tags,
     imported: true,
@@ -1180,6 +1547,8 @@ function toPersistableSkills(skills: ImportedSkillCatalogItem[]) {
     status: 'built-in',
     installed: true,
     enabled_codex: true,
+    executionReady: false,
+    runtimeBinding: 'catalog_only',
   }))
 }
 
@@ -1450,8 +1819,592 @@ async function loadMcpServers() {
   }
 }
 
+async function loadStream() {
+  loadingStream.value = true
+  streamLoadError.value = ''
+  try {
+    streamSnapshot.value = await systemClient.stream()
+    obsEndpointDraft.value = streamSnapshot.value.adapter?.endpoint || ''
+    obsAllowRemote.value = streamSnapshot.value.adapter?.remoteAllowed === true
+    streamTakeoverEnabled.value = streamSnapshot.value.policy?.humanTakeover !== false
+    const moderation = streamSnapshot.value.policy?.moderation
+    streamModerationEnabled.value = moderation?.enabled !== false
+    streamModerationTermsInput.value = (moderation?.blockedTerms || []).join(', ')
+    streamModerationSlowModeSeconds.value = Number(moderation?.slowModeSeconds || 0)
+    streamModerationMaxMessagesPerMinute.value = Number(moderation?.maxMessagesPerMinute || 30)
+    twitchSubscriptionDraft.value = [...(streamSnapshot.value.platforms?.twitch?.subscriptionPlan?.desired || [])]
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    streamLoadError.value = `直播能力加载失败: ${message}`
+  } finally {
+    loadingStream.value = false
+  }
+}
+
+async function loadTwitchConfigStatus() {
+  try {
+    const result = await systemClient.twitchConfig()
+    twitchConfigStatus.value = result
+    twitchSubscriptionProviderDraft.value = result.subscriptionProvider === 'twitch-helix'
+      ? 'helix'
+      : result.subscriptionProvider || 'none'
+    if (!result.secureStorageAvailable) {
+      ElMessage.warning('系统安全凭据存储不可用，Twitch 配置已禁用')
+    }
+  } catch {
+    twitchConfigStatus.value = null
+  }
+}
+
+const twitchConfigStatusText = computed(() => {
+  const status = twitchConfigStatus.value
+  if (!status) return '读取配置状态失败'
+  if (!status.secureStorageAvailable) return '系统安全存储不可用'
+  const configured = Object.entries(status.configured).filter(([, value]) => value).map(([key]) => key)
+  return configured.length ? `已安全保存 ${configured.length} 项；输入框不会回显凭据` : '未配置；凭据仅保存到系统安全存储'
+})
+
+async function probeTwitchConfig() {
+  probingTwitchConfig.value = true
+  try {
+    const result = await systemClient.probeTwitch()
+    if (result.ok !== true) {
+      ElMessage.warning(String(result.error || 'Twitch 只读检查未通过'))
+      return
+    }
+    const configured = result.configured as Record<string, unknown> | undefined
+    const ready = configured && Object.values(configured).filter(Boolean).length
+    ElMessage.info(`Twitch 只读检查完成：${ready || 0} 项能力就绪；未建立连接或发送消息`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`Twitch 只读检查失败: ${message}`)
+  } finally {
+    probingTwitchConfig.value = false
+  }
+}
+
+function twitchConfigPayload() {
+  const fields: Record<string, string> = {
+    clientId: twitchClientIdDraft.value,
+    eventsubSecret: twitchEventsubSecretDraft.value,
+    eventsubToken: twitchEventsubTokenDraft.value,
+    chatToken: twitchChatTokenDraft.value,
+    broadcasterId: twitchBroadcasterIdDraft.value,
+    senderId: twitchSenderIdDraft.value,
+    moderatorId: twitchModeratorIdDraft.value,
+    channel: twitchChannelDraft.value,
+    username: twitchUsernameDraft.value,
+    eventsubCallbackUrl: twitchEventsubCallbackUrlDraft.value,
+    subscriptionProvider: twitchSubscriptionProviderDraft.value,
+  }
+  return Object.fromEntries(Object.entries(fields).filter(([, value]) => value.trim()))
+}
+
+async function saveTwitchConfig() {
+  savingTwitchConfig.value = true
+  try {
+    const result = await systemClient.updateTwitchConfig(twitchConfigPayload())
+    if (result.ok !== true) {
+      ElMessage.warning(String(result.error || 'Twitch 配置未保存'))
+      return
+    }
+    twitchEventsubSecretDraft.value = ''
+    twitchEventsubTokenDraft.value = ''
+    twitchChatTokenDraft.value = ''
+    twitchClientIdDraft.value = ''
+    twitchBroadcasterIdDraft.value = ''
+    twitchSenderIdDraft.value = ''
+    twitchModeratorIdDraft.value = ''
+    twitchChannelDraft.value = ''
+    twitchUsernameDraft.value = ''
+    twitchEventsubCallbackUrlDraft.value = ''
+    await Promise.all([loadStream(), loadTwitchConfigStatus()])
+    const probe = await systemClient.probeTwitch()
+    const ready = probe.configured && typeof probe.configured === 'object'
+      ? Object.values(probe.configured as Record<string, unknown>).filter(Boolean).length
+      : 0
+    ElMessage.success(`Twitch 凭据已安全保存并完成内存重配置；只读检查就绪 ${ready} 项，不会自动连接或发言`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`Twitch 配置失败: ${message}`)
+  } finally {
+    savingTwitchConfig.value = false
+  }
+}
+
+async function clearTwitchConfig() {
+  savingTwitchConfig.value = true
+  try {
+    const fields = ['ClientId', 'EventsubSecret', 'EventsubToken', 'ChatToken', 'BroadcasterId', 'SenderId', 'ModeratorId', 'Channel', 'Username', 'EventsubCallbackUrl', 'SubscriptionProvider']
+    const result = await systemClient.updateTwitchConfig(Object.fromEntries(fields.map(field => [`clear${field}`, true])))
+    if (result.ok !== true) {
+      ElMessage.warning(String(result.error || 'Twitch 凭据未清除'))
+      return
+    }
+    await Promise.all([loadStream(), loadTwitchConfigStatus()])
+    ElMessage.success('Twitch 凭据已清除，IRC 自动重连意图已停止')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`清除 Twitch 凭据失败: ${message}`)
+  } finally {
+    savingTwitchConfig.value = false
+  }
+}
+
+async function configureObs() {
+  configuringObs.value = true
+  streamLoadError.value = ''
+  try {
+    await systemClient.configureObs({
+      endpoint: obsEndpointDraft.value.trim(),
+      ...(obsPasswordDraft.value ? { password: obsPasswordDraft.value } : {}),
+      allowRemote: obsAllowRemote.value,
+    })
+    obsPasswordDraft.value = ''
+    await loadStream()
+    const probe = await systemClient.probeStream()
+    streamProbe.value = probe.probe ?? probe
+    if (probe.status === 'reachable') ElMessage.success('OBS 已配置并完成只读探测')
+    else ElMessage.warning(`OBS 配置已保存，但探测状态为 ${String(probe.status || 'unknown')}`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`OBS 配置失败: ${message}`)
+  } finally {
+    configuringObs.value = false
+  }
+}
+
+async function clearObsPassword() {
+  configuringObs.value = true
+  try {
+    await systemClient.configureObs({
+      endpoint: obsEndpointDraft.value.trim(),
+      allowRemote: obsAllowRemote.value,
+      clearPassword: true,
+    })
+    obsPasswordDraft.value = ''
+    await loadStream()
+    ElMessage.success('OBS 密码已从当前运行时清除')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`OBS 密码清除失败: ${message}`)
+  } finally {
+    configuringObs.value = false
+  }
+}
+
+const streamModerationSummary = computed(() => {
+  if (!streamModerationEnabled.value) return '已关闭'
+  const terms = streamModerationTermsInput.value.split(',').map(item => item.trim()).filter(Boolean).length
+  const slow = streamModerationSlowModeSeconds.value > 0 ? `慢 ${streamModerationSlowModeSeconds.value}s` : '无慢'
+  return `${terms} 词 · ${slow} · ${streamModerationMaxMessagesPerMinute.value}/分`
+})
+
+async function saveStreamModeration() {
+  loadingStreamModeration.value = true
+  try {
+    const blockedTerms = streamModerationTermsInput.value
+      .split(',')
+      .map(item => item.trim())
+      .filter(Boolean)
+    const result = await systemClient.updateStreamModeration({
+      enabled: streamModerationEnabled.value,
+      blockedTerms,
+      slowModeSeconds: streamModerationSlowModeSeconds.value,
+      maxMessagesPerMinute: streamModerationMaxMessagesPerMinute.value,
+    })
+    if (!result.ok) {
+      ElMessage.warning('聊天治理策略未更新')
+      return
+    }
+    await loadStream()
+    ElMessage.success('聊天治理策略已保存；出站消息仍需人工确认')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`聊天治理策略更新失败: ${message}`)
+  } finally {
+    loadingStreamModeration.value = false
+  }
+}
+
+async function loadStreamEvents() {
+  loadingStreamEvents.value = true
+  try {
+    const result = await systemClient.streamEvents(20)
+    streamEvents.value = result.events ?? result.items ?? []
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.warning(`本地直播事件加载失败: ${message}`)
+  } finally {
+    loadingStreamEvents.value = false
+  }
+}
+
+async function loadStreamDrafts() {
+  loadingStreamDrafts.value = true
+  try {
+    const result: StreamDraftsSnapshot = await systemClient.streamDrafts(20)
+    streamDrafts.value = result.drafts ?? []
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.warning(`回复草稿加载失败: ${message}`)
+  } finally {
+    loadingStreamDrafts.value = false
+  }
+}
+
+async function loadStreamDraftConsumer() {
+  try {
+    streamDraftConsumer.value = await systemClient.streamDraftConsumer()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.warning(`自动草稿状态加载失败: ${message}`)
+  }
+}
+
+async function toggleStreamDraftConsumer() {
+  loadingStreamDraftConsumer.value = true
+  try {
+    streamDraftConsumer.value = await systemClient.setStreamDraftConsumer(!streamDraftConsumer.value?.enabled)
+    ElMessage.success(streamDraftConsumer.value.enabled ? '已启用自动本地草稿，未发送消息' : '已关闭自动本地草稿')
+    await Promise.all([loadStreamEvents(), loadStreamDrafts()])
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`自动草稿状态更新失败: ${message}`)
+  } finally {
+    loadingStreamDraftConsumer.value = false
+  }
+}
+
+async function consumeStreamDrafts() {
+  consumingStreamDrafts.value = true
+  try {
+    const result = await systemClient.consumeStreamDrafts({ limit: 3 })
+    if (!result.ok && !(result.created ?? 0)) {
+      ElMessage.warning(result.errors?.[0]?.error || '未处理直播事件')
+      return
+    }
+    await Promise.all([loadStreamEvents(), loadStreamDrafts()])
+    ElMessage.success(`已尝试 ${result.attempted ?? 0} 条，生成 ${result.created ?? 0} 条本地草稿；未发送`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`批量生成草稿失败: ${message}`)
+  } finally {
+    consumingStreamDrafts.value = false
+  }
+}
+
+async function loadStreamActions() {
+  loadingStreamActions.value = true
+  try {
+    const result: StreamActionsSnapshot = await systemClient.streamActions(50)
+    streamActions.value = result.actions ?? []
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.warning(`直播动作审计加载失败: ${message}`)
+  } finally {
+    loadingStreamActions.value = false
+  }
+}
+
+async function reconfigureTwitch() {
+  reconfiguringTwitch.value = true
+  try {
+    const result = await systemClient.reconfigureTwitch()
+    if (result.ok !== true) {
+      ElMessage.warning(String(result.error || 'Twitch 状态未更新'))
+      return
+    }
+    await loadStream()
+    ElMessage.success('已清除本地撤销标记；仍需在 Twitch 侧确认订阅状态')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`Twitch 状态更新失败: ${message}`)
+  } finally {
+    reconfiguringTwitch.value = false
+  }
+}
+
+async function saveTwitchSubscriptions() {
+  loadingTwitchSubscriptions.value = true
+  try {
+    const result = await systemClient.configureTwitchSubscriptions(twitchSubscriptionDraft.value)
+    if (result.ok !== true) {
+      ElMessage.warning(String(result.error || 'EventSub 订阅计划未保存'))
+      return
+    }
+    await loadStream()
+    ElMessage.success('已保存本地 EventSub 订阅计划，未连接 Twitch 创建订阅')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`EventSub 订阅计划保存失败: ${message}`)
+  } finally {
+    loadingTwitchSubscriptions.value = false
+  }
+}
+
+const twitchIrcStatusLabel = computed(() => {
+  const connection = streamSnapshot.value?.platforms?.twitch?.ircConnection
+  if (!connection) return '未启用'
+  if (connection.status === 'connected') return '已连接'
+  if (connection.status === 'connecting') return '连接中'
+  if (connection.status === 'backoff') {
+    const seconds = connection.nextRetryInSeconds
+    return seconds == null ? '等待重连' : `等待重连 ${Math.ceil(seconds)} 秒`
+  }
+  if (connection.status === 'unconfigured') return '未配置'
+  if (connection.status === 'revoked') return '已撤销'
+  return '已断开'
+})
+
+async function connectTwitch() {
+  connectingTwitch.value = true
+  try {
+    const result = await systemClient.connectTwitch()
+    await loadStream()
+    if (result.ok) ElMessage.success('已请求 Twitch IRC 连接')
+    else ElMessage.warning('Twitch IRC 尚未连接，请检查配置或稍后重试')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`Twitch IRC 连接失败: ${message}`)
+  } finally {
+    connectingTwitch.value = false
+  }
+}
+
+async function disconnectTwitch() {
+  disconnectingTwitch.value = true
+  try {
+    await systemClient.disconnectTwitch()
+    await loadStream()
+    ElMessage.success('已断开 Twitch IRC，停止自动重连意图')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`Twitch IRC 断开失败: ${message}`)
+  } finally {
+    disconnectingTwitch.value = false
+  }
+}
+
+function streamEventId(event: StreamLocalEvent) {
+  return String(event.eventId || event.id || '').trim()
+}
+
+async function generateStreamDraft(event: StreamLocalEvent) {
+  const eventId = streamEventId(event)
+  if (!eventId) {
+    ElMessage.warning('该事件缺少可用标识，无法生成草稿')
+    return
+  }
+  generatingStreamDraft.value = eventId
+  try {
+    const result = await systemClient.generateStreamDraft({ eventId })
+    if (!result.ok && !result.draft) {
+      ElMessage.warning(result.error || '回复草稿生成失败')
+      return
+    }
+    if (result.draft) {
+      streamDrafts.value = [result.draft, ...streamDrafts.value.filter(item => item.requestId !== result.draft?.requestId)].slice(0, 20)
+    }
+    ElMessage.success(result.draft?.status === 'generated' ? '已生成本地回复草稿，未发送' : '草稿生成失败，未发送任何消息')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`回复草稿生成失败: ${message}`)
+  } finally {
+    generatingStreamDraft.value = ''
+  }
+}
+
+async function retryStreamDraft(draft: StreamReplyDraft) {
+  const eventId = String(draft.eventId || '').trim()
+  if (!eventId) {
+    ElMessage.warning('该草稿缺少事件标识，无法重新生成')
+    return
+  }
+  generatingStreamDraft.value = eventId
+  try {
+    const result = await systemClient.generateStreamDraft({ eventId, retry: true })
+    if (!result.ok && !result.draft) {
+      ElMessage.warning(result.error || '草稿重新生成失败')
+      return
+    }
+    if (result.draft) {
+      streamDrafts.value = [result.draft, ...streamDrafts.value.filter(item => item.requestId !== result.draft?.requestId)].slice(0, 20)
+    }
+    ElMessage.success(result.draft?.status === 'generated' ? '已重新生成本地回复草稿，未发送' : '草稿重新生成失败，未发送任何消息')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`草稿重新生成失败: ${message}`)
+  } finally {
+    generatingStreamDraft.value = ''
+  }
+}
+
+function streamDraftDeliveryLabel(draft: StreamReplyDraft) {
+  if (draft.sendStatus === 'known_success' || draft.sent) return '已确认发送'
+  if (draft.sendStatus === 'unknown_effect') return '发送效果未知，需人工确认'
+  if (draft.sendStatus === 'failed') return '发送失败，可重新预览'
+  return draft.status === 'generated' ? '仅本地草稿，未发送' : '生成失败'
+}
+
+async function toggleStreamTakeover() {
+  loadingStreamTakeover.value = true
+  try {
+    const result = await systemClient.setStreamTakeover(!streamTakeoverEnabled.value)
+    if (!result.ok) {
+      ElMessage.warning(result.error || '本地接管策略未更新')
+      return
+    }
+    streamTakeoverEnabled.value = result.enabled ?? !streamTakeoverEnabled.value
+    if (result.state && streamSnapshot.value) streamSnapshot.value = { ...streamSnapshot.value, state: result.state, policy: result.policy ?? streamSnapshot.value.policy }
+    ElMessage.success(streamTakeoverEnabled.value ? '已启用本地人工接管，未发送平台指令' : '已关闭本地人工接管')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`本地接管策略更新失败: ${message}`)
+  } finally {
+    loadingStreamTakeover.value = false
+  }
+}
+
+function formatStreamEventTime(value: number | string | null | undefined) {
+  if (value == null || value === '') return '时间未知'
+  const date = new Date(typeof value === 'number' ? value : String(value))
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleTimeString()
+}
+
+function formatStreamActionStatus(status: string | undefined) {
+  const labels: Record<string, string> = {
+    sending: '发送中',
+    known_success: '已确认成功',
+    unknown_effect: '效果未知',
+    failed: '失败',
+  }
+  return labels[status || ''] || status || '未知'
+}
+
+async function probeStream() {
+  loadingStreamProbe.value = true
+  streamLoadError.value = ''
+  try {
+    const result = await systemClient.probeStream()
+    streamProbe.value = result.probe ?? null
+    if (result.state && streamSnapshot.value) streamSnapshot.value = { ...streamSnapshot.value, state: result.state }
+    await loadStream()
+    if (!result.ok) ElMessage.warning(result.error || '适配器探测未通过')
+    else ElMessage.success('适配器只读探测完成，未执行直播动作')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`适配器探测失败: ${message}`)
+  } finally {
+    loadingStreamProbe.value = false
+  }
+}
+
+async function loadObsProfiles() {
+  loadingObsProfiles.value = true
+  streamLoadError.value = ''
+  try {
+    const result = await systemClient.obsProfiles()
+    obsProfiles.value = (result.profiles || []).filter((profile) => typeof profile?.profileName === 'string' && profile.profileName.trim())
+    obsCurrentProfile.value = typeof result.currentProfileName === 'string' ? result.currentProfileName : ''
+    if (!obsProfileDraft.value && obsCurrentProfile.value) obsProfileDraft.value = obsCurrentProfile.value
+    if (result.ok) ElMessage.success(`已读取 ${obsProfiles.value.length} 个 OBS 配置档`)
+    else ElMessage.warning(result.error || 'OBS 配置档读取失败')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`OBS 配置档读取失败: ${message}`)
+  } finally {
+    loadingObsProfiles.value = false
+  }
+}
+
+async function previewObsProfileSwitch() {
+  const profileName = obsProfileDraft.value.trim()
+  if (!profileName) return
+  await previewStream('stream.profile_switch', { profileName })
+}
+
+async function previewStream(kind: string, params: Record<string, unknown> = {}, loadingKey = kind) {
+  previewingStreamCapability.value = loadingKey
+  try {
+    const result = await systemClient.previewStream(kind, params)
+    if (result.preview) {
+      streamSnapshot.value = { ...(streamSnapshot.value || { state: 'disconnected' }), state: 'preview', preview: result.preview }
+      streamExecution.value = null
+      streamPendingExecution.value = {
+        requestId: String(result.preview.requestId || ''),
+        action: String(result.preview.action || result.preview.kind || kind),
+        params: result.preview.params || {},
+      }
+    }
+    if (!result.ok) ElMessage.warning(result.error || '直播动作暂不可预览')
+    else ElMessage.success('已生成直播动作预览，未执行真实操作')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    ElMessage.error(`直播动作预览失败: ${message}`)
+  } finally {
+    previewingStreamCapability.value = ''
+  }
+}
+
+async function previewDraftSend(draft: StreamReplyDraft) {
+  if (!draft.reply) return
+  await previewStream('stream.chat_send', { text: draft.reply, draftId: draft.draftId }, `stream.chat_send:${draft.draftId}`)
+}
+
+function streamRiskLabel(risk: string | undefined) {
+  const labels: Record<string, string> = { safe: '安全', low: '低风险', medium: '中风险', high: '高风险', critical: '关键风险' }
+  return labels[risk || ''] || risk || '未声明风险'
+}
+
+async function confirmStreamExecution() {
+  const pending = streamPendingExecution.value
+  if (!pending?.requestId) {
+    ElMessage.warning('预览已失效，请重新生成预览')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认执行“${pending.action}”？风险：${streamRiskLabel(streamSnapshot.value?.preview?.riskLevel)}。`,
+      '确认直播动作',
+      { type: 'warning', confirmButtonText: '确认执行', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  loadingStreamExecute.value = true
+  try {
+    const result = await systemClient.executeStream({ ...pending, confirmed: true })
+    streamExecution.value = result
+    if (result.state && streamSnapshot.value) streamSnapshot.value = { ...streamSnapshot.value, state: result.state }
+    await Promise.all([loadStream(), loadStreamEvents(), loadStreamActions(), loadStreamDraftConsumer()])
+    if (result.ok) ElMessage.success(`执行完成：${result.verificationStatus || result.outcome || '已提交'}`)
+    else ElMessage.error(result.message || result.error || '直播动作执行失败，可手动重试')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    streamExecution.value = { ok: false, outcome: 'failed', message }
+    // Provider state can change while the confirmation dialog is open (for
+    // example, Twitch EventSub may be revoked). Refresh the read-only
+    // snapshot so stale capabilities or previews cannot remain actionable.
+    try {
+      await loadStream()
+    } catch {
+      // Keep the original execution error visible when the status refresh is
+      // unavailable; the next explicit refresh can reconcile the snapshot.
+    }
+    ElMessage.error(`直播动作执行失败: ${message}`)
+  } finally {
+    loadingStreamExecute.value = false
+  }
+}
+
+function formatStreamParams(params: Record<string, unknown> | undefined) {
+  if (!params || !Object.keys(params).length) return '无'
+  return Object.entries(params).slice(0, 6).map(([key, value]) => `${key}=${String(value)}`).join('，')
+}
+
 async function refreshSnapshots() {
-  await Promise.all([loadPlugins(), loadCapabilities(), loadToolTrace(), loadMcpServers()])
+  await Promise.all([loadPlugins(), loadCapabilities(), loadToolTrace(), loadMcpServers(), loadStream(), loadTwitchConfigStatus(), loadStreamEvents(), loadStreamDrafts(), loadStreamActions(), loadStreamDraftConsumer()])
 }
 
 watch(importedSkillItems, pruneSelectedSkillIds)
@@ -1491,10 +2444,331 @@ onMounted(async () => {
 .tone-emerald strong { color: #059669; }
 
 .mcp-summary,
+.stream-summary,
 .skill-catalog,
 .plugin-panel,
 .log-panel {
   padding: 16px;
+}
+
+.stream-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 12px 0;
+  color: var(--yui-muted);
+  font-size: 12px;
+}
+
+.stream-safety-controls,
+.stream-events-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.stream-safety-controls > div {
+  display: grid;
+  gap: 3px;
+}
+
+.stream-safety-controls small {
+  color: var(--yui-muted);
+  font-size: 11px;
+}
+
+.stream-subscription-controls {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.stream-subscription-options {
+  display: flex;
+  flex: 1 1 320px;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.stream-moderation-controls {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.stream-moderation-fields {
+  display: grid !important;
+  grid-template-columns: minmax(180px, 1fr) 120px 130px;
+  flex: 1 1 100%;
+  gap: 8px;
+  width: 100%;
+}
+
+.stream-obs-config {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.stream-twitch-config {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.stream-twitch-fields {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  align-items: center;
+  flex: 1 1 620px;
+  gap: 8px;
+  min-width: 0;
+}
+
+.stream-twitch-actions {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+}
+
+.stream-obs-fields {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) minmax(190px, 1fr) auto auto;
+  align-items: center;
+  flex: 1 1 520px;
+  gap: 8px;
+  min-width: 0;
+}
+
+.stream-profile-controls {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.stream-profile-fields {
+  display: grid !important;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  align-items: center;
+  flex: 1 1 520px;
+  gap: 8px;
+  min-width: 0;
+}
+
+@media (max-width: 980px) {
+  .stream-moderation-fields {
+    grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(110px, 1fr));
+  }
+
+  .stream-twitch-fields {
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .stream-moderation-fields,
+  .stream-obs-fields,
+  .stream-profile-fields,
+  .stream-twitch-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+.stream-events-heading {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--yui-border);
+}
+
+.stream-actions-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--yui-border);
+}
+
+.stream-action-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.stream-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-control);
+  background: var(--yui-surface-muted);
+}
+
+.stream-action-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.stream-action-row small {
+  color: var(--yui-muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.stream-action-status {
+  align-self: start;
+  color: var(--yui-muted);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.stream-action-status.status-known_success { color: #047857; }
+.stream-action-status.status-unknown_effect { color: #b45309; }
+.stream-action-status.status-failed { color: #be123c; }
+.stream-action-status.status-sending { color: #2563eb; }
+
+.stream-action-row > small {
+  grid-column: 1 / -1;
+}
+
+.stream-event-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.stream-event-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-control);
+}
+
+.stream-event-row > span,
+.stream-event-row small {
+  color: var(--yui-muted);
+  font-size: 10px;
+}
+
+.stream-event-row small {
+  grid-column: 1 / -1;
+}
+
+.stream-event-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stream-draft-status {
+  color: var(--yui-muted);
+  font-size: 10px;
+}
+
+.stream-drafts-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--yui-border);
+}
+
+.stream-draft-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.stream-draft-row {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-control);
+}
+
+.stream-draft-row > div {
+  display: grid;
+  gap: 3px;
+}
+
+.stream-draft-row small {
+  color: var(--yui-muted);
+  font-size: 10px;
+}
+
+.stream-draft-row p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.stream-draft-error {
+  color: var(--el-color-danger);
+}
+
+.stream-capability-list {
+  display: grid;
+  gap: 8px;
+}
+
+.stream-capability-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-control);
+  background: var(--yui-surface);
+}
+
+.stream-capability-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.stream-capability-row small,
+.stream-preview-note span {
+  color: var(--yui-muted);
+  font-size: 11px;
+}
+
+.stream-preview-note {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--el-color-primary);
+  background: var(--yui-surface-sunken);
+}
+
+.stream-probe-note {
+  margin-top: 10px;
+  color: var(--yui-muted);
+  font-size: 11px;
+}
+
+.stream-execution-note {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--el-color-success);
+  background: var(--yui-success-soft);
+  color: var(--yui-text);
+  font-size: 11px;
+}
+
+.stream-execution-note.failed {
+  border-left-color: var(--el-color-danger);
+  background: var(--yui-danger-soft);
 }
 
 .tool-health {

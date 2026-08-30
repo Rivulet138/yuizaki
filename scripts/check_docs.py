@@ -18,7 +18,6 @@ MAINTAINED_DOCS = {
     "README.md",
     "SECURITY.md",
     "THIRD_PARTY_NOTICES.md",
-    "python/tests/README.md",
     "services/soulx-svc/README.md",
 }
 FORBIDDEN_TEXT = {

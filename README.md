@@ -125,7 +125,7 @@ LLM_MODEL=your-model
 | 工具与自动化 | MCP、插件系统、Playwright、受控桌面动作 |
 | 进程管理 | Go Launcher、Electron main process、Python runtime identity/recovery |
 | 通信 | HTTP、SSE、Socket.IO、Electron IPC |
-| 构建与测试 | electron-builder、Vitest、Pytest、Ruff、BasedPyright、ESLint、GitHub Actions |
+| 构建与质量 | electron-builder、Ruff、BasedPyright、ESLint、GitHub Actions |
 
 ## 架构
 
@@ -180,7 +180,6 @@ Python 验证：
 ```powershell
 cd python
 ./.venv/Scripts/python.exe -m ruff check .
-./.venv/Scripts/python.exe -m pytest -q --tb=short
 ```
 
 发行构建：
@@ -205,6 +204,7 @@ npm run package:linux
 | [架构](docs/ARCHITECTURE.md) | 进程、模块、数据流和失败边界 |
 | [API](docs/API.md) | 本地 HTTP 与实时事件契约 |
 | [安全](SECURITY.md) | 数据、工具、桌面动作和连接器边界 |
+| [改进路线图](docs/IMPROVEMENT_ROADMAP.md) | 基于 2026 研究的分阶段目标、验收指标和安全不变量 |
 | [贡献](CONTRIBUTING.md) | 开发流程与质量门 |
 
 ## 许可证

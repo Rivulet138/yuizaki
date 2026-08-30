@@ -35,20 +35,23 @@ including endpoint `PING`. QQ and WeChat require a Bridge Token before enablemen
 QQ and WeChat use a user-selected local personal-account bridge. This is not an official platform API; lockout,
  privacy, disconnect, and protocol-change risks are explicitly accepted by the local user.
 
-Discord interactions receive a deferred acknowledgement before Agent work runs in the background; terminal delivery
+Discord interactions are durably recorded before the deferred acknowledgement, then Agent work runs in the background; terminal delivery
 edits the original response, uses the interaction token only within its local 15-minute deadline, and disables mention parsing.
 An optional Bot Token may send one channel fallback for an expired persisted retry; there is no Discord Gateway ingress.
 Connector turns use stable IDs with the local SQLite
 TurnCommitStore claim/commit/replay layer. Agent commit state and external provider delivery state are separate: a failed
 provider delivery can be retried from the persisted Agent result, while a confirmed delivery does not send a second
-provider reply. Real public HTTPS delivery has not been completed in this repository. Telegram is not fast-acknowledged
-before Agent execution because no durable inbound queue currently proves recovery after an accepted webhook.
+provider reply. Real public HTTPS delivery has not been completed in this repository. The production app fast-acknowledges
+Telegram and personal bridge callbacks only after the inbound message is persisted in `connector_deliveries`; failed worker
+states remain manually retryable. A process-local in-memory queue is never treated as durable.
 
 ## Capability risks
 
 MCP servers, plugins, shell tools, browser automation, and remote model providers may read or change data according to their configuration. Treat every server as code with the permissions of its process. Review tool manifests, keep sensitive directories outside tool scope, and do not send secrets in prompts.
 
 Prompt content, OCR output, screenshots, web pages, and MCP results are untrusted evidence. They must not be treated as authorization to bypass policy or reveal secrets.
+
+The Electron perception bridge masks active-application metadata for common password-manager, finance/payment, and medical applications before renderer projection. Deployments may add a main-process matcher for organization-specific sensitive windows. This is a privacy filter, not an authorization grant; request consent, scope, expiry, interruption, and emergency-stop checks remain mandatory.
 
 ## Native desktop actions
 

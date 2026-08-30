@@ -9,6 +9,7 @@ type BrowserWindowWithAudioContext = Window & typeof globalThis & {
 
 export type AudioCapturePhase = 'idle' | 'requesting' | 'recording' | 'stopping' | 'error';
 export type AudioCapturePermission = 'unknown' | 'prompt' | 'granted' | 'denied';
+export type AudioInputHealth = 'unknown' | 'silent' | 'active' | 'disconnected';
 
 export interface AudioCaptureStatus {
   phase: AudioCapturePhase;
@@ -25,6 +26,8 @@ export interface AudioCaptureStatus {
   level: number;
   peak: number;
   speechDetected: boolean;
+  inputHealth: AudioInputHealth;
+  silenceMs: number;
   chunksSent: number;
   bytesSent: number;
   error: string | null;
@@ -42,9 +45,11 @@ interface AudioCaptureStartOptions {
   maxDurationMs?: number;
   sessionId?: string;
   interruptionEpoch?: number;
+  deviceId?: string;
 }
 
 const DEFAULT_MAX_RECORDING_MS = 120_000;
+export const AUDIO_SILENCE_GRACE_MS = 1_800;
 export const AUDIO_SPEECH_RMS_THRESHOLD = 0.015;
 const SILENCE_PREROLL_CHUNKS = 6;
 const createEnvelopeId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -77,6 +82,17 @@ const computeRms = (samples: Float32Array): number => {
 export const hasSpeechEnergy = (samples: Float32Array, threshold = AUDIO_SPEECH_RMS_THRESHOLD): boolean =>
   computeRms(samples) >= threshold;
 
+export const classifyAudioInputHealth = (
+  rms: number,
+  silenceMs: number,
+  trackState: MediaStreamTrackState = 'live',
+): AudioInputHealth => {
+  if (trackState === 'ended') return 'disconnected';
+  if (Number.isFinite(rms) && rms >= AUDIO_SPEECH_RMS_THRESHOLD) return 'active';
+  if (Number.isFinite(silenceMs) && silenceMs >= AUDIO_SILENCE_GRACE_MS) return 'silent';
+  return 'unknown';
+};
+
 const readBooleanSetting = (value: unknown): boolean | null =>
   typeof value === 'boolean' ? value : null;
 
@@ -101,6 +117,22 @@ export const enumerateAudioDevices = async (): Promise<AudioDeviceInventory> => 
     inputLabels: inputs.map((device) => device.label.trim()).filter(Boolean).slice(0, 8),
     outputLabels: outputs.map((device) => device.label.trim()).filter(Boolean).slice(0, 8),
   };
+};
+
+export interface AudioInputDevice {
+  deviceId: string;
+  label: string;
+}
+
+/** Enumerate input IDs for an explicit user-selected microphone. */
+export const enumerateAudioInputDevices = async (): Promise<AudioInputDevice[]> => {
+  const enumerate = navigator.mediaDevices?.enumerateDevices;
+  if (typeof enumerate !== 'function') return [];
+  const devices = await enumerate.call(navigator.mediaDevices);
+  return devices
+    .filter((device) => device.kind === 'audioinput' && device.deviceId.trim())
+    .map((device) => ({ deviceId: device.deviceId, label: device.label.trim() || '未命名麦克风' }))
+    .slice(0, 16);
 };
 
 export class StreamingPcmNormalizer {
@@ -197,6 +229,17 @@ export class AudioCapture {
   private envelope: { sessionId: string; generationId: string; turnId: string; requestId: string; interruptionEpoch: number; version: 1 } | null = null;
   private speechDetected = false;
   private silencePreroll: Float32Array[] = [];
+  private inputTrack: MediaStreamTrack | null = null;
+  private readonly handleInputTrackEnded = (): void => {
+    this.status.inputHealth = 'disconnected';
+    this.status.error = '麦克风设备已断开';
+    if (!this.isRecording.value) return;
+    this.stop({ sendFinal: false });
+    this.status.phase = 'error';
+    this.status.isRecording = false;
+    this.status.inputHealth = 'disconnected';
+    this.status.error = '麦克风设备已断开';
+  };
   private readonly status = reactive<AudioCaptureStatus>({
     phase: 'idle',
     permission: 'unknown',
@@ -212,6 +255,8 @@ export class AudioCapture {
     level: 0,
     peak: 0,
     speechDetected: false,
+    inputHealth: 'unknown',
+    silenceMs: 0,
     chunksSent: 0,
     bytesSent: 0,
     error: null,
@@ -263,9 +308,14 @@ export class AudioCapture {
           noiseSuppression: true,
           autoGainControl: true,
           sampleRate: this.sampleRate,
+          ...(options.deviceId?.trim() ? { deviceId: { ideal: options.deviceId.trim() } } : {}),
         },
       });
-      const audioTrackSettings = this.mediaStream.getAudioTracks()[0]?.getSettings();
+      const track = this.mediaStream.getAudioTracks()[0];
+      if (!track) throw new Error('没有找到可用麦克风');
+      this.inputTrack = track;
+      track.addEventListener('ended', this.handleInputTrackEnded, { once: true });
+      const audioTrackSettings = track.getSettings();
       this.status.audioProcessing = normalizeAudioProcessingSettings(audioTrackSettings);
 
       const AudioContextConstructor = window.AudioContext || (window as BrowserWindowWithAudioContext).webkitAudioContext;
@@ -368,6 +418,10 @@ export class AudioCapture {
     }
 
     if (this.mediaStream) {
+      if (this.inputTrack) {
+        this.inputTrack.removeEventListener('ended', this.handleInputTrackEnded);
+        this.inputTrack = null;
+      }
       this.mediaStream.getTracks().forEach((track) => {
         track.stop();
       });
@@ -398,7 +452,15 @@ export class AudioCapture {
 
   private sendAudioChunkNow(pcmData: Float32Array, socketClient: SocketClient): void {
     if (!socketClient.isConnected()) {
-      this.status.error = 'Socket.IO 连接已断开';
+      const wasRecording = this.isRecording.value;
+      this.status.error = '实时通道连接已断开';
+      if (wasRecording) {
+        // Do not emit a final empty turn after transport loss. Releasing the
+        // device immediately prevents a silent microphone from staying open.
+        this.stop({ sendFinal: false });
+        this.status.phase = 'error';
+        this.status.error = '实时通道连接已断开';
+      }
       return;
     }
 
@@ -447,6 +509,8 @@ export class AudioCapture {
     this.status.level = 0;
     this.status.peak = 0;
     this.status.speechDetected = false;
+    this.status.inputHealth = 'unknown';
+    this.status.silenceMs = 0;
     this.status.chunksSent = 0;
     this.status.bytesSent = 0;
     this.status.inputSampleRate = null;
@@ -490,6 +554,15 @@ export class AudioCapture {
     const level = Math.min(1, rms * 8);
     this.status.level = this.status.level * 0.72 + level * 0.28;
     this.status.peak = Math.max(this.status.peak * 0.96, level);
+    const now = Date.now();
+    if (rms >= AUDIO_SPEECH_RMS_THRESHOLD) {
+      this.status.silenceMs = 0;
+      this.status.inputHealth = 'active';
+    } else {
+      const baseline = this.status.startedAt ?? now;
+      this.status.silenceMs = Math.max(0, now - baseline);
+      this.status.inputHealth = classifyAudioInputHealth(rms, this.status.silenceMs);
+    }
   }
 
   getIsRecording(): Ref<boolean> {

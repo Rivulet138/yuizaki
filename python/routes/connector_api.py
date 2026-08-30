@@ -5,12 +5,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
+import time
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping
+from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+
 from modules.agent.turn_service import SemanticTurnRequest
 from modules.system.message_connectors import (
     ConnectorMessage,
@@ -20,6 +25,165 @@ from modules.system.message_connectors import (
 
 MAX_CONNECTOR_BODY_BYTES = 512 * 1024
 LOGGER = logging.getLogger(__name__)
+
+
+class ConnectorRecoveryController:
+    """Discover only expired inbound leases and replay them through retry."""
+
+    def __init__(
+        self,
+        *,
+        store_provider: Callable[[], Any] | None,
+        active_tasks: Mapping[str, asyncio.Task[JSONResponse]],
+        retry_callback: Callable[[str, str], Awaitable[JSONResponse]],
+        interval_seconds: float,
+        metrics_path: str | Path | None = None,
+    ) -> None:
+        self._store_provider = store_provider
+        self._active_tasks = active_tasks
+        self._retry_callback = retry_callback
+        self._interval_seconds = max(1.0, float(interval_seconds))
+        self._metrics_path = Path(metrics_path) if metrics_path is not None else None
+        self._stop = asyncio.Event()
+        self._task: asyncio.Task[None] | None = None
+        self._metrics_lock = Lock()
+        self._metrics: dict[str, Any] = {
+            "runs": 0,
+            "inspected": 0,
+            "recovered": 0,
+            "failed": 0,
+            "lastRunAt": None,
+            "lastError": None,
+        }
+        self._load_metrics()
+
+    def _load_metrics(self) -> None:
+        if self._metrics_path is None:
+            return
+        try:
+            payload = json.loads(self._metrics_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, Mapping) or payload.get("schemaVersion") != "yuizaki.connector-recovery.v1":
+                return
+            for key in ("runs", "inspected", "recovered", "failed"):
+                value = payload.get(key)
+                if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10_000_000:
+                    self._metrics[key] = value
+            last_run = payload.get("lastRunAt")
+            if (
+                isinstance(last_run, (int, float))
+                and not isinstance(last_run, bool)
+                and math.isfinite(float(last_run))
+                and 0.0 <= float(last_run) <= 10**12
+            ):
+                self._metrics["lastRunAt"] = float(last_run)
+            last_error = payload.get("lastError")
+            if last_error is None or isinstance(last_error, str):
+                self._metrics["lastError"] = str(last_error)[:160] if last_error else None
+        except (OSError, TypeError, ValueError):
+            return
+
+    def _persist_metrics(self) -> None:
+        if self._metrics_path is None:
+            return
+        payload = {"schemaVersion": "yuizaki.connector-recovery.v1", **self._metrics}
+        try:
+            self._metrics_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary_path = self._metrics_path.with_suffix(f"{self._metrics_path.suffix}.tmp")
+            temporary_path.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
+            temporary_path.replace(self._metrics_path)
+        except OSError:
+            LOGGER.debug("connector recovery telemetry persistence failed", exc_info=True)
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return bounded recovery telemetry without message or credential data."""
+        with self._metrics_lock:
+            return {
+                "schemaVersion": "yuizaki.connector-recovery.v1",
+                **self._metrics,
+            }
+
+    async def run_once(self) -> dict[str, int]:
+        """Recover expired processing rows; leave active and sending rows alone."""
+
+        store = self._store_provider() if self._store_provider is not None else None
+        if store is None:
+            result = {"inspected": 0, "recovered": 0, "failed": 0}
+            with self._metrics_lock:
+                self._metrics.update({"runs": self._metrics["runs"] + 1, **result, "lastRunAt": time.time(), "lastError": "delivery_store_unavailable"})
+                self._persist_metrics()
+            return result
+        rows = store.list_connector_deliveries(status="processing", limit=100)
+        recovered = 0
+        failed = 0
+        last_error: str | None = None
+        for row in rows:
+            connector_id = str(row.get("connector_id") or "").strip().lower()
+            event_id = str(row.get("event_id") or "").strip()
+            delivery_key = str(row.get("delivery_key") or "").strip()
+            if not connector_id or not event_id or not delivery_key:
+                continue
+            active = self._active_tasks.get(f"{connector_id}:{event_id}")
+            if active is not None and not active.done():
+                continue
+            if not store.recover_stale_connector_turn(delivery_key):
+                continue
+            recovered += 1
+            try:
+                response = await self._retry_callback(connector_id, delivery_key)
+                status_code = getattr(response, "status_code", None)
+                if isinstance(status_code, bool) or not isinstance(status_code, int) or not 200 <= status_code < 300:
+                    failed += 1
+                    last_error = f"retry_status_{status_code}"[:160]
+            except Exception as exc:
+                failed += 1
+                last_error = f"retry_exception_{type(exc).__name__}"[:160]
+                LOGGER.exception(
+                    "connector recovery retry failed connector=%s event_id=%s",
+                    connector_id,
+                    event_id,
+                )
+        result = {"inspected": len(rows), "recovered": recovered, "failed": failed}
+        with self._metrics_lock:
+            self._metrics.update({
+                "runs": self._metrics["runs"] + 1,
+                "inspected": self._metrics["inspected"] + result["inspected"],
+                "recovered": self._metrics["recovered"] + recovered,
+                "failed": self._metrics["failed"] + failed,
+                "lastRunAt": time.time(),
+                "lastError": last_error,
+            })
+            self._persist_metrics()
+        return result
+
+    async def start(self) -> None:
+        if self._task is not None and not self._task.done():
+            return
+        self._stop.clear()
+        self._task = asyncio.create_task(self._run(), name="connector-recovery")
+
+    async def stop(self) -> None:
+        task = self._task
+        self._task = None
+        if task is None:
+            return
+        self._stop.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+    async def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                await self.run_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                LOGGER.exception("connector recovery scan failed")
+                with self._metrics_lock:
+                    self._metrics["lastError"] = "recovery_scan_failed"
+                    self._persist_metrics()
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=self._interval_seconds)
+            except asyncio.TimeoutError:
+                continue
 
 
 async def _read_limited_body(request: Request) -> bytes | None:
@@ -65,16 +229,29 @@ def _message_from_snapshot(payload: Mapping[str, Any]) -> ConnectorMessage:
     )
 
 
-def _public_delivery(row: Mapping[str, Any] | None) -> dict[str, Any] | None:
+def _public_delivery(
+    row: Mapping[str, Any] | None,
+    *,
+    now: float | None = None,
+) -> dict[str, Any] | None:
     if row is None:
         return None
+    status = row.get("status")
+    lease_expires_at = row.get("claim_expires_at")
+    effective_now = time.time() if now is None else now
+    lease_expired = lease_expires_at is None or (
+        isinstance(lease_expires_at, (int, float))
+        and not isinstance(lease_expires_at, bool)
+        and math.isfinite(float(lease_expires_at))
+        and float(lease_expires_at) <= effective_now
+    )
     return {
         key: row.get(key)
         for key in (
             "delivery_key", "idempotency_key", "connector_id", "event_id", "status",
             "attempt_count", "claim_expires_at", "last_error", "updated_at", "delivered_at",
         )
-    }
+    } | {"resolvable": status == "sending" and lease_expired}
 
 
 def _turn_request(message: ConnectorMessage, workspace_id: str) -> SemanticTurnRequest:
@@ -104,11 +281,21 @@ def create_message_connector_router(
     turn_service_provider: Callable[[], Any],
     active_workspace_id_provider: Callable[[], str],
     delivery_store_provider: Callable[[], Any] | None = None,
+    fast_ack_connectors: Collection[str] | None = None,
+    recovery_interval_seconds: float | None = None,
+    recovery_metrics_path: str | Path | None = None,
+    wall_clock: Callable[[], float] | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["connectors"])
+    fast_ack = frozenset(
+        str(item).strip().lower()
+        for item in (fast_ack_connectors or ())
+        if str(item).strip()
+    )
     active_tasks: dict[str, asyncio.Task[JSONResponse]] = {}
     active_phases: dict[str, str] = {}
     active_event_ids: dict[str, str] = {}
+    current_time = wall_clock or time.time
 
     @router.get("/api/system/connectors/{connector_id}/config")
     async def connector_config(connector_id: str) -> JSONResponse:
@@ -142,6 +329,17 @@ def create_message_connector_router(
         if snapshot is None:
             return JSONResponse({"ok": False, "error": "unknown_connector"}, status_code=404)
         return JSONResponse({"ok": True, "config": snapshot})
+
+    @router.post("/api/system/connectors/{connector_id}/probe")
+    async def probe_connector(connector_id: str) -> JSONResponse:
+        """Run a provider health check without sending a message or changing state."""
+        try:
+            result = await asyncio.to_thread(registry_provider().probe, connector_id)
+        except MessageConnectorError as exc:
+            return JSONResponse({"ok": False, "error": exc.code, "message": str(exc)}, status_code=exc.status_code)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            return JSONResponse({"ok": False, "error": "probe_failed", "message": str(exc)[:160]}, status_code=502)
+        return JSONResponse(result)
 
     @router.get("/api/system/connectors/{connector_id}/account")
     async def connector_account(connector_id: str) -> JSONResponse:
@@ -232,10 +430,12 @@ def create_message_connector_router(
                 "delivered_at": None,
             })
         # Do not expose credentials or the original message body in governance telemetry.
+        recovery_controller = getattr(router, "connector_recovery_controller", None)
         return JSONResponse({
             "ok": True,
             "connector_id": connector_id,
             "items": [*active_rows, *[_public_delivery(row) for row in rows]],
+            "recovery": recovery_controller.snapshot() if recovery_controller is not None else None,
         })
 
     @router.post("/api/system/connectors/{connector_id}/deliveries/{delivery_key}/retry")
@@ -363,6 +563,64 @@ def create_message_connector_router(
             registry_provider().record_failure(connector_id, reason)
             return JSONResponse({"ok": False, "error": "delivery_failed", "delivery": _public_delivery(store.connector_delivery(delivery_key))}, status_code=502)
 
+    @router.post("/api/system/connectors/{connector_id}/events/{event_id}/resolve")
+    async def resolve_connector_event(connector_id: str, event_id: str, request: Request) -> JSONResponse:
+        """Manually settle an orphaned provider send after external inspection.
+
+        The endpoint is deliberately outcome-only: the operator confirms the
+        provider state, while the server refuses to race an active task or an
+        unexpired delivery lease.  No automatic retry or effect inference is
+        performed here.
+        """
+        connector_id = connector_id.strip().lower()
+        store = delivery_store_provider() if delivery_store_provider is not None else None
+        if store is None:
+            return JSONResponse({"ok": False, "error": "delivery_store_unavailable"}, status_code=503)
+        try:
+            payload = await request.json()
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return JSONResponse({"ok": False, "error": "invalid_json"}, status_code=400)
+        if not isinstance(payload, dict) or set(payload) != {"outcome"}:
+            return JSONResponse({"ok": False, "error": "outcome_required"}, status_code=422)
+        outcome = payload.get("outcome")
+        if outcome not in {"delivered", "failed"}:
+            return JSONResponse({"ok": False, "error": "invalid_outcome"}, status_code=422)
+        delivery_key = f"connector:{connector_id}:{event_id}"
+        resolution_now = current_time()
+        row = store.connector_delivery(delivery_key)
+        if row is None:
+            return JSONResponse({"ok": False, "error": "delivery_not_found"}, status_code=404)
+        if row.get("connector_id") != connector_id:
+            return JSONResponse({"ok": False, "error": "delivery_not_found"}, status_code=404)
+        task = active_tasks.get(f"{connector_id}:{event_id}")
+        if task is not None and not task.done():
+            return JSONResponse({
+                "ok": False,
+                "error": "delivery_in_progress",
+                "delivery": _public_delivery(row, now=resolution_now),
+            }, status_code=409)
+        if row.get("status") != "sending":
+            if outcome == "delivered" and row.get("status") == "delivered":
+                return JSONResponse({"ok": True, "already_resolved": True, "delivery": _public_delivery(row, now=resolution_now)})
+            return JSONResponse({"ok": False, "error": "delivery_not_resolvable", "delivery": _public_delivery(row, now=resolution_now)}, status_code=409)
+        lease_expires_at = row.get("claim_expires_at")
+        if lease_expires_at is not None and (
+            isinstance(lease_expires_at, bool)
+            or not isinstance(lease_expires_at, (int, float))
+            or not math.isfinite(float(lease_expires_at))
+        ):
+            return JSONResponse({"ok": False, "error": "delivery_lease_invalid", "delivery": _public_delivery(row, now=resolution_now)}, status_code=409)
+        if isinstance(lease_expires_at, (int, float)) and float(lease_expires_at) > resolution_now:
+            return JSONResponse({"ok": False, "error": "delivery_lease_active", "delivery": _public_delivery(row, now=resolution_now)}, status_code=409)
+        resolved = store.resolve_connector_delivery(delivery_key, outcome)
+        if not resolved:
+            return JSONResponse({"ok": False, "error": "delivery_state_changed", "delivery": _public_delivery(store.connector_delivery(delivery_key), now=resolution_now)}, status_code=409)
+        if outcome == "delivered":
+            registry_provider().record_success(connector_id)
+        else:
+            registry_provider().record_failure(connector_id, "manual_resolution_failed")
+        return JSONResponse({"ok": True, "resolved": True, "outcome": outcome, "delivery": _public_delivery(store.connector_delivery(delivery_key), now=resolution_now)})
+
     @router.post("/api/system/connectors/{connector_id}/events/{event_id}/retry")
     async def retry_connector_event(connector_id: str, event_id: str) -> JSONResponse:
         """Retry by provider event id; webhook delivery keys are connector:event_id."""
@@ -480,6 +738,19 @@ def create_message_connector_router(
         task_key = f"{connector_id}:{message.event_id}"
         canonical_task = active_tasks.get(task_key)
         if canonical_task is not None and not canonical_task.done():
+            duplicate_store = delivery_store_provider() if delivery_store_provider is not None else None
+            if connector_id in fast_ack and duplicate_store is not None:
+                return JSONResponse({
+                    "ok": True,
+                    "accepted": True,
+                    "queued": True,
+                    "duplicate": True,
+                    "event_id": message.event_id,
+                    "session_id": message.session_id,
+                    "delivery": _public_delivery(
+                        duplicate_store.connector_delivery(request_id)
+                    ),
+                })
             if connector_id == "discord":
                 return JSONResponse({"type": 5, "data": {"allowed_mentions": {"parse": []}}})
             try:
@@ -503,6 +774,49 @@ def create_message_connector_router(
                     "error": "connector_event_in_progress",
                     "delivery": _public_delivery(existing_delivery),
                 }, status_code=409)
+        if delivery_store is not None and existing_delivery is not None:
+            existing_event_id = str(existing_delivery.get("event_id") or "")
+            if existing_event_id and existing_event_id != message.event_id:
+                return JSONResponse({
+                    "ok": False,
+                    "error": "delivery_key_conflict",
+                    "delivery": _public_delivery(existing_delivery),
+                }, status_code=409)
+            existing_status = str(existing_delivery.get("status") or "").strip().lower()
+            if existing_status == "delivered":
+                return JSONResponse({
+                    "ok": True,
+                    "accepted": False,
+                    "duplicate": True,
+                    "already_sent": True,
+                    "event_id": message.event_id,
+                    "session_id": message.session_id,
+                    "delivery": _public_delivery(existing_delivery),
+                })
+            if existing_status == "sending":
+                return JSONResponse({
+                    "ok": False,
+                    "accepted": True,
+                    "error": "delivery_state_unknown",
+                    "outcome": "unknown",
+                    "status": "sending",
+                    "message": "上次发送的最终结果未知，请先检查平台后再手动重投",
+                    "event_id": message.event_id,
+                    "session_id": message.session_id,
+                    "delivery": _public_delivery(existing_delivery),
+                }, status_code=409)
+            if existing_status == "failed" and not str(existing_delivery.get("reply_text") or "").strip():
+                # A replay must never regenerate a failed turn implicitly;
+                # manual retry owns the explicit recovery boundary.
+                return JSONResponse({
+                    "ok": True,
+                    "accepted": True,
+                    "queued": False,
+                    "duplicate": True,
+                    "event_id": message.event_id,
+                    "session_id": message.session_id,
+                    "delivery": _public_delivery(existing_delivery),
+                })
         try:
             turn_service = turn_service_provider()
             if turn_service is None:
@@ -537,12 +851,42 @@ def create_message_connector_router(
                 {"ok": False, "error": "connector_setup_failed", "message": "连接器暂时不可用，请稍后重试"},
                 status_code=503,
             )
+        queued_store = delivery_store_provider() if delivery_store_provider is not None else None
+        queued_owner: str | None = None
+        queued_pending_created = False
+        if (connector_id in fast_ack or connector_id == "discord") and queued_store is not None:
+            # Persist the inbound envelope before acknowledging the provider.
+            # This is the durable boundary; the async worker is only a
+            # continuation and may be recreated by the retry route.
+            queued_owner = f"{connector_id}:{message.event_id}:{uuid.uuid4().hex}"
+            try:
+                queued_pending_created = queued_store.record_connector_turn_pending(
+                    request_id,
+                    request_id,
+                    connector_id,
+                    message.event_id,
+                    queued_owner,
+                    message=_message_snapshot(message, workspace_id=workspace_id),
+                )
+            except Exception:
+                LOGGER.exception(
+                    "connector durable enqueue failed connector=%s event_id=%s",
+                    connector_id,
+                    message.event_id,
+                )
+                registry.record_failure(connector_id, "connector_enqueue_failed")
+                return JSONResponse(
+                    {"ok": False, "error": "connector_enqueue_failed", "message": "连接器暂时不可用，请稍后重试"},
+                    status_code=503,
+                )
         async def _run_connector() -> JSONResponse:
-            delivery_owner = f"{connector_id}:{message.event_id}:{uuid.uuid4().hex}"
+            delivery_owner = queued_owner or f"{connector_id}:{message.event_id}:{uuid.uuid4().hex}"
             delivery_key = request_id
-            delivery_store = delivery_store_provider() if delivery_store_provider is not None else None
+            delivery_store = queued_store if queued_store is not None else (
+                delivery_store_provider() if delivery_store_provider is not None else None
+            )
             delivery_claimed = False
-            turn_pending_created = False
+            turn_pending_created = queued_pending_created
 
             async def _converge_discord(status: str) -> None:
                 if connector_id != "discord":
@@ -557,7 +901,7 @@ def create_message_connector_router(
                     )
 
             try:
-                if delivery_store is not None:
+                if delivery_store is not None and not turn_pending_created:
                     turn_pending_created = delivery_store.record_connector_turn_pending(
                         delivery_key,
                         request_id,
@@ -732,7 +1076,7 @@ def create_message_connector_router(
         active_event_ids[task_key] = message.event_id
         task = asyncio.create_task(_run_connector())
         active_tasks[task_key] = task
-        if connector_id == "discord":
+        if connector_id == "discord" or (connector_id in fast_ack and queued_store is not None):
             def _cleanup(completed: asyncio.Task[JSONResponse]) -> None:
                 if active_tasks.get(task_key) is completed:
                     active_tasks.pop(task_key, None)
@@ -740,7 +1084,20 @@ def create_message_connector_router(
                     active_event_ids.pop(task_key, None)
 
             task.add_done_callback(_cleanup)
-            return JSONResponse({"type": 5, "data": {"allowed_mentions": {"parse": []}}})
+            if connector_id == "discord":
+                return JSONResponse({"type": 5, "data": {"allowed_mentions": {"parse": []}}})
+            # The pending delivery row is written before this response. The
+            # worker continues locally and remains recoverable through retry.
+            return JSONResponse({
+                "ok": True,
+                "accepted": True,
+                "queued": True,
+                "event_id": message.event_id,
+                "session_id": message.session_id,
+                "delivery": _public_delivery(
+                    queued_store.connector_delivery(request_id)
+                ),
+            })
         try:
             return await asyncio.shield(task)
         except asyncio.CancelledError:
@@ -751,7 +1108,15 @@ def create_message_connector_router(
                 active_phases.pop(task_key, None)
                 active_event_ids.pop(task_key, None)
 
+    recovery_controller = ConnectorRecoveryController(
+        store_provider=delivery_store_provider,
+        active_tasks=active_tasks,
+        retry_callback=retry_connector_delivery,
+        interval_seconds=recovery_interval_seconds,
+        metrics_path=recovery_metrics_path,
+    ) if recovery_interval_seconds is not None and recovery_interval_seconds > 0 else None
+    router.connector_recovery_controller = recovery_controller
     return router
 
 
-__all__ = ["MAX_CONNECTOR_BODY_BYTES", "create_message_connector_router"]
+__all__ = ["MAX_CONNECTOR_BODY_BYTES", "ConnectorRecoveryController", "create_message_connector_router"]

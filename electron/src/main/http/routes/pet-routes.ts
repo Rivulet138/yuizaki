@@ -1,4 +1,9 @@
 import { createReadStream } from 'fs'
+import {
+  PET_SCALE_DEFAULT,
+  PET_SCALE_MIN,
+  PET_SCALE_MAX,
+} from '../../../shared/pet-control'
 import type {
   PetCompanionIdleProfile,
   PetControlConfigPatch,
@@ -542,7 +547,7 @@ export const handlePetRoutes: HttpRouteHandler = async (req, res, method, url, c
 
   if (method === 'POST' && url.pathname === '/api/pet/scale') {
     const body = await parseRequestBody<{ scale?: number; duration?: number }>(req)
-    const scale = Math.max(0.12, Math.min(0.6, body.scale ?? 0.28))
+    const scale = Math.max(PET_SCALE_MIN, Math.min(PET_SCALE_MAX, body.scale ?? PET_SCALE_DEFAULT))
     ctx.live2dWindow.setScale(scale)
     let nextState = ctx.petStateStore.applyConfigPatch({ scale })
     ctx.applyPetStateToRenderer?.(nextState)

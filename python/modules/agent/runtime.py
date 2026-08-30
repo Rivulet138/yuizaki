@@ -9,7 +9,10 @@ from typing import Any
 
 from ..agent_plugins.manager import PluginManager
 from ..core.paths import data_dir_from_env
-from ..system.memory_write_pipeline import build_task_completed_event, build_user_signal_event
+from ..system.memory_write_pipeline import (
+    build_task_completed_event,
+    build_user_signal_event,
+)
 from .activity_frames import ActivityFrameService, ActivityFrameStore
 from .agent_trace_store import AgentTraceStore
 from .companion_events import CompanionJobEventLog
@@ -32,13 +35,15 @@ from .policy_engine import PolicyEngine
 from .runtime_context import RuntimeContext, RuntimeContextRegistry
 from .schedule_store import ScheduleStore
 from .scheduler import AgentScheduler
+from .skill_runtime import SkillRuntimeRegistry
+from .skill_store import SkillCatalogStore
+from .skill_trust import SkillTrustStore
 from .step_executor import StepExecutor
 from .tool_executor import ToolExecutor
 from .tool_registry import ToolRegistry
 from .turn_outbox import TurnOutboxDispatcher, TurnOutboxWorker, TurnProjection
 from .turn_service import TurnService
 from .turn_store import TurnCommitStore
-
 
 _FAILURE_PROJECTION_FIELDS = frozenset({
     "step_id", "failed_step_id", "kind", "category", "message",
@@ -115,6 +120,11 @@ class AgentRuntime:
     turn_outbox_dispatcher: TurnOutboxDispatcher | None = None
     turn_outbox_worker: TurnOutboxWorker | None = None
     activity_frame_service: ActivityFrameService | None = None
+    # Imported skills remain catalog metadata until an explicit live binding
+    # is registered.  The registry never bypasses ToolExecutor policy.
+    skill_catalog_store: SkillCatalogStore | None = None
+    skill_runtime_registry: SkillRuntimeRegistry | None = None
+    skill_trust_store: SkillTrustStore | None = None
 
 
 def create_agent_runtime(
@@ -162,6 +172,13 @@ def create_agent_runtime(
     )
     resolved_runtime_context_registry = runtime_context_registry or RuntimeContextRegistry()
     resolved_turn_store = turn_store or TurnCommitStore(data_dir_from_env() / "turn_commits.sqlite3")
+    skill_catalog_store = SkillCatalogStore()
+    skill_trust_store = SkillTrustStore()
+    skill_runtime_registry = SkillRuntimeRegistry(
+        skill_catalog_store,
+        tool_registry,
+        trust_store=skill_trust_store,
+    )
     activity_frame_service = ActivityFrameService(
         ActivityFrameStore(data_dir_from_env() / "activity_frames.sqlite3"),
         resolved_turn_store,
@@ -189,6 +206,7 @@ def create_agent_runtime(
         trigger = _projection_trigger(payload) if isinstance(payload, dict) else ""
         if (
             not isinstance(payload, dict)
+            or bool(payload.get("stream_draft"))
             or (payload.get("autonomy_mode") == "silent" and trigger != "scheduler")
             or trigger not in {"http", "socket", "voice", "scheduler"}
         ):
@@ -244,7 +262,11 @@ def create_agent_runtime(
 
     async def _project_chat_exchange(event: dict[str, Any], context: Any | None) -> None:
         payload = event.get("payload")
-        if not isinstance(payload, dict) or _projection_trigger(payload) not in {"http", "socket", "voice"}:
+        if (
+            not isinstance(payload, dict)
+            or bool(payload.get("stream_draft"))
+            or _projection_trigger(payload) not in {"http", "socket", "voice"}
+        ):
             return
         messages = payload.get("messages")
         if not isinstance(messages, list):
@@ -325,6 +347,18 @@ def create_agent_runtime(
             "tool_call_count": len(payload.get("tool_calls") or []),
             "commit_idempotency_key": idempotency_key,
         }
+        intent_envelope = payload.get("intent_envelope")
+        if isinstance(intent_envelope, dict):
+            # The envelope is inspectable planning metadata only; it never
+            # becomes a permission or tool-authority input during replay.
+            trace_payload["intent_envelope"] = {
+                key: intent_envelope[key]
+                for key in (
+                    "schemaVersion", "intentType", "normalizedGoal", "confidence",
+                    "evidenceIds", "requiresConfirmation", "sensitivity", "expiresAt",
+                )
+                if key in intent_envelope
+            }
         # Newer producers may attach richer trace material. Keeping it inside
         # the commit record preserves backward compatibility with v1 payloads.
         explicit_trace = payload.get("agent_trace") or payload.get("trace_records")
@@ -507,4 +541,7 @@ def create_agent_runtime(
         turn_outbox_dispatcher=turn_outbox_dispatcher,
         turn_outbox_worker=turn_outbox_worker,
         activity_frame_service=activity_frame_service,
+        skill_catalog_store=skill_catalog_store,
+        skill_runtime_registry=skill_runtime_registry,
+        skill_trust_store=skill_trust_store,
     )

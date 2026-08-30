@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="桌宠控制" subtitle="选择模型并修改显示、位置、交互和动作参数" tone="companion">
+  <PanelShell title="桌宠控制" tone="companion">
     <template #actions>
       <el-button :icon="Clock" plain @click="relationshipHistoryVisible = true">关系历史</el-button>
     </template>
@@ -71,6 +71,50 @@
           <el-slider v-model="scaleDraft" :min="0.12" :max="0.6" :step="0.01" @change="applyScale" />
           <label class="field-label">透明度 {{ opacityDraft.toFixed(2) }}</label>
           <el-slider v-model="opacityDraft" :min="0.1" :max="1" :step="0.05" @change="applyOpacity" />
+        </el-card>
+
+        <el-card class="control-card capability-card" shadow="never">
+          <template #header>
+            <div class="card-heading">
+              <span>模型能力与诊断</span>
+              <el-tag size="small" :type="avatarCapabilities ? 'success' : 'warning'">
+                {{ avatarCapabilities ? '能力已同步' : '等待渲染器' }}
+              </el-tag>
+            </div>
+          </template>
+          <div class="capability-summary">
+            <span>{{ state.modelType.toUpperCase() }} · {{ currentModel?.name ?? '未选择模型' }}</span>
+            <span>状态：{{ state.ready ? '已就绪' : '未就绪' }}</span>
+            <span v-if="avatarCapabilities">修订 {{ avatarCapabilities.revision.slice(0, 12) }}</span>
+          </div>
+          <div v-if="avatarCapabilities" class="capability-tags" aria-label="模型动作能力">
+            <el-tag
+              v-for="item in capabilityRows"
+              :key="item.key"
+              size="small"
+              :type="item.enabled ? 'success' : 'info'"
+              effect="plain"
+            >
+              {{ item.label }} {{ item.enabled ? '可用' : '不可用' }}
+            </el-tag>
+          </div>
+          <div class="button-row">
+            <el-button
+              plain
+              :disabled="!avatarCapabilities?.actions.gaze || operationLoading"
+              @click="previewGaze"
+            >
+              注视中心
+            </el-button>
+            <el-button
+              plain
+              :disabled="!avatarCapabilities?.actions.cancel || operationLoading"
+              @click="cancelAvatarActions"
+            >
+              停止当前动作
+            </el-button>
+            <el-button plain :loading="refreshingPet" @click="refresh">同步能力</el-button>
+          </div>
         </el-card>
 
         <details class="pet-advanced-controls">
@@ -309,7 +353,7 @@ import {
   type PetPlacementPreset,
 } from '../../../../shared/pet-control'
 import type { PetImportableModelType, PetModelImportMode } from '../../../../shared/resource-manager'
-import type { AvatarCapabilitySnapshot } from '../../../../shared/avatar-command'
+import { AVATAR_COMMAND_VERSION, type AvatarAction, type AvatarCapabilitySnapshot, type AvatarCommand } from '../../../../shared/avatar-command'
 
 type PlacementPreset = Exclude<PetPlacement, 'free'>
 
@@ -411,11 +455,23 @@ const behaviorStateOptions: Array<{ label: string; value: PetBehaviorState }> = 
   { label: '回应中', value: 'reacting' },
   { label: '被打断后停顿', value: 'interrupted' },
 ]
+const capabilityRows = computed(() => {
+  const actions = avatarCapabilities.value?.actions
+  return [
+    { key: 'behavior', label: '行为', enabled: Boolean(actions?.behavior) },
+    { key: 'affect', label: '情绪', enabled: Boolean(actions?.affect) },
+    { key: 'gaze', label: '注视', enabled: Boolean(actions?.gaze) },
+    { key: 'motion', label: '动作', enabled: Boolean(actions?.motion) },
+    { key: 'expression', label: '表情', enabled: Boolean(actions?.expression) },
+    { key: 'parameterPatch', label: '参数', enabled: Boolean(actions?.parameterPatch) },
+    { key: 'viseme', label: '口型', enabled: Boolean(actions?.viseme) },
+  ]
+})
 const sizePresetOptions = [
   { label: 'S', value: 'small', scale: 0.2 },
-  { label: 'M', value: 'medium', scale: 0.28 },
-  { label: 'L', value: 'large', scale: 0.4 },
-  { label: 'XL', value: 'xlarge', scale: 0.52 },
+  { label: 'M', value: 'medium', scale: 0.42 },
+  { label: 'L', value: 'large', scale: 0.5 },
+  { label: 'XL', value: 'xlarge', scale: 0.58 },
 ]
 const fallbackPlacementOptions: Array<{ label: string; value: PlacementPreset }> = [
   { label: '右下角', value: 'bottom-right' },
@@ -897,6 +953,50 @@ const previewMotion = async () => {
   await runPetOperation(() => petControl.triggerMotion(motion.group, motion.index), '动作已发送')
 }
 
+const buildAvatarCommand = (action: AvatarAction): AvatarCommand => {
+  const now = Date.now()
+  const randomId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${now}-${Math.random().toString(16).slice(2)}`
+  return {
+    version: AVATAR_COMMAND_VERSION,
+    id: `ui-${randomId}`,
+    streamId: 'ui-pet-control',
+    sequence: now,
+    issuedAt: now,
+    priority: 60,
+    interrupt: 'replace',
+    ...(avatarCapabilities.value?.revision ? { capabilityRevision: avatarCapabilities.value.revision } : {}),
+    actions: [action],
+  }
+}
+
+const sendAvatarAction = async (action: AvatarAction, successMessage: string) => {
+  const capability = avatarCapabilities.value?.actions[action.type]
+  if (!capability) {
+    ElMessage.info('当前模型不支持该能力')
+    return
+  }
+  const result = await runPetOperation(
+    () => petControl.triggerAvatarCommand(buildAvatarCommand(action)),
+    successMessage,
+    '发送模型动作失败',
+    `avatar-${action.type}`,
+  )
+  if (result && result.status !== 'completed' && result.status !== 'started' && result.status !== 'accepted') {
+    operationAlertType.value = 'warning'
+    operationMessage.value = result.message ?? `模型动作状态：${result.status}`
+  }
+}
+
+const previewGaze = async () => {
+  await sendAvatarAction({ type: 'gaze', target: { x: 0, y: 0, z: 0 }, strength: 0.8, holdMs: 1800 }, '已发送注视中心')
+}
+
+const cancelAvatarActions = async () => {
+  await sendAvatarAction({ type: 'cancel' }, '已停止当前模型动作')
+}
+
 const applyPosition = async () => {
   applyState(await runPetOperation(() => petControl.move(positionXDraft.value, positionYDraft.value), '位置已应用'))
   await refresh()
@@ -1160,6 +1260,25 @@ onBeforeUnmount(() => {
 .model-card,
 .recovery-card {
   background: var(--yui-surface-raised);
+}
+
+.capability-card {
+  background: var(--yui-surface-raised);
+}
+
+.capability-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--yui-muted);
+  font-size: 12px;
+}
+
+.capability-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
 }
 
 .safety-card {

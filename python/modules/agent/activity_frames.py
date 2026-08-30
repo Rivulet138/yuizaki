@@ -9,39 +9,65 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import sqlite3
 import threading
 import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-
 SOURCE_KIND = "completed_turn_followup"
 PROJECTION_VERSION = "activity-frame.v1"
 POLICY_VERSION = "proactive-policy.v1"
 SCHEMA_VERSION = "yuizaki.activity-frame.v1"
+DEFAULT_ACTIVITY_CATEGORY = "general"
+_ALLOWED_WORK_STATES = {"unknown", "working", "idle", "meeting", "focus", "away"}
+_ALLOWED_BENEFITS = {"continue_task", "check_in", "reminder", "companionship"}
+_ALLOWED_INTERRUPT_COSTS = {"low", "medium", "high"}
+_FEEDBACK_SCORE_WEIGHTS = {
+    "accepted": 1,
+    "ignored": -1,
+    "cancelled": -1,
+    "snoozed": -2,
+}
+FEEDBACK_LEARNING_WINDOW_SECONDS = 30 * 86400
+FEEDBACK_HALF_LIFE_SECONDS = 7 * 86400
+# Feedback is a user-behavior signal, not an immutable audit archive. Keep a
+# bounded local history while retaining longer than the learning window.
+FEEDBACK_RETENTION_SECONDS = 90 * 86400
 FEEDBACK_KINDS = {
     "useful",
     "not_useful",
     "too_frequent",
     "wrong_time",
     "never_source",
+    # Behavioral outcomes are retained as learner signals. They do not grant
+    # authorization and only cancel a still-pending opportunity where noted.
+    "accepted",
+    "ignored",
+    "cancelled",
+    "snoozed",
 }
+BEHAVIOR_FEEDBACK_KINDS = {"accepted", "ignored", "cancelled", "snoozed"}
 GATE_ORDER = (
     "global_disabled",
     "source_disabled",
+    "user_paused",
     "frame_inactive",
     "dnd",
     "quiet_hours",
     "not_interruptible",
+    "context_not_interruptible",
     "cooldown",
     "daily_budget",
+    "category_budget",
+    "feedback_category_disfavored",
     "duplicate",
 )
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$")
@@ -79,6 +105,10 @@ def _feedback_gate(
         return "feedback_wrong_time"
     if kind == "not_useful" and age < max(float(settings.cooldown_seconds), 3600.0):
         return "feedback_not_useful"
+    if kind == "ignored" and age < max(float(settings.cooldown_seconds), 900.0):
+        return "feedback_ignored"
+    if kind == "snoozed" and age < max(float(settings.cooldown_seconds), 1800.0):
+        return "feedback_snoozed"
     return None
 
 
@@ -91,6 +121,7 @@ def deterministic_frame_id(source_kind: str, source_id: str) -> str:
 class ProactiveSettings:
     enabled: bool = False
     completed_turn_followup_enabled: bool = True
+    paused: bool = False
     dnd: bool = False
     quiet_hours_enabled: bool = False
     quiet_hours_start: str = "22:00"
@@ -99,8 +130,9 @@ class ProactiveSettings:
     daily_budget: int = 3
     cooldown_seconds: int = 3600
     retention_days: int = 7
+    category_budgets: dict[str, int] = field(default_factory=dict)
 
-    def validate(self) -> "ProactiveSettings":
+    def validate(self) -> ProactiveSettings:
         _parse_hhmm(self.quiet_hours_start)
         _parse_hhmm(self.quiet_hours_end)
         _validate_timezone(self.timezone)
@@ -110,6 +142,15 @@ class ProactiveSettings:
             raise ValueError("cooldownSeconds must be between 0 and 604800")
         if not 1 <= self.retention_days <= 90:
             raise ValueError("retentionDays must be between 1 and 90")
+        if not isinstance(self.category_budgets, Mapping) or len(self.category_budgets) > 20:
+            raise ValueError("categoryBudgets must contain at most 20 entries")
+        normalized_categories: dict[str, int] = {}
+        for category, budget in self.category_budgets.items():
+            safe_category = _bounded_id(category, "categoryBudget category")
+            if isinstance(budget, bool) or not isinstance(budget, int) or not 1 <= budget <= 20:
+                raise ValueError("categoryBudgets values must be integers between 1 and 20")
+            normalized_categories[safe_category] = budget
+        object.__setattr__(self, "category_budgets", normalized_categories)
         return self
 
     def to_api(self) -> dict[str, Any]:
@@ -117,6 +158,7 @@ class ProactiveSettings:
             "schemaVersion": "yuizaki.proactive-settings.v1",
             "enabled": self.enabled,
             "sourceEnabled": {SOURCE_KIND: self.completed_turn_followup_enabled},
+            "paused": self.paused,
             "dnd": self.dnd,
             "quietHours": {
                 "enabled": self.quiet_hours_enabled,
@@ -125,6 +167,7 @@ class ProactiveSettings:
                 "timezone": self.timezone,
             },
             "dailyBudget": self.daily_budget,
+            "categoryBudgets": dict(self.category_budgets),
             "cooldownSeconds": self.cooldown_seconds,
             "retentionDays": self.retention_days,
             "policyVersion": POLICY_VERSION,
@@ -193,6 +236,9 @@ class PolicyDecision:
     evaluated_at: float
     local_date: str
     remaining_budget: int
+    category: str = DEFAULT_ACTIVITY_CATEGORY
+    remaining_category_budget: int = 0
+    preference_score: float = 0.0
 
     def to_api(self) -> dict[str, Any]:
         return {
@@ -201,6 +247,9 @@ class PolicyDecision:
             "evaluatedAt": self.evaluated_at,
             "localDate": self.local_date,
             "remainingBudget": self.remaining_budget,
+            "category": self.category,
+            "remainingCategoryBudget": self.remaining_category_budget,
+            "preferenceScore": self.preference_score,
             "gateOrder": list(GATE_ORDER),
             "policyVersion": POLICY_VERSION,
         }
@@ -279,6 +328,69 @@ def _in_quiet_hours(settings: ProactiveSettings, minute: int) -> bool:
     if start < end:
         return start <= minute < end
     return minute >= start or minute < end
+
+
+def _activity_category(signals: Mapping[str, Any]) -> str:
+    value = str(signals.get("activityCategory") or DEFAULT_ACTIVITY_CATEGORY).strip()
+    return value if _SAFE_ID.fullmatch(value) else DEFAULT_ACTIVITY_CATEGORY
+
+
+def _category_budget(settings: ProactiveSettings, category: str) -> int:
+    # An empty map intentionally inherits the global budget for every category.
+    return int(settings.category_budgets.get(category, settings.daily_budget))
+
+
+def _activity_context(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Extract bounded, non-authoritative context for a proactive explanation."""
+    raw = payload.get("activity_context")
+    if not isinstance(raw, Mapping):
+        # Cross-process payloads use both Python's snake_case and the
+        # renderer-facing camelCase convention.  Normalize at this boundary
+        # so policy never depends on which transport produced the commit.
+        raw = payload.get("activityContext")
+    if not isinstance(raw, Mapping):
+        raw = {}
+    try:
+        confidence = float(
+            raw.get("scene_confidence", raw.get("sceneConfidence", 0.0)) or 0.0
+        )
+    except (TypeError, ValueError, OverflowError):
+        confidence = 0.0
+    if not math.isfinite(confidence):
+        confidence = 0.0
+    work_state = str(
+        raw.get("user_work_state", raw.get("userWorkState")) or "unknown"
+    ).strip()
+    benefit = str(
+        raw.get("expected_benefit", raw.get("expectedBenefit")) or "continue_task"
+    ).strip()
+    interrupt_cost = str(
+        raw.get("interrupt_cost", raw.get("interruptCost")) or "low"
+    ).strip()
+    return {
+        "scene_confidence": max(0.0, min(1.0, confidence)),
+        "user_work_state": work_state if work_state in _ALLOWED_WORK_STATES else "unknown",
+        "expected_benefit": benefit if benefit in _ALLOWED_BENEFITS else "continue_task",
+        "interrupt_cost": interrupt_cost if interrupt_cost in _ALLOWED_INTERRUPT_COSTS else "low",
+    }
+
+
+def _context_gate_reason(signals: Mapping[str, Any]) -> str | None:
+    """Use high-confidence context only to avoid interrupting focused users."""
+    try:
+        confidence = float(signals.get("scene_confidence", 0.0) or 0.0)
+    except (TypeError, ValueError, OverflowError):
+        confidence = 0.0
+    state = str(signals.get("user_work_state") or "unknown")
+    interrupt_cost = str(signals.get("interrupt_cost") or "low")
+    if (
+        math.isfinite(confidence)
+        and confidence >= 0.7
+        and state in {"working", "focus", "meeting"}
+        and interrupt_cost in {"medium", "high"}
+    ):
+        return "context_not_interruptible"
+    return None
 
 
 class ActivityFrameStore:
@@ -403,6 +515,10 @@ class ActivityFrameStore:
                 """CREATE INDEX IF NOT EXISTS proactive_opportunity_budget_idx
                    ON proactive_opportunities(workspace_id, local_date, status)"""
             )
+            conn.execute(
+                """CREATE INDEX IF NOT EXISTS proactive_feedback_retention_idx
+                   ON proactive_feedback(workspace_id, created_at)"""
+            )
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -418,6 +534,81 @@ class ActivityFrameStore:
     def _settings_from_json(raw: str | None) -> ProactiveSettings:
         data = json.loads(raw) if raw else {}
         return ProactiveSettings(**data).validate()
+
+    @staticmethod
+    def _category_usage_locked(
+        conn: sqlite3.Connection,
+        workspace_id: str,
+        local_date: str,
+        category: str,
+        *,
+        exclude_job_id: str | None = None,
+    ) -> int:
+        rows = conn.execute(
+            """SELECT o.job_id, f.signals_json
+               FROM proactive_opportunities AS o
+               LEFT JOIN activity_frames AS f
+                 ON f.workspace_id = o.workspace_id AND f.frame_id = o.frame_id
+               WHERE o.workspace_id = ? AND o.local_date = ?
+                 AND o.status IN ('pending', 'delivered')""",
+            (workspace_id, local_date),
+        ).fetchall()
+        used = 0
+        for row in rows:
+            if exclude_job_id is not None and str(row["job_id"]) == exclude_job_id:
+                continue
+            try:
+                signals = json.loads(row["signals_json"] or "{}")
+            except (TypeError, ValueError):
+                signals = {}
+            if isinstance(signals, Mapping) and _activity_category(signals) == category:
+                used += 1
+        return used
+
+    @staticmethod
+    def _category_preference_locked(
+        conn: sqlite3.Connection,
+        workspace_id: str,
+        category: str,
+        *,
+        now: float,
+    ) -> float:
+        """Score recent explicit behavior with a bounded exponential decay."""
+        rows = conn.execute(
+            """SELECT p.kind, p.created_at, f.signals_json
+               FROM proactive_feedback AS p
+               JOIN proactive_opportunities AS o
+                 ON o.workspace_id = p.workspace_id AND o.job_id = p.job_id
+                AND o.request_id = p.request_id AND o.source_kind = p.source_kind
+               LEFT JOIN activity_frames AS f
+                 ON f.workspace_id = o.workspace_id AND f.frame_id = o.frame_id
+               WHERE p.workspace_id = ? AND p.created_at >= ?""",
+            (workspace_id, now - FEEDBACK_LEARNING_WINDOW_SECONDS),
+        ).fetchall()
+        score = 0.0
+        for row in rows:
+            try:
+                signals = json.loads(row["signals_json"] or "{}")
+            except (TypeError, ValueError):
+                signals = {}
+            if isinstance(signals, Mapping) and _activity_category(signals) == category:
+                age = max(0.0, now - float(row["created_at"]))
+                decay = 0.5 ** (age / FEEDBACK_HALF_LIFE_SECONDS)
+                score += _FEEDBACK_SCORE_WEIGHTS.get(str(row["kind"]), 0) * decay
+        return round(max(-20.0, min(20.0, score)), 2)
+
+    @staticmethod
+    def _prune_feedback_locked(
+        conn: sqlite3.Connection,
+        workspace_id: str,
+        current: float,
+    ) -> int:
+        cursor = conn.execute(
+            """DELETE FROM proactive_feedback
+               WHERE workspace_id = ? AND created_at < ?""",
+            (workspace_id, current - FEEDBACK_RETENTION_SECONDS),
+        )
+        return int(cursor.rowcount)
 
     def get_settings(self, workspace_id: str) -> ProactiveSettings:
         workspace = _bounded_id(workspace_id, "workspaceId")
@@ -490,6 +681,7 @@ class ActivityFrameStore:
             authority_blocked = (
                 not settings.enabled
                 or not settings.completed_turn_followup_enabled
+                or settings.paused
                 or settings.dnd
                 or _in_quiet_hours(settings, minute)
             )
@@ -726,6 +918,7 @@ class ActivityFrameStore:
             "DELETE FROM activity_frames WHERE workspace_id = ? AND expires_at <= ?",
             (workspace, current),
         )
+        cls._prune_feedback_locked(conn, workspace, current)
         return cls._opportunity_identities(pending)
 
     def prune_expired(
@@ -752,6 +945,8 @@ class ActivityFrameStore:
         current = time.time() if now is None else float(now)
         settings = self.get_settings(workspace)
         local_date, minute = _local_clock(current, settings.timezone)
+        category = _activity_category(frame.signals)
+        category_limit = _category_budget(settings, category)
         with self._lock, self._connect() as conn:
             delivered = int(
                 conn.execute(
@@ -783,12 +978,21 @@ class ActivityFrameStore:
                    WHERE workspace_id = ? AND frame_id = ? LIMIT 1""",
                 (workspace, frame.frame_id),
             ).fetchone() is not None
+            category_used = self._category_usage_locked(
+                conn, workspace, local_date, category
+            )
+            preference_score = self._category_preference_locked(
+                conn, workspace, category, now=current
+            )
         remaining = max(0, settings.daily_budget - delivered)
+        remaining_category = max(0, category_limit - category_used)
         reason = "allowed"
         if not settings.enabled:
             reason = "global_disabled"
         elif not settings.completed_turn_followup_enabled:
             reason = "source_disabled"
+        elif settings.paused:
+            reason = "user_paused"
         elif frame.expires_at <= current or self.get_frame(workspace, frame.frame_id) is None:
             reason = "frame_inactive"
         elif settings.dnd:
@@ -797,6 +1001,8 @@ class ActivityFrameStore:
             reason = "quiet_hours"
         elif not interruptible:
             reason = "not_interruptible"
+        elif (context_reason := _context_gate_reason(frame.signals)) is not None:
+            reason = context_reason
         elif latest_feedback is not None and (
             feedback_reason := _feedback_gate(
                 str(latest_feedback["kind"]),
@@ -810,9 +1016,22 @@ class ActivityFrameStore:
             reason = "cooldown"
         elif delivered + pending >= settings.daily_budget:
             reason = "daily_budget"
+        elif category_used >= category_limit:
+            reason = "category_budget"
+        elif preference_score <= -2:
+            reason = "feedback_category_disfavored"
         elif duplicate:
             reason = "duplicate"
-        return PolicyDecision(reason == "allowed", reason, current, local_date, remaining)
+        return PolicyDecision(
+            reason == "allowed",
+            reason,
+            current,
+            local_date,
+            remaining,
+            category,
+            remaining_category,
+            preference_score,
+        )
 
     def reserve_opportunity(
         self,
@@ -848,6 +1067,7 @@ class ActivityFrameStore:
             if (
                 not settings.enabled
                 or not settings.completed_turn_followup_enabled
+                or settings.paused
                 or settings.dnd
             ):
                 return False
@@ -855,13 +1075,22 @@ class ActivityFrameStore:
             if _in_quiet_hours(settings, minute) or not interruptible:
                 return False
             frame = conn.execute(
-                """SELECT source_kind, source_id, session_id, source_created_at, expires_at
+                """SELECT source_kind, source_id, session_id, source_created_at, expires_at,
+                          signals_json
                    FROM activity_frames
                    WHERE workspace_id = ? AND frame_id = ? AND source_kind = ?
                      AND expires_at > ?""",
                 (workspace, frame_id, source_kind, current),
             ).fetchone()
             if frame is None:
+                return False
+            try:
+                frame_signals = json.loads(frame["signals_json"] or "{}")
+            except (TypeError, ValueError):
+                frame_signals = {}
+            category = _activity_category(frame_signals)
+            category_limit = _category_budget(settings, category)
+            if _context_gate_reason(frame_signals) is not None:
                 return False
             tombstoned = conn.execute(
                 """SELECT 1 FROM activity_frame_tombstones
@@ -931,6 +1160,19 @@ class ActivityFrameStore:
                 ).fetchone()["count"]
             )
             if used >= settings.daily_budget:
+                return False
+            category_used = self._category_usage_locked(
+                conn,
+                workspace,
+                computed_local_date,
+                category,
+                exclude_job_id=job_id,
+            )
+            if category_used >= category_limit:
+                return False
+            if self._category_preference_locked(
+                conn, workspace, category, now=current
+            ) <= -2:
                 return False
             opportunity_expires_at = (
                 min(float(expires_at), effective_frame_expiry)
@@ -1044,6 +1286,7 @@ class ActivityFrameStore:
                 if (
                     not settings.enabled
                     or not settings.completed_turn_followup_enabled
+                    or settings.paused
                     or settings.dnd
                     or _in_quiet_hours(settings, minute)
                     or (row["expires_at"] is not None and float(row["expires_at"]) <= current)
@@ -1169,7 +1412,14 @@ class ActivityFrameStore:
                 (workspace, feedback, job_id, request_id, source_kind, kind, current),
             )
             cancelled: list[tuple[str, str]] = []
-            if kind in {"not_useful", "too_frequent", "wrong_time"}:
+            if kind in {
+                "not_useful",
+                "too_frequent",
+                "wrong_time",
+                "ignored",
+                "cancelled",
+                "snoozed",
+            }:
                 cursor = conn.execute(
                     """UPDATE proactive_opportunities
                        SET status = 'cancelled', resolved_at = ?
@@ -1210,6 +1460,110 @@ class ActivityFrameStore:
                     (current, workspace, source_kind),
                 )
         return True, source_kind, cancelled
+
+    def list_feedback(
+        self,
+        workspace_id: str,
+        *,
+        source_kind: str | None = None,
+        limit: int = 100,
+        now: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return bounded, replayable feedback records for policy evaluation."""
+        workspace = _bounded_id(workspace_id, "workspaceId")
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 500:
+            raise ValueError("limit must be an integer between 1 and 500")
+        current = time.time() if now is None else float(now)
+        if not math.isfinite(current):
+            raise ValueError("now must be a finite timestamp")
+        query = (
+            "SELECT feedback_id, job_id, request_id, source_kind, kind, created_at "
+            "FROM proactive_feedback WHERE workspace_id = ?"
+        )
+        params: list[Any] = [workspace]
+        if source_kind is not None:
+            query += " AND source_kind = ?"
+            params.append(_bounded_id(source_kind, "sourceKind"))
+        query += " ORDER BY created_at DESC, feedback_id DESC LIMIT ?"
+        params.append(limit)
+        with self._lock, self._connect() as conn:
+            self._prune_feedback_locked(conn, workspace, current)
+            rows = conn.execute(query, params).fetchall()
+        return [
+            {
+                "feedbackId": str(row["feedback_id"]),
+                "jobId": str(row["job_id"]),
+                "requestId": str(row["request_id"]),
+                "sourceKind": str(row["source_kind"]),
+                "kind": str(row["kind"]),
+                "createdAt": float(row["created_at"]),
+            }
+            for row in rows
+        ]
+
+    def feedback_summary(
+        self,
+        workspace_id: str,
+        *,
+        source_kind: str | None = None,
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        """Aggregate behavioral signals without exposing prompt or tool data."""
+        evaluation_time = time.time() if now is None else float(now)
+        if not math.isfinite(evaluation_time):
+            raise ValueError("now must be a finite timestamp")
+        records = self.list_feedback(
+            workspace_id,
+            source_kind=source_kind,
+            limit=500,
+            now=evaluation_time,
+        )
+        counts: dict[str, int] = {}
+        for record in records:
+            kind = str(record["kind"])
+            counts[kind] = counts.get(kind, 0) + 1
+        behavioral_total = sum(counts.get(kind, 0) for kind in BEHAVIOR_FEEDBACK_KINDS)
+        accepted = counts.get("accepted", 0)
+        category_scores: dict[str, float] = {}
+        workspace = _bounded_id(workspace_id, "workspaceId")
+        with self._lock, self._connect() as conn:
+            query = """SELECT f.signals_json
+                       FROM proactive_feedback AS p
+                       JOIN proactive_opportunities AS o
+                         ON o.workspace_id = p.workspace_id AND o.job_id = p.job_id
+                        AND o.request_id = p.request_id AND o.source_kind = p.source_kind
+                       LEFT JOIN activity_frames AS f
+                         ON f.workspace_id = o.workspace_id AND f.frame_id = o.frame_id
+                       WHERE p.workspace_id = ?"""
+            params: list[Any] = [workspace]
+            if source_kind is not None:
+                query += " AND p.source_kind = ?"
+                params.append(_bounded_id(source_kind, "sourceKind"))
+            rows = conn.execute(query, params).fetchall()
+            categories: set[str] = set()
+            for row in rows:
+                try:
+                    signals = json.loads(row["signals_json"] or "{}")
+                except (TypeError, ValueError):
+                    signals = {}
+                if isinstance(signals, Mapping):
+                    categories.add(_activity_category(signals))
+            category_scores = {
+                category: self._category_preference_locked(
+                    conn, workspace, category, now=evaluation_time
+                )
+                for category in sorted(categories)
+            }
+        return {
+            "schemaVersion": "yuizaki.proactive-feedback-summary.v1",
+            "workspaceId": workspace_id,
+            "sourceKind": source_kind,
+            "counts": counts,
+            "total": len(records),
+            "behavioralTotal": behavioral_total,
+            "acceptanceRate": (accepted / behavioral_total) if behavioral_total else None,
+            "categoryPreferenceScores": category_scores,
+        }
 
 
 class ActivityFrameService:
@@ -1287,6 +1641,15 @@ class ActivityFrameService:
                 else "other"
             ),
         }
+        trigger = str(signals["trigger"])
+        signals["activityCategory"] = (
+            "scheduled"
+            if trigger == "schedule"
+            else "tool_followup"
+            if bool(signals["hadToolCalls"])
+            else "conversation"
+        )
+        signals.update(_activity_context(payload))
         return ActivityFrame(
             frame_id=deterministic_frame_id(SOURCE_KIND, source_id),
             workspace_id=workspace_id,
@@ -1378,6 +1741,12 @@ class ActivityFrameService:
             .isoformat(timespec="milliseconds")
             .replace("+00:00", "Z"),
             "trigger_reason": "completed_turn_followup",
+            "reason_code": "completed_turn_followup",
+            "scene_confidence": float(frame.signals.get("scene_confidence", 0.0) or 0.0),
+            "user_work_state": str(frame.signals.get("user_work_state") or "unknown"),
+            "expected_benefit": str(frame.signals.get("expected_benefit") or "continue_task"),
+            "interrupt_cost": str(frame.signals.get("interrupt_cost") or "low"),
+            "activity_category": _activity_category(frame.signals),
             "source_kind": frame.source_kind,
             "source_id": frame.source_id,
             "frame_id": frame.frame_id,
@@ -1420,7 +1789,18 @@ class ActivityFrameService:
         }
 
     def patch_settings(self, workspace_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-        allowed = {"expectedRevision", "enabled", "sourceEnabled", "dnd", "quietHours", "dailyBudget", "cooldownSeconds", "retentionDays"}
+        allowed = {
+            "expectedRevision",
+            "enabled",
+            "sourceEnabled",
+            "paused",
+            "dnd",
+            "quietHours",
+            "dailyBudget",
+            "categoryBudgets",
+            "cooldownSeconds",
+            "retentionDays",
+        }
         unknown = set(payload) - allowed
         if unknown:
             raise ValueError(f"unknown settings fields: {', '.join(sorted(unknown))}")
@@ -1428,7 +1808,7 @@ class ActivityFrameService:
         if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision < 0:
             raise ValueError("expectedRevision must be a non-negative integer")
         patch: dict[str, Any] = {}
-        for key in ("enabled", "dnd"):
+        for key in ("enabled", "paused", "dnd"):
             if key in payload:
                 if not isinstance(payload[key], bool):
                     raise ValueError(f"{key} must be a boolean")
@@ -1462,6 +1842,11 @@ class ActivityFrameService:
                 if isinstance(value, bool) or not isinstance(value, int):
                     raise ValueError(f"{external} must be an integer")
                 patch[internal] = value
+        if "categoryBudgets" in payload:
+            category_budgets = payload["categoryBudgets"]
+            if not isinstance(category_budgets, Mapping):
+                raise ValueError("categoryBudgets must be an object")
+            patch["category_budgets"] = dict(category_budgets)
         cancelled_pending: list[dict[str, str]] = []
         settings, revision, updated_at = self.store.patch_settings(
             workspace_id,
@@ -1549,13 +1934,21 @@ class ActivityFrameService:
                 [{"job_id": job_id, "request_id": request_id} for job_id, request_id in cancelled],
                 reason=f"feedback_{payload['kind']}",
             )
+        recorded_at = time.time()
         return {
             "ok": True,
             "duplicate": not created,
             "feedbackId": payload["feedbackId"],
             "sourceKind": source_kind,
+            "feedbackKind": payload["kind"],
+            "recordedAt": recorded_at,
+            "behavioral": payload["kind"] in BEHAVIOR_FEEDBACK_KINDS,
             "cancelledPending": len(cancelled),
         }
+
+    def feedback_summary(self, workspace_id: str) -> dict[str, Any]:
+        """Return bounded proactive feedback metrics without source content."""
+        return self.store.feedback_summary(workspace_id)
 
     def _cancel_source_pending(
         self,
@@ -1637,6 +2030,7 @@ class ProactiveBudget:
 
 
 __all__ = [
+    "BEHAVIOR_FEEDBACK_KINDS",
     "FEEDBACK_KINDS",
     "GATE_ORDER",
     "POLICY_VERSION",

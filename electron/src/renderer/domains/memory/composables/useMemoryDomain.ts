@@ -9,12 +9,16 @@ import type {
 	MemoryOverview,
 	MemoryReviewStatus,
 	MemoryRecallFeedback,
+	MemoryOperation,
+	MemoryAddPayload,
+	MemoryQueryPayload,
 } from "@/api/clients/memory-client";
 
 export interface MemoryDoc {
 	id: string;
 	text: string;
 	type?: string;
+	memory_role?: string;
 	layer?: string;
 	importance?: number;
 	confidence?: number;
@@ -80,6 +84,11 @@ export interface MemoryRetrievalTrace {
 	relation_accepted?: number;
 	evidence_coverage?: number;
 	relation_token_estimate?: number;
+	context_budget_tokens?: number;
+	context_token_estimate?: number;
+	budget_truncated?: boolean;
+	index_consistency?: string;
+	revision_stable?: boolean;
 	top_score?: number;
 	average_score?: number;
 	latency_ms?: number;
@@ -91,7 +100,7 @@ export interface MemoryRetrievalTrace {
 	score_weights?: Record<string, number>;
 }
 
-interface MemoryQueryResult {
+export interface MemoryQueryResult {
 	query: string;
 	results: Array<{
 		id: string;
@@ -193,6 +202,7 @@ const normalizeDoc = (raw: unknown): MemoryDoc => {
 		type: typeof metadata.type === "string" ? metadata.type : undefined,
 		layer: typeof metadata.layer === "string" ? metadata.layer : undefined,
 		importance: numberOrUndefined(metadata.importance),
+		memory_role: stringOrUndefined(metadata.memory_role),
 		confidence: numberOrUndefined(metadata.confidence),
 		quality_score: numberOrUndefined(metadata.quality_score),
 		updated_at: stringOrUndefined(metadata.updated_at),
@@ -253,6 +263,11 @@ const normalizeTrace = (raw: unknown): MemoryRetrievalTrace | undefined => {
 		relation_accepted: numberOrUndefined(trace.relation_accepted),
 		evidence_coverage: numberOrUndefined(trace.evidence_coverage),
 		relation_token_estimate: numberOrUndefined(trace.relation_token_estimate),
+		context_budget_tokens: numberOrUndefined(trace.context_budget_tokens),
+		context_token_estimate: numberOrUndefined(trace.context_token_estimate),
+		budget_truncated: typeof trace.budget_truncated === "boolean" ? trace.budget_truncated : undefined,
+		index_consistency: stringOrUndefined(trace.index_consistency),
+		revision_stable: typeof trace.revision_stable === "boolean" ? trace.revision_stable : undefined,
 		candidate_limit: numberOrUndefined(trace.candidate_limit),
 		candidate_count: numberOrUndefined(trace.candidate_count),
 		filtered_count: numberOrUndefined(trace.filtered_count),
@@ -348,7 +363,8 @@ export function useMemoryDomain() {
 		importance?: number;
 	}>();
 	const queryRequest = useDomainRequest<unknown>();
-	const rawQueryRequest = useDomainRequest<unknown>();
+	const operationsRequest = useDomainRequest<{ status: string; operations: MemoryOperation[]; count: number }>();
+	const operations = computed<MemoryOperation[]>(() => operationsRequest.data?.operations ?? []);
 
 	const loadDocs = async (options?: MemoryDocListOptions) => {
 		const result = await docsRequest.execute(() => memoryClient.getDocs(options));
@@ -375,8 +391,16 @@ export function useMemoryDomain() {
 		return result;
 	};
 
-	const reviewCandidate = async (id: string, decision: "approve" | "reject", reason?: string) => {
-		const result = await memoryClient.reviewCandidate(id, { decision, reason });
+	const loadOperations = async (documentId: string, options?: MemoryDocListOptions) => {
+		return operationsRequest.execute(() => memoryClient.getOperations({
+			...options,
+			documentId,
+			limit: 50,
+		}));
+	};
+
+	const reviewCandidate = async (id: string, decision: "approve" | "reject", reason?: string, sessionId?: string) => {
+		const result = await memoryClient.reviewCandidate(id, { decision, reason, session_id: sessionId });
 		if (result) reviewCandidates.value = reviewCandidates.value.filter((item) => item.id !== id);
 		return result;
 	};
@@ -394,18 +418,7 @@ export function useMemoryDomain() {
 		return result;
 	};
 
-	const addMemory = async (payload: {
-		text: string;
-		type?: string;
-		layer?: string;
-		importance?: number;
-		confidence?: number;
-		confidence_source?: string;
-		metadata?: MemoryMetadata;
-		session_id?: string;
-		workspace_id?: string;
-		scope?: string;
-	}) => {
+	const addMemory = async (payload: MemoryAddPayload) => {
 		return addRequest.execute(() =>
 			memoryClient.addMemory({
 				...payload,
@@ -419,7 +432,8 @@ export function useMemoryDomain() {
 		id: string,
 		payload: {
 			text: string;
-			type?: string;
+		type?: string;
+		memory_role?: string;
 			layer?: string;
 			importance?: number;
 			confidence?: number;
@@ -439,25 +453,14 @@ export function useMemoryDomain() {
 			}),
 		);
 	};
-	const correctDoc = (id: string, payload: { text: string; reason?: string; turn_id?: string; evidence?: unknown }) =>
+	const correctDoc = (id: string, payload: { text: string; reason?: string; turn_id?: string; session_id?: string; evidence?: unknown }) =>
 		memoryClient.correctDoc(id, payload);
-	const softForgetDoc = (id: string, payload?: { reason?: string; turn_id?: string }) =>
+	const softForgetDoc = (id: string, payload?: { reason?: string; turn_id?: string; session_id?: string }) =>
 		memoryClient.softForgetDoc(id, payload);
-	const restoreDoc = (id: string, payload?: { reason?: string }) =>
+	const restoreDoc = (id: string, payload?: { reason?: string; session_id?: string }) =>
 		memoryClient.restoreDoc(id, payload);
 
-	const queryMemory = async (payload: {
-		query: string;
-		top_k?: number;
-		memory_types?: string[];
-		session_id?: string;
-		workspace_id?: string;
-		scope?: string;
-		layers?: string[];
-		expand_relations?: boolean;
-		relation_limit?: number;
-		relation_depth?: number;
-	}) => {
+	const queryMemory = async (payload: MemoryQueryPayload) => {
 		const resolvedScope = resolveScope(payload);
 		const resolvedWorkspaceId = resolveScopedWorkspaceId(payload);
 		const result = await queryRequest.execute(() => memoryClient.query({
@@ -477,50 +480,8 @@ export function useMemoryDomain() {
 		}
 	};
 
-	const queryRawRag = async (payload: {
-		query: string;
-		top_k?: number;
-		memory_types?: string[];
-		session_id?: string;
-		workspace_id?: string;
-		scope?: string;
-		layers?: string[];
-		recency_weight?: number;
-		expand_relations?: boolean;
-		relation_limit?: number;
-		relation_depth?: number;
-	}) => {
-		const resolvedScope = resolveScope(payload);
-		const resolvedWorkspaceId = resolveScopedWorkspaceId(payload);
-		const result = await rawQueryRequest.execute(() =>
-			memoryClient.queryRag({
-				query: payload.query,
-				top_k: payload.top_k ?? 5,
-				memory_types: payload.memory_types,
-				session_id: payload.session_id,
-				workspace_id: resolvedWorkspaceId,
-				scope: resolvedScope,
-				layers: payload.layers ?? [
-					"profile",
-					"working",
-					"episodic",
-					"relationship",
-					"reflective",
-					"semantic",
-				],
-				recency_weight: payload.recency_weight ?? 0.2,
-				expand_relations: payload.expand_relations,
-				relation_limit: payload.relation_limit,
-				relation_depth: payload.relation_depth,
-			}),
-		);
-		if (result) {
-			queryResult.value = normalizeQueryResult(result);
-		}
-	};
-
-	const recordRecallFeedback = async (id: string, feedback: MemoryRecallFeedback) => {
-		const result = await memoryClient.recordRecallFeedback(id, feedback);
+	const recordRecallFeedback = async (id: string, feedback: MemoryRecallFeedback, sessionId?: string) => {
+		const result = await memoryClient.recordRecallFeedback(id, feedback, sessionId);
 		const item = queryResult.value?.results.find((candidate) => candidate.id === id);
 		if (item) {
 			item.metadata = {
@@ -533,6 +494,7 @@ export function useMemoryDomain() {
 
 	return {
 		docs,
+		operations,
 		forgottenDocs,
 		reviewCandidates,
 		overview,
@@ -544,10 +506,11 @@ export function useMemoryDomain() {
 		addRequest,
 		updateRequest,
 		queryRequest,
-		rawQueryRequest,
+		operationsRequest,
 		loadDocs,
 		loadForgottenDocs,
 		loadCandidates,
+		loadOperations,
 		loadOverview,
 		addMemory,
 		updateDoc,
@@ -556,7 +519,6 @@ export function useMemoryDomain() {
 		restoreDoc,
 		reviewCandidate,
 		queryMemory,
-		queryRawRag,
 		recordRecallFeedback,
 	};
 }

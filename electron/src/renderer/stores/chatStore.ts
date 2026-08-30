@@ -38,6 +38,7 @@ export interface ChatStoreState {
   currentText: string
   asrPartialText: string
   isRecording: boolean
+  realtimeStatus: 'idle' | 'connecting' | 'ready' | 'recording' | 'responding' | 'interrupting' | 'error' | 'closed'
   lastError: string | null
   lastAgentEnvelope: ActionEnvelope | null
   agentEnvelopeTimeline: ActionEnvelopeWithTrace[]
@@ -137,12 +138,12 @@ const createOperationId = () => `op_${Date.now()}_${Math.random().toString(36).s
 const createAdviceId = () => `advice_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 const CHAT_OPTIONS_STORAGE_KEY = 'yuizaki.chat.options'
 const CHAT_OPTIONS_STORAGE_VERSION_KEY = 'yuizaki.chat.options.version'
-const CHAT_OPTIONS_STORAGE_VERSION = '7'
+const CHAT_OPTIONS_STORAGE_VERSION = '8'
 const CHAT_OPTIONS_MAX_OUTPUT_TOKENS = 65535
 const createTtsStopEvent = (detail?: { interrupted?: boolean; petLipSyncHandled?: boolean }) =>
   new CustomEvent('pet:tts-stop', { detail })
 
-const DEFAULT_CHAT_OPTIONS: Required<Pick<ChatOptions, 'temperature' | 'top_p' | 'top_k' | 'min_p' | 'frequency_penalty' | 'presence_penalty' | 'repetition_penalty' | 'max_tokens' | 'reasoning_effort' | 'response_mode' | 'voice_mode' | 'mcp_enabled' | 'web_search_enabled' | 'tts_enabled' | 'pet_link_enabled' | 'translation_target' | 'prompt_mode'>> & Pick<ChatOptions, 'model'> = {
+const DEFAULT_CHAT_OPTIONS: Required<Pick<ChatOptions, 'temperature' | 'top_p' | 'top_k' | 'min_p' | 'frequency_penalty' | 'presence_penalty' | 'repetition_penalty' | 'max_tokens' | 'reasoning_effort' | 'response_mode' | 'voice_mode' | 'vad_eagerness' | 'audio_input_device_id' | 'mcp_enabled' | 'web_search_enabled' | 'tts_enabled' | 'pet_link_enabled' | 'translation_target' | 'prompt_mode'>> & Pick<ChatOptions, 'model'> = {
   model: '',
   temperature: 1.2,
   top_p: 0.9,
@@ -155,6 +156,8 @@ const DEFAULT_CHAT_OPTIONS: Required<Pick<ChatOptions, 'temperature' | 'top_p' |
   reasoning_effort: 'default',
   response_mode: 'balanced',
   voice_mode: 'push-to-talk',
+  vad_eagerness: 'auto',
+  audio_input_device_id: '',
   mcp_enabled: true,
   web_search_enabled: false,
   tts_enabled: false,
@@ -378,6 +381,12 @@ const normalizeChatOptions = (value: unknown): ChatOptions => {
       ? source.response_mode as ChatOptions['response_mode']
       : DEFAULT_CHAT_OPTIONS.response_mode,
     voice_mode: source.voice_mode === 'continuous' ? 'continuous' : DEFAULT_CHAT_OPTIONS.voice_mode,
+    vad_eagerness: ['low', 'medium', 'high', 'auto'].includes(String(source.vad_eagerness || ''))
+      ? source.vad_eagerness as ChatOptions['vad_eagerness']
+      : DEFAULT_CHAT_OPTIONS.vad_eagerness,
+    audio_input_device_id: typeof source.audio_input_device_id === 'string'
+      ? source.audio_input_device_id.trim().slice(0, 512)
+      : DEFAULT_CHAT_OPTIONS.audio_input_device_id,
     mcp_enabled: typeof source.mcp_enabled === 'boolean' ? source.mcp_enabled : DEFAULT_CHAT_OPTIONS.mcp_enabled,
     web_search_enabled: typeof source.web_search_enabled === 'boolean' ? source.web_search_enabled : DEFAULT_CHAT_OPTIONS.web_search_enabled,
     tts_enabled: typeof source.tts_enabled === 'boolean' ? source.tts_enabled : DEFAULT_CHAT_OPTIONS.tts_enabled,
@@ -454,6 +463,7 @@ export const useChatStore = defineStore('chat', () => {
     currentText: '',
     asrPartialText: '',
     isRecording: false,
+    realtimeStatus: 'idle',
     lastError: null,
     lastAgentEnvelope: null,
     agentEnvelopeTimeline: [],
@@ -524,6 +534,7 @@ export const useChatStore = defineStore('chat', () => {
       doc.trace_id ?? doc.traceId ?? metadata.trace_id ?? metadata.traceId ?? item.trace_id ?? '',
     ).trim()
     const eventId = String(doc.event_id ?? doc.eventId ?? metadata.event_id ?? metadata.eventId ?? item.event_id ?? '').trim()
+    const sessionId = String(doc.session_id ?? doc.sessionId ?? metadata.session_id ?? metadata.sessionId ?? item.session_id ?? '').trim()
     const modelVersion = String(doc.model_version ?? doc.modelVersion ?? metadata.model_version ?? metadata.modelVersion ?? item.model_version ?? '').trim()
     const correctionStateRaw = String(doc.correction_state ?? doc.correctionState ?? metadata.correction_state ?? '').trim()
     const correctionState = correctionStateRaw === 'corrected' || correctionStateRaw === 'forgotten' ? correctionStateRaw : undefined
@@ -536,6 +547,7 @@ export const useChatStore = defineStore('chat', () => {
       ...(confidence !== undefined ? { confidence } : {}),
       ...(traceId ? { traceId } : {}),
       ...(eventId ? { eventId } : {}),
+      ...(sessionId ? { sessionId } : {}),
       ...(modelVersion ? { modelVersion } : {}),
       ...(correctionState ? { correctionState } : {}),
     }]
@@ -1409,11 +1421,16 @@ export const useChatStore = defineStore('chat', () => {
 
   const setRealtimeError = (message: string) => {
     state.lastError = message
+    state.realtimeStatus = 'error'
     state.isGenerating = false
     state.currentText = ''
     state.asrPartialText = ''
     setRealtimeRecording(false)
     setRealtimePlayback(false)
+  }
+
+  const setRealtimeStatus = (status: ChatStoreState['realtimeStatus']) => {
+    state.realtimeStatus = status
   }
 
   const interrupt = (source: 'manual' | 'voice' = 'manual') => {
@@ -1725,6 +1742,7 @@ export const useChatStore = defineStore('chat', () => {
     completeRealtimeTurn,
     getCurrentRealtimeIdentity: () => currentRealtimeRuntimeRequest,
     setRealtimeError,
+    setRealtimeStatus,
     setChatOptions,
     setTtsEnabled,
     activeContextMessages,

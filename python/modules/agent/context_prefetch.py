@@ -17,6 +17,7 @@ SPECULATIVE_CONTEXT_TTL_SECONDS = 8.0
 SPECULATIVE_CONTEXT_MAX_ENTRIES = 32
 RETRIEVAL_PREFETCH_MAX_ENTRIES = 32
 RETRIEVAL_PREFETCH_WAIT_SECONDS = 0.12
+DEFAULT_MEMORY_CONTEXT_BUDGET_TOKENS = 1200
 
 
 class ContextPrefetchCoordinator:
@@ -152,14 +153,26 @@ class ContextPrefetchCoordinator:
         return True
 
     def schedule_retrieval_prefetch(
-        self, *, cache_key: str, query: str, session_id: str | None, workspace_id: str | None
+        self,
+        *,
+        cache_key: str,
+        query: str,
+        session_id: str | None,
+        workspace_id: str | None,
+        context_budget_tokens: int = DEFAULT_MEMORY_CONTEXT_BUDGET_TOKENS,
     ) -> bool:
         clean_query = " ".join(query.split())
         if self.retrieval_pipeline is None or not cache_key or len(clean_query) < 4:
             return False
         self.cancel_retrieval_prefetch(cache_key, clear_cache=False)
         task = asyncio.create_task(
-            self._run_retrieval_prefetch(cache_key, clean_query, session_id, workspace_id),
+            self._run_retrieval_prefetch(
+                cache_key,
+                clean_query,
+                session_id,
+                workspace_id,
+                max(128, int(context_budget_tokens or DEFAULT_MEMORY_CONTEXT_BUDGET_TOKENS)),
+            ),
             name=f"retrieval-prefetch-{cache_key}",
         )
         self.retrieval_prefetch_tasks[cache_key] = task
@@ -174,7 +187,12 @@ class ContextPrefetchCoordinator:
             self.retrieval_prefetch_cache.pop(cache_key, None)
 
     async def _run_retrieval_prefetch(
-        self, cache_key: str, query: str, session_id: str | None, workspace_id: str | None
+        self,
+        cache_key: str,
+        query: str,
+        session_id: str | None,
+        workspace_id: str | None,
+        context_budget_tokens: int,
     ) -> None:
         pipeline = self.retrieval_pipeline
         if pipeline is None:
@@ -186,6 +204,7 @@ class ContextPrefetchCoordinator:
             workspace_id=workspace_id,
             top_k=5,
             layers=["profile", "working", "episodic", "relationship", "reflective", "semantic"],
+            context_budget_tokens=context_budget_tokens,
         )
         data = await asyncio.to_thread(pipeline.recall, request)
         if not isinstance(data, dict) or not data.get("results"):
@@ -194,6 +213,7 @@ class ContextPrefetchCoordinator:
             "query": query,
             "workspace_id": workspace_id,
             "recorded_at": time.monotonic(),
+            "context_budget_tokens": context_budget_tokens,
             "data": data,
         }
         while len(self.retrieval_prefetch_cache) > RETRIEVAL_PREFETCH_MAX_ENTRIES:
@@ -209,7 +229,12 @@ class ContextPrefetchCoordinator:
             logger.debug("Retrieval prefetch failed for %s: %s", cache_key, error)
 
     async def take_retrieval_prefetch(
-        self, *, cache_key: str, final_query: str, workspace_id: str | None
+        self,
+        *,
+        cache_key: str,
+        final_query: str,
+        workspace_id: str | None,
+        context_budget_tokens: int = DEFAULT_MEMORY_CONTEXT_BUDGET_TOKENS,
     ) -> dict[str, Any] | None:
         task = self.retrieval_prefetch_tasks.get(cache_key)
         if task is not None and not task.done():
@@ -220,9 +245,27 @@ class ContextPrefetchCoordinator:
         cached = self.retrieval_prefetch_cache.pop(cache_key, None)
         if not cached or cached.get("workspace_id") != workspace_id:
             return None
+        expected_budget = max(128, int(context_budget_tokens or DEFAULT_MEMORY_CONTEXT_BUDGET_TOKENS))
+        if int(cached.get("context_budget_tokens") or expected_budget) != expected_budget:
+            return None
         if time.monotonic() - float(cached.get("recorded_at") or 0) > SPECULATIVE_CONTEXT_TTL_SECONDS:
             return None
         if not _query_matches_partial(str(cached.get("query") or ""), final_query):
             return None
         data = cached.get("data")
-        return data if isinstance(data, dict) else None
+        if not isinstance(data, dict):
+            return None
+        # A prefetch may finish after a memory edit. Never reuse evidence from
+        # a prior authority revision in the foreground turn.
+        trace = data.get("trace")
+        if isinstance(trace, dict):
+            cached_revision = trace.get("authority_revision")
+            revision_reader = getattr(self.retrieval_pipeline, "_authority_revision", None)
+            if callable(revision_reader) and isinstance(cached_revision, int):
+                try:
+                    current_revision = revision_reader()
+                except Exception:  # noqa: BLE001 - cache validation is best effort
+                    current_revision = None
+                if isinstance(current_revision, int) and current_revision != cached_revision:
+                    return None
+        return data

@@ -1,12 +1,14 @@
 import {
   parseActivityFrames,
   parseProactiveSettings,
+  parseProactiveFeedbackSummary,
   serializeProactiveFeedback,
   serializeProactiveSettingsPatch,
   type ActivityFrameSummary,
   type ProactiveFeedbackRequest,
   type ProactiveSettings,
   type ProactiveSettingsPatch,
+  type ProactiveFeedbackSummary,
 } from '@/../shared/proactive'
 import { CONTROL_ORIGIN, requestJson } from './http-client'
 
@@ -63,4 +65,11 @@ export const proactiveClient = {
       body: JSON.stringify(serializeProactiveFeedback(payload)),
     },
   ),
+  feedbackSummary: async (): Promise<ProactiveFeedbackSummary> => {
+    const parsed = parseProactiveFeedbackSummary(
+      await requestJson<unknown>(`${CONTROL_ORIGIN}/api/system/proactive/feedback-summary`),
+    )
+    if (!parsed) throw new Error('invalid_proactive_feedback_summary')
+    return parsed
+  },
 }

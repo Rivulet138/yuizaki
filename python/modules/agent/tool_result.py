@@ -10,6 +10,19 @@ RiskLevel = Literal["safe", "low", "medium", "high", "critical"]
 EffectOutcome = Literal["known_success", "known_failure", "unknown_effect"]
 
 
+def is_known_success(value: Any) -> bool:
+    """Return the canonical success predicate for typed and legacy results.
+
+    Some integrations still return a duck-typed result object. Keeping this
+    predicate here makes every execution path agree that ``success=True`` is
+    insufficient unless the explicit effect outcome is ``known_success``.
+    """
+    return bool(
+        getattr(value, "success", False)
+        and getattr(value, "outcome", None) == "known_success"
+    )
+
+
 @dataclass
 class ToolResultEnvelope:
     success: bool
@@ -22,6 +35,11 @@ class ToolResultEnvelope:
     permission_receipt: PermissionReceipt | None = None
     outcome: EffectOutcome | None = None
     retryable: bool | None = None
+
+    @property
+    def is_known_success(self) -> bool:
+        """Whether this result has a confirmed, known successful effect."""
+        return is_known_success(self)
 
     def __post_init__(self) -> None:
         resolved_outcome: EffectOutcome = self.outcome or (

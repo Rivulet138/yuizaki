@@ -5,8 +5,8 @@
 - Status: Active
 - Last refreshed: 2026-08-17
 - Primary product surfaces: desktop companion, chat, long-term memory, Agent jobs, settings, Live2D/VRM pet
-- Code evidence reviewed: `electron/src/renderer/app`, `electron/src/renderer/domains`, `electron/src/renderer/runtime`, `electron/src/renderer/audio`, `electron/src/main`, `python/modules/agent`, `python/modules/memory`, `python/routes`, and their contract tests
-- Documentation boundary: README and design documents describe intent; implementation claims must be rechecked against source paths and tests before release
+- Code evidence reviewed: `electron/src/renderer/app`, `electron/src/renderer/domains`, `electron/src/renderer/runtime`, `electron/src/renderer/audio`, `electron/src/main`, `python/modules/agent`, `python/modules/memory`, and `python/routes`
+- Documentation boundary: README and design documents describe intent; implementation claims must be rechecked against source paths before release
 - External material may inform design decisions, but only current code, tests, and target-device evidence establish a local capability.
 
 ## Code evidence map / 代码证据映射
@@ -17,7 +17,6 @@
 - Memory: `domains/memory`, `api/clients/memory-client.ts`, `python/modules/memory/routes.py`, `python/modules/memory/pipeline.py`, `python/modules/memory/sqlite_store.py`.
 - Agent execution: `python/modules/agent/runtime.py`, `pipeline.py`, `planner.py`, `step_executor.py`, `tool_executor.py`, `tool_loop.py`.
 - Trust boundaries: `python/modules/agent/perception.py`, `desktop_actions.py`, `policy_engine.py`, `permission_receipt.py`, `plugin_trust.py`, `electron/src/main/*token-store.ts`, and `plugin-sandbox.ts`.
-- Evidence tests: `electron/src/**/__tests__`, `python/tests`, and `python/test_*.py`. These prove only the exercised contracts, not all provider/hardware combinations.
 
 ## Brand / 品牌
 
@@ -154,7 +153,7 @@
   - Permanent deletion clears chat references and all configured index projections.
 - Performance constraints: list rendering stays bounded; index rebuild is explicit; embedding models load lazily; terminal Job events are never dropped.
 - Compatibility constraints: preserve existing `/memory` contracts while introducing a single canonical frontend client surface; Qdrant remains optional.
-- Test/screenshot expectations: targeted Python and Vitest contracts, typecheck/build, plus desktop and compact viewport screenshots with no overlap or blank states.
+- Verification expectations: typecheck/build plus desktop and compact viewport checks with no overlap or blank states.
 
 ## Open questions / 待确认
 

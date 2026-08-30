@@ -3,14 +3,11 @@
     <div class="section-heading">
       <div>
         <h3 id="memory-quick-capture-title">快速记忆</h3>
-        <p>新增一条可被检索的记忆文档。</p>
       </div>
-      <el-tag size="small" type="info">{{ selectedLayerDescription }}</el-tag>
     </div>
     <el-form class="capture-form" label-position="top" @submit.prevent="emit('submit')">
       <el-form-item label="记忆内容" class="capture-text">
         <el-input id="memory-capture-text" :model-value="form.text" aria-describedby="memory-capture-hint" type="textarea" :rows="3" resize="none" placeholder="例如：我喜欢被叫溪羽；周五提醒我检查模型。" @update:model-value="updateForm('text', String($event))" />
-        <p id="memory-capture-hint" class="field-hint">保存后会按当前范围和层级参与召回。</p>
       </el-form-item>
       <div class="capture-options">
         <el-form-item label="记忆层级">
@@ -35,7 +32,7 @@
         </div>
       </details>
       <div class="capture-actions">
-        <span role="status" aria-live="polite" :class="{ 'duplicate-hint': duplicateCandidates.length }">{{ duplicateCandidates.length ? `发现 ${duplicateCandidates.length} 条相似记忆，请确认是否重复` : '保存位置：本机' }}</span>
+        <span role="status" aria-live="polite" :class="{ 'duplicate-hint': duplicateCandidates.length }">{{ duplicateCandidates.length ? `相似 ${duplicateCandidates.length} 条` : '本机' }}</span>
         <el-button type="primary" native-type="submit" :loading="loading" :disabled="!form.text.trim()">保存记忆</el-button>
       </div>
     </el-form>
@@ -56,7 +53,6 @@ defineProps<{
   layers: MemoryLayer[]
   typeOptions: MemoryOption[]
   sourceOptions: MemoryOption[]
-  selectedLayerDescription: string
   duplicateCandidates: MemoryDuplicateCandidate[]
   loading: boolean
 }>()
@@ -69,8 +65,6 @@ const updateForm = <K extends keyof MemoryCaptureForm>(key: K, value: MemoryCapt
 .memory-section { padding: 16px 18px 18px; border: 1px solid var(--yui-border); border-radius: var(--yui-radius-card); background: var(--yui-surface); }
 .section-heading, .capture-actions { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 h3 { margin: 0; color: var(--yui-text); font-size: 15px; }
-p { margin: 4px 0 0; color: var(--yui-muted); font-size: 12px; }
-.field-hint { margin-top: 6px; font-size: 11px; line-height: 1.45; }
 .capture-form { margin-top: 14px; }
 .capture-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .detail-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 12px; }

@@ -51,6 +51,20 @@ export interface VoiceDiagnosticsSnapshot {
   }
   recommendations: string[]
   generated_at?: number
+  qualification?: {
+    status: 'qualified' | 'not_qualified' | string
+    sample_count: number
+    required_stages: string[]
+    recovery_quality: Record<string, unknown>
+    gaps: Array<Record<string, unknown>>
+    claim: string
+  }
+  release_gate?: {
+    status: 'pass' | 'fail' | string
+    qualification_status: 'qualified' | 'not_qualified' | string
+    failures: Array<Record<string, unknown>>
+    claim: string
+  }
 }
 
 export type ConnectorState = 'uninstalled' | 'disabled' | 'running' | 'failure'
@@ -72,7 +86,18 @@ export interface ConnectorStatus {
   transport?: string
   toolsCount?: number
   account?: ConnectorAccountSnapshot | null
+  readiness?: ConnectorReadinessSnapshot | null
   source: string
+}
+
+export interface ConnectorReadinessSnapshot {
+  schemaVersion: 'yuizaki.connector-readiness.v1' | string
+  status: 'ready_for_staging' | 'not_qualified' | string
+  networkChecked: boolean
+  externalProviderVerified: boolean
+  requiresPublicHttps: boolean
+  reasons: Array<{ code: string; detail: string }>
+  claim: string
 }
 
 export interface ConnectorRegistrySnapshot {
@@ -176,12 +201,38 @@ export interface ConnectorDeliveryItem {
   deliveredAt: number | null
   retryable: boolean
   cancellable: boolean
+  resolvable: boolean
 }
 
 export interface ConnectorDeliverySnapshot {
   ok: boolean
   connectorId: string
   items: ConnectorDeliveryItem[]
+  recovery?: ConnectorRecoverySnapshot | null
+}
+
+export interface ConnectorRecoverySnapshot {
+  schemaVersion: 'yuizaki.connector-recovery.v1' | string
+  runs: number
+  inspected: number
+  recovered: number
+  failed: number
+  lastRunAt: number | null
+  lastError: string | null
+}
+
+export interface ConnectorProbeSnapshot {
+  schemaVersion: 'yuizaki.connector-probe.v1' | string
+  connectorId: 'telegram' | 'discord' | 'qq' | 'wechat' | string
+  checkedAt: number | null
+  ok: boolean
+  status: string
+  errorCode?: string | null
+  statusCode?: number | null
+  bridgeStatus?: string | null
+  verificationConfigured?: boolean
+  networkChecked?: boolean
+  externalSideEffects?: boolean
 }
 
 /** Versioned identity shared by ASR, generation and TTS events. */

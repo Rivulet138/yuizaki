@@ -103,28 +103,5 @@ contextBridge.exposeInMainWorld('live2dApi', live2dApi)
 declare global {
   interface Window {
     live2dApi: typeof live2dApi
-    __petTestState?: {
-      lastPointerDownAt: number | null
-      lastPointerDownHit: boolean | null
-      lastMouseUpAt: number | null
-      lastMouseUpTriggeredClick: boolean | null
-      lastHitAreaName: string | null
-      lastExpressionName: string | null
-      lastMotionGroup: string | null
-      lastMotionIndex: number | null
-      lastChatOpenAt: number | null
-      lastClickTriggeredAt: number | null
-      lastRightClickTriggeredAt: number | null
-      lastChatCenterRequestAt: number | null
-      lastDragStartAt: number | null
-      lastDragEndAt: number | null
-      dragMoveCount: number
-      interactionBounds: {
-        x: number
-        y: number
-        width: number
-        height: number
-      } | null
-    }
   }
 }

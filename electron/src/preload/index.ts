@@ -23,7 +23,6 @@ import type {
   InputBindingSettingsPatch,
   InputBindingSnapshot,
 } from '../shared/input-bindings'
-import type { E2EActivationProof, E2ERendererControlRequest } from '../shared/e2e-preload'
 import type {
   ComputerUseBridgeResult,
   ComputerUseBackendResponse,
@@ -51,58 +50,6 @@ const sendLipSyncLevel = (level: number, active: boolean, source: PetLipSyncLeve
     active,
     source,
   } satisfies PetLipSyncLevelPayload)
-
-const isActivationProof = (value: unknown): value is E2EActivationProof => (
-  Boolean(value && typeof value === 'object' && typeof (value as E2EActivationProof).proof === 'string'
-    && (value as E2EActivationProof).proof.length > 0)
-)
-
-const createE2EPreloadApi = (token: string, activation: unknown) => {
-  if (!token || !isActivationProof(activation)) return null
-  const proof = activation.proof
-  const invokeControl = (channel: string, payload?: unknown) => ipcRenderer.invoke(channel, token, proof, payload)
-  return Object.freeze({
-    voiceSequence: (payload: unknown) => invokeControl('e2e:voice-sequence', payload),
-    pauseHealthPolling: () => invokeControl('e2e:pause-health-polling'),
-    pollHealthOnce: () => invokeControl('e2e:poll-health-once'),
-    resumeHealthPolling: () => invokeControl('e2e:resume-health-polling'),
-    sampleVisualOnce: () => invokeControl('e2e:sample-visual-once'),
-    pauseCompanionPolling: () => invokeControl('e2e:pause-companion-polling'),
-    pollCompanionOnce: () => invokeControl('e2e:poll-companion-once'),
-    resumeCompanionPolling: () => invokeControl('e2e:resume-companion-polling'),
-    advanceCompanionCooldown: () => invokeControl('e2e:advance-companion-cooldown'),
-    pauseHeartbeat: () => invokeControl('e2e:pause-heartbeat'),
-    emitHeartbeatOnce: () => invokeControl('e2e:emit-heartbeat-once'),
-    teardownRuntime: () => invokeControl('e2e:teardown-runtime'),
-    onControl: (handler: (request: E2ERendererControlRequest) => unknown | Promise<unknown>) => {
-      const wrapped = (_event: Electron.IpcRendererEvent, request: E2ERendererControlRequest) => {
-        void Promise.resolve()
-          .then(() => handler(request))
-          .then(
-            (result) => ipcRenderer.send('e2e:renderer-control-result', token, proof, request.requestId, { ok: true, result }),
-            (error: unknown) => ipcRenderer.send('e2e:renderer-control-result', token, proof, request.requestId, {
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          )
-      }
-      ipcRenderer.on('e2e:renderer-control', wrapped)
-      return () => ipcRenderer.off('e2e:renderer-control', wrapped)
-    },
-  })
-}
-
-const createSandboxedE2EApi = () => {
-  const token = process.env['YUIZAKI_E2E_TOKEN']?.trim() ?? ''
-  const argumentToken = process.argv
-    .find((argument) => argument.startsWith('--yuizaki-e2e-token='))
-    ?.slice('--yuizaki-e2e-token='.length) ?? ''
-  if (process.env['YUIZAKI_E2E'] !== '1' || !token || argumentToken !== token) return null
-  const activation = ipcRenderer.sendSync('e2e:activate', token) as unknown
-  return createE2EPreloadApi(token, activation)
-}
-
-const e2eApi = createSandboxedE2EApi()
 
 const api = {
   onboarding: Object.freeze({
@@ -325,7 +272,6 @@ const api = {
       callbackMap.delete(callback)
     }
   },
-  ...(e2eApi ? { e2e: e2eApi } : {}),
 }
 
 contextBridge.exposeInMainWorld('petApi', api)

@@ -26,8 +26,10 @@ import type {
   SchedulesSnapshot,
   SystemLogsSnapshot,
   ProviderRegistrySnapshot,
+  ConnectorRecoverySnapshot,
+  ConnectorProbeSnapshot,
 } from '@/../shared/agent'
-import type { CapabilitiesSnapshot, SkillCatalogItem, SkillCatalogSnapshot } from '@/../shared/capability'
+import type { CapabilitiesSnapshot, SkillCatalogItem, SkillCatalogSnapshot, StreamActionsSnapshot, StreamDraftConsumeResponse, StreamDraftConsumerSnapshot, StreamDraftGenerateResponse, StreamDraftsSnapshot, StreamEventsSnapshot, StreamExecuteResponse, StreamModerationPolicySnapshot, StreamObsProfilesResponse, StreamPreviewResponse, StreamProbeResponse, StreamRuntimeSnapshot, StreamTakeoverResponse } from '@/../shared/capability'
 import type { OrchestrationSnapshot } from '@/../shared/orchestration'
 
 const SYSTEM_MAINTENANCE_TIMEOUT_MS = 30 * 60 * 1000
@@ -43,26 +45,103 @@ type RawConnectorDelivery = {
   last_error?: unknown
   updated_at?: unknown
   delivered_at?: unknown
+  resolvable?: unknown
 }
 
-const normalizeConnectorDelivery = (row: RawConnectorDelivery): ConnectorDeliveryItem => ({
-  deliveryKey: String(row.delivery_key || ''),
-  idempotencyKey: String(row.idempotency_key || ''),
-  connectorId: String(row.connector_id || ''),
-  eventId: String(row.event_id || ''),
-  status: String(row.status || 'unknown'),
-  attemptCount: Number(row.attempt_count || 0),
-  lastError: row.last_error ? String(row.last_error) : null,
-  updatedAt: Number(row.updated_at || 0),
-  deliveredAt: row.delivered_at == null ? null : Number(row.delivered_at),
-  retryable: row.status === 'failed',
-  cancellable: row.status === 'processing',
-})
+type RawConnectorRecovery = {
+  schemaVersion?: unknown
+  runs?: unknown
+  inspected?: unknown
+  recovered?: unknown
+  failed?: unknown
+  lastRunAt?: unknown
+  lastError?: unknown
+}
+
+export interface UiCapabilitiesSnapshot {
+  schemaVersion: string
+  protocol: {
+    http: boolean
+    socketIo: boolean
+    openapi: string
+  }
+  clients: {
+    browser: UiClientCapabilities
+    electron: UiClientCapabilities
+  }
+  browserPlatform: Record<string, unknown>
+}
+
+export interface UiClientCapabilities {
+  mode: 'browser' | 'electron'
+  coreRoutes: string[]
+  hostCapabilities: {
+    windowControls: boolean
+    desktopActions: boolean
+    screenCapture: boolean
+    localFilePicker: boolean
+  }
+  limitations: string[]
+}
+
+const boundedCount = (value: unknown) => {
+  const count = Number(value)
+  return Number.isInteger(count) && count >= 0 && count <= 10_000_000 ? count : 0
+}
+
+const boundedText = (value: unknown, maxLength: number) => (
+  value == null ? '' : String(value).slice(0, maxLength)
+)
+
+const boundedTimestamp = (value: unknown, fallback: number | null) => {
+  const timestamp = Number(value)
+  return Number.isFinite(timestamp) && timestamp >= 0 ? timestamp : fallback
+}
+
+const normalizeConnectorRecovery = (value: unknown): ConnectorRecoverySnapshot | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const row = value as RawConnectorRecovery
+  const lastRunAt = Number(row.lastRunAt)
+  return {
+    schemaVersion: String(row.schemaVersion || 'yuizaki.connector-recovery.v1'),
+    runs: boundedCount(row.runs),
+    inspected: boundedCount(row.inspected),
+    recovered: boundedCount(row.recovered),
+    failed: boundedCount(row.failed),
+    lastRunAt: Number.isFinite(lastRunAt) && lastRunAt >= 0 ? lastRunAt : null,
+    lastError: row.lastError == null ? null : String(row.lastError).slice(0, 160),
+  }
+}
+
+const normalizeConnectorDelivery = (row: RawConnectorDelivery): ConnectorDeliveryItem => {
+  const status = boundedText(row.status || 'unknown', 40)
+  return {
+  deliveryKey: boundedText(row.delivery_key, 256),
+  idempotencyKey: boundedText(row.idempotency_key, 256),
+  connectorId: boundedText(row.connector_id, 80),
+  eventId: boundedText(row.event_id, 256),
+  status,
+  attemptCount: boundedCount(row.attempt_count),
+  lastError: row.last_error == null ? null : boundedText(row.last_error, 160),
+  updatedAt: boundedTimestamp(row.updated_at, 0) ?? 0,
+  deliveredAt: row.delivered_at == null ? null : boundedTimestamp(row.delivered_at, null),
+  retryable: status === 'failed',
+  cancellable: status === 'processing',
+  resolvable: row.resolvable === true,
+  }
+}
 
 export const systemClient = {
+  uiCapabilities: async () => requestJson<UiCapabilitiesSnapshot>(`${CONTROL_ORIGIN}/api/system/ui-capabilities`),
   pythonHealth: async () => {
     return requestJson(`${CONTROL_ORIGIN}/api/ping`)
   },
+  activeApplication: async () => requestJson<{
+    ok: boolean
+    name: string
+    title: string
+    process_id: number
+  }>(`${CONTROL_ORIGIN}/api/perception/active-application`),
   controlHealth: async () => {
     return requestJson(`${CONTROL_ORIGIN}/api/health`)
   },
@@ -139,12 +218,128 @@ export const systemClient = {
   }),
   cancelHeartbeatGoal: async (goalId: string, reason = 'cancelled') => requestJson<{ ok: boolean; goal_id: string }>(`${CONTROL_ORIGIN}/api/system/heartbeat/goals/${encodeURIComponent(goalId)}/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) }),
   capabilities: async () => requestJson<CapabilitiesSnapshot>(`${CONTROL_ORIGIN}/api/system/capabilities`),
+  stream: async () => requestJson<StreamRuntimeSnapshot>(`${CONTROL_ORIGIN}/api/system/stream`),
+  streamModeration: async () => requestJson<{ ok: boolean; moderation: StreamModerationPolicySnapshot }>(`${CONTROL_ORIGIN}/api/system/stream/moderation`),
+  updateStreamModeration: async (payload: { enabled?: boolean; blockedTerms?: string[]; slowModeSeconds?: number; maxMessagesPerMinute?: number }) => requestJson<{ ok: boolean; moderation: StreamModerationPolicySnapshot; state?: StreamRuntimeSnapshot }>(`${CONTROL_ORIGIN}/api/system/stream/moderation`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  }),
+  probeStream: async () => requestJson<StreamProbeResponse>(`${CONTROL_ORIGIN}/api/system/stream/probe`, { method: 'POST' }),
+  obsProfiles: async () => requestJson<StreamObsProfilesResponse>(`${CONTROL_ORIGIN}/api/system/stream/obs/profiles`),
+  configureObs: async (payload: { endpoint: string; password?: string; allowRemote?: boolean; clearPassword?: boolean }) => requestJson<Record<string, unknown>>(`${CONTROL_ORIGIN}/api/system/stream/obs`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  }),
+  streamEvents: async (limit = 20) => requestJson<StreamEventsSnapshot>(`${CONTROL_ORIGIN}/api/system/stream/events?limit=${encodeURIComponent(String(limit))}`),
+  streamActions: async (limit = 20) => requestJson<StreamActionsSnapshot>(`${CONTROL_ORIGIN}/api/system/stream/actions?limit=${encodeURIComponent(String(limit))}`),
+  twitchConfig: async () => requestJson<{
+    ok: boolean
+    schemaVersion: string
+    secureStorageAvailable: boolean
+    configured: Record<string, boolean>
+    subscriptionProvider: string
+  }>(`${CONTROL_ORIGIN}/api/system/stream/twitch/config`),
+  updateTwitchConfig: async (payload: Record<string, unknown>) => requestJson<Record<string, unknown>>(`${CONTROL_ORIGIN}/api/system/stream/twitch/config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }),
+  probeTwitch: async () => requestJson<Record<string, unknown>>(`${CONTROL_ORIGIN}/api/system/stream/twitch/probe`, { method: 'POST' }),
+  reconfigureTwitch: async () => requestJson<Record<string, unknown>>(`${CONTROL_ORIGIN}/api/system/stream/twitch/reconfigure`, { method: 'POST' }),
+  configureTwitchSubscriptions: async (subscriptions: string[]) => requestJson<Record<string, unknown>>(`${CONTROL_ORIGIN}/api/system/stream/twitch/subscriptions`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subscriptions }),
+  }),
+  connectTwitch: async () => requestJson<Record<string, unknown>>(`${CONTROL_ORIGIN}/api/system/stream/twitch/connect`, { method: 'POST' }),
+  disconnectTwitch: async () => requestJson<Record<string, unknown>>(`${CONTROL_ORIGIN}/api/system/stream/twitch/disconnect`, { method: 'POST' }),
+  tickTwitch: async () => requestJson<Record<string, unknown>>(`${CONTROL_ORIGIN}/api/system/stream/twitch/tick`, { method: 'POST' }),
+  streamDrafts: async (limit = 20) => requestJson<StreamDraftsSnapshot>(`${CONTROL_ORIGIN}/api/system/stream/drafts?limit=${encodeURIComponent(String(limit))}`),
+  generateStreamDraft: async (payload: { eventId: string; workspaceId?: string; sessionId?: string; retry?: boolean }) => requestJson<StreamDraftGenerateResponse>(`${CONTROL_ORIGIN}/api/system/stream/drafts`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  }),
+  consumeStreamDrafts: async (payload: { limit?: number; workspaceId?: string; sessionId?: string } = {}) => requestJson<StreamDraftConsumeResponse>(`${CONTROL_ORIGIN}/api/system/stream/drafts/consume`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  }),
+  streamDraftConsumer: async () => requestJson<StreamDraftConsumerSnapshot>(`${CONTROL_ORIGIN}/api/system/stream/draft-consumer`),
+  setStreamDraftConsumer: async (enabled: boolean) => requestJson<StreamDraftConsumerSnapshot>(`${CONTROL_ORIGIN}/api/system/stream/draft-consumer`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }),
+  }),
+  createStreamEvent: async (payload: { kind: 'chat' | 'caption'; text: string; author?: string }) => requestJson<StreamEventsSnapshot>(`${CONTROL_ORIGIN}/api/system/stream/events`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  }),
+  setStreamTakeover: async (enabled: boolean) => requestJson<StreamTakeoverResponse>(`${CONTROL_ORIGIN}/api/system/stream/takeover`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }),
+  }),
+  previewStream: async (action: string, params: Record<string, unknown> = {}) => requestJson<StreamPreviewResponse>(`${CONTROL_ORIGIN}/api/system/stream/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, params }),
+  }),
+  executeStream: async (payload: { requestId: string; action: string; params: Record<string, unknown>; confirmed: true }) => requestJson<StreamExecuteResponse>(`${CONTROL_ORIGIN}/api/system/stream/execute`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  }),
   providers: async () => requestJson<ProviderRegistrySnapshot>(`${CONTROL_ORIGIN}/api/system/providers`),
   voiceDiagnostics: async () => requestJson<VoiceDiagnosticsSnapshot>(`${CONTROL_ORIGIN}/api/system/voice-diagnostics`),
+  beginVoiceDiagnosticsRun: async (runId?: string) => requestJson<{
+    ok: boolean
+    run_id: string
+    sample_count: number
+    schemaVersion: string
+  }>(`${CONTROL_ORIGIN}/api/system/voice-diagnostics/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(runId ? { run_id: runId } : {}),
+  }),
+  recordVoiceComfort: async (payload: {
+    scenario: string
+    stop_audio_latency_ms?: number | null
+    interrupt_ack_latency_ms?: number | null
+    false_interruption?: boolean
+    first_audio_latency_ms?: number | null
+    continuous_turn_completed?: boolean | null
+    run_id?: string | null
+  }) => requestJson<Record<string, unknown>>(`${CONTROL_ORIGIN}/api/system/voice-diagnostics/comfort`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }),
+  recordVoiceComfortSignal: async (payload: {
+    signal: 'hesitation' | 'backchannel' | 'background_speech'
+    source: 'provider_vad' | 'local_vad' | 'classifier'
+    confidence: number
+    duration_ms?: number | null
+    run_id?: string | null
+  }) => requestJson<{
+    ok: boolean
+    accepted: boolean
+    signal: string
+    source: string
+    sample_count: number
+    signal_counts: Record<string, number>
+  }>(`${CONTROL_ORIGIN}/api/system/voice-diagnostics/comfort-signal`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }),
+  recordVoiceDiagnosticSample: async (payload: {
+    stage: string
+    latency_ms: number
+    ok?: boolean
+    provider?: string | null
+    error_kind?: string | null
+    recovered?: boolean | null
+    recovery_latency_ms?: number | null
+    playback_underruns?: number | null
+    run_id?: string | null
+  }) => requestJson<{ ok: boolean; accepted: boolean; stage: string }>(`${CONTROL_ORIGIN}/api/system/voice-diagnostics/sample`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }),
   connectors: async () => requestJson<ConnectorRegistrySnapshot>(`${CONTROL_ORIGIN}/api/system/connectors`),
   platforms: async () => requestJson<PlatformCapabilitySnapshot>(`${CONTROL_ORIGIN}/api/system/platforms`),
   disableConnector: async (connectorId: string) => requestJson<{ ok: boolean; connector?: ConnectorRegistrySnapshot['connectors'][number] | null; error?: string }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/disable`, { method: 'POST' }),
   connectorConfig: async (connectorId: MessageConnectorConfigSnapshot['id']) => requestJson<MessageConnectorConfigSnapshot>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/config`),
+  probeConnector: async (connectorId: MessageConnectorConfigSnapshot['id']) => requestJson<ConnectorProbeSnapshot>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/probe`, { method: 'POST' }),
   updateConnectorConfig: async (connectorId: MessageConnectorConfigSnapshot['id'], payload: MessageConnectorConfigUpdate) => requestJson<{ ok: boolean; config: MessageConnectorConfigSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -156,14 +351,28 @@ export const systemClient = {
   logoutConnectorAccount: async (connectorId: 'qq' | 'wechat') => requestJson<{ ok: boolean; account: ConnectorAccountSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/account/logout`, { method: 'POST' }),
   unbindConnectorAccount: async (connectorId: 'qq' | 'wechat') => requestJson<{ ok: boolean; account: ConnectorAccountSnapshot; config: MessageConnectorConfigSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/account`, { method: 'DELETE' }),
   connectorDeliveries: async (connectorId: MessageConnectorConfigSnapshot['id'], limit = 20) => {
-    const result = await requestJson<{ ok: boolean; connector_id: string; items: RawConnectorDelivery[] }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/deliveries?limit=${encodeURIComponent(String(limit))}`)
-    return { ok: result.ok, connectorId: result.connector_id, items: (result.items || []).map(normalizeConnectorDelivery) } satisfies ConnectorDeliverySnapshot
+    const result = await requestJson<{ ok: boolean; connector_id: string; items: RawConnectorDelivery[]; recovery?: RawConnectorRecovery | null }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/deliveries?limit=${encodeURIComponent(String(limit))}`)
+    return { ok: result.ok, connectorId: result.connector_id, items: (result.items || []).map(normalizeConnectorDelivery), recovery: normalizeConnectorRecovery(result.recovery) } satisfies ConnectorDeliverySnapshot
   },
   retryConnectorDelivery: async (connectorId: MessageConnectorConfigSnapshot['id'], deliveryKey: string) => {
     const result = await requestJson<{ ok: boolean; already_sent?: boolean; delivery?: RawConnectorDelivery }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/deliveries/${encodeURIComponent(deliveryKey)}/retry`, { method: 'POST' })
     return {
       ok: result.ok,
       alreadySent: result.already_sent,
+      delivery: result.delivery ? normalizeConnectorDelivery(result.delivery) : undefined,
+    }
+  },
+  resolveConnectorEvent: async (connectorId: MessageConnectorConfigSnapshot['id'], eventId: string, outcome: 'delivered' | 'failed') => {
+    const result = await requestJson<{ ok: boolean; already_resolved?: boolean; resolved?: boolean; outcome?: string; delivery?: RawConnectorDelivery }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/events/${encodeURIComponent(eventId)}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ outcome }),
+      headers: { 'Content-Type': 'application/json' },
+    })
+    return {
+      ok: result.ok,
+      alreadyResolved: result.already_resolved === true,
+      resolved: result.resolved === true,
+      outcome: result.outcome,
       delivery: result.delivery ? normalizeConnectorDelivery(result.delivery) : undefined,
     }
   },

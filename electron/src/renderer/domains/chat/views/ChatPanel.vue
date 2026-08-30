@@ -2,7 +2,6 @@
   <PanelShell title="对话中心" tone="companion" density="compact" minimal>
     <div
       class="chat-workspace"
-      :data-e2e-chat-ready="e2eMode ? String(socketDomain.isConnected.value) : undefined"
       :class="{
         'chat-workspace--rail-hidden': !showSessionRail,
       }"
@@ -243,10 +242,13 @@
                   :model-label="effectiveModelLabel"
                   :mcp-summary="mcpSummaryLabel"
                   :prompt-active="promptProfileActive"
+                  :audio-input-devices="audioInputDevices"
+                  :audio-devices-loading="audioDevicesLoading"
                   @update-field="updateRuntimeChatOption"
                   @toggle-tts="toggleTtsOutput"
                   @open-prompt="openPromptPanel"
                   @refresh-models="refreshModelOptions"
+                  @refresh-audio-devices="refreshAudioInputDevices"
                 />
                 <el-dropdown trigger="click" @command="handleTopMoreCommand">
                   <button class="tool-button" type="button" aria-label="更多">
@@ -278,6 +280,7 @@
               :generating="chatState.isGenerating"
               :recording="isRecording"
               :tts-playing="chatState.isTTSPlaying"
+              :show-recovery-action="showRealtimeRecovery"
             />
 
             <ChatVoiceStatus
@@ -296,12 +299,14 @@
               :connected="socketDomain.isConnected.value"
               :shortcut-title="pushToTalkShortcutTitle"
               :tts-playing="chatState.isTTSPlaying"
+              :interruptible="voiceInterruptible"
               @hold-pointer-down="handleHoldPointerDown"
               @hold-pointer-up="handleHoldPointerUp"
               @begin-hold="beginHoldToTalk"
               @end-hold="endHoldToTalk"
               @toggle-mic="toggleMic"
               @interrupt="handleInterrupt"
+              @retry-realtime="retryRealtimeVoice"
             />
           </div>
         </div>
@@ -395,6 +400,8 @@ import ChatComposerStatusLine from '../components/ChatComposerStatusLine.vue'
 import ChatPlaybackBar from '../components/ChatPlaybackBar.vue'
 import ChatRuntimeSettings, { type ChatRuntimeSettingsModel } from '../components/ChatRuntimeSettings.vue'
 import ChatVoiceStatus from '../components/ChatVoiceStatus.vue'
+import { enumerateAudioInputDevices, type AudioInputDevice } from '@/audio/audio-capture'
+import { shouldOfferRealtimeInterrupt, shouldOfferRealtimeRecovery } from '@/app/runtime/realtimeRecoveryPolicy'
 import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { DEFAULT_DAILY_PROMPT, DEFAULT_WORK_PROMPT, useWorkspaceStore } from '@/stores/workspaceStore'
@@ -459,6 +466,9 @@ type RequiredChatOptions = ChatOptions & {
   max_tokens: number
   reasoning_effort: ReasoningOption
   response_mode: ResponseModeOption
+  voice_mode: 'push-to-talk' | 'continuous'
+  vad_eagerness: 'low' | 'medium' | 'high' | 'auto'
+  audio_input_device_id: string
   mcp_enabled: boolean
   web_search_enabled: boolean
   tts_enabled: boolean
@@ -482,7 +492,6 @@ const chatStore = useChatStore()
 const sessionDrafts = useSessionDrafts()
 const sessionViewState = useSessionViewState()
 const { draftSessionIds } = sessionDrafts
-const e2eMode = Boolean(window.petApi?.e2e)
 const sessionStore = useSessionStore()
 const settingsStore = useSettingsStore()
 const inputBindingsStore = useInputBindingsStore()
@@ -507,6 +516,8 @@ const composerTranslating = ref(false)
 const messageTranslatingIndex = ref<number | null>(null)
 const modelOptions = ref<string[]>([])
 const modelsLoading = ref(false)
+const audioInputDevices = ref<AudioInputDevice[]>([])
+const audioDevicesLoading = ref(false)
 const modelOptionsProviderKey = ref('')
 const mcpSummaryLabel = ref('MCP 状态待刷新')
 const attachments = ref<ChatAttachment[]>([])
@@ -688,6 +699,17 @@ const maxChatOutputTokens = computed(() => {
 const updateRuntimeChatOption = (field: keyof ChatRuntimeSettingsModel, value: string | number | boolean) => {
   chatStore.setChatOptions({ [field]: value } as Partial<ChatOptions>)
 }
+const refreshAudioInputDevices = async () => {
+  if (audioDevicesLoading.value) return
+  audioDevicesLoading.value = true
+  try {
+    audioInputDevices.value = await enumerateAudioInputDevices()
+  } catch {
+    audioInputDevices.value = []
+  } finally {
+    audioDevicesLoading.value = false
+  }
+}
 const togglePetLink = (enabled: boolean) => {
   chatStore.setChatOptions({ pet_link_enabled: enabled })
 }
@@ -828,7 +850,9 @@ const quickPanelItems = computed(() => {
 const voiceMeterBars = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 const voiceLevelPercent = computed(() => Math.round(Math.min(1, audioCaptureState.level) * 100))
 const voiceStatusText = computed(() => {
+  if (audioCaptureState.inputHealth === 'disconnected') return '麦克风已断开'
   if (audioCaptureState.phase === 'error') return audioCaptureState.error || '麦克风异常'
+  if (isRecording.value && audioCaptureState.inputHealth === 'silent') return '暂未检测到声音'
   if (isRecording.value) return '正在收音'
   if (!socketDomain.isConnected.value) return '实时通道连接中'
   if (chatState.isTTSPlaying) return '正在播放'
@@ -837,7 +861,12 @@ const voiceStatusText = computed(() => {
 })
 const voicePipelineText = computed(() => {
   if (!socketDomain.isConnected.value) return '实时通道未连接'
-  if (isRecording.value) return `${formatDuration(audioCaptureState.elapsedMs)} · ${audioCaptureState.chunksSent} 块 · ${formatBytes(audioCaptureState.bytesSent)}`
+  if (isRecording.value) {
+    const silenceHint = audioCaptureState.inputHealth === 'silent'
+      ? ` · 静音 ${Math.round(audioCaptureState.silenceMs / 1000)} 秒`
+      : ''
+    return `${formatDuration(audioCaptureState.elapsedMs)} · ${audioCaptureState.chunksSent} 块 · ${formatBytes(audioCaptureState.bytesSent)}${silenceHint}`
+  }
   if (chatState.asrPartialText) return 'ASR 已返回部分文本'
   if (chatState.isGenerating) return 'LLM 正在处理当前上下文'
   if (chatState.isTTSPlaying) return 'TTS 音频正在输出'
@@ -880,9 +909,24 @@ const voiceLatencySummary = computed(() => {
 const voiceStatusClass = computed(() => ({
   recording: isRecording.value,
   error: audioCaptureState.phase === 'error',
+  silent: isRecording.value && audioCaptureState.inputHealth === 'silent',
+  disconnected: audioCaptureState.inputHealth === 'disconnected',
   offline: !socketDomain.isConnected.value,
   speaking: chatState.isTTSPlaying,
 }))
+const showRealtimeRecovery = computed(() => shouldOfferRealtimeRecovery({
+  responseMode: chatOptions.response_mode,
+  recording: isRecording.value,
+  ttsPlaying: chatState.isTTSPlaying,
+  status: chatState.realtimeStatus,
+}))
+const voiceInterruptible = computed(() => shouldOfferRealtimeInterrupt({
+  ttsPlaying: chatState.isTTSPlaying,
+  status: chatState.realtimeStatus,
+}))
+const retryRealtimeVoice = () => {
+  window.dispatchEvent(new CustomEvent('pet:realtime-reconnect'))
+}
 const messageRoleLabel = (role: ChatMessage['role']) => {
   if (role === 'user') return '你'
   if (role === 'assistant') return '結崎'
@@ -1256,6 +1300,7 @@ const handleForgetMemory = async (source: ChatMemorySource) => {
     await memoryClient.softForgetDoc(source.id, {
       reason: 'chat_memory_feedback',
       turn_id: source.traceId,
+      session_id: source.sessionId,
     })
     for (const message of chatState.messages) {
       if (!message.memorySources?.length) continue
@@ -1854,11 +1899,9 @@ onMounted(() => {
   window.addEventListener('click', closeQuickPanel)
   window.addEventListener('keydown', handleGlobalKeydown)
   scrollToBottom()
-  if (!e2eMode) {
-    void settingsStore.fetchSettings().then(refreshModelOptions)
-    void settingsClient.warmupTts().catch(() => undefined)
-    void refreshMcpSummary()
-  }
+  void settingsStore.fetchSettings().then(refreshModelOptions)
+  void settingsClient.warmupTts().catch(() => undefined)
+  void refreshMcpSummary()
 })
 onUnmounted(() => {
   window.removeEventListener('click', closeContextMenu)

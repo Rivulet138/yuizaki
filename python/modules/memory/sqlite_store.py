@@ -10,6 +10,7 @@ from typing import Any
 
 from .backend import MemoryBackendStatus
 from .metadata import append_memory_version, has_prior_version_snapshot, normalize_memory_metadata
+from .operations import MemoryOperation
 from .schema import MemorySearchFilters
 from .vector_store import Document, EmbeddingProvider, VectorStore
 
@@ -152,6 +153,50 @@ class SQLiteMemoryStore(VectorStore):
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS memory_operations (
+                    operation_id TEXT PRIMARY KEY,
+                    operation TEXT NOT NULL,
+                    document_id TEXT NOT NULL,
+                    at TEXT NOT NULL,
+                    actor TEXT NOT NULL,
+                    scope TEXT,
+                    workspace_id TEXT,
+                    session_id TEXT,
+                    reason TEXT,
+                    evidence_json TEXT,
+                    before_revision INTEGER,
+                    after_revision INTEGER,
+                    details_json TEXT NOT NULL
+                )
+                """
+            )
+            # The UI reads a document's recent history most often, while the
+            # global ledger endpoint filters by scope. Keep both hot paths
+            # indexed as the append-only table grows.
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_memory_operations_document_at
+                ON memory_operations (document_id, at DESC, operation_id DESC)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_memory_operations_scope_at
+                ON memory_operations (scope, workspace_id, session_id, at DESC, operation_id DESC)
+                """
+            )
+            # Normalize legacy scope IDs once so exact filtered queries remain
+            # compatible with records written before the API trimmed IDs.
+            connection.execute(
+                "UPDATE memory_operations SET workspace_id = TRIM(workspace_id) "
+                "WHERE workspace_id IS NOT NULL"
+            )
+            connection.execute(
+                "UPDATE memory_operations SET session_id = TRIM(session_id) "
+                "WHERE session_id IS NOT NULL"
+            )
             columns = {
                 str(row[1])
                 for row in connection.execute("PRAGMA table_info(memory_index_rebuild_jobs)")
@@ -189,6 +234,106 @@ class SQLiteMemoryStore(VectorStore):
     def get_authority_revision(self) -> int:
         with self._db_lock, self._connection() as connection:
             return self._authority_revision(connection)
+
+    def record_operation(self, operation: MemoryOperation) -> None:
+        """Persist an operation without changing the document authority revision."""
+        with self._db_lock, self._connection() as connection:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO memory_operations (
+                    operation_id, operation, document_id, at, actor, scope,
+                    workspace_id, session_id, reason, evidence_json,
+                    before_revision, after_revision, details_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    operation.operation_id,
+                    operation.operation,
+                    operation.document_id,
+                    operation.at,
+                    operation.actor,
+                    operation.scope,
+                    operation.workspace_id,
+                    operation.session_id,
+                    operation.reason,
+                    json.dumps(operation.evidence, ensure_ascii=False, sort_keys=True, default=str)
+                    if operation.evidence is not None else None,
+                    operation.before_revision,
+                    operation.after_revision,
+                    json.dumps(operation.details, ensure_ascii=False, sort_keys=True, default=str),
+                ),
+            )
+
+    def list_operations(
+        self,
+        *,
+        document_id: str | None = None,
+        scope: str | None = None,
+        workspace_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        bounded_limit = max(1, min(500, int(limit)))
+        workspace_id = str(workspace_id or "").strip() or None
+        session_id = str(session_id or "").strip() or None
+        clauses: list[str] = []
+        params: list[Any] = []
+        if document_id:
+            clauses.append("document_id = ?")
+            params.append(document_id)
+        if scope:
+            clauses.append("scope = ?")
+            params.append(scope)
+        if workspace_id:
+            clauses.append("workspace_id = ?")
+            params.append(workspace_id)
+        if session_id:
+            clauses.append("session_id = ?")
+            params.append(session_id)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(bounded_limit)
+        with self._db_lock, self._connection() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT operation_id, operation, document_id, at, actor, scope,
+                       workspace_id, session_id, reason, evidence_json,
+                       before_revision, after_revision, details_json
+                FROM memory_operations
+                {where}
+                ORDER BY at DESC, operation_id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            evidence = None
+            details: dict[str, Any] = {}
+            try:
+                evidence = json.loads(row[9]) if row[9] else None
+            except (TypeError, json.JSONDecodeError):
+                evidence = None
+            try:
+                decoded_details = json.loads(row[12]) if row[12] else {}
+                details = decoded_details if isinstance(decoded_details, dict) else {}
+            except (TypeError, json.JSONDecodeError):
+                details = {}
+            result.append({
+                "operation_id": str(row[0]),
+                "operation": str(row[1]),
+                "document_id": str(row[2]),
+                "at": str(row[3]),
+                "actor": str(row[4]),
+                "scope": row[5],
+                "workspace_id": row[6],
+                "session_id": row[7],
+                "reason": row[8],
+                "evidence": evidence,
+                "before_revision": row[10],
+                "after_revision": row[11],
+                "details": details,
+            })
+        return result
 
     def list_documents_page(
         self,

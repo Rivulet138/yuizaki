@@ -75,6 +75,9 @@ from modules.system.heartbeat_goal_store import HeartbeatGoalStore
 from modules.system.health_providers import build_app_runtime_health_providers, register_app_runtime_health_checks
 from modules.system.onboarding_readiness import OnboardingReadiness
 from modules.system.runtime_services import voice_diagnostics
+from modules.system.ui_capabilities import build_ui_capabilities
+from modules.system.stream_platforms import InMemoryTwitchSubscriptionProvider, TwitchHelixSubscriptionProvider
+from modules.system.stream_runtime import ObsWebSocketAdapter, StreamRuntime
 from modules.system.runtime_config import RuntimeConfig, apply_runtime_config
 from modules.system.settings_schema import validate_runtime_patch
 
@@ -150,6 +153,7 @@ settings_manager: SettingsManager | None = None
 db_repo: DatabaseRepository | None = None  # 数据库实例
 _active_workspace_state = ActiveWorkspaceState()
 _message_connector_registry = MessageConnectorRegistry(state_path=data_dir_from_env() / "message_connectors.json")
+_connector_recovery_controller = None
 
 _llm_client: LLMClient | None = None
 _vision_llm_client: LLMClient | None = None
@@ -311,7 +315,7 @@ async def _init_database():
 
 @asynccontextmanager
 async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
-    global _llm_client, _vision_llm_client, _tts_client, _asr_manager, _svc_client, _ocr_client, _generation_mgr, _janitor_task, db_repo, settings_api, settings_manager, _retrieval_pipeline, _heartbeat_scheduler
+    global _llm_client, _vision_llm_client, _tts_client, _asr_manager, _svc_client, _ocr_client, _generation_mgr, _janitor_task, db_repo, settings_api, settings_manager, _retrieval_pipeline, _heartbeat_scheduler, _connector_recovery_controller
     logger.info("Starting Yuizaki backend...")
     enforce_schema_policy()
 
@@ -408,6 +412,9 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
     )
     if sio_server.runtime.turn_outbox_worker is not None:
         await sio_server.runtime.turn_outbox_worker.start()
+    if _connector_recovery_controller is not None:
+        await _connector_recovery_controller.start()
+    await runtime_handlers.stream_draft_consumer_start()
     logger.info("Socket.IO server ready")
 
     yield
@@ -417,6 +424,10 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
         await _heartbeat_scheduler.stop()
     if sio_server.runtime.turn_outbox_worker is not None:
         await sio_server.runtime.turn_outbox_worker.stop()
+    if _connector_recovery_controller is not None:
+        await _connector_recovery_controller.stop()
+    await runtime_handlers.stream_draft_consumer_stop()
+    _stream_runtime.shutdown()
     if _janitor_task:
         _janitor_task.cancel()
         try:
@@ -430,6 +441,40 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
     logger.info("Backend shutdown complete")
 
 app = FastAPI(title="yuizaki", lifespan=app_lifespan)
+_twitch_subscription_provider_mode = os.getenv("YUIZAKI_TWITCH_SUBSCRIPTION_PROVIDER", "").strip().lower()
+_twitch_subscription_provider = None
+if _twitch_subscription_provider_mode == "in-memory-staging":
+    _twitch_subscription_provider = InMemoryTwitchSubscriptionProvider()
+elif _twitch_subscription_provider_mode == "helix":
+    _candidate_provider = TwitchHelixSubscriptionProvider(
+        client_id=os.getenv("YUIZAKI_TWITCH_CLIENT_ID"),
+        access_token=os.getenv("YUIZAKI_TWITCH_EVENTSUB_TOKEN") or os.getenv("YUIZAKI_TWITCH_CHAT_TOKEN"),
+        broadcaster_id=os.getenv("YUIZAKI_TWITCH_BROADCASTER_ID"),
+        callback_url=os.getenv("YUIZAKI_TWITCH_EVENTSUB_CALLBACK_URL"),
+        secret=os.getenv("YUIZAKI_TWITCH_EVENTSUB_SECRET"),
+        moderator_id=os.getenv("YUIZAKI_TWITCH_MODERATOR_ID"),
+    )
+    if _candidate_provider.configured:
+        _twitch_subscription_provider = _candidate_provider
+
+_stream_runtime = StreamRuntime(
+    ObsWebSocketAdapter(
+        os.getenv("YUIZAKI_OBS_WEBSOCKET_URL"),
+        os.getenv("YUIZAKI_OBS_WEBSOCKET_PASSWORD"),
+    ),
+    twitch_eventsub_secret=os.getenv("YUIZAKI_TWITCH_EVENTSUB_SECRET"),
+    twitch_client_id=os.getenv("YUIZAKI_TWITCH_CLIENT_ID"),
+    twitch_eventsub_token=os.getenv("YUIZAKI_TWITCH_EVENTSUB_TOKEN"),
+    twitch_chat_token=os.getenv("YUIZAKI_TWITCH_CHAT_TOKEN"),
+    twitch_broadcaster_id=os.getenv("YUIZAKI_TWITCH_BROADCASTER_ID"),
+    twitch_sender_id=os.getenv("YUIZAKI_TWITCH_SENDER_ID"),
+    twitch_moderator_id=os.getenv("YUIZAKI_TWITCH_MODERATOR_ID"),
+    twitch_channel=os.getenv("YUIZAKI_TWITCH_CHANNEL"),
+    twitch_username=os.getenv("YUIZAKI_TWITCH_USERNAME"),
+    twitch_eventsub_callback_url=os.getenv("YUIZAKI_TWITCH_EVENTSUB_CALLBACK_URL"),
+    twitch_subscription_provider=_twitch_subscription_provider,
+    events_path=data_dir_from_env() / "stream_events.json",
+)
 
 _BACKEND_API_TOKEN = os.getenv("YUIZAKI_BACKEND_API_TOKEN", "").strip()
 
@@ -450,6 +495,11 @@ async def ping():
     return payload
 
 
+@app.get("/api/system/ui-capabilities")
+async def ui_capabilities():
+    return build_ui_capabilities()
+
+
 @app.get("/api/perception/active-application")
 async def active_application():
     try:
@@ -463,7 +513,7 @@ async def active_application():
 
 @app.middleware("http")
 async def backend_api_auth_middleware(request: Request, call_next):
-    if request.url.path == "/api/ping":
+    if request.url.path in {"/api/ping", "/api/system/ui-capabilities"}:
         return await call_next(request)
     if request.url.path == HOST_DESKTOP_ACTION_PREFIX or request.url.path.startswith(
         f"{HOST_DESKTOP_ACTION_PREFIX}/"
@@ -652,12 +702,17 @@ app.include_router(
         get_relationship_writer=lambda: _write_relationship_memory,
     )
 )
-app.include_router(create_message_connector_router(
+_connector_router = create_message_connector_router(
     registry_provider=lambda: _message_connector_registry,
     turn_service_provider=lambda: sio_server.runtime.turn_service if sio_server and sio_server.runtime else None,
     active_workspace_id_provider=_get_active_workspace_id,
     delivery_store_provider=lambda: sio_server.runtime.turn_store if sio_server and sio_server.runtime else None,
-))
+    fast_ack_connectors={"telegram", "qq", "wechat"},
+    recovery_interval_seconds=15.0,
+    recovery_metrics_path=data_dir_from_env() / "connector_recovery.json",
+)
+_connector_recovery_controller = getattr(_connector_router, "connector_recovery_controller", None)
+app.include_router(_connector_router)
 config.tts.audio_cache_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/audio", StaticFiles(directory=str(config.tts.audio_cache_dir)), name="audio")
 
@@ -692,6 +747,7 @@ runtime_handlers = build_runtime_handlers(
     onboarding_readiness=onboarding_readiness,
     product_metrics_consent_store=_product_metrics_consent_store,
     message_connector_registry=_message_connector_registry,
+    stream_runtime_provider=lambda: _stream_runtime,
 )
 app.include_router(create_memory_pipeline_router(runtime_handlers.memory_pipeline_query, get_active_workspace_id=_get_active_workspace_id))
 app.include_router(create_computer_use_host_router(

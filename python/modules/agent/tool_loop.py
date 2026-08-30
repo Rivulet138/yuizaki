@@ -16,8 +16,14 @@ from .failure_recovery import (
 from .permission_receipt import serialize_permission_receipt
 from .tool_executor import ToolExecutor
 from .tool_registry import ToolDefinition, ToolRegistry, tool_may_change_state
+from .tool_result import is_known_success
 
 logger = logging.getLogger(__name__)
+
+
+def _outcome_succeeded(outcome: Any) -> bool:
+    """Use the shared explicit effect-outcome predicate as truth."""
+    return is_known_success(outcome)
 
 
 def _positive_budget(value: object, default: int) -> int:
@@ -309,14 +315,14 @@ async def run_streaming_tool_loop(
             consumed_usage["attempts"] = int(consumed_usage["attempts"]) + 1
             record = {
                 "tool": tool_name,
-                "success": bool(outcome.success),
+                "success": _outcome_succeeded(outcome),
                 "outcome": outcome.outcome,
                 "retryable": bool(outcome.retryable),
                 "error": outcome.error,
             }
             tool_calls_seen.append(record)
             definition = tool_registry.get(str(tool_name))
-            if bool(outcome.success) and definition is not None and tool_may_change_state(definition):
+            if _outcome_succeeded(outcome) and definition is not None and tool_may_change_state(definition):
                 state_changing_tool_succeeded = True
             working_messages.append({
                 "role": "tool",
@@ -325,7 +331,7 @@ async def run_streaming_tool_loop(
                     "source": f"{outcome.source}:{outcome.tool_name or tool_name}",
                     "trust": "untrusted",
                     "instruction_authority": "none",
-                    "success": bool(outcome.success),
+                    "success": _outcome_succeeded(outcome),
                     "outcome": outcome.outcome,
                     "content": outcome.error or outcome.content,
                 }, ensure_ascii=False),
@@ -676,7 +682,7 @@ async def run_tool_loop(
                 "source": f"{outcome.source}:{outcome.tool_name or tool_name}",
                 "trust": "untrusted",
                 "instruction_authority": "none",
-                "success": bool(outcome.success),
+                "success": _outcome_succeeded(outcome),
                 "outcome": outcome.outcome,
                 "content": outcome.error or outcome.content,
             }, ensure_ascii=False)

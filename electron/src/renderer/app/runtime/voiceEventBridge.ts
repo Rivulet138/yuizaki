@@ -14,6 +14,7 @@ export interface VoiceEventBridgeHandlers {
   onAudioEnded: EventListener
   onTtsStop: EventListener
   onRealtimeInterrupt: EventListener
+  onRealtimeReconnect: () => void | Promise<void>
   onStartMic: () => void | Promise<void>
   onStopMic: () => void
   onToggleMic: () => void | Promise<void>
@@ -36,6 +37,7 @@ export class VoiceEventBridge {
     eventHost.addEventListener('pet:audio-ended', this.handlers.onAudioEnded)
     eventHost.addEventListener('pet:tts-stop', this.handlers.onTtsStop)
     eventHost.addEventListener('pet:realtime-interrupt', this.handlers.onRealtimeInterrupt)
+    eventHost.addEventListener('pet:realtime-reconnect', this.handlers.onRealtimeReconnect as EventListener)
 
     shortcutHost.on('shortcut:start-mic', this.handlers.onStartMic)
     shortcutHost.on('shortcut:stop-mic', this.handlers.onStopMic)
@@ -49,6 +51,7 @@ export class VoiceEventBridge {
       this.eventHost.removeEventListener('pet:audio-ended', this.handlers.onAudioEnded)
       this.eventHost.removeEventListener('pet:tts-stop', this.handlers.onTtsStop)
       this.eventHost.removeEventListener('pet:realtime-interrupt', this.handlers.onRealtimeInterrupt)
+      this.eventHost.removeEventListener('pet:realtime-reconnect', this.handlers.onRealtimeReconnect as EventListener)
     }
     if (this.shortcutHost) {
       this.shortcutHost.off('shortcut:start-mic', this.handlers.onStartMic)

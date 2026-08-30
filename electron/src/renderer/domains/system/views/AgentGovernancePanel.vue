@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="工具权限" subtitle="查看授权记录，撤销工具权限，启停 MCP 与插件" tone="admin">
+  <PanelShell title="工具权限" tone="admin">
     <div class="governance-console">
       <section class="governance-toolbar" aria-label="治理操作">
         <div>
@@ -21,7 +21,7 @@
             <el-button plain size="small" :loading="connectorsRequest.loading" @click="loadConnectors">刷新连接器</el-button>
           </div>
         </template>
-        <AsyncState :loading="connectorsRequest.loading" :error="connectorsRequest.error" @retry="loadConnectors">
+        <AsyncState :loading="connectorsRequest.loading" :error="connectorsRequest.error" :show-retry="false">
           <el-alert v-if="connectorMutationError" class="panel-alert" :title="connectorMutationError" type="error" show-icon :closable="false" />
           <div v-if="connectorRows.length" class="connector-list">
             <article v-for="connector in connectorRows" :key="connector.id" class="connector-item" :class="`connector-${connector.state}`">
@@ -36,6 +36,7 @@
               <div class="connector-meta">
                 <span>能力：{{ connector.capabilities.join('、') }}</span>
                 <span>数据流：{{ connector.dataFlow.join('；') }}</span>
+                <span v-if="connector.readiness">资格：{{ connectorReadinessLabel(connector.readiness) }}</span>
               </div>
               <div class="connector-footer">
                 <small v-if="connector.experimental">实验性，默认不启用</small>
@@ -63,7 +64,10 @@
                   <strong>{{ connectorDisplayName(connectorId) }} 设置</strong>
                   <span>{{ connectorConfigs[connectorId]?.webhookPath || `加载 ${connectorId} 配置` }}</span>
                 </div>
-                <el-switch v-model="connectorDrafts[connectorId].enabled" :disabled="savingConnectorIds.has(connectorId)" />
+                <div class="connector-config-head-actions">
+                  <el-button plain size="small" :disabled="!connectorConfigs[connectorId]?.webhookPath" @click="copyConnectorWebhookPath(connectorId)">复制回调路径</el-button>
+                  <el-switch v-model="connectorDrafts[connectorId].enabled" :disabled="savingConnectorIds.has(connectorId)" />
+                </div>
               </div>
               <div class="connector-config-flags" v-if="connectorId !== 'qq' && connectorId !== 'wechat'">
                 <el-tag size="small" :type="connectorConfigs[connectorId]?.botTokenConfigured ? 'success' : 'info'">{{ connectorId === 'discord' ? '降级 Bot Token' : 'Bot Token' }} {{ connectorConfigs[connectorId]?.botTokenConfigured ? '已配置' : '未配置' }}</el-tag>
@@ -109,8 +113,23 @@
               </div>
               <div class="connector-config-actions">
                 <el-button plain size="small" :loading="loadingConnectorConfigIds.has(connectorId)" @click="loadConnectorConfig(connectorId)">重新读取</el-button>
+                <el-button plain size="small" :loading="probingConnectorIds.has(connectorId)" :disabled="connectorProbeRequest.loading || probingConnectorIds.has(connectorId)" @click="probeConnectorItem(connectorId)">测试连接</el-button>
                 <el-button type="primary" size="small" :loading="savingConnectorIds.has(connectorId)" @click="saveConnectorConfig(connectorId)">保存设置</el-button>
                 <el-button plain size="small" :loading="connectorDeliveriesRequest.loading" @click="loadConnectorDeliveries(connectorId)">最近事件</el-button>
+              </div>
+              <div v-if="connectorProbeSnapshot(connectorId)" class="connector-probe-status">
+                <el-tag size="small" :type="connectorProbeTagType(connectorProbeSnapshot(connectorId)!)">{{ connectorProbeStatusLabel(connectorProbeSnapshot(connectorId)!) }}</el-tag>
+                <span v-if="connectorProbeSnapshot(connectorId)?.statusCode">HTTP {{ connectorProbeSnapshot(connectorId)?.statusCode }}</span>
+                <span v-if="connectorProbeSnapshot(connectorId)?.bridgeStatus">桥接状态：{{ connectorProbeSnapshot(connectorId)?.bridgeStatus }}</span>
+                <span v-if="connectorProbeSnapshot(connectorId)?.errorCode" class="connector-probe-error">错误码：{{ connectorProbeSnapshot(connectorId)?.errorCode }}</span>
+              </div>
+              <div v-if="connectorRecoverySnapshot(connectorId)" class="connector-recovery-telemetry">
+                <span>恢复扫描 {{ connectorRecoverySnapshot(connectorId)?.runs ?? 0 }} 次</span>
+                <span>检查 {{ connectorRecoverySnapshot(connectorId)?.inspected ?? 0 }} 条</span>
+                <span>恢复 {{ connectorRecoverySnapshot(connectorId)?.recovered ?? 0 }} 条</span>
+                <span>失败 {{ connectorRecoverySnapshot(connectorId)?.failed ?? 0 }} 条</span>
+                <span>最近扫描 {{ formatRecoveryTime(connectorRecoverySnapshot(connectorId)?.lastRunAt) }}</span>
+                <span v-if="connectorRecoverySnapshot(connectorId)?.lastError" class="connector-recovery-error">{{ connectorRecoverySnapshot(connectorId)?.lastError }}</span>
               </div>
               <div v-if="connectorDeliveryRows(connectorId).length" class="connector-delivery-list">
                 <div v-for="delivery in connectorDeliveryRows(connectorId).slice(0, 5)" :key="delivery.deliveryKey" class="connector-delivery-item">
@@ -139,6 +158,28 @@
                   >
                     取消处理
                   </el-button>
+                  <template v-if="delivery.resolvable">
+                    <el-button
+                      type="primary"
+                      link
+                      size="small"
+                      :loading="resolvingEventIds.has(delivery.eventId)"
+                      :disabled="resolvingEventIds.has(delivery.eventId)"
+                      @click="resolveConnectorEventItem(connectorId, delivery.eventId, 'delivered')"
+                    >
+                      确认已送达
+                    </el-button>
+                    <el-button
+                      type="warning"
+                      link
+                      size="small"
+                      :loading="resolvingEventIds.has(delivery.eventId)"
+                      :disabled="resolvingEventIds.has(delivery.eventId)"
+                      @click="resolveConnectorEventItem(connectorId, delivery.eventId, 'failed')"
+                    >
+                      确认未送达
+                    </el-button>
+                  </template>
                 </div>
               </div>
             </section>
@@ -160,7 +201,7 @@
               </div>
             </div>
           </template>
-          <AsyncState :loading="mcpRequest.loading" :error="mcpRequest.error" @retry="loadMcp">
+          <AsyncState :loading="mcpRequest.loading" :error="mcpRequest.error" :show-retry="false">
             <el-alert
               v-if="mcpMutationError"
               class="panel-alert"
@@ -319,7 +360,7 @@
                 </div>
               </div>
             </template>
-            <AsyncState :loading="permissionsRequest.loading" :error="permissionsRequest.error" @retry="loadPermissions">
+            <AsyncState :loading="permissionsRequest.loading" :error="permissionsRequest.error" :show-retry="false">
               <el-alert
                 v-if="permissionMutationError"
                 class="panel-alert"
@@ -363,7 +404,7 @@
               <el-button plain size="small" :loading="agentPluginsRequest.loading" @click="refreshExtensions">刷新扩展</el-button>
             </div>
           </template>
-          <AsyncState :loading="extensionLoading" :error="extensionError" @retry="refreshExtensions">
+          <AsyncState :loading="extensionLoading" :error="extensionError" :show-retry="false">
             <div class="host-grid">
               <article v-for="host in extensionHosts" :key="host.label" class="host-card" :class="host.tone">
                 <span>{{ host.label }}</span>
@@ -427,7 +468,7 @@
               <el-tag :type="permissionAuditRows.length ? 'warning' : 'success'">{{ permissionAuditRows.length ? '可追踪' : '暂无事件' }}</el-tag>
             </div>
           </template>
-          <AsyncState :loading="permissionsRequest.loading" :error="permissionsRequest.error" @retry="loadPermissions">
+          <AsyncState :loading="permissionsRequest.loading" :error="permissionsRequest.error" :show-retry="false">
             <div v-if="permissionAuditRows.length" class="audit-timeline">
               <article v-for="item in permissionAuditRows.slice(0, 8)" :key="`${item.timestamp}-${item.capability_id || item.tool_name || item.decision}`" class="audit-item">
                 <div class="audit-dot"></div>
@@ -453,7 +494,7 @@ import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import { systemClient } from '@/api/client'
 import { useSystemDomain } from '../composables/useSystemDomain'
 import { usePluginDomain } from '../../plugin/composables/usePluginDomain'
-import type { ConnectorState, ConnectorStatus, MCPHistoryEntry, MCPInventoryItem, MCPServerConfigSnapshot, MCPServerPresetSnapshot, MCPServerStatusSnapshot, MessageConnectorConfigSnapshot, MessageConnectorConfigUpdate, PermissionAuditRecord, RuntimeContributionSummary } from '@/../shared/agent'
+import type { ConnectorProbeSnapshot, ConnectorState, ConnectorStatus, MCPHistoryEntry, MCPInventoryItem, MCPServerConfigSnapshot, MCPServerPresetSnapshot, MCPServerStatusSnapshot, MessageConnectorConfigSnapshot, MessageConnectorConfigUpdate, PermissionAuditRecord, RuntimeContributionSummary } from '@/../shared/agent'
 import type { PluginContributionSummary } from '@/../shared/plugin'
 
 const {
@@ -487,16 +528,22 @@ const {
   loadAgentPlugins,
   loadConnectors,
   connectorDeliveries,
+  connectorRecovery,
   connectorAccounts,
+  connectorProbes,
   loadConnectorAccount,
   loginConnectorAccount,
   refreshConnectorAccount,
   logoutConnectorAccount,
   connectorDeliveriesRequest,
+  connectorProbeRequest,
   cancelConnectorEventRequest,
+  resolveConnectorEventRequest,
   loadConnectorDeliveries,
   retryConnectorDelivery,
   cancelConnectorEvent,
+  resolveConnectorEvent,
+  probeConnector,
   disableConnector,
   toggleAgentPlugin,
   updateAgentPluginConfig,
@@ -529,6 +576,7 @@ const loadingConnectorConfigIds = ref(new Set<string>())
 const savingConnectorIds = ref(new Set<string>())
 const retryingDeliveryKeys = ref(new Set<string>())
 const accountBusyIds = ref(new Set<string>())
+const probingConnectorIds = ref(new Set<string>())
 const messageConnectorIds = ['telegram', 'discord', 'qq', 'wechat'] as const
 type MessageConnectorId = typeof messageConnectorIds[number]
 const activeConnectorId = ref<MessageConnectorId>('telegram')
@@ -678,12 +726,31 @@ const connectorStateLabel = (state: ConnectorState) => {
   return labels[state]
 }
 
+const connectorReadinessLabel = (readiness: ConnectorStatus['readiness']) => {
+  if (!readiness) return '未提供'
+  if (readiness.status === 'ready_for_staging') return readiness.requiresPublicHttps ? '配置完整，仍需公网 HTTPS 验证' : '配置完整，仍需桥接可达性验证'
+  if (readiness.status === 'not_qualified') return readiness.reasons[0]?.detail || '未达到 staging 条件'
+  return readiness.status
+}
+
 const connectorDisplayName = (connectorId: MessageConnectorId) => ({
   telegram: 'Telegram',
   discord: 'Discord',
   qq: 'QQ 个人账号兼容桥',
   wechat: '微信个人账号兼容桥',
 }[connectorId])
+
+const copyConnectorWebhookPath = async (connectorId: MessageConnectorId) => {
+  const path = connectorConfigs[connectorId]?.webhookPath
+  if (!path) return
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('clipboard_unavailable')
+    await navigator.clipboard.writeText(path)
+    ElMessage.success('回调路径已复制')
+  } catch {
+    ElMessage.warning('当前环境无法访问剪贴板，请手动复制回调路径')
+  }
+}
 
 const connectorTagType = (state: ConnectorState): 'success' | 'info' | 'warning' | 'danger' => {
   if (state === 'running') return 'success'
@@ -693,14 +760,44 @@ const connectorTagType = (state: ConnectorState): 'success' | 'info' | 'warning'
 }
 
 const connectorDeliveryRows = (connectorId: MessageConnectorId) => connectorDeliveries.value[connectorId] || []
+const connectorRecoverySnapshot = (connectorId: MessageConnectorId) => connectorRecovery.value[connectorId]
+const refreshConnectorState = async (connectorId: MessageConnectorId) => {
+  // Reconcile both the delivery projection and connector health after an operator action.
+  await Promise.all([
+    loadConnectorDeliveries(connectorId),
+    loadConnectors(),
+  ])
+}
+const formatRecoveryTime = (timestamp: number | null | undefined) => {
+  if (!timestamp || !Number.isFinite(timestamp)) return '尚未扫描'
+  return new Date(timestamp * 1000).toLocaleString()
+}
 const connectorDeliveryStatusLabel = (status: string) => ({
   delivered: '已送达',
   processing: '处理中',
   sending: '发送中（取消过晚）',
   failed: '待重投',
+  unknown_effect: '外部结果未知（需人工确认）',
 }[status] || status)
 
+const connectorProbeSnapshot = (connectorId: MessageConnectorId) => connectorProbes.value[connectorId]
+const connectorProbeStatusLabel = (snapshot: ConnectorProbeSnapshot) => {
+  if (snapshot.status === 'reachable') return '连接可用'
+  if (snapshot.status === 'signature_ready') return '仅签名校验就绪'
+  if (snapshot.status === 'bridge_reachable') return '兼容桥可用'
+  if (snapshot.status === 'provider_rejected') return '服务端拒绝'
+  if (snapshot.status === 'unreachable') return '无法连接'
+  return snapshot.status
+}
+const connectorProbeTagType = (snapshot: ConnectorProbeSnapshot): 'success' | 'info' | 'warning' | 'danger' => {
+  if (snapshot.ok) return 'success'
+  if (snapshot.status === 'signature_ready') return 'info'
+  if (snapshot.status === 'provider_rejected') return 'warning'
+  return 'danger'
+}
+
 const cancellingEventIds = ref(new Set<string>())
+const resolvingEventIds = ref(new Set<string>())
 
 const cancelConnectorEventItem = async (connectorId: MessageConnectorId, eventId: string) => {
   addPending(cancellingEventIds, eventId)
@@ -712,6 +809,7 @@ const cancelConnectorEventItem = async (connectorId: MessageConnectorId, eventId
     ElMessage.warning(error instanceof Error ? error.message : '取消状态未知；请刷新后检查')
   } finally {
     removePending(cancellingEventIds, eventId)
+    await refreshConnectorState(connectorId).catch(() => undefined)
   }
 }
 
@@ -724,6 +822,57 @@ const retryDeliveryItem = async (connectorId: MessageConnectorId, deliveryKey: s
     ElMessage.error(error instanceof Error ? error.message : '重新投递失败')
   } finally {
     removePending(retryingDeliveryKeys, deliveryKey)
+    await refreshConnectorState(connectorId).catch(() => undefined)
+  }
+}
+
+const resolveConnectorEventItem = async (
+  connectorId: MessageConnectorId,
+  eventId: string,
+  outcome: 'delivered' | 'failed',
+) => {
+  try {
+    await ElMessageBox.confirm(
+      outcome === 'delivered'
+        ? '请先在外部平台确认这条回复已经出现，再将本地状态标记为已送达。'
+        : '请确认外部平台没有收到这条回复。此操作不会自动再次发送。',
+      outcome === 'delivered' ? '确认外部发送结果' : '确认未送达',
+      {
+        confirmButtonText: outcome === 'delivered' ? '标记已送达' : '标记未送达',
+        cancelButtonText: '取消',
+        type: outcome === 'delivered' ? 'info' : 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+  addPending(resolvingEventIds, eventId)
+  try {
+    const result = await resolveConnectorEvent(connectorId, eventId, outcome)
+    if (result?.ok) {
+      ElMessage.success(result.alreadyResolved ? '事件状态已经收敛' : outcome === 'delivered' ? '已标记为送达' : '已标记为失败，可人工重投')
+    } else {
+      ElMessage.warning(resolveConnectorEventRequest.error || '状态未能收敛，请刷新后重试')
+    }
+  } catch (error) {
+    ElMessage.warning(error instanceof Error ? error.message : '状态未能收敛，请刷新后重试')
+  } finally {
+    removePending(resolvingEventIds, eventId)
+    await refreshConnectorState(connectorId).catch(() => undefined)
+  }
+}
+
+const probeConnectorItem = async (connectorId: MessageConnectorId, notify = true) => {
+  addPending(probingConnectorIds, connectorId)
+  try {
+    const result = await probeConnector(connectorId)
+    if (!notify) return result
+    if (result?.ok) ElMessage.success(connectorProbeStatusLabel(result))
+    else if (result) ElMessage.warning(connectorProbeStatusLabel(result))
+    else if (connectorProbeRequest.error) ElMessage.error(connectorProbeRequest.error)
+    return result
+  } finally {
+    removePending(probingConnectorIds, connectorId)
   }
 }
 
@@ -1160,7 +1309,10 @@ const saveConnectorConfig = async (connectorId: MessageConnectorId) => {
     draft.clearBridgeProtocol = false
     draft.clearBridgeToken = false
     await loadConnectors()
-    ElMessage.success(`${connectorDisplayName(connectorId)} 设置已保存`)
+    const probe = await probeConnectorItem(connectorId, false)
+    if (probe?.ok) ElMessage.success(`${connectorDisplayName(connectorId)} 设置已保存，${connectorProbeStatusLabel(probe)}`)
+    else if (probe) ElMessage.warning(`${connectorDisplayName(connectorId)} 设置已保存，但${connectorProbeStatusLabel(probe)}`)
+    else ElMessage.success(`${connectorDisplayName(connectorId)} 设置已保存，连接状态待检查`)
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '连接器设置保存失败')
   } finally {
@@ -1171,15 +1323,15 @@ const saveConnectorConfig = async (connectorId: MessageConnectorId) => {
 const accountStateLabel = (state: string) => ({ connected: '已连接', awaiting_scan: '等待登录', signed_out: '未登录', error: '桥接错误' }[state] || state)
 const loginPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
   addPending(accountBusyIds, connectorId)
-  try { const account = await loginConnectorAccount(connectorId); if (account) ElMessage.success(account.loginUrl ? '登录请求已创建，请打开登录页' : `连接状态：${accountStateLabel(account.loginState)}`) } catch (error) { ElMessage.error(error instanceof Error ? error.message : '登录请求失败') } finally { removePending(accountBusyIds, connectorId) }
+  try { const account = await loginConnectorAccount(connectorId); if (account) ElMessage.success(account.loginUrl ? '登录请求已创建，请打开登录页' : `连接状态：${accountStateLabel(account.loginState)}`) } catch (error) { ElMessage.error(error instanceof Error ? error.message : '登录请求失败') } finally { removePending(accountBusyIds, connectorId); await loadConnectors().catch(() => undefined) }
 }
 const refreshPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
   addPending(accountBusyIds, connectorId)
-  try { await refreshConnectorAccount(connectorId) } finally { removePending(accountBusyIds, connectorId) }
+  try { await refreshConnectorAccount(connectorId) } finally { removePending(accountBusyIds, connectorId); await loadConnectors().catch(() => undefined) }
 }
 const logoutPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
   addPending(accountBusyIds, connectorId)
-  try { await logoutConnectorAccount(connectorId); ElMessage.success('账号已退出') } finally { removePending(accountBusyIds, connectorId) }
+  try { await logoutConnectorAccount(connectorId); ElMessage.success('账号已退出') } finally { removePending(accountBusyIds, connectorId); await loadConnectors().catch(() => undefined) }
 }
 
 const unbindPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
@@ -1460,6 +1612,13 @@ const saveAgentPluginConfig = async (pluginId: string) => {
   gap: 10px;
 }
 
+.connector-config-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
 .connector-config-head > div:first-child {
   display: flex;
   min-width: 0;
@@ -1488,12 +1647,44 @@ const saveAgentPluginConfig = async (pluginId: string) => {
   flex-wrap: wrap;
 }
 
+.connector-probe-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-card);
+  color: var(--yui-muted);
+  font-size: 12px;
+}
+
+.connector-probe-error {
+  color: var(--yui-danger, #dc2626);
+}
+
 .connector-delivery-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding-top: 8px;
   border-top: 1px solid var(--yui-border);
+}
+
+.connector-recovery-telemetry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 8px 10px;
+  border-radius: var(--yui-radius-card);
+  background: var(--yui-surface-muted);
+  color: var(--yui-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.connector-recovery-error {
+  color: var(--yui-danger, #dc2626);
 }
 
 .connector-delivery-item {

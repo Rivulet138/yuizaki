@@ -20,7 +20,7 @@ from functools import wraps
 from typing import Any, Callable, Dict, Mapping
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.concurrency import run_in_threadpool
@@ -35,13 +35,25 @@ from .metadata import (
   normalize_memory_validity,
   recall_rejection_reason,
 )
+from .operations import MemoryOperationLog, new_operation
 from .pipeline import RetrievalPipeline
 from .schema import MemorySearchFilters, RetrievalRequest
 from .vector_store import Document, MemoryType, is_memory_recallable
 
 VALID_MEMORY_LAYERS = {'profile', 'working', 'episodic', 'relationship', 'reflective', 'semantic', 'session'}
 VALID_MEMORY_SCOPES = {'global', 'workspace', 'session'}
+VALID_MEMORY_ROLES = {
+  'user_fact', 'relationship_event', 'task_experience',
+  'failure_reflection', 'reusable_skill', 'tool_permission',
+}
 logger = logging.getLogger(__name__)
+
+
+def _mark_deprecated(response: Response) -> None:
+  response.headers["Deprecation"] = "true"
+  response.headers["Link"] = '</memory/query>; rel="successor-version"'
+
+
 SERVER_OWNED_METADATA_FIELDS = frozenset({
   'schema_version',
   'revision',
@@ -91,6 +103,7 @@ class MemoryDocPayload(BaseModel):
   session_id: str | None = None
   layer: str | None = None
   type: str | None = None
+  memory_role: str | None = None
   importance: float | None = None
   confidence: float | None = None
   confidence_source: str | None = None
@@ -112,6 +125,11 @@ class MemoryDocPayload(BaseModel):
   def validate_layer(cls, value: str | None) -> str | None:
     return _validate_layer(value)
 
+  @field_validator('memory_role')
+  @classmethod
+  def validate_memory_role(cls, value: str | None) -> str | None:
+    return _validate_memory_role(value)
+
   @field_validator('importance', 'confidence')
   @classmethod
   def validate_unit(cls, value: float | None) -> float | None:
@@ -128,6 +146,7 @@ class MemoryDocUpdatePayload(BaseModel):
   session_id: str | None = None
   layer: str | None = None
   type: str | None = None
+  memory_role: str | None = None
   importance: float | None = None
   confidence: float | None = None
   confidence_source: str | None = None
@@ -144,6 +163,11 @@ class MemoryDocUpdatePayload(BaseModel):
   @classmethod
   def validate_layer(cls, value: str | None) -> str | None:
     return _validate_layer(value)
+
+  @field_validator('memory_role')
+  @classmethod
+  def validate_memory_role(cls, value: str | None) -> str | None:
+    return _validate_memory_role(value)
 
   @field_validator('importance', 'confidence')
   @classmethod
@@ -176,6 +200,7 @@ class MemoryCorrectionPayload(BaseModel):
   text: str = Field(min_length=1)
   reason: str | None = None
   turn_id: str | None = None
+  session_id: str | None = None
   evidence: Any = None
   confidence: float | None = None
 
@@ -189,11 +214,13 @@ class MemorySoftForgetPayload(BaseModel):
   model_config = ConfigDict(extra='forbid')
   reason: str | None = None
   turn_id: str | None = None
+  session_id: str | None = None
 
 
 class MemoryFeedbackPayload(BaseModel):
   model_config = ConfigDict(extra='forbid')
   feedback: str
+  session_id: str | None = None
 
   @field_validator('feedback')
   @classmethod
@@ -208,6 +235,7 @@ class MemoryReviewPayload(BaseModel):
   model_config = ConfigDict(extra='forbid')
   decision: str
   reason: str | None = None
+  session_id: str | None = None
 
   @field_validator('decision')
   @classmethod
@@ -254,6 +282,7 @@ class MemoryRollbackPayload(BaseModel):
   model_config = ConfigDict(extra='forbid')
   revision: int = Field(ge=1)
   reason: str | None = None
+  session_id: str | None = None
 
 
 class MemoryMaintenancePayload(BaseModel):
@@ -284,6 +313,7 @@ class MemoryAddPayload(BaseModel):
 
   text: str
   type: str | None = None
+  memory_role: str | None = None
   layer: str | None = None
   importance: float | None = None
   metadata: Dict[str, Any] = Field(default_factory=dict)
@@ -310,6 +340,11 @@ class MemoryAddPayload(BaseModel):
   def validate_layer(cls, value: str | None) -> str | None:
     return _validate_layer(value)
 
+  @field_validator('memory_role')
+  @classmethod
+  def validate_memory_role(cls, value: str | None) -> str | None:
+    return _validate_memory_role(value)
+
   @field_validator('importance', 'confidence')
   @classmethod
   def validate_unit(cls, value: float | None) -> float | None:
@@ -322,6 +357,7 @@ class MemoryRagQueryPayload(BaseModel):
   query: str
   top_k: int = Field(default=5, ge=1, le=50)
   memory_types: list[str] | None = None
+  memory_role: str | None = None
   recency_weight: float = Field(default=0.2, ge=0, le=1)
   scope: str | None = None
   session_id: str | None = None
@@ -330,6 +366,7 @@ class MemoryRagQueryPayload(BaseModel):
   expand_relations: bool = True
   relation_limit: int = Field(default=20, ge=0, le=100)
   relation_depth: int = Field(default=1, ge=1, le=3)
+  context_budget_tokens: int = Field(default=1200, ge=128, le=32000)
 
   @field_validator('scope')
   @classmethod
@@ -348,9 +385,19 @@ class MemoryRagQueryPayload(BaseModel):
         layers.append(layer)
     return layers
 
+  @field_validator('memory_role')
+  @classmethod
+  def validate_memory_role(cls, value: str | None) -> str | None:
+    return _validate_memory_role(value)
+
 
 def _payload_dict(payload: BaseModel) -> Dict[str, Any]:
-  return payload.model_dump(exclude_none=True)
+  data = payload.model_dump(exclude_none=True)
+  if 'session_id' in data:
+    data['session_id'] = _normalize_optional_session_id(data['session_id'])
+  if 'workspace_id' in data:
+    data['workspace_id'] = _normalize_optional_workspace_id(data['workspace_id'])
+  return data
 
 
 def _validate_scope(value: str | None) -> str | None:
@@ -362,12 +409,31 @@ def _validate_scope(value: str | None) -> str | None:
   return normalized
 
 
+def _require_session_id(scope: str | None, session_id: str | None) -> None:
+  if scope == 'session' and not _normalize_optional_session_id(session_id):
+    raise ValueError('session_id is required for session scope')
+
+
+def _validate_write_scope(scope: str | None, session_id: str | None) -> None:
+  resolved_scope = _validate_scope(scope) if scope else ('session' if session_id else None)
+  _require_session_id(resolved_scope, session_id)
+
+
 def _validate_layer(value: str | None) -> str | None:
   if value is None:
     return None
   normalized = value.strip()
   if normalized not in VALID_MEMORY_LAYERS:
     raise ValueError(f"layer must be one of {sorted(VALID_MEMORY_LAYERS)}")
+  return normalized
+
+
+def _validate_memory_role(value: str | None) -> str | None:
+  if value is None:
+    return None
+  normalized = value.strip()
+  if normalized not in VALID_MEMORY_ROLES:
+    raise ValueError(f"memory_role must be one of {sorted(VALID_MEMORY_ROLES)}")
   return normalized
 
 
@@ -380,12 +446,18 @@ def _validate_unit_field(value: float | None) -> float | None:
 
 
 def _normalize_optional_workspace_id(value: Any) -> str | None:
-  workspace_id = str(value or '').strip()
-  return workspace_id or None
+  normalized = str(value or '').strip()
+  return normalized or None
+
+
+def _normalize_optional_session_id(value: Any) -> str | None:
+  return _normalize_optional_workspace_id(value)
 
 
 def build_memory_metadata(payload: Dict[str, Any], *, layer: str, scope: str, memory_type: str, importance: float) -> Dict[str, Any]:
   now = datetime.now().isoformat()
+  session_id = _normalize_optional_session_id(payload.get('session_id'))
+  workspace_id = _normalize_optional_workspace_id(payload.get('workspace_id'))
   metadata = {
     **(payload.get('metadata') or {}),
     'layer': layer,
@@ -393,9 +465,10 @@ def build_memory_metadata(payload: Dict[str, Any], *, layer: str, scope: str, me
     'type': memory_type,
     'importance': importance,
     'timestamp': now,
-    'session_id': payload.get('session_id'),
-    'workspace_id': payload.get('workspace_id'),
+    'session_id': session_id,
+    'workspace_id': workspace_id,
   }
+  metadata['memory_role'] = _resolve_memory_role({**payload, 'layer': layer, 'type': memory_type})
   metadata.update(_score_memory_quality(payload, metadata, importance=importance))
   return metadata
 
@@ -414,6 +487,44 @@ def _memory_type_value(value: Any) -> str:
   if raw.startswith('MemoryType.'):
     return raw.split('.', 1)[1].lower()
   return raw or MemoryType.FACT.value
+
+
+def _resolve_memory_role(payload: Dict[str, Any]) -> str:
+  explicit = payload.get('memory_role')
+  if explicit is None and isinstance(payload.get('metadata'), dict):
+    explicit = payload['metadata'].get('memory_role')
+  validated = _validate_memory_role(str(explicit).strip() if explicit is not None else None)
+  if validated:
+    return validated
+  metadata = payload.get('metadata') or {}
+  source = str(metadata.get('source') or '').strip().lower() if isinstance(metadata, dict) else ''
+  layer = str(payload.get('layer') or '').strip().lower()
+  memory_type = _memory_type_value(payload.get('type', MemoryType.FACT))
+  if source == 'relationship' or layer == 'relationship':
+    return 'relationship_event'
+  if source in {'reflection', 'failure', 'failure_reflection'} or layer == 'reflective':
+    return 'failure_reflection'
+  if source in {'tool', 'permission', 'tool_permission'}:
+    return 'tool_permission'
+  if source in {'skill', 'reusable_skill'}:
+    return 'reusable_skill'
+  if memory_type == MemoryType.EVENT or layer in {'episodic', 'working'}:
+    return 'task_experience'
+  return 'user_fact'
+
+
+def _apply_memory_role_governance(metadata: Dict[str, Any], role: str) -> Dict[str, Any]:
+  """Keep operational permission history review-only and out of normal recall."""
+  metadata['memory_role'] = role
+  if role == 'tool_permission':
+    metadata.update({
+      'sensitivity': 'high',
+      'sensitive_category': 'tool_permission',
+      'review_required': True,
+      'candidate': True,
+      'review_status': 'pending',
+    })
+  return metadata
 
 
 def _coerce_unit(value: Any, default: float) -> float:
@@ -458,6 +569,8 @@ def _append_audit(metadata: Dict[str, Any], *, action: str, reason: str | None =
     'action': action,
     'actor': 'memory-api',
   }
+  if metadata.get('memory_role'):
+    event['memory_role'] = metadata['memory_role']
   if reason:
     event['reason'] = reason
   if before:
@@ -522,10 +635,20 @@ def _candidate_payload(doc: Document, score: float) -> Dict[str, Any]:
     'layer': metadata.get('layer'),
     'scope': metadata.get('scope'),
     'type': metadata.get('type'),
+    'memory_role': metadata.get('memory_role'),
     'importance': metadata.get('importance'),
     'confidence': metadata.get('confidence'),
     'quality_score': metadata.get('quality_score'),
   }
+
+
+def _memory_role_counts(documents: list[Document]) -> Dict[str, int]:
+  counts: Dict[str, int] = {}
+  for document in documents:
+    metadata = document.metadata or {}
+    role = _resolve_memory_role(metadata)
+    counts[role] = counts.get(role, 0) + 1
+  return dict(sorted(counts.items()))
 
 
 def _find_merge_candidates(
@@ -536,6 +659,7 @@ def _find_merge_candidates(
   scope: str,
   workspace_id: str | None,
   session_id: str | None,
+  memory_role: str | None = None,
   threshold: float,
   exclude_id: str | None = None,
 ) -> list[Dict[str, Any]]:
@@ -547,6 +671,7 @@ def _find_merge_candidates(
     workspace_id=workspace_id,
     session_id=session_id,
     layers=[layer],
+    memory_role=memory_role,
   )
   results = store.search_with_rerank(query=query, top_k=5, filters=filters, quality_weight=0.0, recency_weight=0.0)
   normalized = ' '.join(query.lower().split())
@@ -601,7 +726,10 @@ def route_memory_write(
   metadata: Dict[str, Any] | None = None,
   explicit_layer: str | None = None,
   explicit_scope: str | None = None,
+  memory_role: str | None = None,
 ) -> Dict[str, Any]:
+  session_id = _normalize_optional_session_id(session_id)
+  workspace_id = _normalize_optional_workspace_id(workspace_id)
   payload: Dict[str, Any] = {
     'text': text,
     'type': memory_type,
@@ -609,6 +737,7 @@ def route_memory_write(
     'session_id': session_id,
     'workspace_id': workspace_id,
     'metadata': metadata or {},
+    'memory_role': memory_role,
   }
   if explicit_layer:
     payload['layer'] = explicit_layer
@@ -616,10 +745,14 @@ def route_memory_write(
     payload['scope'] = explicit_scope
   layer = _resolve_memory_layer(payload)
   scope = _resolve_memory_scope(payload)
+  memory_role = _resolve_memory_role(payload)
+  metadata = build_memory_metadata(payload, layer=layer, scope=scope, memory_type=memory_type, importance=importance)
+  _apply_memory_role_governance(metadata, memory_role)
   return {
     'layer': layer,
     'scope': scope,
-    'metadata': build_memory_metadata(payload, layer=layer, scope=scope, memory_type=memory_type, importance=importance),
+    'memory_role': memory_role,
+    'metadata': metadata,
   }
 
 
@@ -721,6 +854,7 @@ class MemoryState:
   rebuild_task: asyncio.Task[Any] | None = field(default=None, repr=False)
   rebuild_cancel_event: threading.Event | None = field(default=None, repr=False)
   rebuild_launch_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+  operation_log: MemoryOperationLog = field(default_factory=MemoryOperationLog, repr=False)
 
 
 def create_memory_router(
@@ -812,12 +946,81 @@ def create_memory_router(
         },
       )
 
+  def _ensure_doc_scope_access(doc: Document, *, session_id: str | None = None) -> None:
+    """Keep session-scoped mutations bound to the session that owns them."""
+    _ensure_doc_in_active_workspace(doc)
+    metadata = doc.metadata or {}
+    if str(metadata.get('scope') or 'workspace') != 'session':
+      return
+    document_session_id = _normalize_optional_workspace_id(metadata.get('session_id'))
+    requested_session_id = _normalize_optional_workspace_id(session_id)
+    if document_session_id and requested_session_id == document_session_id:
+      return
+    raise HTTPException(
+      status_code=403,
+      detail={
+        "error": "session_mismatch",
+        "message": "Session-scoped memory requires its owning session",
+        "document_session_id": document_session_id,
+      },
+    )
+
   async def _run_store_call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     try:
       async with state.io_lock:
         return await run_in_threadpool(lambda: fn(*args, **kwargs))
     except MemorySearchIncompleteError as exc:
       raise HTTPException(status_code=503, detail=exc.to_detail()) from exc
+
+  async def _run_dedupe_search(**kwargs: Any) -> list[Dict[str, Any]]:
+    """Fail closed when duplicate evidence is incomplete instead of writing blindly."""
+    try:
+      return await _run_store_call(_find_merge_candidates, state.store, **kwargs)
+    except HTTPException as exc:
+      if exc.status_code != 503 or not isinstance(exc.detail, dict):
+        raise
+      detail = dict(exc.detail)
+      detail.update({
+        "error": "memory_dedupe_incomplete",
+        "operation": "dedupe",
+        "complete": False,
+        "backend": getattr(state.store, "backend_name", "unknown"),
+        "cause": str(exc.detail.get("error") or MemorySearchIncompleteError.code),
+      })
+      raise HTTPException(status_code=503, detail=detail) from exc
+
+  async def _record_operation(
+    *,
+    operation: str,
+    document_id: str,
+    document: Document | None = None,
+    previous: Document | None = None,
+    reason: str | None = None,
+    evidence: Any = None,
+    details: Mapping[str, Any] | None = None,
+  ) -> None:
+    metadata = document.metadata if document is not None else {}
+    previous_metadata = previous.metadata if previous is not None else {}
+    event = new_operation(
+      operation=operation,
+      document_id=document_id,
+      scope=str(metadata.get('scope')) if metadata.get('scope') else None,
+      workspace_id=str(metadata.get('workspace_id')) if metadata.get('workspace_id') else None,
+      session_id=str(metadata.get('session_id')) if metadata.get('session_id') else None,
+      reason=reason,
+      evidence=evidence,
+      before_revision=int(previous_metadata.get('revision')) if previous_metadata.get('revision') is not None else None,
+      after_revision=int(metadata.get('revision')) if metadata.get('revision') is not None else None,
+      details=dict(details or {}),
+    )
+    recorder = getattr(state.store, 'record_operation', None)
+    try:
+      if callable(recorder):
+        await _run_store_call(recorder, event)
+      else:
+        state.operation_log.append(event)
+    except Exception as exc:  # noqa: BLE001 - ledger is explanatory, not write authority
+      logger.warning("Failed to record memory operation %s: %s", event.operation_id, exc)
 
   def _serialized_mutation(handler: Callable[..., Any]) -> Callable[..., Any]:
     @wraps(handler)
@@ -835,6 +1038,14 @@ def create_memory_router(
     ]
     for doc_id in doc_ids:
       await _run_store_call(state.store.delete_document, doc_id)
+      existing = next((doc for doc in documents if doc.id == doc_id), None)
+      if existing is not None:
+        await _record_operation(
+          operation='delete',
+          document_id=doc_id,
+          previous=existing,
+          reason='permanent_delete',
+        )
     # Keep a metadata-only tombstone for review candidates. This is the
     # candidate-specific replay guard; ordinary document deletion remains a
     # physical delete as before.
@@ -888,7 +1099,38 @@ def create_memory_router(
           old_metadata=existing.metadata,
           new_metadata=metadata,
         )
-    await _run_store_call(state.store.add_document, Document(id=doc.id, text=doc.text, metadata=metadata))
+    written = Document(id=doc.id, text=doc.text, metadata=metadata)
+    await _run_store_call(state.store.add_document, written)
+    latest_action = None
+    audit = metadata.get('audit')
+    if isinstance(audit, list) and audit and isinstance(audit[-1], Mapping):
+      latest_action = str(audit[-1].get('action') or '').strip().lower()
+    operation = {
+      'create': 'create',
+      'update': 'update',
+      'correction': 'correction',
+      'review': 'review',
+      'review_approve': 'review',
+      'review_reject': 'review',
+      'soft_forget': 'forget',
+      'restore': 'restore',
+      'rollback': 'rollback',
+      'delete_candidate': 'delete',
+      'maintenance': 'maintenance',
+    }.get(latest_action or '', 'update' if existing is not None else 'create')
+    reason = None
+    evidence = None
+    if isinstance(audit, list) and audit and isinstance(audit[-1], Mapping):
+      reason = str(audit[-1].get('reason') or '').strip() or None
+      evidence = audit[-1].get('evidence')
+    await _record_operation(
+      operation=operation,
+      document_id=doc.id,
+      document=written,
+      previous=existing,
+      reason=reason,
+      evidence=evidence,
+    )
 
   async def _compact_storage() -> Dict[str, Any] | None:
     compact_storage = getattr(state.store, 'compact_storage', None)
@@ -919,7 +1161,9 @@ def create_memory_router(
     if scope == 'global':
       return doc_scope == 'global'
     if scope == 'session':
-      return doc_scope == 'session' and bool(session_id) and metadata.get('session_id') == session_id
+      requested_session_id = _normalize_optional_session_id(session_id)
+      document_session_id = _normalize_optional_session_id(metadata.get('session_id'))
+      return doc_scope == 'session' and bool(requested_session_id) and document_session_id == requested_session_id
     if scope == 'workspace':
       if doc_scope != 'workspace':
         return False
@@ -1066,8 +1310,10 @@ def create_memory_router(
     layer: str | None = None,
     include_state: str = 'active',
   ) -> Dict[str, Any]:
+    session_id = _normalize_optional_session_id(session_id)
     try:
       resolved_scope = _validate_scope(scope) or 'workspace'
+      _require_session_id(resolved_scope, session_id)
       resolved_layer = _validate_layer(layer) if layer else None
       if include_state not in {'active', 'forgotten', 'all'}:
         raise ValueError('include_state must be active, forgotten, or all')
@@ -1098,6 +1344,54 @@ def create_memory_router(
       ]
     }
 
+  @router.get("/operations")
+  async def list_operations(
+    document_id: str | None = None,
+    scope: str | None = None,
+    workspace_id: str | None = None,
+    session_id: str | None = None,
+    limit: int = 100,
+  ) -> Dict[str, Any]:
+    """Return the explainable lifecycle ledger for memory mutations."""
+    session_id = _normalize_optional_session_id(session_id)
+    try:
+      resolved_scope = _validate_scope(scope) or 'workspace'
+      _require_session_id(resolved_scope, session_id)
+      resolved_workspace_id = _resolve_request_workspace_id(
+        workspace_id,
+        scope=resolved_scope,
+        default_for_workspace_scope=resolved_scope == 'workspace',
+      )
+    except ValueError as exc:
+      raise HTTPException(status_code=400, detail=str(exc)) from exc
+    bounded_limit = max(1, min(500, int(limit)))
+    reader = getattr(state.store, 'list_operations', None)
+    if callable(reader):
+      operations = await _run_store_call(
+        reader,
+        document_id=document_id,
+        scope=resolved_scope,
+        workspace_id=resolved_workspace_id,
+        session_id=session_id,
+        limit=bounded_limit,
+      )
+    else:
+      operations = state.operation_log.list(
+        document_id=document_id,
+        scope=resolved_scope,
+        workspace_id=resolved_workspace_id,
+        session_id=session_id,
+        limit=bounded_limit,
+      )
+    return {
+      'status': 'ok',
+      'operations': operations,
+      'count': len(operations),
+      'scope': resolved_scope,
+      'workspace_id': resolved_workspace_id,
+      'session_id': session_id,
+    }
+
   @router.get("/export")
   async def export_memory(
     scope: str | None = None,
@@ -1110,8 +1404,10 @@ def create_memory_router(
     The export is intentionally metadata-first and excludes vector/index data;
     the index can be rebuilt from the exported records after restore.
     """
+    session_id = _normalize_optional_session_id(session_id)
     try:
       resolved_scope = _validate_scope(scope) or 'workspace'
+      _require_session_id(resolved_scope, session_id)
       if include_state not in {'active', 'forgotten', 'all'}:
         raise ValueError('include_state must be active, forgotten, or all')
       resolved_workspace_id = _resolve_request_workspace_id(
@@ -1164,8 +1460,10 @@ def create_memory_router(
     workspace_id: str | None = None,
     session_id: str | None = None,
   ) -> Dict[str, Any]:
+    session_id = _normalize_optional_session_id(session_id)
     try:
       resolved_scope = _validate_scope(scope) or 'workspace'
+      _require_session_id(resolved_scope, session_id)
       resolved_workspace_id = _resolve_request_workspace_id(
         workspace_id,
         scope=resolved_scope,
@@ -1243,15 +1541,22 @@ def create_memory_router(
     records are skipped so an export can never revive rejected, deleted, or
     superseded memory entries.
     """
+    payload_dict = _payload_dict(payload)
+    session_id = payload_dict.get('session_id')
+    workspace_id = payload_dict.get('workspace_id')
     if payload.version != 1:
       raise HTTPException(status_code=400, detail='unsupported memory export version')
+    try:
+      _validate_write_scope(payload.scope, session_id)
+    except ValueError as exc:
+      raise HTTPException(status_code=400, detail=str(exc)) from exc
     resolved_workspace_id = _resolve_request_workspace_id(
-      payload.workspace_id,
+      workspace_id,
       scope=payload.scope,
       default_for_workspace_scope=True,
     )
     target_workspace_id = resolved_workspace_id if payload.scope == 'workspace' else None
-    target_session_id = payload.session_id if payload.scope == 'session' else None
+    target_session_id = session_id if payload.scope == 'session' else None
     existing_ids = {
       doc.id for doc in await _run_store_call(state.store.list_documents)
     }
@@ -1298,7 +1603,13 @@ def create_memory_router(
       existing_ids.add(imported_id)
       if source_metadata.get('soft_forgotten'):
         try:
-          await soft_forget_doc(imported_id, MemorySoftForgetPayload(reason='memory_import_restore'))
+          await soft_forget_doc(
+            imported_id,
+            MemorySoftForgetPayload(
+              reason='memory_import_restore',
+              session_id=target_session_id,
+            ),
+          )
           restored_count += 1
         except HTTPException as exc:
           skipped.append({'id': imported_id, 'reason': 'restore_state_failed', 'detail': exc.detail})
@@ -1327,6 +1638,11 @@ def create_memory_router(
   @router.post('/maintenance/preview')
   async def preview_memory_maintenance(payload: MemoryMaintenancePayload) -> Dict[str, Any]:
     resolved_scope = payload.scope or 'workspace'
+    session_id = _normalize_optional_session_id(payload.session_id)
+    try:
+      _require_session_id(resolved_scope, session_id)
+    except ValueError as exc:
+      raise HTTPException(status_code=400, detail=str(exc)) from exc
     resolved_workspace_id = _resolve_request_workspace_id(
       payload.workspace_id,
       scope=resolved_scope,
@@ -1335,7 +1651,7 @@ def create_memory_router(
     documents = await _run_store_call(state.store.list_documents)
     return _build_maintenance_plan(
       documents,
-      payload,
+      payload.model_copy(update={'session_id': session_id}),
       scope=resolved_scope,
       workspace_id=resolved_workspace_id,
     )
@@ -1352,6 +1668,11 @@ def create_memory_router(
         },
       )
     resolved_scope = payload.scope or 'workspace'
+    session_id = _normalize_optional_session_id(payload.session_id)
+    try:
+      _require_session_id(resolved_scope, session_id)
+    except ValueError as exc:
+      raise HTTPException(status_code=400, detail=str(exc)) from exc
     resolved_workspace_id = _resolve_request_workspace_id(
       payload.workspace_id,
       scope=resolved_scope,
@@ -1360,7 +1681,7 @@ def create_memory_router(
     documents = await _run_store_call(state.store.list_documents)
     plan = _build_maintenance_plan(
       documents,
-      payload,
+      payload.model_copy(update={'session_id': session_id}),
       scope=resolved_scope,
       workspace_id=resolved_workspace_id,
     )
@@ -1382,16 +1703,69 @@ def create_memory_router(
       'storage': await _compact_storage(),
     }
 
+  def _prepare_new_memory(
+    payload_dict: Mapping[str, Any],
+    *,
+    doc_id: str,
+    text: str,
+  ) -> tuple[Document, Dict[str, Any]]:
+    """Build the canonical document shared by create and compatibility writes."""
+    source_metadata = _normalize_expiry_for_write(
+      _sanitize_create_metadata(dict(payload_dict.get("metadata") or {}))
+    )
+    memory_type = _memory_type_value(
+      payload_dict.get("type") or source_metadata.get("type") or MemoryType.FACT
+    )
+    importance = _coerce_importance(
+      payload_dict.get("importance", source_metadata.get("importance", 0.5))
+    )
+    workspace_id = _resolve_request_workspace_id(
+      payload_dict.get("workspace_id"),
+      scope=payload_dict.get("scope"),
+      default_for_workspace_scope=True,
+    )
+    routing = route_memory_write(
+      text=text,
+      memory_type=memory_type,
+      importance=importance,
+      session_id=payload_dict.get("session_id"),
+      workspace_id=workspace_id,
+      metadata=source_metadata,
+      explicit_layer=payload_dict.get("layer") if isinstance(payload_dict.get("layer"), str) else None,
+      explicit_scope=payload_dict.get("scope") if isinstance(payload_dict.get("scope"), str) else None,
+      memory_role=payload_dict.get("memory_role") if isinstance(payload_dict.get("memory_role"), str) else None,
+    )
+    metadata = _normalize_expiry_for_write(dict(routing["metadata"]))
+    _apply_provenance(metadata, dict(payload_dict), preserve=False)
+    metadata["confidence_history"].append({
+      "at": metadata.get("timestamp"),
+      "confidence": metadata.get("confidence"),
+      "source": "create",
+    })
+    _append_audit(metadata, action="create")
+    return Document(id=doc_id, text=text, metadata=metadata), {
+      "type": memory_type,
+      "memory_role": routing["memory_role"],
+      "layer": routing["layer"],
+      "scope": routing["scope"],
+      "workspace_id": metadata.get("workspace_id"),
+      "importance": importance,
+    }
+
   @router.post("/docs")
   @_serialized_mutation
   async def add_doc(payload: MemoryDocPayload) -> Dict[str, Any]:
+    try:
+      _validate_write_scope(payload.scope, payload.session_id)
+    except ValueError as exc:
+      raise HTTPException(status_code=400, detail=str(exc)) from exc
     payload_dict = _payload_dict(payload)
     doc_id = str(payload_dict.get("id") or f"doc_{uuid4().hex}")
     if payload.id is not None:
       documents = await _run_store_call(state.store.list_documents)
       existing = next((doc for doc in documents if doc.id == doc_id), None)
       if existing is not None:
-        _ensure_doc_in_active_workspace(existing)
+        _ensure_doc_scope_access(existing, session_id=payload.session_id)
         existing_metadata = dict(existing.metadata or {})
         review_status = str(existing_metadata.get('review_status') or '').strip().lower()
         if (
@@ -1411,59 +1785,29 @@ def create_memory_router(
             },
           )
     text = str(payload_dict.get("text") or "")
-    metadata = _normalize_expiry_for_write(
-      _sanitize_create_metadata(dict(payload_dict.get("metadata") or {}))
-    )
-    memory_type = _memory_type_value(payload_dict.get("type") or metadata.get("type") or MemoryType.FACT)
-    importance = _coerce_importance(payload_dict.get("importance", metadata.get("importance", 0.5)))
-    routing_payload = {
-      **payload_dict,
-      "type": memory_type,
-      "importance": importance,
-      "metadata": metadata,
-    }
-    layer = _resolve_memory_layer(routing_payload)
-    scope = _resolve_memory_scope(routing_payload)
-    workspace_id = _resolve_request_workspace_id(
-      payload_dict.get("workspace_id"),
-      scope=scope,
-      default_for_workspace_scope=True,
-    )
-    now = datetime.now().isoformat()
-    metadata = {
-      **metadata,
-      "layer": layer,
-      "scope": scope,
-      "type": memory_type,
-      "importance": importance,
-      "timestamp": now,
-      "session_id": payload_dict.get("session_id"),
-      "workspace_id": workspace_id,
-    }
-    metadata.update(_score_memory_quality({**payload_dict, "text": text}, metadata, importance=importance))
-    _apply_provenance(metadata, payload_dict, preserve=False)
-    metadata['confidence_history'].append({'at': now, 'confidence': metadata.get('confidence'), 'source': 'create'})
-    _append_audit(metadata, action='create')
+    document, info = _prepare_new_memory(payload_dict, doc_id=doc_id, text=text)
     if payload.dedupe:
-      candidates = await _run_store_call(
-        _find_merge_candidates,
-        state.store,
+      candidates = await _run_dedupe_search(
         text=text,
-        layer=layer,
-        scope=scope,
-        workspace_id=workspace_id,
+        layer=str(info["layer"]),
+        scope=str(info["scope"]),
+        workspace_id=info["workspace_id"],
         session_id=payload_dict.get("session_id"),
+        memory_role=str(info["memory_role"]),
         threshold=_coerce_unit(payload.dedupe_threshold, 0.92),
       )
       if candidates:
         return {"status": "duplicate_candidates", "skipped": True, "id": doc_id, "duplicate_candidates": candidates}
-    doc = Document(id=doc_id, text=text, metadata=metadata)
-    await _write_memory_document(doc)
+    await _write_memory_document(document)
     return {"status": "ok", "id": doc_id}
 
   @router.post("/docs/batch-delete")
   @_serialized_mutation
-  async def batch_delete_docs(payload: MemoryDocBatchDeletePayload) -> Dict[str, Any]:
+  async def batch_delete_docs(
+    payload: MemoryDocBatchDeletePayload,
+    session_id: str | None = None,
+  ) -> Dict[str, Any]:
+    session_id = _normalize_optional_session_id(session_id)
     doc_ids = payload.ids
     documents = await _run_store_call(state.store.list_documents)
     docs_by_id = {doc.id: doc for doc in documents}
@@ -1480,7 +1824,7 @@ def create_memory_router(
       )
 
     for doc_id in doc_ids:
-      _ensure_doc_in_active_workspace(docs_by_id[doc_id])
+      _ensure_doc_scope_access(docs_by_id[doc_id], session_id=session_id)
 
     candidate_ids = [doc_id for doc_id in doc_ids if (docs_by_id[doc_id].metadata or {}).get('candidate')]
     hard_delete_ids = [doc_id for doc_id in doc_ids if doc_id not in candidate_ids]
@@ -1496,12 +1840,17 @@ def create_memory_router(
       "status": "deleted",
       "ids": doc_ids,
       "deleted_count": len(doc_ids),
+      "memory_role_counts": _memory_role_counts([docs_by_id[doc_id] for doc_id in doc_ids]),
       "cleared_message_references": cleared_references,
       "storage": await _compact_storage(),
     }
 
   @router.post("/docs/delete-preview")
-  async def preview_delete_docs(payload: MemoryDocBatchDeletePayload) -> Dict[str, Any]:
+  async def preview_delete_docs(
+    payload: MemoryDocBatchDeletePayload,
+    session_id: str | None = None,
+  ) -> Dict[str, Any]:
+    session_id = _normalize_optional_session_id(session_id)
     doc_ids = payload.ids
     documents = await _run_store_call(state.store.list_documents)
     docs_by_id = {doc.id: doc for doc in documents}
@@ -1517,7 +1866,7 @@ def create_memory_router(
         },
       )
     for doc_id in doc_ids:
-      _ensure_doc_in_active_workspace(docs_by_id[doc_id])
+      _ensure_doc_scope_access(docs_by_id[doc_id], session_id=session_id)
     candidate_count = sum(1 for doc_id in doc_ids if (docs_by_id[doc_id].metadata or {}).get('candidate'))
     hard_delete_count = len(doc_ids) - candidate_count
     reference_count = 0
@@ -1529,6 +1878,11 @@ def create_memory_router(
       'status': 'preview',
       'ids': doc_ids,
       'total_count': len(doc_ids),
+      'memory_role_counts': _memory_role_counts([docs_by_id[doc_id] for doc_id in doc_ids]),
+      'review_only_count': sum(
+        1 for doc_id in doc_ids
+        if _resolve_memory_role(docs_by_id[doc_id].metadata or {}) == 'tool_permission'
+      ),
       'hard_delete_count': hard_delete_count,
       'candidate_tombstone_count': candidate_count,
       'affected_message_count': reference_count,
@@ -1540,15 +1894,18 @@ def create_memory_router(
       },
     }
 
-  @router.put("/docs/{doc_id:path}")
-  @_serialized_mutation
-  async def update_doc(doc_id: str, payload: MemoryDocUpdatePayload) -> Dict[str, Any]:
+  async def _update_doc_impl(
+    doc_id: str,
+    payload: MemoryDocUpdatePayload,
+    *,
+    audit_action: str,
+  ) -> Dict[str, Any]:
     payload_dict = _payload_dict(payload)
     documents = await _run_store_call(state.store.list_documents)
     existing = next((doc for doc in documents if doc.id == doc_id), None)
     if existing is None:
       raise HTTPException(status_code=404, detail="memory document not found")
-    _ensure_doc_in_active_workspace(existing)
+    _ensure_doc_scope_access(existing, session_id=payload.session_id)
 
     text = str(payload_dict.get("text") if payload_dict.get("text") is not None else existing.text).strip()
     if not text:
@@ -1580,6 +1937,7 @@ def create_memory_router(
       "text": text,
     }
     layer = _resolve_memory_layer(routing_payload)
+    memory_role = _resolve_memory_role(routing_payload)
     scope = _resolve_memory_scope(routing_payload)
     workspace_id = _resolve_request_workspace_id(
       routing_payload.get("workspace_id"),
@@ -1598,6 +1956,7 @@ def create_memory_router(
       "layer": layer,
       "scope": scope,
       "type": memory_type,
+      "memory_role": memory_role,
       "importance": importance,
       "timestamp": str(merged_metadata.get("timestamp") or now),
       "updated_at": now,
@@ -1605,6 +1964,7 @@ def create_memory_router(
       "workspace_id": workspace_id,
     }
     metadata.update(_score_memory_quality(routing_payload, metadata, importance=importance))
+    _apply_memory_role_governance(metadata, memory_role)
     _apply_provenance(metadata, routing_payload, preserve=True)
     if payload_dict.get('confidence') is not None and payload_dict.get('confidence') != existing_metadata.get('confidence'):
       metadata['confidence_history'].append({'at': now, 'confidence': metadata.get('confidence'), 'source': 'update', 'reason': payload.edit_reason})
@@ -1621,63 +1981,44 @@ def create_memory_router(
         correction['evidence'] = payload.evidence
       corrections.append(correction)
       metadata['correction_history'] = corrections[-25:]
-    _append_audit(metadata, action='update', reason=payload.edit_reason, before=before)
+    _append_audit(metadata, action=audit_action, reason=payload.edit_reason, before=before)
 
     await _write_memory_document(Document(id=doc_id, text=text, metadata=metadata))
     return {"status": "updated", "id": doc_id, "layer": layer, "scope": scope, "importance": importance}
+
+  @router.put("/docs/{doc_id:path}")
+  @_serialized_mutation
+  async def update_doc(doc_id: str, payload: MemoryDocUpdatePayload) -> Dict[str, Any]:
+    return await _update_doc_impl(doc_id, payload, audit_action='update')
 
   @router.post("/memory/add")
   @_serialized_mutation
   async def add_memory(payload: MemoryAddPayload) -> Dict[str, Any]:
     """Add typed memory with importance filtering (Week 1 Task 1.3)"""
+    try:
+      _validate_write_scope(payload.scope, payload.session_id)
+    except ValueError as exc:
+      raise HTTPException(status_code=400, detail=str(exc)) from exc
     payload_dict = _payload_dict(payload)
     text = payload.text.strip()
     if not text:
       raise HTTPException(status_code=400, detail="text is required")
 
-    memory_type = _memory_type_value(payload_dict.get("type", MemoryType.FACT))
     importance = _coerce_importance(payload_dict.get("importance", 0.5))
 
     # Filter low-importance memories
     if importance < 0.3:
       return {"skipped": True, "reason": "low_importance", "threshold": 0.3}
 
-    doc_id = str(uuid4())
-    layer = _resolve_memory_layer(payload_dict)
-    scope = _resolve_memory_scope(payload_dict)
-    workspace_id = _resolve_request_workspace_id(
-      payload_dict.get('workspace_id'),
-      scope=scope,
-      default_for_workspace_scope=True,
-    )
-    routing = route_memory_write(
-      text=str(text),
-      memory_type=_memory_type_value(memory_type),
-      importance=importance,
-      session_id=payload_dict.get('session_id'),
-      workspace_id=workspace_id,
-      metadata=_sanitize_create_metadata(
-        payload_dict.get('metadata') if isinstance(payload_dict.get('metadata'), dict) else {}
-      ),
-      explicit_layer=payload_dict.get('layer') if isinstance(payload_dict.get('layer'), str) else None,
-      explicit_scope=payload_dict.get('scope') if isinstance(payload_dict.get('scope'), str) else None,
-    )
-    layer = routing['layer']
-    scope = routing['scope']
-    metadata = routing['metadata']
-    metadata = _normalize_expiry_for_write(metadata)
-    _apply_provenance(metadata, payload_dict, preserve=False)
-    metadata['confidence_history'].append({'at': metadata.get('timestamp'), 'confidence': metadata.get('confidence'), 'source': 'create'})
-    _append_audit(metadata, action='create')
+    document, info = _prepare_new_memory(payload_dict, doc_id=str(uuid4()), text=str(text))
     if payload.dedupe:
-      candidates = await _run_store_call(
-        _find_merge_candidates,
-        state.store,
+      candidates = await _run_dedupe_search(
         text=str(text),
-        layer=layer,
-        scope=scope,
-        workspace_id=workspace_id,
+        layer=str(info['layer']),
+        scope=str(info['scope']),
+        workspace_id=info['workspace_id'],
         session_id=payload_dict.get('session_id'),
+        memory_role=str(info['memory_role']),
         threshold=_coerce_unit(payload.dedupe_threshold, 0.92),
       )
       if candidates:
@@ -1686,24 +2027,24 @@ def create_memory_router(
           "skipped": True,
           "reason": "similar_memory_exists",
           "duplicate_candidates": candidates,
-          "layer": layer,
-          "scope": scope,
+          "layer": info['layer'],
+          "scope": info['scope'],
           "importance": importance,
         }
 
-    doc = Document(id=doc_id, text=text, metadata=metadata)
-    await _write_memory_document(doc)
+    await _write_memory_document(document)
 
-    return {"status": "ok", "id": doc_id, "type": memory_type, "layer": layer, "scope": scope, "importance": importance}
+    return {"status": "ok", "id": document.id, "type": info['type'], "memory_role": info['memory_role'], "layer": info['layer'], "scope": info['scope'], "importance": info['importance']}
 
   @router.delete("/docs/{doc_id:path}")
   @_serialized_mutation
-  async def delete_doc(doc_id: str) -> Dict[str, Any]:
+  async def delete_doc(doc_id: str, session_id: str | None = None) -> Dict[str, Any]:
+    session_id = _normalize_optional_session_id(session_id)
     documents = await _run_store_call(state.store.list_documents)
     existing = next((doc for doc in documents if doc.id == doc_id), None)
     if existing is None:
       raise HTTPException(status_code=404, detail="memory document not found")
-    _ensure_doc_in_active_workspace(existing)
+    _ensure_doc_scope_access(existing, session_id=session_id)
     if (existing.metadata or {}).get('candidate'):
       metadata = dict(existing.metadata or {})
       metadata['review_status'] = 'deleted'
@@ -1737,7 +2078,7 @@ def create_memory_router(
     existing = next((doc for doc in documents if doc.id == doc_id), None)
     if existing is None:
       raise HTTPException(status_code=404, detail="memory document not found")
-    _ensure_doc_in_active_workspace(existing)
+    _ensure_doc_scope_access(existing, session_id=payload.session_id)
     metadata = dict(existing.metadata or {})
     summary = metadata.get('recall_feedback')
     summary = dict(summary) if isinstance(summary, dict) else {}
@@ -1755,18 +2096,29 @@ def create_memory_router(
     if not callable(updater):
       raise HTTPException(status_code=501, detail='memory backend does not support metadata feedback')
     await _run_store_call(updater, doc_id, metadata)
+    updated = Document(id=existing.id, text=existing.text, metadata=metadata)
+    await _record_operation(
+      operation='feedback',
+      document_id=doc_id,
+      document=updated,
+      previous=existing,
+      reason=f'recall_{payload.feedback}',
+      details={'feedback': payload.feedback},
+    )
     return {'status': 'recorded', 'id': doc_id, 'feedback': payload.feedback, 'counts': summary['summary']}
 
   @router.post("/docs/{doc_id:path}/correction")
+  @_serialized_mutation
   async def correct_doc(doc_id: str, payload: MemoryCorrectionPayload) -> Dict[str, Any]:
     """Apply a conversational correction while retaining origin provenance and audit history."""
-    result = await update_doc(doc_id, MemoryDocUpdatePayload(
+    result = await _update_doc_impl(doc_id, MemoryDocUpdatePayload(
       text=payload.text.strip(),
       edit_reason=payload.reason or 'conversational_correction',
       turn_id=payload.turn_id,
+      session_id=payload.session_id,
       evidence=payload.evidence,
       confidence=payload.confidence,
-    ))
+    ), audit_action='correction')
     result['action'] = 'correction'
     return result
 
@@ -1778,7 +2130,7 @@ def create_memory_router(
     existing = next((doc for doc in documents if doc.id == doc_id), None)
     if existing is None:
       raise HTTPException(status_code=404, detail="memory document not found")
-    _ensure_doc_in_active_workspace(existing)
+    _ensure_doc_scope_access(existing, session_id=payload.session_id)
     metadata = dict(existing.metadata or {})
     if not metadata.get('candidate'):
       raise HTTPException(status_code=409, detail="memory document is not a review candidate")
@@ -1807,11 +2159,13 @@ def create_memory_router(
     review state from confidence alone because low-quality active memories and
     review-only candidates have different lifecycle rules.
     """
+    session_id = _normalize_optional_session_id(session_id)
     requested = str(status or 'pending').strip().lower()
     if requested not in {'pending', 'approved', 'rejected', 'deleted', 'all'}:
       raise HTTPException(status_code=400, detail='unsupported candidate status')
     try:
-      resolved_scope = _validate_scope(scope) if scope else None
+      resolved_scope = _validate_scope(scope) or 'workspace'
+      _require_session_id(resolved_scope, session_id)
       resolved_workspace_id = _resolve_request_workspace_id(
         workspace_id,
         scope=resolved_scope,
@@ -1829,12 +2183,7 @@ def create_memory_router(
       review_status = str(metadata.get('review_status') or 'pending').lower()
       if requested != 'all' and review_status != requested:
         continue
-      if resolved_scope is None:
-        try:
-          _ensure_doc_in_active_workspace(doc)
-        except HTTPException:
-          continue
-      elif not _doc_matches_scope(
+      if not _doc_matches_scope(
           doc,
           scope=resolved_scope,
           workspace_id=resolved_workspace_id,
@@ -1852,7 +2201,7 @@ def create_memory_router(
     existing = next((doc for doc in documents if doc.id == doc_id), None)
     if existing is None:
       raise HTTPException(status_code=404, detail="memory document not found")
-    _ensure_doc_in_active_workspace(existing)
+    _ensure_doc_scope_access(existing, session_id=payload.session_id)
     metadata = dict(existing.metadata or {})
     now = datetime.now().isoformat()
     metadata['soft_forgotten'] = True
@@ -1870,7 +2219,7 @@ def create_memory_router(
     existing = next((doc for doc in documents if doc.id == doc_id), None)
     if existing is None:
       raise HTTPException(status_code=404, detail="memory document not found")
-    _ensure_doc_in_active_workspace(existing)
+    _ensure_doc_scope_access(existing, session_id=payload.session_id)
     metadata = dict(existing.metadata or {})
     if not metadata.get('soft_forgotten'):
       return {'status': 'active', 'id': doc_id, 'action': 'restore', 'changed': False}
@@ -1889,7 +2238,7 @@ def create_memory_router(
     existing = next((doc for doc in documents if doc.id == doc_id), None)
     if existing is None:
       raise HTTPException(status_code=404, detail="memory document not found")
-    _ensure_doc_in_active_workspace(existing)
+    _ensure_doc_scope_access(existing, session_id=payload.session_id)
 
     current_metadata = normalize_memory_metadata(existing.metadata)
     current_revision = int(current_metadata.get("revision", 1))
@@ -2173,23 +2522,17 @@ def create_memory_router(
       raise HTTPException(status_code=409, detail="memory index rebuild job is not recoverable")
     return await _start_index_rebuild(retry_of=job_id)
 
-  @router.post("/query")
-  @router.post("/rag/query")
-  async def rag_query(payload: MemoryRagQueryPayload) -> Dict[str, Any]:
-    """
-    RAG query with optional type filtering and recency reranking (Week 1 Task 1.5).
-
-    Payload:
-      - query: str (required)
-      - top_k: int (default 5)
-      - memory_types: list[str] (optional, e.g., ["fact", "preference"])
-      - recency_weight: float (default 0.2, range 0-1)
-    """
+  async def _execute_rag_query(payload: MemoryRagQueryPayload) -> Dict[str, Any]:
     query = str(payload.query or "")
     top_k = int(payload.top_k or 5)
     memory_types = payload.memory_types
     recency_weight = float(payload.recency_weight)
     resolved_scope = payload.scope or 'workspace'
+    session_id = _normalize_optional_session_id(payload.session_id)
+    try:
+      _require_session_id(resolved_scope, session_id)
+    except ValueError as exc:
+      raise HTTPException(status_code=400, detail=str(exc)) from exc
     resolved_workspace_id = _resolve_request_workspace_id(
       payload.workspace_id,
       scope=resolved_scope,
@@ -2198,15 +2541,17 @@ def create_memory_router(
     request = RetrievalRequest(
       query=query,
       scope=resolved_scope,
-      session_id=payload.session_id,
+      session_id=session_id,
       workspace_id=resolved_workspace_id,
       top_k=top_k,
       layers=payload.layers or ['profile', 'working', 'episodic', 'relationship', 'reflective', 'semantic'],
       memory_types=memory_types,
+      memory_role=payload.memory_role,
       recency_weight=recency_weight,
       relation_expansion=payload.expand_relations,
       relation_limit=payload.relation_limit,
       relation_depth=payload.relation_depth,
+      context_budget_tokens=payload.context_budget_tokens,
     )
     pipeline = state.pipeline or RetrievalPipeline(state.store)
     try:
@@ -2215,6 +2560,17 @@ def create_memory_router(
       raise HTTPException(status_code=503, detail=exc.to_detail()) from exc
     result["query"] = query
     return result
+
+  @router.post("/query")
+  async def rag_query(payload: MemoryRagQueryPayload) -> Dict[str, Any]:
+    """Canonical memory retrieval endpoint."""
+    return await _execute_rag_query(payload)
+
+  @router.post("/rag/query", deprecated=True)
+  async def legacy_rag_query(payload: MemoryRagQueryPayload, response: Response) -> Dict[str, Any]:
+    """Compatibility alias for clients migrating to ``/memory/query``."""
+    _mark_deprecated(response)
+    return await _execute_rag_query(payload)
 
   return router
 
@@ -2245,16 +2601,24 @@ def create_memory_pipeline_router(query_handler, get_active_workspace_id: Callab
       return active
     return requested
 
-  @router.get("/api/memory/pipeline/query")
+  @router.get("/api/memory/pipeline/query", deprecated=True)
   async def memory_pipeline_query(
     query: str,
+    response: Response,
     session_id: str | None = None,
     workspace_id: str | None = None,
     scope: str | None = None,
     layers: str | None = None,
     top_k: int = 5,
   ):
-    resolved_scope = scope or 'workspace'
+    """Compatibility adapter; migrate callers to ``POST /memory/query``."""
+    _mark_deprecated(response)
+    session_id = _normalize_optional_session_id(session_id)
+    try:
+      resolved_scope = _validate_scope(scope) or 'workspace'
+      _require_session_id(resolved_scope, session_id)
+    except ValueError as exc:
+      raise HTTPException(status_code=400, detail=str(exc)) from exc
     resolved_workspace_id = _resolve_query_workspace_id(workspace_id, resolved_scope)
     try:
       return await run_in_threadpool(

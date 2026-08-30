@@ -1,5 +1,5 @@
 <template>
-  <PanelShell :title="t('navigation.svc.title')" subtitle="上传音频、转换音色并测试 TTS/ASR 服务">
+  <PanelShell :title="t('navigation.svc.title')">
     <div class="voice-panel">
       <section class="voice-toolbar">
         <div>

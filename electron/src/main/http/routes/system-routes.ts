@@ -23,6 +23,13 @@ import { resolvePythonApiOrigin } from '../python-origin'
 import type { SkillCatalogItem, SkillCatalogSnapshot } from '../../../shared/capability'
 
 const PYTHON_PROXY_TIMEOUT_MS = 12000
+const PYTHON_LOCAL_DISCOVERY_TIMEOUT_MS = 30000
+
+const resolvePythonProxyTimeout = (pathname: string): number =>
+  pathname === '/api/settings/local-discovery' ? PYTHON_LOCAL_DISCOVERY_TIMEOUT_MS : PYTHON_PROXY_TIMEOUT_MS
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 
 const resolveElectronRoot = (): string => {
   const { YUIZAKI_ELECTRON_ROOT: explicitRoot } = process.env
@@ -67,10 +74,16 @@ const proxyPythonJson = async (
   method: string,
   url: URL,
   ctx: Parameters<HttpRouteHandler>[4],
+  bodyOverride?: unknown,
+  onSuccess?: (body: unknown) => void,
 ) => {
-  const body = method === 'GET' || method === 'DELETE' ? undefined : await parseRequestBody<unknown>(req)
+  const body = bodyOverride !== undefined
+    ? bodyOverride
+    : method === 'GET' || method === 'DELETE'
+      ? undefined
+      : await parseRequestBody<unknown>(req)
   const abortController = new AbortController()
-  const timeout = setTimeout(() => abortController.abort(), PYTHON_PROXY_TIMEOUT_MS)
+  const timeout = setTimeout(() => abortController.abort(), resolvePythonProxyTimeout(url.pathname))
   const init: RequestInit = {
     method,
     headers: buildProxyHeaders(ctx, body !== undefined, String(req.headers['x-trace-id'] || '').trim() || null),
@@ -104,6 +117,12 @@ const proxyPythonJson = async (
     }
   }
   if (response.ok) {
+    try {
+      onSuccess?.(body)
+    } catch {
+      sendJson(res, 500, { error: 'Credential persistence failed after backend accepted the request' })
+      return
+    }
     if (method === 'PATCH' && url.pathname === '/api/settings/' && body !== undefined) {
       ctx.providerCredentialStore.captureSettingsPayload(body)
     } else if (method === 'POST' && url.pathname === '/api/settings/import' && body !== undefined) {
@@ -314,6 +333,8 @@ const normalizeImportedSkillItem = (
     fit: normalizeSkillFit(raw['fit']),
     installed: true,
     enabled_codex: true,
+    executionReady: false,
+    runtimeBinding: 'catalog_only',
     directory: normalizeOptionalField(raw['directory']),
     repo: normalizeOptionalField(raw['repo']),
     url: normalizeOptionalField(raw['url']),
@@ -337,11 +358,14 @@ const buildImportedSkillsSnapshot = (items: SkillCatalogItem[]): SkillCatalogSna
   }, {})
 
   return {
+    schemaVersion: 'yuizaki.skill-catalog.v1',
     items,
     summary: {
       total: items.length,
       built_in: items.filter((item) => item.status === 'built-in').length,
       ready: items.filter((item) => item.installed).length,
+      execution_ready: items.filter((item) => item.executionReady === true).length,
+      catalog_only: items.filter((item) => item.runtimeBinding === 'catalog_only').length,
       planned: items.filter((item) => item.status === 'planned').length,
       high_fit: items.filter((item) => item.fit === 'high').length,
       medium_fit: items.filter((item) => item.fit === 'medium').length,
@@ -376,7 +400,11 @@ const writeImportedSkillsSnapshot = (items: SkillCatalogItem[]): SkillCatalogSna
   fs.mkdirSync(path.dirname(storePath), { recursive: true })
   const tempPath = `${storePath}.${process.pid}.${Date.now()}.tmp`
   try {
-    fs.writeFileSync(tempPath, JSON.stringify({ savedAt: new Date().toISOString(), items: snapshot.items }, null, 2), 'utf8')
+    fs.writeFileSync(tempPath, JSON.stringify({
+      schemaVersion: 'yuizaki.skill-catalog.v1',
+      savedAt: new Date().toISOString(),
+      items: snapshot.items,
+    }, null, 2), 'utf8')
     fs.renameSync(tempPath, storePath)
   } finally {
     if (fs.existsSync(tempPath)) {
@@ -664,6 +692,8 @@ const scanPetOverlayVisibility = async (ctx: Parameters<HttpRouteHandler>[4]): P
 
 const PYTHON_JSON_PROXY_PATHS = new Set([
   '/api/ping',
+  '/api/system/ui-capabilities',
+  '/api/perception/active-application',
   '/api/readiness',
   '/health',
   '/memory/docs',
@@ -697,7 +727,13 @@ const PYTHON_JSON_PROXY_PATHS = new Set([
   '/api/system/permissions',
   '/api/system/capabilities',
   '/api/system/providers',
+  '/api/system/voice-diagnostics',
+  '/api/system/voice-diagnostics/run',
+  '/api/system/voice-diagnostics/comfort',
+  '/api/system/voice-diagnostics/comfort-signal',
+  '/api/system/voice-diagnostics/sample',
   '/api/system/connectors',
+  '/api/system/stream',
   '/api/system/platforms',
   '/api/system/orchestration',
   '/api/system/schedules',
@@ -730,6 +766,7 @@ const isPythonJsonProxyPath = (pathname: string): boolean =>
   pathname.startsWith('/api/system/mcp/') ||
   pathname.startsWith('/api/system/agent-plugins/') ||
   pathname.startsWith('/api/system/connectors/') ||
+  pathname.startsWith('/api/system/stream/') ||
   /^\/api\/messages\/[^/]+$/.test(pathname) ||
   /^\/api\/sessions\/[^/]+$/.test(pathname) ||
   /^\/api\/sessions\/[^/]+\/messages$/.test(pathname) ||
@@ -747,6 +784,7 @@ const isProactivePythonProxyRoute = (method: string, pathname: string): boolean 
   (method === 'GET' && pathname === '/api/system/proactive/settings')
   || (method === 'PATCH' && pathname === '/api/system/proactive/settings')
   || (method === 'POST' && pathname === '/api/system/proactive/feedback')
+  || (method === 'GET' && pathname === '/api/system/proactive/feedback-summary')
   || (method === 'POST' && /^\/api\/system\/companion-runtime\/opportunities\/outcome\/[^/]+$/.test(pathname))
   || (method === 'POST' && /^\/api\/system\/heartbeat\/opportunities\/[^/]+\/accept$/.test(pathname))
   || (method === 'POST' && /^\/api\/system\/heartbeat\/goals\/[^/]+\/cancel$/.test(pathname))
@@ -904,8 +942,87 @@ export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, ur
     return true
   }
 
+  if (method === 'GET' && url.pathname === '/api/system/stream/twitch/config') {
+    sendJson(res, 200, {
+      ok: true,
+      schemaVersion: 'yuizaki.twitch-credentials.v1',
+      ...ctx.providerCredentialStore.getTwitchCredentialStatus(),
+    })
+    return true
+  }
+
+  if (method === 'PUT' && url.pathname === '/api/system/stream/twitch/config') {
+    const body = await parseRequestBody<Record<string, unknown>>(_req)
+    if (!isRecord(body)) {
+      sendJson(res, 400, { ok: false, error: 'payload_must_be_object' })
+      return true
+    }
+    const credentialFields = [
+      'clientId', 'eventsubSecret', 'eventsubToken', 'chatToken',
+      'broadcasterId', 'senderId', 'moderatorId', 'channel', 'username',
+      'eventsubCallbackUrl', 'subscriptionProvider',
+    ]
+    const touchesCredential = credentialFields.some((field) =>
+      typeof body[field] === 'string'
+      || body[`clear${field.charAt(0).toUpperCase()}${field.slice(1)}`] === true,
+    )
+    if (touchesCredential && !ctx.providerCredentialStore.isSecureStorageAvailable()) {
+      sendJson(res, 503, { ok: false, error: 'secure_credential_storage_unavailable' })
+      return true
+    }
+    await proxyPythonJson(
+      _req,
+      res,
+      method,
+      url,
+      ctx,
+      body,
+      () => {
+        const changed = ctx.providerCredentialStore.captureTwitchCredentials(body)
+        if (changed) {
+          ctx.updatePythonProviderEnvironment?.(ctx.providerCredentialStore.getPythonEnvironment())
+        }
+      },
+    )
+    return true
+  }
+
   if (method === 'GET' && url.pathname === '/api/system/backend-token') {
     sendJson(res, 200, ctx.backendApiTokenStore.getBackendApiTokenStatus())
+    return true
+  }
+
+  const connectorConfigMatch = /^\/api\/system\/connectors\/(telegram|discord|qq|wechat)\/config$/.exec(url.pathname)
+  if (method === 'PUT' && connectorConfigMatch) {
+    const connectorId = connectorConfigMatch[1] ?? ''
+    const body = await parseRequestBody<Record<string, unknown>>(_req)
+    if (!isRecord(body)) {
+      sendJson(res, 400, { ok: false, error: 'payload_must_be_object' })
+      return true
+    }
+    const secretFields = ['botToken', 'webhookSecret', 'publicKey', 'bridgeToken']
+    const touchesSecret = secretFields.some((field) =>
+      typeof body[field] === 'string'
+      || body[`clear${field.charAt(0).toUpperCase()}${field.slice(1)}`] === true,
+    )
+    if (touchesSecret && !ctx.providerCredentialStore.isSecureStorageAvailable()) {
+      sendJson(res, 503, { ok: false, error: 'secure_credential_storage_unavailable' })
+      return true
+    }
+    await proxyPythonJson(
+      _req,
+      res,
+      method,
+      url,
+      ctx,
+      body,
+      (payload) => {
+        const changed = ctx.providerCredentialStore.captureConnectorCredentials(connectorId, payload)
+        if (changed) {
+          ctx.updatePythonProviderEnvironment?.(ctx.providerCredentialStore.getPythonEnvironment())
+        }
+      },
+    )
     return true
   }
 

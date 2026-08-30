@@ -135,9 +135,14 @@ class AgentPipeline:
         query: str,
         session_id: str | None,
         workspace_id: str | None,
+        context_budget_tokens: int = 1200,
     ) -> bool:
         return self._context_prefetch.schedule_retrieval_prefetch(
-            cache_key=cache_key, query=query, session_id=session_id, workspace_id=workspace_id,
+            cache_key=cache_key,
+            query=query,
+            session_id=session_id,
+            workspace_id=workspace_id,
+            context_budget_tokens=context_budget_tokens,
         )
 
     def cancel_retrieval_prefetch(self, cache_key: str, *, clear_cache: bool = True) -> None:
@@ -149,9 +154,13 @@ class AgentPipeline:
         cache_key: str,
         final_query: str,
         workspace_id: str | None,
+        context_budget_tokens: int = 1200,
     ) -> dict[str, Any] | None:
         return await self._context_prefetch.take_retrieval_prefetch(
-            cache_key=cache_key, final_query=final_query, workspace_id=workspace_id,
+            cache_key=cache_key,
+            final_query=final_query,
+            workspace_id=workspace_id,
+            context_budget_tokens=context_budget_tokens,
         )
 
     def _extract_user_text(self, ctx: AgentRequestContext) -> str:

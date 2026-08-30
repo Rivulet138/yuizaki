@@ -27,6 +27,7 @@ export interface MemoryMetadata extends Record<string, unknown> {
   turn_id?: string
   evidence?: unknown
   confidence_history?: Array<Record<string, unknown>>
+  memory_role?: 'user_fact' | 'relationship_event' | 'task_experience' | 'failure_reflection' | 'reusable_skill' | 'tool_permission' | string
 }
 
 export interface MemoryDocWritePayload {
@@ -38,6 +39,7 @@ export interface MemoryDocWritePayload {
   session_id?: string
   layer?: string
   type?: string
+  memory_role?: string
   importance?: number
   confidence?: number
   confidence_source?: string
@@ -45,6 +47,11 @@ export interface MemoryDocWritePayload {
   source_id?: string
   turn_id?: string
   evidence?: unknown
+}
+
+export interface MemoryAddPayload extends MemoryDocWritePayload {
+  dedupe?: boolean
+  dedupe_threshold?: number
 }
 
 export interface MemoryMaintenancePolicyPayload {
@@ -117,6 +124,22 @@ export type MemoryLifecycleState = 'active' | 'forgotten' | 'expired' | 'schedul
 export type MemoryReviewStatus = 'unreviewed' | 'pending' | 'accepted' | 'confirmed' | 'rejected' | 'superseded'
 export type MemoryRecallFeedback = 'helpful' | 'not_helpful' | 'incorrect' | 'dismissed'
 
+export interface MemoryOperation {
+  operation_id: string
+  operation: 'create' | 'update' | 'correction' | 'review' | 'forget' | 'restore' | 'rollback' | 'delete' | 'feedback' | 'maintenance'
+  document_id: string
+  at: string
+  actor: string
+  scope?: string | null
+  workspace_id?: string | null
+  session_id?: string | null
+  reason?: string | null
+  evidence?: unknown
+  before_revision?: number | null
+  after_revision?: number | null
+  details?: Record<string, unknown>
+}
+
 export interface MemoryOverview {
   total: number
   recallable: number
@@ -187,78 +210,108 @@ export interface MemoryDeletePreview {
   }
 }
 
-const buildDocsUrl = (options?: MemoryDocListOptions) => {
-  const search = new URLSearchParams()
+export interface MemoryQueryPayload {
+  query: string
+  top_k?: number
+  memory_types?: string[]
+  memory_role?: string
+  recency_weight?: number
+  scope?: string
+  session_id?: string
+  workspace_id?: string
+  layers?: string[]
+  expand_relations?: boolean
+  relation_limit?: number
+  relation_depth?: number
+  context_budget_tokens?: number
+}
+
+export interface MemoryQueryResponse {
+  query: string
+  results: unknown[]
+  trace?: unknown
+}
+
+const appendScopeParams = (search: URLSearchParams, options?: MemoryDocListOptions) => {
   if (options?.scope) search.set('scope', options.scope)
   if (options?.workspaceId) search.set('workspace_id', options.workspaceId)
   if (options?.sessionId) search.set('session_id', options.sessionId)
+}
+
+const buildMemoryUrl = (path: string, search: URLSearchParams) => {
+  const suffix = search.toString()
+  return `${CONTROL_ORIGIN}${path}${suffix ? `?${suffix}` : ''}`
+}
+
+const buildSessionActionUrl = (path: string, sessionId?: string) => {
+  const search = new URLSearchParams()
+  if (sessionId) search.set('session_id', sessionId)
+  return buildMemoryUrl(path, search)
+}
+
+const buildDocsUrl = (options?: MemoryDocListOptions) => {
+  const search = new URLSearchParams()
+  appendScopeParams(search, options)
   if (options?.layer) search.set('layer', options.layer)
   if (options?.includeState) search.set('include_state', options.includeState)
-  const suffix = search.toString()
-  return `${CONTROL_ORIGIN}/memory/docs${suffix ? `?${suffix}` : ''}`
+  return buildMemoryUrl('/memory/docs', search)
 }
 
 export const memoryClient = {
   getDocs: async (options?: MemoryDocListOptions) => requestJson<{ docs: unknown[] }>(buildDocsUrl(options)),
-  addDoc: async (payload: MemoryDocWritePayload) =>
-    requestJson<{ status: string; id: string; skipped?: boolean; reason?: string; duplicate_candidates?: unknown[] }>(`${CONTROL_ORIGIN}/memory/docs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }),
   updateDoc: async (id: string, payload: MemoryDocWritePayload & { edit_reason?: string }) =>
     requestJson<{ status: string; id: string; layer?: string; scope?: string; importance?: number }>(`${CONTROL_ORIGIN}/memory/docs/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
-  correctDoc: async (id: string, payload: { text: string; reason?: string; turn_id?: string; evidence?: unknown }) =>
+  correctDoc: async (id: string, payload: { text: string; reason?: string; turn_id?: string; session_id?: string; evidence?: unknown }) =>
     requestJson<{ status: string; id: string; action?: string }>(`${CONTROL_ORIGIN}/memory/docs/${encodeURIComponent(id)}/correction`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
     }),
-  softForgetDoc: async (id: string, payload?: { reason?: string; turn_id?: string }) =>
+  softForgetDoc: async (id: string, payload?: { reason?: string; turn_id?: string; session_id?: string }) =>
     requestJson<{ status: string; id: string; action?: string }>(`${CONTROL_ORIGIN}/memory/docs/${encodeURIComponent(id)}/soft-forget`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload || {}),
     }),
-  restoreDoc: async (id: string, payload?: { reason?: string }) =>
+  restoreDoc: async (id: string, payload?: { reason?: string; session_id?: string }) =>
     requestJson<{ status: string; id: string; action?: string }>(`${CONTROL_ORIGIN}/memory/docs/${encodeURIComponent(id)}/restore`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload || {}),
     }),
-  rollbackDoc: async (id: string, revision: number) =>
+  rollbackDoc: async (id: string, revision: number, sessionId?: string) =>
     requestJson<{ status: string; id: string; revision?: number; action?: string }>(`${CONTROL_ORIGIN}/memory/docs/${encodeURIComponent(id)}/rollback`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision, session_id: sessionId }),
     }),
-  recordRecallFeedback: async (id: string, feedback: MemoryRecallFeedback) =>
+  recordRecallFeedback: async (id: string, feedback: MemoryRecallFeedback, sessionId?: string) =>
     requestJson<{ status: 'recorded'; id: string; feedback: MemoryRecallFeedback; counts: Record<string, number> }>(`${CONTROL_ORIGIN}/memory/docs/${encodeURIComponent(id)}/feedback`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback, session_id: sessionId }),
     }),
   getOverview: async (options?: MemoryDocListOptions) => {
     const search = new URLSearchParams()
-    if (options?.scope) search.set('scope', options.scope)
-    if (options?.workspaceId) search.set('workspace_id', options.workspaceId)
-    if (options?.sessionId) search.set('session_id', options.sessionId)
-    const suffix = search.toString()
-    return requestJson<MemoryOverview>(`${CONTROL_ORIGIN}/memory/overview${suffix ? `?${suffix}` : ''}`)
+    appendScopeParams(search, options)
+    return requestJson<MemoryOverview>(buildMemoryUrl('/memory/overview', search))
+  },
+  getOperations: async (options?: MemoryDocListOptions & { documentId?: string; limit?: number }) => {
+    const search = new URLSearchParams()
+    appendScopeParams(search, options)
+    if (options?.documentId) search.set('document_id', options.documentId)
+    if (options?.limit) search.set('limit', String(options.limit))
+    return requestJson<{ status: string; operations: MemoryOperation[]; count: number }>(
+      buildMemoryUrl('/memory/operations', search),
+    )
   },
   getCandidates: async (options?: MemoryDocListOptions & { status?: MemoryReviewStatus }) => {
     const search = new URLSearchParams()
+    appendScopeParams(search, options)
     if (options?.status) search.set('status', options.status)
-    if (options?.scope) search.set('scope', options.scope)
-    if (options?.workspaceId) search.set('workspace_id', options.workspaceId)
-    if (options?.sessionId) search.set('session_id', options.sessionId)
-    const suffix = search.toString()
     return requestJson<{ status: string; candidates: MemoryCandidate[]; count: number }>(
-      `${CONTROL_ORIGIN}/memory/candidates${suffix ? `?${suffix}` : ''}`,
+      buildMemoryUrl('/memory/candidates', search),
     )
   },
   exportDocs: async (options?: MemoryDocListOptions) => {
     const search = new URLSearchParams()
-    if (options?.scope) search.set('scope', options.scope)
-    if (options?.workspaceId) search.set('workspace_id', options.workspaceId)
-    if (options?.sessionId) search.set('session_id', options.sessionId)
+    appendScopeParams(search, options)
     if (options?.includeState) search.set('include_state', options.includeState)
-    const suffix = search.toString()
-    return requestJson<MemoryExport>(`${CONTROL_ORIGIN}/memory/export${suffix ? `?${suffix}` : ''}`)
+    return requestJson<MemoryExport>(buildMemoryUrl('/memory/export', search))
   },
   importDocs: async (payload: {
     format: 'yuizaki-memory-export'
@@ -273,7 +326,7 @@ export const memoryClient = {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   }),
-  reviewCandidate: async (id: string, payload: { decision: 'approve' | 'reject'; reason?: string }) =>
+  reviewCandidate: async (id: string, payload: { decision: 'approve' | 'reject'; reason?: string; session_id?: string }) =>
     requestJson<{ status: string; id: string }>(`${CONTROL_ORIGIN}/memory/docs/${encodeURIComponent(id)}/review`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -291,25 +344,25 @@ export const memoryClient = {
   retryIndexRebuild: async (jobId: string) => requestJson<MemoryIndexRebuildResponse>(`${CONTROL_ORIGIN}/memory/index/rebuild/${encodeURIComponent(jobId)}/retry`, {
     method: 'POST',
   }),
-  addMemory: async (payload: Record<string, unknown>) =>
+  addMemory: async (payload: MemoryAddPayload) =>
     requestJson<{ status?: string; id?: string; type?: string; layer?: string; scope?: string; importance?: number; skipped?: boolean; reason?: string; duplicate_candidates?: unknown[] }>(`${CONTROL_ORIGIN}/memory/memory/add`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       timeoutMs: MEMORY_MAINTENANCE_TIMEOUT_MS,
     }),
-  removeDoc: async (id: string) =>
-    requestJson(`${CONTROL_ORIGIN}/memory/docs/${encodeURIComponent(id)}`, {
+  removeDoc: async (id: string, sessionId?: string) =>
+    requestJson(buildSessionActionUrl(`/memory/docs/${encodeURIComponent(id)}`, sessionId), {
       method: 'DELETE',
     }),
-  removeDocs: async (ids: string[]) =>
-    requestJson<{ status: string; ids: string[]; deleted_count: number }>(`${CONTROL_ORIGIN}/memory/docs/batch-delete`, {
+  removeDocs: async (ids: string[], sessionId?: string) =>
+    requestJson<{ status: string; ids: string[]; deleted_count: number }>(buildSessionActionUrl('/memory/docs/batch-delete', sessionId), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids }),
     }),
-  previewDelete: async (ids: string[]) =>
-    requestJson<MemoryDeletePreview>(`${CONTROL_ORIGIN}/memory/docs/delete-preview`, {
+  previewDelete: async (ids: string[], sessionId?: string) =>
+    requestJson<MemoryDeletePreview>(buildSessionActionUrl('/memory/docs/delete-preview', sessionId), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids }),
@@ -328,33 +381,10 @@ export const memoryClient = {
       body: JSON.stringify(payload),
       timeoutMs: MEMORY_MAINTENANCE_TIMEOUT_MS,
     }),
-  queryRag: async (payload: Record<string, unknown>) =>
-    requestJson<{ results: unknown[]; trace?: unknown }>(`${CONTROL_ORIGIN}/memory/rag/query`, {
+  query: async (payload: MemoryQueryPayload) =>
+    requestJson<MemoryQueryResponse>(`${CONTROL_ORIGIN}/memory/query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }),
-  query: async (payload: Record<string, unknown>) =>
-    requestJson<{ query: string; results: unknown[]; trace?: unknown }>(`${CONTROL_ORIGIN}/memory/query`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }),
-  queryPipeline: async (query: string, options?: { sessionId?: string; topK?: number; workspaceId?: string; scope?: string; layers?: string[] }) => {
-    const topK = options?.topK ?? 5
-    const search = new URLSearchParams({ query, top_k: String(topK) })
-    if (options?.sessionId) {
-      search.set('session_id', options.sessionId)
-    }
-    if (options?.workspaceId) {
-      search.set('workspace_id', options.workspaceId)
-    }
-    if (options?.scope) {
-      search.set('scope', options.scope)
-    }
-    if (options?.layers?.length) {
-      search.set('layers', options.layers.join(','))
-    }
-    return requestJson<{ results: unknown[]; trace: unknown }>(`${CONTROL_ORIGIN}/api/memory/pipeline/query?${search.toString()}`)
-  },
 }

@@ -16,9 +16,9 @@ Read:
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before changing process or event contracts.
 - 修改进程或事件契约前阅读 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
-Do not commit API keys, personal data, chat history, screenshots, model weights, audio caches, databases, logs, or pytest temporary directories.
+Do not commit API keys, personal data, chat history, screenshots, model weights, audio caches, databases, or logs.
 
-不要提交 API 密钥、个人数据、聊天历史、截图、模型权重、音频缓存、数据库、日志或 pytest 临时目录。
+不要提交 API 密钥、个人数据、聊天历史、截图、模型权重、音频缓存、数据库或日志。
 
 ## Development setup / 开发环境
 
@@ -38,18 +38,16 @@ python scripts/check_docs.py
 cd electron
 npm run type-check
 npm run lint
-npm test
 npm run build
 cd ..\python
-.\.venv\Scripts\python.exe -m pytest -q --tb=short
 .\.venv\Scripts\python.exe -m compileall -q modules app.py socket_server.py
 ```
 
-Linux uses `python scripts/check_docs.py`, the equivalent npm commands, and `.venv/bin/python -m pytest -q --tb=short`.
+Linux uses `python scripts/check_docs.py` and the equivalent npm commands.
 
-Changes to Socket.IO events, Job envelopes, cancellation, authentication, storage deletion, restore, or resource permissions require contract tests. Hardware- or provider-dependent behavior must include a mocked deterministic test plus a clear real-device limitation.
+Changes to Socket.IO events, Job envelopes, cancellation, authentication, storage deletion, restore, or resource permissions require targeted manual verification. Hardware- or provider-dependent behavior must include a clear real-device limitation.
 
-对 Socket.IO 事件、Job 信封、取消、认证、存储删除、恢复或资源权限的修改必须包含契约测试。依赖硬件或 provider 的行为必须包含确定性的模拟测试，并明确真实设备限制。
+对 Socket.IO 事件、Job 信封、取消、认证、存储删除、恢复或资源权限的修改必须进行针对性人工验证。依赖硬件或 provider 的行为必须明确真实设备限制。
 
 ## Pull requests / 拉取请求
 

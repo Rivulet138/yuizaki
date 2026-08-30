@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="服务与数据" subtitle="检查健康状态、运行资源、接口响应并执行备份恢复" tone="admin">
+  <PanelShell title="服务与数据" tone="admin">
     <div class="infra-console">
       <section class="infra-hero">
         <div class="hero-copy">
@@ -26,7 +26,7 @@
               <el-tag :type="serviceStatusTagType">{{ serviceStatusLabel }}</el-tag>
             </div>
           </template>
-          <AsyncState :loading="diagnosticsRequest.loading" :error="diagnosticsRequest.error" @retry="loadDiagnostics">
+          <AsyncState :loading="diagnosticsRequest.loading" :error="diagnosticsRequest.error" :show-retry="false">
             <div v-if="diagnostics" class="service-list">
               <article v-for="item in serviceCards" :key="item.label" class="service-item" :class="item.tone">
                 <div class="service-dot"></div>
@@ -47,10 +47,9 @@
               <div>
                 <strong>环境依赖 · {{ envStatusLabel }}</strong>
               </div>
-              <el-button plain size="small" :loading="diagnosticsRequest.loading" @click="loadDiagnostics">重新检查</el-button>
             </div>
           </template>
-          <AsyncState :loading="diagnosticsRequest.loading" :error="diagnosticsRequest.error" @retry="loadDiagnostics">
+          <AsyncState :loading="diagnosticsRequest.loading" :error="diagnosticsRequest.error" :show-retry="false">
             <div v-if="diagnostics" class="env-list">
               <div v-for="item in envChecks" :key="item.label" class="env-item">
                 <span>{{ item.label }}</span>
@@ -150,7 +149,6 @@
                 <strong>备份与恢复 · {{ backupTargets.length }} 个目标</strong>
               </div>
               <div class="action-row">
-                <el-button plain size="small" :loading="backupTargetsRequest.loading" @click="loadBackupTargets">检查目标</el-button>
                 <el-button size="small" type="primary" :loading="createBackupRequest.loading" @click="createAndSelectBackup">创建备份</el-button>
               </div>
             </div>
@@ -163,7 +161,7 @@
             show-icon
             :closable="false"
           />
-          <AsyncState :loading="backupTargetsRequest.loading" :error="backupTargetsRequest.error" @retry="loadBackupTargets">
+          <AsyncState :loading="backupTargetsRequest.loading" :error="backupTargetsRequest.error" :show-retry="false">
             <div v-if="backupResult" class="backup-success">
               <strong>备份清单已创建</strong>
               <span>{{ backupResult }}</span>
@@ -236,7 +234,7 @@
               <el-tag :type="exceptionTagType">{{ exceptionTagLabel }}</el-tag>
             </div>
           </template>
-          <AsyncState :loading="diagnosticsRequest.loading" :error="diagnosticsRequest.error" @retry="loadDiagnostics">
+          <AsyncState :loading="diagnosticsRequest.loading" :error="diagnosticsRequest.error" :show-retry="false">
             <div v-if="diagnostics && runtimeExceptions.length" class="exception-list">
               <article v-for="item in runtimeExceptions.slice(0, 6)" :key="`${item.timestamp}-${item.type}`" class="exception-item">
                 <div>
@@ -263,7 +261,7 @@
               <el-button plain :loading="logsRequest.loading" @click="refreshLogs">刷新日志</el-button>
             </div>
           </template>
-          <AsyncState :loading="logsRequest.loading" :error="logsRequest.error" @retry="refreshLogs">
+          <AsyncState :loading="logsRequest.loading" :error="logsRequest.error" :show-retry="false">
             <div class="log-grid">
               <article v-for="channel in logChannels" :key="channel.key" class="log-panel" :class="channel.tone">
                 <div class="log-head">

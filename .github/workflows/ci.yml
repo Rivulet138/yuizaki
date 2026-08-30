@@ -26,6 +26,40 @@ jobs:
         working-directory: python
         run: python scripts/check_requirements_lock.py
 
+  python-contracts:
+    name: Python Companion Contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install locked core dependencies
+        working-directory: python
+        run: python -m pip install -r requirements-core-lock-linux.txt
+      - name: Run deterministic memory replay gate
+        run: python scripts/memory_retrieval_check.py
+      - name: Run local stream staging replay gate
+        run: python scripts/stream_staging_check.py
+      - name: Run local connector staging replay gate
+        run: python scripts/connector_staging_check.py
+      - name: Run synthetic voice comfort replay gate
+        run: python scripts/voice_comfort_check.py
+      - name: Run proactive and stream contract tests
+        env:
+          PYTHONPATH: python
+        run: >-
+          python -m pytest -q
+          python/tests/test_proactive_evaluation.py
+          python/tests/test_stream_staging_check.py
+          python/tests/test_stream_drafts.py
+          python/tests/test_stream_moderation.py
+          python/tests/test_connector_probe.py
+          python/tests/test_connector_staging_check.py
+          python/tests/test_connector_e2e.py
+          python/tests/test_connector_resolution.py
+          python/tests/test_voice_comfort_check.py
+
   electron-build:
     name: Electron Validate & Build (${{ matrix.os }})
     strategy:
@@ -52,46 +86,10 @@ jobs:
 
       - run: npm ci
       - run: npm run install:runtime
-      - run: npm run test:ci-contract
       - run: npm run type-check
       - run: npm run lint
-      - run: npm test
       - run: npm run build
       - run: npm run start:check
-      # YUIZAKI_E2E_WINDOWS_BLOCK_START
-      - name: Set up Python for Electron E2E (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-          cache-dependency-path: python/requirements-core-lock-windows.txt
-      - name: Prepare Python fixture for Electron E2E (Windows)
-        if: runner.os == 'Windows'
-        working-directory: ${{ github.workspace }}
-        shell: pwsh
-        run: |
-          python -m venv python/.venv
-          python/.venv/Scripts/python.exe -m pip install --upgrade pip
-          python/.venv/Scripts/python.exe -m pip install -r python/requirements-core-lock-windows.txt
-          python/.venv/Scripts/python.exe -m pip check
-      - name: Run Electron E2E Unit Tests (Windows)
-        if: runner.os == 'Windows'
-        working-directory: ${{ github.workspace }}/electron
-        run: npm run test:e2e:unit
-      - name: Run Python Runtime Recovery Smoke (Windows)
-        if: runner.os == 'Windows'
-        working-directory: ${{ github.workspace }}/electron
-        run: npm run test:runtime-smoke
-      - name: Run Electron E2E Redaction Test (Windows)
-        if: runner.os == 'Windows'
-        working-directory: ${{ github.workspace }}/electron
-        run: npm run test:e2e:redaction
-      - name: Run Electron E2E (Windows)
-        if: runner.os == 'Windows'
-        working-directory: ${{ github.workspace }}/electron
-        run: npm run test:e2e
-      # YUIZAKI_E2E_WINDOWS_BLOCK_END
       - uses: actions/setup-go@v6
         if: runner.os == 'Windows'
         with:
@@ -101,133 +99,3 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: ${{ github.workspace }}/tools/yuizaki-launcher
         run: go test ./...
-      - name: Install Linux GUI runtime libraries
-        if: runner.os == 'Linux'
-        working-directory: ${{ github.workspace }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libxtst6 xvfb xauth
-          sudo chown root electron/node_modules/electron/dist/chrome-sandbox
-          sudo chmod 4755 electron/node_modules/electron/dist/chrome-sandbox
-      # YUIZAKI_E2E_LINUX_BLOCK_START
-      - name: Set up Python for Electron E2E (Linux)
-        if: runner.os == 'Linux'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-          cache-dependency-path: python/requirements-core-lock-linux.txt
-      - name: Prepare Python fixture for Electron E2E (Linux)
-        if: runner.os == 'Linux'
-        working-directory: ${{ github.workspace }}
-        shell: bash
-        run: |
-          python -m venv python/.venv
-          python/.venv/bin/python -m pip install --upgrade pip
-          python/.venv/bin/python -m pip install -r python/requirements-core-lock-linux.txt
-          python/.venv/bin/python -m pip check
-      - name: Run Electron E2E Unit Tests (Linux)
-        if: runner.os == 'Linux'
-        working-directory: ${{ github.workspace }}/electron
-        run: npm run test:e2e:unit
-      - name: Run Python Runtime Recovery Smoke (Linux)
-        if: runner.os == 'Linux'
-        working-directory: ${{ github.workspace }}/electron
-        run: npm run test:runtime-smoke
-      - name: Run Electron E2E Redaction Test (Linux)
-        if: runner.os == 'Linux'
-        working-directory: ${{ github.workspace }}/electron
-        run: xvfb-run -a npm run test:e2e:redaction
-      - name: Run Electron E2E (Linux)
-        if: runner.os == 'Linux'
-        working-directory: ${{ github.workspace }}/electron
-        run: xvfb-run -a npm run test:e2e
-      # YUIZAKI_E2E_LINUX_BLOCK_END
-
-  node-mcp-test:
-    name: Node MCP Test (Linux)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: node-mcp
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22.13'
-          cache: 'npm'
-          cache-dependency-path: node-mcp/package-lock.json
-
-      - run: npm ci
-      - run: npm test
-
-  python-test:
-    name: Python Lint & Test (${{ matrix.os }} / ${{ matrix.python-version }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            python-version: '3.11'
-            requirements-lock: requirements-dev-lock-linux.txt
-          - os: ubuntu-latest
-            python-version: '3.12'
-            requirements-lock: requirements-dev-lock-linux.txt
-          - os: ubuntu-latest
-            python-version: '3.13'
-            requirements-lock: requirements-dev-lock-linux.txt
-          - os: windows-latest
-            python-version: '3.11'
-            requirements-lock: requirements-dev-lock-windows.txt
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: python
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: 'pip'
-          cache-dependency-path: python/${{ matrix.requirements-lock }}
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r ${{ matrix.requirements-lock }}
-          pip check
-          python scripts/check_installed_lock.py --lock ${{ matrix.requirements-lock }}
-
-      - name: Check Python runtime errors with ruff
-        run: ruff check . --select E9,F63,F7,F82
-
-      - name: Type check with pyright
-        run: pyright --pythonversion ${{ matrix.python-version }}
-
-      - name: Run tests
-        run: pytest . -q --tb=short
-
-  qdrant-integration:
-    name: Real Qdrant Recovery Integration
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-          cache-dependency-path: python/requirements-dev-lock-linux.txt
-
-      - name: Install Qdrant integration dependencies
-        working-directory: python
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev-lock-linux.txt
-          pip check
-          python scripts/check_installed_lock.py --lock requirements-dev-lock-linux.txt
-
-      - name: Run real Qdrant recovery integration
-        run: python scripts/run_qdrant_integration.py

@@ -17,6 +17,7 @@ from typing import Any, cast
 
 from modules.agent.context import AgentRequestContext
 from socket_events import (
+    TOOL_EVENT_SCHEMA_VERSION,
     TOOL_PROTOCOL_VERSION,
     SystemEvents,
     ToolCallData,
@@ -68,16 +69,17 @@ def _event_payload(data: object) -> JsonDict:
 def _terminal_payload(call: ToolCallData, outcome: object, *, error: str | None = None) -> JsonDict:
     success = bool(getattr(outcome, "success", False))
     resolved_outcome = _as_outcome(getattr(outcome, "outcome", None), success=success)
+    terminal_success = success and resolved_outcome == "known_success"
     raw_data = getattr(outcome, "data", None)
     data = dict(raw_data) if isinstance(raw_data, Mapping) else {}
     verification_status = data.get("verificationStatus") or data.get("verification_status")
     recheck_available = bool(data.get("recheckAvailable", data.get("recheck_available", False)))
     payload = _event_payload(ToolResultData(
         id=call.id,
-        output=str(getattr(outcome, "content", "") or "") if success else "",
-        error=error or (str(getattr(outcome, "error", "")) if not success and getattr(outcome, "error", None) else None),
+        output=str(getattr(outcome, "content", "") or "") if terminal_success else "",
+        error=error or (str(getattr(outcome, "error", "")) if not terminal_success and getattr(outcome, "error", None) else None),
         version=call.version,
-        status="completed" if success else "failed",
+        status="completed" if terminal_success else "failed",
         outcome=resolved_outcome,
         effect_outcome=resolved_outcome,
         verification_status=str(verification_status) if verification_status else None,
@@ -89,6 +91,7 @@ def _terminal_payload(call: ToolCallData, outcome: object, *, error: str | None 
         job_id=call.job_id,
         source=call.source,
     ))
+    payload["schemaVersion"] = TOOL_EVENT_SCHEMA_VERSION
     payload["effectOutcome"] = payload.pop("effect_outcome")
     payload["verificationStatus"] = payload.pop("verification_status")
     payload["recheckAvailable"] = payload.pop("recheck_available")
@@ -102,8 +105,26 @@ def _terminal_payload(call: ToolCallData, outcome: object, *, error: str | None 
             "recheckAvailable": payload.get("recheckAvailable"),
         }.items() if value is not None
     } or None
+    verification_projection = {
+        key: data[key]
+        for key in (
+            "verificationTarget",
+            "verificationParameters",
+            "verificationRetryable",
+            "unknownEffect",
+        )
+        if key in data
+    }
+    if verification_projection:
+        payload.update(verification_projection)
+        payload["data"] = {
+            **(payload.get("data") or {}),
+            **verification_projection,
+        }
     if isinstance(data.get("verificationEvidence"), list):
-        payload["verificationEvidence"] = [str(item)[:360] for item in data["verificationEvidence"][:6]]
+        bounded_evidence = [str(item)[:360] for item in data["verificationEvidence"][:6]]
+        payload["verificationEvidence"] = bounded_evidence
+        payload["data"] = {**(payload.get("data") or {}), "verificationEvidence": bounded_evidence}
     if data.get("recheckError") is not None:
         payload["recheckError"] = str(data["recheckError"])[:160]
     if data.get("resultSummary") is not None:
@@ -151,6 +172,7 @@ def build_tool_call_handler(
                 "output": "",
                 "error": "unsupported_protocol_version",
                 "version": TOOL_PROTOCOL_VERSION,
+                "schemaVersion": TOOL_EVENT_SCHEMA_VERSION,
                 "status": "failed",
                 "outcome": "known_failure",
                 "effectOutcome": "known_failure",
@@ -216,7 +238,12 @@ def build_tool_call_handler(
                 }
             outcome = await execute(call.name, call.args, **execute_kwargs)
 
-            await sio.emit(ToolEvents.RESULT if outcome.success else ToolEvents.ERROR, _terminal_payload(call, outcome), to=sid)
+            terminal_payload = _terminal_payload(call, outcome)
+            await sio.emit(
+                ToolEvents.RESULT if terminal_payload.get("status") == "completed" else ToolEvents.ERROR,
+                terminal_payload,
+                to=sid,
+            )
         except Exception as exc:  # noqa: BLE001 - preserve existing transport error contract
             failure = type("Failure", (), {"success": False, "error": str(exc), "outcome": "known_failure", "retryable": True})()
             await sio.emit(ToolEvents.ERROR, _terminal_payload(call, failure), to=sid)

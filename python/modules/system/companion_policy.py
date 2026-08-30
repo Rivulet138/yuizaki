@@ -1,6 +1,22 @@
 from __future__ import annotations
 
+import math
 from typing import Any
+
+
+def _finite_number(value: Any, *, default: float, minimum: float | None = None, maximum: float | None = None) -> tuple[float, bool]:
+    """Normalize untrusted relationship/persona numbers without enabling action."""
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default, False
+    if not math.isfinite(normalized):
+        return default, False
+    if minimum is not None and normalized < minimum:
+        return default, False
+    if maximum is not None and normalized > maximum:
+        return default, False
+    return normalized, True
 
 
 def evaluate_proactive_policy(
@@ -17,12 +33,30 @@ def evaluate_proactive_policy(
     kinds = [str(item) for item in (recent_kinds or []) if item]
     relationship_stage = str(summary.get("relationship_stage") or "warming")
     milestone_salience = str(summary.get("milestone_salience") or "low")
-    proactive_budget = float(summary.get("proactive_budget") or 1.0)
+    raw_budget = summary.get("proactive_budget", 1.0)
+    if raw_budget is None:
+        raw_budget = 1.0
+    proactive_budget, budget_valid = _finite_number(
+        raw_budget,
+        default=0.0,
+        minimum=0.0,
+        maximum=10.0,
+    )
+    normalized_energy, energy_valid = _finite_number(
+        energy,
+        default=0.0,
+        minimum=0.0,
+        maximum=1.0,
+    )
 
     suppression_reasons: list[str] = []
     trigger_reason = "routine-idle"
 
-    if energy <= 0.3 or mood == "tired":
+    if not budget_valid:
+        suppression_reasons.append("invalid-proactive-budget")
+    if not energy_valid:
+        suppression_reasons.append("invalid-energy")
+    if normalized_energy <= 0.3 or mood == "tired":
         suppression_reasons.append("low-energy")
     if proactive_budget < 0.85:
         suppression_reasons.append("low-proactive-budget")

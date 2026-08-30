@@ -1,0 +1,209 @@
+[
+  {
+    "caseId": "eligible",
+    "expectedAllowed": true,
+    "expectedReason": "allowed",
+    "settings": {
+      "enabled": true,
+      "dailyBudget": 2,
+      "cooldownSeconds": 0
+    },
+    "frame": {
+      "sourceCreatedAt": 1800000000,
+      "expiresAt": 1800086400
+    }
+  },
+  {
+    "caseId": "paused",
+    "expectedAllowed": false,
+    "expectedReason": "user_paused",
+    "settings": {
+      "enabled": true,
+      "paused": true
+    },
+    "frame": {
+      "sourceCreatedAt": 1800000000,
+      "expiresAt": 1800086400
+    }
+  },
+  {
+    "caseId": "ignored-feedback",
+    "expectedAllowed": false,
+    "expectedReason": "feedback_ignored",
+    "settings": {
+      "enabled": true,
+      "cooldownSeconds": 0
+    },
+    "history": {
+      "feedback": [
+        {
+          "kind": "ignored",
+          "at": 1799999940
+        }
+      ]
+    },
+    "frame": {
+      "sourceCreatedAt": 1800000000,
+      "expiresAt": 1800086400
+    }
+  },
+  {
+    "caseId": "daily-budget",
+    "expectedAllowed": false,
+    "expectedReason": "daily_budget",
+    "settings": {
+      "enabled": true,
+      "dailyBudget": 1,
+      "cooldownSeconds": 0
+    },
+    "history": {
+      "delivered": [
+        {
+          "at": 1799999940
+        }
+      ]
+    },
+    "frame": {
+      "sourceCreatedAt": 1800000000,
+      "expiresAt": 1800086400
+    }
+  },
+  {
+    "caseId": "quiet-hours",
+    "expectedAllowed": false,
+    "expectedReason": "quiet_hours",
+    "settings": {
+      "enabled": true,
+      "quietHours": {
+        "enabled": true,
+        "start": "00:00",
+        "end": "23:59",
+        "timezone": "UTC"
+      }
+    },
+    "frame": {
+      "sourceCreatedAt": 1800000000,
+      "expiresAt": 1800086400
+    }
+  },
+  {
+    "caseId": "not-interruptible",
+    "expectedAllowed": false,
+    "expectedReason": "not_interruptible",
+    "settings": {
+      "enabled": true
+    },
+    "interruptible": false,
+    "frame": {
+      "sourceCreatedAt": 1800000000,
+      "expiresAt": 1800086400
+    }
+  },
+  {
+    "caseId": "snoozed-feedback",
+    "expectedAllowed": false,
+    "expectedReason": "feedback_snoozed",
+    "settings": {
+      "enabled": true,
+      "cooldownSeconds": 0
+    },
+    "history": {
+      "feedback": [
+        {
+          "kind": "snoozed",
+          "at": 1799999940
+        }
+      ]
+    },
+    "frame": {
+      "sourceCreatedAt": 1800000000,
+      "expiresAt": 1800086400
+    }
+  },
+  {
+    "caseId": "source-disabled",
+    "expectedAllowed": false,
+    "expectedReason": "source_disabled",
+    "settings": {
+      "enabled": true,
+      "sourceEnabled": {
+        "completed_turn_followup": false
+      }
+    },
+    "frame": {
+      "sourceCreatedAt": 1800000000,
+      "expiresAt": 1800086400
+    }
+  },
+  {
+    "caseId": "category-budget",
+    "expectedAllowed": false,
+    "expectedReason": "category_budget",
+    "expectedRemainingBudget": 2,
+    "expectedRemainingCategoryBudget": 0,
+    "category": "conversation",
+    "settings": {
+      "enabled": true,
+      "dailyBudget": 3,
+      "categoryBudgets": {
+        "conversation": 1
+      },
+      "cooldownSeconds": 0
+    },
+    "history": {
+      "delivered": [
+        {
+          "at": 1799999940,
+          "category": "conversation"
+        }
+      ]
+    },
+    "frame": {
+      "sourceCreatedAt": 1800000000,
+      "expiresAt": 1800086400
+    }
+  },
+  {
+    "caseId": "cooldown-active",
+    "expectedAllowed": false,
+    "expectedReason": "cooldown",
+    "settings": {
+      "enabled": true,
+      "dailyBudget": 3,
+      "cooldownSeconds": 3600
+    },
+    "history": {
+      "delivered": [
+        {
+          "at": 1799999940
+        }
+      ]
+    },
+    "frame": {
+      "sourceCreatedAt": 1800000000,
+      "expiresAt": 1800086400
+    }
+  },
+  {
+    "caseId": "cooldown-expired",
+    "expectedAllowed": true,
+    "expectedReason": "allowed",
+    "expectedRemainingBudget": 2,
+    "settings": {
+      "enabled": true,
+      "dailyBudget": 3,
+      "cooldownSeconds": 3600
+    },
+    "history": {
+      "delivered": [
+        {
+          "at": 1799992800
+        }
+      ]
+    },
+    "frame": {
+      "sourceCreatedAt": 1800000000,
+      "expiresAt": 1800086400
+    }
+  }
+]

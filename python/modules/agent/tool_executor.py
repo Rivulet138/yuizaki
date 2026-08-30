@@ -19,6 +19,7 @@ from .models import RuntimeLoopRecord
 from .perception import redact_sensitive_payload
 from .permission_receipt import build_permission_receipt
 from .policy_engine import PolicyEngine
+from .result_verifier import build_result_verification, normalize_verification_status
 from .route_policy import memory_reflector_route
 from .tool_registry import ToolRegistry, _mint_execution_permit, tool_may_change_state
 from .tool_result import ToolResultEnvelope
@@ -37,13 +38,7 @@ def _bounded_result_summary(content: Any) -> str:
     return f"{text[:_RESULT_SUMMARY_LIMIT - 3].rstrip()}..."
 
 
-def _normalize_verification_status(value: Any) -> str:
-    marker = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
-    if marker in {"verified", "passed", "success", "succeeded", "ok"}:
-        return "verified"
-    if marker in {"error", "failed", "failure", "timeout", "timed_out"}:
-        return "error"
-    return "unverified"
+_normalize_verification_status = normalize_verification_status
 
 
 class ToolExecutor:
@@ -178,6 +173,13 @@ class ToolExecutor:
                     _bounded_result_summary(redact_sensitive_payload(item))
                     for item in values if item is not None and str(item).strip()
                 ][:6]
+            verification_contract = build_result_verification(
+                target=tool_name,
+                parameters=original_args,
+                raw={"status": status, "evidence": evidence},
+                retryability=status in {"unverified", "error"},
+                unknown_effect=(latest_effect_outcome == "unknown_effect" and status != "verified"),
+            )
             resolved_effect_outcome = (
                 "known_success"
                 if status == "verified"
@@ -190,29 +192,40 @@ class ToolExecutor:
                 "recheckAvailable": True,
                 "durationMs": round((time.perf_counter() - started_at) * 1000),
                 "effectOutcome": resolved_effect_outcome,
+                **verification_contract.to_event_data(),
             }
         except TimeoutError:
             status = "error"
             evidence = []
             failed_reason = "status_probe_timeout"
+            verification_contract = build_result_verification(
+                target=tool_name, parameters=original_args, raw=None,
+                default_status="error", retryability=True,
+            )
             payload = {
                 "verificationStatus": "error",
                 "recheck": True,
                 "recheckAvailable": True,
                 "durationMs": round((time.perf_counter() - started_at) * 1000),
                 "recheckError": "status_probe_timeout",
+                **verification_contract.to_event_data(),
             }
         except Exception as exc:  # noqa: BLE001 - probe failure is user-visible, not a transport crash
             logger.debug("Tool recheck failed for %s: %s", tool_name, exc)
             status = "error"
             evidence = []
             failed_reason = "status_probe_failed"
+            verification_contract = build_result_verification(
+                target=tool_name, parameters=original_args, raw=None,
+                default_status="error", retryability=True,
+            )
             payload = {
                 "verificationStatus": "error",
                 "recheck": True,
                 "recheckAvailable": True,
                 "durationMs": round((time.perf_counter() - started_at) * 1000),
                 "recheckError": "status_probe_failed",
+                **verification_contract.to_event_data(),
             }
         log.append_recheck(
             job_id=job_id,
@@ -945,13 +958,35 @@ class ToolExecutor:
                         verification_data["verificationEvidence"] = [
                             _bounded_result_summary(redact_sensitive_payload(evidence))
                         ]
+                    verification_contract = build_result_verification(
+                        target=tool.name,
+                        parameters=args,
+                        raw={
+                            "status": status,
+                            "evidence": verification_data.get("verificationEvidence", []),
+                        },
+                        retryability=status in {"unverified", "error"},
+                        unknown_effect=result.outcome == "unknown_effect",
+                    )
+                    verification_data.update(verification_contract.to_event_data())
                 elif not verification_data:
-                    verification_data["verificationStatus"] = "verified" if verification is True else "unverified"
+                    verification_contract = build_result_verification(
+                        target=tool.name,
+                        parameters=args,
+                        raw=verification,
+                        unknown_effect=result.outcome == "unknown_effect",
+                    )
+                    verification_data.update(verification_contract.to_event_data())
             except TimeoutError:
                 verification_data = {
                     "verificationStatus": "error",
                     "verificationError": "verification_timeout",
                 }
+                verification_data.update(build_result_verification(
+                    target=tool.name, parameters=args, raw=None,
+                    default_status="error", retryability=True,
+                    unknown_effect=result.outcome == "unknown_effect",
+                ).to_event_data())
             except asyncio.CancelledError:
                 # The primary handler has already reached a known terminal
                 # result. Cancelling its optional observation must not erase
@@ -960,9 +995,19 @@ class ToolExecutor:
                     "verificationStatus": "cancelled",
                     "verificationError": "verification_cancelled",
                 }
+                verification_data.update(build_result_verification(
+                    target=tool.name, parameters=args, raw="cancelled",
+                    default_status="cancelled", retryability=False,
+                    unknown_effect=result.outcome == "unknown_effect",
+                ).to_event_data())
             except Exception as exc:  # noqa: BLE001 - verification must not break a completed action
                 logger.debug("Tool postcondition verification failed for %s: %s", tool.name, exc)
                 verification_data = {"verificationStatus": "error"}
+                verification_data.update(build_result_verification(
+                    target=tool.name, parameters=args, raw=None,
+                    default_status="error", retryability=True,
+                    unknown_effect=result.outcome == "unknown_effect",
+                ).to_event_data())
         result_summary = _bounded_result_summary(
             redact_sensitive_payload(getattr(result, "content", ""))
         )

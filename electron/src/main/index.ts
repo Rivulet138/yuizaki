@@ -1,4 +1,4 @@
-import { app, clipboard, desktopCapturer, dialog, ipcMain, screen, shell } from 'electron'
+import { app, clipboard, desktopCapturer, dialog, screen, shell } from 'electron'
 import path from 'path'
 import { readFile, stat } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
@@ -56,13 +56,6 @@ import {
 import { fenceDesktopActionsWhenHotkeyUnavailable } from './desktop-action-hotkey-coordinator'
 import { rebindInputBindingsWithDesktopActionFence } from './input-binding-rebind-coordinator'
 import { configureLinuxDesktop } from './linux-desktop'
-import {
-  buildE2EActivation,
-  registerE2EActivationHandshake,
-  registerE2ERendererControlHandlers,
-  registerE2EVoiceHandler,
-  runE2ESuite,
-} from './e2e-test-mode'
 
 registerRendererProtocolPrivileges()
 configureLinuxDesktop(app, process.env)
@@ -92,10 +85,6 @@ let inputBindingStatus: InputBindingRegistrationStatus = {
 }
 let ipcReady = false
 let isQuitting = false
-let disposeE2EHandlers: (() => void) | null = null
-
-const e2eActivation = buildE2EActivation(process.env, app.isPackaged)
-if (e2eActivation.active) app.commandLine.appendSwitch('force-prefers-reduced-motion')
 
 const togglePetLock = () => {
   const nextState = petStateStore.applyConfigPatch({ locked: !petStateStore.getState().locked })
@@ -138,7 +127,6 @@ function buildPanelRuntimeOptions(tab?: string): PetWindowRuntimeOptions {
     controlOrigin: controlServer.panelUrl.replace(/\/$/, ''),
     apiOrigin: resolvePythonApiOrigin(),
     controlToken: controlServer.getControlToken(),
-    ...(e2eActivation.active ? { e2eToken: e2eActivation.token } : {}),
     ...(tab ? { tab } : {}),
   }
 }
@@ -222,6 +210,7 @@ async function createApp(): Promise<void> {
   backendApiTokenStore = new BackendApiTokenStore(path.join(app.getPath('userData'), 'auth'))
   providerCredentialStore = new ProviderCredentialStore(path.join(app.getPath('userData'), 'credentials'))
   providerCredentialStore.migratePlaintextSettings(path.resolve(__dirname, '../../../python/config/settings.json'))
+  providerCredentialStore.migratePlaintextConnectorState(path.resolve(__dirname, '../../../python/data/message_connectors.json'))
   inputBindingStore = new InputBindingStore(path.join(app.getPath('userData'), 'input'))
   const packageStateStore: JsonPackageStateStore = createDefaultPackageStateStore(app.getPath('userData'))
   const packageArtifactStore: LocalPackageArtifactStore = createDefaultPackageArtifactStore(app.getPath('userData'))
@@ -420,6 +409,9 @@ async function createApp(): Promise<void> {
     hostPerceptionToken,
     hostDesktopActionToken,
   )
+  controlServer.setPythonProviderEnvironmentUpdater((environment) => {
+    pythonService.updateProviderCredentialEnvironment(environment)
+  })
   const onboardingStore = new OnboardingReadinessStore(path.join(app.getPath('userData'), 'onboarding'))
   onboardingCoordinator = new OnboardingReadinessCoordinator(
     onboardingStore,
@@ -468,23 +460,7 @@ async function createApp(): Promise<void> {
   applyPetStateToRenderer(petStateStore.getState())
   setPetVisible(petStateStore.getState().visible)
 
-  petWindow.create(buildPanelRuntimeOptions(), e2eActivation.active ? (window) => {
-    const e2eContext = {
-      ipcMain,
-      activation: e2eActivation,
-      expectedSender: window.webContents,
-      apiOrigin: resolvePythonApiOrigin(),
-      activationProof: { value: null },
-    }
-    const disposeActivation = registerE2EActivationHandshake(e2eContext)
-    const disposeVoice = registerE2EVoiceHandler(e2eContext)
-    const disposeControls = registerE2ERendererControlHandlers(e2eContext)
-    disposeE2EHandlers = () => {
-      disposeControls()
-      disposeVoice()
-      disposeActivation()
-    }
-  } : undefined)
+  petWindow.create(buildPanelRuntimeOptions())
 
   const inputSettings = inputBindingStore.get()
   inputBindingStatus = petShortcuts.register(inputSettings)
@@ -507,27 +483,11 @@ async function createApp(): Promise<void> {
     },
   )
 
-  const backendStart = onboardingCoordinator.startBackend().catch((error: unknown) => {
+  void onboardingCoordinator.startBackend().catch((error: unknown) => {
     console.error('Failed to start Python service:', error)
     return onboardingCoordinator.snapshot()
   })
 
-  if (e2eActivation.active && petWindow.window && live2dWindow.window) {
-    await backendStart
-    await runE2ESuite({
-      activation: e2eActivation,
-      caseId: process.env['YUIZAKI_E2E_CASE'] ?? '',
-      runId: process.env['YUIZAKI_E2E_RUN_ID'] ?? '',
-      tokenHash: process.env['YUIZAKI_E2E_TOKEN_HASH'] ?? '',
-      backendToken: controlServer.getControlToken(),
-      artifactDir: process.env['YUIZAKI_E2E_ARTIFACT_DIR'] ?? app.getPath('temp'),
-      apiOrigin: resolvePythonApiOrigin(),
-      panelWindow: petWindow.window,
-      live2dWindow: live2dWindow.window,
-      failureProbe: process.env['YUIZAKI_E2E_FAILURE_PROBE'],
-    })
-    app.quit()
-  }
 }
 
 function restorePersistedPetModelSelection(): void {
@@ -700,8 +660,6 @@ app.on('before-quit', async () => {
   computerUseBridge?.dispose()
   desktopActionBridge?.dispose()
   perceptionBridge?.dispose()
-  disposeE2EHandlers?.()
-  disposeE2EHandlers = null
   petShortcuts?.unregister()
   petTray?.destroy()
   live2dWindow?.close()

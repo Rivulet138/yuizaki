@@ -12,6 +12,11 @@ from .schema import MemorySearchFilters, RetrievalRequest, RetrievalTrace
 from .vector_store import Document, memory_score_weights
 
 
+def _normalize_scope_id(value: Any) -> str | None:
+    normalized = str(value or '').strip()
+    return normalized or None
+
+
 class RetrievalPipeline:
     """Minimal retrieval pipeline skeleton for layered memory recall."""
 
@@ -29,7 +34,7 @@ class RetrievalPipeline:
         list_documents = getattr(self.store, 'list_documents', None)
         if not callable(list_documents):
             return {}, MemoryRelationProjection({})
-        raw_revision = getattr(self.store, 'get_authority_revision', None)
+        raw_revision = getattr(self._authority_owner(), 'get_authority_revision', None)
         revision: int | None = None
         if callable(raw_revision):
             try:
@@ -60,15 +65,53 @@ class RetrievalPipeline:
             self._relation_projection = None
         return documents_by_id, projection
 
+    def _authority_owner(self) -> Any:
+        """Return the durable authority behind an optional rebuildable index."""
+        return getattr(self.store, "authority", None) or self.store
+
+    def _authority_revision(self) -> int | None:
+        getter = getattr(self._authority_owner(), "get_authority_revision", None)
+        if not callable(getter):
+            return None
+        try:
+            value = getter()
+        except Exception:
+            return None
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+    def _index_snapshot_revision(self) -> int | None:
+        getter = getattr(self._authority_owner(), "get_active_index_generation", None)
+        if not callable(getter):
+            return None
+        try:
+            active = getter()
+        except Exception:
+            return None
+        if not isinstance(active, dict):
+            return None
+        value = active.get("snapshot_revision")
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+    def _index_consistency(self, authority_revision: int | None) -> str:
+        if bool(getattr(self.store, "_index_dirty", False)):
+            return "dirty"
+        snapshot_revision = self._index_snapshot_revision()
+        if authority_revision is None or snapshot_revision is None:
+            return "unknown"
+        return "current" if snapshot_revision == authority_revision else "stale"
+
     def recall(self, request: RetrievalRequest) -> dict[str, Any]:
         started = perf_counter()
+        authority_revision_before = self._authority_revision()
         top_k = max(1, request.top_k)
+        context_budget_tokens = max(128, int(request.context_budget_tokens or 1200))
         candidate_limit = max(top_k * 8, top_k + 20)
         filters = MemorySearchFilters(
             scope=request.scope,
             session_id=request.session_id,
             workspace_id=request.workspace_id,
             layers=request.layers,
+            memory_role=request.memory_role,
         )
         try:
             raw_results = self.store.search_with_rerank(
@@ -98,6 +141,14 @@ class RetrievalPipeline:
                 complete=False,
                 error_code=exc.code,
                 scan_limit_reached=True,
+                authority_revision=authority_revision_before,
+                index_snapshot_revision=self._index_snapshot_revision(),
+                revision_stable=(
+                    authority_revision_before == self._authority_revision()
+                    if authority_revision_before is not None
+                    else None
+                ),
+                index_consistency=self._index_consistency(authority_revision_before),
             )
             trace_dict = asdict(trace)
             self.last_trace = trace_dict
@@ -106,6 +157,8 @@ class RetrievalPipeline:
 
         eligible: list[tuple[Document, float]] = []
         filter_reasons: dict[str, int] = {}
+        requested_session_id = _normalize_scope_id(request.session_id)
+        requested_workspace_id = _normalize_scope_id(request.workspace_id)
 
         def _reject_reason(doc: Document) -> str | None:
             metadata = doc.metadata or {}
@@ -116,28 +169,34 @@ class RetrievalPipeline:
             scope = str(metadata.get('scope', 'workspace'))
             if layer not in request.layers:
                 return 'layer'
+            if request.memory_role and str(metadata.get('memory_role') or '') != request.memory_role:
+                return 'memory_role'
             if request.scope == 'global':
                 if scope != 'global':
                     return 'scope'
-                if request.session_id is not None and metadata.get('session_id') not in (None, request.session_id):
+                document_session_id = _normalize_scope_id(metadata.get('session_id'))
+                if requested_session_id is not None and document_session_id not in (None, requested_session_id):
                     return 'session'
                 return None
             if request.scope and scope != request.scope:
                 return 'scope'
             if request.scope == 'session':
-                if request.session_id is None or metadata.get('session_id') not in (request.session_id,):
+                document_session_id = _normalize_scope_id(metadata.get('session_id'))
+                if requested_session_id is None or document_session_id not in (requested_session_id,):
                     return 'session'
             elif request.scope == 'workspace':
-                document_workspace_id = metadata.get('workspace_id')
-                if request.workspace_id is None:
+                document_workspace_id = _normalize_scope_id(metadata.get('workspace_id'))
+                if requested_workspace_id is None:
                     if document_workspace_id is not None:
                         return 'workspace'
-                elif document_workspace_id not in (request.workspace_id, None):
+                elif document_workspace_id not in (requested_workspace_id, None):
                     return 'workspace'
             else:
-                if request.session_id is not None and metadata.get('session_id') not in (None, request.session_id):
+                document_session_id = _normalize_scope_id(metadata.get('session_id'))
+                if requested_session_id is not None and document_session_id not in (None, requested_session_id):
                     return 'session'
-                if request.workspace_id is not None and metadata.get('workspace_id') not in (None, request.workspace_id):
+                document_workspace_id = _normalize_scope_id(metadata.get('workspace_id'))
+                if requested_workspace_id is not None and document_workspace_id not in (None, requested_workspace_id):
                     return 'workspace'
             return None
 
@@ -202,11 +261,24 @@ class RetrievalPipeline:
             if relation_queue:
                 expansion_truncated = True
 
-        selected = sorted(
+        ranked_selected = sorted(
             [*filtered, *expanded],
             key=lambda item: float(item[1]),
             reverse=True,
         )[:top_k]
+        # Apply a second, token-aware bound after ranking.  Keep the first
+        # result even when it is larger than the budget so a valid query never
+        # silently loses all evidence; the trace makes that condition visible.
+        selected: list[tuple[Document, float]] = []
+        context_token_estimate = 0
+        for item in ranked_selected:
+            document = item[0]
+            estimate = max(1, (len(document.text) + 3) // 4)
+            if selected and context_token_estimate + estimate > context_budget_tokens:
+                continue
+            selected.append(item)
+            context_token_estimate += estimate
+        budget_truncated = len(selected) < len(ranked_selected)
         scores = [float(score) for _, score in selected]
         reranker = getattr(self.store, "_reranker", None)
         index = getattr(self.store, "index", None)
@@ -216,6 +288,12 @@ class RetrievalPipeline:
             recency_weight=request.recency_weight,
             quality_weight=request.quality_weight,
             learned_enabled=bool(getattr(reranker, "enabled", False)),
+        )
+        authority_revision_after = self._authority_revision()
+        revision_stable = (
+            authority_revision_before == authority_revision_after
+            if authority_revision_before is not None and authority_revision_after is not None
+            else None
         )
 
         trace = RetrievalTrace(
@@ -235,12 +313,18 @@ class RetrievalPipeline:
             average_score=(sum(scores) / len(scores)) if scores else None,
             latency_ms=round((perf_counter() - started) * 1000, 3),
             backend_filter_downpushed=True,
+            complete=revision_stable is not False,
+            error_code=("authority_changed_during_recall" if revision_stable is False else None),
+            authority_revision=authority_revision_after,
+            index_snapshot_revision=self._index_snapshot_revision(),
+            revision_stable=revision_stable,
+            index_consistency=self._index_consistency(authority_revision_after),
             ranking_strategy="hybrid_semantic_lexical_learned_optional",
             score_weights=weights,
             anchor_ids=anchor_ids,
             expanded_ids=[doc.id for doc, _ in expanded],
             expansion_edges=expansion_edges,
-            evidence_ids=[doc.id for doc, _ in expanded],
+            evidence_ids=[*anchor_ids, *[doc.id for doc, _ in expanded]],
             expansion_depth=max_expansion_depth,
             expansion_truncated=expansion_truncated,
             relation_latency_ms=round((perf_counter() - relation_started) * 1000, 3),
@@ -248,6 +332,9 @@ class RetrievalPipeline:
             relation_accepted=relation_accepted,
             evidence_coverage=(relation_accepted / relation_attempted) if relation_attempted else 0.0,
             relation_token_estimate=relation_token_estimate,
+            context_budget_tokens=context_budget_tokens,
+            context_token_estimate=context_token_estimate,
+            budget_truncated=budget_truncated,
         )
         trace_dict = asdict(trace)
 
@@ -288,19 +375,17 @@ class RetrievalPipeline:
                 return '与当前请求直接匹配', 'anchor', None
             return '按相关性排序进入结果', 'ranking', None
 
-        payload = {
-            'results': [
-                {
-                    'doc': doc.__dict__,
-                    'score': score,
-                    'score_components': _score_components(doc, float(score)),
-                    'why_recalled': _recall_explanation(doc, float(score))[0],
-                    'evidence_type': _recall_explanation(doc, float(score))[1],
-                    'association': _recall_explanation(doc, float(score))[2],
-                }
-                for doc, score in selected[:top_k]
-            ],
-            'trace': trace_dict,
-        }
+        results: list[dict[str, Any]] = []
+        for doc, score in selected[:top_k]:
+            why_recalled, evidence_type, association = _recall_explanation(doc, float(score))
+            results.append({
+                'doc': doc.__dict__,
+                'score': score,
+                'score_components': _score_components(doc, float(score)),
+                'why_recalled': why_recalled,
+                'evidence_type': evidence_type,
+                'association': association,
+            })
+        payload = {'results': results, 'trace': trace_dict}
         self.last_trace = trace_dict
         return payload

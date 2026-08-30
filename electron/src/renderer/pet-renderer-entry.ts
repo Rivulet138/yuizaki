@@ -1,11 +1,9 @@
 import { logger } from "./logger";
 import { PetRenderer } from "./pet-renderer";
-import { DEFAULT_PET_TEST_STATE, type PetTestState } from "./pet-test-state";
 
 type PetRendererWindow = {
 	live2dApi?: typeof window.live2dApi;
 	petRenderer?: PetRenderer;
-	__petTestState?: PetTestState;
 };
 
 const renderer = new PetRenderer("pet-canvas");
@@ -16,34 +14,17 @@ renderer.init().catch((error) => {
 const petWindow = window as unknown as PetRendererWindow;
 
 if (!petWindow.live2dApi) {
-	const readTestState = (): PetTestState => ({
-		...DEFAULT_PET_TEST_STATE,
-		...(petWindow.__petTestState ?? {}),
-	});
 	const fallbackApi = {
 		pet: {
 			rendererReady: () => {},
 			setPosition: () => {},
-			dragWindow: () => {
-				const current = readTestState();
-				petWindow.__petTestState = {
-					...current,
-					dragMoveCount: current.dragMoveCount + 1,
-					lastDragStartAt: current.lastDragStartAt ?? Date.now(),
-				};
-			},
-			endWindowDrag: () => {
-				const current = readTestState();
-				petWindow.__petTestState = {
-					...current,
-					lastDragEndAt: Date.now(),
-				};
-			},
+			dragWindow: () => {},
+			endWindowDrag: () => {},
 			setMouseIgnore: () => {},
 			setLocked: async () => ({
 				modelType: "live2d",
 				modelId: null,
-				scale: 0.28,
+				scale: 0.42,
 				positionX: 0,
 				positionY: 0,
 				placement: "bottom-right",
@@ -56,7 +37,7 @@ if (!petWindow.live2dApi) {
 			setClickThrough: async () => ({
 				modelType: "live2d",
 				modelId: null,
-				scale: 0.28,
+				scale: 0.42,
 				positionX: 0,
 				positionY: 0,
 				placement: "bottom-right",
@@ -69,7 +50,7 @@ if (!petWindow.live2dApi) {
 			snapBottomRight: async () => ({
 				modelType: "live2d",
 				modelId: null,
-				scale: 0.28,
+				scale: 0.42,
 				positionX: 0,
 				positionY: 0,
 				placement: "bottom-right",
@@ -89,13 +70,7 @@ if (!petWindow.live2dApi) {
 			reportAvatarCommandResult: () => {},
 			reportLipSyncReady: () => {},
 			openControlPanel: () => {},
-			openChatCenter: () => {
-				const current = readTestState();
-				petWindow.__petTestState = {
-					...current,
-					lastChatCenterRequestAt: Date.now(),
-				};
-			},
+			openChatCenter: () => {},
 			dispatchEvent: async () => ({
 				ok: true,
 				matched: 0,
@@ -115,6 +90,3 @@ if (!petWindow.live2dApi) {
 }
 
 petWindow.petRenderer = renderer;
-petWindow.__petTestState = petWindow.__petTestState ?? {
-	...DEFAULT_PET_TEST_STATE,
-};

@@ -4,9 +4,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-
 MemoryLayer = str  # profile | working | episodic | relationship | reflective | semantic | session(legacy)
 MemoryScope = str  # global | workspace | session
+MemoryRole = str  # user_fact | relationship_event | task_experience | failure_reflection | reusable_skill | tool_permission
 
 
 @dataclass
@@ -36,11 +36,16 @@ class RetrievalRequest:
     top_k: int = 5
     layers: list[MemoryLayer] = field(default_factory=lambda: ['profile', 'working', 'episodic', 'relationship', 'reflective', 'semantic'])
     memory_types: list[str] | None = None
+    memory_role: MemoryRole | None = None
     recency_weight: float = 0.2
     quality_weight: float = 0.15
     relation_expansion: bool = True
     relation_limit: int = 20
     relation_depth: int = 1
+    # Bound the amount of memory evidence that can reach prompt assembly.
+    # This is separate from ``top_k`` because a single long memory can consume
+    # the whole context budget.
+    context_budget_tokens: int = 1200
 
 
 @dataclass
@@ -49,6 +54,7 @@ class MemorySearchFilters:
     session_id: str | None = None
     workspace_id: str | None = None
     layers: list[MemoryLayer] | None = None
+    memory_role: MemoryRole | None = None
 
 
 @dataclass
@@ -72,6 +78,10 @@ class RetrievalTrace:
     complete: bool = True
     error_code: str | None = None
     scan_limit_reached: bool = False
+    authority_revision: int | None = None
+    index_snapshot_revision: int | None = None
+    revision_stable: bool | None = None
+    index_consistency: str = "unknown"
     ranking_strategy: str = "hybrid_semantic_lexical"
     score_weights: dict[str, float] = field(default_factory=dict)
     anchor_ids: list[str] = field(default_factory=list)
@@ -85,3 +95,6 @@ class RetrievalTrace:
     relation_accepted: int = 0
     evidence_coverage: float = 0.0
     relation_token_estimate: int = 0
+    context_budget_tokens: int = 1200
+    context_token_estimate: int = 0
+    budget_truncated: bool = False

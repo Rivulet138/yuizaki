@@ -10,7 +10,6 @@ build/
 python/.venv/
 python/.cache/
 python/__pycache__/
-python/.pytest_cache/
 python/audio_cache/
 python/artifacts/
 python/CharacterModels/
@@ -65,20 +64,16 @@ coverage/
 htmlcov/
 *-smoke.png
 /.tmp/
-/.pytest_cache/
-/.pytest-tmp*/
 /tmp/
 /data/test_chat.db
 /.omx/**/*.png
 /electron/.codex-logs/
 /electron/artifacts/
-/electron/test-results/
 /electron/.package-runtime/
 /electron/.tmp/
 /electron/tmp/
 /python/.tmp/
 /python/tmp*/
-/python/.pytest-tmp-codex*/
 /python/.test-tmp/
 
 # Python tooling caches

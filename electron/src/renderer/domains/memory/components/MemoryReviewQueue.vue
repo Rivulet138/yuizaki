@@ -1,6 +1,6 @@
 <template>
   <section class="review" aria-labelledby="memory-review-title">
-    <div class="review-heading"><div><h3 id="memory-review-title">待确认记忆</h3><p>这些内容暂不参与召回，确认后才会进入可用记忆。</p></div><el-tag :type="docs.length ? 'warning' : 'success'">{{ docs.length }} 条</el-tag></div>
+    <div class="review-heading"><div><h3 id="memory-review-title">待确认</h3></div><el-tag :type="docs.length ? 'warning' : 'success'">{{ docs.length }} 条</el-tag></div>
     <AsyncState :loading="loading" :error="error" :empty="docs.length === 0" empty-text="当前没有待确认的记忆" loading-text="正在读取待确认记忆…" @retry="emit('retry')">
       <div class="review-list">
         <article v-for="doc in docs" :key="doc.id">
@@ -22,6 +22,6 @@ const decide = (doc: MemoryDoc, decision: 'approve' | 'reject') => {
 }
 </script>
 <style scoped>
-.review,.review-list { display: flex; flex-direction: column; gap: 12px; }.review-heading,.review-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.review-heading h3 { margin: 0; color: var(--yui-text); font-size: 15px; }.review-heading p { margin: 4px 0 0; color: var(--yui-muted); font-size: 12px; }.review-list article { display: flex; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--yui-border); }.review-list strong { color: var(--yui-text); }.review-list p { margin: 5px 0 0; color: var(--yui-text); font-size: 13px; line-height: 1.55; }.review-meta { flex-wrap: wrap; justify-content: flex-end; color: var(--yui-muted); font-size: 12px; }.review-actions { display: inline-flex; align-items: center; gap: 6px; }
+.review,.review-list { display: flex; flex-direction: column; gap: 12px; }.review-heading,.review-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.review-heading h3 { margin: 0; color: var(--yui-text); font-size: 15px; }.review-list article { display: flex; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--yui-border); }.review-list strong { color: var(--yui-text); }.review-list p { margin: 5px 0 0; color: var(--yui-text); font-size: 13px; line-height: 1.55; }.review-meta { flex-wrap: wrap; justify-content: flex-end; color: var(--yui-muted); font-size: 12px; }.review-actions { display: inline-flex; align-items: center; gap: 6px; }
 @media (max-width: 760px) { .review-list article { flex-direction: column; }.review-meta { justify-content: flex-start; } }
 </style>

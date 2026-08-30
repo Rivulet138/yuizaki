@@ -9,9 +9,11 @@ import {
   type AvatarCapabilitySnapshot,
 } from '../../shared/avatar-command'
 import {
+  PET_SCALE_DEFAULT,
   normalizePetLipSyncProfile,
   type PetCompanionIdleProfile,
   type PetControlConfigPatch,
+  type AvatarManifest,
   type PetEmotionPreset,
   type PetPlacement,
   type PetLipSyncProfile,
@@ -26,6 +28,21 @@ const VRM_BASE_SCENE_Y = -1.35
 const VRM_CAMERA_Y = 1.35
 const VRM_CAMERA_Z = 3.1
 const VRM_CAMERA_TARGET_Y = 1.2
+const VRM_TARGET_HEIGHT_RATIO = 0.78
+
+export const computeVrmFitScale = (options: {
+  modelHeight: number
+  fovDeg?: number
+  cameraDistance?: number
+  targetHeightRatio?: number
+}): number => {
+  const modelHeight = Number.isFinite(options.modelHeight) && options.modelHeight > 0 ? options.modelHeight : 1
+  const fovDeg = Math.max(1, Math.min(120, options.fovDeg ?? 30))
+  const cameraDistance = Math.max(0.1, options.cameraDistance ?? VRM_CAMERA_Z)
+  const targetHeightRatio = Math.max(0.25, Math.min(0.92, options.targetHeightRatio ?? VRM_TARGET_HEIGHT_RATIO))
+  const visibleWorldHeight = 2 * Math.tan(THREE.MathUtils.degToRad(fovDeg / 2)) * cameraDistance
+  return Math.max(0.08, Math.min(4, (visibleWorldHeight * targetHeightRatio) / modelHeight))
+}
 
 interface VrmHostContext {
   container: HTMLElement
@@ -35,6 +52,7 @@ interface VrmHostContext {
     modelPath: string
     animationPaths: string[]
     emotionPresets?: PetEmotionPreset[]
+    modelManifest?: AvatarManifest | null
     scale: number
     positionX: number | null
     positionY: number | null
@@ -118,6 +136,7 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
   private vrm: VRM | null = null
   private animationMixer: THREE.AnimationMixer | null = null
   private animationClips: THREE.AnimationClip[] = []
+  private vrmBaseScale = 1
   private activeAnimationAction: THREE.AnimationAction | null = null
   private rafId: number | null = null
   private renderLoopGeneration = 0
@@ -316,7 +335,11 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
       return
     }
 
-    const normalizedScale = Math.max(0.2, Math.min(0.8, this.host.config.scale))
+    const manifestScale = this.host.config.modelManifest?.modelTransform?.scale
+      ?? this.host.config.modelManifest?.transformDefaults?.scale
+      ?? 1
+    const userScaleFactor = this.host.config.scale / PET_SCALE_DEFAULT
+    const normalizedScale = Math.max(0.08, Math.min(4, this.vrmBaseScale * manifestScale * userScaleFactor))
     this.vrm.scene.scale.setScalar(normalizedScale)
 
     if (this.camera) {
@@ -391,6 +414,7 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
       VRMUtils.deepDispose(this.vrm.scene)
       this.scene?.remove(this.vrm.scene)
       this.vrm = null
+      this.vrmBaseScale = 1
     }
 
     if (this.renderer) {
@@ -512,6 +536,14 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
     const previousVrm = this.vrm
     this.disposeAnimationState()
     this.vrm = vrm
+    const bounds = new THREE.Box3().setFromObject(vrm.scene)
+    const size = new THREE.Vector3()
+    bounds.getSize(size)
+    this.vrmBaseScale = computeVrmFitScale({
+      modelHeight: size.y,
+      fovDeg: this.camera?.fov ?? 30,
+      cameraDistance: VRM_CAMERA_Z,
+    })
     this.animationClips = [
       ...(Array.isArray(gltf.animations) ? gltf.animations : []),
       ...externalClips,

@@ -1,20 +1,23 @@
 from __future__ import annotations
 
-import logging
 import importlib
+import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol, cast
 
 from ..asr import ASRManager
+from ..core.paths import data_dir_from_env
 from ..llm import LLMClient
 from ..ocr import OCRClient
 from ..svc import SVCClient
 from ..tts import TTSProviderClient, create_tts_client
 from .voice_diagnostics import VoiceDiagnostics
 
-_VOICE_DIAGNOSTICS = VoiceDiagnostics()
+_VOICE_DIAGNOSTICS = VoiceDiagnostics(
+    persistence_path=data_dir_from_env() / "voice_diagnostics.json",
+)
 
 
 def voice_diagnostics() -> VoiceDiagnostics:
@@ -168,7 +171,7 @@ RelationshipSummaryProvider = Callable[[], object]
 
 def _database_repository_factory() -> DatabaseRepositoryFactory:
     database_module = importlib.import_module("database")
-    repository_factory = cast(object, getattr(database_module, "DatabaseRepository"))
+    repository_factory = cast(object, database_module.DatabaseRepository)
     return cast(DatabaseRepositoryFactory, repository_factory)
 
 

@@ -6,7 +6,7 @@ import { realtimeVoiceSession } from '@/audio/realtime-voice'
 import { PetSentenceEmotionScheduler, type PetTtsPlaybackStartedDetail } from '@/pet-sentence-emotion-scheduler'
 import { useChatStore } from '@/stores/chatStore'
 import { petControl } from '@/utils/petControl'
-import { chatClient, shortcutClient } from '@/api/client'
+import { chatClient, shortcutClient, systemClient } from '@/api/client'
 import {
   getCompanionInterruptionEpoch,
   publishCompanionJobEvent,
@@ -59,17 +59,90 @@ export function useVoiceConversationBridge() {
   const sentenceEmotionScheduler = new PetSentenceEmotionScheduler()
   const audioCaptureState = audioCapture.getStatus()
   let activeVoiceTransport: 'pipeline' | 'realtime' | null = null
+  let mounted = false
   let voiceRuntimeEpoch = getCompanionInterruptionEpoch()
   let realtimeLipSyncForwardingActive = false
   let avatarCommandSequence = 0
+  let diagnosticsRunId: string | null = null
+  let diagnosticsRunPromise: Promise<void> | null = null
+  let diagnosticsRunGeneration = 0
   const avatarCommandStreamId = `voice:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
-  const realtimeEventBridge = new RealtimeVoiceEventBridge(realtimeVoiceSession)
+  const realtimeEventBridge = new RealtimeVoiceEventBridge(realtimeVoiceSession, (sample) => {
+    if (!mounted) return
+    const runId = sample.runId
+    if (!runId) return
+    if (sample.scope && !isCurrentRealtimeScope(sample.scope)) return
+    // Persist only bounded timing/recovery metadata; never send transcript or audio.
+    void systemClient.recordVoiceDiagnosticSample({
+      stage: sample.stage,
+      latency_ms: sample.latencyMs,
+      ok: sample.ok,
+      recovered: sample.recovered,
+      recovery_latency_ms: sample.recoveryLatencyMs,
+      playback_underruns: sample.playbackUnderruns,
+      run_id: runId,
+    }).catch(() => undefined)
+    if (sample.stage === 'interruption' || sample.stage === 'interrupt_ack') {
+      void systemClient.recordVoiceComfort({
+        scenario: 'deliberate_interrupt',
+        run_id: runId,
+        ...(sample.stage === 'interruption'
+          ? { stop_audio_latency_ms: sample.latencyMs }
+          : { interrupt_ack_latency_ms: sample.latencyMs }),
+      }).catch(() => undefined)
+    }
+  })
   const isCurrentRealtimeScope = (scope: { workspaceId: string; sessionId: string; interruptionEpoch: number }) =>
     matchesRealtimeVoiceScope(scope, {
       workspaceId: chatState.currentWorkspaceId,
       sessionId: chatState.currentSessionId,
       interruptionEpoch: getCompanionInterruptionEpoch(),
     })
+
+  const createDiagnosticsRunId = (): string =>
+    `voice-ui-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
+
+  const beginDiagnosticsRun = async (): Promise<void> => {
+    const generation = ++diagnosticsRunGeneration
+    const nextRunId = createDiagnosticsRunId()
+    diagnosticsRunId = nextRunId
+    realtimeEventBridge.setDiagnosticRunId(nextRunId)
+    try {
+      const result = await systemClient.beginVoiceDiagnosticsRun(nextRunId)
+      if (generation !== diagnosticsRunGeneration || result.run_id !== nextRunId) return
+    } catch (error) {
+      if (generation === diagnosticsRunGeneration) {
+        diagnosticsRunId = null
+        realtimeEventBridge.setDiagnosticRunId(null)
+      }
+      console.debug('[VoiceBridge] diagnostics run unavailable:', error)
+    }
+  }
+
+  const queueDiagnosticsRun = (): Promise<void> => {
+    const task = beginDiagnosticsRun()
+    const trackedTask = task.finally(() => {
+      if (diagnosticsRunPromise === trackedTask) diagnosticsRunPromise = null
+    })
+    diagnosticsRunPromise = trackedTask
+    return trackedTask
+  }
+
+  const ensureDiagnosticsRun = async (): Promise<void> => {
+    if (diagnosticsRunId) return
+    if (!diagnosticsRunPromise) queueDiagnosticsRun()
+    await diagnosticsRunPromise
+  }
+
+  const rotateDiagnosticsRun = async (): Promise<void> => {
+    diagnosticsRunGeneration += 1
+    diagnosticsRunId = null
+    realtimeEventBridge.setDiagnosticRunId(null)
+    const previousRun = diagnosticsRunPromise
+    if (previousRun) await previousRun
+    if (!mounted) return
+    await queueDiagnosticsRun()
+  }
 
   const refreshPetControlContext = async (): Promise<void> => {
     try {
@@ -232,13 +305,16 @@ export function useVoiceConversationBridge() {
   }
 
   const prewarmRealtimeVoice = async (microphonePermissionKnown = false) => {
+    await ensureDiagnosticsRun()
+    if (!diagnosticsRunId) return
     const sessionContext = {
       workspaceId: chatState.currentWorkspaceId,
       sessionId: chatState.currentSessionId,
       mcpEnabled: chatStore.chatOptions.mcp_enabled,
       webSearchEnabled: chatStore.chatOptions.web_search_enabled,
       voiceMode: chatStore.chatOptions.voice_mode,
-      vadEagerness: 'auto',
+      vadEagerness: chatStore.chatOptions.vad_eagerness,
+      audioInputDeviceId: chatStore.chatOptions.audio_input_device_id,
       petControlContext: chatStore.getPetControlContext(),
     }
     if (
@@ -256,6 +332,10 @@ export function useVoiceConversationBridge() {
         if (permission.state !== 'granted') return
       }
       await realtimeVoiceSession.connect(sessionContext)
+      if (!mounted) {
+        realtimeVoiceSession.close()
+        return
+      }
       if (chatStore.chatOptions.voice_mode === 'continuous') {
         activeVoiceTransport = 'realtime'
         chatStore.setRealtimeRecording(true, realtimeVoiceSession.getCurrentTurnIdentity())
@@ -283,8 +363,18 @@ export function useVoiceConversationBridge() {
     }
   }
 
+  const retryRealtimeVoice = async () => {
+    if (!mounted || chatStore.chatOptions.response_mode !== 'instant') return
+    if (audioCapture.getIsRecording().value || chatState.isTTSPlaying) return
+    realtimeVoiceSession.close()
+    activeVoiceTransport = null
+    chatStore.setRealtimeStatus('connecting')
+    await prewarmRealtimeVoice(true)
+  }
+
   const startMic = async () => {
     if (audioCapture.getIsRecording().value || activeVoiceTransport !== null) return
+    await ensureDiagnosticsRun()
     const socketClient = chatClient.getSocketClient()
 
     if ((chatState.isGenerating || chatState.isTTSPlaying) && realtimeVoiceSession.getStatus() !== 'responding') {
@@ -298,6 +388,7 @@ export function useVoiceConversationBridge() {
         workspaceId: chatState.currentWorkspaceId,
         sessionId: chatState.currentSessionId,
         voiceMode: chatStore.chatOptions.voice_mode,
+        audioInputDeviceId: chatStore.chatOptions.audio_input_device_id,
       })
     ) {
       try {
@@ -307,9 +398,10 @@ export function useVoiceConversationBridge() {
           interruptionEpoch: voiceRuntimeEpoch,
           mcpEnabled: chatStore.chatOptions.mcp_enabled,
           webSearchEnabled: chatStore.chatOptions.web_search_enabled,
-          voiceMode: chatStore.chatOptions.voice_mode,
-          vadEagerness: 'auto',
-          petControlContext: chatStore.getPetControlContext(),
+        voiceMode: chatStore.chatOptions.voice_mode,
+        vadEagerness: chatStore.chatOptions.vad_eagerness,
+        audioInputDeviceId: chatStore.chatOptions.audio_input_device_id,
+        petControlContext: chatStore.getPetControlContext(),
         })
         activeVoiceTransport = 'realtime'
         chatStore.setRealtimeRecording(true, realtimeVoiceSession.getCurrentTurnIdentity())
@@ -337,6 +429,7 @@ export function useVoiceConversationBridge() {
       await audioCapture.start({
         sessionId: chatState.currentSessionId,
         interruptionEpoch: voiceRuntimeEpoch,
+        deviceId: chatStore.chatOptions.audio_input_device_id,
       })
       activeVoiceTransport = 'pipeline'
     } catch {
@@ -358,14 +451,17 @@ export function useVoiceConversationBridge() {
     onAudioEnded: stopAudioPlaybackState,
     onTtsStop: stopAudioPlaybackState,
     onRealtimeInterrupt: interruptRealtimeVoice,
+    onRealtimeReconnect: retryRealtimeVoice,
     onStartMic: startMic,
     onStopMic: stopMic,
     onToggleMic: toggleMic,
   })
 
   onMounted(() => {
+    mounted = true
     const socketClient = chatClient.getSocketClient()
     realtimeEventBridge.listen('status', ({ status }) => {
+      chatStore.setRealtimeStatus(status)
       if (status === 'recording') {
         chatStore.setRealtimeRecording(true, realtimeVoiceSession.getCurrentTurnIdentity())
         if (chatStore.chatOptions.pet_link_enabled !== false) {
@@ -445,24 +541,33 @@ export function useVoiceConversationBridge() {
       () => [chatState.currentWorkspaceId, chatState.currentSessionId] as const,
       ([workspaceId, sessionId], [previousWorkspaceId, previousSessionId]) => {
         if (workspaceId === previousWorkspaceId && sessionId === previousSessionId) return
-        if (!realtimeVoiceSession.isConnected() || realtimeVoiceSession.isConnectedFor({ workspaceId, sessionId })) return
-        realtimeVoiceSession.close()
+        const wasConnectedForCurrentContext = realtimeVoiceSession.isConnectedFor({
+          workspaceId,
+          sessionId,
+          audioInputDeviceId: chatStore.chatOptions.audio_input_device_id,
+        })
+        if (!wasConnectedForCurrentContext) realtimeVoiceSession.close()
         activeVoiceTransport = null
         chatStore.setRealtimeRecording(false)
         chatStore.setRealtimePlayback(false)
         void publishCompanionRuntimeEvent({ source: 'voice', activity: 'idle' })
+        void rotateDiagnosticsRun().then(() => {
+          if (chatStore.chatOptions.response_mode === 'instant') void prewarmRealtimeVoice()
+        })
       },
     )
     watch(
-      () => [chatStore.chatOptions.response_mode, chatStore.chatOptions.voice_mode] as const,
-      ([responseMode, voiceMode], [previousResponseMode, previousVoiceMode]) => {
-        if (responseMode === previousResponseMode && voiceMode === previousVoiceMode) return
+      () => [chatStore.chatOptions.response_mode, chatStore.chatOptions.voice_mode, chatStore.chatOptions.vad_eagerness, chatStore.chatOptions.audio_input_device_id] as const,
+      ([responseMode, voiceMode, vadEagerness, audioInputDeviceId], [previousResponseMode, previousVoiceMode, previousVadEagerness, previousAudioInputDeviceId]) => {
+        if (responseMode === previousResponseMode && voiceMode === previousVoiceMode && vadEagerness === previousVadEagerness && audioInputDeviceId === previousAudioInputDeviceId) return
         if (realtimeVoiceSession.isConnected()) realtimeVoiceSession.close()
         activeVoiceTransport = null
         chatStore.setRealtimeRecording(false)
         chatStore.setRealtimePlayback(false)
         void publishCompanionRuntimeEvent({ source: 'voice', activity: 'idle' })
-        if (responseMode === 'instant') void prewarmRealtimeVoice()
+        void rotateDiagnosticsRun().then(() => {
+          if (responseMode === 'instant') void prewarmRealtimeVoice()
+        })
       },
     )
     realtimeEventBridge.listen('companion-event', (event) => {
@@ -489,8 +594,41 @@ export function useVoiceConversationBridge() {
         socketClient.sendClientTiming('realtime_transcript_stable', { elapsedMs })
       }
     })
+    realtimeEventBridge.listen('empty-input', () => {
+      const runId = diagnosticsRunId
+      if (!runId) return
+      void systemClient.recordVoiceComfort({
+        scenario: 'empty_asr',
+        continuous_turn_completed: false,
+        run_id: runId,
+      }).catch(() => undefined)
+    })
+    realtimeEventBridge.listen('comfort-signal', (payload) => {
+      // Comfort observations are session-scoped just like transcripts. A
+      // delayed signal from a closed/replaced realtime session must not
+      // contaminate the current run's comfort metrics.
+      if (!mounted || !isCurrentRealtimeScope(payload)) return
+      const { signal, source, confidence, durationMs } = payload
+      const runId = diagnosticsRunId
+      if (!runId) return
+      void systemClient.recordVoiceComfortSignal({
+        signal,
+        source,
+        confidence,
+        ...(durationMs === undefined ? {} : { duration_ms: durationMs }),
+        run_id: runId,
+      }).catch(() => undefined)
+    })
     realtimeEventBridge.listen('playback-start', ({ elapsedMs }) => {
+      const runId = diagnosticsRunId
       chatStore.setRealtimePlayback(true)
+      if (runId) {
+        void systemClient.recordVoiceComfort({
+          scenario: 'first_audio',
+          first_audio_latency_ms: elapsedMs,
+          run_id: runId,
+        }).catch(() => undefined)
+      }
       if (socketClient.isConnected()) {
         socketClient.sendClientTiming('realtime_speech_to_playback', {
           elapsedMs,
@@ -544,19 +682,26 @@ export function useVoiceConversationBridge() {
     })
     realtimeEventBridge.listen('error', ({ message, fatal }) => {
       if (fatal) chatStore.setRealtimeError(message)
+      else chatStore.setRealtimeStatus('error')
       console.warn('[VoiceBridge] realtime voice error:', message)
     })
-    void prewarmRealtimeVoice()
+    void ensureDiagnosticsRun().then(() => {
+      if (chatStore.chatOptions.response_mode === 'instant') void prewarmRealtimeVoice()
+    })
     voiceEventBridge.attach(window, shortcutClient)
 
     void refreshPetControlContext()
   })
 
   onUnmounted(() => {
+    mounted = false
     if (audioCapture.getIsRecording().value) {
       audioCapture.stop()
     }
     realtimeVoiceSession.close()
+    diagnosticsRunGeneration += 1
+    diagnosticsRunId = null
+    realtimeEventBridge.setDiagnosticRunId(null)
     if (realtimeLipSyncForwardingActive) {
       window.petApi?.pet.setRealtimeLipSync(0, false)
       realtimeLipSyncForwardingActive = false

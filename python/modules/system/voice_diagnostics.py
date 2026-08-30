@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import re
 import secrets
 import time
 from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 VoiceStage = Literal[
@@ -31,14 +34,33 @@ VoiceComfortScenarioName = Literal[
     "backchannel",
     "background_speech",
     "empty_asr",
+    "first_audio",
 ]
+VoiceComfortSignalName = Literal["hesitation", "backchannel", "background_speech"]
+VoiceComfortSignalSource = Literal["provider_vad", "local_vad", "classifier"]
 
+# Behaviour scenarios are the required comfort-coverage set.  ``first_audio``
+# is a latency-only sample and must not make coverage appear complete.
 VOICE_COMFORT_SCENARIOS: tuple[VoiceComfortScenarioName, ...] = (
     "deliberate_interrupt",
     "hesitation",
     "backchannel",
     "background_speech",
     "empty_asr",
+)
+VOICE_COMFORT_SAMPLE_SCENARIOS: tuple[VoiceComfortScenarioName, ...] = (
+    *VOICE_COMFORT_SCENARIOS,
+    "first_audio",
+)
+VOICE_COMFORT_SIGNALS: tuple[VoiceComfortSignalName, ...] = (
+    "hesitation",
+    "backchannel",
+    "background_speech",
+)
+VOICE_COMFORT_SIGNAL_SOURCES: tuple[VoiceComfortSignalSource, ...] = (
+    "provider_vad",
+    "local_vad",
+    "classifier",
 )
 
 REAL_DEVICE_REQUIRED_STAGES: tuple[str, ...] = (
@@ -163,7 +185,7 @@ class VoiceComfortScenarioSample:
     run_id: str | None = None
 
     def __post_init__(self) -> None:
-        if self.scenario not in VOICE_COMFORT_SCENARIOS:
+        if self.scenario not in VOICE_COMFORT_SAMPLE_SCENARIOS:
             raise ValueError("unsupported voice comfort scenario")
         for field_name in (
             "stop_audio_latency_ms",
@@ -175,6 +197,32 @@ class VoiceComfortScenarioSample:
                 _validate_latency(value, field_name)
         if self.scenario == "deliberate_interrupt" and self.false_interruption:
             raise ValueError("a deliberate interruption cannot be marked false")
+
+
+@dataclass(frozen=True)
+class VoiceComfortSignalSample:
+    """Transcript/audio-free observation emitted by an explicit VAD/classifier."""
+
+    signal: VoiceComfortSignalName
+    source: VoiceComfortSignalSource
+    confidence: float
+    duration_ms: float | None = None
+    run_id: str | None = None
+    recorded_at: float = field(default_factory=time.time)
+
+    def __post_init__(self) -> None:
+        if self.signal not in VOICE_COMFORT_SIGNALS:
+            raise ValueError("unsupported voice comfort signal")
+        if self.source not in VOICE_COMFORT_SIGNAL_SOURCES:
+            raise ValueError("unsupported voice comfort signal source")
+        if not math.isfinite(float(self.confidence)) or not 0 <= float(self.confidence) <= 1:
+            raise ValueError("comfort signal confidence must be between 0 and 1")
+        if self.duration_ms is not None:
+            _validate_latency(float(self.duration_ms), "comfort signal duration_ms")
+            if float(self.duration_ms) > 120_000:
+                raise ValueError("comfort signal duration_ms is too large")
+        if not math.isfinite(float(self.recorded_at)) or not 0 <= float(self.recorded_at) <= 10**12:
+            raise ValueError("comfort signal recorded_at is invalid")
 
 
 class VoiceMeasurementHandle:
@@ -197,6 +245,8 @@ DEFAULT_COMFORT_BUDGETS_MS: dict[str, float] = {
     "interrupt_ack_p95": 300.0,
     "first_audio_p95": 1000.0,
 }
+_DIAGNOSTICS_SCHEMA_VERSION = "yuizaki.voice-diagnostics.v1"
+_MAX_PERSISTED_LABEL = 96
 
 
 def _clean(value: object) -> str | None:
@@ -322,7 +372,11 @@ class VoiceDiagnostics:
     """Bounded sample store suitable for API snapshots and local reports."""
 
     def __init__(
-        self, *, max_samples: int = 512, p95_warning_ms: float = 1500.0
+        self,
+        *,
+        max_samples: int = 512,
+        p95_warning_ms: float = 1500.0,
+        persistence_path: str | Path | None = None,
     ) -> None:
         if max_samples < 1:
             raise ValueError("max_samples must be positive")
@@ -330,9 +384,246 @@ class VoiceDiagnostics:
         self._comfort_samples: deque[VoiceComfortScenarioSample] = deque(
             maxlen=max_samples
         )
+        self._comfort_signal_samples: deque[VoiceComfortSignalSample] = deque(
+            maxlen=max_samples
+        )
         self.p95_warning_ms = float(p95_warning_ms)
+        self._persistence_path = Path(persistence_path) if persistence_path is not None else None
         self._run_id = self._new_run_id()
         self._measurement_token: object = object()
+        self._load_persisted()
+
+    @staticmethod
+    def _safe_persisted_run_id(value: object) -> str | None:
+        if not isinstance(value, str):
+            return None
+        cleaned = value.strip()
+        if not cleaned or len(cleaned) > _MAX_PERSISTED_LABEL or not _SAFE_LABEL_RE.fullmatch(cleaned):
+            return None
+        return cleaned
+
+    @staticmethod
+    def _provenance_from_snapshot(value: object) -> VoiceEvidenceProvenance:
+        if not isinstance(value, Mapping):
+            return VoiceEvidenceProvenance()
+        kind = value.get("kind") if value.get("kind") in {"synthetic_fixture", "real_device"} else "synthetic_fixture"
+        string_fields = (
+            "machine", "platform", "runtime", "provider", "model",
+            "input_device", "output_device", "power_profile", "vad_profile",
+        )
+        kwargs: dict[str, Any] = {"kind": kind}
+        for field_name in string_fields:
+            field_value = value.get(field_name)
+            safe_value = _safe_label(field_value)
+            if safe_value is not None:
+                kwargs[field_name] = safe_value
+        for field_name in ("sample_rate_hz", "channel_count"):
+            field_value = value.get(field_name)
+            if isinstance(field_value, int) and not isinstance(field_value, bool) and 1 <= field_value <= 1_000_000:
+                kwargs[field_name] = field_value
+        for field_name in ("echo_cancellation", "noise_suppression"):
+            field_value = value.get(field_name)
+            if isinstance(field_value, bool):
+                kwargs[field_name] = field_value
+        try:
+            return VoiceEvidenceProvenance(**kwargs)
+        except (TypeError, ValueError):
+            return VoiceEvidenceProvenance()
+
+    @classmethod
+    def _sample_from_snapshot(cls, value: object, current_run_id: str) -> VoiceDiagnosticSample | None:
+        if not isinstance(value, Mapping):
+            return None
+        stage = value.get("stage")
+        latency = value.get("latency_ms")
+        safe_stage = _safe_label(stage)
+        if safe_stage is None or not isinstance(latency, (int, float)) or isinstance(latency, bool):
+            return None
+        try:
+            recorded_at = value.get("recorded_at", time.time())
+            if not isinstance(recorded_at, (int, float)) or isinstance(recorded_at, bool) or not math.isfinite(float(recorded_at)) or not 0 <= float(recorded_at) <= 10**12:
+                return None
+            recovery_latency = value.get("recovery_latency_ms")
+            if recovery_latency is not None and (not isinstance(recovery_latency, (int, float)) or isinstance(recovery_latency, bool)):
+                return None
+            underruns = value.get("playback_underruns")
+            if underruns is not None and (not isinstance(underruns, int) or isinstance(underruns, bool) or underruns < 0 or underruns > 10_000):
+                return None
+            recovered = value.get("recovered")
+            if recovered is not None and not isinstance(recovered, bool):
+                return None
+            return VoiceDiagnosticSample(
+                stage=safe_stage,
+                latency_ms=float(latency),
+                ok=value.get("ok") is not False,
+                provider=_safe_label(value.get("provider")),
+                error_kind=_safe_label(value.get("error_kind")),
+                request_id=_safe_label(value.get("request_id")),
+                run_id=current_run_id,
+                provenance=cls._provenance_from_snapshot(value.get("provenance")),
+                recovered=recovered,
+                recovery_latency_ms=float(recovery_latency) if recovery_latency is not None else None,
+                playback_underruns=underruns,
+                recorded_at=float(recorded_at),
+            )
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    @classmethod
+    def _comfort_from_snapshot(cls, value: object, current_run_id: str) -> VoiceComfortScenarioSample | None:
+        if not isinstance(value, Mapping):
+            return None
+        scenario = value.get("scenario")
+        if not isinstance(scenario, str):
+            return None
+        kwargs: dict[str, Any] = {"scenario": scenario, "run_id": current_run_id}
+        for field_name in ("stop_audio_latency_ms", "interrupt_ack_latency_ms", "first_audio_latency_ms"):
+            item = value.get(field_name)
+            if item is not None:
+                if not isinstance(item, (int, float)) or isinstance(item, bool):
+                    return None
+                kwargs[field_name] = float(item)
+        for field_name in ("false_interruption", "continuous_turn_completed"):
+            item = value.get(field_name)
+            if item is not None and not isinstance(item, bool):
+                return None
+            kwargs[field_name] = item
+        try:
+            return VoiceComfortScenarioSample(**kwargs)
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    @classmethod
+    def _comfort_signal_from_snapshot(
+        cls, value: object, current_run_id: str
+    ) -> VoiceComfortSignalSample | None:
+        if not isinstance(value, Mapping):
+            return None
+        signal = value.get("signal")
+        source = value.get("source")
+        confidence = value.get("confidence")
+        if (
+            not isinstance(signal, str)
+            or not isinstance(source, str)
+            or not isinstance(confidence, (int, float))
+            or isinstance(confidence, bool)
+        ):
+            return None
+        duration_ms = value.get("duration_ms")
+        recorded_at = value.get("recorded_at", time.time())
+        if duration_ms is not None and (
+            not isinstance(duration_ms, (int, float)) or isinstance(duration_ms, bool)
+        ):
+            return None
+        if not isinstance(recorded_at, (int, float)) or isinstance(recorded_at, bool):
+            return None
+        try:
+            return VoiceComfortSignalSample(
+                signal=signal,
+                source=source,
+                confidence=float(confidence),
+                duration_ms=float(duration_ms) if duration_ms is not None else None,
+                run_id=current_run_id,
+                recorded_at=float(recorded_at),
+            )
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    def _persisted_payload(self) -> dict[str, Any]:
+        def sample_payload(sample: VoiceDiagnosticSample) -> dict[str, Any]:
+            return {
+                "stage": sample.stage,
+                "latency_ms": sample.latency_ms,
+                "ok": sample.ok,
+                "provider": sample.provider,
+                "error_kind": sample.error_kind,
+                "request_id": sample.request_id,
+                "run_id": sample.run_id,
+                "provenance": sample.provenance.snapshot(),
+                "recovered": sample.recovered,
+                "recovery_latency_ms": sample.recovery_latency_ms,
+                "playback_underruns": sample.playback_underruns,
+                "recorded_at": sample.recorded_at,
+            }
+
+        return {
+            "schemaVersion": _DIAGNOSTICS_SCHEMA_VERSION,
+            "run_id": self._run_id,
+            "samples": [sample_payload(sample) for sample in self._samples],
+            "comfort_samples": [
+                {
+                    "scenario": sample.scenario,
+                    "stop_audio_latency_ms": sample.stop_audio_latency_ms,
+                    "interrupt_ack_latency_ms": sample.interrupt_ack_latency_ms,
+                    "false_interruption": sample.false_interruption,
+                    "first_audio_latency_ms": sample.first_audio_latency_ms,
+                    "continuous_turn_completed": sample.continuous_turn_completed,
+                    "run_id": sample.run_id,
+                }
+                for sample in self._comfort_samples
+            ],
+            "comfort_signal_samples": [
+                {
+                    "signal": sample.signal,
+                    "source": sample.source,
+                    "confidence": sample.confidence,
+                    "duration_ms": sample.duration_ms,
+                    "run_id": sample.run_id,
+                    "recorded_at": sample.recorded_at,
+                }
+                for sample in self._comfort_signal_samples
+            ],
+        }
+
+    def _persist(self) -> None:
+        path = self._persistence_path
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+            temporary.write_text(
+                json.dumps(self._persisted_payload(), ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False),
+                encoding="utf-8",
+            )
+            os.replace(temporary, path)
+        except (OSError, TypeError, ValueError):
+            try:
+                temporary.unlink()
+            except (OSError, UnboundLocalError):
+                pass
+
+    def _load_persisted(self) -> None:
+        path = self._persistence_path
+        if path is None or not path.is_file():
+            return
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, TypeError, ValueError, UnicodeError):
+            return
+        if not isinstance(payload, Mapping) or payload.get("schemaVersion") != _DIAGNOSTICS_SCHEMA_VERSION:
+            return
+        persisted_run_id = self._safe_persisted_run_id(payload.get("run_id"))
+        if persisted_run_id:
+            self._run_id = persisted_run_id
+        raw_samples = payload.get("samples")
+        if isinstance(raw_samples, list):
+            for raw_sample in raw_samples[-self._samples.maxlen :]:
+                sample = self._sample_from_snapshot(raw_sample, self._run_id)
+                if sample is not None:
+                    self._samples.append(sample)
+        raw_comfort = payload.get("comfort_samples")
+        if isinstance(raw_comfort, list):
+            for raw_sample in raw_comfort[-self._comfort_samples.maxlen :]:
+                sample = self._comfort_from_snapshot(raw_sample, self._run_id)
+                if sample is not None:
+                    self._comfort_samples.append(sample)
+        raw_signals = payload.get("comfort_signal_samples")
+        if isinstance(raw_signals, list):
+            for raw_sample in raw_signals[-self._comfort_signal_samples.maxlen :]:
+                sample = self._comfort_signal_from_snapshot(raw_sample, self._run_id)
+                if sample is not None:
+                    self._comfort_signal_samples.append(sample)
 
     @staticmethod
     def _new_run_id() -> str:
@@ -349,6 +640,8 @@ class VoiceDiagnostics:
         self._measurement_token = object()
         self._samples.clear()
         self._comfort_samples.clear()
+        self._comfort_signal_samples.clear()
+        self._persist()
         return self._run_id
 
     def begin_measurement(self, run_id: str | None = None) -> VoiceMeasurementHandle:
@@ -407,6 +700,7 @@ class VoiceDiagnostics:
             playback_underruns=playback_underruns,
         )
         self._samples.append(sample)
+        self._persist()
         return sample
 
     def record_elapsed(
@@ -443,7 +737,7 @@ class VoiceDiagnostics:
         protection from same-label restarts must retain and use that handle.
         """
         scenario_value = str(scenario).strip()
-        if scenario_value not in VOICE_COMFORT_SCENARIOS:
+        if scenario_value not in VOICE_COMFORT_SAMPLE_SCENARIOS:
             raise ValueError("unsupported voice comfort scenario")
         selected_run_id = self._resolve_run_id(run_id=run_id, handle=handle)
         sample = VoiceComfortScenarioSample(
@@ -468,6 +762,7 @@ class VoiceDiagnostics:
             run_id=selected_run_id,
         )
         self._comfort_samples.append(sample)
+        self._persist()
         return sample
 
     def comfort_snapshot(self) -> dict[str, Any]:
@@ -535,8 +830,71 @@ class VoiceDiagnostics:
             "claim": "synthetic_comfort_regression_only",
             "real_device_qualification": "not_evaluated",
         }
+        snapshot["comfort_signals"] = self.comfort_signal_snapshot()
         snapshot["comfort_gate"] = self.comfort_gate(snapshot=snapshot)
         return snapshot
+
+    def record_comfort_signal(
+        self,
+        signal: VoiceComfortSignalName | str,
+        source: VoiceComfortSignalSource | str,
+        confidence: float,
+        *,
+        duration_ms: float | None = None,
+        run_id: str | None = None,
+        handle: VoiceMeasurementHandle | None = None,
+    ) -> VoiceComfortSignalSample:
+        """Record an explicit, transcript-free comfort observation.
+
+        Callers must provide a signal from a provider VAD, local VAD, or an
+        explicit classifier. Missing events are intentionally not inferred.
+        """
+        selected_run_id = self._resolve_run_id(run_id=run_id, handle=handle)
+        sample = VoiceComfortSignalSample(
+            signal=str(signal).strip(),
+            source=str(source).strip(),
+            confidence=float(confidence),
+            duration_ms=(float(duration_ms) if duration_ms is not None else None),
+            run_id=selected_run_id,
+        )
+        self._comfort_signal_samples.append(sample)
+        self._persist()
+        return sample
+
+    def comfort_signal_snapshot(self) -> dict[str, Any]:
+        """Return bounded signal coverage without exposing transcript/audio."""
+        counts = {
+            signal: sum(sample.signal == signal for sample in self._comfort_signal_samples)
+            for signal in VOICE_COMFORT_SIGNALS
+        }
+        source_counts = {
+            source: sum(sample.source == source for sample in self._comfort_signal_samples)
+            for source in VOICE_COMFORT_SIGNAL_SOURCES
+        }
+        confidences = [sample.confidence for sample in self._comfort_signal_samples]
+        durations = [
+            sample.duration_ms
+            for sample in self._comfort_signal_samples
+            if sample.duration_ms is not None
+        ]
+        missing = [signal for signal, count in counts.items() if count == 0]
+        return {
+            "sample_count": len(self._comfort_signal_samples),
+            "signal_counts": counts,
+            "source_counts": source_counts,
+            "missing_signals": missing,
+            "coverage_complete": not missing,
+            "confidence": {
+                "p50": _percentile(confidences, 0.50),
+                "p95": _percentile(confidences, 0.95),
+            },
+            "duration_ms": {
+                "p50": _percentile(durations, 0.50),
+                "p95": _percentile(durations, 0.95),
+            },
+            "evidence_kind": "transcript_free_explicit_signal",
+            "claim": "comfort_signal_regression_only",
+        }
 
     def comfort_gate(
         self,

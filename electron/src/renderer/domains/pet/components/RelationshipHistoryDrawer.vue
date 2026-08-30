@@ -22,8 +22,7 @@
         :empty="Boolean(payload) && visibleEvents.length === 0"
         loading-text="加载关系历史"
         empty-text="暂无关系事件"
-        retry-text="重试"
-        @retry="load"
+        :show-retry="false"
       >
         <template v-if="payload">
           <dl class="relationship-summary" aria-label="关系摘要">

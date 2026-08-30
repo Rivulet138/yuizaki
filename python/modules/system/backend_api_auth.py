@@ -12,6 +12,7 @@ CONNECTOR_WEBHOOK_PATHS = frozenset({
     "/api/system/connectors/discord/webhook",
     "/api/system/connectors/qq/webhook",
     "/api/system/connectors/wechat/webhook",
+    "/api/system/stream/twitch/eventsub",
 })
 
 

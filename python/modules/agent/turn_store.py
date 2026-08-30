@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import threading
 import time
@@ -14,6 +15,40 @@ from typing import Any
 from .turn_service import TurnClaimLostError
 
 StoreBarrier = Callable[[str, dict[str, Any]], None]
+
+
+def _intent_envelope_snapshot(value: Any) -> dict[str, Any] | None:
+    """Persist only the bounded, non-authoritative intent contract."""
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        value = to_dict()
+    if not isinstance(value, Mapping):
+        return None
+    try:
+        confidence = float(value.get("confidence", 0.0) or 0.0)
+    except (TypeError, ValueError, OverflowError):
+        confidence = 0.0
+    if not math.isfinite(confidence):
+        confidence = 0.0
+    try:
+        expires_at = float(value.get("expiresAt", 0.0) or 0.0)
+    except (TypeError, ValueError, OverflowError):
+        expires_at = 0.0
+    if not math.isfinite(expires_at):
+        expires_at = 0.0
+    evidence_ids = value.get("evidenceIds")
+    if not isinstance(evidence_ids, list):
+        evidence_ids = []
+    return {
+        "schemaVersion": "yuizaki.intent-envelope.v1",
+        "intentType": str(value.get("intentType") or "unknown")[:32],
+        "normalizedGoal": str(value.get("normalizedGoal") or "")[:2000],
+        "confidence": max(0.0, min(1.0, confidence)),
+        "evidenceIds": [str(item)[:160] for item in evidence_ids[:16]],
+        "requiresConfirmation": bool(value.get("requiresConfirmation", False)),
+        "sensitivity": str(value.get("sensitivity") or "normal")[:16],
+        "expiresAt": expires_at,
+    }
 
 
 class TurnCommitStore:
@@ -305,6 +340,10 @@ class TurnCommitStore:
             "owner_agent_id": extra.get("owner_agent_id"),
             "owner_agent_role": extra.get("owner_agent_role"),
             "route_reason": extra.get("route_reason"),
+            "source": extra.get("source"),
+            "source_id": extra.get("source_id"),
+            "source_kind": extra.get("source_kind"),
+            "stream_draft": bool(extra.get("stream_draft", False)),
             "autonomy_mode": commit.context.autonomy_mode,
             "model": getattr(commit.context, "model", None),
             "messages": commit.context.messages,
@@ -322,6 +361,9 @@ class TurnCommitStore:
             "consumed_usage": dict(getattr(result, "consumed_usage", None) or {}),
             "committed_at": committed_at,
         }
+        intent_envelope = _intent_envelope_snapshot(extra.get("intent_envelope"))
+        if intent_envelope is not None:
+            payload["intent_envelope"] = intent_envelope
         if payload["job_id"] or payload["run_id"]:
             payload["job_terminal"] = {
                 "status": payload["outcome"],
@@ -677,6 +719,39 @@ class TurnCommitStore:
                        updated_at = ?, delivered_at = ?
                    WHERE delivery_key = ? AND claimed_by = ? AND status = 'sending'""",
                 (now, now, str(delivery_key), str(owner_id)),
+            )
+            return cursor.rowcount == 1
+
+    def resolve_connector_delivery(self, delivery_key: str, outcome: str) -> bool:
+        """Resolve an orphaned send after an operator checked the provider.
+
+        A send is only resolvable after its lease has expired (or was already
+        cleared).  This prevents the governance UI from racing an active
+        provider call while still giving a crashed process a finite recovery
+        path.  The caller must provide an explicit ``delivered`` or ``failed``
+        outcome; this method never infers the external effect.
+        """
+        key = str(delivery_key or "").strip()
+        normalized = str(outcome or "").strip().lower()
+        if not key or normalized not in {"delivered", "failed"}:
+            return False
+        now = self._now()
+        if normalized == "delivered":
+            status = "delivered"
+            last_error = None
+            delivered_at = now
+        else:
+            status = "failed"
+            last_error = "manual_resolution_failed"
+            delivered_at = None
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """UPDATE connector_deliveries
+                   SET status = ?, claimed_by = NULL, claim_expires_at = NULL,
+                       last_error = ?, updated_at = ?, delivered_at = ?
+                   WHERE delivery_key = ? AND status = 'sending'
+                     AND (claim_expires_at IS NULL OR claim_expires_at <= ?)""",
+                (status, last_error, now, delivered_at, key, now),
             )
             return cursor.rowcount == 1
 

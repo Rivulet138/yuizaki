@@ -22,6 +22,9 @@ TakeRetrievalPrefetch = Callable[..., Awaitable[dict[str, Any] | None]]
 _DEFAULT_MEMORY_LAYERS = [
     "profile", "working", "episodic", "relationship", "reflective", "semantic",
 ]
+_DEFAULT_MEMORY_CONTEXT_BUDGET_TOKENS = 1200
+_MIN_MEMORY_CONTEXT_BUDGET_TOKENS = 128
+_MAX_MEMORY_CONTEXT_BUDGET_TOKENS = 32000
 
 
 class ContextStage:
@@ -43,7 +46,11 @@ class ContextStage:
             return ctx
 
         ctx.extra["interpret_result"] = interpret_user_text(user_text)
-        apply_visual_context_decision(ctx, user_text)
+        visual_decision = apply_visual_context_decision(ctx, user_text)
+        ctx.extra["intent_envelope"] = ctx.extra["interpret_result"].to_envelope(
+            evidence_ids=["user_text"],
+            confirmation_required=visual_decision.confirmation_required,
+        )
         if retrieval_pipeline is not None:
             await self._recall(
                 ctx,
@@ -101,11 +108,24 @@ class ContextStage:
         append_runtime_loop: RuntimeLoopAppender,
     ) -> None:
         try:
-            data = await take_retrieval_prefetch(
-                cache_key=ctx.sid,
-                final_query=user_text,
-                workspace_id=ctx.workspace_id,
-            )
+            context_budget_tokens = self._context_budget_tokens(ctx)
+            try:
+                data = await take_retrieval_prefetch(
+                    cache_key=ctx.sid,
+                    final_query=user_text,
+                    workspace_id=ctx.workspace_id,
+                    context_budget_tokens=context_budget_tokens,
+                )
+            except TypeError as exc:
+                # Keep custom runtime integrations written against the old
+                # callback shape working while they migrate to budgets.
+                if "context_budget_tokens" not in str(exc):
+                    raise
+                data = await take_retrieval_prefetch(
+                    cache_key=ctx.sid,
+                    final_query=user_text,
+                    workspace_id=ctx.workspace_id,
+                )
             prefetch_hit = data is not None
             if data is None:
                 request = RetrievalRequest(
@@ -115,10 +135,32 @@ class ContextStage:
                     workspace_id=ctx.workspace_id,
                     top_k=5,
                     layers=list(_DEFAULT_MEMORY_LAYERS),
+                    context_budget_tokens=context_budget_tokens,
                 )
                 data = await asyncio.to_thread(retrieval_pipeline.recall, request)
             ctx.extra["retrieval_prefetch_hit"] = prefetch_hit
-            self._apply_recall_results(ctx, data.get("results", []), user_text, append_runtime_loop)
+            retrieval_trace = data.get("trace") if isinstance(data, dict) else None
+            if isinstance(retrieval_trace, dict) and retrieval_trace.get("revision_stable") is False:
+                # Do not place a result assembled across a memory mutation in
+                # the prompt. The next turn can retry against the new revision.
+                ctx.extra["rag_error"] = "memory_revision_changed_during_recall"
+                append_runtime_loop(
+                    ctx,
+                    stage="recall",
+                    summary="Memory changed during recall; skipped retrieved context.",
+                    status="stale",
+                    agent_id="yuizaki.companion-orchestrator",
+                    agent_role="orchestrator",
+                    data={"error": ctx.extra["rag_error"], "retrieval_trace": retrieval_trace},
+                )
+                return
+            self._apply_recall_results(
+                ctx,
+                data.get("results", []),
+                user_text,
+                append_runtime_loop,
+                retrieval_trace=data.get("trace"),
+            )
         except Exception as exc:  # noqa: BLE001 - recall failure preserves text path
             ctx.extra["rag_error"] = str(exc)
             append_runtime_loop(
@@ -132,11 +174,21 @@ class ContextStage:
             )
 
     @staticmethod
+    def _context_budget_tokens(ctx: AgentRequestContext) -> int:
+        raw = ctx.extra.get("memory_context_budget_tokens")
+        try:
+            value = int(raw) if raw is not None else _DEFAULT_MEMORY_CONTEXT_BUDGET_TOKENS
+        except (TypeError, ValueError):
+            value = _DEFAULT_MEMORY_CONTEXT_BUDGET_TOKENS
+        return max(_MIN_MEMORY_CONTEXT_BUDGET_TOKENS, min(_MAX_MEMORY_CONTEXT_BUDGET_TOKENS, value))
+
+    @staticmethod
     def _apply_recall_results(
         ctx: AgentRequestContext,
         raw_results: object,
         user_text: str,
         append_runtime_loop: RuntimeLoopAppender,
+        retrieval_trace: object = None,
     ) -> None:
         results = raw_results if isinstance(raw_results, list) else []
         chunks: list[str] = []
@@ -158,12 +210,31 @@ class ContextStage:
             metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
             layer = str(doc.get("layer") or metadata.get("layer") or "").strip()
             source = str(doc.get("source") or metadata.get("source") or "").strip()
+            source_kind = str(doc.get("source_kind") or metadata.get("source_kind") or "").strip()
+            source_id = str(doc.get("source_id") or metadata.get("source_id") or "").strip()
+            turn_id = str(doc.get("turn_id") or metadata.get("turn_id") or "").strip()
+            evidence = metadata.get("evidence")
+            evidence_ids: list[str] = []
+            if isinstance(evidence, dict):
+                raw_ids = evidence.get("ids") or evidence.get("id")
+                if isinstance(raw_ids, (list, tuple, set)):
+                    evidence_ids = [str(value)[:160] for value in raw_ids if str(value).strip()][:8]
+                elif raw_ids is not None and str(raw_ids).strip():
+                    evidence_ids = [str(raw_ids)[:160]]
+            elif isinstance(evidence, (list, tuple, set)):
+                evidence_ids = [str(value)[:160] for value in evidence if str(value).strip()][:8]
+            elif isinstance(evidence, str) and evidence.strip():
+                evidence_ids = [evidence.strip()[:160]]
             score = item.get("score")
             memory_sources.append({
                 "id": doc_id,
                 "text": f"{clean_text[:317]}..." if len(clean_text) > 320 else clean_text,
                 **({"layer": layer} if layer else {}),
                 **({"source": source} if source else {}),
+                **({"source_kind": source_kind} if source_kind else {}),
+                **({"source_id": source_id} if source_id else {}),
+                **({"turn_id": turn_id} if turn_id else {}),
+                **({"evidence_ids": evidence_ids} if evidence_ids else {}),
                 **({"score": float(score)} if isinstance(score, (int, float)) else {}),
             })
         if not chunks:
@@ -181,6 +252,8 @@ class ContextStage:
         )
         ctx.extra["retrieved_chunks"] = chunks[:5]
         ctx.extra["memory_sources"] = memory_sources
+        if isinstance(retrieval_trace, dict):
+            ctx.extra["memory_retrieval_trace"] = dict(retrieval_trace)
         recent_signal_docs: list[dict[str, str]] = []
         for item in results[:5]:
             doc_payload = item.get("doc") if isinstance(item, dict) else {}
@@ -201,6 +274,8 @@ class ContextStage:
                 "retrieved_chunk_count": len(chunks[:5]),
                 "query": user_text,
                 "recent_signal_kinds": [item.get("kind") for item in recent_signal_docs],
+                "memory_sources": memory_sources,
+                "retrieval_trace": retrieval_trace if isinstance(retrieval_trace, dict) else None,
             },
         )
 

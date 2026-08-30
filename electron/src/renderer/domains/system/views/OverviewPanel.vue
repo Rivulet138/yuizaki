@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="运行状态" subtitle="读取服务、摘要和桌宠状态；异常项提供可执行入口" tone="admin">
+  <PanelShell title="运行状态" tone="admin">
     <template #actions>
       <el-button plain @click="openOnboarding">{{ t('onboarding.reopen') }}</el-button>
       <el-button plain :loading="overviewRefreshLoading" @click="refreshOverview">刷新</el-button>
@@ -16,7 +16,7 @@
             <h3>{{ runtimeActionItems.length ? `需要处理 ${runtimeActionItems.length} 项` : '运行链路就绪' }}</h3>
             <span>{{ readyChainCount }}/{{ chainChecks.length }} 个核心环节可用</span>
           </div>
-          <el-button plain size="small" :loading="runtimeRequest.loading" @click="loadRuntimeDependencies">刷新检查</el-button>
+          <el-button plain size="small" :loading="runtimeRequest.loading" @click="loadRuntimeDependencies">刷新</el-button>
         </div>
         <el-alert
           v-if="runtimeRequest.error"
@@ -38,7 +38,7 @@
         </div>
         <div v-else class="runtime-ready-state">
           <strong>可以开始对话</strong>
-          <span>控制服务、模型链路、实时通道和桌宠联动均未发现阻塞项。</span>
+          <span>核心链路正常</span>
         </div>
         <div class="runtime-chain" aria-label="核心链路状态">
           <span v-for="item in chainChecks" :key="item.label" class="runtime-chain-item" :class="item.tone" :title="item.desc">
@@ -53,11 +53,11 @@
         <div class="ops-card-head">
           <div>
             <h3>语音体验</h3>
-            <span>只读汇总，不会自动打开设备或发起网络测试</span>
+            <span>只读指标</span>
           </div>
-          <el-button plain size="small" :loading="voiceRequest.loading" @click="loadVoiceDiagnostics">刷新语音数据</el-button>
+          <el-button plain size="small" :loading="voiceRequest.loading" @click="loadVoiceDiagnostics">刷新</el-button>
         </div>
-        <AsyncState :loading="voiceRequest.loading" :error="voiceRequest.error" @retry="loadVoiceDiagnostics">
+        <AsyncState :loading="voiceRequest.loading" :error="voiceRequest.error" :show-retry="false">
           <div v-if="voiceSnapshot" class="voice-quality-grid">
             <div class="voice-quality-metric">
               <strong>{{ voiceEvidenceLabel }}</strong>
@@ -75,11 +75,28 @@
               <strong>{{ voiceP95Label(voiceSnapshot.stages.interruption) }}</strong>
               <span>打断 p95</span>
             </div>
+            <div class="voice-quality-metric">
+              <strong>{{ voiceComfortLabel }}</strong>
+              <span>舒适度回归</span>
+            </div>
+            <div class="voice-quality-metric">
+              <strong>{{ voiceQualificationLabel }}</strong>
+              <span>发布资格</span>
+            </div>
+          </div>
+          <div v-if="voiceComfortSummary" class="voice-quality-notes">
+            <span>{{ voiceComfortSummary }}</span>
+          </div>
+          <div v-if="voiceComfortSignalSummary" class="voice-quality-notes">
+            <span>{{ voiceComfortSignalSummary }}</span>
+          </div>
+          <div v-if="voiceQualificationSummary" class="voice-quality-notes">
+            <span>{{ voiceQualificationSummary }}</span>
           </div>
           <div v-if="voiceRecommendations.length" class="voice-quality-notes">
             <span v-for="recommendation in voiceRecommendations.slice(0, 2)" :key="recommendation">{{ recommendation }}</span>
           </div>
-          <el-empty v-if="voiceSnapshot && voiceSnapshot.sample_count === 0" description="暂无语音体验采样；可在语音设置中开始使用" :image-size="48" />
+          <el-empty v-if="voiceSnapshot && voiceSnapshot.sample_count === 0" description="暂无采样" :image-size="48" />
         </AsyncState>
       </section>
 
@@ -89,9 +106,9 @@
             <h3>平台能力</h3>
             <span v-if="platformSnapshot">宿主：{{ platformHostLabel }}</span>
           </div>
-          <el-button plain size="small" :loading="platformRequest.loading" @click="loadPlatformMatrix">刷新能力</el-button>
+          <el-button plain size="small" :loading="platformRequest.loading" @click="loadPlatformMatrix">刷新</el-button>
         </div>
-        <AsyncState :loading="platformRequest.loading" :error="platformRequest.error" @retry="loadPlatformMatrix">
+        <AsyncState :loading="platformRequest.loading" :error="platformRequest.error" :show-retry="false">
           <div v-if="platformRows.length" class="platform-table-wrap">
             <table class="platform-table">
               <thead>
@@ -121,6 +138,57 @@
       </section>
 
       <section class="ops-grid">
+        <article class="ops-card context-card" aria-label="当前应用">
+          <div class="ops-card-head">
+            <div>
+              <h3>当前应用</h3>
+              <span>前台</span>
+            </div>
+            <el-tag :type="activeApplication ? 'success' : 'info'">
+              {{ activeApplication ? '已读取' : '不可用' }}
+            </el-tag>
+          </div>
+          <div v-if="activeApplicationRequest.loading" class="compact-status">读取中</div>
+          <dl v-else-if="activeApplication" class="context-list">
+            <div><dt>进程</dt><dd>{{ activeApplication.name }}</dd></div>
+            <div><dt>窗口</dt><dd :title="activeApplication.title">{{ activeApplication.title || '无标题' }}</dd></div>
+            <div><dt>进程号</dt><dd>{{ activeApplication.process_id }}</dd></div>
+          </dl>
+          <div v-else class="compact-status">{{ activeApplicationRequest.error || '浏览器不可用' }}</div>
+        </article>
+
+        <article class="ops-card orchestration-card" aria-label="运行编排">
+          <div class="ops-card-head">
+            <div>
+              <h3>运行编排</h3>
+              <span>Agent / 技能 / 命令 / 钩子</span>
+            </div>
+            <el-tag :type="orchestrationSnapshot ? 'success' : 'info'">
+              {{ orchestrationSnapshot ? '已读取' : '不可用' }}
+            </el-tag>
+          </div>
+          <div v-if="orchestrationRequest.loading" class="compact-status">读取中</div>
+          <template v-else-if="orchestrationSnapshot">
+            <div class="orchestration-counts">
+              <span>Agent <strong>{{ orchestrationSnapshot.summary?.agents ?? orchestrationSnapshot.agents?.length ?? 0 }}</strong></span>
+              <span>技能 <strong>{{ orchestrationSnapshot.summary?.skills ?? orchestrationSnapshot.skills.length }}</strong></span>
+              <span>命令 <strong>{{ orchestrationSnapshot.summary?.commands ?? orchestrationSnapshot.commands.length }}</strong></span>
+              <span>钩子 <strong>{{ orchestrationSnapshot.summary?.hooks ?? orchestrationSnapshot.hooks.length }}</strong></span>
+            </div>
+            <details class="orchestration-details">
+              <summary>查看条目</summary>
+              <ul>
+                <li v-for="item in orchestrationEntries" :key="`${item.kind}:${item.id}`">
+                  <strong>{{ item.name }}</strong><span>{{ item.kind }}</span>
+                </li>
+              </ul>
+            </details>
+          </template>
+          <div v-else class="compact-status">{{ orchestrationRequest.error || '暂无编排数据' }}</div>
+        </article>
+      </section>
+
+      <section class="ops-grid">
         <article class="ops-card governance-card">
           <div class="ops-card-head">
             <div>
@@ -132,7 +200,7 @@
             </div>
           </div>
 
-          <AsyncState :loading="governanceReq.loading" :error="governanceReq.error" @retry="loadGovernance">
+          <AsyncState :loading="governanceReq.loading" :error="governanceReq.error" :show-retry="false">
             <div v-if="governanceData" class="metric-grid">
               <div v-for="stat in governanceStats" :key="stat.label" class="metric-tile" :class="stat.tone">
                 <strong>{{ stat.value }}</strong>
@@ -158,7 +226,7 @@
         <article class="ops-card summary-watch-card">
           <div class="ops-card-head">
             <div>
-              <h3>会话摘要操作</h3>
+              <h3>会话摘要</h3>
             </div>
             <div class="action-row">
               <el-button
@@ -382,6 +450,14 @@ import type {
   ProviderRegistrySnapshot,
   VoiceDiagnosticsSnapshot,
 } from '@/../shared/agent'
+import type { OrchestrationSnapshot } from '@/../shared/orchestration'
+
+type ActiveApplicationSnapshot = {
+  ok: boolean
+  name: string
+  title: string
+  process_id: number
+}
 
 const governanceData = ref<any>(null)
 const governanceReq = reactive({ loading: false, error: '' })
@@ -394,6 +470,10 @@ const avatarCapabilities = ref<AvatarCapabilitySnapshot | null>(null)
 const voiceSnapshot = ref<VoiceDiagnosticsSnapshot | null>(null)
 const runtimeRequest = reactive({ loading: false, error: '' })
 const voiceRequest = reactive({ loading: false, error: '' })
+const activeApplication = ref<ActiveApplicationSnapshot | null>(null)
+const activeApplicationRequest = reactive({ loading: false, error: '' })
+const orchestrationSnapshot = ref<OrchestrationSnapshot | null>(null)
+const orchestrationRequest = reactive({ loading: false, error: '' })
 const settingsStore = useSettingsStore()
 const workspaceStore = useWorkspaceStore()
 const { t } = useI18n()
@@ -408,16 +488,12 @@ const loadGovernance = async () => {
   finally { governanceReq.loading = false }
 }
 
-const refreshGovernanceAfterAlertAction = async () => {
-  await loadGovernance()
-}
-
 const acknowledgeAlert = async (key: string) => {
   if (alertActionKey.value) return
   alertActionKey.value = key
   try {
     await summaryClient.ackAlert(key)
-    await refreshGovernanceAfterAlertAction()
+    await loadGovernance()
   } catch (error: any) {
     governanceReq.error = error?.message || '告警确认失败'
   } finally {
@@ -430,7 +506,7 @@ const snoozeAlert = async (key: string) => {
   alertActionKey.value = key
   try {
     await summaryClient.snoozeAlert(key, 60)
-    await refreshGovernanceAfterAlertAction()
+    await loadGovernance()
   } catch (error: any) {
     governanceReq.error = error?.message || '告警延后失败'
   } finally {
@@ -443,7 +519,7 @@ const clearAlertState = async () => {
   alertActionKey.value = '__clear__'
   try {
     await summaryClient.clearAlerts()
-    await refreshGovernanceAfterAlertAction()
+    await loadGovernance()
   } catch (error: any) {
     governanceReq.error = error?.message || '告警清空失败'
   } finally {
@@ -492,6 +568,32 @@ const loadVoiceDiagnostics = async () => {
   }
 }
 
+const loadActiveApplication = async () => {
+  activeApplicationRequest.loading = true
+  activeApplicationRequest.error = ''
+  try {
+    activeApplication.value = await systemClient.activeApplication()
+  } catch (error: any) {
+    activeApplication.value = null
+    activeApplicationRequest.error = error?.message || '前台应用不可用'
+  } finally {
+    activeApplicationRequest.loading = false
+  }
+}
+
+const loadOrchestration = async () => {
+  orchestrationRequest.loading = true
+  orchestrationRequest.error = ''
+  try {
+    orchestrationSnapshot.value = await systemClient.orchestration()
+  } catch (error: any) {
+    orchestrationSnapshot.value = null
+    orchestrationRequest.error = error?.message || '运行编排不可用'
+  } finally {
+    orchestrationRequest.loading = false
+  }
+}
+
 const loadAvatarCapabilities = async () => {
   try {
     const result = await petControl.getAvatarCapabilities()
@@ -512,7 +614,69 @@ const voiceP95Label = (stage: Record<string, unknown> | undefined): string => {
   const value = stage?.p95_ms
   return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value)} ms` : '暂无'
 }
+const voiceComfortLabel = computed(() => {
+  const comfort = voiceSnapshot.value?.comfort
+  const gate = comfort && typeof comfort === 'object' ? comfort.comfort_gate : null
+  const status = gate && typeof gate === 'object' ? (gate as Record<string, unknown>).status : null
+  if (status === 'pass') return '通过'
+  if (status === 'needs_attention') return '需关注'
+  return '数据不足'
+})
+const voiceComfortSummary = computed(() => {
+  const comfort = voiceSnapshot.value?.comfort
+  if (!comfort || typeof comfort !== 'object') return ''
+  const sampleCount = comfort.sample_count
+  if (typeof sampleCount !== 'number' || sampleCount <= 0) return '尚未记录舒适度场景；当前仅展示运行时语音采样。'
+  const gate = comfort.comfort_gate
+  if (!gate || typeof gate !== 'object') return `已记录 ${sampleCount} 个舒适度场景。`
+  const failures = (gate as Record<string, unknown>).failures
+  if (Array.isArray(failures) && failures.length > 0) return String(failures[0])
+  return `已记录 ${sampleCount} 个舒适度场景，未发现回归问题。`
+})
+const voiceComfortSignalSummary = computed(() => {
+  const comfort = voiceSnapshot.value?.comfort
+  if (!comfort || typeof comfort !== 'object') return ''
+  const signals = comfort.comfort_signals
+  if (!signals || typeof signals !== 'object') return '尚未接入显式 comfort signal 分类器。'
+  const report = signals as Record<string, unknown>
+  const count = typeof report.sample_count === 'number' ? report.sample_count : 0
+  const missing = Array.isArray(report.missing_signals)
+    ? report.missing_signals.map(item => String(item)).filter(Boolean)
+    : []
+  if (count <= 0) return '尚未记录 hesitation、backchannel 或 background speech 信号。'
+  if (missing.length) return `已记录 ${count} 个显式舒适度信号；尚缺 ${missing.join('、')}。`
+  return `已记录 ${count} 个显式舒适度信号，来源和置信度均已做边界校验。`
+})
+const voiceQualificationLabel = computed(() => {
+  const status = voiceSnapshot.value?.release_gate?.status
+  if (status === 'pass') return '已通过'
+  if (status === 'fail') return '未资格化'
+  return '暂无'
+})
+const voiceQualificationSummary = computed(() => {
+  const qualification = voiceSnapshot.value?.qualification
+  if (!qualification) return ''
+  if (qualification.status === 'qualified') return '真实设备语音资格已通过发布门禁。'
+  const gaps = Array.isArray(qualification.gaps)
+    ? qualification.gaps
+      .map((gap) => typeof gap?.kind === 'string' ? gap.kind : '')
+      .filter(Boolean)
+      .slice(0, 2)
+    : []
+  return gaps.length ? `语音发布资格未通过：${gaps.join('、')}` : '语音发布资格尚未完成真实设备验证。'
+})
 const voiceRecommendations = computed(() => voiceSnapshot.value?.recommendations ?? [])
+
+const orchestrationEntries = computed(() => {
+  const snapshot = orchestrationSnapshot.value
+  if (!snapshot) return []
+  return [
+    ...(snapshot.agents ?? []).map(item => ({ id: item.id, name: item.name, kind: 'Agent' })),
+    ...snapshot.skills.map(item => ({ id: item.id, name: item.name, kind: '技能' })),
+    ...snapshot.commands.map(item => ({ id: item.id, name: item.name, kind: '命令' })),
+    ...snapshot.hooks.map(item => ({ id: item.id, name: item.name, kind: '钩子' })),
+  ].slice(0, 12)
+})
 
 const platformRows = computed(() => platformSnapshot.value?.platforms ?? [])
 const platformHostLabel = computed(() => {
@@ -868,6 +1032,8 @@ const overviewRefreshLoading = computed(() => (
   || platformRequest.loading
   || runtimeRequest.loading
   || voiceRequest.loading
+  || activeApplicationRequest.loading
+  || orchestrationRequest.loading
 ))
 
 const refreshOverview = async () => {
@@ -879,6 +1045,8 @@ const refreshOverview = async () => {
     loadRuntimeDependencies(),
     loadVoiceDiagnostics(),
     loadAvatarCapabilities(),
+    loadActiveApplication(),
+    loadOrchestration(),
   ])
 }
 
@@ -956,7 +1124,7 @@ onDeactivated(() => {
 .overview-console {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .ops-card,
@@ -970,7 +1138,7 @@ onDeactivated(() => {
 .ops-card:hover,
 .control-block:hover {
   border-color: var(--yui-panel-outline-strong, var(--yui-border-strong));
-  box-shadow: var(--yui-shadow-hover);
+  box-shadow: var(--yui-panel-shadow, var(--yui-shadow-card));
 }
 
 .ops-card:focus-within,
@@ -982,11 +1150,11 @@ onDeactivated(() => {
 .ops-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
-  gap: 16px;
+  gap: 12px;
 }
 
 .voice-quality-card {
-  padding: 18px;
+  padding: 16px;
 }
 
 .voice-quality-grid {
@@ -1063,7 +1231,7 @@ onDeactivated(() => {
 }
 
 .runtime-readiness-card {
-  padding: 18px;
+  padding: 16px;
 }
 
 .runtime-readiness-alert {
@@ -1193,8 +1361,8 @@ onDeactivated(() => {
 }
 
 .ops-card {
-  border-radius: var(--yui-radius-card);
-  padding: 20px;
+  border-radius: 8px;
+  padding: 16px;
 }
 
 .ops-card-head,
@@ -1211,6 +1379,118 @@ onDeactivated(() => {
   color: var(--yui-text);
   font-size: 16px;
   font-weight: 900;
+}
+
+.compact-status {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  color: var(--yui-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.context-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.context-list > div {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  min-width: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--yui-border);
+}
+
+.context-list > div:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.context-list dt {
+  color: var(--yui-muted);
+  font-size: 12px;
+}
+
+.context-list dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--yui-text);
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orchestration-counts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.orchestration-counts span {
+  min-width: 0;
+  padding: 8px 6px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-control);
+  color: var(--yui-muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.orchestration-counts strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--yui-text);
+  font-size: 16px;
+}
+
+.orchestration-details {
+  margin-top: 12px;
+  color: var(--yui-muted);
+  font-size: 12px;
+}
+
+.orchestration-details summary {
+  cursor: pointer;
+  color: var(--yui-accent);
+  font-weight: 800;
+}
+
+.orchestration-details ul {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.orchestration-details li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--yui-border);
+}
+
+.orchestration-details li strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--yui-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orchestration-details li span {
+  flex: 0 0 auto;
+  color: var(--yui-muted);
 }
 
 .action-row,
@@ -1279,7 +1559,7 @@ onDeactivated(() => {
 }
 
 .summary-selector-block {
-  padding: 16px;
+  padding: 12px;
   border: 1px solid var(--yui-border);
   border-radius: var(--yui-radius-card);
   background: var(--yui-surface-muted);
@@ -1503,7 +1783,8 @@ onDeactivated(() => {
   .metric-grid,
   .pet-control-grid,
   .voice-quality-grid,
-  .pet-capability-summary {
+  .pet-capability-summary,
+  .orchestration-counts {
     grid-template-columns: 1fr;
   }
 

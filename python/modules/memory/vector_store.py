@@ -28,6 +28,11 @@ from .schema import MemorySearchFilters
 logger = logging.getLogger(__name__)
 
 
+def _normalize_scope_id(value: Any) -> str | None:
+  normalized = str(value or '').strip()
+  return normalized or None
+
+
 def memory_recency_score(metadata: Dict[str, Any], *, now: datetime | None = None) -> float:
   """Return a stable 30-day recency score using event time before system time."""
   raw = next(
@@ -267,6 +272,14 @@ def is_memory_recallable(
   metadata = doc.metadata or {}
   if not is_metadata_recallable(metadata):
     return False
+  memory_role = str(metadata.get("memory_role") or "").strip()
+  # Permission history is review-only even when a legacy/external document
+  # omitted the candidate/pending governance fields during ingestion. An
+  # explicit role filter is required for an audit caller to request it.
+  if memory_role == "tool_permission" and (
+    filters is None or filters.memory_role != "tool_permission"
+  ):
+    return False
   allowed_types = _memory_type_filter_values(memory_types)
   if allowed_types is not None and str(metadata.get("type") or "") not in allowed_types:
     return False
@@ -274,18 +287,24 @@ def is_memory_recallable(
     return True
   if filters.layers and str(metadata.get("layer") or "semantic") not in filters.layers:
     return False
+  if filters.memory_role and str(metadata.get("memory_role") or "") != filters.memory_role:
+    return False
   doc_scope = str(metadata.get("scope") or "workspace")
+  document_session_id = _normalize_scope_id(metadata.get("session_id"))
+  requested_session_id = _normalize_scope_id(filters.session_id)
+  document_workspace_id = _normalize_scope_id(metadata.get("workspace_id"))
+  requested_workspace_id = _normalize_scope_id(filters.workspace_id)
   if filters.scope == "global":
     return doc_scope == "global"
   if filters.scope == "session":
-    return doc_scope == "session" and bool(filters.session_id) and metadata.get("session_id") == filters.session_id
+    return doc_scope == "session" and bool(requested_session_id) and document_session_id == requested_session_id
   if filters.scope == "workspace":
     if doc_scope != "workspace":
       return False
-    return not filters.workspace_id or metadata.get("workspace_id") in (filters.workspace_id, None)
-  if filters.session_id is not None and metadata.get("session_id") not in (None, filters.session_id):
+    return not requested_workspace_id or document_workspace_id in (requested_workspace_id, None)
+  if requested_session_id is not None and document_session_id not in (None, requested_session_id):
     return False
-  if filters.workspace_id is not None and metadata.get("workspace_id") not in (None, filters.workspace_id):
+  if requested_workspace_id is not None and document_workspace_id not in (None, requested_workspace_id):
     return False
   return True
 

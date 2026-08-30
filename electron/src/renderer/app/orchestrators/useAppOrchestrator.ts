@@ -52,7 +52,6 @@ export function useAppOrchestrator() {
   const companionStore = useCompanionStore()
   const chatStore = useChatStore()
   const { applyActiveCompanionRuntime, handleCompanionChange } = useCompanionRuntimeBridge()
-  const e2eMode = Boolean(window.petApi?.e2e)
 
   const runRecoverableTask = async (label: string, task: () => Promise<unknown> | unknown) => {
     try {
@@ -121,7 +120,7 @@ export function useAppOrchestrator() {
           companionStore.setActiveCompanion(workspaceStore.activeWorkspace.companion_profile_id)
         }
       },
-      applyActiveCompanionRuntime: () => e2eMode ? undefined : applyActiveCompanionRuntime(),
+      applyActiveCompanionRuntime,
       loadSessions: sessionStore.loadSessions,
       run: runRecoverableTask,
     })

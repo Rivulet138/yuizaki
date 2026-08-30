@@ -15,6 +15,20 @@
     </p>
     <p v-else class="policy-status" role="status">{{ t('proactive.status.ready') }}</p>
 
+    <div v-if="controls.feedbackSummary.value" class="feedback-summary" data-testid="proactive-feedback-summary">
+      <h4>{{ t('proactive.feedbackSummary.title') }}</h4>
+      <dl>
+        <div><dt>{{ t('proactive.feedbackSummary.total') }}</dt><dd>{{ controls.feedbackSummary.value.total }}</dd></div>
+        <div><dt>{{ t('proactive.feedbackSummary.behavioralTotal') }}</dt><dd>{{ controls.feedbackSummary.value.behavioralTotal }}</dd></div>
+        <div><dt>{{ t('proactive.feedbackSummary.acceptanceRate') }}</dt><dd>{{ formatAcceptanceRate(controls.feedbackSummary.value.acceptanceRate) }}</dd></div>
+      </dl>
+      <div v-if="categoryScores.length" class="feedback-categories">
+        <span v-for="entry in categoryScores" :key="entry[0]" class="feedback-category">
+          <span>{{ entry[0] }}</span><strong>{{ formatScore(entry[1]) }}</strong>
+        </span>
+      </div>
+    </div>
+
     <label class="control-row">
       <span><strong>{{ t('proactive.enabled') }}</strong><small>{{ t('proactive.enabledHint') }}</small></span>
       <input data-testid="proactive-enabled" type="checkbox" :checked="settings.enabled" :disabled="busy" @change="setBoolean('enabled', $event)" />
@@ -57,7 +71,7 @@
           <div><dt>{{ t('proactive.opportunity.expires') }}</dt><dd>{{ formatDate(opportunity.expiresAt) }}</dd></div>
         </dl>
         <div class="feedback-actions" role="group" :aria-label="t('proactive.opportunity.title')">
-          <button v-for="kind in feedbackKinds" :key="kind" :ref="kind === 'never_source' ? setNeverButton : undefined" type="button" :data-testid="`proactive-feedback-${kind}`" :disabled="feedbackPending" @click="sendFeedback(kind)">
+          <button v-for="kind in feedbackKinds" :key="kind" type="button" :data-testid="`proactive-feedback-${kind}`" :disabled="feedbackPending" @click="sendFeedback(kind)">
             {{ t(`proactive.feedback.${kind}`) }}
           </button>
         </div>
@@ -89,8 +103,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { computed, onBeforeUnmount, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
 import {
   PROACTIVE_FEEDBACK_KINDS,
@@ -113,14 +127,10 @@ const controls = useProactiveControls()
 const { locale, t } = useI18n()
 const settings = computed(() => controls.settings.value)
 const busy = computed(() => controls.loading.value || controls.saving.value)
-const feedbackKinds = PROACTIVE_FEEDBACK_KINDS
+const feedbackKinds = [...PROACTIVE_FEEDBACK_KINDS, 'snoozed'] as const
 const limits = PROACTIVE_SETTINGS_LIMITS
 const feedbackPending = computed(() => props.opportunity ? controls.isFeedbackPending(props.opportunity) : false)
-let neverButton: HTMLElement | null = null
-
-const setNeverButton = (value: unknown) => {
-  neverButton = value instanceof HTMLElement ? value : null
-}
+const categoryScores = computed(() => Object.entries(controls.feedbackSummary.value?.categoryPreferenceScores ?? {}))
 
 const load = () => controls.load()
 const checked = (event: Event) => (event.target as HTMLInputElement).checked
@@ -140,27 +150,14 @@ const reasonLabel = (reason: string) => t(reason === 'completed_turn_followup'
   ? 'proactive.reason.completed_turn_followup'
   : 'proactive.reason.unknown')
 const formatDate = (value: number) => new Intl.DateTimeFormat(locale.value, { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value * 1_000))
+const formatAcceptanceRate = (value: number | null) => value === null ? t('proactive.feedbackSummary.none') : `${Math.round(value * 100)}%`
+const formatScore = (value: number) => value.toFixed(2)
 
 const sendFeedback = async (kind: ProactiveFeedbackKind) => {
   const opportunity = props.opportunity
   if (!opportunity || feedbackPending.value) return
-  if (kind === 'never_source') {
-    try {
-      await ElMessageBox.confirm(
-        t('proactive.feedback.confirmBody'),
-        t('proactive.feedback.confirmTitle'),
-        { confirmButtonText: t('proactive.feedback.confirm'), cancelButtonText: t('common.cancel'), type: 'warning', autofocus: true },
-      )
-    } catch {
-      await nextTick()
-      neverButton?.focus()
-      return
-    }
-  }
   const saved = await controls.submitFeedback(opportunity, kind)
   if (saved) ElMessage.success(t('proactive.feedback.saved'))
-  await nextTick()
-  if (kind === 'never_source') neverButton?.focus()
 }
 
 const rebuildFrames = async () => {
@@ -196,6 +193,13 @@ input[type='checkbox'] { width: 18px; height: 18px; flex: 0 0 auto; accent-color
 .field, .field-grid label { display: grid; min-width: 0; gap: 5px; color: var(--yui-muted); font-size: 12px; }
 input[type='text'], input[type='time'], input[type='number'] { width: 100%; min-width: 0; min-height: 34px; box-sizing: border-box; padding: 5px 7px; border: 1px solid var(--yui-border-strong); border-radius: 5px; background: var(--yui-surface); color: var(--yui-text); }
 .opportunity, .frames { display: grid; gap: 10px; padding-top: 4px; }
+.feedback-summary { display: grid; gap: 8px; padding: 10px 0; border-top: 1px solid var(--yui-border); border-bottom: 1px solid var(--yui-border); }
+.feedback-summary h4 { margin: 0; }
+.feedback-summary dl { gap: 4px; }
+.feedback-summary dl div { grid-template-columns: minmax(120px, auto) minmax(0, 1fr); }
+.feedback-categories { display: flex; flex-wrap: wrap; gap: 6px; }
+.feedback-category { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; padding: 0 7px; border: 1px solid var(--yui-border); border-radius: 5px; color: var(--yui-muted); font-size: 11px; }
+.feedback-category strong { color: var(--yui-text); font-variant-numeric: tabular-nums; }
 dl { display: grid; gap: 6px; margin: 0; }
 dl div { display: grid; grid-template-columns: minmax(88px, auto) minmax(0, 1fr); gap: 10px; }
 dt { color: var(--yui-muted); font-size: 12px; }

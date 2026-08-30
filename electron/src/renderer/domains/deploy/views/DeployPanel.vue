@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="运行检查" subtitle="检查后端连接、就绪状态和桌面控制能力" tone="admin">
+  <PanelShell title="运行检查" tone="admin">
     <div class="deploy-console">
       <section class="deploy-hero">
         <div class="hero-actions">
@@ -87,7 +87,6 @@
             <div class="card-head">
               <div>
                 <strong>模型与语音运行时</strong>
-                <span class="card-subtitle">配置、初始化和健康状态来自同一份后端快照</span>
               </div>
               <el-tag :type="providerSummary.requiredHealthy ? 'success' : 'warning'">
                 {{ providerSummary.healthy }}/{{ providerSummary.total }} 正常
@@ -471,7 +470,7 @@ const refreshAll = async () => {
 }
 
 onMounted(() => {
-  if (!window.petApi?.e2e) void refreshAll()
+  void refreshAll()
 })
 </script>
 
@@ -513,12 +512,6 @@ onMounted(() => {
 }
 
 .lower-grid { grid-template-columns: minmax(0, 1fr); }
-
-.card-subtitle {
-  color: var(--yui-muted);
-  font-size: 12px;
-  font-weight: 400;
-}
 
 .provider-grid {
   display: grid;
@@ -722,9 +715,12 @@ onMounted(() => {
   .metric-grid,
   .deploy-grid,
   .lower-grid,
-  .service-grid,
-  .provider-grid {
+  .service-grid {
     grid-template-columns: 1fr;
+  }
+
+  .provider-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -747,6 +743,10 @@ onMounted(() => {
   .runway-step,
   .command-item {
     flex-direction: column;
+  }
+
+  .provider-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

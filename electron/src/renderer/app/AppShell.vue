@@ -1,10 +1,9 @@
 <template>
-  <div class="yuizaki-bg">
+  <div class="yuizaki-bg" :class="{ 'browser-mode': !isElectronPanel }">
     <div class="shell cherry-shell">
       <AppSidebar
         :active-workspace-id="activeWorkspace.id"
         :menus="menus"
-        :admin-menus="adminMenus"
         @open-workspace-settings="dialogStore.openWorkspaceDrawer"
       />
 
@@ -13,6 +12,25 @@
         <div class="wallpaper-blur" :style="{ backgroundImage: `url(${currentWallpaper})` }"></div>
         <div class="wallpaper-mask"></div>
         <div class="content-frame">
+          <div v-if="!isElectronPanel" class="browser-runtime-strip" role="status" aria-live="polite">
+            <div class="browser-runtime-state">
+              <el-icon aria-hidden="true"><Monitor /></el-icon>
+              <strong>浏览器工作区</strong>
+              <span :class="{ offline: !uiCapabilities.connected.value }">
+                {{ uiCapabilities.loading.value ? '连接检查中' : uiCapabilities.connected.value ? 'HTTP 已连接' : '等待后端' }}
+              </span>
+            </div>
+            <button
+              class="browser-runtime-refresh"
+              type="button"
+              title="刷新连接状态"
+              aria-label="刷新连接状态"
+              :disabled="uiCapabilities.loading.value"
+              @click="uiCapabilities.refresh"
+            >
+              <el-icon :class="{ spinning: uiCapabilities.loading.value }"><Refresh /></el-icon>
+            </button>
+          </div>
           <AppTopbar
             v-if="activeTab !== 'chat'"
             :active-workspace="activeWorkspace"
@@ -21,11 +39,9 @@
             :title="activeModuleTitle"
             :companion-state="companionRuntime.presentationState.value"
             :companion-state-label="companionStateLabel"
-            :admin-mode="adminMode"
             :is-electron-panel="isElectronPanel"
             :notification-count="notifications.length"
             :theme="resolvedTheme"
-            @toggle-admin-mode="toggleAdminMode"
             @toggle-theme="toggleTheme"
             @change-locale="handleLocaleChange"
             @toggle-notifications="showNotifPanel = !showNotifPanel"
@@ -33,13 +49,6 @@
             @maximize="maximize"
             @close="close"
             @change-companion="handleCompanionChange"
-          />
-
-          <RuntimeEnvironmentStrip
-            v-if="runtimeEnvironmentNotice"
-            v-bind="runtimeEnvironmentNotice"
-            @open-checks="openRuntimeChecks"
-            @retry="retryConnection"
           />
 
           <main class="app-main" :class="activeTab === 'chat' ? 'chat-mode' : 'panel-mode'">
@@ -90,10 +99,10 @@
 
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
+import { Monitor, Refresh } from '@element-plus/icons-vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { yuizakiConfig } from '@/config/yuizaki'
-import { hasControlAuthToken } from '@/api/clients/http-client'
 import { getSocketClient, SocketEvents } from '@/net/socketClient'
 import { useChatStore } from '@/stores/chatStore'
 import { useCompanionStore } from '@/stores/companionStore'
@@ -108,13 +117,13 @@ import { adminNavigationModules, isPanelKey, primaryNavigationModules, type Navi
 import AppSidebar from './AppSidebar.vue'
 import AppTopbar from './AppTopbar.vue'
 import GlobalDialogs from './components/dialogs/GlobalDialogs.vue'
-import RuntimeEnvironmentStrip from './components/RuntimeEnvironmentStrip.vue'
 import { useAppOrchestrator } from './orchestrators/useAppOrchestrator'
 import { useVoiceConversationBridge } from './composables/useVoiceConversationBridge'
-import { advanceCompanionCooldownForE2E, useCompanionRuntimeBridge } from './composables/useCompanionRuntimeBridge'
+import { useCompanionRuntimeBridge } from './composables/useCompanionRuntimeBridge'
 import { publishCompanionRuntimeEvent } from './runtime/companionRuntime'
 import { createAppRuntimeTeardown } from './runtime/appRuntimeTeardown'
 import { createVisualCaptureRuntime } from './runtime/visualCaptureRuntime'
+import { useUiCapabilities } from './composables/useUiCapabilities'
 
 const systemStore = useSystemStore()
 const workspaceStore = useWorkspaceStore()
@@ -125,12 +134,11 @@ const inputBindingsStore = useInputBindingsStore()
 const chatStore = useChatStore()
 const orchestrator = useAppOrchestrator()
 const companionRuntime = useCompanionRuntimeBridge()
+const uiCapabilities = useUiCapabilities()
 useVoiceConversationBridge()
 const route = useRoute()
 const router = useRouter()
 const petApi = window.petApi
-const e2eApi = petApi?.e2e
-const e2eMode = Boolean(e2eApi)
 
 const activeTab = computed<NavigationModuleId>(() => {
   const segments = route.path.replace(/^\//, '').split('/')
@@ -140,9 +148,7 @@ const activeTab = computed<NavigationModuleId>(() => {
 const activeWorkspace = computed(() => workspaceStore.activeWorkspace)
 const wallpaperMode = ref(true)
 const currentWallpaper = ref(yuizakiConfig.slides[0] || '')
-const localMenus = computed(() => primaryNavigationModules())
-const localAdminMenus = computed(() => adminNavigationModules())
-const ADMIN_MODE_STORAGE_KEY = 'yuizaki.adminMode'
+const localMenus = computed(() => [...primaryNavigationModules(), ...adminNavigationModules()])
 const activeVisionSettings = computed(() => workspaceStore.activeWorkspace.context.vision ?? {
   enabled: false,
   displayIndex: 0,
@@ -150,9 +156,6 @@ const activeVisionSettings = computed(() => workspaceStore.activeWorkspace.conte
   region: { x: 0, y: 0, width: 1280, height: 720 },
   privacyMasks: [],
 })
-const adminMode = ref(
-  typeof window !== 'undefined' && window.localStorage.getItem(ADMIN_MODE_STORAGE_KEY) === 'true',
-)
 const chatState = computed(() => chatStore.state)
 const showShortcuts = ref(false)
 const showNotifPanel = ref(false)
@@ -165,51 +168,7 @@ const companionOptions = computed(() => {
 })
 const isElectronPanel = computed(() => Boolean(petApi?.window))
 const handleCompanionChange = orchestrator.handleCompanionChange
-const runtimeEnvironmentNotice = computed(() => {
-  const browserHost = !isElectronPanel.value
-  const browserAuthorized = browserHost && (hasControlAuthToken() || systemStore.controlRunning)
-  if (systemStore.statusChecked && (!systemStore.controlRunning || !systemStore.pythonRunning)) {
-    const unavailable = [
-      !systemStore.controlRunning ? '控制服务' : '',
-      !systemStore.pythonRunning ? 'Python 后端' : '',
-    ].filter(Boolean).join('、')
-    return {
-      kind: 'offline' as const,
-      tone: 'danger' as const,
-      title: `${unavailable}未连接`,
-      detail: '对话、语音、记忆或桌宠控制暂不可用。',
-      retryable: true,
-    }
-  }
-  if (systemStore.statusChecked && !systemStore.sioConnected) {
-    return {
-      kind: 'degraded' as const,
-      tone: 'warning' as const,
-      title: '实时通道未连接',
-      detail: '设置仍可读取，但流式对话、语音回传和桌宠联动会中断。',
-      retryable: true,
-    }
-  }
-  if (browserHost) {
-    return {
-      kind: 'browser' as const,
-      tone: 'info' as const,
-      title: browserAuthorized ? '浏览器控制台' : '浏览器预览模式',
-      detail: browserAuthorized
-        ? '服务功能可用；桌宠宿主窗口、全局输入和 Electron 进程资源不可用。'
-        : '仅用于界面预览；请从 Yuizaki 桌面应用或本地控制页打开完整功能。',
-      retryable: false,
-    }
-  }
-  if (!systemStore.statusChecked) return null
-  return null
-})
-
 let themeMediaQuery: MediaQueryList | null = null
-let healthScheduleEnabled = !e2eMode
-let companionScheduleEnabled = !e2eMode
-let disposeE2EControls: (() => void) | null = null
-let e2eInitialHealthChecked = false
 let visualContextEnabled = activeVisionSettings.value.enabled
 const visualCaptureRuntime = createVisualCaptureRuntime({
   getSettings: () => activeVisionSettings.value,
@@ -272,23 +231,11 @@ const menus = computed(() => {
     })
 })
 
-const adminMenus = computed(() => (adminMode.value ? localAdminMenus.value : []))
 const activeModuleTitle = computed(() => {
-  const module = [...localMenus.value, ...localAdminMenus.value].find((item) => item.id === activeTab.value)
+  const module = localMenus.value.find((item) => item.id === activeTab.value)
   return module?.title || yuizakiConfig.heroTitle
 })
 const companionStateLabel = computed(() => t(`companion.home.state.${companionRuntime.presentationState.value}`))
-
-const retryConnection = () => {
-  const socketClient = getSocketClient()
-  socketClient.connect()
-  systemStore.refreshStatus(
-    () => socketClient.isConnected(),
-    () => socketClient.isConnected(),
-  )
-}
-
-const openRuntimeChecks = () => handlePanelOpenTab('deploy')
 
 const handleGlobalKeydown = (event: KeyboardEvent) => {
   if (event.key === '?' && !event.ctrlKey && !event.metaKey && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
@@ -331,11 +278,6 @@ const callWindowAction = (action: 'minimize' | 'maximize' | 'close') => {
 const minimize = () => callWindowAction('minimize')
 const maximize = () => callWindowAction('maximize')
 const close = () => callWindowAction('close')
-const toggleAdminMode = () => {
-  adminMode.value = !adminMode.value
-  window.localStorage.setItem(ADMIN_MODE_STORAGE_KEY, String(adminMode.value))
-}
-
 const handleLocaleChange = async (locale: string) => {
   try {
     await setLocale(locale)
@@ -362,8 +304,6 @@ const stopAppRuntime = () => {
   socketClient.off(SocketEvents.PERMISSION_REQUEST, handlePermissionRequest)
   socketClient.off(SocketEvents.SCREENSHOT_RESULT, visualCaptureRuntime.handleResult)
   socketClient.off(SocketEvents.SCREENSHOT_CAPTURE_REQUEST, visualCaptureRuntime.handleCaptureRequest)
-  disposeE2EControls?.()
-  disposeE2EControls = null
 }
 
 const appRuntimeTeardown = createAppRuntimeTeardown({
@@ -373,91 +313,12 @@ const appRuntimeTeardown = createAppRuntimeTeardown({
 const teardownAppRuntime = () => appRuntimeTeardown.run()
 defineExpose({ teardownAppRuntime })
 
-if (e2eApi) {
-  disposeE2EControls = e2eApi.onControl(async ({ control }) => {
-    const socketClient = getSocketClient()
-    switch (control) {
-      case 'pauseHealthPolling':
-        healthScheduleEnabled = false
-        systemStore.stopHealthCheck()
-        return { paused: true }
-      case 'pollHealthOnce':
-        if (!e2eInitialHealthChecked) {
-          const socketDeadline = Date.now() + 5_000
-          while (!socketClient.isConnected()) {
-            if (Date.now() >= socketDeadline) throw new Error('Initial E2E Socket connection timed out')
-            await new Promise(resolve => window.setTimeout(resolve, 25))
-          }
-          e2eInitialHealthChecked = true
-        }
-        await systemStore.refreshStatus(() => false, () => socketClient.isConnected())
-        return {
-          checked: systemStore.statusChecked,
-          controlRunning: systemStore.controlRunning,
-          pythonRunning: systemStore.pythonRunning,
-          sioConnected: systemStore.sioConnected,
-        }
-      case 'resumeHealthPolling':
-        healthScheduleEnabled = true
-        systemStore.startHealthCheck(() => false, () => socketClient.isConnected())
-        while (!systemStore.statusChecked) await new Promise(resolve => window.setTimeout(resolve, 25))
-        return { resumed: true, checked: true }
-      case 'sampleVisualOnce':
-        {
-          const socketDeadline = Date.now() + 5_000
-          while (!socketClient.isConnected()) {
-            if (Date.now() >= socketDeadline) throw new Error('Visual sample Socket connection timed out')
-            await new Promise(resolve => window.setTimeout(resolve, 25))
-          }
-          const frameId = `renderer-e2e-${Date.now()}`
-          const result = await visualCaptureRuntime.captureAndWait(frameId, true)
-          return { sampled: true, frameId, status: result['status'] }
-        }
-      case 'pauseCompanionPolling':
-        companionScheduleEnabled = false
-        companionRuntime.stopCompanionRuntime()
-        return { paused: true }
-      case 'pollCompanionOnce':
-        return companionRuntime.pollCompanionOnce()
-      case 'resumeCompanionPolling':
-        {
-          companionScheduleEnabled = true
-          const previous = companionRuntime.runtimeSnapshot.value
-          const nextSnapshot = new Promise<void>((resolve, reject) => {
-            const timeout = window.setTimeout(() => {
-              stopWatching()
-              reject(new Error('Scheduled companion poll timed out'))
-            }, 4_000)
-            const stopWatching = watch(companionRuntime.runtimeSnapshot, (snapshot) => {
-              if (!snapshot || snapshot === previous) return
-              window.clearTimeout(timeout)
-              stopWatching()
-              resolve()
-            })
-          })
-          companionRuntime.startCompanionRuntime(() => systemStore.controlRunning && systemStore.pythonRunning)
-          await nextSnapshot
-          return { resumed: true, polled: true }
-        }
-      case 'advanceCompanionCooldown':
-        return { advancedMs: advanceCompanionCooldownForE2E() }
-      case 'pauseHeartbeat':
-        socketClient.pauseHeartbeat()
-        return { paused: true }
-      case 'emitHeartbeatOnce':
-        return socketClient.emitHeartbeatOnceAndWaitForEcho()
-      case 'teardownRuntime':
-        await teardownAppRuntime()
-        return { tornDown: true }
-    }
-  })
-}
-
 watch(() => chatState.value.isGenerating, (generating) => {
   document.title = generating ? t('shell.status.thinking') : yuizakiConfig.heroTitle
 })
 
 onMounted(() => {
+  void uiCapabilities.refresh()
   applyTheme()
   themeMediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)') ?? null
   themeMediaQuery?.addEventListener('change', applyTheme)
@@ -473,23 +334,17 @@ onMounted(() => {
   petApi?.on?.('shortcut:toggle-vision', handleToggleVisionShortcut)
 
   const socketClient = getSocketClient()
-  if (e2eMode) socketClient.pauseHeartbeat()
   socketClient.connect()
-  // E2E drives health checks explicitly so startup ordering remains deterministic.
-  if (healthScheduleEnabled && !e2eMode) {
-    systemStore.startHealthCheck(
-      () => false,
-      () => socketClient.isConnected(),
-    )
-  }
+  systemStore.startHealthCheck(
+    () => false,
+    () => socketClient.isConnected(),
+  )
   socketClient.on(SocketEvents.PERMISSION_REQUEST, handlePermissionRequest)
   socketClient.on(SocketEvents.SCREENSHOT_RESULT, visualCaptureRuntime.handleResult)
   socketClient.on(SocketEvents.SCREENSHOT_CAPTURE_REQUEST, visualCaptureRuntime.handleCaptureRequest)
   systemStore.setVisualPerceptionEnabled(activeVisionSettings.value.enabled)
 
-  if (companionScheduleEnabled) {
-    companionRuntime.startCompanionRuntime(() => systemStore.controlRunning && systemStore.pythonRunning)
-  }
+  companionRuntime.startCompanionRuntime(() => systemStore.controlRunning && systemStore.pythonRunning)
   const restoredTab = activeWorkspace.value.context.activeTab
   if (activeTab.value === 'companion' && restoredTab && isPanelKey(restoredTab) && restoredTab !== 'companion') {
     void router.replace(`/w/${encodeURIComponent(activeWorkspace.value.id)}/${restoredTab}`)
@@ -551,7 +406,7 @@ watch(
   height: 100%;
   overflow: hidden;
   background: var(--yui-main-bg);
-  padding: 14px 16px 16px;
+  padding: 12px 14px 14px;
   box-sizing: border-box;
 }
 
@@ -599,6 +454,71 @@ watch(
   height: 100%;
 }
 
+.browser-runtime-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 34px;
+  margin-bottom: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--yui-browser-border, var(--yui-border));
+  border-radius: 8px;
+  color: var(--yui-browser-text, var(--yui-text));
+  background: var(--yui-browser-surface, var(--yui-surface));
+  box-sizing: border-box;
+}
+
+.browser-runtime-state {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.browser-runtime-state strong {
+  font-weight: 650;
+}
+
+.browser-runtime-state span {
+  color: var(--yui-success-text, #16803c);
+}
+
+.browser-runtime-state span.offline {
+  color: var(--yui-warning-text, #9a6700);
+}
+
+.browser-runtime-refresh {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--yui-browser-border, var(--yui-border));
+  border-radius: 6px;
+  color: var(--yui-browser-text, var(--yui-text));
+  background: transparent;
+  cursor: pointer;
+}
+
+.browser-runtime-refresh:hover:not(:disabled),
+.browser-runtime-refresh:focus-visible {
+  color: var(--yui-accent);
+  border-color: var(--yui-accent);
+  background: var(--yui-accent-soft);
+}
+
+.browser-runtime-refresh:disabled {
+  cursor: wait;
+  opacity: 0.56;
+}
+
+.browser-runtime-refresh .spinning {
+  animation: browser-refresh-spin 0.9s linear infinite;
+}
+
 .app-main {
   display: flex;
   flex-direction: column;
@@ -612,7 +532,7 @@ watch(
 }
 
 .app-main.panel-mode {
-  padding: 18px 24px 22px;
+  padding: 14px 18px 18px;
   border-color: var(--yui-panel-outline);
   background: var(--yui-panel-surface);
   background-clip: padding-box;
@@ -723,6 +643,10 @@ watch(
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes browser-refresh-spin {
+  to { transform: rotate(360deg); }
+}
+
 @media (max-width: 980px) {
   .shell {
     padding: 0;
@@ -757,6 +681,10 @@ watch(
 
   .app-main.panel-mode {
     padding: 10px;
+  }
+
+  .browser-runtime-strip {
+    margin-bottom: 6px;
   }
 
 }
@@ -858,6 +786,46 @@ watch(
   --yui-chat-focus: rgba(96, 165, 250, 0.42);
   --yui-text: #e5e7eb;
   --yui-muted: #94a3b8;
+}
+
+.yuizaki-bg.browser-mode {
+  --yui-browser-bg: #f3f5f8;
+  --yui-browser-surface: #ffffff;
+  --yui-browser-border: #d9e0e8;
+  --yui-browser-text: #1f2937;
+  --yui-success-text: #16713a;
+  --yui-warning-text: #8a5a00;
+  --yui-panel-wallpaper-opacity: 0.28;
+  --yui-panel-wallpaper-mask: rgba(255, 255, 255, 0.48);
+  background: var(--yui-browser-bg);
+}
+
+:root[data-theme='dark'] .yuizaki-bg.browser-mode {
+  --yui-browser-bg: #111827;
+  --yui-browser-surface: #182235;
+  --yui-browser-border: #334155;
+  --yui-browser-text: #e5e7eb;
+  --yui-success-text: #6ee7a0;
+  --yui-warning-text: #f5c76b;
+  --yui-panel-wallpaper-opacity: 0.24;
+  --yui-panel-wallpaper-mask: rgba(11, 18, 32, 0.52);
+}
+
+.yuizaki-bg.browser-mode .sidebar,
+.yuizaki-bg.browser-mode .topbar {
+  border-color: var(--yui-browser-border);
+  background: var(--yui-browser-surface);
+  box-shadow: none;
+}
+
+.yuizaki-bg.browser-mode .main {
+  background: var(--yui-main-bg);
+}
+
+.yuizaki-bg.browser-mode .app-main.panel-mode {
+  border-color: var(--yui-browser-border);
+  background: var(--yui-panel-surface);
+  box-shadow: var(--yui-panel-shadow);
 }
 
 .yuizaki-bg .el-card,

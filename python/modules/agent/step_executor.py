@@ -37,7 +37,7 @@ from .planner import (
 )
 from .route_policy import system_prompt_for_agent_role
 from .tool_loop import run_tool_loop
-from .tool_result import ToolResultEnvelope
+from .tool_result import ToolResultEnvelope, is_known_success
 
 
 @dataclass(frozen=True)
@@ -1472,7 +1472,10 @@ class StepExecutor:
             condition=condition,
             tool=tool_name,
             args=safe_args,
-            success=outcome.success,
+            # Treat the explicit effect outcome as the terminal source of
+            # truth. Legacy adapters may return a loosely shaped object with
+            # success=True while still reporting an unknown effect.
+            success=is_known_success(outcome),
             content=outcome.content,
             error=outcome.error,
             retry_count=retry_count,
@@ -1862,7 +1865,9 @@ class StepExecutor:
                 condition=condition,
                 tool=tool_name,
                 args=safe_args,
-                success=outcome.success,
+                # Keep the compatibility execution path aligned with the
+                # typed path: an unknown effect is never a successful step.
+                success=is_known_success(outcome),
                 content=outcome.content,
                 error=outcome.error,
                 retry_count=retry_count,

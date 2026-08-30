@@ -30,6 +30,7 @@ const parseLocalPort = (value: string | undefined, fallback: number): number => 
 const DEFAULT_PORT = parseLocalPort(process.env['CONTROL_SERVER_PORT'], 38945)
 const TRUSTED_PACKAGED_RENDERER_ORIGIN = 'yuizaki-app://renderer'
 const CONTROL_CORS_METHODS = 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
+const CONTROL_CORS_HEADERS = 'Content-Type, Authorization, x-trace-id'
 
 const MIME_TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
@@ -67,6 +68,7 @@ export class ControlServer {
   private port = DEFAULT_PORT
   private perceptionBridge: AuthorizedPerceptionBridge | null = null
   private onboardingCoordinator: OnboardingReadinessCoordinator | null = null
+  private pythonProviderEnvironmentUpdater: ((environment: Record<string, string>) => void) | undefined
 
   constructor(
     private readonly live2dWindow: Live2DWindow,
@@ -125,6 +127,10 @@ export class ControlServer {
 
   setOnboardingCoordinator(coordinator: OnboardingReadinessCoordinator): void {
     this.onboardingCoordinator = coordinator
+  }
+
+  setPythonProviderEnvironmentUpdater(updater: (environment: Record<string, string>) => void): void {
+    this.pythonProviderEnvironmentUpdater = updater
   }
 
   authorizePanelUrl(url: URL): URL {
@@ -188,7 +194,7 @@ export class ControlServer {
           return
         }
         const headers: Record<string, string> = {
-          'Access-Control-Allow-Headers': 'Content-Type, x-trace-id',
+          'Access-Control-Allow-Headers': CONTROL_CORS_HEADERS,
           'Access-Control-Allow-Methods': CONTROL_CORS_METHODS,
         }
         if (allowedOrigin) {
@@ -207,7 +213,7 @@ export class ControlServer {
         }
         if (allowedOrigin) {
           res.setHeader('Access-Control-Allow-Origin', allowedOrigin)
-          res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-trace-id')
+          res.setHeader('Access-Control-Allow-Headers', CONTROL_CORS_HEADERS)
           res.setHeader('Access-Control-Allow-Methods', CONTROL_CORS_METHODS)
           res.setHeader('Vary', 'Origin')
         }
@@ -222,7 +228,7 @@ export class ControlServer {
         }
         if (allowedOrigin) {
           res.setHeader('Access-Control-Allow-Origin', allowedOrigin)
-          res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-trace-id')
+          res.setHeader('Access-Control-Allow-Headers', CONTROL_CORS_HEADERS)
           res.setHeader('Access-Control-Allow-Methods', CONTROL_CORS_METHODS)
           res.setHeader('Vary', 'Origin')
         }
@@ -236,7 +242,7 @@ export class ControlServer {
       }
       if (allowedOrigin) {
         res.setHeader('Access-Control-Allow-Origin', allowedOrigin)
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-trace-id')
+        res.setHeader('Access-Control-Allow-Headers', CONTROL_CORS_HEADERS)
         res.setHeader('Access-Control-Allow-Methods', CONTROL_CORS_METHODS)
         res.setHeader('Vary', 'Origin')
       }
@@ -270,6 +276,9 @@ export class ControlServer {
       backendApiToken: this.getControlToken(),
       backendApiTokenStore: this.backendApiTokenStore,
       providerCredentialStore: this.providerCredentialStore,
+      ...(this.pythonProviderEnvironmentUpdater
+        ? { updatePythonProviderEnvironment: this.pythonProviderEnvironmentUpdater }
+        : {}),
       applyPetStateToRenderer: this.applyPetStateToRenderer,
       applyStateToLive2D: (state: PetControlState) => this.applyStateToLive2D(state),
     }

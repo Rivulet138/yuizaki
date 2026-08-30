@@ -1,5 +1,10 @@
 export type PetModelType = 'live2d' | 'vrm'
 
+/** User-facing scale contract shared by renderer, state store, HTTP and UI. */
+export const PET_SCALE_DEFAULT = 0.42
+export const PET_SCALE_MIN = 0.12
+export const PET_SCALE_MAX = 0.6
+
 export type PetPlacement = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left' | 'center' | 'free'
 
 export type PetModelSource = 'bundled' | 'local' | 'plugin'
@@ -353,7 +358,7 @@ export const DEFAULT_PET_CONTROL_STATE: PetControlState = {
   modelType: 'live2d',
   modelId: null,
   displayId: null,
-  scale: 0.28,
+  scale: PET_SCALE_DEFAULT,
   positionX: null,
   positionY: null,
   placement: 'bottom-right',

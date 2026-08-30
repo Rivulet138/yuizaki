@@ -177,8 +177,7 @@ const onboardingBackgroundStyle = computed(() => ({
 
 const onboardingApi = computed(() => window.petApi?.onboarding)
 const isElectronPanel = computed(() => Boolean(window.petApi?.window))
-const trustedE2EActivation = computed(() => Boolean(window.petApi?.e2e))
-const showApplication = computed(() => trustedE2EActivation.value || !onboardingApi.value || (completed.value && !reopened.value))
+const showApplication = computed(() => !onboardingApi.value || (completed.value && !reopened.value))
 const backendStartActive = computed(() => snapshot.value?.operation === 'backend_start' ||
   (snapshot.value?.operation !== 'probe_scan' && backendStartPending.value))
 const runActive = computed(() => backendStartActive.value ||

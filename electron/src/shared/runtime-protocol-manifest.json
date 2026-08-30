@@ -1,13 +1,38 @@
 {
   "production_protocol": {
+    "schema_versions": {
+      "tool:result": "yuizaki.tool-event.v1",
+      "tool:error": "yuizaki.tool-event.v1"
+    },
     "routes": {
-      "ping": { "method": "GET", "path": "/api/ping" },
-      "settings": { "method": "GET", "path": "/api/settings/" },
-      "workspaces": { "method": "GET", "path": "/api/workspaces" },
-      "active_workspace": { "method": "POST", "path": "/api/system/active-workspace" },
-      "sessions": { "method": "GET", "path": "/api/sessions?scope=all" },
-      "companion_runtime": { "method": "GET", "path": "/api/system/companion-runtime?limit={limit}" },
-      "onboarding_readiness_run": { "method": "POST", "path": "/api/system/onboarding/readiness/run" }
+      "ping": {
+        "method": "GET",
+        "path": "/api/ping"
+      },
+      "settings": {
+        "method": "GET",
+        "path": "/api/settings/"
+      },
+      "workspaces": {
+        "method": "GET",
+        "path": "/api/workspaces"
+      },
+      "active_workspace": {
+        "method": "POST",
+        "path": "/api/system/active-workspace"
+      },
+      "sessions": {
+        "method": "GET",
+        "path": "/api/sessions?scope=all"
+      },
+      "companion_runtime": {
+        "method": "GET",
+        "path": "/api/system/companion-runtime?limit={limit}"
+      },
+      "onboarding_readiness_run": {
+        "method": "POST",
+        "path": "/api/system/onboarding/readiness/run"
+      }
     },
     "socket_events": {
       "AUDIO_CHUNK": "audio:chunk",
@@ -54,55 +79,340 @@
       "agent:chat": {
         "type": "object",
         "required": {
-          "messages": { "type": "array" },
-          "session_id": { "type": "string" },
-          "workspace_id": { "type": "string" },
-          "request_id": { "type": "string" },
-          "generation_id": { "type": "string" },
-          "turn_id": { "type": "string" },
-          "interruption_epoch": { "type": "integer" },
-          "version": { "const": 1 }
+          "messages": {
+            "type": "array"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "generation_id": {
+            "type": "string"
+          },
+          "turn_id": {
+            "type": "string"
+          },
+          "interruption_epoch": {
+            "type": "integer"
+          },
+          "version": {
+            "const": 1
+          }
         },
         "optional": {
-          "pet_control_context": { "oneOf": [{ "type": "object" }, { "type": "null" }] },
-          "chat_options": { "oneOf": [{ "type": "object" }, { "type": "null" }] }
+          "pet_control_context": {
+            "oneOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "chat_options": {
+            "oneOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
         }
       },
       "audio:chunk": {
         "type": "object",
-        "required": { "chunk": { "type": "string" }, "sample_rate": { "type": "integer" }, "is_final": { "type": "boolean" }, "session_id": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 } }
+        "required": {
+          "chunk": {
+            "type": "string"
+          },
+          "sample_rate": {
+            "type": "integer"
+          },
+          "is_final": {
+            "type": "boolean"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "generation_id": {
+            "type": "string"
+          },
+          "turn_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "interruption_epoch": {
+            "type": "integer"
+          },
+          "version": {
+            "const": 1
+          }
+        }
       },
       "asr:speech-start": {
         "type": "object",
-        "required": { "session_id": { "type": "string" }, "confirmed_ms": { "type": "number" } }
+        "required": {
+          "session_id": {
+            "type": "string"
+          },
+          "confirmed_ms": {
+            "type": "number"
+          }
+        }
       },
       "asr:partial": {
         "type": "object",
-        "required": { "session_id": { "type": "string" }, "text": { "type": "string" }, "confidence": { "type": "number" }, "lang": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 } }
+        "required": {
+          "session_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "lang": {
+            "type": "string"
+          },
+          "generation_id": {
+            "type": "string"
+          },
+          "turn_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "interruption_epoch": {
+            "type": "integer"
+          },
+          "version": {
+            "const": 1
+          }
+        }
       },
       "asr:final": {
         "type": "object",
-        "required": { "session_id": { "type": "string" }, "text": { "type": "string" }, "confidence": { "type": "number" }, "lang": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 } }
+        "required": {
+          "session_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "lang": {
+            "type": "string"
+          },
+          "generation_id": {
+            "type": "string"
+          },
+          "turn_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "interruption_epoch": {
+            "type": "integer"
+          },
+          "version": {
+            "const": 1
+          }
+        }
       },
       "llm:delta": {
         "type": "object",
-        "required": { "token": { "type": "string" }, "index": { "type": "integer" }, "session_id": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 }, "sequence": { "type": "integer" } }
+        "required": {
+          "token": {
+            "type": "string"
+          },
+          "index": {
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "generation_id": {
+            "type": "string"
+          },
+          "turn_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "interruption_epoch": {
+            "type": "integer"
+          },
+          "version": {
+            "const": 1
+          },
+          "sequence": {
+            "type": "integer"
+          }
+        }
       },
       "llm:final": {
         "type": "object",
-        "required": { "text": { "type": "string" }, "session_id": { "type": "string" }, "total_tokens": { "type": "integer" }, "finish_reason": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 }, "sequence": { "type": "integer" } },
-        "optional": { "user_message_id": { "type": "integer" }, "assistant_message_id": { "type": "integer" }, "tts_expected": { "type": "boolean" } }
+        "required": {
+          "text": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "total_tokens": {
+            "type": "integer"
+          },
+          "finish_reason": {
+            "type": "string"
+          },
+          "generation_id": {
+            "type": "string"
+          },
+          "turn_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "interruption_epoch": {
+            "type": "integer"
+          },
+          "version": {
+            "const": 1
+          },
+          "sequence": {
+            "type": "integer"
+          }
+        },
+        "optional": {
+          "user_message_id": {
+            "type": "integer"
+          },
+          "assistant_message_id": {
+            "type": "integer"
+          },
+          "tts_expected": {
+            "type": "boolean"
+          }
+        }
       },
       "tts:chunk": {
         "oneOf": [
           {
             "type": "object",
-            "required": { "session_id": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 }, "sequence": { "type": "integer" }, "is_final": { "const": false }, "audio_url": { "type": "string" }, "text": { "type": "string" } }
+            "required": {
+              "session_id": {
+                "type": "string"
+              },
+              "generation_id": {
+                "type": "string"
+              },
+              "turn_id": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "interruption_epoch": {
+                "type": "integer"
+              },
+              "version": {
+                "const": 1
+              },
+              "sequence": {
+                "type": "integer"
+              },
+              "is_final": {
+                "const": false
+              },
+              "audio_url": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            }
           },
           {
             "type": "object",
-            "required": { "session_id": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 }, "sequence": { "type": "integer" }, "is_final": { "const": false }, "audio": { "type": "string" }, "audio_format": { "type": "string" }, "sample_rate": { "type": "integer" }, "channels": { "type": "integer" }, "sample_width_bytes": { "type": "integer" }, "chunk_index": { "type": "integer" }, "duration_ms": { "oneOf": [{ "type": "number" }, { "type": "null" }] }, "text": { "type": "string" } },
-            "optional": { "visemes": { "type": "array" } }
+            "required": {
+              "session_id": {
+                "type": "string"
+              },
+              "generation_id": {
+                "type": "string"
+              },
+              "turn_id": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "interruption_epoch": {
+                "type": "integer"
+              },
+              "version": {
+                "const": 1
+              },
+              "sequence": {
+                "type": "integer"
+              },
+              "is_final": {
+                "const": false
+              },
+              "audio": {
+                "type": "string"
+              },
+              "audio_format": {
+                "type": "string"
+              },
+              "sample_rate": {
+                "type": "integer"
+              },
+              "channels": {
+                "type": "integer"
+              },
+              "sample_width_bytes": {
+                "type": "integer"
+              },
+              "chunk_index": {
+                "type": "integer"
+              },
+              "duration_ms": {
+                "oneOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "optional": {
+              "visemes": {
+                "type": "array"
+              }
+            }
           }
         ]
       },
@@ -110,333 +420,147 @@
         "oneOf": [
           {
             "type": "object",
-            "required": { "session_id": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 }, "sequence": { "type": "integer" }, "is_final": { "const": true }, "complete": { "const": true } }
+            "required": {
+              "session_id": {
+                "type": "string"
+              },
+              "generation_id": {
+                "type": "string"
+              },
+              "turn_id": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "interruption_epoch": {
+                "type": "integer"
+              },
+              "version": {
+                "const": 1
+              },
+              "sequence": {
+                "type": "integer"
+              },
+              "is_final": {
+                "const": true
+              },
+              "complete": {
+                "const": true
+              }
+            }
           },
           {
             "type": "object",
-            "required": { "session_id": { "type": "string" }, "generation_id": { "type": "string" }, "turn_id": { "type": "string" }, "request_id": { "type": "string" }, "interruption_epoch": { "type": "integer" }, "version": { "const": 1 }, "sequence": { "type": "integer" }, "is_final": { "const": true }, "audio_url": { "type": "string" }, "text": { "type": "string" } }
+            "required": {
+              "session_id": {
+                "type": "string"
+              },
+              "generation_id": {
+                "type": "string"
+              },
+              "turn_id": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "interruption_epoch": {
+                "type": "integer"
+              },
+              "version": {
+                "const": 1
+              },
+              "sequence": {
+                "type": "integer"
+              },
+              "is_final": {
+                "const": true
+              },
+              "audio_url": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            }
           }
         ]
       },
       "interrupt:ack": {
         "type": "object",
-        "required": { "request_id": { "type": "string" }, "session_id": { "type": "string" }, "source": { "type": "string" }, "generation_id": { "type": "string" }, "hit_active_generation": { "type": "boolean" }, "server_processing_ms": { "type": "number" } }
+        "required": {
+          "request_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "generation_id": {
+            "type": "string"
+          },
+          "hit_active_generation": {
+            "type": "boolean"
+          },
+          "server_processing_ms": {
+            "type": "number"
+          }
+        }
       },
       "system:client-timing": {
         "type": "object",
-        "required": { "stage": { "type": "string" }, "session_id": { "type": "string" }, "generation_id": { "type": "string" } },
-        "optional": { "elapsed_ms": { "type": "number" } }
+        "required": {
+          "stage": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "generation_id": {
+            "type": "string"
+          }
+        },
+        "optional": {
+          "elapsed_ms": {
+            "type": "number"
+          }
+        }
       },
       "permission:request": {
         "type": "object",
-        "required": { "request_id": { "type": "string" }, "tool_name": { "type": "string" }, "capability_id": { "type": "string" }, "capability_type": { "const": "tool" }, "capability_kind": { "type": "string" }, "permission_scope": { "type": "string" }, "risk_level": { "type": "string" }, "reason": { "type": "string" }, "args": { "type": "object" } }
+        "required": {
+          "request_id": {
+            "type": "string"
+          },
+          "tool_name": {
+            "type": "string"
+          },
+          "capability_id": {
+            "type": "string"
+          },
+          "capability_type": {
+            "const": "tool"
+          },
+          "capability_kind": {
+            "type": "string"
+          },
+          "permission_scope": {
+            "type": "string"
+          },
+          "risk_level": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "args": {
+            "type": "object"
+          }
+        }
       }
-    }
-  },
-  "fixture_variants": {
-    "optional_event_extensions": {
-      "request_id": { "type": "string" },
-      "sequence": { "type": "integer" }
-    },
-    "E2E-02": { "tts_chunk_variant": "url", "tts_done_variant": "complete-marker" }
-  },
-  "e2e_controls": {
-    "activation": { "environment": "YUIZAKI_E2E", "enabled_value": "1", "token_environment": "YUIZAKI_E2E_TOKEN", "unpackaged_only": true },
-    "header": "X-Yuizaki-E2E-Token",
-    "ipc": ["voiceSequence", "pauseHealthPolling", "pollHealthOnce", "resumeHealthPolling", "sampleVisualOnce", "pauseCompanionPolling", "pollCompanionOnce", "resumeCompanionPolling", "advanceCompanionCooldown", "pauseHeartbeat", "emitHeartbeatOnce", "teardownRuntime"],
-    "http": ["POST /__e2e__/case/start", "POST /__e2e__/case/assert", "POST /__e2e__/case/wait-disconnect", "POST /__e2e__/voice-sequence", "POST /__e2e__/proactive-event", "POST /__e2e__/backend-mode"]
-  },
-  "cases": {
-    "E2E-01": {
-      "interactions": [
-        { "channel": "http", "direction": "supervisor->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 1 },
-        { "channel": "http", "direction": "supervisor->fixture", "name": "POST /__e2e__/case/start", "min": 1, "max": 1, "order": 2 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 3 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /api/system/onboarding/readiness/run", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/settings/", "min": 1, "max": 2, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/companions", "min": 0, "max": 2, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/workspaces", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /api/system/active-workspace", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/sessions?scope=all", "min": 1, "max": 1, "order": 4 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "connect", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/companions/default", "min": 0, "max": 1, "order": 9 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/companions/default/relationship-history?limit=20", "min": 0, "max": 1, "order": 9 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/permissions", "min": 0, "max": 1, "order": 9 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/companion-runtime?limit=8", "min": 1, "max": 1, "order": 9 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "agent:chat", "min": 1, "max": 1, "order": 10 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "llm:delta", "min": 1, "max": 1, "order": 11 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "llm:final", "min": 1, "max": 1, "order": 12 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "agent:chat", "min": 1, "max": 1, "order": 13 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "llm:delta", "min": 1, "max": 1, "order": 14 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "interrupt", "min": 1, "max": 1, "order": 15 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "interrupt:ack", "min": 1, "max": 1, "order": 16 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "system:client-timing:interrupt_ack", "min": 1, "max": 1, "order": 17 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "disconnect", "min": 1, "max": 1, "order": 18 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /__e2e__/case/assert", "min": 1, "max": 1, "order": 19 }
-      ]
-    },
-    "E2E-02": {
-      "interactions": [
-        { "channel": "http", "direction": "supervisor->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 1 },
-        { "channel": "http", "direction": "supervisor->fixture", "name": "POST /__e2e__/case/start", "min": 1, "max": 1, "order": 2 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 3 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /api/system/onboarding/readiness/run", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/settings/", "min": 1, "max": 2, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/companions", "min": 0, "max": 2, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/workspaces", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /api/system/active-workspace", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/sessions?scope=all", "min": 1, "max": 1, "order": 4 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "connect", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/companions/default", "min": 0, "max": 1, "order": 9 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/companion-runtime?limit=8", "min": 1, "max": 1, "order": 9 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /__e2e__/voice-sequence", "min": 1, "max": 1, "order": 10 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "asr:speech-start", "min": 1, "max": 1, "order": 11 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "asr:partial", "min": 1, "max": 1, "order": 12 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "asr:final", "min": 1, "max": 1, "order": 13 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "agent:chat", "min": 1, "max": 1, "order": 14 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "llm:delta", "min": 1, "max": 1, "order": 15 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "llm:final", "min": 1, "max": 1, "order": 16 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "tts:chunk", "min": 1, "max": 1, "order": 16 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /audio.wav", "min": 1, "max": 2, "order": 17 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "tts:done", "min": 1, "max": 1, "order": 17 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "system:client-timing:playback_start", "min": 1, "max": 1, "order": 17 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "agent:chat", "min": 1, "max": 1, "order": 18 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "llm:delta", "min": 1, "max": 1, "order": 19 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "tts:chunk", "min": 1, "max": 1, "order": 20 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /audio.wav", "min": 1, "max": 2, "order": 20 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "system:client-timing:playback_start", "min": 1, "max": 1, "order": 20 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "interrupt", "min": 1, "max": 1, "order": 21 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "interrupt:ack", "min": 1, "max": 1, "order": 22 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "system:client-timing:interrupt_ack", "min": 1, "max": 1, "order": 23 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "disconnect", "min": 1, "max": 1, "order": 24 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /__e2e__/case/assert", "min": 1, "max": 1, "order": 25 }
-      ]
-    },
-    "E2E-03": {
-      "interactions": [
-        { "channel": "http", "direction": "supervisor->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 1 },
-        { "channel": "http", "direction": "supervisor->fixture", "name": "POST /__e2e__/case/start", "min": 1, "max": 1, "order": 2 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 3 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /api/system/onboarding/readiness/run", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/settings/", "min": 1, "max": 2, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/companions", "min": 0, "max": 2, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/workspaces", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /api/system/active-workspace", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/sessions?scope=all", "min": 1, "max": 1, "order": 4 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "connect", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/permissions", "min": 0, "max": 1, "order": 8 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "agent:chat", "min": 1, "max": 1, "order": 9 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "llm:delta", "min": 1, "max": 1, "order": 10 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "permission:request", "min": 1, "max": 1, "order": 11 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "permission:response", "min": 1, "max": 1, "order": 12 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "llm:final", "min": 1, "max": 1, "order": 13 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "agent:result", "min": 1, "max": 1, "order": 14 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "agent:chat", "min": 1, "max": 1, "order": 15 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "llm:delta", "min": 1, "max": 1, "order": 16 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "permission:request", "min": 1, "max": 1, "order": 17 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "permission:response", "min": 1, "max": 1, "order": 18 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "llm:final", "min": 1, "max": 1, "order": 19 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "agent:result", "min": 1, "max": 1, "order": 20 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /v1/chat/completions", "min": 2, "max": 2, "order": 21 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "disconnect", "min": 1, "max": 1, "order": 22 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /__e2e__/case/assert", "min": 1, "max": 1, "order": 23 }
-      ]
-    },
-    "E2E-04": {
-      "interactions": [
-        { "channel": "http", "direction": "supervisor->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 1 },
-        { "channel": "http", "direction": "supervisor->fixture", "name": "POST /__e2e__/case/start", "min": 1, "max": 1, "order": 2 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 3 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /api/system/onboarding/readiness/run", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/settings/", "min": 1, "max": 2, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/companions", "min": 0, "max": 2, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/workspaces", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /api/system/active-workspace", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/sessions?scope=all", "min": 1, "max": 1, "order": 4 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "connect", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /memory/docs?scope=workspace&workspace_id=default", "min": 1, "max": 2, "order": 9 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /memory/overview", "min": 0, "max": 1, "order": 9 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /memory/docs", "min": 1, "max": 1, "order": 10 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "PUT /memory/docs/memory-e2e-1", "min": 1, "max": 1, "order": 11 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /memory/docs?scope=workspace&workspace_id=default", "min": 1, "max": 2, "order": 12 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /memory/overview", "min": 0, "max": 1, "order": 12 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /memory/rag/query", "min": 1, "max": 1, "order": 13 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /memory/maintenance/preview", "min": 1, "max": 1, "order": 15 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /memory/maintenance/apply", "min": 0, "max": 1, "order": 16 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "DELETE /memory/docs/memory-e2e-1", "min": 1, "max": 1, "order": 17 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /memory/docs?scope=workspace&workspace_id=default", "min": 1, "max": 2, "order": 18 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /memory/overview", "min": 0, "max": 1, "order": 18 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /memory/query", "min": 1, "max": 1, "order": 19 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "disconnect", "min": 1, "max": 1, "order": 20 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /__e2e__/case/assert", "min": 1, "max": 1, "order": 21 }
-      ]
-    },
-    "E2E-05": {
-      "interactions": [
-        { "channel": "http", "direction": "supervisor->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 1 },
-        { "channel": "http", "direction": "supervisor->fixture", "name": "POST /__e2e__/case/start", "min": 1, "max": 1, "order": 2 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 3 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /api/system/onboarding/readiness/run", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/settings/", "min": 1, "max": 2, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/companions", "min": 0, "max": 3, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/workspaces", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /api/system/active-workspace", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/sessions?scope=all", "min": 1, "max": 1, "order": 4 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "connect", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /__e2e__/proactive-event", "min": 1, "max": 1, "order": 9 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/companion-runtime?limit=8", "min": 1, "max": 1, "order": 10 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/proactive/settings", "min": 2, "max": 2, "order": 10 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/activity-frames", "min": 2, "max": 2, "order": 10 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /api/system/companion-runtime/opportunities/outcome/proactive-job-A", "min": 1, "max": 1, "order": 10 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /__e2e__/proactive-event", "min": 1, "max": 1, "order": 11 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/companion-runtime?limit=8", "min": 1, "max": 1, "order": 12 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /__e2e__/proactive-event", "min": 1, "max": 1, "order": 13 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/companion-runtime?limit=8", "min": 1, "max": 1, "order": 14 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/proactive/settings", "min": 1, "max": 1, "order": 14 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/activity-frames", "min": 1, "max": 1, "order": 14 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /api/system/companion-runtime/opportunities/outcome/proactive-job-B", "min": 1, "max": 1, "order": 14 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /__e2e__/proactive-event", "min": 1, "max": 1, "order": 15 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/companion-runtime?limit=8", "min": 1, "max": 1, "order": 16 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/proactive/settings", "min": 2, "max": 2, "order": 16 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/activity-frames", "min": 2, "max": 2, "order": 16 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /api/system/companion-runtime/opportunities/outcome/proactive-job-C", "min": 1, "max": 1, "order": 16 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "disconnect", "min": 1, "max": 1, "order": 17 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /__e2e__/case/assert", "min": 1, "max": 1, "order": 18 }
-      ]
-    },
-    "E2E-05T": {
-      "interactions": [
-        { "channel": "http", "direction": "supervisor->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 1 },
-        { "channel": "http", "direction": "supervisor->fixture", "name": "POST /__e2e__/case/start", "min": 1, "max": 1, "order": 2 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 3 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /api/system/onboarding/readiness/run", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/settings/", "min": 1, "max": 2, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/companions", "min": 0, "max": 2, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/workspaces", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /api/system/active-workspace", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/sessions?scope=all", "min": 1, "max": 1, "order": 4 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "connect", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 8 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "heartbeat", "min": 1, "max": 1, "order": 9 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "heartbeat", "min": 1, "max": 1, "order": 10 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "disconnect", "min": 1, "max": 1, "order": 11 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /__e2e__/case/assert", "min": 1, "max": 1, "order": 12 }
-      ]
-    },
-    "E2E-06": {
-      "interactions": [
-        { "channel": "http", "direction": "supervisor->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 1 },
-        { "channel": "http", "direction": "supervisor->fixture", "name": "POST /__e2e__/case/start", "min": 1, "max": 1, "order": 2 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 3 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /api/system/onboarding/readiness/run", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/settings/", "min": 1, "max": 2, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/companions", "min": 0, "max": 2, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/workspaces", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /api/system/active-workspace", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/sessions?scope=all", "min": 1, "max": 1, "order": 4 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "connect", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/companion-runtime?limit=8", "min": 1, "max": 1, "order": 9 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /__e2e__/backend-mode", "min": 1, "max": 1, "order": 10 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "disconnect", "min": 1, "max": 1, "order": 10 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 11 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/companion-runtime?limit=8", "min": 1, "max": 1, "order": 12 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /__e2e__/backend-mode", "min": 1, "max": 1, "order": 13 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "connect", "min": 1, "max": 1, "order": 14 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 14 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/companion-runtime?limit=8", "min": 1, "max": 1, "order": 15 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 16 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/companion-runtime?limit=8", "min": 1, "max": 1, "order": 17 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "disconnect", "min": 1, "max": 1, "order": 18 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /__e2e__/case/assert", "min": 1, "max": 1, "order": 19 }
-      ]
-    },
-    "E2E-07": {
-      "interactions": [
-        { "channel": "http", "direction": "supervisor->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 1 },
-        { "channel": "http", "direction": "supervisor->fixture", "name": "POST /__e2e__/case/start", "min": 1, "max": 1, "order": 2 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 3 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /api/system/onboarding/readiness/run", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/settings/", "min": 1, "max": 2, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/companions", "min": 0, "max": 2, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/workspaces", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /api/system/active-workspace", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/sessions?scope=all", "min": 1, "max": 1, "order": 4 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "connect", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/companions/default", "min": 0, "max": 1, "order": 9 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/companion-runtime?limit=8", "min": 1, "max": 1, "order": 9 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "screenshot:request", "min": 1, "max": 1, "order": 10 },
-        { "channel": "socket", "direction": "fixture->renderer", "name": "screenshot:result", "min": 1, "max": 1, "order": 11 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "disconnect", "min": 1, "max": 1, "order": 12 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /__e2e__/case/assert", "min": 1, "max": 1, "order": 13 }
-      ]
-    },
-    "E2E-08": {
-      "interactions": [
-        { "channel": "http", "direction": "supervisor->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 1 },
-        { "channel": "http", "direction": "supervisor->fixture", "name": "POST /__e2e__/case/start", "min": 1, "max": 1, "order": 2 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 3 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /api/system/onboarding/readiness/run", "min": 1, "max": 1, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/settings/", "min": 1, "max": 2, "order": 4 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/workspaces", "min": 1, "max": 1, "order": 5 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /api/system/active-workspace", "min": 1, "max": 1, "order": 6 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/sessions?scope=all", "min": 1, "max": 1, "order": 7 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/companions", "min": 0, "max": 2, "order": 4 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "connect", "min": 1, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/ping", "min": 1, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/settings/", "min": 0, "max": 3, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/readiness", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/summary", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/summary/report/json", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/capabilities", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/agent-trace", "min": 0, "max": 2, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/experience-metrics", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/product-metrics/consent", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/mcp", "min": 0, "max": 2, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/permissions", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/agent-plugins", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/schedules", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/companion-runtime?limit=32", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/heartbeat", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/i18n/locales", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/i18n/messages", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/settings/metadata", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/settings/history", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/storage", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/settings/tts/status", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /memory/docs?scope=workspace&workspace_id=default", "min": 0, "max": 4, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /memory/overview", "min": 0, "max": 2, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "POST /api/settings/tts/warmup", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/proactive/settings", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "GET /api/system/activity-frames", "min": 0, "max": 1, "order": 8 },
-        { "channel": "http", "direction": "renderer->fixture", "name": "PATCH /api/workspaces/default", "min": 1, "max": 1, "order": 8 },
-        { "channel": "socket", "direction": "renderer->fixture", "name": "disconnect", "min": 1, "max": 1, "order": 10 },
-        { "channel": "http", "direction": "main->fixture", "name": "POST /__e2e__/case/assert", "min": 1, "max": 1, "order": 11 }
-      ]
     }
   }
 }

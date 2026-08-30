@@ -33,6 +33,9 @@ export interface RealtimeVoiceTurn extends RealtimeVoiceScope {
   actionEnvelope?: unknown
 }
 
+export type RealtimeVoiceComfortSignal = 'hesitation' | 'backchannel' | 'background_speech'
+export type RealtimeVoiceComfortSignalSource = 'provider_vad' | 'local_vad' | 'classifier'
+
 export interface RealtimeVoiceSessionOptions {
   workspaceId: string
   sessionId: string
@@ -42,6 +45,7 @@ export interface RealtimeVoiceSessionOptions {
   webSearchEnabled?: boolean
   voiceMode?: 'push-to-talk' | 'continuous'
   vadEagerness?: 'low' | 'medium' | 'high' | 'auto'
+  audioInputDeviceId?: string
 }
 
 export interface RealtimeVoiceEventMap {
@@ -49,18 +53,26 @@ export interface RealtimeVoiceEventMap {
   'input-partial': RealtimeVoiceScope & { text: string }
   'assistant-delta': RealtimeVoiceScope & { text: string; delta: string }
   'turn-complete': RealtimeVoiceTurn
-  connect: { elapsedMs: number }
-  'speech-end': { elapsedMs: number }
-  'speech-start': { elapsedMs: number }
-  'transcript-stable': { elapsedMs: number }
-  'response-start': { elapsedMs: number }
-  'playback-start': { elapsedMs: number }
+  connect: RealtimeVoiceScope & { elapsedMs: number }
+  'speech-end': RealtimeVoiceScope & { elapsedMs: number }
+  'speech-start': RealtimeVoiceScope & { elapsedMs: number }
+  'transcript-stable': RealtimeVoiceScope & { elapsedMs: number }
+  /** The provider rejected an input commit because it contained no ASR text. */
+  'empty-input': RealtimeVoiceScope & { elapsedMs: number }
+  'response-start': RealtimeVoiceScope & { elapsedMs: number }
+  'playback-start': RealtimeVoiceScope & { elapsedMs: number }
   'playback-end': Record<string, never>
-  'playback-stop': { elapsedMs: number }
-  'playback-recovery': { elapsedMs: number; ok: boolean; recovered: boolean; recoveryLatencyMs: number; playbackUnderruns: number }
-  'provider-cancel': { elapsedMs: number }
+  'playback-stop': RealtimeVoiceScope & { elapsedMs: number }
+  'playback-recovery': RealtimeVoiceScope & { elapsedMs: number; ok: boolean; recovered: boolean; recoveryLatencyMs: number; playbackUnderruns: number }
+  'provider-cancel': RealtimeVoiceScope & { elapsedMs: number }
   'lip-sync-level': { level: number; active: boolean }
-  'interrupt-ack': { elapsedMs: number }
+  'interrupt-ack': RealtimeVoiceScope & { elapsedMs: number }
+  'comfort-signal': RealtimeVoiceScope & {
+    signal: RealtimeVoiceComfortSignal
+    source: RealtimeVoiceComfortSignalSource
+    confidence: number
+    durationMs?: number
+  }
   'agent-result': RealtimeVoiceScope & { callId: string; turnId: string; reply: string; petControl?: unknown; actionEnvelope?: unknown }
   'companion-event': CompanionEventEnvelope
   error: { message: string; fatal: boolean }
@@ -85,6 +97,10 @@ type RealtimeServerEvent = {
   response_id?: unknown
   item_id?: unknown
   error?: unknown
+  signal?: unknown
+  source?: unknown
+  confidence?: unknown
+  duration_ms?: unknown
 }
 
 interface RealtimeAgentResponse {
@@ -146,6 +162,16 @@ const REALTIME_AGENT_INTENTS = new Set<RealtimeAgentIntent>([
   'vision',
   'task',
   'deep_answer',
+])
+const REALTIME_COMFORT_SIGNALS = new Set<RealtimeVoiceComfortSignal>([
+  'hesitation',
+  'backchannel',
+  'background_speech',
+])
+const REALTIME_COMFORT_SIGNAL_SOURCES = new Set<RealtimeVoiceComfortSignalSource>([
+  'provider_vad',
+  'local_vad',
+  'classifier',
 ])
 
 const createTurnId = () => `rt_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
@@ -253,6 +279,7 @@ export class RealtimeVoiceSession {
   private agentWebSearchEnabled = false
   private voiceMode: 'push-to-talk' | 'continuous' = 'push-to-talk'
   private vadEagerness: 'low' | 'medium' | 'high' | 'auto' = 'auto'
+  private audioInputDeviceId = ''
   private speechStartedAt: number | null = null
   private bargeInCandidateStartedAt: number | null = null
   private bargeInCandidateTimer: number | null = null
@@ -278,11 +305,12 @@ export class RealtimeVoiceSession {
       && Date.now() - this.connectedAt < MAX_REUSABLE_SESSION_MS
   }
 
-  isConnectedFor(options: { workspaceId: string; sessionId: string; voiceMode?: 'push-to-talk' | 'continuous' }): boolean {
+  isConnectedFor(options: { workspaceId: string; sessionId: string; voiceMode?: 'push-to-talk' | 'continuous'; audioInputDeviceId?: string }): boolean {
     return this.isConnected()
       && this.workspaceId === options.workspaceId
       && this.sessionId === options.sessionId
       && (options.voiceMode === undefined || this.voiceMode === options.voiceMode)
+      && (options.audioInputDeviceId === undefined || this.audioInputDeviceId === (options.audioInputDeviceId.trim() || ''))
   }
 
   getCurrentTurnIdentity(): Pick<RealtimeVoiceScope, 'turnId' | 'generationId' | 'requestId' | 'interruptionEpoch'> {
@@ -292,6 +320,35 @@ export class RealtimeVoiceSession {
       requestId: this.currentRequestId,
       interruptionEpoch: this.currentInterruptionEpoch,
     }
+  }
+
+  /**
+   * Publish an explicit transcript-free comfort observation from a local VAD
+   * or classifier. This method only emits an event; persistence belongs to the
+   * renderer bridge so a diagnostics outage cannot interrupt the voice path.
+   */
+  reportComfortSignal(
+    signal: RealtimeVoiceComfortSignal,
+    source: RealtimeVoiceComfortSignalSource,
+    confidence: number,
+    durationMs?: number,
+  ): void {
+    if (!REALTIME_COMFORT_SIGNALS.has(signal) || !REALTIME_COMFORT_SIGNAL_SOURCES.has(source)) {
+      throw new Error('Realtime comfort signal is invalid')
+    }
+    if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+      throw new Error('Realtime comfort signal confidence is invalid')
+    }
+    if (durationMs !== undefined && (!Number.isFinite(durationMs) || durationMs < 0 || durationMs > 120_000)) {
+      throw new Error('Realtime comfort signal duration is invalid')
+    }
+    this.emit('comfort-signal', {
+      ...this.currentScope(),
+      signal,
+      source,
+      confidence,
+      ...(durationMs === undefined ? {} : { durationMs }),
+    })
   }
 
   async connect(options: RealtimeVoiceSessionOptions): Promise<void> {
@@ -374,7 +431,7 @@ export class RealtimeVoiceSession {
     const elapsedMs = Math.max(0, performance.now() - this.pressStartedAt)
     this.pressStartedAt = null
     this.speechEndedAt = performance.now()
-    this.emit('speech-end', { elapsedMs })
+    this.emit('speech-end', { ...this.currentScope(), elapsedMs })
     if (elapsedMs < MIN_PUSH_TO_TALK_MS) {
       this.sendEvent({ type: 'input_audio_buffer.clear' })
       this.setStatus('ready')
@@ -422,11 +479,11 @@ export class RealtimeVoiceSession {
       this.resolveInterruptAck = resolve
     })
     this.sendEvent({ type: 'response.cancel' })
-    this.emit('provider-cancel', { elapsedMs: Math.max(0, performance.now() - this.interruptStartedAt) })
+    this.emit('provider-cancel', { ...this.currentScope(), elapsedMs: Math.max(0, performance.now() - this.interruptStartedAt) })
     this.sendEvent({ type: 'output_audio_buffer.clear' })
     this.responseActive = false
     this.audioElement?.pause()
-    this.emit('playback-stop', { elapsedMs: Math.max(0, performance.now() - this.interruptStartedAt) })
+    this.emit('playback-stop', { ...this.currentScope(), elapsedMs: Math.max(0, performance.now() - this.interruptStartedAt) })
     this.stopOutputLipSync()
     this.setStatus('interrupting')
     this.interruptAckTimer = window.setTimeout(() => {
@@ -444,6 +501,7 @@ export class RealtimeVoiceSession {
     const connectStartedAt = performance.now()
     this.disposeConnection()
     this.setStatus('connecting')
+    this.audioInputDeviceId = options.audioInputDeviceId?.trim() || ''
     this.workspaceId = options.workspaceId
     this.sessionId = options.sessionId
 
@@ -468,6 +526,7 @@ export class RealtimeVoiceSession {
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
+        ...(this.audioInputDeviceId ? { deviceId: { ideal: this.audioInputDeviceId } } : {}),
       },
     })
     const track = stream.getAudioTracks()[0]
@@ -556,7 +615,7 @@ export class RealtimeVoiceSession {
         this.setStatus('recording')
       }
     }
-    this.emit('connect', { elapsedMs: Math.max(0, performance.now() - connectStartedAt) })
+    this.emit('connect', { ...this.currentScope(), elapsedMs: Math.max(0, performance.now() - connectStartedAt) })
   }
 
   private handleServerEvent(raw: unknown): void {
@@ -585,13 +644,30 @@ export class RealtimeVoiceSession {
         const startedAt = this.bargeInCandidateStartedAt
         this.clearBargeInCandidate()
         if (startedAt !== null) {
-          this.emit('speech-end', { elapsedMs: Math.max(0, performance.now() - startedAt) })
+          this.emit('speech-end', { ...this.currentScope(), elapsedMs: Math.max(0, performance.now() - startedAt) })
         }
         return
       }
       this.speechEndedAt = performance.now()
-      this.emit('speech-end', { elapsedMs: this.speechStartedAt === null ? 0 : Math.max(0, this.speechEndedAt - this.speechStartedAt) })
+      this.emit('speech-end', { ...this.currentScope(), elapsedMs: this.speechStartedAt === null ? 0 : Math.max(0, this.speechEndedAt - this.speechStartedAt) })
       this.setStatus('responding')
+      return
+    }
+    if (type === 'input_audio_buffer.comfort_signal' || type === 'comfort_signal') {
+      const signal = readString(event.signal) as RealtimeVoiceComfortSignal
+      const source = readString(event.source) as RealtimeVoiceComfortSignalSource
+      const confidence = typeof event.confidence === 'number' ? event.confidence : Number.NaN
+      const durationMs = event.duration_ms === undefined ? undefined : Number(event.duration_ms)
+      if (
+        REALTIME_COMFORT_SIGNALS.has(signal)
+        && REALTIME_COMFORT_SIGNAL_SOURCES.has(source)
+        && Number.isFinite(confidence)
+        && confidence >= 0
+        && confidence <= 1
+        && (durationMs === undefined || (Number.isFinite(durationMs) && durationMs >= 0 && durationMs <= 120_000))
+      ) {
+        this.reportComfortSignal(signal, source, confidence, durationMs)
+      }
       return
     }
     if (!type) return
@@ -634,7 +710,7 @@ export class RealtimeVoiceSession {
       if (!this.inputTranscriptStableReported && this.inputTranscript.trim()) {
         this.inputTranscriptStableReported = true
         const elapsedMs = this.elapsedSinceSpeechEnd()
-        if (elapsedMs !== null) this.emit('transcript-stable', { elapsedMs })
+        if (elapsedMs !== null) this.emit('transcript-stable', { ...this.currentScope(), elapsedMs })
       }
       this.maybeFinalizeTurn()
       return
@@ -643,7 +719,7 @@ export class RealtimeVoiceSession {
       if (!this.acceptCreatedResponse(event.response)) return
       this.responseActive = true
       const elapsedMs = this.elapsedSinceSpeechEnd()
-      if (elapsedMs !== null) this.emit('response-start', { elapsedMs })
+      if (elapsedMs !== null) this.emit('response-start', { ...this.currentScope(), elapsedMs })
       return
     }
     if (type === 'response.output_audio_transcript.delta') {
@@ -933,7 +1009,7 @@ export class RealtimeVoiceSession {
     if (this.playbackReported) return
     this.playbackReported = true
     const elapsedMs = this.elapsedSinceSpeechEnd()
-    if (elapsedMs !== null) this.emit('playback-start', { elapsedMs })
+    if (elapsedMs !== null) this.emit('playback-start', { ...this.currentScope(), elapsedMs })
   }
 
   private attachOutputAnalysis(stream: MediaStream): void {
@@ -961,6 +1037,7 @@ export class RealtimeVoiceSession {
       void audioElement.play().catch(() => this.recoverPlayback(audioElement))
     } else {
       this.emit('playback-recovery', {
+        ...this.currentScope(),
         elapsedMs: 0,
         ok: false,
         recovered: false,
@@ -989,6 +1066,7 @@ export class RealtimeVoiceSession {
       if (epoch !== this.operationEpoch) return
       const recoveryLatencyMs = Math.max(0, performance.now() - startedAt)
       this.emit('playback-recovery', {
+        ...this.currentScope(),
         elapsedMs: recoveryLatencyMs,
         ok: true,
         recovered: true,
@@ -999,6 +1077,7 @@ export class RealtimeVoiceSession {
       if (epoch !== this.operationEpoch) return
       const recoveryLatencyMs = Math.max(0, performance.now() - startedAt)
       this.emit('playback-recovery', {
+        ...this.currentScope(),
         elapsedMs: recoveryLatencyMs,
         ok: false,
         recovered: false,
@@ -1254,6 +1333,7 @@ export class RealtimeVoiceSession {
     if (this.bargeInCandidateTimer !== null) return
     this.bargeInCandidateStartedAt = startedAt
     this.emit('speech-start', {
+      ...this.currentScope(),
       elapsedMs: this.speechEndedAt === null ? 0 : Math.max(0, startedAt - this.speechEndedAt),
     })
     this.bargeInCandidateTimer = window.setTimeout(() => {
@@ -1275,6 +1355,7 @@ export class RealtimeVoiceSession {
     this.speechStartedAt = startedAt
     if (emitStart) {
       this.emit('speech-start', {
+        ...this.currentScope(),
         elapsedMs: this.speechEndedAt === null ? 0 : Math.max(0, startedAt - this.speechEndedAt),
       })
     }
@@ -1299,7 +1380,7 @@ export class RealtimeVoiceSession {
     this.interruptAckPromise = null
     resolve?.()
     if (this.status === 'interrupting') this.setStatus('ready')
-    this.emit('interrupt-ack', { elapsedMs })
+    this.emit('interrupt-ack', { ...this.currentScope(), elapsedMs })
   }
 
   private async waitForInterruptAcknowledgement(): Promise<void> {
@@ -1319,6 +1400,7 @@ export class RealtimeVoiceSession {
       if (!pending) return
       if (pending.retired || pending.generationId !== this.currentGenerationId || pending.turnId !== this.currentTurnId) return
       this.responseActive = false
+      this.reportEmptyInput()
       this.resetTurn()
       this.setStatus(this.voiceMode === 'continuous' ? 'recording' : 'ready')
       return
@@ -1330,8 +1412,14 @@ export class RealtimeVoiceSession {
     if (!pending) return
     if (pending.retired || pending.generationId !== this.currentGenerationId || pending.turnId !== this.currentTurnId) return
     this.responseActive = false
+    this.reportEmptyInput()
     this.resetTurn()
     this.setStatus(this.voiceMode === 'continuous' ? 'recording' : 'ready')
+  }
+
+  private reportEmptyInput(): void {
+    const elapsedMs = this.elapsedSinceSpeechEnd()
+    if (elapsedMs !== null) this.emit('empty-input', { ...this.currentScope(), elapsedMs })
   }
 
   private rememberRetiredInputCommit(commit: PendingInputCommit): void {
@@ -1397,6 +1485,7 @@ export class RealtimeVoiceSession {
     this.petControlContext = null
     this.agentMcpEnabled = true
     this.agentWebSearchEnabled = false
+    this.audioInputDeviceId = ''
     this.responseActive = false
     this.resetTurn()
     this.retiredResponseIds.clear()

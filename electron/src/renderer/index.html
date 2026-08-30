@@ -41,7 +41,11 @@
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background-color: transparent;
+        /* The control panel is also served in a normal browser. A transparent
+           document falls back to Chromium's dark canvas while the Vue entry
+           chunk is loading, which looks like a stuck black screen. Keep the
+           standalone pet window transparent via pet-window.html instead. */
+        background-color: #f8fafc;
         user-select: none;
         -webkit-user-select: none;
         font-family: var(--yui-font-sans);
@@ -62,10 +66,58 @@
         height: 100%;
         font-family: var(--yui-font-sans);
       }
+
+      #boot-splash {
+        display: grid;
+        place-items: center;
+        width: 100%;
+        height: 100%;
+        box-sizing: border-box;
+        padding: 24px;
+        color: #334155;
+        background: #f8fafc;
+      }
+
+      #boot-splash__content {
+        display: grid;
+        justify-items: center;
+        gap: 12px;
+        min-width: 220px;
+        padding: 28px 32px;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        background: #ffffff;
+        box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+      }
+
+      #boot-splash__mark {
+        width: 28px;
+        height: 28px;
+        border: 3px solid #dbeafe;
+        border-top-color: #2563eb;
+        border-radius: 50%;
+        animation: boot-spin 0.8s linear infinite;
+      }
+
+      #boot-splash__label {
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      @keyframes boot-spin {
+        to { transform: rotate(360deg); }
+      }
     </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div id="boot-splash" role="status" aria-live="polite">
+        <div id="boot-splash__content">
+          <div id="boot-splash__mark" aria-hidden="true"></div>
+          <div id="boot-splash__label">正在启动结崎…</div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/main.ts"></script>
   </body>
 </html>

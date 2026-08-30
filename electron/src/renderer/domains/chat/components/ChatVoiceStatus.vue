@@ -47,17 +47,29 @@
         <el-icon><Microphone /></el-icon>
         <span>{{ recording ? '结束录音' : '语音输入' }}</span>
       </button>
-      <button class="voice-stop-button" type="button" :disabled="!ttsPlaying" aria-label="停止语音播放" @click="$emit('interrupt')">
+      <button class="voice-stop-button" type="button" :disabled="!interruptible" :aria-label="interruptibleLabel" :title="interruptibleLabel" @click="$emit('interrupt')">
         <el-icon><Mute /></el-icon>
+      </button>
+      <button
+        v-if="showRecoveryAction"
+        class="voice-retry-button"
+        type="button"
+        title="重连实时语音"
+        aria-label="重连实时语音"
+        @click="$emit('retry-realtime')"
+      >
+        <el-icon><Refresh /></el-icon>
+        <span>重连语音</span>
       </button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { Headset, Microphone, Mute } from '@element-plus/icons-vue'
+import { computed } from 'vue'
+import { Headset, Microphone, Mute, Refresh } from '@element-plus/icons-vue'
 
-defineProps<{
+const props = defineProps<{
   statusClass: string
   statusText: string
   pipelineText: string
@@ -72,7 +84,11 @@ defineProps<{
   connected: boolean
   shortcutTitle: string
   ttsPlaying: boolean
+  interruptible: boolean
+  showRecoveryAction: boolean
 }>()
+
+const interruptibleLabel = computed(() => props.interruptible ? '停止当前语音响应' : '没有可停止的语音响应')
 
 defineEmits<{
   'update:mode': [mode: string]
@@ -82,6 +98,7 @@ defineEmits<{
   'end-hold': []
   'toggle-mic': []
   interrupt: []
+  'retry-realtime': []
 }>()
 </script>
 
@@ -146,6 +163,25 @@ defineEmits<{
   color: var(--yui-accent);
 }
 
+.voice-retry-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--yui-border);
+  border-radius: 8px;
+  background: var(--yui-surface-raised);
+  color: var(--yui-text);
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.voice-retry-button:hover,
+.voice-retry-button:focus-visible {
+  border-color: var(--yui-accent);
+  color: var(--yui-accent);
+}
+
 .voice-status-badge.recording {
   border-color: color-mix(in srgb, var(--yui-danger) 28%, var(--yui-border));
   color: var(--yui-danger);
@@ -157,7 +193,9 @@ defineEmits<{
 }
 
 .voice-status-badge.offline,
-.voice-status-badge.error {
+.voice-status-badge.error,
+.voice-status-badge.disconnected,
+.voice-status-badge.silent {
   color: var(--yui-muted);
 }
 

@@ -8,6 +8,8 @@ from typing import Any
 
 GoldenCase = Mapping[str, Any]
 QueryRunner = Callable[[GoldenCase], Mapping[str, Any]]
+SCHEMA_VERSION = "yuizaki.memory-evaluation.v1"
+MAX_CASES = 500
 _REQUIRED_SCORE_COMPONENTS = frozenset({
     "semantic", "lexical", "learned", "recency", "quality", "final",
 })
@@ -26,9 +28,20 @@ def _percentile(values: list[float], fraction: float) -> float:
 
 def load_golden_cases(path: str | Path) -> list[dict[str, Any]]:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(payload, list):
+    if not isinstance(payload, list) or len(payload) > MAX_CASES:
         raise TypeError("memory golden cases must be a JSON array")
-    return [dict(item) for item in payload if isinstance(item, Mapping)]
+    cases: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(payload):
+        if not isinstance(item, Mapping):
+            raise TypeError(f"memory golden case {index} must be an object")
+        case = dict(item)
+        case_id = str(case.get("id") or f"case-{index + 1}").strip()
+        if not case_id or case_id in seen:
+            raise ValueError("memory golden case ids must be unique")
+        seen.add(case_id)
+        cases.append(case)
+    return cases
 
 
 def evaluate_memory_retrieval(
@@ -49,6 +62,13 @@ def evaluate_memory_retrieval(
             | lifecycle_forbidden_ids
             | scope_forbidden_ids
         )
+        expected_memory_roles = {
+            str(key): str(value)
+            for key, value in (case.get("expected_memory_roles", {}) or {}).items()
+        } if isinstance(case.get("expected_memory_roles", {}), Mapping) else {}
+        forbidden_memory_roles = {
+            str(item) for item in (case.get("forbidden_memory_roles", []) or [])
+        }
         response = run_query(case)
         raw_trace = response.get("trace")
         trace: Mapping[str, Any] = raw_trace if isinstance(raw_trace, Mapping) else {}
@@ -93,6 +113,25 @@ def evaluate_memory_retrieval(
             else (0.0 if expected_set else None)
         )
         leaked_ids = sorted(forbidden_ids.intersection(retrieved_ids))
+        memory_role_mismatches: list[dict[str, str | None]] = []
+        memory_role_leaked_ids: list[str] = []
+        for result in response.get("results", []):
+            if not isinstance(result, Mapping) or not isinstance(result.get("doc"), Mapping):
+                continue
+            doc = result["doc"]
+            doc_id = str(doc.get("id") or "")
+            metadata = doc.get("metadata") if isinstance(doc.get("metadata"), Mapping) else {}
+            observed_role = metadata.get("memory_role")
+            observed_role_text = str(observed_role) if observed_role is not None else None
+            expected_role = expected_memory_roles.get(doc_id)
+            if expected_role is not None and observed_role_text != expected_role:
+                memory_role_mismatches.append({
+                    "id": doc_id,
+                    "expected": expected_role,
+                    "observed": observed_role_text,
+                })
+            if observed_role_text in forbidden_memory_roles:
+                memory_role_leaked_ids.append(doc_id)
         lifecycle_leaked_ids = sorted(lifecycle_forbidden_ids.intersection(retrieved_ids))
         scope_leaked_ids = sorted(scope_forbidden_ids.intersection(retrieved_ids))
         required_evidence_ids = {
@@ -122,9 +161,27 @@ def evaluate_memory_retrieval(
                 bool(expected_set) and expected_set.issubset(hits)
                 or not expected_set and not retrieved_ids
             )
+        expected_retrieval_passed = expected_set.issubset(set(retrieved_ids))
+        passed = (
+            expected_retrieval_passed
+            and not abstention_mismatch
+            and not leaked_ids
+            and not memory_role_mismatches
+            and not memory_role_leaked_ids
+            and evidence_quality_passed is not False
+            and not lifecycle_leaked_ids
+            and not scope_leaked_ids
+            and not bool(
+                {str(value) for value in case.get("consistency_forbidden_ids", [])}
+                .intersection(retrieved_ids)
+            )
+            and security_passed is not False
+        )
         results.append({
             "id": case_id,
             "scenario": str(case.get("scenario") or "general"),
+            "passed": passed,
+            "expected_retrieval_passed": expected_retrieval_passed,
             "retrieved_ids": retrieved_ids,
             "recall_at_k": recall_at_k,
             "recall_at": recall_at,
@@ -137,6 +194,9 @@ def evaluate_memory_retrieval(
             "missing_premise_mismatch": missing_premise_mismatch,
             "abstention_mismatch": abstention_mismatch,
             "leaked_ids": leaked_ids,
+            "memory_role_mismatches": memory_role_mismatches,
+            "memory_role_leaked_ids": sorted(set(memory_role_leaked_ids)),
+            "expected_memory_role_count": len(expected_memory_roles),
             "lifecycle_leaked_ids": lifecycle_leaked_ids,
             "scope_leaked_ids": scope_leaked_ids,
             "latency_ms": float(trace.get("latency_ms") or 0.0),
@@ -189,6 +249,8 @@ def evaluate_memory_retrieval(
     abstention_mismatch_count = sum(1 for item in results if item["abstention_mismatch"])
     security_results = [item for item in results if item["security_phase"]]
     evidence_results = [item for item in results if item["evidence_quality_passed"] is not None]
+    role_expectation_count = sum(int(item["expected_memory_role_count"]) for item in results)
+    role_mismatch_count = sum(len(item["memory_role_mismatches"]) for item in results)
     scenario_metrics: dict[str, dict[str, Any]] = {}
     for scenario in sorted({str(item["scenario"]) for item in results}):
         scenario_items = [item for item in results if item["scenario"] == scenario]
@@ -217,6 +279,11 @@ def evaluate_memory_retrieval(
         }
     return {
         "case_count": count,
+        "passed": sum(1 for item in results if item["passed"]),
+        "pass_rate": (
+            sum(1 for item in results if item["passed"]) / count
+            if count else 0.0
+        ),
         "recall_at_k": (
             fmean(item["recall_at_k"] for item in positive_results)
             if positive_results
@@ -244,6 +311,15 @@ def evaluate_memory_retrieval(
             if count else 0.0
         ),
         "leakage_case_count": sum(1 for item in results if item["leaked_ids"]),
+        "memory_role_expectation_count": role_expectation_count,
+        "memory_role_mismatch_count": role_mismatch_count,
+        "memory_role_accuracy": (
+            (role_expectation_count - role_mismatch_count) / role_expectation_count
+            if role_expectation_count else 1.0
+        ),
+        "memory_role_leakage_case_count": sum(
+            1 for item in results if item["memory_role_leaked_ids"]
+        ),
         "lifecycle_leakage_case_count": sum(
             1 for item in results if item["lifecycle_leaked_ids"]
         ),

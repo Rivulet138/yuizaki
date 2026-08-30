@@ -3,6 +3,9 @@ import fs from 'fs'
 import path from 'path'
 import {
   DEFAULT_PET_CONTROL_STATE,
+  PET_SCALE_DEFAULT,
+  PET_SCALE_MIN,
+  PET_SCALE_MAX,
   normalizePetLipSyncProfile,
   type PetControlConfigPatch,
   type PetLipSyncProfile,
@@ -31,8 +34,9 @@ type PersistedPetState = Pick<
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value))
-const MIN_PET_SCALE = 0.12
-const MAX_PET_SCALE = 0.6
+const MIN_PET_SCALE = PET_SCALE_MIN
+const MAX_PET_SCALE = PET_SCALE_MAX
+const LEGACY_DEFAULT_PET_SCALE = 0.28
 
 const isPlacement = (value: unknown): value is PetControlState['placement'] =>
   value === 'bottom-right' ||
@@ -257,7 +261,13 @@ export class PetStateStore {
             : null,
         scale:
           typeof parsed.scale === 'number'
-            ? clamp(parsed.scale, MIN_PET_SCALE, MAX_PET_SCALE)
+            ? clamp(
+                parsed.scale === LEGACY_DEFAULT_PET_SCALE
+                  ? PET_SCALE_DEFAULT
+                  : parsed.scale,
+                MIN_PET_SCALE,
+                MAX_PET_SCALE,
+              )
             : DEFAULT_PET_CONTROL_STATE.scale,
         positionX: typeof parsed.positionX === 'number' ? parsed.positionX : null,
         positionY: typeof parsed.positionY === 'number' ? parsed.positionY : null,

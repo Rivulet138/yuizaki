@@ -18,6 +18,7 @@ export interface HttpRouteContext {
   backendApiToken: string
   backendApiTokenStore: BackendApiTokenStoreLike
   providerCredentialStore: ProviderCredentialStore
+  updatePythonProviderEnvironment?: (environment: Record<string, string>) => void
   applyPetStateToRenderer: ((state: PetControlState) => void) | undefined
   applyStateToLive2D: (state: PetControlState) => PetControlState
   getAvatarCapabilities?: () => AvatarCapabilitySnapshot | null

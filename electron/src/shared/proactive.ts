@@ -11,7 +11,7 @@ export const PROACTIVE_SETTINGS_LIMITS = {
 } as const
 
 export const PROACTIVE_FEEDBACK_KINDS = ['useful', 'not_useful', 'too_frequent', 'wrong_time', 'never_source'] as const
-export type ProactiveFeedbackKind = typeof PROACTIVE_FEEDBACK_KINDS[number]
+export type ProactiveFeedbackKind = typeof PROACTIVE_FEEDBACK_KINDS[number] | 'snoozed'
 
 export interface ProactiveQuietHours {
   enabled: boolean
@@ -74,6 +74,17 @@ export interface ProactiveOpportunityIdentity {
 export interface ProactiveFeedbackRequest extends ProactiveOpportunityIdentity {
   feedbackId: string
   feedback: ProactiveFeedbackKind
+}
+
+export interface ProactiveFeedbackSummary {
+  schemaVersion: 'yuizaki.proactive-feedback-summary.v1'
+  workspaceId: string
+  sourceKind: ProactiveSource | string | null
+  counts: Record<string, number>
+  total: number
+  behavioralTotal: number
+  acceptanceRate: number | null
+  categoryPreferenceScores: Record<string, number>
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -246,6 +257,41 @@ export const parseActivityFrames = (value: unknown): ActivityFrameSummary[] | nu
   if (!items) return null
   const parsed = items.map(parseFrame)
   return parsed.every((item): item is ActivityFrameSummary => item !== null) ? parsed : null
+}
+
+export const parseProactiveFeedbackSummary = (value: unknown): ProactiveFeedbackSummary | null => {
+  if (!isRecord(value)
+    || value['schemaVersion'] !== 'yuizaki.proactive-feedback-summary.v1'
+    || !isNonEmptyString(value['workspaceId'])
+    || !(value['sourceKind'] === null || isNonEmptyString(value['sourceKind']))
+    || !isRecord(value['counts'])
+    || !isRecord(value['categoryPreferenceScores'])) return null
+  const boundedCounts: Record<string, number> = {}
+  for (const [key, count] of Object.entries(value['counts'])) {
+    if (isNonEmptyString(key) && isIntegerWithin(count, { min: 0, max: 500 })) boundedCounts[key] = count
+  }
+  const categoryScores: Record<string, number> = {}
+  for (const [key, score] of Object.entries(value['categoryPreferenceScores'])) {
+    if (isNonEmptyString(key) && typeof score === 'number' && Number.isFinite(score) && score >= -500 && score <= 500) {
+      categoryScores[key] = score
+    }
+  }
+  const total = value['total']
+  const behavioralTotal = value['behavioralTotal']
+  const acceptanceRate = value['acceptanceRate']
+  if (!isIntegerWithin(total, { min: 0, max: 500 })
+    || !isIntegerWithin(behavioralTotal, { min: 0, max: 500 })
+    || !(acceptanceRate === null || (typeof acceptanceRate === 'number' && Number.isFinite(acceptanceRate) && acceptanceRate >= 0 && acceptanceRate <= 1))) return null
+  return {
+    schemaVersion: 'yuizaki.proactive-feedback-summary.v1',
+    workspaceId: value['workspaceId'],
+    sourceKind: value['sourceKind'],
+    counts: boundedCounts,
+    total,
+    behavioralTotal,
+    acceptanceRate,
+    categoryPreferenceScores: categoryScores,
+  }
 }
 
 export const parseProactiveOpportunityIdentity = (value: unknown): ProactiveOpportunityIdentity | null => {
