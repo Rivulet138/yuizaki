@@ -12,25 +12,6 @@
         <div class="wallpaper-blur" :style="{ backgroundImage: `url(${currentWallpaper})` }"></div>
         <div class="wallpaper-mask"></div>
         <div class="content-frame">
-          <div v-if="!isElectronPanel" class="browser-runtime-strip" role="status" aria-live="polite">
-            <div class="browser-runtime-state">
-              <el-icon aria-hidden="true"><Monitor /></el-icon>
-              <strong>浏览器工作区</strong>
-              <span :class="{ offline: !uiCapabilities.connected.value }">
-                {{ uiCapabilities.loading.value ? '连接检查中' : uiCapabilities.connected.value ? 'HTTP 已连接' : '等待后端' }}
-              </span>
-            </div>
-            <button
-              class="browser-runtime-refresh"
-              type="button"
-              title="刷新连接状态"
-              aria-label="刷新连接状态"
-              :disabled="uiCapabilities.loading.value"
-              @click="uiCapabilities.refresh"
-            >
-              <el-icon :class="{ spinning: uiCapabilities.loading.value }"><Refresh /></el-icon>
-            </button>
-          </div>
           <AppTopbar
             v-if="activeTab !== 'chat'"
             :active-workspace="activeWorkspace"
@@ -99,7 +80,6 @@
 
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
-import { Monitor, Refresh } from '@element-plus/icons-vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { yuizakiConfig } from '@/config/yuizaki'
@@ -123,7 +103,6 @@ import { useCompanionRuntimeBridge } from './composables/useCompanionRuntimeBrid
 import { publishCompanionRuntimeEvent } from './runtime/companionRuntime'
 import { createAppRuntimeTeardown } from './runtime/appRuntimeTeardown'
 import { createVisualCaptureRuntime } from './runtime/visualCaptureRuntime'
-import { useUiCapabilities } from './composables/useUiCapabilities'
 
 const systemStore = useSystemStore()
 const workspaceStore = useWorkspaceStore()
@@ -134,7 +113,6 @@ const inputBindingsStore = useInputBindingsStore()
 const chatStore = useChatStore()
 const orchestrator = useAppOrchestrator()
 const companionRuntime = useCompanionRuntimeBridge()
-const uiCapabilities = useUiCapabilities()
 useVoiceConversationBridge()
 const route = useRoute()
 const router = useRouter()
@@ -318,7 +296,6 @@ watch(() => chatState.value.isGenerating, (generating) => {
 })
 
 onMounted(() => {
-  void uiCapabilities.refresh()
   applyTheme()
   themeMediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)') ?? null
   themeMediaQuery?.addEventListener('change', applyTheme)
@@ -454,71 +431,6 @@ watch(
   height: 100%;
 }
 
-.browser-runtime-strip {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 34px;
-  margin-bottom: 8px;
-  padding: 0 10px;
-  border: 1px solid var(--yui-browser-border, var(--yui-border));
-  border-radius: 8px;
-  color: var(--yui-browser-text, var(--yui-text));
-  background: var(--yui-browser-surface, var(--yui-surface));
-  box-sizing: border-box;
-}
-
-.browser-runtime-state {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  gap: 8px;
-  font-size: 12px;
-}
-
-.browser-runtime-state strong {
-  font-weight: 650;
-}
-
-.browser-runtime-state span {
-  color: var(--yui-success-text, #16803c);
-}
-
-.browser-runtime-state span.offline {
-  color: var(--yui-warning-text, #9a6700);
-}
-
-.browser-runtime-refresh {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--yui-browser-border, var(--yui-border));
-  border-radius: 6px;
-  color: var(--yui-browser-text, var(--yui-text));
-  background: transparent;
-  cursor: pointer;
-}
-
-.browser-runtime-refresh:hover:not(:disabled),
-.browser-runtime-refresh:focus-visible {
-  color: var(--yui-accent);
-  border-color: var(--yui-accent);
-  background: var(--yui-accent-soft);
-}
-
-.browser-runtime-refresh:disabled {
-  cursor: wait;
-  opacity: 0.56;
-}
-
-.browser-runtime-refresh .spinning {
-  animation: browser-refresh-spin 0.9s linear infinite;
-}
-
 .app-main {
   display: flex;
   flex-direction: column;
@@ -643,10 +555,6 @@ watch(
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes browser-refresh-spin {
-  to { transform: rotate(360deg); }
-}
-
 @media (max-width: 980px) {
   .shell {
     padding: 0;
@@ -681,10 +589,6 @@ watch(
 
   .app-main.panel-mode {
     padding: 10px;
-  }
-
-  .browser-runtime-strip {
-    margin-bottom: 6px;
   }
 
 }
@@ -790,25 +694,43 @@ watch(
 
 .yuizaki-bg.browser-mode {
   --yui-browser-bg: #f3f5f8;
-  --yui-browser-surface: #ffffff;
+  --yui-browser-surface: rgba(255, 255, 255, 0.34);
   --yui-browser-border: #d9e0e8;
   --yui-browser-text: #1f2937;
   --yui-success-text: #16713a;
   --yui-warning-text: #8a5a00;
-  --yui-panel-wallpaper-opacity: 0.28;
-  --yui-panel-wallpaper-mask: rgba(255, 255, 255, 0.48);
+  --yui-panel-wallpaper-opacity: 0.82;
+  --yui-panel-wallpaper-mask: rgba(255, 255, 255, 0.12);
+  --yui-panel-surface: rgba(255, 255, 255, 0.32);
+  --yui-panel-surface-strong: rgba(255, 255, 255, 0.46);
+  --yui-chat-surface: rgba(255, 255, 255, 0.36);
+  --yui-chat-surface-muted: rgba(241, 245, 249, 0.32);
+  --yui-chat-sidebar-bg: rgba(244, 247, 251, 0.34);
+  --yui-chat-user-bg: rgba(232, 238, 245, 0.42);
+  --yui-chat-assistant-bg: rgba(255, 255, 255, 0.42);
+  --yui-chat-wallpaper-opacity: 1;
+  --yui-chat-wallpaper-mask: rgba(255, 255, 255, 0.08);
   background: var(--yui-browser-bg);
 }
 
 :root[data-theme='dark'] .yuizaki-bg.browser-mode {
   --yui-browser-bg: #111827;
-  --yui-browser-surface: #182235;
+  --yui-browser-surface: rgba(24, 34, 53, 0.42);
   --yui-browser-border: #334155;
   --yui-browser-text: #e5e7eb;
   --yui-success-text: #6ee7a0;
   --yui-warning-text: #f5c76b;
-  --yui-panel-wallpaper-opacity: 0.24;
-  --yui-panel-wallpaper-mask: rgba(11, 18, 32, 0.52);
+  --yui-panel-wallpaper-opacity: 0.78;
+  --yui-panel-wallpaper-mask: rgba(11, 18, 32, 0.14);
+  --yui-panel-surface: rgba(15, 23, 42, 0.36);
+  --yui-panel-surface-strong: rgba(15, 23, 42, 0.5);
+  --yui-chat-surface: rgba(17, 24, 39, 0.44);
+  --yui-chat-surface-muted: rgba(30, 41, 59, 0.38);
+  --yui-chat-sidebar-bg: rgba(11, 18, 32, 0.4);
+  --yui-chat-user-bg: rgba(38, 52, 73, 0.5);
+  --yui-chat-assistant-bg: rgba(17, 24, 39, 0.5);
+  --yui-chat-wallpaper-opacity: 1;
+  --yui-chat-wallpaper-mask: rgba(11, 18, 32, 0.1);
 }
 
 .yuizaki-bg.browser-mode .sidebar,
