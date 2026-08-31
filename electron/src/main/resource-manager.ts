@@ -514,6 +514,8 @@ const buildSoulxStatus = (settings: StoredSettings): SoulxResourceStatus => {
 }
 
 const buildSherpaStatus = (settings: StoredSettings): SherpaResourceStatus => {
+  const usedForFinalAsr = settings.asr?.provider === 'sherpa-onnx'
+    || settings.asr?.provider === 'sherpa-onnx-online'
   const useConfiguredPaths = settings.asr?.provider === 'sherpa-onnx'
   const modelPath = resolveBackendRelativePath(useConfiguredPaths ? settings.asr?.sherpa_model_path : '', DEFAULT_SHERPA_MODEL_PATH)
   const tokensPath = resolveBackendRelativePath(useConfiguredPaths ? settings.asr?.sherpa_tokens_path : '', DEFAULT_SHERPA_TOKENS_PATH)
@@ -524,7 +526,7 @@ const buildSherpaStatus = (settings: StoredSettings): SherpaResourceStatus => {
 
   return {
     ...summary,
-    metadata: resourceMetadata('sherpa', settings.asr?.provider === 'sherpa-onnx' ? ['语音识别'] : []),
+    metadata: resourceMetadata('sherpa', usedForFinalAsr ? ['句末语音识别'] : []),
     assetUrl: DEFAULT_SHERPA_ASSET_URL,
     modelPath,
     tokensPath,
@@ -840,6 +842,10 @@ export const prepareSoulxModels = async (petModelCatalog: PetModelCatalog): Prom
 }
 
 export const prepareSherpaSenseVoice = async (petModelCatalog: PetModelCatalog): Promise<ResourceCommandResult> => {
+  const install = await ensurePythonModule('sherpa_onnx', 'sherpa-onnx>=1.13.6,<2')
+  if (install && !install.success) {
+    return buildResult(install, getModelResourceStatus(petModelCatalog), 'sherpa-onnx installed')
+  }
   const scriptPath = path.join(PYTHON_DIR, 'scripts', 'download_sherpa_sensevoice.py')
   const execution = await runCommand(PYTHON_EXE, [scriptPath, '--asset-url', DEFAULT_SHERPA_ASSET_URL, '--sha256', DEFAULT_SHERPA_SHA256], {
     cwd: PYTHON_DIR,
@@ -852,7 +858,7 @@ export const prepareSherpaSenseVoice = async (petModelCatalog: PetModelCatalog):
 }
 
 export const prepareSherpaStreamingZipformer = async (petModelCatalog: PetModelCatalog): Promise<ResourceCommandResult> => {
-  const install = await ensurePythonModule('sherpa_onnx', 'sherpa-onnx>=1.13.2,<2')
+  const install = await ensurePythonModule('sherpa_onnx', 'sherpa-onnx>=1.13.6,<2')
   if (install && !install.success) {
     return buildResult(install, getModelResourceStatus(petModelCatalog), 'sherpa-onnx installed')
   }

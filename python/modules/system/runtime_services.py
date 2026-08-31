@@ -288,6 +288,7 @@ async def initialize_asr(service_config: ServiceConfig, logger: logging.Logger) 
             logger.info("ASR disabled by provider=%s", provider)
             return None
 
+        final_client = None
         if provider in {"sensevoice-service", "funasr-service", "openai-compatible"}:
             sensevoice_client = SenseVoiceServiceClient(
                 model=service_config.asr.sensevoice_model,
@@ -321,6 +322,19 @@ async def initialize_asr(service_config: ServiceConfig, logger: logging.Logger) 
             logger.info("ASR client not available; voice input disabled")
             return None
 
+        if provider == "sherpa-onnx-online":
+            candidate = SherpaOnnxSenseVoiceClient(
+                num_threads=service_config.asr.sherpa_num_threads,
+                provider=service_config.asr.sherpa_provider,
+                language=service_config.asr.language,
+            )
+            await candidate.connect()
+            if candidate.is_available:
+                final_client = candidate
+                logger.info("SenseVoice final ASR initialized for streaming refinement")
+            else:
+                logger.info("SenseVoice final ASR unavailable; using streaming final results")
+
         manager = ASRManager(
             sensevoice_client,
             service_config.asr.vad_threshold,
@@ -328,6 +342,7 @@ async def initialize_asr(service_config: ServiceConfig, logger: logging.Logger) 
             service_config.asr.asr_partial_every,
             service_config.asr.language,
             diagnostics=_VOICE_DIAGNOSTICS,
+            final_client=final_client,
         )
         logger.info("ASR manager initialized (provider=%s)", provider or "sensevoice-local")
         return manager
@@ -341,9 +356,16 @@ async def initialize_asr(service_config: ServiceConfig, logger: logging.Logger) 
 async def cleanup_asr(manager: ASRManager | None) -> None:
     if manager is None:
         return
-    sensevoice_client = cast(SenseVoiceRuntimeClient | None, getattr(manager, "sensevoice_client", None))
-    if sensevoice_client is not None:
-        await sensevoice_client.disconnect()
+    clients = (
+        cast(SenseVoiceRuntimeClient | None, getattr(manager, "sensevoice_client", None)),
+        cast(SenseVoiceRuntimeClient | None, getattr(manager, "final_client", None)),
+    )
+    disconnected: set[int] = set()
+    for client in clients:
+        if client is None or id(client) in disconnected:
+            continue
+        disconnected.add(id(client))
+        await client.disconnect()
 
 
 async def initialize_svc(service_config: ServiceConfig, logger: logging.Logger) -> SVCClient:

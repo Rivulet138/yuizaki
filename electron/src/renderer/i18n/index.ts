@@ -394,8 +394,8 @@ const messages = {
     'navigation.prompt.title': '人格提示词',
     'navigation.settings.desc': 'LLM、TTS、ASR、SVC 与桌宠 agent 运行配置',
     'navigation.settings.title': '模型与语音',
-    'navigation.svc.desc': '音色转换、试听与语音调试',
-    'navigation.svc.title': '语音调试',
+    'navigation.svc.desc': 'SoulX 歌声转换与试听',
+    'navigation.svc.title': '歌声转换',
     'navigation.tool.desc': '工具、插件、MCP 与权限',
     'navigation.tool.title': '桌宠技能',
 
@@ -1127,8 +1127,8 @@ const messages = {
     'navigation.prompt.title': 'Persona Prompts',
     'navigation.settings.desc': 'LLM, TTS, ASR, SVC, and desktop pet agent runtime configuration',
     'navigation.settings.title': 'Models & Voice',
-    'navigation.svc.desc': 'SVC voice conversion, preview, and voice capability diagnostics',
-    'navigation.svc.title': 'Voice Diagnostics',
+    'navigation.svc.desc': 'SoulX singing conversion and preview',
+    'navigation.svc.title': 'Singing Conversion',
     'navigation.tool.desc': 'Tools, plugins, MCP, and permissions',
     'navigation.tool.title': 'Pet Skills',
 
@@ -1602,8 +1602,8 @@ const messages = {
     'navigation.prompt.title': 'Persona Prompts',
     'navigation.settings.desc': 'LLM, TTS, ASR, SVC, and desktop pet agent runtime configuration',
     'navigation.settings.title': 'Models & Voice',
-    'navigation.svc.desc': 'SVC voice conversion, preview, and voice capability diagnostics',
-    'navigation.svc.title': 'Voice Diagnostics',
+    'navigation.svc.desc': 'SoulX singing conversion and preview',
+    'navigation.svc.title': 'Singing Conversion',
     'navigation.tool.desc': 'Tools, plugins, MCP, and permissions',
     'navigation.tool.title': 'Pet Skills',
 

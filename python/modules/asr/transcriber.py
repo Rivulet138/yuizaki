@@ -36,8 +36,10 @@ class ASRManager:
         asr_partial_every: int = 15,
         language: str = "zh",
         diagnostics: VoiceDiagnostics | None = None,
+        final_client: Any | None = None,
     ):
         self.sensevoice_client = sensevoice_client
+        self.final_client = final_client or sensevoice_client
         self.vad_threshold = vad_threshold
         self.vad_min_silence_ms = vad_min_silence_ms
         self.asr_partial_every = asr_partial_every
@@ -52,14 +54,21 @@ class ASRManager:
         return bool(getattr(self.sensevoice_client, "is_available", True))
 
     def _transcription_engine(self) -> Any:
-        if bool(getattr(self.sensevoice_client, "supports_streaming", False)):
-            return self.sensevoice_client
-        model = getattr(self.sensevoice_client, "_model", None)
+        client = self.final_client
+        if bool(getattr(client, "supports_streaming", False)):
+            return client
+        model = getattr(client, "_model", None)
         if model is not None and hasattr(model, "generate"):
             return model
-        if hasattr(self.sensevoice_client, "generate"):
-            return self.sensevoice_client
+        if hasattr(client, "generate"):
+            return client
         raise RuntimeError("ASR client must expose a generate-capable transcription engine")
+
+    def _has_dedicated_final_engine(self) -> bool:
+        return (
+            self.final_client is not self.sensevoice_client
+            and bool(getattr(self.final_client, "is_available", False))
+        )
 
     def get_or_create(self, session_id: str) -> ASRPipeline:
         if session_id not in self._pipelines:
@@ -198,7 +207,23 @@ class ASRManager:
             })
 
         if event == "vad_end" or is_final:
-            final_text = (await client.finish_stream(session_id)).strip() or text.strip() or self._streaming_partials.get(session_id, "")
+            audio = asr.snapshot_audio()
+            streaming_final = (
+                (await client.finish_stream(session_id)).strip()
+                or text.strip()
+                or self._streaming_partials.get(session_id, "")
+            )
+            final_text = streaming_final
+            if self._has_dedicated_final_engine() and audio is not None:
+                refined_text = await asyncio.to_thread(
+                    asr.transcribe_sync,
+                    audio,
+                    5,
+                    self.language,
+                )
+                if refined_text:
+                    final_text = refined_text
+                    asr.mark("asr_final_refined")
             if final_started_at is not None:
                 self.diagnostics.record_elapsed(
                     "asr_final",

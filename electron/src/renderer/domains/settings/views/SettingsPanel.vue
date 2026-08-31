@@ -2374,7 +2374,7 @@ const resourceIdsForSettingsPatch = (patch: SettingsPatch): ManagedModelResource
   const tts = patch.tts as Record<string, unknown> | undefined
   const svc = patch.svc as { provider?: unknown } | undefined
   const memory = patch.memory as { embedding_model?: unknown } | undefined
-  if (asr?.provider === 'sherpa-onnx-online') ids.push('sherpa_online')
+  if (asr?.provider === 'sherpa-onnx-online') ids.push('sherpa_online', 'sherpa')
   if (asr?.provider === 'sherpa-onnx') ids.push('sherpa')
   if (tts) ids.push('tts')
   if (svc?.provider === 'soulx-service') ids.push('soulx')

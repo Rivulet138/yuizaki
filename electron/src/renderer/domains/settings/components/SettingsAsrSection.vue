@@ -33,7 +33,7 @@
             <el-option label="FunASR Service" value="funasr-service" />
             <el-option label="OpenAI Compatible" value="openai-compatible" />
             <el-option label="Sherpa ONNX" value="sherpa-onnx" />
-            <el-option label="Sherpa ONNX Streaming" value="sherpa-onnx-online" />
+            <el-option label="Sherpa Streaming + SenseVoice" value="sherpa-onnx-online" />
             <el-option label="SenseVoice Local" value="sensevoice-local" />
             <el-option :label="t('common.disabled')" value="disabled" />
           </el-select>

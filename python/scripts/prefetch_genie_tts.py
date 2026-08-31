@@ -22,6 +22,20 @@ def validate_character_name(character: str) -> str:
     return normalized
 
 
+def normalize_genie_language(language: str) -> str:
+    normalized = language.strip().lower()
+    return {
+        "auto": "Japanese",
+        "ja": "Japanese",
+        "japanese": "Japanese",
+        "zh": "Chinese",
+        "cn": "Chinese",
+        "chinese": "Chinese",
+        "en": "English",
+        "english": "English",
+    }.get(normalized, language.strip() or "Japanese")
+
+
 def prefetch_genie_assets(
     *,
     character: str,
@@ -73,6 +87,7 @@ def main() -> None:
     args = parser.parse_args()
 
     character = validate_character_name(args.character)
+    language = normalize_genie_language(args.language)
     genie_data_dir = args.genie_data_dir.resolve()
     workspace_root = Path(__file__).resolve().parents[1]
     os.environ.setdefault("GENIE_DATA_DIR", str(genie_data_dir))
@@ -99,7 +114,7 @@ def main() -> None:
         genie_tts.load_character(
             character_name=character,
             onnx_model_dir=args.model_dir.strip(),
-            language=args.language,
+            language=language,
         )
     else:
         genie_tts.load_predefined_character(character)
