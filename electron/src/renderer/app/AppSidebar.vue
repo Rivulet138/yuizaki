@@ -11,10 +11,9 @@
     </div>
 
     <nav class="menu">
-      <section v-for="group in menuGroups" :key="group.id" class="menu-group" :aria-label="group.label">
-        <div class="menu-group-label">{{ group.label }}</div>
+      <section class="menu-group" aria-label="常用">
         <router-link
-          v-for="menu in group.items"
+          v-for="menu in primaryMenus"
           :key="menu.id"
           :to="`/w/${activeWorkspaceId}/${menu.id}`"
           class="menu-item"
@@ -26,6 +25,36 @@
           <span class="menu-label">{{ menu.title }}</span>
         </router-link>
       </section>
+
+      <button
+        class="admin-toggle"
+        type="button"
+        :aria-expanded="advancedOpen"
+        aria-controls="advanced-navigation"
+        title="高级功能"
+        @click="advancedOpen = !advancedOpen"
+      >
+        <span class="admin-toggle-label">高级</span>
+        <el-icon class="admin-toggle-icon" :class="{ expanded: advancedOpen }"><ArrowDown /></el-icon>
+      </button>
+
+      <div v-show="advancedOpen" id="advanced-navigation" class="advanced-groups">
+        <section v-for="group in advancedMenuGroups" :key="group.id" class="menu-group" :aria-label="group.label">
+          <div class="menu-group-label">{{ group.label }}</div>
+          <router-link
+            v-for="menu in group.items"
+            :key="menu.id"
+            :to="`/w/${activeWorkspaceId}/${menu.id}`"
+            class="menu-item"
+            active-class="active"
+            :aria-label="menu.title"
+            :title="menu.title"
+          >
+            <el-icon class="menu-icon"><component :is="menu.icon" /></el-icon>
+            <span class="menu-label">{{ menu.title }}</span>
+          </router-link>
+        </section>
+      </div>
     </nav>
 
     <div class="sidebar-footer">
@@ -45,11 +74,13 @@
 </template>
 
 <script setup lang="ts">
-import { Setting } from '@element-plus/icons-vue'
-import { computed } from 'vue'
+import { ArrowDown, Setting } from '@element-plus/icons-vue'
+import { computed, ref, watch } from 'vue'
 import type { Component } from 'vue'
+import { useRoute } from 'vue-router'
 import { yuizakiConfig } from '@/config/yuizaki'
 import { t } from '@/i18n'
+import { buildSidebarNavigation, isPrimarySidebarMenu } from '@/navigation/sidebarNavigation'
 
 type SidebarMenu = { id: string; title: string; icon: Component; desc?: string }
 
@@ -60,26 +91,16 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'open-workspace-settings'): void
 }>()
-const menuGroupDefinitions = [
-  { id: 'conversation', label: '对话', ids: ['chat', 'memory', 'prompt', 'persona-memory'] },
-  { id: 'system', label: '运行', ids: ['overview', 'infrastructure', 'deploy'] },
-  { id: 'tools', label: '工具', ids: ['tool', 'svc', 'plugins'] },
-  { id: 'audit', label: '审计', ids: ['agent-trace', 'agent-governance'] },
-  { id: 'settings', label: '设置', ids: ['settings', 'pet', 'i18n'] },
-]
+const route = useRoute()
 
-const menuGroups = computed(() => {
-  const remaining = new Set(props.menus.map((menu) => menu.id))
-  const groups = menuGroupDefinitions.map((group) => {
-    const items = group.ids
-      .map((id) => props.menus.find((menu) => menu.id === id))
-      .filter((menu): menu is SidebarMenu => Boolean(menu))
-    items.forEach((menu) => remaining.delete(menu.id))
-    return { ...group, items }
-  }).filter((group) => group.items.length > 0)
-  const otherItems = props.menus.filter((menu) => remaining.has(menu.id))
-  if (otherItems.length) groups.push({ id: 'other', label: '其他', ids: otherItems.map((menu) => menu.id), items: otherItems })
-  return groups
+const activeMenuId = computed(() => String(route.name || 'chat'))
+const advancedOpen = ref(!isPrimarySidebarMenu(activeMenuId.value))
+const sidebarNavigation = computed(() => buildSidebarNavigation(props.menus))
+const primaryMenus = computed(() => sidebarNavigation.value.primary)
+const advancedMenuGroups = computed(() => sidebarNavigation.value.advanced)
+
+watch(activeMenuId, (menuId) => {
+  if (!isPrimarySidebarMenu(menuId)) advancedOpen.value = true
 })
 </script>
 
@@ -234,6 +255,11 @@ const menuGroups = computed(() => {
   transform: rotate(180deg);
 }
 
+.advanced-groups {
+  display: flex;
+  flex-direction: column;
+}
+
 .menu-item.active::after {
   content: '';
   position: absolute;
@@ -345,9 +371,10 @@ const menuGroups = computed(() => {
     .menu-section-label,
     .menu-label,
     .admin-toggle-label,
-  .admin-group-label,
-  .menu-divider,
-  .menu-item.active::after {
+    .admin-group-label,
+    .menu-group-label,
+    .menu-divider,
+    .menu-item.active::after {
     display: none;
   }
 

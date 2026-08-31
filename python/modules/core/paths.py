@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_DIR = BACKEND_ROOT / "data"
 DEFAULT_AUDIO_CACHE_DIR = BACKEND_ROOT / "audio_cache"
@@ -17,6 +16,13 @@ def resolve_backend_path(value: str | Path | None, default: Path) -> Path:
     if not path.is_absolute():
         path = BACKEND_ROOT / path
     return path.resolve()
+
+
+def resolve_optional_backend_path(value: str | Path | None) -> Path | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    return resolve_backend_path(raw, BACKEND_ROOT)
 
 
 def data_dir_from_env() -> Path:

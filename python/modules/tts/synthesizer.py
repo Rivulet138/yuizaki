@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from modules.core.paths import DEFAULT_AUDIO_CACHE_DIR
+from modules.core.paths import DEFAULT_AUDIO_CACHE_DIR, resolve_optional_backend_path
 from modules.system.experience_metrics import percentile
 from modules.system.voice_diagnostics import VoiceDiagnostics
 from modules.tts.capabilities import (
@@ -116,10 +116,12 @@ class TTSClient:
         diagnostics: VoiceDiagnostics | None = None,
     ) -> None:
         self._character = genie_character.strip()
-        self._model_dir = genie_model_dir
+        resolved_model_dir = resolve_optional_backend_path(genie_model_dir)
+        self._model_dir = str(resolved_model_dir) if resolved_model_dir else None
         self._configured_language = (language or "").strip().lower() or "ja"
         self._language = _normalize_genie_language(language)
-        self._ref_audio = ref_audio.strip()
+        resolved_ref_audio = resolve_optional_backend_path(ref_audio)
+        self._ref_audio = str(resolved_ref_audio) if resolved_ref_audio else ""
         self._ref_text = ref_text.strip()
         self._device = device.strip().lower() or "cpu"
         self._quality = quality.strip() or "质量优先"
@@ -898,7 +900,9 @@ def _resolve_genie_character(
         return model_name or "custom"
 
     try:
-        from genie_tts.PredefinedCharacter import CHARA_LANG  # type: ignore[import-untyped]
+        from genie_tts.PredefinedCharacter import (  # type: ignore[import-untyped]
+            CHARA_LANG,
+        )
     except Exception as exc:
         raise ValueError("TTS Genie character is empty and predefined character metadata is unavailable") from exc
 

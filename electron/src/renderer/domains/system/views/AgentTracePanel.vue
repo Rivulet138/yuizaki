@@ -1,11 +1,26 @@
 <template>
-  <PanelShell title="任务追踪" tone="admin">
+  <PanelShell title="任务" tone="admin">
     <template #actions>
       <el-button size="small" plain :disabled="!selectedTrace" @click="downloadDiagnosticBundle">导出诊断</el-button>
       <el-button size="small" plain :loading="refreshLoading" @click="refreshAll">刷新</el-button>
     </template>
     <div class="trace-console">
-      <section class="trace-hero panel-card">
+      <nav class="trace-view-nav" aria-label="任务视图" role="tablist">
+        <button
+          v-for="view in traceViews"
+          :key="view.id"
+          type="button"
+          role="tab"
+          class="trace-view-button"
+          :class="{ active: activeTraceView === view.id }"
+          :aria-selected="activeTraceView === view.id"
+          @click="activeTraceView = view.id"
+        >
+          {{ view.label }}
+        </button>
+      </nav>
+
+      <section v-show="activeTraceView === 'status'" class="trace-hero panel-card">
         <div class="hero-metrics">
           <div v-for="metric in traceMetrics" :key="metric.label" class="metric-card" :class="`tone-${metric.tone}`" :title="metric.desc">
             <span>{{ metric.label }}</span>
@@ -14,7 +29,7 @@
         </div>
       </section>
 
-      <section class="experience-panel panel-card">
+      <section v-show="activeTraceView === 'status'" class="experience-panel panel-card">
         <div class="section-header compact">
           <div>
             <h3>运行指标</h3>
@@ -55,7 +70,7 @@
         </div>
       </section>
 
-      <section class="jobs-panel panel-card">
+      <section v-show="activeTraceView === 'jobs'" class="jobs-panel panel-card">
         <div class="section-header compact">
           <div>
             <h3>后台任务</h3>
@@ -104,7 +119,7 @@
         </AsyncState>
       </section>
 
-      <section class="runtime-strip panel-card">
+      <section v-show="activeTraceView === 'jobs'" class="runtime-strip panel-card">
         <div class="section-header compact">
           <div>
                 <h3>最近执行阶段</h3>
@@ -123,8 +138,8 @@
         </div>
       </section>
 
-      <div class="trace-layout">
-        <aside class="schedule-panel panel-card">
+      <div v-show="activeTraceView === 'schedules' || activeTraceView === 'traces'" class="trace-layout single-view">
+        <aside v-show="activeTraceView === 'schedules'" class="schedule-panel panel-card">
           <div class="section-header">
             <div>
               <h3>计划任务</h3>
@@ -184,7 +199,7 @@
           </div>
         </aside>
 
-        <main class="trace-browser panel-card">
+        <main v-show="activeTraceView === 'traces'" class="trace-browser panel-card">
           <div class="browser-main">
             <div class="section-header browser-header">
               <div>
@@ -387,6 +402,7 @@ type TagType = 'success' | 'warning' | 'danger' | 'info' | 'primary'
 type TraceFilter = 'all' | 'planner' | 'steps' | 'scheduler' | 'runtime_loop'
 type StatusFilter = 'all' | 'ok' | 'error' | 'partial'
 type MetricTone = 'blue' | 'emerald' | 'amber' | 'rose'
+type TraceViewId = 'status' | 'jobs' | 'schedules' | 'traces'
 interface TraceEntry {
   traceType: TraceFilter
   timestamp: string
@@ -486,6 +502,13 @@ const {
 } = useSystemDomain()
 
 const scheduleForm = reactive({ name: '', prompt: '', run_after_seconds: 60, interval_seconds: 300 })
+const traceViews: Array<{ id: TraceViewId; label: string }> = [
+  { id: 'status', label: '状态' },
+  { id: 'jobs', label: '后台任务' },
+  { id: 'schedules', label: '计划任务' },
+  { id: 'traces', label: '追踪' },
+]
+const activeTraceView = ref<TraceViewId>('jobs')
 const traceSearch = ref('')
 const traceFilter = ref<TraceFilter>('all')
 const statusFilter = ref<StatusFilter>('all')
@@ -1251,6 +1274,44 @@ onMounted(() => {
   gap: 16px;
 }
 
+.trace-view-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--yui-border);
+}
+
+.trace-view-button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--yui-text);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.trace-view-button:hover,
+.trace-view-button:focus-visible {
+  border-color: var(--yui-border-strong);
+  background: var(--yui-surface-muted);
+  outline: none;
+}
+
+.trace-view-button.active {
+  border-color: color-mix(in srgb, var(--yui-accent) 34%, var(--yui-border));
+  color: var(--yui-accent-strong, var(--yui-accent));
+  background: var(--yui-accent-soft);
+}
+
 .panel-card {
   border: 1px solid var(--yui-panel-outline, var(--yui-border));
   border-radius: var(--yui-radius-card);
@@ -1567,6 +1628,10 @@ h3 {
   grid-template-columns: 340px minmax(0, 1fr);
   gap: 16px;
   min-height: 660px;
+}
+
+.trace-layout.single-view {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .schedule-panel,

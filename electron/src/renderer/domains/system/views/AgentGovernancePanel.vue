@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="工具权限" tone="admin">
+  <PanelShell title="权限" tone="admin">
     <div class="governance-console">
       <section class="governance-toolbar" aria-label="治理操作">
         <div>
@@ -11,7 +11,22 @@
         </div>
       </section>
 
-      <el-card class="panel-card connector-card" shadow="never">
+      <nav class="governance-view-nav" aria-label="权限视图" role="tablist">
+        <button
+          v-for="view in governanceViews"
+          :key="view.id"
+          type="button"
+          role="tab"
+          class="governance-view-button"
+          :class="{ active: activeGovernanceView === view.id }"
+          :aria-selected="activeGovernanceView === view.id"
+          @click="activeGovernanceView = view.id"
+        >
+          {{ view.label }}
+        </button>
+      </nav>
+
+      <el-card v-show="activeGovernanceView === 'connectors'" class="panel-card connector-card" shadow="never">
         <template #header>
           <div class="card-head">
             <div>
@@ -188,8 +203,8 @@
         </AsyncState>
       </el-card>
 
-      <section class="governance-grid">
-        <el-card class="panel-card mcp-card" shadow="never">
+      <section v-show="activeGovernanceView === 'mcp' || activeGovernanceView === 'permissions'" class="governance-grid" :class="{ 'single-view': activeGovernanceView === 'permissions' }">
+        <el-card v-show="activeGovernanceView === 'mcp'" class="panel-card mcp-card" shadow="never">
           <template #header>
             <div class="card-head">
               <div>
@@ -292,7 +307,7 @@
         </el-card>
 
         <aside class="side-stack">
-          <el-card class="panel-card register-card" shadow="never">
+          <el-card v-show="activeGovernanceView === 'mcp'" class="panel-card register-card" shadow="never">
             <template #header>
               <div class="card-head compact">
                 <div>
@@ -348,7 +363,7 @@
             </div>
           </el-card>
 
-          <el-card class="panel-card permission-card" shadow="never">
+          <el-card v-show="activeGovernanceView === 'permissions'" class="panel-card permission-card" shadow="never">
             <template #header>
               <div class="card-head compact">
                 <div>
@@ -393,8 +408,8 @@
         </aside>
       </section>
 
-      <section class="governance-grid lower-grid">
-        <el-card class="panel-card extension-card" shadow="never">
+      <section v-show="activeGovernanceView === 'extensions' || activeGovernanceView === 'permissions'" class="governance-grid lower-grid single-view">
+        <el-card v-show="activeGovernanceView === 'extensions'" class="panel-card extension-card" shadow="never">
           <template #header>
             <div class="card-head">
               <div>
@@ -459,7 +474,7 @@
           </AsyncState>
         </el-card>
 
-        <el-card class="panel-card audit-card" shadow="never">
+        <el-card v-show="activeGovernanceView === 'permissions'" class="panel-card audit-card" shadow="never">
           <template #header>
             <div class="card-head compact">
               <div>
@@ -496,6 +511,16 @@ import { useSystemDomain } from '../composables/useSystemDomain'
 import { usePluginDomain } from '../../plugin/composables/usePluginDomain'
 import type { ConnectorProbeSnapshot, ConnectorState, ConnectorStatus, MCPHistoryEntry, MCPInventoryItem, MCPServerConfigSnapshot, MCPServerPresetSnapshot, MCPServerStatusSnapshot, MessageConnectorConfigSnapshot, MessageConnectorConfigUpdate, PermissionAuditRecord, RuntimeContributionSummary } from '@/../shared/agent'
 import type { PluginContributionSummary } from '@/../shared/plugin'
+
+type GovernanceViewId = 'connectors' | 'mcp' | 'permissions' | 'extensions'
+
+const governanceViews: Array<{ id: GovernanceViewId; label: string }> = [
+  { id: 'connectors', label: '连接器' },
+  { id: 'mcp', label: 'MCP' },
+  { id: 'permissions', label: '授权' },
+  { id: 'extensions', label: '扩展' },
+]
+const activeGovernanceView = ref<GovernanceViewId>('connectors')
 
 const {
   permissions,
@@ -1451,6 +1476,44 @@ const saveAgentPluginConfig = async (pluginId: string) => {
   gap: 10px;
 }
 
+.governance-view-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--yui-border);
+}
+
+.governance-view-button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--yui-text);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.governance-view-button:hover,
+.governance-view-button:focus-visible {
+  border-color: var(--yui-border-strong);
+  background: var(--yui-surface-muted);
+  outline: none;
+}
+
+.governance-view-button.active {
+  border-color: color-mix(in srgb, var(--yui-accent) 34%, var(--yui-border));
+  color: var(--yui-accent-strong, var(--yui-accent));
+  background: var(--yui-accent-soft);
+}
+
 .governance-grid,
 .host-grid {
   display: grid;
@@ -1463,6 +1526,11 @@ const saveAgentPluginConfig = async (pluginId: string) => {
 
 .lower-grid {
   grid-template-columns: minmax(0, 1fr) minmax(360px, 0.7fr);
+}
+
+.governance-grid.single-view,
+.lower-grid.single-view {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .host-grid {

@@ -21,19 +21,39 @@
           :closable="false"
         />
 
-        <SettingsAccessSection
-          v-model:backend-token="backendTokenInput"
-          :backend-token-configured="backendTokenConfigured"
-          :backend-token-busy="backendTokenBusy"
-          :backend-token-status-known="Boolean(backendTokenStatus)"
-          :backend-token-source-label="backendTokenSourceLabel"
-          :backend-token-preview="backendTokenPreview"
-          :backend-token-requires-restart="backendTokenRequiresRestart"
-          @save-backend-token="saveBackendToken"
-          @reset-backend-token="resetBackendToken"
-        />
+        <div class="settings-workspace">
+          <nav class="settings-section-nav" :aria-label="t('settings.sectionNav')">
+            <section v-for="group in settingSectionGroups" :key="group.id" class="settings-section-group">
+              <span class="settings-section-group-label">{{ group.label }}</span>
+              <button
+                v-for="item in group.items"
+                :key="item.id"
+                type="button"
+                class="settings-section-button"
+                :class="{ active: activeSection === item.id }"
+                :aria-current="activeSection === item.id ? 'page' : undefined"
+                @click="activeSection = item.id"
+              >
+                {{ item.label }}
+              </button>
+            </section>
+          </nav>
 
-        <el-tabs v-model="activeSection" type="border-card">
+          <el-tabs v-model="activeSection" class="settings-content-tabs">
+          <el-tab-pane :label="t('settings.tabs.access')" name="access" lazy>
+            <SettingsAccessSection
+              v-model:backend-token="backendTokenInput"
+              :backend-token-configured="backendTokenConfigured"
+              :backend-token-busy="backendTokenBusy"
+              :backend-token-status-known="Boolean(backendTokenStatus)"
+              :backend-token-source-label="backendTokenSourceLabel"
+              :backend-token-preview="backendTokenPreview"
+              :backend-token-requires-restart="backendTokenRequiresRestart"
+              @save-backend-token="saveBackendToken"
+              @reset-backend-token="resetBackendToken"
+            />
+          </el-tab-pane>
+
           <el-tab-pane :label="t('settings.tabs.llm')" name="llm" lazy>
             <el-card class="llm-settings-card" shadow="never">
               <template #header>
@@ -495,7 +515,8 @@
               @imported="handlePortableImported"
             />
           </el-tab-pane>
-        </el-tabs>
+          </el-tabs>
+        </div>
       </div>
     </AsyncState>
   </PanelShell>
@@ -542,7 +563,7 @@ import type { LlmProviderPreset } from '../llmProviders'
 import { isPlainRecord, normalizeResourceStatus, normalizeStorageStatus } from '../resourceStatus'
 
 type SaveTimeout = ReturnType<typeof window.setTimeout>
-type SettingSectionId = 'llm' | 'voice' | 'asr' | 'memory' | 'summary' | 'svc' | 'resources' | 'system' | 'portable'
+type SettingSectionId = 'access' | 'llm' | 'voice' | 'asr' | 'memory' | 'summary' | 'svc' | 'resources' | 'system' | 'portable'
 type QualityScorerMode = 'rule' | 'llm'
 type SettingsPatch = Record<string, unknown>
 type AlertType = 'success' | 'warning' | 'info' | 'error'
@@ -734,6 +755,42 @@ const form = reactive({
   },
 })
 
+const settingSectionGroups = computed(() => [
+  {
+    id: 'connection',
+    label: t('settings.groups.connection'),
+    items: [
+      { id: 'access' as const, label: t('settings.tabs.access') },
+      { id: 'llm' as const, label: t('settings.tabs.llm') },
+    ],
+  },
+  {
+    id: 'voice',
+    label: t('settings.groups.voice'),
+    items: [
+      { id: 'voice' as const, label: t('settings.tabs.tts') },
+      { id: 'asr' as const, label: t('settings.tabs.asr') },
+      { id: 'svc' as const, label: t('settings.tabs.svc') },
+    ],
+  },
+  {
+    id: 'memory',
+    label: t('settings.groups.memory'),
+    items: [
+      { id: 'memory' as const, label: t('settings.tabs.memory') },
+      { id: 'summary' as const, label: t('settings.tabs.summary') },
+    ],
+  },
+  {
+    id: 'application',
+    label: t('settings.groups.application'),
+    items: [
+      { id: 'resources' as const, label: t('settings.tabs.resources') },
+      { id: 'system' as const, label: t('settings.tabs.system') },
+      { id: 'portable' as const, label: t('settings.tabs.portable') },
+    ],
+  },
+])
 const activeSection = ref<SettingSectionId>('llm')
 const lastSavedAt = ref('')
 const lastApplied = ref<string[]>([])

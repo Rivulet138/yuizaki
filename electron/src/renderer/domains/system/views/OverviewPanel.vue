@@ -10,7 +10,22 @@
         <router-link :to="canonicalPath('deploy')">{{ t('canonical.system.runtimeChecks') }}</router-link>
       </nav>
 
-      <section class="ops-card runtime-readiness-card" aria-label="运行环境与下一步操作">
+      <nav class="overview-view-nav" aria-label="状态视图" role="tablist">
+        <button
+          v-for="view in overviewViews"
+          :key="view.id"
+          type="button"
+          role="tab"
+          class="overview-view-button"
+          :class="{ active: activeOverviewView === view.id }"
+          :aria-selected="activeOverviewView === view.id"
+          @click="activeOverviewView = view.id"
+        >
+          {{ view.label }}
+        </button>
+      </nav>
+
+      <section v-show="activeOverviewView === 'status'" class="ops-card runtime-readiness-card" aria-label="运行环境与下一步操作">
         <div class="ops-card-head">
           <div>
             <h3>{{ runtimeActionItems.length ? `需要处理 ${runtimeActionItems.length} 项` : '运行链路就绪' }}</h3>
@@ -49,7 +64,7 @@
         </div>
       </section>
 
-      <section class="ops-card voice-quality-card" aria-label="语音体验质量">
+      <section v-show="activeOverviewView === 'voice'" class="ops-card voice-quality-card" aria-label="语音体验质量">
         <div class="ops-card-head">
           <div>
             <h3>语音体验</h3>
@@ -100,7 +115,7 @@
         </AsyncState>
       </section>
 
-      <section class="ops-card platform-card" aria-label="跨平台能力">
+      <section v-show="activeOverviewView === 'platform'" class="ops-card platform-card" aria-label="跨平台能力">
         <div class="ops-card-head">
           <div>
             <h3>平台能力</h3>
@@ -137,7 +152,7 @@
         </AsyncState>
       </section>
 
-      <section class="ops-grid">
+      <section v-show="activeOverviewView === 'runtime'" class="ops-grid">
         <article class="ops-card context-card" aria-label="当前应用">
           <div class="ops-card-head">
             <div>
@@ -188,7 +203,7 @@
         </article>
       </section>
 
-      <section class="ops-grid">
+      <section v-show="activeOverviewView === 'runtime'" class="ops-grid">
         <article class="ops-card governance-card">
           <div class="ops-card-head">
             <div>
@@ -284,7 +299,7 @@
         </article>
       </section>
 
-      <section class="ops-card pet-ops-card">
+      <section v-show="activeOverviewView === 'pet'" class="ops-card pet-ops-card">
         <div class="ops-card-head pet-head">
           <div>
             <h3>桌宠控制</h3>
@@ -458,6 +473,17 @@ type ActiveApplicationSnapshot = {
   title: string
   process_id: number
 }
+
+type OverviewView = 'status' | 'voice' | 'platform' | 'runtime' | 'pet'
+
+const overviewViews: Array<{ id: OverviewView; label: string }> = [
+  { id: 'status', label: '状态' },
+  { id: 'voice', label: '语音' },
+  { id: 'platform', label: '平台' },
+  { id: 'runtime', label: '运行' },
+  { id: 'pet', label: '桌宠' },
+]
+const activeOverviewView = ref<OverviewView>('status')
 
 const governanceData = ref<any>(null)
 const governanceReq = reactive({ loading: false, error: '' })
@@ -1125,6 +1151,47 @@ onDeactivated(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.overview-view-nav {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 4px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-card);
+  background: var(--yui-surface-muted);
+}
+
+.overview-view-button {
+  min-width: 72px;
+  min-height: 34px;
+  border: 0;
+  border-radius: var(--yui-radius-control);
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--yui-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.overview-view-button:hover {
+  color: var(--yui-text);
+  background: var(--yui-surface);
+}
+
+.overview-view-button.active {
+  color: var(--yui-accent);
+  background: var(--yui-surface-raised);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
+}
+
+.overview-view-button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--yui-accent) 30%, transparent);
+  outline-offset: 1px;
 }
 
 .ops-card,

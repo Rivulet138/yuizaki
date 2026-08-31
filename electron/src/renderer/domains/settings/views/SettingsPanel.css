@@ -5,6 +5,79 @@
   min-width: 0;
 }
 
+.settings-workspace {
+  display: grid;
+  grid-template-columns: 144px minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.settings-section-nav {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 8px 10px 8px 0;
+  border-right: 1px solid var(--yui-border);
+}
+
+.settings-section-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.settings-section-group-label {
+  padding: 0 9px 4px;
+  color: var(--yui-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.settings-section-button {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--yui-text);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.settings-section-button:hover,
+.settings-section-button:focus-visible {
+  border-color: var(--yui-border-strong);
+  background: var(--yui-surface-muted);
+  outline: none;
+}
+
+.settings-section-button.active {
+  border-color: color-mix(in srgb, var(--yui-accent) 34%, var(--yui-border));
+  color: var(--yui-accent-strong, var(--yui-accent));
+  background: var(--yui-accent-soft);
+}
+
+.settings-content-tabs {
+  min-width: 0;
+}
+
+.settings-content-tabs :deep(.el-tabs__header) {
+  display: none;
+}
+
+.settings-content-tabs :deep(.el-tabs__content) {
+  padding: 0;
+}
+
 .product-metrics-consent-card {
   margin-top: 12px;
 }
@@ -469,6 +542,34 @@
 }
 
 @media (max-width: 960px) {
+  .settings-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-section-nav {
+    position: static;
+    flex-direction: row;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 0 0 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--yui-border);
+  }
+
+  .settings-section-group {
+    flex-direction: row;
+    flex: 0 0 auto;
+  }
+
+  .settings-section-group-label {
+    display: none;
+  }
+
+  .settings-section-button {
+    width: auto;
+    min-width: max-content;
+  }
+
   .form-grid,
   .form-grid.three,
   .llm-workspace,

@@ -4,6 +4,22 @@
     tone="tool"
   >
     <div class="tool-panel">
+      <nav class="tool-view-nav" aria-label="工具视图" role="tablist">
+        <button
+          v-for="view in toolViews"
+          :key="view.id"
+          type="button"
+          role="tab"
+          class="tool-view-button"
+          :class="{ active: activeToolView === view.id }"
+          :aria-selected="activeToolView === view.id"
+          @click="activeToolView = view.id"
+        >
+          {{ view.label }}
+        </button>
+      </nav>
+
+      <div v-show="activeToolView === 'status'" class="tool-view-stack">
       <nav class="canonical-links" :aria-label="t('canonical.capabilities.aria')">
         <span>{{ t('canonical.capabilities.label') }}</span>
         <router-link :to="canonicalPath('plugins')">{{ t('canonical.capabilities.plugins') }}</router-link>
@@ -50,8 +66,9 @@
         </div>
         <el-empty v-else description="暂无 MCP 服务" :image-size="48" />
       </section>
+      </div>
 
-      <section class="stream-summary panel-card" aria-label="直播能力状态">
+      <section v-show="activeToolView === 'stream'" class="stream-summary panel-card" aria-label="直播能力状态">
         <div class="section-heading">
           <div>
             <h3>直播能力</h3>
@@ -312,7 +329,7 @@
         <el-empty v-else description="暂无草稿" :image-size="40" />
       </section>
 
-      <section class="capability-workspace panel-card">
+      <section v-show="activeToolView === 'capabilities'" class="capability-workspace panel-card">
         <div class="capability-list-pane">
           <div class="section-heading compact">
             <div>
@@ -440,7 +457,7 @@
         </aside>
       </section>
 
-      <section class="skill-catalog panel-card">
+      <section v-show="activeToolView === 'skills'" class="skill-catalog panel-card">
         <div class="section-heading">
           <div>
             <h3>项目技能</h3>
@@ -537,7 +554,7 @@
         <el-empty v-else description="没有匹配的技能" />
       </section>
 
-      <section class="bottom-grid">
+      <section v-show="activeToolView === 'history'" class="bottom-grid">
         <article class="panel-card plugin-panel">
           <div class="section-heading compact">
             <div>
@@ -598,6 +615,7 @@ type MetricTone = 'blue' | 'amber' | 'rose' | 'emerald'
 type SkillCategoryFilter = 'all' | string
 type ImportedSkillCatalogItem = SkillCatalogItem & { imported?: boolean }
 type HealthActionKey = 'ready' | 'approval' | 'mcp-error' | 'plugin-error' | 'trace'
+type ToolViewId = 'status' | 'stream' | 'capabilities' | 'skills' | 'history'
 
 const IMPORTED_SKILLS_STORAGE_KEY = 'yuizaki.importedSkills'
 const IMPORTED_SKILLS_MIGRATION_KEY = 'yuizaki.importedSkills.backendMigrated'
@@ -605,6 +623,14 @@ const IMPORTED_SKILLS_DIRTY_KEY = 'yuizaki.importedSkills.localDirty'
 const workspaceStore = useWorkspaceStore()
 const { t } = useI18n()
 const canonicalPath = (moduleId: string) => `/w/${workspaceStore.activeWorkspaceId}/${moduleId}`
+const toolViews: Array<{ id: ToolViewId; label: string }> = [
+  { id: 'status', label: '状态' },
+  { id: 'stream', label: '直播' },
+  { id: 'capabilities', label: '能力' },
+  { id: 'skills', label: '技能' },
+  { id: 'history', label: '记录' },
+]
+const activeToolView = ref<ToolViewId>('status')
 
 interface SourceCard {
   kind: CapabilityKindFilter
@@ -1092,6 +1118,7 @@ function isMcpErrored(server: MCPRow) {
 
 function applyHealthAction(action: HealthActionKey) {
   activeHealthKey.value = action
+  activeToolView.value = 'capabilities'
   if (action === 'ready') {
     filterKind.value = ''
     filterRisk.value = ''
@@ -2417,6 +2444,50 @@ onMounted(async () => {
 
 <style scoped>
 .tool-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tool-view-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--yui-border);
+}
+
+.tool-view-button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--yui-text);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.tool-view-button:hover,
+.tool-view-button:focus-visible {
+  border-color: var(--yui-border-strong);
+  background: var(--yui-surface-muted);
+  outline: none;
+}
+
+.tool-view-button.active {
+  border-color: color-mix(in srgb, var(--yui-accent) 34%, var(--yui-border));
+  color: var(--yui-accent-strong, var(--yui-accent));
+  background: var(--yui-accent-soft);
+}
+
+.tool-view-stack {
   display: flex;
   flex-direction: column;
   gap: 16px;
