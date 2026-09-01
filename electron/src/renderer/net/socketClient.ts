@@ -168,11 +168,16 @@ export class SocketClient {
 
     socket.on('connect_error', (err: Error) => {
       if (this.socket !== socket) return;
-      logger.error('[SocketIO] Connection error:', err.message);
+      logger.warn('[SocketIO] Connection attempt failed:', err.message);
       this.reconnectAttempts.value++;
       if (err.message.toLowerCase().includes('reject')) {
         this.retryWithFreshAuthToken(socket);
       }
+    });
+
+    socket.io.on('reconnect_failed', () => {
+      if (this.socket !== socket) return;
+      logger.error('[SocketIO] Reconnection failed after all attempts');
     });
 
     // 注册已有的事件处理器

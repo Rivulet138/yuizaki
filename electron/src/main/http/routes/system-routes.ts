@@ -24,9 +24,37 @@ import type { SkillCatalogItem, SkillCatalogSnapshot } from '../../../shared/cap
 
 const PYTHON_PROXY_TIMEOUT_MS = 12000
 const PYTHON_LOCAL_DISCOVERY_TIMEOUT_MS = 30000
+const PYTHON_SESSION_READ_TIMEOUT_MS = 30000
+const PYTHON_TTS_WARMUP_TIMEOUT_MS = 5 * 60 * 1000
+const PYTHON_PING_ATTEMPT_TIMEOUT_MS = 4000
+const PYTHON_PING_MAX_ATTEMPTS = 3
 
-const resolvePythonProxyTimeout = (pathname: string): number =>
-  pathname === '/api/settings/local-discovery' ? PYTHON_LOCAL_DISCOVERY_TIMEOUT_MS : PYTHON_PROXY_TIMEOUT_MS
+const resolvePythonProxyTimeout = (pathname: string): number => {
+  if (pathname === '/api/settings/local-discovery') return PYTHON_LOCAL_DISCOVERY_TIMEOUT_MS
+  if (pathname === '/api/sessions') return PYTHON_SESSION_READ_TIMEOUT_MS
+  if (pathname === '/api/settings/tts/warmup') return PYTHON_TTS_WARMUP_TIMEOUT_MS
+  if (pathname === '/api/ping') return PYTHON_PING_ATTEMPT_TIMEOUT_MS
+  return PYTHON_PROXY_TIMEOUT_MS
+}
+
+const proxyPythonJsonRequest = async (target: string, init: RequestInit, pathname: string): Promise<Response> => {
+  const attempts = pathname === '/api/ping' ? PYTHON_PING_MAX_ATTEMPTS : 1
+  const attemptTimeout = resolvePythonProxyTimeout(pathname)
+  let lastError: unknown
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), attemptTimeout)
+    try {
+      return await fetch(target, { ...init, signal: controller.signal })
+    } catch (error) {
+      lastError = error
+      if (attempt + 1 < attempts) await new Promise((resolve) => setTimeout(resolve, 150))
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError))
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -82,29 +110,24 @@ const proxyPythonJson = async (
     : method === 'GET' || method === 'DELETE'
       ? undefined
       : await parseRequestBody<unknown>(req)
-  const abortController = new AbortController()
-  const timeout = setTimeout(() => abortController.abort(), resolvePythonProxyTimeout(url.pathname))
   const init: RequestInit = {
     method,
     headers: buildProxyHeaders(ctx, body !== undefined, String(req.headers['x-trace-id'] || '').trim() || null),
-    signal: abortController.signal,
   }
   if (body !== undefined) {
     init.body = JSON.stringify(body)
   }
   let response: Response
   try {
-    response = await fetch(`${resolvePythonApiOrigin()}${url.pathname}${url.search}`, init)
+    response = await proxyPythonJsonRequest(`${resolvePythonApiOrigin()}${url.pathname}${url.search}`, init, url.pathname)
   } catch (error) {
-    const aborted = abortController.signal.aborted
+    const aborted = error instanceof Error && error.name === 'AbortError'
     sendJson(res, aborted ? 504 : 502, {
       error: aborted ? 'Python backend request timed out' : 'Python backend request failed',
       path: url.pathname,
       detail: error instanceof Error ? error.message : String(error),
     })
     return
-  } finally {
-    clearTimeout(timeout)
   }
 
   const text = await response.text()

@@ -40,7 +40,7 @@
       <section class="stage-display" aria-label="Live2D 展示台">
         <div class="stage-backdrop"></div>
         <div class="stage-floor"><span></span></div>
-        <BrowserPetStage />
+        <BrowserPetStage :key="compactStage ? 'compact' : 'desktop'" />
         <div class="stage-caption">
           <span>{{ companionId || 'yumi' }}</span>
           <small>{{ companionStateLabel }}</small>
@@ -51,7 +51,7 @@
         <header class="stage-window-header">
           <div>
             <strong>对话</strong>
-            <span>在线</span>
+            <span>{{ realtimeConnected ? '在线' : '连接中' }}</span>
           </div>
           <button class="stage-close" type="button" title="关闭聊天" aria-label="关闭聊天" @click="chatOpen = false">
             <el-icon><Close /></el-icon>
@@ -94,12 +94,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ChatDotRound, Close, Moon } from '@element-plus/icons-vue'
 import type { NavigationModuleId } from '@/navigation/modules'
 import type { NavigationModule } from '@/navigation/types'
 import type { WorkspaceRecord } from '@/../shared/workspace'
+import { getSocketClient } from '@/net/socketClient'
 import BrowserPetStage from './BrowserPetStage.vue'
 
 const props = defineProps<{
@@ -121,6 +122,9 @@ const router = useRouter()
 const chatOpen = ref(true)
 const panelOpen = ref(true)
 const showLocale = ref(false)
+const compactStage = ref(false)
+const realtimeConnected = getSocketClient().connected
+let compactMediaQuery: MediaQueryList | null = null
 
 const quickMenus = computed(() => props.menus.filter((item) => ['chat', 'pet', 'settings', 'svc'].includes(item.id)).slice(0, 4))
 const activeTitle = computed(() => props.menus.find((item) => item.id === props.activeTab)?.title || props.activeTab)
@@ -154,6 +158,20 @@ const changeLocale = (locale: string): void => {
   // Parent owns persistence and backend synchronization.
   emit('changeLocale', locale)
 }
+
+const syncCompactStage = (): void => {
+  compactStage.value = compactMediaQuery?.matches ?? false
+}
+
+onMounted(() => {
+  compactMediaQuery = window.matchMedia('(max-width: 860px)')
+  syncCompactStage()
+  compactMediaQuery.addEventListener('change', syncCompactStage)
+})
+
+onBeforeUnmount(() => {
+  compactMediaQuery?.removeEventListener('change', syncCompactStage)
+})
 </script>
 
 <style scoped>

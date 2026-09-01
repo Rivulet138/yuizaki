@@ -519,6 +519,7 @@ const modelsLoading = ref(false)
 const audioInputDevices = ref<AudioInputDevice[]>([])
 const audioDevicesLoading = ref(false)
 const modelOptionsProviderKey = ref('')
+let warmupTimer: number | null = null
 const mcpSummaryLabel = ref('MCP 状态待刷新')
 const attachments = ref<ChatAttachment[]>([])
 const isCreatingSession = ref(false)
@@ -1766,7 +1767,11 @@ const refreshModelOptions = async (force = false) => {
   modelsLoading.value = true
   let loaded = false
   try {
-    if (!settingsStore.state.llm.base_url) {
+    const baseUrl = settingsStore.state.llm.base_url.trim()
+    const isLocalProvider = /^https?:\/\/(localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(baseUrl)
+    // Do not probe a remote provider until credentials exist. This keeps first-run
+    // startup local and avoids a needless upstream timeout in the chat surface.
+    if (!baseUrl || (!settingsStore.state.llm.api_key.trim() && !isLocalProvider)) {
       modelOptions.value = [settingsStore.state.llm.model, chatOptions.model].filter((item): item is string => Boolean(item))
       loaded = true
       return
@@ -1900,7 +1905,10 @@ onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeydown)
   scrollToBottom()
   void settingsStore.fetchSettings().then(refreshModelOptions)
-  void settingsClient.warmupTts().catch(() => undefined)
+  const warmupTts = () => {
+    void settingsClient.warmupTts().catch(() => undefined)
+  }
+  warmupTimer = window.setTimeout(warmupTts, 4000)
   void refreshMcpSummary()
 })
 onUnmounted(() => {
@@ -1909,6 +1917,10 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
   endHoldToTalk()
   sessionDrafts.flushDrafts()
+  if (warmupTimer !== null) {
+    window.clearTimeout(warmupTimer)
+    warmupTimer = null
+  }
 })
 </script>
 
