@@ -29,7 +29,7 @@ export interface NavigationModuleRecord {
 export const staticNavigationModuleRecords = [
   {
     id: 'overview',
-    title: '状态',
+    title: '运行状态',
     desc: '运行状态与异常',
     order: 0,
     enabled: true,
@@ -40,8 +40,8 @@ export const staticNavigationModuleRecords = [
   },
   {
     id: 'companion',
-    title: '首页',
-    desc: '兼容旧链接并转到桌宠对话',
+    title: '桌宠总览',
+    desc: '档案、关系与联动',
     order: 0,
     enabled: true,
     capabilities: { petControl: true, memory: true, voice: true, companion: true },
@@ -51,7 +51,7 @@ export const staticNavigationModuleRecords = [
   },
   {
     id: 'chat',
-    title: '对话',
+    title: '对话中心',
     desc: '文本与语音对话',
     order: 1,
     enabled: true,
@@ -62,7 +62,7 @@ export const staticNavigationModuleRecords = [
   },
   {
     id: 'prompt',
-    title: '人格',
+    title: '人格设定',
     desc: '提示词、角色卡与世界书',
     order: 2,
     enabled: true,
@@ -73,7 +73,7 @@ export const staticNavigationModuleRecords = [
   },
   {
     id: 'pet',
-    title: '桌宠',
+    title: '桌宠控制',
     desc: '模型、动作与位置',
     order: 3,
     enabled: true,
@@ -84,7 +84,7 @@ export const staticNavigationModuleRecords = [
   },
   {
     id: 'svc',
-    title: '歌声',
+    title: '歌声转换',
     desc: 'SoulX 歌声转换',
     order: 4,
     enabled: true,
@@ -95,7 +95,7 @@ export const staticNavigationModuleRecords = [
   },
   {
     id: 'tool',
-    title: '能力',
+    title: '本地能力',
     desc: '工具、MCP 与本地操作',
     order: 5,
     enabled: true,
@@ -106,7 +106,7 @@ export const staticNavigationModuleRecords = [
   },
   {
     id: 'plugins',
-    title: '插件',
+    title: '插件管理',
     desc: '插件启停与配置',
     order: 6,
     enabled: true,
@@ -116,7 +116,7 @@ export const staticNavigationModuleRecords = [
   },
   {
     id: 'infrastructure',
-    title: '服务与数据',
+    title: '服务数据',
     desc: '服务、日志与备份',
     order: 7,
     enabled: true,
@@ -126,7 +126,7 @@ export const staticNavigationModuleRecords = [
   },
   {
     id: 'agent-governance',
-    title: '权限',
+    title: '权限审计',
     desc: '工具授权与审计',
     order: 8,
     enabled: true,
@@ -136,7 +136,7 @@ export const staticNavigationModuleRecords = [
   },
   {
     id: 'agent-trace',
-    title: '任务',
+    title: '任务追踪',
     desc: '任务、调度与追踪',
     order: 9,
     enabled: true,
@@ -147,7 +147,7 @@ export const staticNavigationModuleRecords = [
   },
   {
     id: 'persona-memory',
-    title: '行为',
+    title: '行为记录',
     desc: '人格与心跳事件',
     order: 11,
     enabled: true,
@@ -157,7 +157,7 @@ export const staticNavigationModuleRecords = [
   },
   {
     id: 'settings',
-    title: '设置',
+    title: '系统设置',
     desc: '模型、语音与应用设置',
     order: 12,
     enabled: true,
@@ -168,7 +168,7 @@ export const staticNavigationModuleRecords = [
   },
   {
     id: 'i18n',
-    title: '语言',
+    title: '语言管理',
     desc: '界面语言与文案',
     order: 13,
     enabled: true,
@@ -178,7 +178,7 @@ export const staticNavigationModuleRecords = [
   },
   {
     id: 'memory',
-    title: '记忆',
+    title: '长期记忆',
     desc: '长期记忆与检索',
     order: 14,
     enabled: true,
@@ -189,7 +189,7 @@ export const staticNavigationModuleRecords = [
   },
   {
     id: 'deploy',
-    title: '检查',
+    title: '运行检查',
     desc: '接口、启动与打包',
     order: 15,
     enabled: true,

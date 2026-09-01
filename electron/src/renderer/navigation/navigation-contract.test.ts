@@ -11,6 +11,12 @@ describe('navigation contract', () => {
     expect(new Set(enabledIds).size).toBe(enabledIds.length)
   })
 
+  it('keeps sidebar titles concise and functional', () => {
+    for (const module of staticNavigationModuleRecords) {
+      expect(module.title).toMatch(/^[\u3400-\u9fff]{4,5}$/)
+    }
+  })
+
   it('keeps chat and memory as the only primary destinations', () => {
     const primaryIds = staticNavigationModuleRecords
       .filter((module) => module.primary === true)
