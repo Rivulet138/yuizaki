@@ -86,11 +86,6 @@ export interface TtsResourceStatus extends ManagedResourceSummary {
   modelDir: string
 }
 
-export interface GptSovitsResourceStatus extends ManagedResourceSummary {
-  modelDir: string
-  imported: boolean
-}
-
 export type ResourceProgressPhase = 'preparing' | 'downloading' | 'verifying' | 'extracting' | 'installing' | 'cancelling'
 
 export interface ResourceDownloadProgress {
@@ -120,7 +115,6 @@ export interface ModelResourceStatusPayload {
   sherpaOnline: SherpaResourceStatus
   embedding: EmbeddingResourceStatus
   tts: TtsResourceStatus
-  gptSovits: GptSovitsResourceStatus
   activeDownloads: ResourceDownloadProgress[]
   resumableDownloads: ResumableResourceDownload[]
 }
@@ -129,7 +123,7 @@ export interface ResourceProgressSnapshot {
   activeDownloads: ResourceDownloadProgress[]
 }
 
-export type ManagedModelResourceId = 'soulx' | 'gpt_sovits' | 'sherpa' | 'sherpa_online' | 'embedding' | 'tts'
+export type ManagedModelResourceId = 'soulx' | 'sherpa' | 'sherpa_online' | 'embedding' | 'tts'
 
 export type ResourceFailureCode =
   | 'cancelled'

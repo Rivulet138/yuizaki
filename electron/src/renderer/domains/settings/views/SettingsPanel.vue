@@ -1385,7 +1385,6 @@ const resourceDownloadOptions = computed<ResourceDownloadOption[]>(() => {
     { ...status.tts.metadata, id: 'tts', label: 'Genie TTS', ready: status.tts.ready },
     { ...status.embedding.metadata, id: 'embedding', label: '长期记忆嵌入', ready: status.embedding.ready },
     { ...status.soulx.metadata, id: 'soulx', label: 'SoulX 变声', ready: status.soulx.ready },
-    { ...status.gptSovits.metadata, id: 'gpt_sovits', label: 'GPT-SoVITS（本地导入）', ready: status.gptSovits.ready },
   ]
   return options.map((item) => ({
     ...item,
@@ -2343,9 +2342,6 @@ const prepareResource = async (resourceId: ManagedModelResourceId) => {
       break
     case 'soulx':
       await runResourceCommand('soulx-download', () => resourceClient.prepareSoulx(), [resourceId])
-      break
-    case 'gpt_sovits':
-      await runResourceCommand('gpt-sovits-check', () => resourceClient.prepare([resourceId]), [resourceId])
       break
     case 'sherpa':
       await runResourceCommand('sherpa-download', () => resourceClient.prepareSherpa(), [resourceId])

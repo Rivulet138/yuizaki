@@ -214,30 +214,6 @@
       <el-card class="resource-card" shadow="never">
         <template #header>
           <div class="card-header">
-            <span>GPT-SoVITS（本地导入）</span>
-            <el-tag :type="resourceTagType(resourceView.gptSovits.state)">{{ resourceView.gptSovits.message }}</el-tag>
-          </div>
-        </template>
-        <div class="resource-details">
-          <div><strong>模型目录</strong><code class="resource-path">{{ resourceView.gptSovits.modelDir }}</code></div>
-          <div><strong>体积</strong><el-tag size="small" type="info">约 4.94 GiB · 不自动下载</el-tag></div>
-        </div>
-        <div class="button-row resource-actions">
-          <el-button type="primary" plain :loading="resourceActionLoading('gpt-sovits-check')" @click="emit('prepare-resource', 'gpt_sovits')">检查本地资源</el-button>
-          <el-button
-            v-if="resourceView.gptSovits.state !== 'missing'"
-            type="danger"
-            plain
-            :icon="Delete"
-            :loading="resourceActionLoading('remove-gpt_sovits')"
-            @click="emit('remove-resource', 'gpt_sovits', 'GPT-SoVITS', resourceView.gptSovits.metadata)"
-          >永久卸载</el-button>
-        </div>
-      </el-card>
-
-      <el-card class="resource-card" shadow="never">
-        <template #header>
-          <div class="card-header">
             <span>Sherpa SenseVoice</span>
             <el-tag :type="resourceTagType(resourceView.sherpa.state)">{{ resourceView.sherpa.message }}</el-tag>
           </div>
@@ -391,7 +367,6 @@ const formatStorageBytes = (value: number): string => {
 const formatResourceDownloadBytes = (value: number): string => value > 0 ? formatStorageBytes(value) : '按模型'
 const resourceProgressLabels: Record<ManagedModelResourceId, string> = {
   soulx: 'SoulX 变声',
-  gpt_sovits: 'GPT-SoVITS',
   sherpa: '离线语音识别',
   sherpa_online: '流式语音识别',
   embedding: '长期记忆嵌入',
@@ -411,7 +386,7 @@ const storageCategoryLabel = (id: StorageCategoryId) => t(`settings.storage.cate
 
 const updateSelectedResourceIds = (value: unknown) => {
   if (!Array.isArray(value)) return
-  const allowed = new Set<ManagedModelResourceId>(['soulx', 'gpt_sovits', 'sherpa', 'sherpa_online', 'embedding', 'tts'])
+  const allowed = new Set<ManagedModelResourceId>(['soulx', 'sherpa', 'sherpa_online', 'embedding', 'tts'])
   emit('update:selectedResourceIds', value.filter((id): id is ManagedModelResourceId => allowed.has(id as ManagedModelResourceId)))
 }
 
