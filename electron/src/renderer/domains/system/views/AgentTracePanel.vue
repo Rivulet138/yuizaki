@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="任务" tone="admin">
+  <PanelShell title="任务追踪" tone="admin">
     <template #actions>
       <el-button size="small" plain :disabled="!selectedTrace" @click="downloadDiagnosticBundle">导出诊断</el-button>
       <el-button size="small" plain :loading="refreshLoading" @click="refreshAll">刷新</el-button>

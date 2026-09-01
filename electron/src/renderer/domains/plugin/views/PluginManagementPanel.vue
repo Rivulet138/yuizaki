@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="桌宠插件" tone="companion">
+  <PanelShell title="插件管理" tone="companion">
     <div class="plugin-console">
 <section class="plugin-toolbar" aria-label="插件操作">
         <div class="toolbar-summary">

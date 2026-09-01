@@ -1,6 +1,6 @@
 
 <template>
-  <PanelShell title="记忆管理" tone="companion" density="compact">
+  <PanelShell title="长期记忆" tone="companion" density="compact">
     <template #status><span class="local-status" role="status">本机保存 · {{ scopeLabel(currentMemoryScope) }} · 索引 {{ indexStatusLabel }}</span></template>
     <template #actions>
       <label class="scope-control"><span>当前范围</span><el-select :model-value="currentMemoryScope" size="small" :disabled="workspaceScopeSaving" aria-label="当前记忆范围" @change="updateDefaultMemoryScope"><el-option v-for="scope in memoryScopeOptions" :key="scope.value" :label="scope.label" :value="scope.value" :disabled="scope.value === 'session' && !sessionStore.activeSession" /></el-select></label>

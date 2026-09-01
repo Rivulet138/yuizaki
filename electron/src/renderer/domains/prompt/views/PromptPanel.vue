@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="提示词设置" tone="companion">
+  <PanelShell title="人格设定" tone="companion">
     <div class="prompt-panel">
       <section class="prompt-status-grid" aria-label="提示词状态">
         <article v-for="item in promptStatusItems" :key="item.key" class="prompt-status-item" :class="`is-${item.tone}`">

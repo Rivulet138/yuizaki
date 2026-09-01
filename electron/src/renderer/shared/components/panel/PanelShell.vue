@@ -65,7 +65,7 @@ withDefaults(defineProps<{
 }
 
 .panel-shell--compact {
-  gap: 12px;
+  gap: 8px;
 }
 
 .panel-shell__header {
@@ -73,8 +73,8 @@ withDefaults(defineProps<{
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  margin-bottom: 14px;
-  padding-bottom: 12px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
   border-bottom: 1px solid var(--yui-border);
   flex-shrink: 0;
 }
@@ -114,12 +114,16 @@ withDefaults(defineProps<{
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 0;
   padding-right: 4px;
   scrollbar-gutter: stable;
+}
+
+.panel-shell--compact .panel-shell__body {
+  gap: 10px;
 }
 
 .panel-shell--minimal .panel-shell__body {

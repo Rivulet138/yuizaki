@@ -162,7 +162,7 @@ watch(activeMenuId, (menuId) => {
 .menu {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 5px;
   min-height: 0;
   overflow-y: auto;
 }

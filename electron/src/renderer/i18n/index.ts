@@ -653,7 +653,7 @@ const messages = {
     'settings.theme.dark': '深色',
     'settings.theme.light': '浅色',
     'settings.theme.system': '跟随系统',
-    'settings.title': '设置',
+    'settings.title': '系统设置',
     'settings.subtitle': '保存模型、语音、界面和记忆参数；修改后立即应用到运行时',
     'settings.portable.title': '便携设置',
     'settings.portable.description': '将当前运行配置导出为可迁移的 JSON 文件，或从其他 Yuizaki 实例导入。',

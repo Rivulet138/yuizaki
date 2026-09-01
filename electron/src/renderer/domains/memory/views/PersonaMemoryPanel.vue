@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="行为运行调试" tone="admin">
+  <PanelShell title="行为记录" tone="admin">
     <div class="persona-panel">
       <div class="panel-toolbar">
         <div>

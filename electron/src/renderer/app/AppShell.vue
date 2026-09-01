@@ -444,7 +444,7 @@ watch(
 }
 
 .app-main.panel-mode {
-  padding: 14px 18px 18px;
+  padding: 12px 14px 14px;
   border-color: var(--yui-panel-outline);
   background: var(--yui-panel-surface);
   background-clip: padding-box;
@@ -566,7 +566,7 @@ watch(
   }
 
   .app-main.panel-mode {
-    padding: 14px;
+    padding: 12px;
   }
 
   .wallpaper-layer,
@@ -588,7 +588,7 @@ watch(
   }
 
   .app-main.panel-mode {
-    padding: 10px;
+    padding: 8px;
   }
 
 }
@@ -1054,7 +1054,8 @@ watch(
 }
 
 .yuizaki-bg .app-main.panel-mode > .view-host > .view-component > .panel-shell {
-  background: var(--yui-panel-surface-strong, var(--yui-panel-surface));
+  background: transparent;
+  box-shadow: none;
 }
 
 .yuizaki-bg .el-table,

@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="权限" tone="admin">
+  <PanelShell title="权限审计" tone="admin">
     <div class="governance-console">
       <section class="governance-toolbar" aria-label="治理操作">
         <div>
