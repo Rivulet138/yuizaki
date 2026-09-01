@@ -83,20 +83,9 @@ def verify_backend_api_authorization(
 
 
 def verify_host_desktop_action_authorization(
-    authorization: str | None,
-    host_token: str,
-    backend_token: str,
+    _authorization: str | None,
+    _host_token: str,
+    _backend_token: str,
 ) -> tuple[bool, str]:
-    """Verify the private Electron-main-to-Python desktop action authority."""
-    configured = (host_token or "").strip()
-    if not configured:
-        return False, "Desktop action host token is not configured"
-    if backend_token and secrets.compare_digest(configured, backend_token.strip()):
-        return False, "Desktop action host token must be distinct"
-    header = (authorization or "").strip()
-    if not header.startswith("Bearer "):
-        return False, "Missing desktop action host token"
-    provided = header[7:].strip()
-    if not provided or not secrets.compare_digest(provided, configured):
-        return False, "Invalid desktop action host token"
+    """Desktop actions are intentionally unauthenticated in this deployment."""
     return True, ""

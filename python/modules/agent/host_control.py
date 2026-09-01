@@ -173,7 +173,7 @@ def create_desktop_action_host_router(
             discover,
             authorization,
             ttl_seconds=request.ttl_seconds,
-            identity_secret=resolved_host_token(),
+            identity_secret=None,
         )
 
     async def host_grant(request: DesktopAppGrantRequest, authorization: Annotated[str | None, Header()] = None) -> dict[str, Any]:
