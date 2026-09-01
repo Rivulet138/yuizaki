@@ -68,91 +68,6 @@
           </div>
         </el-card>
 
-        <div class="voice-side">
-          <el-card class="voice-card" shadow="never">
-            <template #header>
-              <div class="card-header">
-                <div>
-              <strong>{{ t('settings.tts.service') }}</strong>
-                </div>
-                <el-button size="small" type="primary" plain :loading="testingTts" :disabled="testingTts" @click="testTts">{{ t('settings.tts.test') }}</el-button>
-              </div>
-            </template>
-            <el-form label-position="top" @submit.prevent>
-              <div class="form-row">
-                <el-form-item :label="t('settings.tts.character')">
-                  <el-input v-model="voiceConfig.tts.genie_character" :aria-label="t('settings.tts.character')" @change="saveTtsSettings({ genie_character: String($event) })" />
-                </el-form-item>
-                <el-form-item :label="t('settings.tts.modelDir')">
-                  <el-input v-model="voiceConfig.tts.genie_model_dir" @change="saveTtsSettings({ genie_model_dir: String($event) })" />
-                </el-form-item>
-              </div>
-              <div class="form-row">
-                <el-form-item :label="t('settings.tts.lang')">
-                  <el-select v-model="voiceConfig.tts.lang" @change="saveTtsSettings({ lang: String($event) })">
-                    <el-option :label="t('settings.tts.lang.zh')" value="zh" />
-                    <el-option :label="t('settings.tts.lang.ja')" value="ja" />
-                    <el-option :label="t('settings.tts.lang.en')" value="en" />
-                    <el-option :label="t('common.auto')" value="auto" />
-                  </el-select>
-                </el-form-item>
-                <el-form-item :label="t('settings.tts.provider')">
-                  <el-tag class="genie-provider-tag" type="success">{{ t('settings.tts.genieProvider') }}</el-tag>
-                </el-form-item>
-              </div>
-              <el-form-item :label="t('settings.tts.referenceAudio')">
-                <el-input v-model="voiceConfig.tts.ref_audio" :placeholder="t('settings.tts.referenceAudioPlaceholder')" @change="saveTtsSettings({ ref_audio: String($event) })" />
-              </el-form-item>
-              <el-form-item :label="t('settings.tts.referenceText')">
-                <el-input v-model="voiceConfig.tts.ref_text" type="textarea" :rows="2" resize="none" @change="saveTtsSettings({ ref_text: String($event) })" />
-              </el-form-item>
-            </el-form>
-          </el-card>
-
-          <el-card class="voice-card" shadow="never">
-            <template #header>
-              <div class="card-header">
-                <div>
-              <strong>{{ t('settings.asr.title') }}</strong>
-                </div>
-                <el-tag type="info">Socket.IO</el-tag>
-              </div>
-            </template>
-            <el-form label-position="top" @submit.prevent>
-              <div class="form-row">
-                <el-form-item :label="t('settings.asr.provider')">
-                  <el-select
-                    v-model="voiceConfig.asr.provider"
-                    :aria-label="t('settings.asr.provider')"
-                    @change="saveAsrSettings({ provider: String($event) as SettingsResponse['asr']['provider'] })"
-                  >
-                    <el-option label="SenseVoice Service" value="sensevoice-service" />
-                    <el-option label="FunASR Service" value="funasr-service" />
-                    <el-option label="OpenAI Compatible" value="openai-compatible" />
-                    <el-option label="Sherpa ONNX" value="sherpa-onnx" />
-                    <el-option label="Sherpa Streaming + SenseVoice" value="sherpa-onnx-online" />
-                    <el-option label="SenseVoice Local" value="sensevoice-local" />
-                    <el-option :label="t('common.disabled')" value="disabled" />
-                  </el-select>
-                </el-form-item>
-                <el-form-item v-if="voiceConfig.asr.provider !== 'disabled'" :label="t('settings.asr.languageHint')">
-          <el-input v-model="voiceConfig.asr.language" placeholder="zh / ja / en" @change="saveAsrSettings({ language: String($event) })" />
-                </el-form-item>
-              </div>
-              <div v-if="voiceConfig.asr.provider !== 'disabled'" class="form-row">
-                <el-form-item v-if="voiceConfig.asr.provider !== 'sherpa-onnx-online'" :label="t('settings.asr.partialInterval')">
-                  <el-input-number v-model="voiceConfig.asr.asr_partial_every" :min="1" :max="30" controls-position="right" @change="saveAsrSettings({ asr_partial_every: Number($event) })" />
-                </el-form-item>
-                <el-form-item :label="t('settings.asr.endpointSilenceCap', { value: voiceConfig.asr.vad_min_silence_ms })">
-                  <el-input-number v-model="voiceConfig.asr.vad_min_silence_ms" :min="160" :max="1200" :step="32" controls-position="right" @change="saveAsrSettings({ vad_min_silence_ms: Number($event) })" />
-                </el-form-item>
-              </div>
-              <el-form-item v-if="voiceConfig.asr.provider !== 'disabled'" :label="t('settings.asr.vadThreshold', { value: voiceConfig.asr.vad_threshold.toFixed(2) })">
-                <el-slider v-model="voiceConfig.asr.vad_threshold" :min="0.1" :max="0.9" :step="0.05" @change="saveAsrSettings({ vad_threshold: Number($event) })" />
-              </el-form-item>
-            </el-form>
-          </el-card>
-        </div>
       </section>
     </div>
   </PanelShell>
@@ -166,7 +81,6 @@ import { t } from '@/i18n'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import { API_ORIGIN, requestJson, resolveBackendUrl } from '@/api/clients/http-client'
 import { settingsClient, type SettingsResponse } from '@/api/clients/settings-client'
-import { DEFAULT_VAD_MIN_SILENCE_MS } from '@/../shared/runtime-defaults'
 
 interface SvcConvertResponse {
   status?: string
@@ -178,40 +92,9 @@ interface SvcConvertResponse {
 type SaveTimeout = ReturnType<typeof window.setTimeout>
 type SettingsPatch = Record<string, unknown>
 type AlertType = 'success' | 'warning' | 'info' | 'error'
-type TtsSettingsPatch = Partial<SettingsResponse['tts']>
-type AsrSettingsPatch = Partial<SettingsResponse['asr']>
 type SvcSettingsPatch = Partial<SettingsResponse['svc']>
 
-const defaultVoiceConfig: Pick<SettingsResponse, 'tts' | 'asr' | 'svc'> = {
-  tts: {
-    genie_character: '',
-    genie_model_dir: '',
-    lang: 'zh',
-    ref_audio: '',
-    ref_text: '',
-    device: 'cpu',
-    quality: '质量优先',
-    split: '智能切分',
-    mode: '串行推理',
-    save_mode: '禁用自动保存',
-    provider: 'genie-tts',
-  },
-  asr: {
-    provider: 'sherpa-onnx-online',
-    base_url: '',
-    api_key: '',
-    timeout: 60,
-    sensevoice_model: 'iic/SenseVoiceSmall',
-    sensevoice_device: 'cpu',
-    sherpa_model_path: '',
-    sherpa_tokens_path: '',
-    sherpa_num_threads: 2,
-    sherpa_provider: 'cpu',
-    language: 'zh',
-    vad_threshold: 0.5,
-    vad_min_silence_ms: DEFAULT_VAD_MIN_SILENCE_MS,
-    asr_partial_every: 15,
-  },
+const defaultVoiceConfig: Pick<SettingsResponse, 'svc'> = {
   svc: {
     provider: 'soulx-service',
     base_url: '',
@@ -221,10 +104,9 @@ const defaultVoiceConfig: Pick<SettingsResponse, 'tts' | 'asr' | 'svc'> = {
   },
 }
 
-const voiceConfig = reactive<Pick<SettingsResponse, 'tts' | 'asr' | 'svc'>>(structuredClone(defaultVoiceConfig))
+const voiceConfig = reactive<Pick<SettingsResponse, 'svc'>>(structuredClone(defaultVoiceConfig))
 const selectedFile = ref<File | null>(null)
 const settingsLoading = ref(false)
-const testingTts = ref(false)
 const isConverting = ref(false)
 const conversionPitch = ref(0)
 const resultAudioUrl = ref('')
@@ -271,7 +153,7 @@ const svcReadinessMessage = computed(() => {
 const canStartConversion = computed(() => {
   return Boolean(selectedFile.value && svcModelReady.value && !isConverting.value)
 })
-const runtimeSummary = computed(() => `${t('settings.tts.genieProvider')} 路 ${voiceConfig.asr.provider} 路 ${voiceConfig.svc.provider}`)
+const runtimeSummary = computed(() => `SoulX · ${voiceConfig.svc.provider}`)
 const voiceSaveStatusVisible = computed(() => voiceSaveStatus.value !== 'idle')
 const voiceSaveAlertType = computed<AlertType>(() => {
   if (voiceSaveStatus.value === 'error') return 'error'
@@ -294,9 +176,6 @@ const voiceSaveStatusDetail = computed(() => {
 })
 
 const applySettings = (settings: SettingsResponse) => {
-  Object.assign(voiceConfig.tts, settings.tts)
-  voiceConfig.tts.provider = 'genie-tts'
-  Object.assign(voiceConfig.asr, settings.asr)
   Object.assign(voiceConfig.svc, settings.svc)
   conversionPitch.value = settings.svc.pitch
 }
@@ -369,15 +248,6 @@ const flushPendingSave = async () => {
   return savePatch(currentPatch)
 }
 
-const saveTtsSettings = (patch: TtsSettingsPatch) => {
-  voiceConfig.tts.provider = 'genie-tts'
-  scheduleSave({ tts: patch })
-}
-
-const saveAsrSettings = (patch: AsrSettingsPatch) => {
-  scheduleSave({ asr: patch })
-}
-
 const saveSvcSettings = (patch: SvcSettingsPatch) => {
   scheduleSave({ svc: patch })
 }
@@ -392,24 +262,6 @@ const saveSvcPitch = (value: number | number[]) => {
   const pitch = Array.isArray(value) ? value[0] ?? 0 : value
   voiceConfig.svc.pitch = pitch
   saveSvcSettings({ pitch })
-}
-
-const testTts = async () => {
-  if (testingTts.value) return
-  if (!(await flushPendingSave())) return
-  testingTts.value = true
-  try {
-    const result = await settingsClient.testTts()
-    if (result.ok === false) {
-      ElMessage.error(result.message || t('svcPanel.ttsFailed'))
-      return
-    }
-    ElMessage.success(result.message || t('svcPanel.ttsDone'))
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : t('svcPanel.ttsFailed'))
-  } finally {
-    testingTts.value = false
-  }
 }
 
 const handleFileChange = (uploadFile: UploadFile) => {
@@ -532,19 +384,9 @@ onUnmounted(() => {
 
 .voice-grid {
   display: grid;
-  grid-template-columns: minmax(360px, 0.95fr) minmax(420px, 1.2fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   min-height: 0;
-}
-
-.voice-side {
-  display: grid;
-  gap: 16px;
-}
-
-.genie-provider-tag {
-  min-height: 32px;
-  align-items: center;
 }
 
 .upload-icon {

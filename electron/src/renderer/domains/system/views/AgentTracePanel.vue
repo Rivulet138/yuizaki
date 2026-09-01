@@ -2017,33 +2017,6 @@ h3 {
   border-radius: 13px;
 }
 
-.canonical-links {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  margin-bottom: 14px;
-  color: var(--yui-muted);
-  font-size: 12px;
-}
-
-.canonical-links span {
-  font-weight: 700;
-}
-
-.canonical-links a {
-  color: var(--yui-accent);
-  font-weight: 700;
-  text-underline-offset: 3px;
-}
-
-.canonical-links a:focus-visible {
-  border-radius: 4px;
-  outline: 3px solid var(--yui-accent);
-  outline-offset: 2px;
-}
-
 @media (max-width: 1280px) {
   .experience-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -5,11 +5,6 @@
       <el-button plain :loading="overviewRefreshLoading" @click="refreshOverview">刷新</el-button>
     </template>
     <div class="overview-console">
-      <nav class="canonical-links" :aria-label="t('canonical.system.aria')">
-        <router-link :to="canonicalPath('infrastructure')">{{ t('canonical.system.diagnostics') }}</router-link>
-        <router-link :to="canonicalPath('deploy')">{{ t('canonical.system.runtimeChecks') }}</router-link>
-      </nav>
-
       <nav class="overview-view-nav" aria-label="状态视图" role="tablist">
         <button
           v-for="view in overviewViews"
@@ -1742,33 +1737,6 @@ onDeactivated(() => {
 
 .compact-actions {
   margin-top: 12px;
-}
-
-.canonical-links {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  margin-bottom: 14px;
-  color: var(--yui-muted);
-  font-size: 12px;
-}
-
-.canonical-links span {
-  font-weight: 700;
-}
-
-.canonical-links a {
-  color: var(--yui-accent);
-  font-weight: 700;
-  text-underline-offset: 3px;
-}
-
-.canonical-links a:focus-visible {
-  border-radius: 4px;
-  outline: 3px solid var(--yui-accent);
-  outline-offset: 2px;
 }
 
 .ops-card-head > div:first-child > span {

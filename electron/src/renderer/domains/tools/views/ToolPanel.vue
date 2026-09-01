@@ -20,11 +20,6 @@
       </nav>
 
       <div v-show="activeToolView === 'status'" class="tool-view-stack">
-      <nav class="canonical-links" :aria-label="t('canonical.capabilities.aria')">
-        <span>{{ t('canonical.capabilities.label') }}</span>
-        <router-link :to="canonicalPath('plugins')">{{ t('canonical.capabilities.plugins') }}</router-link>
-        <router-link :to="canonicalPath('agent-governance')">{{ t('canonical.capabilities.governance') }}</router-link>
-      </nav>
       <section class="tool-health panel-card" aria-label="本地能力状态">
         <button
           v-for="item in healthItems"
@@ -40,32 +35,6 @@
         </button>
       </section>
 
-      <section class="mcp-summary panel-card">
-        <div class="section-heading">
-          <div>
-            <h3>MCP 服务</h3>
-            <p>{{ mcpRows.length }} 台 · {{ mcpConnectedCount }} 连 · {{ mcpErrorCount }} 异常 · {{ mcpDisabledCount }} 关闭</p>
-          </div>
-          <div class="section-actions">
-            <el-button plain :icon="Refresh" :loading="loadingMcp" @click="loadMcpServers">刷新</el-button>
-            <router-link class="governance-link" :to="canonicalPath('agent-governance')">管理 MCP</router-link>
-          </div>
-        </div>
-
-        <el-alert v-if="mcpLoadError" class="panel-alert" type="warning" :closable="false" show-icon>
-          <div class="alert-row">
-            <span>{{ mcpLoadError }}</span>
-            <el-button size="small" text :loading="loadingMcp" @click.stop="loadMcpServers">重试</el-button>
-          </div>
-        </el-alert>
-
-        <div v-if="mcpRows.length" class="mcp-status-line" aria-label="MCP 状态摘要">
-          <span><i class="connected"></i>{{ mcpConnectedCount }} 已连接</span>
-          <span><i class="error"></i>{{ mcpErrorCount }} 异常</span>
-          <span><i class="disabled"></i>{{ mcpDisabledCount }} 未启用</span>
-        </div>
-        <el-empty v-else description="暂无 MCP 服务" :image-size="48" />
-      </section>
       </div>
 
       <section v-show="activeToolView === 'stream'" class="stream-summary panel-card" aria-label="直播能力状态">
@@ -599,8 +568,6 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Check, Close, Delete, Refresh, Search, Upload } from '@element-plus/icons-vue'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import { pluginClient, systemClient } from '@/api/client'
-import { useWorkspaceStore } from '@/stores/workspaceStore'
-import { useI18n } from '@/i18n'
 import { curatedSkillRecommendations } from '../skillRecommendations'
 import type { PluginLoadFailure, PluginRuntimeState, PluginToolCapabilityContribution } from '../../../../shared/plugin'
 import type { CapabilityDescriptor, CapabilityKind, CapabilityRiskLevel, SkillCatalogItem, StreamActionRecord, StreamActionsSnapshot, StreamCapabilityDescriptor, StreamDraftConsumerSnapshot, StreamDraftsSnapshot, StreamExecuteResponse, StreamLocalEvent, StreamObsProfile, StreamReplyDraft, StreamRuntimeSnapshot } from '../../../../shared/capability'
@@ -620,9 +587,6 @@ type ToolViewId = 'status' | 'stream' | 'capabilities' | 'skills' | 'history'
 const IMPORTED_SKILLS_STORAGE_KEY = 'yuizaki.importedSkills'
 const IMPORTED_SKILLS_MIGRATION_KEY = 'yuizaki.importedSkills.backendMigrated'
 const IMPORTED_SKILLS_DIRTY_KEY = 'yuizaki.importedSkills.localDirty'
-const workspaceStore = useWorkspaceStore()
-const { t } = useI18n()
-const canonicalPath = (moduleId: string) => `/w/${workspaceStore.activeWorkspaceId}/${moduleId}`
 const toolViews: Array<{ id: ToolViewId; label: string }> = [
   { id: 'status', label: '状态' },
   { id: 'stream', label: '直播' },
@@ -879,9 +843,7 @@ const mcpRows = computed<MCPRow[]>(() => {
     })
     .sort((left, right) => Number(right.enabled) - Number(left.enabled) || left.name.localeCompare(right.name, 'zh-CN'))
 })
-const mcpConnectedCount = computed(() => mcpRows.value.filter(item => item.connected).length)
-const mcpErrorCount = computed(() => mcpRows.value.filter(isMcpErrored).length)
-const mcpDisabledCount = computed(() => mcpRows.value.filter(item => !item.enabled).length)
+const mcpErrorCount = computed(() => mcpLoadError.value ? 1 : mcpRows.value.filter(isMcpErrored).length)
 const streamCapabilities = computed<StreamCapabilityDescriptor[]>(() => streamSnapshot.value?.capabilities ?? [])
 const streamDraftByEventId = computed(() => {
   const index = new Map<string, StreamReplyDraft>()
@@ -2514,7 +2476,6 @@ onMounted(async () => {
 .tone-rose strong { color: #e11d48; }
 .tone-emerald strong { color: #059669; }
 
-.mcp-summary,
 .stream-summary,
 .skill-catalog,
 .plugin-panel,
@@ -2908,16 +2869,6 @@ onMounted(async () => {
   gap: 8px;
 }
 
-.governance-link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 30px;
-  color: var(--yui-accent);
-  font-size: 12px;
-  font-weight: 800;
-  text-decoration: none;
-}
-
 .file-input {
   display: none;
 }
@@ -2958,32 +2909,6 @@ onMounted(async () => {
   font-size: 13px;
   font-weight: 850;
 }
-
-.mcp-status-line {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px 18px;
-}
-
-.mcp-status-line span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--yui-muted);
-  font-size: 12px;
-}
-
-.mcp-status-line i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--yui-muted);
-}
-
-.mcp-status-line i.connected { background: #059669; }
-.mcp-status-line i.error { background: #dc2626; }
-.mcp-status-line i.disabled { background: #94a3b8; }
 
 .capability-workspace {
   display: grid;
@@ -3335,33 +3260,6 @@ onMounted(async () => {
 :deep(.el-input__wrapper),
 :deep(.el-select__wrapper) {
   border-radius: 10px;
-}
-
-.canonical-links {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  margin-bottom: 14px;
-  color: var(--yui-muted);
-  font-size: 12px;
-}
-
-.canonical-links span {
-  font-weight: 700;
-}
-
-.canonical-links a {
-  color: var(--yui-accent);
-  font-weight: 700;
-  text-underline-offset: 3px;
-}
-
-.canonical-links a:focus-visible {
-  border-radius: 4px;
-  outline: 3px solid var(--yui-accent);
-  outline-offset: 2px;
 }
 
 @media (max-width: 1180px) {
