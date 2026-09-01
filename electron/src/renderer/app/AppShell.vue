@@ -1,6 +1,18 @@
 <template>
   <div class="yuizaki-bg" :class="{ 'browser-mode': !isElectronPanel }">
-    <div class="shell cherry-shell">
+    <BrowserStageView
+      v-if="!isElectronPanel"
+      :current-wallpaper="currentWallpaper"
+      :active-tab="activeTab"
+      :menus="menus"
+      :active-workspace="activeWorkspace"
+      :companion-id="activeWorkspace.companion_profile_id || companionStore.activeCompanionId"
+      :companion-state-label="companionStateLabel"
+      @toggle-theme="toggleTheme"
+      @change-locale="handleLocaleChange"
+    />
+
+    <div v-else class="shell cherry-shell">
       <AppSidebar
         :active-workspace-id="activeWorkspace.id"
         :menus="menus"
@@ -96,6 +108,7 @@ import { logger } from '@/logger'
 import { adminNavigationModules, isPanelKey, primaryNavigationModules, type NavigationModuleId } from '@/navigation/modules'
 import AppSidebar from './AppSidebar.vue'
 import AppTopbar from './AppTopbar.vue'
+import BrowserStageView from './BrowserStageView.vue'
 import GlobalDialogs from './components/dialogs/GlobalDialogs.vue'
 import { useAppOrchestrator } from './orchestrators/useAppOrchestrator'
 import { useVoiceConversationBridge } from './composables/useVoiceConversationBridge'

@@ -1364,6 +1364,21 @@ class PetRenderer {
 		}
 	}
 
+	/** Apply and load a renderer configuration from the browser scene without Electron IPC. */
+	async applyBrowserConfig(patch: PetControlConfigPatch): Promise<void> {
+		const { modelPath, ...configPatch } = patch;
+		this.applyConfig(configPatch, false);
+		if (typeof modelPath !== "string" || !modelPath.trim()) {
+			return;
+		}
+		const resolvedModelPath =
+			/^https?:\/\//i.test(modelPath) || modelPath.startsWith("file:")
+				? modelPath
+				: resolveRendererAsset(modelPath);
+		this.config.modelPath = resolvedModelPath;
+		await this.loadModel(resolvedModelPath);
+	}
+
 	private applyModelTransform(): void {
 		if (this.config.modelType === "vrm") {
 			this.vrmRuntime?.applyConfig({

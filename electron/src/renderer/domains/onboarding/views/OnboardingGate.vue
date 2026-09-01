@@ -151,6 +151,7 @@ import OnboardingModelSetup from '../components/OnboardingModelSetup.vue'
 import OnboardingReadinessRail from '../components/OnboardingReadinessRail.vue'
 import { ONBOARDING_OPEN_EVENT } from '../onboardingEvents'
 import { enumerateAudioDevices } from '@/audio/audio-capture'
+import { CONTROL_ORIGIN, requestJson } from '@/api/clients/http-client'
 
 const COMPLETION_KEY = 'yuizaki.onboarding.completed.v1'
 const OPTIONAL_PROBES: OnboardingProbeId[] = ['tts.status', 'asr.runtime', 'database.status', 'memory.status', 'host.avatar']
@@ -175,9 +176,20 @@ const onboardingBackgroundStyle = computed(() => ({
   '--onboarding-wallpaper': yuizakiConfig.slides[0] ? `url("${yuizakiConfig.slides[0]}")` : 'none',
 }))
 
-const onboardingApi = computed(() => window.petApi?.onboarding)
+const browserOnboardingApi = {
+  snapshot: () => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/snapshot`),
+  startBackend: () => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/backend/start`, { method: 'POST', body: '{}' }),
+  cancelBackend: () => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/backend/cancel`, { method: 'POST', body: '{}' }),
+  cancelRun: (request: { runId: string }) => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/cancel`, { method: 'POST', body: JSON.stringify(request) }),
+  // Device probes are browser-local; the control service has no matching HTTP route.
+  reportDeviceProbe: async (_report: OnboardingDeviceProbeReport) => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/snapshot`),
+  runProbe: (request: { probeIds?: OnboardingProbeId[] } = {}) => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/run`, { method: 'POST', body: JSON.stringify(request) }),
+  retry: (request: { runId: string; probeIds?: OnboardingProbeId[] }) => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/retry`, { method: 'POST', body: JSON.stringify(request) }),
+  runRepair: (request: { actionId: OnboardingRepairActionId }) => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/repair`, { method: 'POST', body: JSON.stringify(request) }),
+}
+const onboardingApi = computed(() => window.petApi?.onboarding ?? browserOnboardingApi)
 const isElectronPanel = computed(() => Boolean(window.petApi?.window))
-const showApplication = computed(() => !onboardingApi.value || (completed.value && !reopened.value))
+const showApplication = computed(() => completed.value && !reopened.value)
 const backendStartActive = computed(() => snapshot.value?.operation === 'backend_start' ||
   (snapshot.value?.operation !== 'probe_scan' && backendStartPending.value))
 const runActive = computed(() => backendStartActive.value ||
