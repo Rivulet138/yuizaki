@@ -8,20 +8,12 @@
         </div>
       </section>
 
-      <section class="metric-grid" aria-label="运行状态概况">
-        <article v-for="metric in metrics" :key="metric.label" class="metric-card" :class="metric.tone">
-          <span>{{ metric.label }}</span>
-          <strong>{{ metric.value }}</strong>
-          <small>{{ metric.detail }}</small>
-        </article>
-      </section>
-
       <section class="deploy-grid">
         <el-card class="panel-card health-card" shadow="never">
           <template #header>
             <div class="card-head">
               <div>
-                <strong>必需检查 {{ passedRequiredChecks }} / {{ requiredCheckCount }}</strong>
+                <strong>后端状态</strong>
               </div>
               <el-tag :type="health.healthy ? 'success' : 'danger'">{{ health.healthy ? '后端在线' : '等待连接' }}</el-tag>
             </div>
@@ -47,17 +39,6 @@
             </el-button>
           </div>
           <el-alert v-if="actionError" class="panel-alert" :title="actionError" type="error" show-icon :closable="false" />
-          <div class="service-grid">
-            <article v-for="svc in serviceChecks" :key="svc.name" class="service-item" :class="svc.ok ? 'ok' : svc.required ? 'blocked' : 'optional'">
-              <div>
-                <strong>{{ svc.label }}</strong>
-                <span>{{ svc.message }}</span>
-              </div>
-              <el-tag size="small" :type="svc.ok ? 'success' : svc.required ? 'danger' : 'warning'">
-                {{ svc.ok ? '通过' : svc.required ? '阻塞' : '可选' }}
-              </el-tag>
-            </article>
-          </div>
         </el-card>
 
         <el-card class="panel-card runway-card" shadow="never">
@@ -72,9 +53,7 @@
           <div class="runway-list">
             <article v-for="step in deploySteps" :key="step.id" class="runway-step" :class="step.status">
               <div class="step-index">{{ step.index }}</div>
-              <div>
-                <strong>{{ step.title }}</strong>
-              </div>
+              <strong>{{ step.title }}</strong>
               <el-tag size="small" :type="stepTagType(step.status)">{{ stepStatusLabel(step.status) }}</el-tag>
             </article>
           </div>
@@ -82,7 +61,7 @@
       </section>
 
       <section class="deploy-grid lower-grid">
-        <el-card class="panel-card provider-card" shadow="never">
+        <el-card v-if="providers.length || providersLoading || providersError" class="panel-card provider-card" shadow="never">
           <template #header>
             <div class="card-head">
               <div>
@@ -95,7 +74,7 @@
           </template>
           <el-alert v-if="providersError" :title="providersError" type="warning" show-icon :closable="false" />
           <div v-if="providersLoading && !providers.length" class="provider-empty">正在读取 provider 状态...</div>
-          <div v-else class="provider-grid">
+          <div v-else-if="providers.length" class="provider-grid">
             <article v-for="provider in providers" :key="provider.id" class="provider-item" :class="provider.healthy ? 'ok' : provider.configured ? 'degraded' : 'optional'">
               <div class="provider-item-head">
                 <strong>{{ provider.label }}</strong>
@@ -118,6 +97,7 @@
               >重新检查</el-button>
             </article>
           </div>
+          <div v-else class="provider-empty">后端在线后显示模型、ASR、TTS 和视觉状态</div>
         </el-card>
 
         <el-card class="panel-card command-card" shadow="never">
@@ -154,14 +134,6 @@ import { resolveBackendUrl } from '@/api/clients/http-client'
 import { buildDeployPlatformCommands, resolveDeployPlatform } from '../platform-commands'
 
 type StepStatus = 'done' | 'active' | 'pending' | 'blocked'
-
-interface ServiceCheck {
-  name: string
-  label: string
-  ok: boolean
-  required: boolean
-  message: string
-}
 
 const health = reactive({
   healthy: false,
@@ -364,71 +336,9 @@ const hasElectronPythonControls = computed(() => Boolean(window.petApi?.python?.
 const pythonControlHint = computed(() => hasElectronPythonControls.value ? '通过 Electron 主进程启停后端' : '浏览器模式无法直接启停后端，请使用命令手册')
 const refreshing = computed(() => healthLoading.value || readinessLoading.value)
 
-const serviceChecks = computed<ServiceCheck[]>(() => [
-  {
-    name: 'python-api',
-    label: 'Python FastAPI',
-    ok: health.healthy,
-    required: true,
-    message: health.message,
-  },
-  {
-    name: 'readiness',
-    label: '摘要 / LLM 就绪',
-    ok: readiness.ready,
-    required: false,
-    message: readiness.message,
-  },
-  {
-    name: 'electron-bridge',
-    label: 'Electron 桥接',
-    ok: hasElectronPythonControls.value,
-    required: false,
-    message: hasElectronPythonControls.value ? '主进程 API 可直接启停后端' : '当前是浏览器降级模式，需要终端手动启停',
-  },
-  {
-    name: 'api-docs',
-    label: 'API 文档入口',
-    ok: health.healthy,
-    required: false,
-    message: health.healthy ? '可打开当前后端 /docs' : '后端在线后可访问 Swagger 文档',
-  },
-])
-
-const requiredCheckCount = computed(() => serviceChecks.value.filter((item) => item.required).length)
-const passedRequiredChecks = computed(() => serviceChecks.value.filter((item) => item.required && item.ok).length)
-const passedCheckCount = computed(() => serviceChecks.value.filter((item) => item.ok).length)
-
-const metrics = computed(() => [
-  {
-    label: '后端健康',
-    value: health.healthy ? '在线' : '离线',
-    detail: health.message,
-    tone: health.healthy ? 'green' : 'red',
-  },
-  {
-    label: '就绪闸门',
-    value: `${passedCheckCount.value}/${serviceChecks.value.length}`,
-    detail: '健康、就绪、桥接与文档入口',
-    tone: passedRequiredChecks.value === requiredCheckCount.value ? 'blue' : 'amber',
-  },
-  {
-    label: '运行模式',
-    value: hasElectronBridge.value ? '桌面' : '浏览器',
-    detail: hasElectronBridge.value ? '支持主进程启停' : '保留核心运行检查能力',
-    tone: hasElectronBridge.value ? 'green' : 'slate',
-  },
-  {
-    label: 'API 文档',
-    value: '/docs',
-    detail: 'Swagger / OpenAPI 调试入口',
-    tone: 'violet',
-  },
-])
-
 const overallStatusText = computed(() => {
   if (refreshing.value) return '正在刷新运行状态'
-  if (passedRequiredChecks.value === requiredCheckCount.value) return '必需闸门已通过'
+  if (health.healthy && readiness.ready) return '核心检查通过'
   return '等待后端健康'
 })
 
@@ -496,15 +406,9 @@ onMounted(() => {
   font-size: 12px;
 }
 
-.metric-grid,
-.deploy-grid,
-.service-grid {
+.deploy-grid {
   display: grid;
   gap: 14px;
-}
-
-.metric-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .deploy-grid {
@@ -537,47 +441,13 @@ onMounted(() => {
 .provider-item small { font-size: 11px; line-height: 1.45; }
 .provider-empty { padding: 14px; color: var(--yui-muted); }
 
-.service-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin-top: 14px;
-}
-
-.metric-card,
 .panel-card,
-.service-item,
 .runway-step,
 .command-item {
   border: 1px solid var(--yui-border);
   background: var(--yui-surface);
   box-shadow: var(--yui-shadow-card);
 }
-
-.metric-card {
-  display: flex;
-  min-height: 112px;
-  flex-direction: column;
-  justify-content: space-between;
-  padding: 16px;
-  border-radius: var(--yui-radius-card);
-}
-
-.metric-card span,
-.metric-card small {
-  color: var(--yui-muted);
-}
-
-.metric-card strong {
-  color: var(--yui-text);
-  font-size: 26px;
-  letter-spacing: 0;
-}
-
-.metric-card.green { background: var(--yui-success-soft); }
-.metric-card.blue,
-.metric-card.violet { background: var(--yui-accent-soft); }
-.metric-card.amber { background: var(--yui-warning-soft); }
-.metric-card.red { background: var(--yui-danger-soft); }
-.metric-card.slate { background: var(--yui-surface-muted); }
 
 .panel-card {
   border-radius: var(--yui-radius-card);
@@ -586,7 +456,6 @@ onMounted(() => {
 .card-head,
 .actions,
 .status-row,
-.service-item,
 .runway-step,
 .command-item {
   display: flex;
@@ -597,7 +466,6 @@ onMounted(() => {
 
 .card-head > div:first-child,
 .status-row > div:last-child,
-.service-item > div,
 .runway-step > div:nth-child(2),
 .command-item > div {
   display: flex;
@@ -632,14 +500,12 @@ onMounted(() => {
 }
 
 .status-row strong,
-.service-item strong,
 .runway-step strong,
 .command-item strong {
   color: var(--yui-text);
 }
 
 .status-row span,
-.service-item span,
 .runway-step span,
 .command-item span {
   color: var(--yui-muted);
@@ -658,26 +524,22 @@ onMounted(() => {
   border-radius: 14px;
 }
 
-.service-item,
 .runway-step,
 .command-item {
   padding: 12px;
   border-radius: var(--yui-radius-card);
 }
 
-.service-item.ok,
 .runway-step.done {
   border-color: rgba(34, 197, 94, 0.26);
   background: var(--yui-success-soft);
 }
 
-.service-item.blocked,
 .runway-step.blocked {
   border-color: rgba(239, 68, 68, 0.24);
   background: var(--yui-danger-soft);
 }
 
-.service-item.optional,
 .runway-step.active {
   border-color: rgba(245, 158, 11, 0.24);
   background: var(--yui-warning-soft);
@@ -712,10 +574,8 @@ onMounted(() => {
 }
 
 @media (max-width: 1180px) {
-  .metric-grid,
   .deploy-grid,
-  .lower-grid,
-  .service-grid {
+  .lower-grid {
     grid-template-columns: 1fr;
   }
 
@@ -732,14 +592,12 @@ onMounted(() => {
 
   .hero-actions,
   .card-head,
-  .service-item,
   .runway-step,
   .command-item {
     align-items: flex-start;
   }
 
   .card-head,
-  .service-item,
   .runway-step,
   .command-item {
     flex-direction: column;
