@@ -21,7 +21,7 @@ const resourceSummaryFallback = (message = '') => ({
   details: [] as string[],
 })
 
-const resourceIds = new Set<ManagedModelResourceId>(['soulx', 'sherpa', 'sherpa_online', 'embedding', 'tts'])
+const resourceIds = new Set<ManagedModelResourceId>(['soulx', 'gpt_sovits', 'sherpa', 'sherpa_online', 'embedding', 'tts'])
 const progressPhases = new Set<ResourceProgressPhase>([
   'preparing',
   'downloading',
@@ -40,6 +40,7 @@ export const normalizeResourceStatus = (value: unknown): ModelResourceStatusPayl
   const sherpaOnline = isPlainRecord(value.sherpaOnline) ? value.sherpaOnline : {}
   const embedding = isPlainRecord(value.embedding) ? value.embedding : {}
   const ttsStatus = isPlainRecord(value.tts) ? value.tts : {}
+  const gptSovits = isPlainRecord(value.gptSovits) ? value.gptSovits : {}
   const activeDownloads = (Array.isArray(value.activeDownloads) ? value.activeDownloads : [])
     .filter(isPlainRecord)
     .flatMap((progress): ResourceDownloadProgress[] => {
@@ -156,6 +157,11 @@ export const normalizeResourceStatus = (value: unknown): ModelResourceStatusPayl
       character: String(ttsStatus.character || ''),
       cacheDir: String(ttsStatus.cacheDir || ''),
       modelDir: String(ttsStatus.modelDir || ''),
+    },
+    gptSovits: {
+      ...summary(gptSovits, 'GPT-SoVITS resources unavailable'),
+      modelDir: String(gptSovits.modelDir || ''),
+      imported: Boolean(gptSovits.imported),
     },
     activeDownloads,
     resumableDownloads,

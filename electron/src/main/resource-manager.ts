@@ -20,6 +20,7 @@ import type {
   SherpaResourceStatus,
   SoulxResourceStatus,
   TtsResourceStatus,
+  GptSovitsResourceStatus,
 } from '../shared/resource-manager'
 import { resolvePythonRuntime } from './python-runtime'
 
@@ -37,6 +38,8 @@ type StoredSettings = {
     genie_character?: string
     genie_model_dir?: string
     lang?: string
+    ref_audio?: string
+    ref_text?: string
   }
   svc?: {
     provider?: string
@@ -83,7 +86,7 @@ type LockedResourceSource = {
 type LockedResource = {
   label: string
   version: string
-  kind: 'archive' | 'huggingface_snapshot' | 'huggingface_bundle' | 'package_managed'
+  kind: 'archive' | 'huggingface_snapshot' | 'huggingface_bundle' | 'package_managed' | 'local_bundle'
   license: string
   licenseUrl: string
   downloadBytes: number
@@ -120,7 +123,9 @@ const resourceMetadata = (resourceId: ManagedModelResourceId, inUseBy: string[] 
     licenseUrl: resource.licenseUrl,
     downloadBytes: resource.downloadBytes,
     source: source.repo ?? source.package ?? source.url ?? '',
-    integrity: resource.kind === 'archive'
+    integrity: resource.kind === 'local_bundle'
+      ? 'unverified'
+      : resource.kind === 'archive'
       ? 'sha256'
       : resource.kind === 'package_managed'
         ? source.revision ? 'package+revision' : 'package'
@@ -156,12 +161,13 @@ const SOULX_LAUNCHER = path.join(SOULX_SERVICE_DIR, 'docker-compose.yml')
 const SOULX_MODEL_DIR = path.join(SOULX_SERVICE_DIR, 'models', 'SoulX-Singer')
 const SOULX_PREPROCESS_DIR = path.join(SOULX_SERVICE_DIR, 'models', 'SoulX-Singer-Preprocess')
 const SOULX_REFERENCE_DIR = path.join(SOULX_SERVICE_DIR, 'references')
+const GPT_SOVITS_MODEL_DIR = path.join(PROJECT_ROOT, 'services', 'gpt-sovits', 'models', 'GPT_SoVITS')
 const SOULX_CHECKPOINT_CANDIDATES = [
   path.join(SOULX_MODEL_DIR, 'model-svc.pt'),
   path.join(SOULX_MODEL_DIR, 'model.pt'),
 ]
 
-const RESOURCE_IDS = new Set<ManagedModelResourceId>(['soulx', 'sherpa', 'sherpa_online', 'embedding', 'tts'])
+const RESOURCE_IDS = new Set<ManagedModelResourceId>(['soulx', 'gpt_sovits', 'sherpa', 'sherpa_online', 'embedding', 'tts'])
 const resourcePreparation = new Map<ManagedModelResourceId, Promise<ResourceCommandResult>>()
 const resourceProcesses = new Map<ManagedModelResourceId, ReturnType<typeof spawn>>()
 const resourceCancellationRequests = new Set<ManagedModelResourceId>()
@@ -618,13 +624,25 @@ const buildTtsStatus = (settings: StoredSettings): TtsResourceStatus => {
   const configuredModelDir = configuredValue ? resolveBackendRelativePath(configuredValue, configuredValue) : null
   const character = normalizeGenieCharacter(settings.tts?.genie_character)
   const modelDir = configuredModelDir ?? genieCharacterDir(character)
+  const modelFilesReady = (root: string): boolean => [
+    't2s_encoder_fp32.onnx',
+    't2s_first_stage_decoder_fp32.onnx',
+    't2s_stage_decoder_fp32.onnx',
+    'vits_fp32.onnx',
+    'prompt_encoder_fp32.onnx',
+  ].every((name) => fs.existsSync(path.join(root, name)))
   const checks: Array<[boolean, string]> = [
     [fs.existsSync(path.join(DEFAULT_GENIE_DATA_DIR, 'speaker_encoder.onnx')), 'Genie speaker encoder is missing'],
     [fs.existsSync(path.join(DEFAULT_GENIE_DATA_DIR, 'chinese-hubert-base')), 'Genie Hubert assets are missing'],
     [fs.existsSync(path.join(DEFAULT_GENIE_DATA_DIR, 'G2P')), 'Genie G2P assets are missing'],
     [fs.existsSync(modelDir), configuredModelDir ? 'Configured Genie model directory is missing' : 'Genie character model is missing'],
   ]
-  if (!configuredModelDir) {
+  if (configuredModelDir) {
+    checks.push([modelFilesReady(modelDir), 'Genie character model files are incomplete'])
+    const refAudio = resolveBackendRelativePath(settings.tts?.ref_audio, '')
+    checks.push([Boolean(refAudio) && fs.existsSync(refAudio), 'Genie reference audio is missing'])
+    checks.push([Boolean(settings.tts?.ref_text?.trim()), 'Genie reference text is missing'])
+  } else {
     checks.push(
       [fs.existsSync(path.join(modelDir, 'tts_models')), 'Genie character TTS models are missing'],
       [fs.existsSync(path.join(modelDir, 'prompt_wav')), 'Genie character prompt audio is missing'],
@@ -639,6 +657,17 @@ const buildTtsStatus = (settings: StoredSettings): TtsResourceStatus => {
     character,
     cacheDir: DEFAULT_GENIE_DATA_DIR,
     modelDir,
+  }
+}
+
+const buildGptSovitsStatus = (): GptSovitsResourceStatus => {
+  const imported = fs.existsSync(GPT_SOVITS_MODEL_DIR)
+  const summary = buildSummary([[imported, 'GPT-SoVITS 模型目录未导入']])
+  return {
+    ...summary,
+    metadata: resourceMetadata('gpt_sovits'),
+    modelDir: GPT_SOVITS_MODEL_DIR,
+    imported,
   }
 }
 
@@ -790,6 +819,7 @@ export const getModelResourceStatus = (petModelCatalog: PetModelCatalog): ModelR
     sherpaOnline: buildSherpaOnlineStatus(settings),
     embedding,
     tts,
+    gptSovits: buildGptSovitsStatus(),
     activeDownloads: [...resourceProgress.values()].map((progress) => ({ ...progress })),
     resumableDownloads: resumableResourceDownloads(embedding, tts),
   }
@@ -839,6 +869,30 @@ export const prepareSoulxModels = async (petModelCatalog: PetModelCatalog): Prom
     },
   })
   return buildResult(execution, getModelResourceStatus(petModelCatalog), 'SoulX model assets are ready')
+}
+
+export const prepareGptSovits = async (petModelCatalog: PetModelCatalog): Promise<ResourceCommandResult> => {
+  const status = getModelResourceStatus(petModelCatalog)
+  if (status.gptSovits.imported) {
+    return {
+      success: true,
+      message: 'GPT-SoVITS 本地资源已就绪',
+      errorCode: null,
+      retryable: false,
+      stdout: [],
+      stderr: [],
+      status,
+    }
+  }
+  return {
+    success: false,
+    message: 'GPT-SoVITS 仅支持本地导入，请放入 services/gpt-sovits/models/GPT_SoVITS',
+    errorCode: 'unknown',
+    retryable: false,
+    stdout: [],
+    stderr: [],
+    status,
+  }
 }
 
 export const prepareSherpaSenseVoice = async (petModelCatalog: PetModelCatalog): Promise<ResourceCommandResult> => {
@@ -927,6 +981,7 @@ export const missingModelResources = (
 ): ManagedModelResourceId[] => {
   const ready: Record<ManagedModelResourceId, boolean> = {
     soulx: status.soulx.ready,
+    gpt_sovits: status.gptSovits.ready,
     sherpa: status.sherpa.ready,
     sherpa_online: status.sherpaOnline.ready,
     embedding: status.embedding.ready,
@@ -945,6 +1000,7 @@ const prepareModelResource = (
   beginResourceProgress(resourceId)
   const task = (() => {
     if (resourceId === 'soulx') return prepareSoulxModels(petModelCatalog)
+    if (resourceId === 'gpt_sovits') return prepareGptSovits(petModelCatalog)
     if (resourceId === 'sherpa') return prepareSherpaSenseVoice(petModelCatalog)
     if (resourceId === 'sherpa_online') return prepareSherpaStreamingZipformer(petModelCatalog)
     if (resourceId === 'embedding') return prepareEmbeddingModel(petModelCatalog)
@@ -1111,6 +1167,9 @@ const managedRemovalTargets = (resourceId: ManagedModelResourceId, settings: Sto
   if (resourceId === 'sherpa_online') return [{ targetPath: SHERPA_ONLINE_DIR, managedRoot: pythonCacheRoot }]
   if (resourceId === 'embedding') {
     return embeddingRemovalTargets(settings.memory?.embedding_model?.trim() || DEFAULT_EMBEDDING_MODEL)
+  }
+  if (resourceId === 'gpt_sovits') {
+    return [{ targetPath: GPT_SOVITS_MODEL_DIR, managedRoot: path.join(PROJECT_ROOT, 'services', 'gpt-sovits', 'models') }]
   }
   if (resourceId === 'tts') return genieRemovalTargets(normalizeGenieCharacter(settings.tts?.genie_character))
   const soulxModelsRoot = path.join(SOULX_SERVICE_DIR, 'models')

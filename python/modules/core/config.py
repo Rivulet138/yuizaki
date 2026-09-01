@@ -9,6 +9,10 @@ from pydantic import BaseModel, Field, ConfigDict
 
 from .paths import DEFAULT_AUDIO_CACHE_DIR, audio_cache_dir_from_env, data_dir_from_env
 DEFAULT_TTS_LANG = "ja"
+DEFAULT_GENIE_CHARACTER = "普拉琪娜_e15_e8_correct_sampling_v2"
+DEFAULT_GENIE_MODEL_DIR = "CharacterModels/v2ProPlus/普拉琪娜_e15_e8_correct_sampling_v2"
+DEFAULT_GENIE_REF_AUDIO = "CharacterModels/v2ProPlus/普拉琪娜_e15_e8_correct_sampling_v2/prompt_wav/もうこんなひどいことさせないからね.wav"
+DEFAULT_GENIE_REF_TEXT = "もうこんなひどいことさせないからね"
 DEFAULT_EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-0.6B"
 DEFAULT_QDRANT_DOCKER_IMAGE = "qdrant/qdrant:v1.18.3"
 DEFAULT_QDRANT_DOCKER_CONTAINER = "yuizaki-qdrant"
@@ -67,10 +71,10 @@ class TTSConfig(BaseModel):
     """TTS service configuration."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    genie_character: str = Field(default="")
-    genie_model_dir: str = Field(default="")
-    ref_audio: str = Field(default="")
-    ref_text: str = Field(default="")
+    genie_character: str = Field(default=DEFAULT_GENIE_CHARACTER)
+    genie_model_dir: str = Field(default=DEFAULT_GENIE_MODEL_DIR)
+    ref_audio: str = Field(default=DEFAULT_GENIE_REF_AUDIO)
+    ref_text: str = Field(default=DEFAULT_GENIE_REF_TEXT)
     lang: str = Field(default=DEFAULT_TTS_LANG)
     device: str = Field(default="cpu")
     quality: str = Field(default="质量优先")
@@ -218,10 +222,10 @@ def _load_config_from_env() -> AppConfig:
             vision_detail=os.getenv("VISION_LLM_DETAIL", "low").strip().lower() or "low",
         ),
         tts=TTSConfig(
-            genie_character=os.getenv("TTS_GENIE_CHARACTER", ""),
-            genie_model_dir=os.getenv("TTS_GENIE_MODEL_DIR", ""),
-            ref_audio=os.getenv("TTS_REF_AUDIO", ""),
-            ref_text=os.getenv("TTS_REF_TEXT", ""),
+            genie_character=os.getenv("TTS_GENIE_CHARACTER", DEFAULT_GENIE_CHARACTER),
+            genie_model_dir=os.getenv("TTS_GENIE_MODEL_DIR", DEFAULT_GENIE_MODEL_DIR),
+            ref_audio=os.getenv("TTS_REF_AUDIO", DEFAULT_GENIE_REF_AUDIO),
+            ref_text=os.getenv("TTS_REF_TEXT", DEFAULT_GENIE_REF_TEXT),
             lang=os.getenv("TTS_LANG", DEFAULT_TTS_LANG),
             device=os.getenv("TTS_DEVICE", "cpu"),
             quality=os.getenv("TTS_QUALITY", "质量优先"),

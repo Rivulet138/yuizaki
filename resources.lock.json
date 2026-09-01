@@ -60,6 +60,19 @@
         }
       ]
     },
+    "gpt_sovits": {
+      "label": "GPT-SoVITS 预训练资源",
+      "version": "本地导入",
+      "kind": "local_bundle",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/RVC-Boss/GPT-SoVITS/blob/main/LICENSE",
+      "downloadBytes": 4939000000,
+      "sources": [
+        {
+          "url": "local://services/gpt-sovits/models/GPT_SoVITS"
+        }
+      ]
+    },
     "soulx": {
       "label": "SoulX Singer SVC",
       "version": "2026-02",
