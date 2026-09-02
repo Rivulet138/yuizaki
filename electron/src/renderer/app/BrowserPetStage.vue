@@ -20,6 +20,8 @@ const ready = ref(false)
 const modelType = ref<PetModelType>('live2d')
 const modelLabel = ref('Live2D')
 let renderer: PetRendererInstance | null = null
+let restoreDesktopPet = false
+let stageActive = true
 
 onMounted(async () => {
   if (!mountEl.value) return
@@ -29,6 +31,11 @@ onMounted(async () => {
     let model: PetModelDefinition | undefined
     try {
       const [state, catalog] = await Promise.all([petControl.getState(), petControl.getCatalog()])
+      if (!window.petApi?.window && state.visible) {
+        await petControl.setVisible(false)
+        if (stageActive) restoreDesktopPet = true
+        else await petControl.setVisible(true)
+      }
       const modelId = state.modelId || catalog.activeModelId
       model = catalog.models.find((item) => item.id === modelId) || catalog.models[0]
     } catch (cause) {
@@ -69,8 +76,15 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  stageActive = false
   renderer?.destroy()
   renderer = null
+  if (restoreDesktopPet) {
+    void petControl.setVisible(true).catch((cause) => {
+      console.warn('[BrowserPetStage] failed to restore desktop pet visibility', cause)
+    })
+    restoreDesktopPet = false
+  }
 })
 </script>
 
