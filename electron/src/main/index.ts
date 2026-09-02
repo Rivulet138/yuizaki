@@ -85,6 +85,7 @@ let inputBindingStatus: InputBindingRegistrationStatus = {
 }
 let ipcReady = false
 let isQuitting = false
+const browserOnly = process.env['YUIZAKI_BROWSER_ONLY'] === '1'
 
 const togglePetLock = () => {
   const nextState = petStateStore.applyConfigPatch({ locked: !petStateStore.getState().locked })
@@ -132,6 +133,15 @@ function buildPanelRuntimeOptions(tab?: string): PetWindowRuntimeOptions {
 }
 
 async function openPanel(tab?: string): Promise<void> {
+  if (browserOnly) {
+    const browserUrl = new URL(controlServer.panelUrl)
+    browserUrl.searchParams.set('browser_only', '1')
+    controlServer.authorizePanelUrl(browserUrl)
+    const normalizedTab = tab === 'companion' ? 'chat' : (tab || 'chat')
+    browserUrl.hash = `/w/default/${normalizedTab}`
+    await shell.openExternal(browserUrl.toString())
+    return
+  }
   if (!petWindow.window) {
     petWindow.create(buildPanelRuntimeOptions(tab))
   }
@@ -458,7 +468,12 @@ async function createApp(): Promise<void> {
   await controlServer.start()
   live2dWindow.create(controlServer.panelUrl.replace(/\/$/, ''))
   applyPetStateToRenderer(petStateStore.getState())
-  setPetVisible(petStateStore.getState().visible)
+  if (browserOnly) {
+    petStateStore.setVisible(false)
+    live2dWindow.hide()
+  } else {
+    setPetVisible(petStateStore.getState().visible)
+  }
 
   petWindow.create(buildPanelRuntimeOptions())
 
@@ -630,6 +645,10 @@ function setupIPC(): void {
 }
 
 app.on('second-instance', () => {
+  if (browserOnly) {
+    void openPanel('chat')
+    return
+  }
   petWindow?.show()
   setPetVisible(true)
 })

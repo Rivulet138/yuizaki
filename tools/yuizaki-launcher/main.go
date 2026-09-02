@@ -54,6 +54,7 @@ type launcherConfig struct {
 	devRenderer      bool
 	noOpen           bool
 	noShowPet        bool
+	browserOnly      bool
 	noQdrant         bool
 	smoke            bool
 	checkOnly        bool
@@ -293,6 +294,8 @@ func newConfig() (*launcherConfig, error) {
 	flagSet.BoolVar(&cfg.withMCP, "with-mcp", cfg.withMCP, "start MCP service")
 	flagSet.BoolVar(&cfg.noOpen, "no-open", false, "do not open the panel URL")
 	flagSet.BoolVar(&cfg.noShowPet, "no-show-pet", false, "do not restore the desktop pet layer")
+	flagSet.BoolVar(&cfg.browserOnly, "browser-only", true, "open the browser frontend without showing Electron windows")
+	electronUI := flagSet.Bool("electron-ui", false, "show the Electron control panel and desktop pet")
 	flagSet.BoolVar(&cfg.noQdrant, "no-qdrant", cfg.noQdrant, "skip Qdrant Docker auto-start")
 	withQdrant := flagSet.Bool("with-qdrant", false, "start Qdrant Docker when memory backend needs it")
 	flagSet.BoolVar(&cfg.smoke, "smoke", false, "run lightweight smoke checks after startup")
@@ -317,6 +320,9 @@ func newConfig() (*launcherConfig, error) {
 	}
 	if *noInstall {
 		cfg.autoInstall = false
+	}
+	if *electronUI {
+		cfg.browserOnly = false
 	}
 
 	if err := os.MkdirAll(cfg.logDir, 0o755); err != nil {
@@ -351,6 +357,11 @@ func newConfig() (*launcherConfig, error) {
 	cfg.env["PYTHONUNBUFFERED"] = envOrMap(cfg.env, "PYTHONUNBUFFERED", "1")
 	cfg.env["PYTHONIOENCODING"] = envOrMap(cfg.env, "PYTHONIOENCODING", "utf-8")
 	cfg.env["DESKTOP_PET_SKIP_INTERNAL_PYTHON"] = "1"
+	if cfg.browserOnly {
+		cfg.env["YUIZAKI_BROWSER_ONLY"] = "1"
+	} else {
+		delete(cfg.env, "YUIZAKI_BROWSER_ONLY")
+	}
 	cfg.env["YUIZAKI_ELECTRON_ROOT"] = cfg.electronDir
 	cfg.env["ELECTRON_RUN_AS_NODE"] = ""
 	cfg.refreshURLs()
@@ -427,7 +438,7 @@ func (r *commandRunner) Run(ctx context.Context) error {
 			return err
 		}
 	}
-	if !cfg.noShowPet {
+	if !cfg.noShowPet && !cfg.browserOnly {
 		if err := r.ensurePetVisible(ctx); err != nil {
 			cfg.logger.Log("launcher", "pet restore warning: "+err.Error())
 		}
@@ -1247,9 +1258,9 @@ func (cfg *launcherConfig) refreshURLs() {
 		cfg.env["VITE_DEV_SERVER_URL"] = ""
 		cfg.env["YUIZAKI_USE_VITE"] = "0"
 	}
-	cfg.panelOpenURL = cfg.rendererURL
+	cfg.panelOpenURL = cfg.rendererURL + "?browser_only=1#/w/default/chat"
 	if cfg.token != "" {
-		cfg.panelOpenURL = cfg.rendererURL + "?control_token=" + cfg.token
+		cfg.panelOpenURL = cfg.rendererURL + "?browser_only=1&control_token=" + cfg.token + "#/w/default/chat"
 	}
 	cfg.mcpURL = fmt.Sprintf("http://%s:%s", cfg.serverHost, cfg.mcpPort)
 	cfg.env["SERVER_PORT"] = cfg.serverPort

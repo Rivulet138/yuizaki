@@ -23,6 +23,14 @@ let renderer: PetRendererInstance | null = null
 let restoreDesktopPet = false
 let stageActive = true
 
+const isBrowserOnlyLaunch = (): boolean => {
+  try {
+    return new URL(window.location.href).searchParams.get('browser_only') === '1'
+  } catch {
+    return false
+  }
+}
+
 onMounted(async () => {
   if (!mountEl.value) return
   const mountId = `browser-pet-stage-${Math.random().toString(36).slice(2)}`
@@ -33,8 +41,9 @@ onMounted(async () => {
       const [state, catalog] = await Promise.all([petControl.getState(), petControl.getCatalog()])
       if (!window.petApi?.window && state.visible) {
         await petControl.setVisible(false)
-        if (stageActive) restoreDesktopPet = true
-        else await petControl.setVisible(true)
+        if (stageActive && !isBrowserOnlyLaunch()) {
+          restoreDesktopPet = true
+        }
       }
       const modelId = state.modelId || catalog.activeModelId
       model = catalog.models.find((item) => item.id === modelId) || catalog.models[0]

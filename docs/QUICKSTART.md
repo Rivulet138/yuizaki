@@ -36,6 +36,8 @@ This creates `YuizakiLauncher.exe` and `YuizakiLauncher` in the repository root.
 
 `setup` creates `python/.env` when missing and asks for the install profile and initial LLM settings. `--check` validates paths, runtimes, dependencies, and startup configuration without launching services.
 
+默认启动会打开浏览器对话页，Electron 仅作为隐藏的本地宿主运行；需要旧 Electron 控制窗口和桌宠时使用 `.\YuizakiLauncher.exe start --electron-ui`。
+
 ## Linux
 
 Build only the Linux launcher when preferred:
@@ -51,16 +53,18 @@ chmod +x YuizakiLauncher
 ./YuizakiLauncher start
 ```
 
+默认启动会打开浏览器对话页，Electron 仅作为隐藏的本地宿主运行；需要旧 Electron 控制窗口和桌宠时使用 `./YuizakiLauncher start --electron-ui`。
+
 Read [Linux notes](LINUX.md) before diagnosing audio, GPU, X11, or Wayland behavior.
 
 ## First run / 首次运行
 
-1. Open the control panel and confirm that the pet window appears.
+1. Open the browser chat page and confirm that the Live2D/VRM stage appears.
 2. Open Settings and confirm that an LLM provider, endpoint, and model are configured.
 3. Send a text message and wait for the final response.
 4. Enable voice, vision, tools, MCP services, or connectors only after text chat works.
 
-首次启动时先确认控制面板、桌宠窗口和文字对话正常，再逐项启用语音、视觉、工具、MCP 或连接器。
+首次启动时先确认浏览器对话页、模型展示和文字对话正常，再逐项启用语音、视觉、工具、MCP 或连接器。
 
 ## Launcher commands / 启动器命令
 
@@ -74,7 +78,7 @@ Read [Linux notes](LINUX.md) before diagnosing audio, GPU, X11, or Wayland behav
 | `install-desktop` | Install a user-scoped shortcut or desktop entry |
 | `remove-desktop` | Remove the user-scoped shortcut or desktop entry |
 
-Useful start flags include `--check`, `--smoke`, `--no-mcp`, `--no-install`, `--dev-renderer`, `--no-open`, and `--no-show-pet`. Windows also supports `--with-qdrant` for the Docker-backed optional Qdrant service.
+Useful start flags include `--check`, `--smoke`, `--no-mcp`, `--no-install`, `--dev-renderer`, `--no-open`, `--no-show-pet`, and `--electron-ui`. Windows also supports `--with-qdrant` for the Docker-backed optional Qdrant service.
 
 ## Common failures / 常见故障
 

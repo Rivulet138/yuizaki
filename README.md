@@ -41,7 +41,7 @@
 | `Yuizaki-0.1.0-win-x64.exe` | Windows x64 NSIS 安装包 |
 | `SHA256SUMS.txt` | 发布文件校验值 |
 
-Launcher 负责创建环境、安装锁定依赖、启动 Python、MCP 和 Electron，并监督进程退出。独立 Launcher 必须放在源码仓库根目录，不能脱离 `python/`、`electron/` 和 `node-mcp/` 单独运行。
+Launcher 负责创建环境、安装锁定依赖、启动 Python、MCP 和 Electron 后台宿主，并监督进程退出。默认启动只打开浏览器对话页，不显示 Electron 控制窗口或桌面宠物；需要旧桌面界面时使用 `start --electron-ui`。独立 Launcher 必须放在源码仓库根目录，不能脱离 `python/`、`electron/` 和 `node-mcp/` 单独运行。
 
 ## 快速开始
 
