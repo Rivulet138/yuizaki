@@ -219,6 +219,7 @@ class PetRenderer {
 	private live2dVisualLocalBounds: VisualBounds | null = null;
 	private live2dVisualScaleCorrection = 1;
 	private live2dBaseScale: number | null = null;
+	private viewportOverride: { width: number; height: number } | null = null;
 	private visualCalibrationFrame: number | null = null;
 	private visualCalibrationGeneration = 0;
 	private readonly container: HTMLElement;
@@ -293,6 +294,13 @@ class PetRenderer {
 			this.getActiveRuntime()?.executeAvatarAction({ type: "cancel", channel });
 		},
 	});
+
+	private getViewportSize(): { width: number; height: number } {
+		return this.viewportOverride ?? {
+			width: Math.max(1, window.innerWidth),
+			height: Math.max(1, window.innerHeight),
+		};
+	}
 
 	constructor(containerId: string) {
 		const element = document.getElementById(containerId);
@@ -1104,8 +1112,7 @@ class PetRenderer {
 			return;
 		}
 
-		const width = Math.max(1, window.innerWidth);
-		const height = Math.max(1, window.innerHeight);
+		const { width, height } = this.getViewportSize();
 		const target: Live2DAttentionTarget = {
 			x: clamp((clientPoint.x / width) * 2 - 1, -1, 1),
 			y: clamp(1 - (clientPoint.y / height) * 2, -1, 1),
@@ -1407,8 +1414,7 @@ class PetRenderer {
 			this.app.stage.addChild(this.live2dViewport);
 		}
 
-		const viewportWidth = window.innerWidth;
-		const viewportHeight = window.innerHeight;
+		const { width: viewportWidth, height: viewportHeight } = this.getViewportSize();
 		const baseScaleResult = computeBaseModelScale({
 			cachedBaseScale: this.live2dBaseScale,
 			model: this.model,
@@ -1618,9 +1624,10 @@ class PetRenderer {
 		const scaleX = this.live2dViewport.scale.x;
 		const scaleY = this.live2dViewport.scale.y;
 		this.live2dVisualLocalBounds = null;
+		const { width: viewportWidth, height: viewportHeight } = this.getViewportSize();
 		this.live2dViewport.position.set(
-			window.innerWidth / 2 - (nominal.x + nominal.width / 2) * scaleX,
-			window.innerHeight / 2 - (nominal.y + nominal.height / 2) * scaleY,
+			viewportWidth / 2 - (nominal.x + nominal.width / 2) * scaleX,
+			viewportHeight / 2 - (nominal.y + nominal.height / 2) * scaleY,
 		);
 		const readAfterStableFrames = () => {
 			if (generation !== this.visualCalibrationGeneration || this.destroyed) {
@@ -1696,12 +1703,13 @@ class PetRenderer {
 				...framebufferAlphaBounds,
 				y: pixelHeight - framebufferAlphaBounds.y - framebufferAlphaBounds.height,
 			};
+			const { width: viewportWidth, height: viewportHeight } = this.getViewportSize();
 			const screenBounds = mapAlphaBoundsToLocalBounds({
 				extractionFrame: {
 					x: 0,
 					y: 0,
-					width: window.innerWidth,
-					height: window.innerHeight,
+					width: viewportWidth,
+					height: viewportHeight,
 				},
 				pixelWidth,
 				pixelHeight,
@@ -1711,8 +1719,8 @@ class PetRenderer {
 			const scaleY = this.live2dViewport.scale.y;
 			const currentVisibleWidth = Math.max(1, screenBounds.width);
 			const currentVisibleHeight = Math.max(1, screenBounds.height);
-			const targetVisibleWidth = Math.max(1, window.innerWidth * 0.36);
-			const targetVisibleHeight = Math.max(1, window.innerHeight * 0.78);
+			const targetVisibleWidth = Math.max(1, viewportWidth * 0.36);
+			const targetVisibleHeight = Math.max(1, viewportHeight * 0.78);
 			const calibrationCorrection = Math.min(
 				targetVisibleWidth / currentVisibleWidth,
 				targetVisibleHeight / currentVisibleHeight,
@@ -1736,7 +1744,7 @@ class PetRenderer {
 				visualLocalBounds: this.live2dVisualLocalBounds,
 				finalVisualBounds: this.getLive2DVisualBounds(),
 				visualScaleCorrection: this.live2dVisualScaleCorrection,
-				viewport: { width: window.innerWidth, height: window.innerHeight },
+				viewport: { width: viewportWidth, height: viewportHeight },
 				framebuffer: { width: pixelWidth, height: pixelHeight },
 			}));
 		} catch (error) {
@@ -2454,8 +2462,8 @@ class PetRenderer {
 					candidateY: currentAnchor.y + dragDelta.deltaY,
 					visualWidth: visualBounds.width,
 					visualHeight: visualBounds.height,
-					viewportWidth: window.innerWidth,
-					viewportHeight: window.innerHeight,
+					viewportWidth: this.getViewportSize().width,
+					viewportHeight: this.getViewportSize().height,
 				});
 				this.config.positionX = nextAnchor.x;
 				this.config.positionY = nextAnchor.y;
@@ -2629,19 +2637,35 @@ class PetRenderer {
 		this.markActivity("wheel-scale");
 	};
 
-	private readonly handleResize = (): void => {
+	/** Resize the renderer to an embedded viewport, used by the browser stage. */
+	resizeTo(width: number, height: number): void {
+		const safeWidth = Math.max(1, Math.round(width));
+		const safeHeight = Math.max(1, Math.round(height));
+		this.viewportOverride = { width: safeWidth, height: safeHeight };
+		this.resizeRenderer(safeWidth, safeHeight);
+	}
+
+	private readonly resizeRenderer = (width: number, height: number): void => {
 		if (!this.app) {
 			return;
 		}
 
-		this.app.renderer.resize(window.innerWidth, window.innerHeight);
+		this.app.renderer.resize(width, height);
 		this.live2dBaseScale = null;
 		this.invalidateLive2DVisualCalibration();
-		this.vrmRuntime?.resize(window.innerWidth, window.innerHeight);
+		this.vrmRuntime?.resize(width, height);
 		this.applyModelTransform();
 		this.reportRendererMetrics("resize");
 
 		this.syncMouseCaptureFromLastPoint("resize", true);
+	};
+
+	private readonly handleResize = (): void => {
+		const viewport = this.viewportOverride ?? {
+			width: window.innerWidth,
+			height: window.innerHeight,
+		};
+		this.resizeRenderer(viewport.width, viewport.height);
 	};
 
 	private readonly handleWindowError = (event: ErrorEvent): void => {

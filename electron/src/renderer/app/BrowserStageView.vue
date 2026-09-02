@@ -107,8 +107,9 @@ const localeOptions = [
   { value: 'ja-JP', label: '日本語' },
 ]
 const stageStyle = computed(() => ({
-  '--stage-wallpaper': 'url("/assets/chat-depth-bg.jpg")',
-  '--stage-user-wallpaper': props.currentWallpaper ? `url("${props.currentWallpaper}")` : 'none',
+  '--stage-wallpaper': props.currentWallpaper
+    ? `url("${props.currentWallpaper}")`
+    : 'url("/assets/chat-depth-bg.jpg")',
 }))
 
 const changeLocale = (locale: string): void => {

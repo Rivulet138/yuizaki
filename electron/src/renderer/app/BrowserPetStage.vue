@@ -20,6 +20,7 @@ const ready = ref(false)
 const modelType = ref<PetModelType>('live2d')
 const modelLabel = ref('Live2D')
 let renderer: PetRendererInstance | null = null
+let resizeObserver: ResizeObserver | null = null
 let restoreDesktopPet = false
 let stageActive = true
 
@@ -65,6 +66,15 @@ onMounted(async () => {
     const { PetRenderer } = await import('@/pet-renderer')
     renderer = new PetRenderer(mountId)
     await renderer.init()
+    const resizeRenderer = (): void => {
+      const rect = mountEl.value?.getBoundingClientRect()
+      if (rect && rect.width > 0 && rect.height > 0) {
+        renderer?.resizeTo(rect.width, rect.height)
+      }
+    }
+    resizeObserver = new ResizeObserver(resizeRenderer)
+    resizeObserver.observe(mountEl.value)
+    resizeRenderer()
     await renderer.applyBrowserConfig({
       modelType: selectedType,
       modelId: model?.id || 'yumi',
@@ -86,6 +96,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stageActive = false
+  resizeObserver?.disconnect()
+  resizeObserver = null
   renderer?.destroy()
   renderer = null
   if (restoreDesktopPet) {
