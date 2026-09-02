@@ -144,11 +144,22 @@ onBeforeUnmount(() => {
   color: var(--yui-text);
   background: var(--yui-browser-bg);
   --stage-chat-overlay: rgba(255, 255, 255, .78);
+  --stage-sidebar-overlay: rgba(255, 255, 255, .72);
 }
 
-:global(:root[data-theme='dark']) .browser-stage { --stage-chat-overlay: rgba(15, 23, 42, .74); }
+:global(:root[data-theme='dark']) .browser-stage {
+  --stage-chat-overlay: rgba(15, 23, 42, .74);
+  --stage-sidebar-overlay: rgba(15, 23, 42, .7);
+}
 
-.stage-sidebar { flex: 0 0 202px; height: 100%; }
+:global(.yuizaki-bg.browser-mode .stage-sidebar.sidebar) {
+  flex: 0 0 202px;
+  height: 100%;
+  background-color: var(--yui-panel-surface);
+  background-image: linear-gradient(var(--stage-sidebar-overlay), var(--stage-sidebar-overlay)), var(--stage-wallpaper);
+  background-position: center;
+  background-size: cover;
+}
 .stage-content { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
 .stage-toolbar {
   position: relative;
