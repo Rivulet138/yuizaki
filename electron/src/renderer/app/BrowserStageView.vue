@@ -38,11 +38,6 @@
         <section class="stage-display" aria-label="对话中的 Live2D 或 VRM 模型">
           <div class="stage-backdrop"></div>
           <div class="stage-floor"><span></span></div>
-          <div class="display-heading">
-            <span class="display-kicker">COMPANION</span>
-            <strong>陪伴正在这里</strong>
-            <small>模型会随对话响应</small>
-          </div>
           <BrowserPetStage :key="compactStage ? 'compact' : 'desktop'" />
           <div class="stage-caption">
             <span>{{ companionId || 'yumi' }}</span>
@@ -60,7 +55,7 @@
               <el-icon><Close /></el-icon>
             </button>
           </header>
-          <div class="stage-window-body">
+          <div class="stage-window-body chat-mode">
             <router-view v-slot="{ Component, route }">
               <component :is="Component" v-if="Component && route.name === 'chat'" class="stage-route-component" />
             </router-view>
@@ -207,16 +202,11 @@ onBeforeUnmount(() => {
 .stage-caption { position: absolute; bottom: 7%; display: grid; gap: 3px; text-align: center; color: rgba(255,255,255,.82); text-shadow: 0 2px 14px rgba(0,0,0,.35); }
 .stage-caption span { font-size: 12px; font-weight: 700; }
 .stage-caption small { font-size: 10px; color: rgba(255,255,255,.6); }
-.display-heading { position: absolute; top: 26px; left: 32px; z-index: 2; display: grid; gap: 4px; }
-.display-kicker { color: rgba(255,255,255,.52); font-size: 10px; letter-spacing: .12em; }
-.display-heading strong { font-size: 18px; font-weight: 700; }
-.display-heading small { color: rgba(255,255,255,.58); font-size: 11px; }
-
-.stage-window { position: relative; z-index: 3; display: flex; flex-direction: column; width: min(430px, 42vw); min-width: 340px; margin: 16px 16px 16px 0; overflow: hidden; border: 1px solid rgba(255,255,255,.34); border-radius: 10px; background: rgba(15,23,42,.82); box-shadow: 0 18px 45px rgba(2,6,23,.28); backdrop-filter: blur(18px); }
-.stage-window-header { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 8px 12px 8px 16px; border-bottom: 1px solid rgba(255,255,255,.18); }
+.stage-window { position: relative; z-index: 3; display: flex; flex-direction: column; width: min(430px, 42vw); min-width: 340px; margin: 16px 16px 16px 0; overflow: hidden; border: 1px solid rgba(255,255,255,.54); border-radius: 10px; color: #263238; background: rgba(250,248,244,.96); box-shadow: 0 18px 45px rgba(2,6,23,.28); backdrop-filter: blur(18px); }
+.stage-window-header { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 8px 12px 8px 16px; border-bottom: 1px solid rgba(82,67,48,.14); background: rgba(255,253,248,.82); }
 .stage-window-header div { display: flex; align-items: baseline; gap: 8px; }
 .stage-window-header strong { font-size: 14px; }
-.stage-window-header span { color: rgba(255,255,255,.52); font-size: 10px; }
+.stage-window-header span { color: rgba(38,50,56,.56); font-size: 10px; }
 .stage-window-body { flex: 1; min-height: 0; overflow: hidden; }
 .stage-route-component { width: 100%; height: 100%; }
 .stage-reopen { position: absolute; right: 20px; bottom: 20px; z-index: 5; display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 12px; border: 1px solid rgba(255,255,255,.38); border-radius: 8px; color: #fff; background: rgba(15,23,42,.72); box-shadow: 0 10px 24px rgba(2,6,23,.25); cursor: pointer; backdrop-filter: blur(10px); }

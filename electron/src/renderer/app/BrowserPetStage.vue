@@ -60,7 +60,7 @@ onMounted(async () => {
       modelType: selectedType,
       modelId: model?.id || 'yumi',
       modelPath: selectedPath,
-      scale: selectedType === 'vrm' ? 0.72 : 0.58,
+      scale: selectedType === 'vrm' ? 0.8 : 0.74,
       clickThrough: false,
       locked: false,
       opacity: 1,
