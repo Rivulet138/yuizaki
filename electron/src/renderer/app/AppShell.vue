@@ -1,7 +1,7 @@
 <template>
   <div class="yuizaki-bg" :class="{ 'browser-mode': !isElectronPanel }">
     <BrowserStageView
-      v-if="!isElectronPanel"
+      v-if="!isElectronPanel && activeTab === 'chat'"
       :current-wallpaper="currentWallpaper"
       :active-tab="activeTab"
       :menus="menus"
