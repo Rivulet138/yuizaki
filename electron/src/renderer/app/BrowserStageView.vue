@@ -143,7 +143,10 @@ onBeforeUnmount(() => {
   overflow: hidden;
   color: var(--yui-text);
   background: var(--yui-browser-bg);
+  --stage-chat-overlay: rgba(255, 255, 255, .78);
 }
+
+:global(:root[data-theme='dark']) .browser-stage { --stage-chat-overlay: rgba(15, 23, 42, .74); }
 
 .stage-sidebar { flex: 0 0 202px; height: 100%; }
 .stage-content { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
@@ -178,16 +181,28 @@ onBeforeUnmount(() => {
   flex: 1;
   width: auto;
   min-height: 0;
+  gap: 14px;
   margin: 14px 18px 18px;
+  overflow: hidden;
+}
+
+.stage-display {
+  position: relative;
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
   overflow: hidden;
   isolation: isolate;
   border: 1px solid var(--yui-browser-border);
   border-radius: var(--yui-radius-panel);
   background: var(--yui-panel-surface);
   box-shadow: var(--yui-panel-shadow);
+  padding: 18px 26px;
 }
 
-.stage-main::before {
+.stage-display::before {
   position: absolute;
   inset: 0;
   z-index: -2;
@@ -200,7 +215,7 @@ onBeforeUnmount(() => {
   transform: scale(1.04);
 }
 
-.stage-main::after {
+.stage-display::after {
   position: absolute;
   inset: 0;
   z-index: -1;
@@ -209,13 +224,12 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-.stage-display { position: relative; flex: 1; min-width: 0; min-height: 0; display: grid; place-items: center; overflow: hidden; padding: 18px 26px; }
 .stage-floor { position: absolute; bottom: 8%; width: min(72vw, 780px); height: 16%; border-radius: 50%; background: radial-gradient(ellipse, rgba(16,24,39,.48), transparent 68%); }
 .stage-floor span { position: absolute; inset: 28% 18% auto; height: 2px; background: linear-gradient(90deg, transparent, rgba(255,255,255,.4), transparent); }
 .stage-caption { position: absolute; bottom: 7%; display: grid; gap: 3px; text-align: center; color: var(--yui-text); text-shadow: 0 2px 14px rgba(0,0,0,.35); }
 .stage-caption span { font-size: 12px; font-weight: 700; }
 .stage-caption small { font-size: 10px; color: var(--yui-muted); }
-.stage-window { position: relative; z-index: 3; display: flex; flex-direction: column; width: min(430px, 42vw); min-width: 340px; margin: 16px 16px 16px 0; overflow: hidden; border: 1px solid var(--yui-panel-outline); border-radius: var(--yui-radius-card); color: var(--yui-text); background: var(--yui-surface-raised); box-shadow: var(--yui-panel-shadow); }
+.stage-window { position: relative; z-index: 3; display: flex; flex-direction: column; width: min(430px, 42vw); min-width: 340px; margin: 0; overflow: hidden; border: 1px solid var(--yui-panel-outline); border-radius: var(--yui-radius-panel); color: var(--yui-text); background-color: var(--yui-surface-raised); background-image: linear-gradient(var(--stage-chat-overlay), var(--stage-chat-overlay)), var(--stage-wallpaper); background-position: center; background-size: cover; box-shadow: var(--yui-panel-shadow); }
 .stage-window-header { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 8px 12px 8px 16px; border-bottom: 1px solid var(--yui-border); background: var(--yui-surface-muted); }
 .stage-window-header div { display: flex; align-items: baseline; gap: 8px; }
 .stage-window-header strong { font-size: 14px; }
@@ -236,7 +250,7 @@ onBeforeUnmount(() => {
   .stage-display { min-height: 520px; height: calc(100vh - 58px); }
   .stage-main { margin: 10px 10px 12px; }
   .stage-display { padding: 12px 14px; }
-  .stage-window { position: absolute; top: 12px; right: 12px; bottom: 12px; width: min(430px, calc(100% - 24px)); min-width: 0; margin: 0; }
+  .stage-window { position: absolute; top: 12px; right: 12px; bottom: 12px; width: min(430px, calc(100% - 24px)); min-width: 0; }
   .stage-caption { left: 24%; }
   .stage-display :deep(.browser-pet-stage) { transform: translateX(-16%); }
   .stage-actions { gap: 6px; }
