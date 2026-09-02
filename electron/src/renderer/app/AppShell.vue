@@ -10,6 +10,7 @@
       :companion-state-label="companionStateLabel"
       @toggle-theme="toggleTheme"
       @change-locale="handleLocaleChange"
+      @open-workspace-settings="dialogStore.openWorkspaceDrawer"
     />
 
     <div v-else class="shell cherry-shell">

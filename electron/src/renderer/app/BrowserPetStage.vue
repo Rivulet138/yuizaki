@@ -1,20 +1,24 @@
 <template>
-  <div class="browser-pet-stage" aria-label="Live2D 展示台">
-    <img v-if="!ready" class="browser-pet-fallback" src="/live2d/llm-live2d/yumi/yumi-stage.png" alt="" />
+  <div class="browser-pet-stage" :data-model-type="modelType" :aria-label="`${modelLabel} 对话模型`">
+    <img v-if="!ready && modelType === 'live2d'" class="browser-pet-fallback" src="/live2d/llm-live2d/yumi/yumi-stage.png" alt="" />
     <div ref="mountEl" class="browser-pet-canvas" aria-hidden="true"></div>
-    <div v-if="loading" class="browser-pet-status">Live2D 加载中</div>
-    <div v-else-if="error" class="browser-pet-status browser-pet-status--error">展示台预览</div>
+    <div v-if="loading" class="browser-pet-status">{{ modelLabel }} 加载中</div>
+    <div v-else-if="error" class="browser-pet-status browser-pet-status--error">{{ modelLabel }} 暂不可用</div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import type { PetRenderer as PetRendererInstance } from '@/pet-renderer'
+import { petControl } from '@/utils/petControl'
+import type { PetModelDefinition, PetModelType } from '@/../shared/pet-control'
 
 const mountEl = ref<HTMLElement | null>(null)
 const loading = ref(true)
 const error = ref(false)
 const ready = ref(false)
+const modelType = ref<PetModelType>('live2d')
+const modelLabel = ref('Live2D')
 let renderer: PetRendererInstance | null = null
 
 onMounted(async () => {
@@ -22,14 +26,34 @@ onMounted(async () => {
   const mountId = `browser-pet-stage-${Math.random().toString(36).slice(2)}`
   mountEl.value.id = mountId
   try {
+    let model: PetModelDefinition | undefined
+    try {
+      const [state, catalog] = await Promise.all([petControl.getState(), petControl.getCatalog()])
+      const modelId = state.modelId || catalog.activeModelId
+      model = catalog.models.find((item) => item.id === modelId) || catalog.models[0]
+    } catch (cause) {
+      console.warn('[BrowserPetStage] model catalog unavailable, using bundled Live2D', cause)
+    }
+
+    if (model) {
+      modelType.value = model.type
+      modelLabel.value = model.type === 'vrm' ? 'VRM' : 'Live2D'
+    }
+    const selectedType = model?.type || 'live2d'
+    const selectedPath = model?.assetPath
+      ? model.assetPath.startsWith('/')
+        ? model.assetPath
+        : `./${selectedType === 'vrm' ? 'vrm' : 'live2d'}/${model.assetPath}`
+      : './live2d/llm-live2d/yumi/yumi.model3.json'
+
     const { PetRenderer } = await import('@/pet-renderer')
     renderer = new PetRenderer(mountId)
     await renderer.init()
     await renderer.applyBrowserConfig({
-      modelType: 'live2d',
-      modelId: 'yumi',
-      modelPath: '/live2d/llm-live2d/yumi/yumi.model3.json',
-      scale: 0.58,
+      modelType: selectedType,
+      modelId: model?.id || 'yumi',
+      modelPath: selectedPath,
+      scale: selectedType === 'vrm' ? 0.72 : 0.58,
       clickThrough: false,
       locked: false,
       opacity: 1,
