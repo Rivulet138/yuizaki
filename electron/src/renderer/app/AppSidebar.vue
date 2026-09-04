@@ -94,7 +94,10 @@ const emit = defineEmits<{
 const route = useRoute()
 
 const activeMenuId = computed(() => String(route.name || 'chat'))
-const advancedOpen = ref(!isPrimarySidebarMenu(activeMenuId.value))
+// Keep the advanced navigation visible by default. Route changes should not
+// collapse it, so users can move between chat and advanced tools without
+// losing their navigation context.
+const advancedOpen = ref(true)
 const sidebarNavigation = computed(() => buildSidebarNavigation(props.menus))
 const primaryMenus = computed(() => sidebarNavigation.value.primary)
 const advancedMenuGroups = computed(() => sidebarNavigation.value.advanced)

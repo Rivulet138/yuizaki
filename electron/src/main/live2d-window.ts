@@ -97,6 +97,21 @@ const writeRendererLog = (message: string, payload?: unknown): void => {
 const TOPMOST_GUARD_INTERVAL_MS = 30000
 const RENDERER_RECOVERY_DELAY_MS = 1000
 const LIPSYNC_READY_TIMEOUT_MS = 750
+const PET_STATE_REQUEST_TIMEOUT_MS = 400
+const PENDING_RENDERER_MESSAGE_TTL_MS = 1500
+const PENDING_RENDERER_MESSAGE_LIMIT = 32
+const QUEUED_RENDERER_CHANNELS = new Set([
+  'pet:trigger-expression',
+  'pet:trigger-expression-mix',
+  'pet:trigger-animation',
+  'pet:trigger-emotion',
+  'pet:behavior-state',
+  'pet:lipsync-start',
+  'pet:lipsync-stop',
+  'pet:lipsync-level',
+  'pet:lipsync-viseme',
+  'pet:avatar-command',
+])
 
 type RendererConsoleLevel = 'debug' | 'info' | 'warning' | 'error'
 
@@ -177,6 +192,12 @@ export class Live2DWindow {
     resolve: () => void
     timer: NodeJS.Timeout
   }>()
+  private readonly pendingPetStateRequests = new Map<number, {
+    resolve: (success: boolean) => void
+    timer: NodeJS.Timeout
+  }>()
+  private pendingRendererMessages: Array<{ channel: string; data?: unknown; expiresAt: number }> = []
+  private petStateRequestSequence = 0
   private lastPetConfig: PetRendererConfigPayload = {}
   private lastCompanionIdleProfile: PetCompanionIdleProfile | null = null
   private topMostGuardTimer: NodeJS.Timeout | null = null
@@ -346,6 +367,7 @@ export class Live2DWindow {
     this.sendToRenderer('pet:interact-toggle', this.interactMode)
     this.sendToRenderer('pet:request-avatar-capabilities')
     this.requestPetState()
+    this.flushPendingRendererMessages()
     return true
   }
 
@@ -463,6 +485,11 @@ export class Live2DWindow {
   private invalidateAvatarRenderer(message: string): void {
     this.rendererReady = false
     this.avatarCapabilities = null
+    for (const [requestId, pending] of this.pendingPetStateRequests) {
+      clearTimeout(pending.timer)
+      this.pendingPetStateRequests.delete(requestId)
+      pending.resolve(false)
+    }
     for (const [requestId, pending] of this.pendingLipSyncStarts) {
       clearTimeout(pending.timer)
       this.pendingLipSyncStarts.delete(requestId)
@@ -762,6 +789,29 @@ export class Live2DWindow {
     this.sendToRenderer('pet:request-state')
   }
 
+  requestPetStateAndWait(timeoutMs = PET_STATE_REQUEST_TIMEOUT_MS): Promise<boolean> {
+    if (!this.rendererReady || !this.win || this.win.isDestroyed() || this.win.webContents.isDestroyed()) {
+      return Promise.resolve(false)
+    }
+    const requestId = ++this.petStateRequestSequence
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingPetStateRequests.delete(requestId)
+        resolve(false)
+      }, timeoutMs)
+      this.pendingPetStateRequests.set(requestId, { resolve: (success) => resolve(success), timer })
+      this.sendToRenderer('pet:request-state')
+    })
+  }
+
+  notifyPetStateUpdated(): void {
+    for (const [requestId, pending] of this.pendingPetStateRequests) {
+      clearTimeout(pending.timer)
+      this.pendingPetStateRequests.delete(requestId)
+      pending.resolve(true)
+    }
+  }
+
   async hasVisiblePixels(alphaThreshold = 8): Promise<boolean> {
     if (!this.win || this.win.isDestroyed() || !this.win.isVisible()) {
       return false
@@ -798,6 +848,32 @@ export class Live2DWindow {
   sendToRenderer(channel: string, data?: unknown): void {
     if (this.win && !this.win.isDestroyed() && this.rendererReady) {
       this.win.webContents.send(channel, data)
+      return
+    }
+    if (!QUEUED_RENDERER_CHANNELS.has(channel)) {
+      return
+    }
+    const now = Date.now()
+    this.pendingRendererMessages = this.pendingRendererMessages.filter((message) => message.expiresAt > now)
+    if (this.pendingRendererMessages.length >= PENDING_RENDERER_MESSAGE_LIMIT) {
+      this.pendingRendererMessages.shift()
+    }
+    this.pendingRendererMessages.push({
+      channel,
+      data,
+      expiresAt: now + PENDING_RENDERER_MESSAGE_TTL_MS,
+    })
+  }
+
+  private flushPendingRendererMessages(): void {
+    if (!this.win || this.win.isDestroyed() || !this.rendererReady) return
+    const now = Date.now()
+    const pending = this.pendingRendererMessages
+    this.pendingRendererMessages = []
+    for (const message of pending) {
+      if (message.expiresAt > now) {
+        this.win.webContents.send(message.channel, message.data)
+      }
     }
   }
 

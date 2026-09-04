@@ -6,11 +6,6 @@ type PetRendererWindow = {
 	petRenderer?: PetRenderer;
 };
 
-const renderer = new PetRenderer("pet-canvas");
-renderer.init().catch((error) => {
-	logger.error("[PetRenderer] init failed:", error);
-});
-
 const petWindow = window as unknown as PetRendererWindow;
 
 if (!petWindow.live2dApi) {
@@ -89,4 +84,10 @@ if (!petWindow.live2dApi) {
 	petWindow.live2dApi = fallbackApi;
 }
 
+// The renderer registers IPC listeners during init. Expose the preload API first
+// so a slow or failed preload cannot leave an apparently live but disconnected pet.
+const renderer = new PetRenderer("pet-canvas");
 petWindow.petRenderer = renderer;
+renderer.init().catch((error) => {
+	logger.error("[PetRenderer] init failed:", error);
+});

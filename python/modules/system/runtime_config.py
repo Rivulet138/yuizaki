@@ -140,7 +140,9 @@ class SocketServiceInjector(Protocol):
         vision_llm_client: object | None,
         tts_client: object | None,
         asr_manager: object | None,
+        svc_client: object | None,
         generation_mgr: SummaryPolicyUpdater | None,
+        ocr_client: object | None,
     ) -> None: ...
 
 
@@ -439,6 +441,8 @@ async def reload_runtime_services(
     tts_client_provider: RuntimeServiceProvider | None = None,
     asr_manager_provider: RuntimeServiceProvider | None = None,
     vision_llm_client_provider: RuntimeServiceProvider | None = None,
+    svc_client_provider: RuntimeServiceProvider | None = None,
+    ocr_client_provider: RuntimeServiceProvider | None = None,
 ) -> None:
     if "llm" in changed:
         _ = await cleanup_llm()
@@ -467,11 +471,13 @@ async def reload_runtime_services(
             quality_score_budget_per_hour=config.summary.quality_score_budget_per_hour,
         )
 
-    if changed.intersection({"llm", "tts", "asr"}):
+    if changed.intersection({"llm", "tts", "asr", "svc", "ocr"}):
         sio_server.inject_services(
             llm_client=llm_client_provider() if llm_client_provider is not None else llm_client,
             vision_llm_client=vision_llm_client_provider() if vision_llm_client_provider is not None else None,
             tts_client=tts_client_provider() if tts_client_provider is not None else tts_client,
             asr_manager=asr_manager_provider() if asr_manager_provider is not None else asr_manager,
+            svc_client=svc_client_provider() if svc_client_provider is not None else None,
             generation_mgr=generation_mgr,
+            ocr_client=ocr_client_provider() if ocr_client_provider is not None else None,
         )

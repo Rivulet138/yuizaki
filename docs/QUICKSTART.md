@@ -30,7 +30,7 @@ This creates `YuizakiLauncher.exe` and `YuizakiLauncher` in the repository root.
 
 ```powershell
 .\YuizakiLauncher.exe setup
-.\YuizakiLauncher.exe --check
+.\YuizakiLauncher.exe start --check
 .\YuizakiLauncher.exe start
 ```
 
@@ -49,7 +49,7 @@ npm run prepare:launcher:linux
 cd ..
 chmod +x YuizakiLauncher
 ./YuizakiLauncher setup
-./YuizakiLauncher --check
+./YuizakiLauncher start --check
 ./YuizakiLauncher start
 ```
 

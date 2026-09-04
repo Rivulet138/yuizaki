@@ -77,7 +77,7 @@ export class ControlServer {
     private readonly petModelCatalog: PetModelCatalog,
     private readonly pluginRegistry: PluginRegistry,
     private readonly rendererDistDir: string,
-    private readonly applyPetStateToRenderer: ((state: PetControlState) => void) | undefined,
+    private readonly applyPetStateToRenderer: ((state: PetControlState) => PetControlState) | undefined,
     private readonly providerCredentialStore: ProviderCredentialStore,
     private readonly backendApiTokenStore: BackendApiTokenStoreLike = createTransientBackendApiTokenStore(),
     private readonly hostPerceptionToken: string = '',
@@ -147,14 +147,26 @@ export class ControlServer {
       void this.handleRequest(req, res)
     })
 
-    await new Promise<void>((resolve, reject) => {
-      this.server!.once('error', reject)
-      this.server!.listen(DEFAULT_PORT, '127.0.0.1', () => {
-        const address = this.server!.address() as AddressInfo
-        this.port = address.port
-        resolve()
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.server!.once('error', reject)
+        this.server!.listen(DEFAULT_PORT, '127.0.0.1', () => {
+          const address = this.server!.address() as AddressInfo
+          this.port = address.port
+          resolve()
+        })
       })
-    })
+    } catch (error) {
+      const failedServer = this.server
+      this.server = null
+      this.port = DEFAULT_PORT
+      try {
+        failedServer?.close()
+      } catch {
+        // The listen failure already contains the actionable error.
+      }
+      throw error
+    }
 
     logger.info(`[ControlServer] listening at ${this.panelUrl}`)
   }
@@ -280,7 +292,8 @@ export class ControlServer {
         ? { updatePythonProviderEnvironment: this.pythonProviderEnvironmentUpdater }
         : {}),
       applyPetStateToRenderer: this.applyPetStateToRenderer,
-      applyStateToLive2D: (state: PetControlState) => this.applyStateToLive2D(state),
+      applyStateToLive2D: (state: PetControlState) =>
+        this.applyPetStateToRenderer ? this.applyPetStateToRenderer(state) : state,
     }
 
     if (await handleSystemRoutes(req, res, method, url, routeContext)) {
@@ -379,42 +392,5 @@ export class ControlServer {
 
     res.writeHead(200, { 'Content-Type': mimeType })
     createReadStream(realFilePath).pipe(res)
-  }
-  private applyStateToLive2D(state: PetControlState): PetControlState {
-    let nextState = state
-    const restoredModelId = this.petModelCatalog.normalizeModelId(state.modelId)
-    if (restoredModelId && restoredModelId !== state.modelId) {
-      const restoredModel = this.petModelCatalog.getModelById(restoredModelId)
-      nextState = this.petStateStore.applyConfigPatch({
-        modelId: restoredModelId,
-        ...(restoredModel ? { modelType: restoredModel.type } : {}),
-      })
-    }
-    const layout = this.live2dWindow.applyWindowLayout(state)
-
-    if (layout) {
-      if (layout.placement === 'free') {
-        if (
-          state.positionX !== layout.positionX ||
-          state.positionY !== layout.positionY ||
-          state.placement !== 'free'
-        ) {
-          nextState = this.petStateStore.applyConfigPatch({
-            positionX: layout.positionX,
-            positionY: layout.positionY,
-            placement: 'free',
-          })
-        }
-      }
-      if (state.displayId !== layout.displayId) {
-        nextState = this.petStateStore.applyConfigPatch({ displayId: layout.displayId })
-      }
-    }
-
-    this.live2dWindow.setInteractMode(nextState.interactMode)
-    this.live2dWindow.setClickThrough(nextState.clickThrough)
-    this.live2dWindow.setLocked(nextState.locked)
-    this.live2dWindow.applyPetConfig(this.petModelCatalog.buildRendererConfig(nextState))
-    return nextState
   }
 }

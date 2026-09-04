@@ -348,6 +348,8 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
             lambda: _tts_client,
             lambda: _asr_manager,
             lambda: _vision_llm_client,
+            lambda: _svc_client,
+            lambda: _ocr_client,
         )
 
     settings_api = SettingsAPI(settings_store, dynamic_config, config=config, reload_runtime_services=_reload_runtime_for_settings)

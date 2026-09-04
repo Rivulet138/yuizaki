@@ -207,8 +207,8 @@ def create_agent_runtime(
         if (
             not isinstance(payload, dict)
             or bool(payload.get("stream_draft"))
-            or (payload.get("autonomy_mode") == "silent" and trigger != "scheduler")
-            or trigger not in {"http", "socket", "voice", "scheduler"}
+            or (payload.get("autonomy_mode") == "silent" and trigger not in {"scheduler", "heartbeat"})
+            or trigger not in {"http", "socket", "voice", "scheduler", "heartbeat"}
         ):
             return
         workspace_id = str(payload.get("workspace_id") or "").strip() or None

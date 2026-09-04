@@ -168,7 +168,7 @@ export const handlePetRoutes: HttpRouteHandler = async (req, res, method, url, c
   }
 
   if (method === 'GET' && url.pathname === '/api/pet/state') {
-    ctx.live2dWindow.requestPetState()
+    await ctx.live2dWindow.requestPetStateAndWait()
     sendJson(res, 200, ctx.petStateStore.getState())
     return true
   }

@@ -69,18 +69,18 @@
 
       <section class="drawer-section">
         <h3>{{ t('workspaceDrawer.capabilities.title') }}</h3>
-        <router-link :to="canonicalRoute('settings')" class="summary-link" data-testid="workspace-model-summary">
+        <div class="summary-link">
           <span>{{ t('workspaceDrawer.capabilities.model') }}</span><strong>{{ workspace.default_model || t('workspaceDrawer.capabilities.globalModel') }}</strong>
-        </router-link>
-        <router-link :to="canonicalRoute('memory')" class="summary-link" data-testid="workspace-memory-summary">
+        </div>
+        <div class="summary-link">
           <span>{{ t('workspaceDrawer.capabilities.memory') }}</span><strong>{{ memoryScopeSummary }}</strong>
-        </router-link>
-        <router-link :to="canonicalRoute('tool')" class="summary-link" data-testid="workspace-tool-summary">
+        </div>
+        <div class="summary-link">
           <span>{{ t('workspaceDrawer.capabilities.tools') }}</span><strong>{{ toolSummary }}</strong>
-        </router-link>
-        <router-link :to="canonicalRoute('agent-governance')" class="summary-link" data-testid="workspace-mcp-summary">
+        </div>
+        <div class="summary-link">
           <span>MCP</span><strong>{{ workspace.mcp_preset_id || t('workspaceDrawer.capabilities.allMcp') }}</strong>
-        </router-link>
+        </div>
       </section>
     </div>
   </el-drawer>

@@ -1,7 +1,6 @@
 <template>
   <PanelShell title="运行状态" tone="admin">
     <template #actions>
-      <el-button plain @click="openOnboarding">{{ t('onboarding.reopen') }}</el-button>
       <el-button plain :loading="overviewRefreshLoading" @click="refreshOverview">刷新</el-button>
     </template>
     <div class="overview-console">
@@ -26,7 +25,6 @@
             <h3>{{ runtimeActionItems.length ? `需要处理 ${runtimeActionItems.length} 项` : '运行链路就绪' }}</h3>
             <span>{{ readyChainCount }}/{{ chainChecks.length }} 个核心环节可用</span>
           </div>
-          <el-button plain size="small" :loading="runtimeRequest.loading" @click="loadRuntimeDependencies">刷新</el-button>
         </div>
         <el-alert
           v-if="runtimeRequest.error"
@@ -65,7 +63,6 @@
             <h3>语音体验</h3>
             <span>只读指标</span>
           </div>
-          <el-button plain size="small" :loading="voiceRequest.loading" @click="loadVoiceDiagnostics">刷新</el-button>
         </div>
         <AsyncState :loading="voiceRequest.loading" :error="voiceRequest.error" :show-retry="false">
           <div v-if="voiceSnapshot" class="voice-quality-grid">
@@ -116,7 +113,6 @@
             <h3>平台能力</h3>
             <span v-if="platformSnapshot">宿主：{{ platformHostLabel }}</span>
           </div>
-          <el-button plain size="small" :loading="platformRequest.loading" @click="loadPlatformMatrix">刷新</el-button>
         </div>
         <AsyncState :loading="platformRequest.loading" :error="platformRequest.error" :show-retry="false">
           <div v-if="platformRows.length" class="platform-table-wrap">
@@ -448,8 +444,6 @@ import { useSettingsStore } from '@/state/settingsStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { inferLlmProviderPreset } from '@/domains/settings/llmProviders'
 import { normalizeOpenAiBaseUrl } from '@/domains/settings/llmDiscovery'
-import { useI18n } from '@/i18n'
-import { openOnboarding } from '@/domains/onboarding/onboardingEvents'
 import { systemClient } from '@/api/client'
 import { petControl } from '@/utils/petControl'
 import type {
@@ -497,7 +491,6 @@ const orchestrationSnapshot = ref<OrchestrationSnapshot | null>(null)
 const orchestrationRequest = reactive({ loading: false, error: '' })
 const settingsStore = useSettingsStore()
 const workspaceStore = useWorkspaceStore()
-const { t } = useI18n()
 const canonicalPath = (moduleId: string) => `/w/${workspaceStore.activeWorkspaceId}/${moduleId}`
 
 const loadGovernance = async () => {

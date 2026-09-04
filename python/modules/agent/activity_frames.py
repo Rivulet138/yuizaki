@@ -2003,32 +2003,6 @@ class ActivityFrameService:
         return resolved
 
 
-# Retained as a compatibility helper for callers from earlier phases. It is not
-# used as the durable policy authority.
-class ProactiveBudget:
-    def __init__(self, *, max_events: int = 3, window_seconds: float = 3600.0) -> None:
-        if max_events < 1 or window_seconds <= 0:
-            raise ValueError("proactive budget values must be positive")
-        self.max_events = max_events
-        self.window_seconds = window_seconds
-        self._events: dict[str, list[float]] = {}
-
-    def consume(self, scope: str, *, now: float | None = None) -> bool:
-        current = time.time() if now is None else now
-        events = [stamp for stamp in self._events.get(scope, []) if current - stamp < self.window_seconds]
-        if len(events) >= self.max_events:
-            self._events[scope] = events
-            return False
-        self._events[scope] = [*events, current]
-        return True
-
-    def remaining(self, scope: str, *, now: float | None = None) -> int:
-        current = time.time() if now is None else now
-        events = [stamp for stamp in self._events.get(scope, []) if current - stamp < self.window_seconds]
-        self._events[scope] = events
-        return max(0, self.max_events - len(events))
-
-
 __all__ = [
     "BEHAVIOR_FEEDBACK_KINDS",
     "FEEDBACK_KINDS",
@@ -2039,7 +2013,6 @@ __all__ = [
     "ActivityFrame",
     "ActivityFrameService",
     "ActivityFrameStore",
-    "ProactiveBudget",
     "ProactiveSettings",
     "deterministic_frame_id",
 ]

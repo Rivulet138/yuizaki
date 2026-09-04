@@ -76,6 +76,8 @@ export interface IpcContext {
     hide: () => void
     reloadRenderer: () => void
     requestPetState: () => void
+    requestPetStateAndWait: (timeoutMs?: number) => Promise<boolean>
+    notifyPetStateUpdated: () => void
     handleRendererReady: (sender: WebContents) => boolean
     handleAvatarCapabilities: (sender: WebContents, payload: unknown) => boolean
     handleAvatarCommandResult: (sender: WebContents, payload: unknown) => boolean
@@ -742,9 +744,8 @@ function registerPetControlHandlers(ctx: IpcContext): void {
       ctx.live2dWindow.setLocked(false)
       ctx.live2dWindow.setClickThrough(false)
       state = ctx.petStateStore.applyConfigPatch({ visible: true, locked: false, clickThrough: false })
-      ctx.applyPetStateToRenderer(state)
     }
-    return state
+    return ctx.applyPetStateToRenderer(state)
   })
 
   ipcMain.handle('pet:begin-adjustment', (event) => {
@@ -858,8 +859,9 @@ function registerPetControlHandlers(ctx: IpcContext): void {
     } else {
       ctx.live2dWindow.hide()
     }
-    ctx.petStateStore.setVisible(Boolean(enabled))
-    return { success: true, visible: Boolean(enabled) }
+    const state = ctx.petStateStore.setVisible(Boolean(enabled))
+    ctx.applyPetStateToRenderer(state)
+    return { success: true, visible: state.visible }
   })
 
   ipcMain.handle('pet:pick-local-model', async (event, modelType: unknown): Promise<LocalModelPickerResponse> => {
@@ -931,14 +933,12 @@ function registerPetInteractionHandlers(ctx: IpcContext): void {
 
   ipcMain.on('pet:interact-enable', (event) => {
     if (!allowTrustedIpcSender(event)) return
-    ctx.live2dWindow.setInteractMode(true)
-    ctx.petStateStore.setInteractMode(true)
+    ctx.applyPetStateToRenderer(ctx.petStateStore.setInteractMode(true))
   })
 
   ipcMain.on('pet:interact-disable', (event) => {
     if (!allowTrustedIpcSender(event)) return
-    ctx.live2dWindow.setInteractMode(false)
-    ctx.petStateStore.setInteractMode(false)
+    ctx.applyPetStateToRenderer(ctx.petStateStore.setInteractMode(false))
   })
 
   ipcMain.on('pet:open-control-panel', (event) => {
@@ -1011,6 +1011,7 @@ function registerPetInteractionHandlers(ctx: IpcContext): void {
   ipcMain.on('pet:state-changed', (event, payload: PetRendererStatePayload) => {
     if (!allowTrustedIpcSender(event)) return
     ctx.petStateStore.applyRendererState(payload)
+    ctx.live2dWindow.notifyPetStateUpdated()
   })
 
   ipcMain.handle('pet:dispatch-event', async (event, payload: unknown) => {

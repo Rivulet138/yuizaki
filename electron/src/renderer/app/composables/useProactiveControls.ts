@@ -13,7 +13,6 @@ import {
 } from '@/../shared/proactive'
 
 const LEGACY_PRESET_KEY = 'yuizaki.companion.proactivity-preset'
-const LEGACY_MIGRATED_KEY = 'yuizaki.companion.proactivity-preset.backend-authority'
 
 interface ProactiveApi {
   settings: typeof proactiveClient.settings
@@ -47,14 +46,8 @@ const applyRestrictivePatch = (settings: ProactiveSettings, patch: ProactiveSett
   },
 })
 
-const migrateLegacyPresetMarker = () => {
+const migrateLegacyPreset = () => {
   try {
-    if (!window.localStorage.getItem(LEGACY_MIGRATED_KEY)) {
-      const preset = window.localStorage.getItem(LEGACY_PRESET_KEY)
-      if (preset === 'conservative' || preset === 'standard') {
-        window.localStorage.setItem(LEGACY_MIGRATED_KEY, preset)
-      }
-    }
     window.localStorage.removeItem(LEGACY_PRESET_KEY)
   } catch {
     // Backend settings still remain authoritative when local storage is unavailable.
@@ -117,7 +110,7 @@ export const createProactiveControls = (api: ProactiveApi = proactiveClient) => 
       feedbackSummary.value = nextFeedbackSummary
       loaded.value = true
       policyClosed.value = false
-      migrateLegacyPresetMarker()
+      migrateLegacyPreset()
       return true
     } catch (loadError) {
       if (!isCurrent(generation)) return false

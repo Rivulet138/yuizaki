@@ -4,6 +4,7 @@ import { jaJPOverrides } from './jaOverrides'
 import { onboardingMessages } from './onboardingMessages'
 import { productMetricsMessages } from './productMetricsMessages'
 import { proactiveMessages } from './proactiveMessages'
+import { chatMessages } from './chatMessages'
 
 export type Locale = 'zh-CN' | 'en-US' | 'ja-JP'
 
@@ -13,6 +14,7 @@ const STORAGE_KEY = 'yuizaki.locale'
 
 const messages = {
   'zh-CN': {
+    ...chatMessages['zh-CN'],
     ...onboardingMessages['zh-CN'],
     ...productMetricsMessages['zh-CN'],
     ...proactiveMessages['zh-CN'],
@@ -277,7 +279,7 @@ const messages = {
     'navigation.agent-trace.desc': '任务调度与执行追踪',
     'navigation.agent-trace.title': '任务追踪',
     'navigation.chat.desc': '文本与语音对话',
-    'navigation.chat.title': '对话中心',
+    'navigation.chat.title': '对话',
     'navigation.companion.desc': '档案、关系与联动',
     'navigation.companion.title': '桌宠总览',
     'companion.home.actions': '日常操作',
@@ -753,6 +755,7 @@ const messages = {
     'settings.tts.warmup': '预热语音引擎',
   },
   'en-US': {
+    ...chatMessages['en-US'],
     ...onboardingMessages['en-US'],
     ...productMetricsMessages['en-US'],
     ...proactiveMessages['en-US'],
@@ -1497,6 +1500,7 @@ const messages = {
     'settings.tts.warmup': 'Warm up voice engine',
   },
   'ja-JP': {
+    ...chatMessages['ja-JP'],
     ...onboardingMessages['ja-JP'],
     ...productMetricsMessages['ja-JP'],
     ...proactiveMessages['ja-JP'],

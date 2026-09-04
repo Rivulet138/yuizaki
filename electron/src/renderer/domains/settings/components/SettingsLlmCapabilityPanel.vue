@@ -102,7 +102,7 @@ const configurationWarnings = computed(() => {
   if (metadata.maxOutputTokens !== null && props.maxOutputTokens > metadata.maxOutputTokens) {
     warnings.push(`当前最大输出 ${formatTokenLimit(props.maxOutputTokens)} 超过登记上限 ${formatTokenLimit(metadata.maxOutputTokens)}。`)
   }
-  if (capabilities.value.vision === false && !props.visionEnabled) {
+  if (capabilities.value.vision === false && props.visionEnabled) {
     warnings.push('当前文本模型不支持视觉；启用实时屏幕观察前，请配置独立视觉模型。')
   }
   return warnings

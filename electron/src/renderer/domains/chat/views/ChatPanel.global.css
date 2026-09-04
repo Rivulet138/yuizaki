@@ -4,8 +4,8 @@
 
 .yuizaki-bg.yuizaki-bg .chat-mode .composer-box {
   border-color: var(--yui-chat-border);
-  background: var(--yui-chat-surface);
-  box-shadow: none;
+  background: var(--yui-browser-composer-surface, var(--yui-chat-surface));
+  box-shadow: var(--yui-browser-composer-shadow, none);
 }
 
 .yuizaki-bg.yuizaki-bg .chat-mode .composer-box .el-textarea__inner {
@@ -34,9 +34,9 @@
 
 [data-theme='dark'] .yuizaki-bg.yuizaki-bg .chat-mode .composer-box {
   border-color: var(--yui-chat-border);
-  background: var(--yui-chat-surface);
+  background: var(--yui-browser-composer-surface, var(--yui-chat-surface));
   color: var(--yui-chat-text);
-  box-shadow: none;
+  box-shadow: var(--yui-browser-composer-shadow, none);
 }
 
 [data-theme='dark'] .yuizaki-bg.yuizaki-bg .chat-mode .composer-box .el-textarea__inner {

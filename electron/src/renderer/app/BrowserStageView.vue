@@ -10,21 +10,17 @@
     <div class="stage-content">
       <header class="stage-toolbar">
         <div class="stage-brand">
-          <span class="stage-brand-mark">結</span>
           <div>
-            <strong>{{ activeWorkspace.name || '結崎' }}</strong>
-            <span class="stage-subtitle">对话空间</span>
+            <strong>{{ activeWorkspace.name || t('chat.stage.workspaceFallback') }}</strong>
+            <span class="stage-subtitle">{{ t('chat.stage.subtitle') }}</span>
           </div>
-          <span class="stage-live"><i></i>在线</span>
+          <span class="stage-live">{{ realtimeConnected ? t('chat.stage.online') : t('chat.stage.connecting') }}</span>
         </div>
 
         <div class="stage-actions">
-        <button class="stage-icon-button" type="button" title="主题" aria-label="主题" @click="$emit('toggle-theme')">
-          <el-icon><Moon /></el-icon>
-        </button>
-        <button class="stage-icon-button" type="button" title="语言" aria-label="语言" @click="showLocale = !showLocale">
-          <el-icon><ChatDotRound /></el-icon>
-        </button>
+          <button class="stage-text-button" type="button" :title="t('chat.stage.language')" @click="showLocale = !showLocale">
+            {{ t('chat.stage.language') }}
+          </button>
         </div>
 
         <div v-if="showLocale" class="locale-menu">
@@ -35,22 +31,51 @@
       </header>
 
       <main class="stage-main">
-        <section class="stage-display" aria-label="对话中的 Live2D 或 VRM 模型">
-          <div class="stage-floor"><span></span></div>
-          <BrowserPetStage :key="compactStage ? 'compact' : 'desktop'" />
-          <div class="stage-caption">
-            <span>{{ companionId || 'yumi' }}</span>
-            <small>{{ companionStateLabel }}</small>
-          </div>
+        <section class="stage-display" :aria-label="t('chat.stage.modelLabel')">
+          <BrowserPetStage
+            ref="petStageRef"
+            :key="compactStage ? 'compact' : 'desktop'"
+            @zoom-change="modelZoom = $event"
+          />
         </section>
 
         <aside v-if="chatOpen" class="stage-window stage-chat-window">
+          <div class="stage-window-zoom-controls" role="group" :aria-label="t('chat.stage.modelZoom')">
+            <button
+              class="stage-window-zoom-button"
+              type="button"
+              :title="t('chat.stage.zoomOut')"
+              :aria-label="t('chat.stage.zoomOut')"
+              :disabled="modelZoom <= MODEL_ZOOM_MIN"
+              @click.stop="changeModelZoom(-ZOOM_STEP)"
+            >
+              <el-icon><ZoomOut /></el-icon>
+            </button>
+            <button
+              class="stage-window-zoom-button"
+              type="button"
+              :title="t('chat.stage.zoomReset')"
+              :aria-label="t('chat.stage.zoomReset')"
+              @click.stop="resetModelZoom"
+            >
+              <el-icon><Refresh /></el-icon>
+            </button>
+            <button
+              class="stage-window-zoom-button"
+              type="button"
+              :title="t('chat.stage.zoomIn')"
+              :aria-label="t('chat.stage.zoomIn')"
+              :disabled="modelZoom >= MODEL_ZOOM_MAX"
+              @click.stop="changeModelZoom(ZOOM_STEP)"
+            >
+              <el-icon><ZoomIn /></el-icon>
+            </button>
+          </div>
           <header class="stage-window-header">
             <div>
-              <strong>对话</strong>
-              <span>{{ realtimeConnected ? '在线' : '连接中' }}</span>
+              <strong>{{ t('chat.title') }}</strong>
             </div>
-            <button class="stage-close" type="button" title="关闭聊天" aria-label="关闭聊天" @click="chatOpen = false">
+            <button class="stage-close" type="button" :title="t('chat.stage.close')" :aria-label="t('chat.stage.close')" @click="chatOpen = false">
               <el-icon><Close /></el-icon>
             </button>
           </header>
@@ -61,9 +86,9 @@
           </div>
         </aside>
 
-        <button v-else class="stage-reopen" type="button" title="打开聊天" @click="chatOpen = true">
+        <button v-else class="stage-reopen" type="button" :title="t('chat.stage.open')" @click="chatOpen = true">
           <el-icon><ChatDotRound /></el-icon>
-          <span>打开聊天</span>
+          <span>{{ t('chat.stage.open') }}</span>
         </button>
       </main>
     </div>
@@ -72,32 +97,34 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { ChatDotRound, Close, Moon } from '@element-plus/icons-vue'
-import type { NavigationModuleId } from '@/navigation/modules'
+import { ChatDotRound, Close, Refresh, ZoomIn, ZoomOut } from '@element-plus/icons-vue'
 import type { NavigationModule } from '@/navigation/types'
 import type { WorkspaceRecord } from '@/../shared/workspace'
 import { getSocketClient } from '@/net/socketClient'
+import { useI18n } from '@/i18n'
 import AppSidebar from './AppSidebar.vue'
 import BrowserPetStage from './BrowserPetStage.vue'
 
 const props = defineProps<{
   currentWallpaper: string
-  activeTab: NavigationModuleId
   menus: NavigationModule[]
   activeWorkspace: WorkspaceRecord
-  companionId: string
-  companionStateLabel: string
 }>()
 
 const emit = defineEmits<{
-  toggleTheme: []
   changeLocale: [locale: string]
   'open-workspace-settings': []
 }>()
+const { t } = useI18n()
 
 const chatOpen = ref(true)
 const showLocale = ref(false)
 const compactStage = ref(false)
+const petStageRef = ref<{ adjustZoom: (delta: number) => void; resetZoom: () => void } | null>(null)
+const MODEL_ZOOM_MIN = 1.2
+const MODEL_ZOOM_MAX = 3
+const ZOOM_STEP = 0.1
+const modelZoom = ref(1.7)
 const realtimeConnected = getSocketClient().connected
 let compactMediaQuery: MediaQueryList | null = null
 
@@ -109,7 +136,7 @@ const localeOptions = [
 const stageStyle = computed(() => ({
   '--stage-wallpaper': props.currentWallpaper
     ? `url("${props.currentWallpaper}")`
-    : 'url("/assets/chat-depth-bg.jpg")',
+    : 'url("/assets/chat-home-bg.jpg")',
 }))
 
 const changeLocale = (locale: string): void => {
@@ -120,6 +147,14 @@ const changeLocale = (locale: string): void => {
 
 const syncCompactStage = (): void => {
   compactStage.value = compactMediaQuery?.matches ?? false
+}
+
+const changeModelZoom = (delta: number): void => {
+  petStageRef.value?.adjustZoom(delta)
+}
+
+const resetModelZoom = (): void => {
+  petStageRef.value?.resetZoom()
 }
 
 onMounted(() => {
@@ -142,25 +177,41 @@ onBeforeUnmount(() => {
   height: 100%;
   overflow: hidden;
   color: var(--yui-text);
-  background: var(--yui-browser-bg);
-  --stage-chat-overlay: rgba(255, 255, 255, .78);
-  --stage-sidebar-overlay: rgba(255, 255, 255, .72);
+  background: transparent;
+  --stage-border: rgba(255, 255, 255, .58);
+  --stage-chrome-surface: rgba(255, 255, 255, .18);
+  --stage-frame: rgba(255, 255, 255, .68);
+  --stage-window-surface: rgba(255, 255, 255, .86);
 }
 
 :global(:root[data-theme='dark']) .browser-stage {
-  --stage-chat-overlay: rgba(15, 23, 42, .74);
-  --stage-sidebar-overlay: rgba(15, 23, 42, .7);
+  --stage-border: rgba(173, 207, 233, .42);
+  --stage-chrome-surface: rgba(15, 23, 42, .58);
+  --stage-frame: rgba(30, 41, 59, .9);
+  --stage-window-surface: rgba(15, 23, 42, .78);
+}
+
+.browser-stage::before {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  content: '';
+  background-color: #edf2f7;
+  background-image: var(--stage-wallpaper);
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
 }
 
 :global(.yuizaki-bg.browser-mode .stage-sidebar.sidebar) {
   flex: 0 0 202px;
   height: 100%;
-  background-color: var(--yui-panel-surface);
-  background-image: linear-gradient(var(--stage-sidebar-overlay), var(--stage-sidebar-overlay)), var(--stage-wallpaper);
-  background-position: center;
-  background-size: cover;
+  background: var(--stage-chrome-surface);
+  background-image: none;
+  border-color: var(--stage-border);
+  backdrop-filter: blur(4px) saturate(1.06);
 }
-.stage-content { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
+.stage-content { position: relative; z-index: 1; display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; }
 .stage-toolbar {
   position: relative;
   z-index: 4;
@@ -169,19 +220,18 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   min-height: 58px;
   padding: 12px 20px;
-  border-bottom: 1px solid var(--yui-browser-border);
+  border-bottom: 1px solid var(--stage-border);
   color: var(--yui-browser-text);
-  background: var(--yui-browser-surface);
+  background: var(--stage-chrome-surface);
+  backdrop-filter: blur(4px) saturate(1.06);
 }
 
 .stage-brand, .stage-actions { display: flex; align-items: center; gap: 10px; }
-.stage-brand-mark { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid var(--yui-border-strong); border-radius: 50%; font-weight: 800; }
 .stage-brand strong { display: block; font-size: 14px; font-weight: 750; letter-spacing: .02em; }
 .stage-subtitle { display: block; margin-top: 2px; color: var(--yui-muted); font-size: 10px; }
-.stage-live { display: inline-flex; align-items: center; gap: 5px; color: var(--yui-muted); font-size: 10px; letter-spacing: .14em; }
-.stage-live i { width: 6px; height: 6px; border-radius: 50%; background: #fb7185; box-shadow: 0 0 0 4px rgba(251,113,133,.15); }
-.stage-icon-button, .stage-close { display: grid; width: 34px; height: 34px; padding: 0; place-items: center; border: 1px solid var(--yui-border); border-radius: 8px; color: var(--yui-muted); background: var(--yui-panel-surface); cursor: pointer; text-decoration: none; transition: background .16s ease, border-color .16s ease, color .16s ease; }
-.stage-icon-button:hover, .stage-icon-button.active, .stage-close:hover { border-color: var(--yui-border-strong); color: var(--yui-text); background: var(--yui-panel-surface-strong); }
+.stage-live { color: var(--yui-muted); font-size: 10px; }
+.stage-text-button, .stage-close { min-height: 30px; padding: 0 9px; border: 1px solid var(--stage-border); border-radius: 7px; color: var(--yui-muted); background: rgba(255, 255, 255, .18); cursor: pointer; text-decoration: none; transition: background .16s ease, border-color .16s ease, color .16s ease; }
+.stage-text-button:hover, .stage-text-button.active, .stage-close:hover { border-color: rgba(255, 255, 255, .96); color: var(--yui-text); background: rgba(255, 255, 255, .42); }
 .locale-menu { position: absolute; top: 52px; right: 18px; z-index: 6; display: grid; min-width: 110px; padding: 6px; border: 1px solid var(--yui-border); border-radius: 8px; background: var(--yui-surface-raised); box-shadow: var(--yui-shadow-card); }
 .locale-menu button { padding: 8px 10px; border: 0; color: var(--yui-text); background: transparent; text-align: left; cursor: pointer; }
 .locale-menu button:hover { background: var(--yui-chat-hover); }
@@ -206,49 +256,67 @@ onBeforeUnmount(() => {
   place-items: center;
   overflow: hidden;
   isolation: isolate;
-  border: 1px solid var(--yui-browser-border);
-  border-radius: var(--yui-radius-panel);
-  background: var(--yui-panel-surface);
-  box-shadow: var(--yui-panel-shadow);
+  border: 6px solid var(--stage-frame);
+  border-radius: 26px;
+  background-color: #edf2f7;
+  background-image: url('/assets/echobot-reference-bg.jpg');
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  backdrop-filter: none;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, .18), 0 18px 46px rgba(15, 23, 42, .18), inset 0 0 0 1px rgba(255, 255, 255, .58);
   padding: 18px 26px;
 }
 
-.stage-display::before {
-  position: absolute;
-  inset: 0;
-  z-index: -2;
-  content: '';
-  background-image: var(--stage-wallpaper);
-  background-position: center;
-  background-size: cover;
-  filter: blur(10px) saturate(1.06) contrast(1.02);
-  opacity: .62;
-  transform: scale(1.04);
-}
-
-.stage-display::after {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  content: '';
-  background: linear-gradient(180deg, rgba(8, 13, 24, .24), rgba(8, 13, 24, .08) 46%, rgba(8, 13, 24, .36));
-  pointer-events: none;
-}
-
-.stage-floor { position: absolute; bottom: 8%; width: min(72vw, 780px); height: 16%; border-radius: 50%; background: radial-gradient(ellipse, rgba(16,24,39,.48), transparent 68%); }
-.stage-floor span { position: absolute; inset: 28% 18% auto; height: 2px; background: linear-gradient(90deg, transparent, rgba(255,255,255,.4), transparent); }
-.stage-caption { position: absolute; bottom: 7%; display: grid; gap: 3px; text-align: center; color: var(--yui-text); text-shadow: 0 2px 14px rgba(0,0,0,.35); }
-.stage-caption span { font-size: 12px; font-weight: 700; }
-.stage-caption small { font-size: 10px; color: var(--yui-muted); }
-.stage-window { position: relative; z-index: 3; display: flex; flex-direction: column; width: min(430px, 42vw); min-width: 340px; margin: 0; overflow: hidden; border: 1px solid var(--yui-panel-outline); border-radius: var(--yui-radius-panel); color: var(--yui-text); background-color: var(--yui-surface-raised); background-image: linear-gradient(var(--stage-chat-overlay), var(--stage-chat-overlay)), var(--stage-wallpaper); background-position: center; background-size: cover; box-shadow: var(--yui-panel-shadow); }
-.stage-window-header { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 8px 12px 8px 16px; border-bottom: 1px solid var(--yui-border); background: var(--yui-surface-muted); }
-.stage-window-header div { display: flex; align-items: baseline; gap: 8px; }
+.stage-window { position: relative; z-index: 3; display: flex; flex-direction: column; width: clamp(360px, 31vw, 480px); min-width: 340px; margin: 0; overflow: hidden; border: 7px solid var(--stage-frame); border-radius: 28px; color: var(--yui-text); background: var(--stage-window-surface); box-shadow: 0 0 0 1px rgba(15, 23, 42, .18), 0 20px 52px rgba(15, 23, 42, .2), inset 0 0 0 1px rgba(255, 255, 255, .68); }
+.stage-window-header { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 8px 12px 8px 16px; border-bottom: 1px solid rgba(255, 255, 255, .42); background: rgba(255, 255, 255, .28); }
+.stage-window-header div { display: flex; align-items: baseline; }
 .stage-window-header strong { font-size: 14px; }
 .stage-window-header span { color: var(--yui-muted); font-size: 10px; }
-.stage-window-body { flex: 1; min-height: 0; overflow: hidden; }
+.stage-window-body { position: relative; z-index: 1; flex: 1; min-height: 0; overflow: hidden; background: rgba(255, 255, 255, .08); }
 .stage-route-component { width: 100%; height: 100%; }
+.stage-window-zoom-controls { position: absolute; top: 78px; left: 14px; z-index: 4; display: inline-flex; align-items: center; gap: 6px; padding: 5px; border: 1px solid rgba(255, 255, 255, .72); border-radius: 10px; background: rgba(255, 255, 255, .62); box-shadow: 0 8px 18px rgba(15, 23, 42, .14); backdrop-filter: blur(5px); }
+.stage-window-zoom-button { display: inline-grid; width: 30px; height: 30px; padding: 0; place-items: center; border: 1px solid rgba(148, 163, 184, .42); border-radius: 7px; color: #334155; background: rgba(255, 255, 255, .72); cursor: pointer; transition: background .16s ease, border-color .16s ease, color .16s ease, opacity .16s ease; }
+.stage-window-zoom-button:hover:not(:disabled) { border-color: rgba(71, 85, 105, .58); color: #0f172a; background: #fff; }
+.stage-window-zoom-button:focus-visible { outline: 2px solid rgba(59, 130, 246, .72); outline-offset: 2px; }
+.stage-window-zoom-button:disabled { cursor: not-allowed; opacity: .4; }
 .stage-reopen { position: absolute; right: 20px; bottom: 20px; z-index: 5; display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 12px; border: 1px solid var(--yui-border); border-radius: 8px; color: var(--yui-text); background: var(--yui-panel-surface-strong); box-shadow: var(--yui-shadow-card); cursor: pointer; }
 .stage-reopen:hover { border-color: var(--yui-border-strong); background: var(--yui-surface-raised); }
+
+.stage-window-body :deep(.chat-workspace) {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.stage-window-body :deep(.session-rail-pane) {
+  background: rgba(255, 255, 255, .2);
+}
+
+:global(:root[data-theme='dark']) .stage-window-header,
+:global(:root[data-theme='dark']) .stage-window-body :deep(.session-rail-pane) {
+  background: rgba(15, 23, 42, .76);
+}
+
+:global(:root[data-theme='dark']) .stage-window {
+  background: var(--stage-window-surface);
+}
+
+:global(:root[data-theme='dark']) .stage-window-zoom-controls {
+  border-color: rgba(148, 163, 184, .42);
+  background: rgba(15, 23, 42, .72);
+}
+
+:global(:root[data-theme='dark']) .stage-window-zoom-button {
+  border-color: rgba(148, 163, 184, .44);
+  color: #dbeafe;
+  background: rgba(30, 41, 59, .82);
+}
+
+:global(:root[data-theme='dark']) .stage-window-body {
+  background: rgba(15, 23, 42, .2);
+}
 
 @media (max-width: 860px) {
   .stage-sidebar { flex-basis: 68px; width: 68px; }
@@ -261,9 +329,8 @@ onBeforeUnmount(() => {
   .stage-display { min-height: 520px; height: calc(100vh - 58px); }
   .stage-main { margin: 10px 10px 12px; }
   .stage-display { padding: 12px 14px; }
-  .stage-window { position: absolute; top: 12px; right: 12px; bottom: 12px; width: min(430px, calc(100% - 24px)); min-width: 0; }
-  .stage-caption { left: 24%; }
-  .stage-display :deep(.browser-pet-stage) { transform: translateX(-16%); }
+  .stage-window { position: absolute; top: 12px; right: 12px; bottom: 12px; width: min(360px, calc(100% - 24px)); min-width: 0; border-width: 5px; border-radius: 24px; }
+  .stage-display :deep(.browser-pet-stage) { transform: translateX(-28%); }
   .stage-actions { gap: 6px; }
   .stage-brand strong, .stage-subtitle, .stage-live { display: none; }
 }

@@ -86,7 +86,7 @@ Use `--with-qdrant` on Windows to request the configured Docker service. Memory 
 | `SERVER_PORT` | `8001` | Python HTTP and Socket.IO backend |
 | `CONTROL_SERVER_PORT` | `38945` | Electron control service |
 | `RENDERER_PORT` | `5173` | Vite renderer in development |
-| `MCP_PORT` | `8333` | Default node-mcp service |
+| `MCP_PORT` | `7777` | Default node-mcp service |
 
 The launcher may select a fallback port when a default is occupied and passes the chosen origins to the application. Do not hard-code these defaults in clients.
 

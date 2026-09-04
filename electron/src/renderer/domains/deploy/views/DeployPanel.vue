@@ -15,11 +15,11 @@
               <div>
                 <strong>后端状态</strong>
               </div>
-              <el-tag :type="health.healthy ? 'success' : 'danger'">{{ health.healthy ? '后端在线' : '等待连接' }}</el-tag>
+              <el-tag :type="healthTone">{{ healthTagText }}</el-tag>
             </div>
           </template>
           <div class="status-row">
-            <div class="status-orb" :class="health.healthy ? 'online' : 'offline'"></div>
+            <div class="status-orb" :class="healthOrbClass"></div>
             <div>
               <strong>{{ health.message }}</strong>
               <span>{{ lastCheckedAt ? `最近检查：${lastCheckedAt}` : '尚未执行健康检查' }}</span>
@@ -164,7 +164,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 const normalizeHealthStatus = (payload: unknown) => {
   const data = isRecord(payload) ? payload : {}
   const status = typeof data.status === 'string' ? data.status : 'unknown'
-  const healthy = data.healthy === true || status === 'healthy' || status === 'ok'
+  const healthy = data.healthy === true || data.ok === true || status === 'healthy' || status === 'ok'
   const message = typeof data.message === 'string'
     ? data.message
     : healthy
@@ -335,19 +335,32 @@ const hasElectronBridge = computed(() => Boolean(window.petApi?.python?.health))
 const hasElectronPythonControls = computed(() => Boolean(window.petApi?.python?.start && window.petApi?.python?.stop))
 const pythonControlHint = computed(() => hasElectronPythonControls.value ? '通过 Electron 主进程启停后端' : '浏览器模式无法直接启停后端，请使用命令手册')
 const refreshing = computed(() => healthLoading.value || readinessLoading.value)
+const healthIsError = computed(() => !health.healthy && ['error', 'failed', 'unhealthy'].includes(health.status))
+const healthTone = computed<'success' | 'warning' | 'danger' | 'info'>(() => {
+  if (health.healthy) return 'success'
+  if (healthIsError.value) return 'danger'
+  return 'warning'
+})
+const healthTagText = computed(() => {
+  if (health.healthy) return '后端在线'
+  if (healthIsError.value) return '检查失败'
+  return '等待连接'
+})
+const healthOrbClass = computed(() => health.healthy ? 'online' : healthIsError.value ? 'error' : 'offline')
 
 const overallStatusText = computed(() => {
   if (refreshing.value) return '正在刷新运行状态'
   if (health.healthy && readiness.ready) return '核心检查通过'
+  if (healthIsError.value) return '运行检查失败'
   return '等待后端健康'
 })
 
 const deploySteps = computed(() => {
   const steps = [
-    { id: 'backend', title: '后端健康接口', status: health.healthy ? 'done' : 'active' as StepStatus },
+    { id: 'backend', title: '后端健康接口', status: health.healthy ? 'done' : healthLoading.value ? 'active' : healthIsError.value ? 'blocked' : 'pending' as StepStatus },
     { id: 'readiness', title: 'AI 就绪检查', status: readiness.ready ? 'done' : health.healthy ? 'active' : 'pending' as StepStatus },
     { id: 'electron', title: 'Electron 启停桥接', status: hasElectronBridge.value ? 'done' : 'pending' as StepStatus },
-    { id: 'docs', title: 'API 文档入口', status: health.healthy ? 'done' : 'blocked' as StepStatus },
+    { id: 'docs', title: 'API 文档入口', status: health.healthy ? 'done' : healthIsError.value ? 'blocked' : 'pending' as StepStatus },
   ]
   return steps.map((step, index) => ({ ...step, index: index + 1 }))
 })
@@ -490,13 +503,18 @@ onMounted(() => {
   width: 16px;
   height: 16px;
   border-radius: 999px;
-  background: #ef4444;
-  box-shadow: 0 0 0 8px rgba(239, 68, 68, 0.12);
+  background: #f59e0b;
+  box-shadow: 0 0 0 8px rgba(245, 158, 11, 0.12);
 }
 
 .status-orb.online {
   background: #22c55e;
   box-shadow: 0 0 0 8px rgba(34, 197, 94, 0.12);
+}
+
+.status-orb.error {
+  background: #ef4444;
+  box-shadow: 0 0 0 8px rgba(239, 68, 68, 0.12);
 }
 
 .status-row strong,

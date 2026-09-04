@@ -75,6 +75,7 @@ def create_ai_router(
     allow_legacy_turn_pipeline: bool = False,
 ) -> APIRouter:
     router = APIRouter(tags=["ai"])
+    legacy_warning_emitted = False
 
     def _maybe_write_user_relationship_event(
         messages: list[dict[str, Any]],
@@ -172,9 +173,16 @@ def create_ai_router(
         return requested or uuid.uuid4().hex[:12]
 
     def _require_turn_service(runtime: Any) -> Any | None:
+        nonlocal legacy_warning_emitted
         turn_service = getattr(runtime, "turn_service", None)
         if turn_service is None and not allow_legacy_turn_pipeline:
             raise RuntimeError("TurnService is required for semantic chat execution")
+        if turn_service is None and allow_legacy_turn_pipeline and not legacy_warning_emitted:
+            logger.warning(
+                "Legacy HTTP Turn pipeline is enabled; chat requests may bypass "
+                "TurnService/outbox and should be migrated."
+            )
+            legacy_warning_emitted = True
         return turn_service
 
     def _bind_http_generation(

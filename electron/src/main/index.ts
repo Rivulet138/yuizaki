@@ -552,7 +552,7 @@ function normalizePetPatch(patch: PetControlConfigPatch): PetControlConfigPatch 
   return nextPatch
 }
 
-function applyPetStateToRenderer(state: PetControlState): void {
+function applyPetStateToRenderer(state: PetControlState): PetControlState {
   let nextState = state
   const restoredModelId = petModelCatalog.normalizeModelId(state.modelId)
   if (restoredModelId && restoredModelId !== state.modelId) {
@@ -604,6 +604,8 @@ function applyPetStateToRenderer(state: PetControlState): void {
       scale: nextState.scale,
     })
   }
+
+  return petStateStore.getState()
 }
 
 function setupIPC(): void {

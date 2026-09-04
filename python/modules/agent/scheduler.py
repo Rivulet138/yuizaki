@@ -87,6 +87,11 @@ class AgentScheduler:
             if allow_legacy_pipeline is None
             else bool(allow_legacy_pipeline)
         )
+        if self.allow_legacy_pipeline:
+            logger.warning(
+                "Legacy scheduler pipeline compatibility is enabled; scheduled semantic "
+                "runs may bypass TurnService/outbox and should be migrated."
+            )
         self._store_lock = asyncio.Lock()
 
     async def start(self) -> None:

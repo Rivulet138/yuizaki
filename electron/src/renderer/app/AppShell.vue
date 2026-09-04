@@ -1,14 +1,10 @@
 <template>
-  <div class="yuizaki-bg" :class="{ 'browser-mode': !isElectronPanel }">
+  <div class="yuizaki-bg" :class="{ 'browser-mode': !isElectronPanel }" :style="browserWallpaperStyle">
     <BrowserStageView
-      v-if="!isElectronPanel && activeTab === 'chat'"
+      v-if="activeTab === 'chat'"
       :current-wallpaper="currentWallpaper"
-      :active-tab="activeTab"
       :menus="menus"
       :active-workspace="activeWorkspace"
-      :companion-id="activeWorkspace.companion_profile_id || companionStore.activeCompanionId"
-      :companion-state-label="companionStateLabel"
-      @toggle-theme="toggleTheme"
       @change-locale="handleLocaleChange"
       @open-workspace-settings="dialogStore.openWorkspaceDrawer"
     />
@@ -117,6 +113,7 @@ import { useCompanionRuntimeBridge } from './composables/useCompanionRuntimeBrid
 import { publishCompanionRuntimeEvent } from './runtime/companionRuntime'
 import { createAppRuntimeTeardown } from './runtime/appRuntimeTeardown'
 import { createVisualCaptureRuntime } from './runtime/visualCaptureRuntime'
+import { petControl } from '@/utils/petControl'
 
 const systemStore = useSystemStore()
 const workspaceStore = useWorkspaceStore()
@@ -159,6 +156,39 @@ const companionOptions = computed(() => {
     .map((item) => ({ id: item.id, name: item.name }))
 })
 const isElectronPanel = computed(() => Boolean(petApi?.window))
+const browserWallpaperStyle = computed(() => ({
+  '--browser-wallpaper': currentWallpaper.value ? `url("${currentWallpaper.value}")` : 'none',
+}))
+let browserPetVisibilityRequest = 0
+let browserPetVisibilityRetryTimer: ReturnType<typeof window.setTimeout> | null = null
+const syncBrowserPetLayer = (tab: NavigationModuleId): void => {
+  // The browser conversation owns its in-frame renderer; every other tab
+  // hands visibility back to the Electron desktop pet layer. Browser mode can
+  // start before the control server is ready, so retry the latest request a
+  // few times without allowing an old route change to win later.
+  const requestId = ++browserPetVisibilityRequest
+  if (browserPetVisibilityRetryTimer !== null) {
+    window.clearTimeout(browserPetVisibilityRetryTimer)
+    browserPetVisibilityRetryTimer = null
+  }
+  const desiredVisible = tab !== 'chat' || document.visibilityState === 'hidden'
+  const attempt = async (retry: number): Promise<void> => {
+    if (requestId !== browserPetVisibilityRequest || isElectronPanel.value) return
+    try {
+      await petControl.setVisible(desiredVisible)
+    } catch (cause) {
+      if (retry >= 3) {
+        console.warn('[AppShell] failed to sync browser pet visibility', cause)
+        return
+      }
+      browserPetVisibilityRetryTimer = window.setTimeout(() => {
+        browserPetVisibilityRetryTimer = null
+        void attempt(retry + 1)
+      }, 500 * 2 ** retry)
+    }
+  }
+  void attempt(0)
+}
 const handleCompanionChange = orchestrator.handleCompanionChange
 let themeMediaQuery: MediaQueryList | null = null
 let visualContextEnabled = activeVisionSettings.value.enabled
@@ -267,9 +297,19 @@ const callWindowAction = (action: 'minimize' | 'maximize' | 'close') => {
   winApi[action]?.()
 }
 
-const minimize = () => callWindowAction('minimize')
+const minimize = () => {
+  if (isElectronPanel.value && activeTab.value === 'chat') {
+    void petControl.setVisible(true).catch((cause) => {
+      console.warn('[AppShell] failed to restore desktop pet before minimize', cause)
+    })
+  }
+  callWindowAction('minimize')
+}
 const maximize = () => callWindowAction('maximize')
 const close = () => callWindowAction('close')
+const handleDocumentVisibilityChange = (): void => {
+  syncBrowserPetLayer(activeTab.value)
+}
 const handleLocaleChange = async (locale: string) => {
   try {
     await setLocale(locale)
@@ -321,6 +361,7 @@ onMounted(() => {
   void inputBindingsStore.load()
   wallpaperMode.value = activeWorkspace.value.context?.wallpaperMode ?? true
   window.addEventListener('keydown', handleGlobalKeydown)
+  document.addEventListener('visibilitychange', handleDocumentVisibilityChange)
   petApi?.on?.('panel:open-tab', handlePanelOpenTab)
   petApi?.on?.('shortcut:toggle-vision', handleToggleVisionShortcut)
 
@@ -343,11 +384,20 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleDocumentVisibilityChange)
+  browserPetVisibilityRequest += 1
+  if (browserPetVisibilityRetryTimer !== null) {
+    window.clearTimeout(browserPetVisibilityRetryTimer)
+    browserPetVisibilityRetryTimer = null
+  }
   void teardownAppRuntime()
 })
 
 watch(() => settingsStore.state.system.theme, applyTheme)
 watch(() => settingsStore.state.system.language, (language) => syncLocaleFromSettings(language))
+watch([isElectronPanel, activeTab], ([electronPanel, tab]) => {
+  if (!electronPanel) syncBrowserPetLayer(tab)
+}, { immediate: true })
 watch(activeTab, (tab) => {
   const context = activeWorkspace.value.context
   const recentTabs = [tab, ...(context.recentTabs ?? []).filter((item) => item !== tab)].slice(0, 8)
@@ -707,24 +757,33 @@ watch(
 }
 
 .yuizaki-bg.browser-mode {
-  --yui-browser-bg: #f3f5f8;
-  --yui-browser-surface: rgba(255, 255, 255, 0.34);
-  --yui-browser-border: #d9e0e8;
+  --yui-browser-bg: #edf2f7;
+  --yui-browser-surface: rgba(255, 255, 255, 0.18);
+  --yui-browser-border: rgba(255, 255, 255, 0.58);
   --yui-browser-text: #1f2937;
   --yui-success-text: #16713a;
   --yui-warning-text: #8a5a00;
   --yui-panel-wallpaper-opacity: 0.82;
-  --yui-panel-wallpaper-mask: rgba(255, 255, 255, 0.12);
-  --yui-panel-surface: rgba(255, 255, 255, 0.32);
-  --yui-panel-surface-strong: rgba(255, 255, 255, 0.46);
-  --yui-chat-surface: rgba(255, 255, 255, 0.36);
-  --yui-chat-surface-muted: rgba(241, 245, 249, 0.32);
-  --yui-chat-sidebar-bg: rgba(244, 247, 251, 0.34);
-  --yui-chat-user-bg: rgba(232, 238, 245, 0.42);
-  --yui-chat-assistant-bg: rgba(255, 255, 255, 0.42);
+  --yui-panel-wallpaper-mask: transparent;
+  --yui-panel-surface: rgba(255, 255, 255, 0.12);
+  --yui-panel-surface-strong: rgba(255, 255, 255, 0.28);
+  --yui-browser-card-surface: rgba(255, 255, 255, 0.68);
+  --yui-browser-card-border: rgba(15, 23, 42, 0.16);
+  --yui-browser-card-shadow: 0 10px 26px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.66);
+  --yui-browser-composer-surface: #fff;
+  --yui-browser-composer-shadow: 0 10px 24px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.56);
+  --yui-chat-surface: rgba(255, 255, 255, 0.58);
+  --yui-chat-surface-muted: rgba(255, 255, 255, 0.46);
+  --yui-chat-sidebar-bg: rgba(255, 255, 255, 0.52);
+  --yui-chat-user-bg: rgba(255, 255, 255, 0.64);
+  --yui-chat-assistant-bg: rgba(255, 255, 255, 0.7);
   --yui-chat-wallpaper-opacity: 1;
-  --yui-chat-wallpaper-mask: rgba(255, 255, 255, 0.08);
-  background: var(--yui-browser-bg);
+  --yui-chat-wallpaper-mask: transparent;
+  background-color: var(--yui-browser-bg);
+  background-image: var(--browser-wallpaper);
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
 }
 
 :root[data-theme='dark'] .yuizaki-bg.browser-mode {
@@ -738,11 +797,16 @@ watch(
   --yui-panel-wallpaper-mask: rgba(11, 18, 32, 0.14);
   --yui-panel-surface: rgba(15, 23, 42, 0.36);
   --yui-panel-surface-strong: rgba(15, 23, 42, 0.5);
-  --yui-chat-surface: rgba(17, 24, 39, 0.44);
-  --yui-chat-surface-muted: rgba(30, 41, 59, 0.38);
-  --yui-chat-sidebar-bg: rgba(11, 18, 32, 0.4);
-  --yui-chat-user-bg: rgba(38, 52, 73, 0.5);
-  --yui-chat-assistant-bg: rgba(17, 24, 39, 0.5);
+  --yui-browser-card-surface: rgba(15, 23, 42, 0.76);
+  --yui-browser-card-border: rgba(203, 213, 225, 0.32);
+  --yui-browser-card-shadow: 0 12px 28px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --yui-browser-composer-surface: rgba(15, 23, 42, 0.86);
+  --yui-browser-composer-shadow: 0 12px 28px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --yui-chat-surface: rgba(17, 24, 39, 0.64);
+  --yui-chat-surface-muted: rgba(30, 41, 59, 0.54);
+  --yui-chat-sidebar-bg: rgba(11, 18, 32, 0.6);
+  --yui-chat-user-bg: rgba(38, 52, 73, 0.7);
+  --yui-chat-assistant-bg: rgba(17, 24, 39, 0.74);
   --yui-chat-wallpaper-opacity: 1;
   --yui-chat-wallpaper-mask: rgba(11, 18, 32, 0.1);
 }
@@ -752,16 +816,31 @@ watch(
   border-color: var(--yui-browser-border);
   background: var(--yui-browser-surface);
   box-shadow: none;
+  backdrop-filter: blur(4px) saturate(1.06);
 }
 
 .yuizaki-bg.browser-mode .main {
-  background: var(--yui-main-bg);
+  background: transparent;
+}
+
+.yuizaki-bg.browser-mode .wallpaper-layer,
+.yuizaki-bg.browser-mode .wallpaper-blur,
+.yuizaki-bg.browser-mode .wallpaper-mask {
+  opacity: 0;
 }
 
 .yuizaki-bg.browser-mode .app-main.panel-mode {
+  border: 0;
   border-color: var(--yui-browser-border);
-  background: var(--yui-panel-surface);
-  box-shadow: var(--yui-panel-shadow);
+  background: transparent;
+  box-shadow: none;
+}
+
+.yuizaki-bg.browser-mode .app-main.panel-mode :is(.el-card, .el-tabs--border-card, .el-descriptions, .el-alert, .el-table, [class*='-card']) {
+  border-color: var(--yui-browser-card-border);
+  background: var(--yui-browser-card-surface);
+  background-clip: padding-box;
+  box-shadow: var(--yui-browser-card-shadow);
 }
 
 .yuizaki-bg .el-card,

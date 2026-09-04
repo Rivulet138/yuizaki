@@ -527,6 +527,11 @@ class DesktopPetSocketServer:
             if allow_legacy_turn_pipeline is None
             else bool(allow_legacy_turn_pipeline)
         )
+        if self._allow_legacy_turn_pipeline:
+            logger.warning(
+                "Legacy Turn pipeline compatibility is enabled; semantic socket execution "
+                "may bypass TurnService/outbox and should be migrated."
+            )
 
         # 外部服务引用（在 app.py lifespan 中注入）
         self.llm_client: LLMClient | None = None
@@ -3253,9 +3258,18 @@ class DesktopPetSocketServer:
                     if turn_service is None:
                         relationship_writer = self.runtime_context.relationship_event_writer
                         if relationship_writer:
-                            event = build_user_signal_event(user_text)
+                            logger.warning(
+                                "Using legacy socket voice pipeline for request_id=%s; "
+                                "migrate to TurnService to retain outbox/idempotency guarantees.",
+                                request_id,
+                            )
+                            event = build_user_signal_event(
+                                user_text,
+                                workspace_id=workspace_id,
+                                turn_id=gen.turn_id,
+                            )
                             if event:
-                                relationship_writer(_event_payload(event))
+                                relationship_writer(event)
                         pipeline_result = await self.agent_pipeline.run_streaming(ctx, _AgentStreamingAdapter(), gen)
                     else:
                         commit = await turn_service.execute_streaming_context(

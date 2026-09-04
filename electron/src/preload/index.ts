@@ -84,8 +84,8 @@ const api = {
 
   interact: {
     toggle: () => ipcRenderer.invoke('pet:toggle-interact'),
-    enable: () => ipcRenderer.send('pet:interact-enable'),
-    disable: () => ipcRenderer.send('pet:interact-disable'),
+    enable: () => ipcRenderer.invoke('pet:set-interact-mode', true) as Promise<PetControlState>,
+    disable: () => ipcRenderer.invoke('pet:set-interact-mode', false) as Promise<PetControlState>,
   },
 
   pet: {

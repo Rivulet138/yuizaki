@@ -1205,7 +1205,9 @@ class MCPManager:
     async def _fetch_stdio_inventory(self, server: MCPServerConfig) -> dict[str, Any]:
         session = await self._get_or_create_stdio_session(server)
         if session.get("protocol") != "mcp-jsonrpc":
-            return self._empty_inventory("legacy stdio protocol does not expose MCP inventory")
+            raise MCPToolError(
+                "legacy stdio protocol is unsupported; migrate the server to MCP JSON-RPC stdio"
+            )
 
         async with session["lock"]:
             tools_result = await self._stdio_jsonrpc_request_locked(session, "tools/list", {}, timeout=8.0)

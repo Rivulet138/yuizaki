@@ -143,6 +143,7 @@ const DEFAULT_CONFIG: PetConfig = {
 const DEFAULT_SCALE = PET_SCALE_DEFAULT;
 const MIN_SCALE = PET_SCALE_MIN;
 const MAX_SCALE = PET_SCALE_MAX;
+const BROWSER_MAX_SCALE = 0.8;
 const PASSTHROUGH_MIN_SWITCH_MS = 140;
 const HOVER_HYSTERESIS_PX = 14;
 const DOUBLE_CLICK_INTERVAL_MS = 280;
@@ -265,6 +266,7 @@ class PetRenderer {
 	});
 
 	private scalePersistTimer: number | null = null;
+	private browserMode = false;
 	private positionPersistTimer: number | null = null;
 	private dragCooldownUntil = 0;
 	private interactionBounds: PetInteractionBoundsPayload | null = null;
@@ -389,8 +391,11 @@ class PetRenderer {
 		this.setupAdjustmentControls();
 		this.setupIPCListeners();
 		this.showNotice("正在恢复上次桌宠模型...");
+		// Live2D resolves its ready promise from a render frame. Keep the Pixi
+		// ticker alive while the initial model is loading, even if this window
+		// is still hidden; the visibility policy is restored after load settles.
+		this.app.ticker.start();
 		window.live2dApi?.pet.rendererReady();
-		this.startPerformanceController();
 		this.reportRendererMetrics("init");
 	}
 
@@ -398,6 +403,9 @@ class PetRenderer {
 		if (!this.app) {
 			return;
 		}
+		// A hidden Electron window may have its ticker paused by the performance
+		// controller. Model loading must still receive render frames.
+		this.app.ticker.start();
 		const loadGeneration = this.beginModelLoadGeneration();
 		const modelLabel = this.config.modelType === "vrm" ? "VRM" : "Live2D";
 		this.showNotice(`正在加载 ${modelLabel} 桌宠...`);
@@ -425,6 +433,7 @@ class PetRenderer {
 				);
 				this.reportState(true);
 			}
+			this.startPerformanceController();
 			return;
 		}
 
@@ -476,6 +485,7 @@ class PetRenderer {
 				console.error("[PetRenderer] failed to load VRM model:", error);
 				this.reportState(true);
 			}
+			this.startPerformanceController();
 			return;
 		}
 
@@ -535,6 +545,7 @@ class PetRenderer {
 			console.error("[PetRenderer] failed to load model:", error);
 			this.reportState(true);
 		}
+		this.startPerformanceController();
 	}
 
 	private async loadRuntimeWithRecovery(
@@ -1230,7 +1241,7 @@ class PetRenderer {
 	}
 
 	setScale(scale: number, report = true): void {
-		this.config.scale = clamp(scale, MIN_SCALE, MAX_SCALE);
+		this.config.scale = clamp(scale, MIN_SCALE, this.browserMode ? BROWSER_MAX_SCALE : MAX_SCALE);
 		this.applyModelTransform();
 
 		if (report) {
@@ -1276,7 +1287,7 @@ class PetRenderer {
 		}
 
 		if (typeof patch.scale === "number" && Number.isFinite(patch.scale)) {
-			this.config.scale = clamp(patch.scale, MIN_SCALE, MAX_SCALE);
+			this.config.scale = clamp(patch.scale, MIN_SCALE, this.browserMode ? BROWSER_MAX_SCALE : MAX_SCALE);
 		}
 
 		if (typeof patch.interactMode === "boolean") {
@@ -1373,6 +1384,7 @@ class PetRenderer {
 
 	/** Apply and load a renderer configuration from the browser scene without Electron IPC. */
 	async applyBrowserConfig(patch: PetControlConfigPatch): Promise<void> {
+		this.browserMode = true;
 		const { modelPath, ...configPatch } = patch;
 		this.applyConfig(configPatch, false);
 		if (typeof modelPath !== "string" || !modelPath.trim()) {
@@ -1427,7 +1439,7 @@ class PetRenderer {
 			configScale: this.config.scale,
 			defaultScale: DEFAULT_SCALE,
 			minScale: MIN_SCALE,
-			maxScale: MAX_SCALE,
+			maxScale: this.browserMode ? BROWSER_MAX_SCALE : MAX_SCALE,
 			baseScale: baseScaleResult.baseScale,
 			modelCalibrationScale: (
 				this.config.modelManifest?.modelTransform?.scale
@@ -2613,7 +2625,7 @@ class PetRenderer {
 				: false,
 			currentScale: this.config.scale,
 			minScale: MIN_SCALE,
-			maxScale: MAX_SCALE,
+			maxScale: this.browserMode ? BROWSER_MAX_SCALE : MAX_SCALE,
 			deltaY: event.deltaY,
 		});
 

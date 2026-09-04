@@ -197,7 +197,9 @@ export class PetStateStore {
       ...this.state,
       modelType: nextModelType,
       modelId: nextModelId,
-      scale: clamp(payload.scale, MIN_PET_SCALE, MAX_PET_SCALE),
+      scale: typeof payload.scale === 'number' && Number.isFinite(payload.scale)
+        ? clamp(payload.scale, MIN_PET_SCALE, MAX_PET_SCALE)
+        : this.state.scale,
       positionX: hasFreePosition ? payload.positionX : null,
       positionY: hasFreePosition ? payload.positionY : null,
       placement,

@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="对话中心" tone="companion" density="compact" minimal>
+  <PanelShell :title="t('chat.title')" tone="companion" density="compact" minimal>
     <div
       class="chat-workspace"
       :class="{
@@ -33,56 +33,56 @@
               class="chat-search-input"
               size="small"
               clearable
-              placeholder="搜索消息"
+              :placeholder="t('chat.search.placeholder')"
               @keydown.enter.prevent="jumpSearchResult(1)"
               @keydown.shift.enter.prevent="jumpSearchResult(-1)"
               @keydown.esc.prevent="closeMessageSearch"
             />
             <span class="chat-search-count">{{ searchResultLabel }}</span>
-            <button class="search-nav-button" type="button" :disabled="!messageSearchMatches.length" aria-label="上一条" @click="jumpSearchResult(-1)">
+            <button class="search-nav-button" type="button" :disabled="!messageSearchMatches.length" :aria-label="t('chat.search.previous')" @click="jumpSearchResult(-1)">
               <el-icon><ArrowUp /></el-icon>
             </button>
-            <button class="search-nav-button" type="button" :disabled="!messageSearchMatches.length" aria-label="下一条" @click="jumpSearchResult(1)">
+            <button class="search-nav-button" type="button" :disabled="!messageSearchMatches.length" :aria-label="t('chat.search.next')" @click="jumpSearchResult(1)">
               <el-icon><ArrowDown /></el-icon>
             </button>
-            <button class="search-nav-button" type="button" aria-label="关闭搜索" @click="closeMessageSearch">
+            <button class="search-nav-button" type="button" :aria-label="t('chat.search.close')" @click="closeMessageSearch">
               <el-icon><Close /></el-icon>
             </button>
           </div>
-          <el-tooltip content="搜索消息" placement="bottom">
-            <button class="top-icon-button" type="button" aria-label="搜索消息" @click="toggleMessageSearch">
+          <el-tooltip :content="t('chat.search.open')" placement="bottom">
+            <button class="top-icon-button" type="button" :aria-label="t('chat.search.open')" @click="toggleMessageSearch">
               <el-icon><Search /></el-icon>
             </button>
           </el-tooltip>
-          <el-tooltip :content="showSessionRail ? '隐藏会话列表' : '显示会话列表'" placement="bottom">
-            <button class="top-icon-button" type="button" :aria-label="showSessionRail ? '隐藏会话列表' : '显示会话列表'" @click="toggleSessionRail">
+          <el-tooltip :content="showSessionRail ? t('chat.session.hide') : t('chat.session.show')" placement="bottom">
+            <button class="top-icon-button" type="button" :aria-label="showSessionRail ? t('chat.session.hide') : t('chat.session.show')" @click="toggleSessionRail">
               <el-icon>
                 <Fold v-if="showSessionRail" />
                 <Expand v-else />
               </el-icon>
             </button>
           </el-tooltip>
-          <el-tooltip :content="resolvedTheme === 'dark' ? '切换浅色' : '切换深色'" placement="bottom">
-            <button class="top-icon-button" type="button" :aria-label="resolvedTheme === 'dark' ? '切换浅色' : '切换深色'" @click="toggleTheme">
+          <el-tooltip :content="resolvedTheme === 'dark' ? t('chat.theme.light') : t('chat.theme.dark')" placement="bottom">
+            <button class="top-icon-button" type="button" :aria-label="resolvedTheme === 'dark' ? t('chat.theme.light') : t('chat.theme.dark')" @click="toggleTheme">
               <el-icon>
                 <Sunny v-if="resolvedTheme === 'dark'" />
                 <Moon v-else />
               </el-icon>
             </button>
           </el-tooltip>
-          <el-tooltip content="桌宠设置" placement="bottom">
+          <el-tooltip :content="t('chat.petSettings')" placement="bottom">
             <button
               class="top-icon-button"
               type="button"
-              aria-label="打开桌宠设置"
+              :aria-label="t('chat.petSettings')"
               data-testid="chat-pet-settings"
               @click="openPetSettings"
             >
               <el-icon><StarFilled /></el-icon>
             </button>
           </el-tooltip>
-          <el-tooltip content="设置" placement="bottom">
-            <button class="top-icon-button" type="button" aria-label="打开设置" @click="openSettings">
+          <el-tooltip :content="t('chat.settings')" placement="bottom">
+            <button class="top-icon-button" type="button" :aria-label="t('chat.settings')" @click="openSettings">
               <el-icon><Setting /></el-icon>
             </button>
           </el-tooltip>
@@ -104,7 +104,7 @@
           <div v-if="dragOver" class="drop-overlay">
             <div class="drop-hint">
               <el-icon><FolderOpened /></el-icon>
-              <span>松手上传文件</span>
+              <span>{{ t('chat.upload.drop') }}</span>
             </div>
           </div>
 
@@ -203,14 +203,14 @@
               type="textarea"
               :autosize="{ minRows: 2, maxRows: 8 }"
               resize="none"
-              placeholder="输入消息"
+              :placeholder="t('chat.input.placeholder')"
               class="flex-1 chat-input"
               @keydown="handleComposerKeydown"
               @compositionstart="isComposing = true"
               @compositionend="isComposing = false"
             />
             <div class="composer-toolbar">
-              <div class="composer-tools-left" aria-label="输入工具栏">
+              <div class="composer-tools-left" :aria-label="t('chat.input.toolbar')">
                 <span
                   v-for="tool in visibleComposerTools"
                   :key="tool.id"
@@ -251,19 +251,19 @@
                   @refresh-audio-devices="refreshAudioInputDevices"
                 />
                 <el-dropdown trigger="click" @command="handleTopMoreCommand">
-                  <button class="tool-button" type="button" aria-label="更多">
+                  <button class="tool-button" type="button" :aria-label="t('chat.more')">
                     <el-icon><MoreFilled /></el-icon>
                   </button>
                   <template #dropdown>
                     <el-dropdown-menu>
-                      <el-dropdown-item command="copy-transcript" :disabled="!chatState.messages.length">复制全文</el-dropdown-item>
-                      <el-dropdown-item command="copy-last" :disabled="!lastAssistantMessage">复制最后回复</el-dropdown-item>
-                      <el-dropdown-item command="open-expanded-composer">展开输入框</el-dropdown-item>
-                      <el-dropdown-item command="quick-phrases">快捷短语</el-dropdown-item>
-                      <el-dropdown-item command="clear-context" :disabled="!hasConversationContent">清理上下文</el-dropdown-item>
-                      <el-dropdown-item command="reset-context" :disabled="chatState.contextStartIndex <= 0">恢复完整上下文</el-dropdown-item>
-                      <el-dropdown-item divided command="clear-conversation" :disabled="!hasConversationContent">清空当前会话</el-dropdown-item>
-                      <el-dropdown-item command="interrupt" :disabled="!(chatState.isGenerating || chatState.isTTSPlaying)">中断生成与播放</el-dropdown-item>
+                      <el-dropdown-item command="copy-transcript" :disabled="!chatState.messages.length">{{ t('chat.more.copyTranscript') }}</el-dropdown-item>
+                      <el-dropdown-item command="copy-last" :disabled="!lastAssistantMessage">{{ t('chat.more.copyLast') }}</el-dropdown-item>
+                      <el-dropdown-item command="open-expanded-composer">{{ t('chat.more.expand') }}</el-dropdown-item>
+                      <el-dropdown-item command="quick-phrases">{{ t('chat.more.quickPhrases') }}</el-dropdown-item>
+                      <el-dropdown-item command="clear-context" :disabled="!hasConversationContent">{{ t('chat.more.clearContext') }}</el-dropdown-item>
+                      <el-dropdown-item command="reset-context" :disabled="chatState.contextStartIndex <= 0">{{ t('chat.more.resetContext') }}</el-dropdown-item>
+                      <el-dropdown-item divided command="clear-conversation" :disabled="!hasConversationContent">{{ t('chat.more.clearConversation') }}</el-dropdown-item>
+                      <el-dropdown-item command="interrupt" :disabled="!(chatState.isGenerating || chatState.isTTSPlaying)">{{ t('chat.more.interrupt') }}</el-dropdown-item>
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
@@ -281,6 +281,7 @@
               :recording="isRecording"
               :tts-playing="chatState.isTTSPlaying"
               :show-recovery-action="showRealtimeRecovery"
+              @retry="retryRealtimeVoice"
             />
 
             <ChatVoiceStatus
@@ -313,47 +314,47 @@
       </div>
     </div>
 
-    <el-dialog v-model="expandedComposerVisible" title="展开输入" width="min(560px, calc(100vw - 32px))" append-to-body>
+    <el-dialog v-model="expandedComposerVisible" :title="t('chat.dialog.expandedTitle')" width="min(560px, calc(100vw - 32px))" append-to-body>
       <el-input
         v-model="expandedComposerText"
         type="textarea"
         :autosize="{ minRows: 8, maxRows: 14 }"
         resize="vertical"
-        placeholder="输入内容"
+        :placeholder="t('chat.dialog.inputPlaceholder')"
       />
       <template #footer>
-        <el-button @click="expandedComposerVisible = false">取消</el-button>
-        <el-button plain @click="applyExpandedComposer">回填</el-button>
-        <el-button type="primary" :disabled="!expandedComposerText.trim()" @click="sendExpandedComposer">发送</el-button>
+        <el-button @click="expandedComposerVisible = false">{{ t('chat.action.cancel') }}</el-button>
+        <el-button plain @click="applyExpandedComposer">{{ t('chat.action.apply') }}</el-button>
+        <el-button type="primary" :disabled="!expandedComposerText.trim()" @click="sendExpandedComposer">{{ t('chat.action.send') }}</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="quickPhraseDialogVisible" title="快捷短语模块" width="min(560px, calc(100vw - 32px))" append-to-body>
+    <el-dialog v-model="quickPhraseDialogVisible" :title="t('chat.dialog.quickPhrasesTitle')" width="min(560px, calc(100vw - 32px))" append-to-body>
       <div class="phrase-manager">
         <article v-for="phrase in quickPhrases" :key="phrase.id" class="phrase-row">
-          <el-input v-model="phrase.label" size="small" placeholder="标题" />
-          <el-input v-model="phrase.text" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" resize="none" placeholder="短语内容" />
-          <el-button type="primary" link @click="insertQuickPhrase(phrase.text)">插入</el-button>
-          <el-button type="danger" link @click="removeQuickPhrase(phrase.id)">删除</el-button>
+          <el-input v-model="phrase.label" size="small" :placeholder="t('chat.dialog.phraseTitlePlaceholder')" />
+          <el-input v-model="phrase.text" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" resize="none" :placeholder="t('chat.dialog.phraseTextPlaceholder')" />
+          <el-button type="primary" link @click="insertQuickPhrase(phrase.text)">{{ t('chat.action.insert') }}</el-button>
+          <el-button type="danger" link @click="removeQuickPhrase(phrase.id)">{{ t('chat.action.delete') }}</el-button>
         </article>
         <div class="phrase-create-row">
-          <el-input v-model="quickPhraseDraft.label" size="small" placeholder="新短语标题" />
-          <el-input v-model="quickPhraseDraft.text" type="textarea" :autosize="{ minRows: 2, maxRows: 5 }" resize="none" placeholder="新短语内容" />
-          <el-button type="primary" :disabled="!quickPhraseDraft.label.trim() || !quickPhraseDraft.text.trim()" @click="addQuickPhrase">添加</el-button>
+          <el-input v-model="quickPhraseDraft.label" size="small" :placeholder="t('chat.dialog.newPhraseTitlePlaceholder')" />
+          <el-input v-model="quickPhraseDraft.text" type="textarea" :autosize="{ minRows: 2, maxRows: 5 }" resize="none" :placeholder="t('chat.dialog.newPhraseTextPlaceholder')" />
+          <el-button type="primary" :disabled="!quickPhraseDraft.label.trim() || !quickPhraseDraft.text.trim()" @click="addQuickPhrase">{{ t('chat.action.add') }}</el-button>
         </div>
       </div>
       <template #footer>
-        <el-button @click="resetQuickPhrases">恢复默认</el-button>
-        <el-button type="primary" @click="quickPhraseDialogVisible = false">完成</el-button>
+        <el-button @click="resetQuickPhrases">{{ t('chat.action.reset') }}</el-button>
+        <el-button type="primary" @click="quickPhraseDialogVisible = false">{{ t('chat.action.done') }}</el-button>
       </template>
     </el-dialog>
 
     <el-dialog v-model="translationDialogVisible" :title="translationDialogTitle" width="min(520px, calc(100vw - 32px))" append-to-body>
       <div class="translation-result">{{ translationResult }}</div>
       <template #footer>
-        <el-button @click="translationDialogVisible = false">关闭</el-button>
-        <el-button plain :disabled="!translationResult" @click="handleCopy(translationResult)">复制</el-button>
-        <el-button type="primary" :disabled="!translationResult" @click="applyTranslationToInput">回填输入框</el-button>
+        <el-button @click="translationDialogVisible = false">{{ t('chat.action.close') }}</el-button>
+        <el-button plain :disabled="!translationResult" @click="handleCopy(translationResult)">{{ t('chat.action.copy') }}</el-button>
+        <el-button type="primary" :disabled="!translationResult" @click="applyTranslationToInput">{{ t('chat.action.applyToInput') }}</el-button>
       </template>
     </el-dialog>
   </PanelShell>
@@ -408,6 +409,7 @@ import { DEFAULT_DAILY_PROMPT, DEFAULT_WORK_PROMPT, useWorkspaceStore } from '@/
 import { useSettingsStore } from '@/state/settingsStore'
 import { DEFAULT_LLM_MAX_OUTPUT_TOKENS } from '@/../shared/runtime-defaults'
 import { useInputBindingsStore } from '@/state/inputBindingsStore'
+import { useI18n } from '@/i18n'
 import { settingsClient, systemClient } from '@/api/client'
 import { memoryClient } from '@/api/clients/memory-client'
 import type { ChatAttachment, ChatMemorySource, ChatMessage, ChatOptions } from '@/../shared/types'
@@ -495,7 +497,8 @@ const { draftSessionIds } = sessionDrafts
 const sessionStore = useSessionStore()
 const settingsStore = useSettingsStore()
 const inputBindingsStore = useInputBindingsStore()
-const pushToTalkShortcutTitle = computed(() => `${inputBindingsStore.pushToTalkLabel.value}说话`)
+const { t } = useI18n()
+const pushToTalkShortcutTitle = computed(() => `${inputBindingsStore.pushToTalkLabel.value} ${t('chat.tool.voiceInput')}`)
 const workspaceStore = useWorkspaceStore()
 const chatOptions = chatStore.chatOptions as RequiredChatOptions
 const route = useRoute()
@@ -511,7 +514,7 @@ const expandedComposerText = ref('')
 const quickPhraseDialogVisible = ref(false)
 const translationDialogVisible = ref(false)
 const translationResult = ref('')
-const translationDialogTitle = ref('翻译结果')
+const translationDialogTitle = ref(t('chat.dialog.translationTitle'))
 const composerTranslating = ref(false)
 const messageTranslatingIndex = ref<number | null>(null)
 const modelOptions = ref<string[]>([])
@@ -520,7 +523,7 @@ const audioInputDevices = ref<AudioInputDevice[]>([])
 const audioDevicesLoading = ref(false)
 const modelOptionsProviderKey = ref('')
 let warmupTimer: number | null = null
-const mcpSummaryLabel = ref('MCP 状态待刷新')
+const mcpSummaryLabel = ref(t('chat.status.refreshingMcp'))
 const attachments = ref<ChatAttachment[]>([])
 const isCreatingSession = ref(false)
 const voiceMode = ref<'tap' | 'hold'>('tap')
@@ -564,10 +567,10 @@ const loadSessionRailVisibility = () => {
 
 const showSessionRail = ref(loadSessionRailVisibility())
 
-const voiceModeOptions = [
-  { label: '轻点', value: 'tap' },
-  { label: '按住', value: 'hold' },
-]
+const voiceModeOptions = computed(() => [
+  { label: t('chat.voiceMode.tap'), value: 'tap' as const },
+  { label: t('chat.voiceMode.hold'), value: 'hold' as const },
+])
 
 const quickPhraseIconKeys = new Set<QuickPhraseIconKey>(['camera', 'refresh', 'voice', 'magic'])
 
@@ -630,22 +633,22 @@ const loadQuickPhrases = (): QuickPhrase[] => {
 
 const quickPhrases = ref<QuickPhrase[]>(loadQuickPhrases())
 
-const reasoningOptions: Array<{ label: string; value: ReasoningOption }> = [
-  { label: '默认思考', value: 'default' },
-  { label: '关闭思考', value: 'none' },
+const reasoningOptions = computed<Array<{ label: string; value: ReasoningOption }>>(() => [
+  { label: t('chat.reasoning.default'), value: 'default' },
+  { label: t('chat.reasoning.none'), value: 'none' },
   { label: 'Minimal', value: 'minimal' },
   { label: 'Low', value: 'low' },
   { label: 'Medium', value: 'medium' },
   { label: 'High', value: 'high' },
   { label: 'XHigh', value: 'xhigh' },
   { label: 'Auto', value: 'auto' },
-]
+])
 
-const responseModeOptions: Array<{ label: string; value: ResponseModeOption }> = [
-  { label: '即时', value: 'instant' },
-  { label: '均衡', value: 'balanced' },
-  { label: '深度', value: 'deep' },
-]
+const responseModeOptions = computed<Array<{ label: string; value: ResponseModeOption }>>(() => [
+  { label: t('chat.response.instant'), value: 'instant' },
+  { label: t('chat.response.balanced'), value: 'balanced' },
+  { label: t('chat.response.deep'), value: 'deep' },
+])
 
 const lastAssistantMessage = computed(() => [...chatState.messages].reverse().find((message) => message.role === 'assistant') ?? null)
 const playbackText = computed(() => {
@@ -653,13 +656,13 @@ const playbackText = computed(() => {
   return text.length > 120 ? `${text.slice(0, 120)}…` : text
 })
 const pendingAssistantLabel = computed(() => {
-  if (chatOptions.reasoning_effort && !['none', 'default'].includes(chatOptions.reasoning_effort)) return '思考中'
-  return '等待模型输出'
+  if (chatOptions.reasoning_effort && !['none', 'default'].includes(chatOptions.reasoning_effort)) return t('chat.status.thinking')
+  return t('chat.status.waiting')
 })
 const hasConversationContent = computed(() => Boolean(chatState.messages.length || chatState.currentText || chatState.asrPartialText))
 const workspaceNameMap = computed(() => Object.fromEntries(workspaceStore.workspaces.map((workspace) => [workspace.id, workspace.name])))
-const effectiveModelLabel = computed(() => chatOptions.model || settingsStore.state.llm.model || '默认模型')
-const webSearchLabel = computed(() => chatOptions.web_search_enabled ? '联网搜索开启' : '联网搜索关闭')
+const effectiveModelLabel = computed(() => chatOptions.model || settingsStore.state.llm.model || t('chat.model.default'))
+const webSearchLabel = computed(() => chatOptions.web_search_enabled ? t('common.enabled') : t('common.disabled'))
 const openPromptPanel = () => {
   const workspaceId = String(route.params.workspaceId || workspaceStore.activeWorkspaceId || 'default')
   void router.push(`/w/${encodeURIComponent(workspaceId)}/prompt`)
@@ -728,25 +731,25 @@ watch(maxChatOutputTokens, (limit) => {
 const composerToolRegistry = computed<Record<ComposerToolId, ComposerToolDefinition>>(() => ({
   attach: {
     id: 'attach',
-    label: '上传文件',
+    label: t('chat.tool.attach'),
     icon: FolderOpened,
     run: triggerFilePicker,
   },
   quickPhrases: {
     id: 'quickPhrases',
-    label: '快捷短语',
+    label: t('chat.tool.quickPhrases'),
     icon: MagicStick,
     run: () => openQuickPanel('slash'),
   },
   expandInput: {
     id: 'expandInput',
-    label: '展开输入框',
+    label: t('chat.tool.expandInput'),
     icon: FullScreen,
     run: openExpandedComposer,
   },
   voiceInput: {
     id: 'voiceInput',
-    label: isRecording.value ? '结束录音' : '语音输入',
+    label: isRecording.value ? t('chat.tool.endRecording') : t('chat.tool.voiceInput'),
     icon: Microphone,
     active: isRecording.value,
     disabled: !socketDomain.isConnected.value,
@@ -754,7 +757,7 @@ const composerToolRegistry = computed<Record<ComposerToolId, ComposerToolDefinit
   },
   webSearch: {
     id: 'webSearch',
-    label: '网络搜索',
+    label: t('chat.tool.webSearch'),
     title: webSearchLabel.value,
     icon: Search,
     active: chatOptions.web_search_enabled,
@@ -762,14 +765,14 @@ const composerToolRegistry = computed<Record<ComposerToolId, ComposerToolDefinit
   },
   translate: {
     id: 'translate',
-    label: '翻译输入',
+    label: t('chat.tool.translateInput'),
     icon: RefreshRight,
     disabled: !inputText.value.trim() || composerTranslating.value,
     run: () => { void translateComposerInput() },
   },
   voiceStatus: {
     id: 'voiceStatus',
-    label: toolsExpanded.value ? '收起语音状态' : '语音状态',
+    label: toolsExpanded.value ? t('chat.tool.collapseVoiceStatus') : t('chat.tool.voiceStatus'),
     icon: Headset,
     active: toolsExpanded.value,
     run: () => { toolsExpanded.value = !toolsExpanded.value },
@@ -778,8 +781,8 @@ const composerToolRegistry = computed<Record<ComposerToolId, ComposerToolDefinit
 const visibleComposerTools = computed(() => primaryComposerToolOrder
   .map((id) => composerToolRegistry.value[id])
   .filter((tool): tool is ComposerToolDefinition => Boolean(tool)))
-const quickPanelTitle = computed(() => quickPanel.mode === 'mention' ? '选择模型' : '快捷面板')
-const quickPanelEmptyText = computed(() => quickPanel.mode === 'mention' ? '没有匹配的模型' : '没有匹配的快捷项')
+const quickPanelTitle = computed(() => quickPanel.mode === 'mention' ? t('chat.quickPanel.selectModel') : t('chat.quickPanel.title'))
+const quickPanelEmptyText = computed(() => quickPanel.mode === 'mention' ? t('chat.quickPanel.noModels') : t('chat.quickPanel.noItems'))
 const slashPanelItems = computed<QuickPanelItem[]>(() => [
   ...quickPhrases.value.map((phrase) => ({
     id: `phrase:${phrase.id}`,
@@ -790,38 +793,38 @@ const slashPanelItems = computed<QuickPanelItem[]>(() => [
   })),
   {
     id: 'command:newTopic',
-    label: '新话题',
-    description: isCreatingSession.value ? '正在创建新会话' : '创建一条干净的新会话',
+    label: t('chat.quickPanel.newTopic'),
+    description: isCreatingSession.value ? t('chat.quickPanel.creatingSession') : t('chat.quickPanel.cleanSession'),
     icon: Plus,
     disabled: isCreatingSession.value,
     run: () => { void handleCreateSession() },
   },
   {
     id: 'command:attach',
-    label: '上传文件',
-    description: '添加文本、图片或本地文件上下文',
+    label: t('chat.tool.attach'),
+    description: t('chat.quickPanel.addContext'),
     icon: FolderOpened,
     run: triggerFilePicker,
   },
   {
     id: 'command:managePhrases',
-    label: '管理快捷短语',
-    description: '编辑、添加或恢复默认短语',
+    label: t('chat.quickPanel.managePhrases'),
+    description: t('chat.quickPanel.managePhrasesHint'),
     icon: MagicStick,
     run: () => { quickPhraseDialogVisible.value = true },
   },
   {
     id: 'command:clear',
-    label: '清空消息',
-    description: '删除当前会话中的所有消息',
+    label: t('chat.quickPanel.clearMessages'),
+    description: t('chat.quickPanel.clearMessagesHint'),
     icon: Delete,
     disabled: !hasConversationContent.value,
     run: () => { void handleClearConversation() },
   },
   {
     id: 'command:voice',
-    label: '语音输入',
-    description: socketDomain.isConnected.value ? '切换麦克风输入' : '实时通道连接后可用',
+    label: t('chat.tool.voiceInput'),
+    description: socketDomain.isConnected.value ? t('chat.quickPanel.voiceHint') : t('chat.quickPanel.voiceUnavailable'),
     icon: Microphone,
     disabled: !socketDomain.isConnected.value,
     run: toggleMic,
@@ -831,8 +834,8 @@ const modelPanelItems = computed<QuickPanelItem[]>(() => {
   const models = Array.from(new Set(['', settingsStore.state.llm.model, chatOptions.model, ...modelOptions.value].filter((model): model is string => typeof model === 'string')))
   return models.map((model) => ({
     id: `model:${model || 'default'}`,
-    label: model || '默认模型',
-    description: model ? '设为当前对话模型' : '跟随设置里的默认模型',
+    label: model || t('chat.model.default'),
+    description: model ? t('chat.model.useSelected') : t('chat.model.followDefault'),
     icon: MagicStick,
     current: model === chatOptions.model || (!model && !chatOptions.model),
     run: () => selectQuickPanelModel(model),
@@ -851,39 +854,39 @@ const quickPanelItems = computed(() => {
 const voiceMeterBars = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 const voiceLevelPercent = computed(() => Math.round(Math.min(1, audioCaptureState.level) * 100))
 const voiceStatusText = computed(() => {
-  if (audioCaptureState.inputHealth === 'disconnected') return '麦克风已断开'
-  if (audioCaptureState.phase === 'error') return audioCaptureState.error || '麦克风异常'
-  if (isRecording.value && audioCaptureState.inputHealth === 'silent') return '暂未检测到声音'
-  if (isRecording.value) return '正在收音'
-  if (!socketDomain.isConnected.value) return '实时通道连接中'
-  if (chatState.isTTSPlaying) return '正在播放'
-  if (chatState.asrPartialText) return '正在识别'
-  return '语音就绪'
+  if (audioCaptureState.inputHealth === 'disconnected') return t('chat.status.micDisconnected')
+  if (audioCaptureState.phase === 'error') return audioCaptureState.error || t('chat.status.micError')
+  if (isRecording.value && audioCaptureState.inputHealth === 'silent') return t('chat.status.noSound')
+  if (isRecording.value) return t('chat.status.listening')
+  if (!socketDomain.isConnected.value) return t('chat.status.channelConnecting')
+  if (chatState.isTTSPlaying) return t('chat.status.playing')
+  if (chatState.asrPartialText) return t('chat.status.recognizing')
+  return t('chat.status.ready')
 })
 const voicePipelineText = computed(() => {
-  if (!socketDomain.isConnected.value) return '实时通道未连接'
+  if (!socketDomain.isConnected.value) return t('chat.status.channelOffline')
   if (isRecording.value) {
     const silenceHint = audioCaptureState.inputHealth === 'silent'
-      ? ` · 静音 ${Math.round(audioCaptureState.silenceMs / 1000)} 秒`
+      ? ` · ${t('chat.status.silence', { seconds: Math.round(audioCaptureState.silenceMs / 1000) })}`
       : ''
-    return `${formatDuration(audioCaptureState.elapsedMs)} · ${audioCaptureState.chunksSent} 块 · ${formatBytes(audioCaptureState.bytesSent)}${silenceHint}`
+    return `${t('chat.recording.metrics', { duration: formatDuration(audioCaptureState.elapsedMs), chunks: audioCaptureState.chunksSent, bytes: formatBytes(audioCaptureState.bytesSent) })}${silenceHint}`
   }
-  if (chatState.asrPartialText) return 'ASR 已返回部分文本'
-  if (chatState.isGenerating) return 'LLM 正在处理当前上下文'
-  if (chatState.isTTSPlaying) return 'TTS 音频正在输出'
-  return chatOptions.tts_enabled ? 'ASR → Agent → TTS 链路待命' : 'ASR → Agent，TTS 已关闭'
+  if (chatState.asrPartialText) return t('chat.status.asrPartial')
+  if (chatState.isGenerating) return t('chat.status.llmProcessing')
+  if (chatState.isTTSPlaying) return t('chat.status.ttsOutput')
+  return chatOptions.tts_enabled ? t('chat.status.pipelineReady') : t('chat.status.pipelineNoTts')
 })
 const voiceProcessingText = computed(() => {
   const processing = audioCaptureState.audioProcessing
   const formatState = (label: string, value: boolean | null) => (
-    value === null ? null : `${label} ${value ? '开' : '关'}`
+    value === null ? null : t(value ? 'chat.status.processingOn' : 'chat.status.processingOff', { label })
   )
   return [
-    formatState('AEC', processing.echoCancellation),
-    formatState('降噪', processing.noiseSuppression),
-    formatState('AGC', processing.autoGainControl),
+    formatState(t('chat.processing.aec'), processing.echoCancellation),
+    formatState(t('chat.processing.noise'), processing.noiseSuppression),
+    formatState(t('chat.processing.agc'), processing.autoGainControl),
     audioCaptureState.inputSampleRate
-      ? `${Math.round(audioCaptureState.inputSampleRate / 1000)}k → 16kHz`
+      ? t('chat.status.sampleRate', { input: Math.round(audioCaptureState.inputSampleRate / 1000) })
       : null,
   ].filter(Boolean).join(' · ')
 })
@@ -897,13 +900,13 @@ const voiceLatencySummary = computed(() => {
   const firstAudioMs = generationStages?.tts_first_audio_ready
   const playbackMs = generationStages?.playback_start
   const parts: string[] = []
-  if (endpointMs !== undefined) parts.push(`端点 ${Math.round(endpointMs)} ms`)
-  if (firstTokenMs !== undefined) parts.push(`首字 ${Math.round(firstTokenMs)} ms`)
-  if (firstSentenceMs !== undefined) parts.push(`成句 ${Math.round(firstSentenceMs)} ms`)
+  if (endpointMs !== undefined) parts.push(t('chat.status.endpoint', { value: Math.round(endpointMs) }))
+  if (firstTokenMs !== undefined) parts.push(t('chat.status.firstToken', { value: Math.round(firstTokenMs) }))
+  if (firstSentenceMs !== undefined) parts.push(t('chat.status.firstSentence', { value: Math.round(firstSentenceMs) }))
   if (playbackMs !== undefined) {
-    parts.push(`首播 ${Math.round((asrFinalMs ?? 0) + playbackMs)} ms`)
+    parts.push(t('chat.status.firstPlayback', { value: Math.round((asrFinalMs ?? 0) + playbackMs) }))
   } else if (firstAudioMs !== undefined) {
-    parts.push(`首段 ${Math.round((asrFinalMs ?? 0) + firstAudioMs)} ms`)
+    parts.push(t('chat.status.firstAudio', { value: Math.round((asrFinalMs ?? 0) + firstAudioMs) }))
   }
   return parts.join(' · ')
 })
@@ -929,9 +932,9 @@ const retryRealtimeVoice = () => {
   window.dispatchEvent(new CustomEvent('pet:realtime-reconnect'))
 }
 const messageRoleLabel = (role: ChatMessage['role']) => {
-  if (role === 'user') return '你'
-  if (role === 'assistant') return '結崎'
-  return '系统'
+  if (role === 'user') return t('chat.message.you')
+  if (role === 'assistant') return t('chat.message.companion')
+  return t('chat.message.system')
 }
 const {
   state: messageSearch,
@@ -1004,7 +1007,7 @@ const selectQuickPanelModel = (model: string) => {
   stripQuickPanelTrigger()
   chatOptions.model = model
   closeQuickPanel()
-  ElMessage.success(model ? `已选择模型 ${model}` : '已切回默认模型')
+  ElMessage.success(model ? t('chat.model.selected', { model }) : t('chat.model.reset'))
 }
 
 const runQuickPanelItem = (item: QuickPanelItem) => {
@@ -1126,24 +1129,24 @@ const quoteMessage = (msg: ChatMessage) => {
     ? `${inputText.value.trim()}\n\n${quote}`
     : quote
   closeContextMenu()
-  ElMessage.success('已引用到输入框')
+  ElMessage.success(t('chat.feedback.quoted'))
   scrollToBottom()
 }
 
 const handleSetContextStart = (idx: number) => {
   if (chatState.isGenerating) {
-    ElMessage.info('生成中请先中断再调整上下文')
+    ElMessage.info(t('chat.feedback.interruptFirst'))
     return
   }
   chatStore.setContextStartIndex(idx)
   closeContextMenu()
   scrollToMessage(idx)
-  ElMessage.success('已从这条消息开始上下文')
+  ElMessage.success(t('chat.feedback.contextSet'))
 }
 
 const handleResetContextStart = () => {
   chatStore.setContextStartIndex(0)
-  ElMessage.success('已恢复完整上下文')
+  ElMessage.success(t('chat.feedback.contextRestored'))
 }
 
 const messageRegenerationIndex = (idx: number) => {
@@ -1162,9 +1165,9 @@ const handleDeleteMsg = async (idx: number) => {
   const message = chatState.messages[idx]
   if (!message) return
   try {
-    await ElMessageBox.confirm('这会从本地历史中删除该消息，无法撤销。', '删除消息', {
-      confirmButtonText: '删除消息',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(t('chat.feedback.deleteMessageHint'), t('chat.feedback.deleteMessageTitle'), {
+      confirmButtonText: t('chat.feedback.deleteMessageTitle'),
+      cancelButtonText: t('common.cancel'),
       type: 'warning',
       confirmButtonClass: 'el-button--danger',
     })
@@ -1172,17 +1175,17 @@ const handleDeleteMsg = async (idx: number) => {
     if (message.id !== undefined) {
       sessionStore.noteMessageDeleted(chatState.currentSessionId)
     }
-    ElMessage.success(message.id === undefined ? '已删除未同步的本地消息' : '消息已删除')
+    ElMessage.success(message.id === undefined ? t('chat.feedback.deletedUnsynced') : t('chat.feedback.deletedMessage'))
   } catch (error) {
     if (error === 'cancel' || error === 'close') return
     console.warn('[ChatPanel] failed to delete message:', error)
-    ElMessage.error('删除消息失败')
+    ElMessage.error(t('chat.feedback.deleteMessageFailed'))
   }
 }
 
 const startMessageEdit = (idx: number, msg: ChatMessage) => {
   if (chatState.isGenerating) {
-    ElMessage.info('生成中请先中断再编辑')
+    ElMessage.info(t('chat.feedback.editBlocked'))
     return
   }
   editingMessage.index = idx
@@ -1213,13 +1216,13 @@ const saveMessageEdit = async (resend: boolean | Event = false) => {
       if (removed > 0) {
         sessionStore.noteMessagesDeleted(chatState.currentSessionId, removed)
       }
-      ElMessage.success('已保存并重发')
+      ElMessage.success(t('chat.feedback.savedResent'))
       return
     }
-    ElMessage.success('消息已更新')
+    ElMessage.success(t('chat.feedback.updated'))
   } catch (error) {
     console.warn('[ChatPanel] failed to update message:', error)
-    ElMessage.error('保存消息失败')
+    ElMessage.error(t('chat.feedback.updateFailed'))
     editingMessage.saving = false
   }
 }
@@ -1227,7 +1230,7 @@ const saveMessageEdit = async (resend: boolean | Event = false) => {
 const handleRegenerate = async (idx: number) => {
   const sourceIndex = messageRegenerationIndex(idx)
   if (sourceIndex < 0) {
-    ElMessage.info('没有可重发的用户消息')
+    ElMessage.info(t('chat.feedback.noRegenerate'))
     return
   }
   try {
@@ -1237,7 +1240,7 @@ const handleRegenerate = async (idx: number) => {
     }
   } catch (error) {
     console.warn('[ChatPanel] failed to regenerate message:', error)
-    ElMessage.error('重新生成失败')
+    ElMessage.error(t('chat.feedback.regenerateFailed'))
   }
   closeContextMenu()
 }
@@ -1292,9 +1295,9 @@ const handleCorrectMemory = (source: ChatMemorySource) => {
 
 const handleForgetMemory = async (source: ChatMemorySource) => {
   try {
-    await ElMessageBox.confirm('这条记忆将从后续检索中隐藏，可在记忆面板中恢复。', '忘记这条记忆', {
-      confirmButtonText: '隐藏',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(t('chat.feedback.forgetHint'), t('chat.feedback.forgetTitle'), {
+      confirmButtonText: t('chat.action.hide'),
+      cancelButtonText: t('common.cancel'),
       type: 'warning',
       confirmButtonClass: 'el-button--danger',
     })
@@ -1315,11 +1318,11 @@ const handleForgetMemory = async (source: ChatMemorySource) => {
         })
       }
     }
-    ElMessage.success('已隐藏这条记忆')
+    ElMessage.success(t('chat.feedback.hidden'))
   } catch (error) {
     if (error === 'cancel' || error === 'close') return
     console.warn('[ChatPanel] failed to forget memory:', error)
-    ElMessage.error('忘记记忆失败')
+    ElMessage.error(t('chat.feedback.forgetFailed'))
   }
 }
 
@@ -1341,22 +1344,22 @@ const syncActiveWorkspaceForSessionView = async (workspaceId: string) => {
 
 const handleClearContext = async () => {
   try {
-    await ElMessageBox.confirm('清理后，下一轮请求不会再携带此前消息，但当前视图仍会保留。', '清理上下文', {
-      confirmButtonText: '清理',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(t('chat.feedback.clearContextHint'), t('chat.feedback.clearContextTitle'), {
+      confirmButtonText: t('common.clear'),
+      cancelButtonText: t('common.cancel'),
       type: 'warning',
     })
     chatStore.clearContext()
-    ElMessage.success('已从当前位置开始新上下文')
+    ElMessage.success(t('chat.feedback.contextStarted'))
   } catch {
     // user cancelled
   }
 }
 const handleClearConversation = async () => {
   try {
-    await ElMessageBox.confirm('这会删除当前会话中的所有消息，但会保留会话本身。此操作无法撤销。', '清空消息', {
-      confirmButtonText: '清空消息',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(t('chat.feedback.clearMessagesHint'), t('chat.feedback.clearMessagesTitle'), {
+      confirmButtonText: t('chat.feedback.clearMessagesTitle'),
+      cancelButtonText: t('common.cancel'),
       type: 'warning',
       confirmButtonClass: 'el-button--danger',
     })
@@ -1364,11 +1367,11 @@ const handleClearConversation = async () => {
     if (clearedPersistedMessages) {
       sessionStore.noteSessionMessagesCleared(chatState.currentSessionId)
     }
-    ElMessage.success('已清空当前会话消息')
+    ElMessage.success(t('chat.feedback.cleared'))
   } catch (error) {
     if (error === 'cancel' || error === 'close') return
     console.warn('[ChatPanel] failed to clear conversation messages:', error)
-    ElMessage.error('清空消息失败')
+    ElMessage.error(t('chat.feedback.clearFailed'))
   }
 }
 
@@ -1377,7 +1380,9 @@ const handleCreateSession = async () => {
   isCreatingSession.value = true
   try {
     const workspaceId = workspaceStore.activeWorkspaceId || chatState.currentWorkspaceId || 'default'
-    const session = await sessionStore.createSession(`新对话 ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`)
+    const session = await sessionStore.createSession(t('chat.feedback.newSession', {
+      time: new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),
+    }))
     sessionStore.setActiveSession(session.id)
     chatStore.clearLocalMessages()
     chatStore.setWorkspaceContext(workspaceId, session.id)
@@ -1396,11 +1401,11 @@ const handleCreateSession = async () => {
     }
     await router.replace(chatRouteForSession(session.id))
     restoreSessionScroll(session.id)
-    ElMessage.success('已创建新会话')
+    ElMessage.success(t('chat.feedback.sessionCreated'))
   } catch (error) {
     console.warn('[ChatPanel] failed to create session:', error)
-    const message = error instanceof Error && error.message ? error.message : '请确认后端服务已启动'
-    ElMessage.error(`新建会话失败：${message}`)
+    const message = error instanceof Error && error.message ? error.message : t('chat.feedback.backendHint')
+    ElMessage.error(t('chat.feedback.createFailed', { message }))
   } finally {
     isCreatingSession.value = false
   }
@@ -1419,7 +1424,7 @@ const handleSelectSession = async (sessionId: string) => {
     await chatStore.loadHistory(sessionId, targetWorkspaceId)
   } catch (error) {
     console.warn('[ChatPanel] failed to load session history:', error)
-    ElMessage.error('加载会话失败')
+    ElMessage.error(t('chat.feedback.loadSessionFailed'))
   }
   restoreSessionScroll(sessionId)
 }
@@ -1429,7 +1434,7 @@ const handleTogglePin = async (sessionId: string, pinned: boolean) => {
     await sessionStore.updateSession(sessionId, { pinned }, sessionWorkspaceId(sessionId))
   } catch (error) {
     console.warn('[ChatPanel] failed to update session pin:', error)
-    ElMessage.error('更新置顶失败')
+    ElMessage.error(t('chat.feedback.pinFailed'))
   }
 }
 
@@ -1438,7 +1443,7 @@ const handleRenameSession = async (sessionId: string, title: string) => {
     await sessionStore.updateSession(sessionId, { title }, sessionWorkspaceId(sessionId))
   } catch (error) {
     console.warn('[ChatPanel] failed to rename session:', error)
-    ElMessage.error('重命名失败')
+    ElMessage.error(t('chat.feedback.renameFailed'))
   }
 }
 
@@ -1455,7 +1460,7 @@ const handleArchiveSession = async (sessionId: string, archived: boolean) => {
     }
   } catch (error) {
     console.warn('[ChatPanel] failed to archive session:', error)
-    ElMessage.error(archived ? '归档会话失败' : '恢复会话失败')
+    ElMessage.error(archived ? t('chat.feedback.archiveFailed') : t('chat.feedback.restoreFailed'))
   }
 }
 
@@ -1463,7 +1468,7 @@ const handleCreateBranch = async (_index: number, message: ChatMessage) => {
   if (chatState.isGenerating) return
   const messageId = Number(message.id)
   if (!Number.isInteger(messageId)) {
-    ElMessage.warning('这条消息尚未保存，无法创建分支')
+    ElMessage.warning(t('chat.feedback.branchBlocked'))
     return
   }
   const sourceSession = sessionStore.activeSession
@@ -1473,7 +1478,7 @@ const handleCreateBranch = async (_index: number, message: ChatMessage) => {
     const branch = await sessionStore.branchSession(
       sourceSessionId,
       messageId,
-      `${sourceSession?.title || '当前会话'} · 分支`,
+      `${sourceSession?.title || t('chat.feedback.currentSession')} · ${t('chat.feedback.branch')}`,
       workspaceId,
     )
     chatStore.clearLocalMessages()
@@ -1481,19 +1486,19 @@ const handleCreateBranch = async (_index: number, message: ChatMessage) => {
     await router.replace(chatRouteForSession(branch.id, workspaceId))
     await chatStore.loadHistory(branch.id, workspaceId)
     restoreSessionScroll(branch.id)
-    ElMessage.success('已创建会话分支')
+    ElMessage.success(t('chat.feedback.branchCreated'))
   } catch (error) {
     console.warn('[ChatPanel] failed to create session branch:', error)
-    ElMessage.error('创建会话分支失败')
+    ElMessage.error(t('chat.feedback.branchFailed'))
   }
 }
 
 const handleDeleteSession = async (sessionId: string) => {
   const wasActive = sessionId === sessionStore.activeSessionId
   try {
-    await ElMessageBox.confirm('这会删除该会话和其中的所有消息，无法撤销。', '删除会话', {
-      confirmButtonText: '删除会话',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(t('chat.feedback.deleteSessionHint'), t('chat.feedback.deleteSessionTitle'), {
+      confirmButtonText: t('chat.feedback.deleteSessionTitle'),
+      cancelButtonText: t('common.cancel'),
       type: 'warning',
       confirmButtonClass: 'el-button--danger',
     })
@@ -1518,7 +1523,7 @@ const handleDeleteSession = async (sessionId: string) => {
   } catch (error) {
     if (error === 'cancel' || error === 'close') return
     console.warn('[ChatPanel] failed to delete session:', error)
-    ElMessage.error('删除会话失败')
+    ElMessage.error(t('chat.feedback.deleteSessionFailed'))
   }
 }
 
@@ -1549,7 +1554,7 @@ const toggleTheme = async () => {
   try {
     await settingsStore.saveSettings({ system: { ...settingsStore.state.system, theme: nextTheme } })
   } catch {
-    ElMessage.warning('主题已本地切换，后端连接后再保存')
+    ElMessage.warning(t('chat.feedback.themeLocal'))
   }
 }
 
@@ -1649,7 +1654,7 @@ const addFiles = async (files: FileList | File[]) => {
           content: content.slice(0, MAX_ATTACHMENT_TEXT_CHARS),
         })
       } catch {
-        ElMessage.warning(`${file.name} 读取失败`)
+        ElMessage.warning(t('chat.attachment.readFailed', { name: file.name }))
       }
       continue
     }
@@ -1715,11 +1720,11 @@ const translateComposerInput = async () => {
     const translated = await chatStore.translateText(text, chatOptions.translation_target)
     if (translated) {
       inputText.value = translated
-      ElMessage.success('已翻译到输入框')
+      ElMessage.success(t('chat.translation.done'))
     }
   } catch (error) {
     console.warn('[ChatPanel] failed to translate composer:', error)
-    ElMessage.error('翻译失败')
+    ElMessage.error(t('chat.translation.failed'))
   } finally {
     composerTranslating.value = false
   }
@@ -1728,14 +1733,14 @@ const translateComposerInput = async () => {
 const handleTranslateMessage = async (msg: ChatMessage, idx: number) => {
   if (!msg.content.trim() || messageTranslatingIndex.value !== null) return
   messageTranslatingIndex.value = idx
-  translationDialogTitle.value = `翻译为 ${chatOptions.translation_target || 'zh-CN'}`
+  translationDialogTitle.value = `${t('chat.dialog.translationTitle')} · ${chatOptions.translation_target || 'zh-CN'}`
   translationResult.value = ''
   try {
     translationResult.value = await chatStore.translateText(msg.content, chatOptions.translation_target)
     translationDialogVisible.value = true
   } catch (error) {
     console.warn('[ChatPanel] failed to translate message:', error)
-    ElMessage.error('翻译失败')
+    ElMessage.error(t('chat.translation.failed'))
   } finally {
     messageTranslatingIndex.value = null
   }
@@ -1799,9 +1804,9 @@ const refreshMcpSummary = async () => {
     const rows = Object.entries(snapshot.servers || {})
     const connected = rows.filter(([name, server]) => snapshot.status?.[name]?.connected && (snapshot.status?.[name]?.enabled ?? server.enabled)).length
     const enabled = rows.filter(([name, server]) => snapshot.status?.[name]?.enabled ?? server.enabled).length
-    mcpSummaryLabel.value = `${connected}/${enabled} 个 MCP 服务可用`
+    mcpSummaryLabel.value = t('chat.mcp.ready', { connected, enabled })
   } catch {
-    mcpSummaryLabel.value = 'MCP 状态获取失败'
+    mcpSummaryLabel.value = t('chat.mcp.failed')
   }
 }
 
