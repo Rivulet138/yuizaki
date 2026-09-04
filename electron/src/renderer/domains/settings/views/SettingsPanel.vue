@@ -1372,6 +1372,7 @@ type ResourceDownloadOption = {
   label: string
   ready: boolean
   version: string
+  requiredOnFirstRun: boolean
   license: string
   downloadBytes: number
   resumable: ResumableResourceDownload | null
@@ -1391,6 +1392,19 @@ const resourceDownloadOptions = computed<ResourceDownloadOption[]>(() => {
     resumable: status.resumableDownloads.find((download) => download.resourceId === item.id) ?? null,
   }))
 })
+
+const selectRequiredResources = (status: ModelResourceStatusPayload | null): void => {
+  if (!status || selectedResourceIds.value.length > 0) return
+  const options = [
+    { id: 'sherpa_online' as const, status: status.sherpaOnline },
+    { id: 'sherpa' as const, status: status.sherpa },
+    { id: 'tts' as const, status: status.tts },
+    { id: 'embedding' as const, status: status.embedding },
+  ]
+  selectedResourceIds.value = options
+    .filter((item) => item.status.metadata.requiredOnFirstRun && !item.status.ready)
+    .map((item) => item.id)
+}
 
 const formatStorageBytes = (value: number): string => {
   const bytes = Math.max(0, Number(value) || 0)
@@ -2267,6 +2281,7 @@ const loadResourceStatus = async () => {
   resourceLoading.value = true
   try {
     resourceStatus.value = normalizeResourceStatus(await resourceClient.status())
+    selectRequiredResources(resourceStatus.value)
     syncResourceProgressPolling()
   } catch (error) {
     const message = error instanceof Error ? error.message : t('settings.resource.statusFailed')
@@ -2446,7 +2461,10 @@ const prepareResourcesForSettingsPatch = async (patch: SettingsPatch) => {
 }
 
 const downloadSelectedResources = async () => {
-  const ids = [...selectedResourceIds.value]
+  const requiredMissing = resourceDownloadOptions.value
+    .filter((item) => item.requiredOnFirstRun && !item.ready)
+    .map((item) => item.id)
+  const ids = [...new Set([...selectedResourceIds.value, ...requiredMissing])]
   if (ids.length === 0) return
   await runResourceCommand('selected-download', () => resourceClient.prepare(ids), ids)
   selectedResourceIds.value = selectedResourceIds.value.filter((id) => {

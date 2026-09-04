@@ -55,6 +55,7 @@
         >
           <span class="resource-download-label">{{ item.label }}</span>
           <el-tag size="small" type="info">{{ item.version }}</el-tag>
+          <el-tag v-if="item.requiredOnFirstRun" size="small" type="warning">首次运行必需</el-tag>
           <span>{{ formatResourceDownloadBytes(item.downloadBytes) }}</span>
           <span>{{ item.license }}</span>
           <el-tag v-if="item.resumable" size="small" type="warning">
@@ -320,6 +321,7 @@ interface ResourceDownloadOption {
   label: string
   ready: boolean
   version: string
+  requiredOnFirstRun: boolean
   license: string
   downloadBytes: number
   resumable: ResumableResourceDownload | null

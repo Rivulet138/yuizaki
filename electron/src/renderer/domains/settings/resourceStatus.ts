@@ -91,6 +91,7 @@ export const normalizeResourceStatus = (value: unknown): ModelResourceStatusPayl
     return {
       label: String(raw.label || ''),
       version: String(raw.version || ''),
+      requiredOnFirstRun: raw.requiredOnFirstRun === true,
       license: String(raw.license || ''),
       licenseUrl: String(raw.licenseUrl || ''),
       downloadBytes: Math.max(0, Number(raw.downloadBytes || 0)),

@@ -22,6 +22,20 @@ Ollama, LM Studio, OpenAI-compatible endpoints, Qdrant, SoulX services, MCP serv
 
 Ollama、LM Studio、OpenAI 兼容端点、Qdrant、SoulX 服务、MCP 服务和 Hugging Face 模型仓库各自拥有独立条款；Yuizaki 不授予这些服务或模型权利。
 
+## Upstream acknowledgements / 上游致谢
+
+The required first-run resources are prepared from the following upstream projects and model repositories. Please review their current licenses before redistributing a build:
+
+| Integration | Upstream project | Model/data source |
+| --- | --- | --- |
+| Sherpa ASR | [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) | Sherpa ONNX release archives |
+| Streaming ASR recipe | [k2-fsa/icefall](https://github.com/k2-fsa/icefall) | Streaming Zipformer2 model archive |
+| Qwen3 Embedding | [QwenLM/Qwen3](https://github.com/QwenLM/Qwen3) | [Qwen/Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B) |
+| Genie TTS | [High-Logic/Genie-TTS](https://github.com/High-Logic/Genie-TTS) | `High-Logic/Genie` fixed Hugging Face revision |
+| SoulX SVC | [Soul-AILab/SoulX-Singer](https://github.com/Soul-AILab/SoulX-Singer) | SoulX model and preprocess repositories |
+
+感谢上述项目及其维护者。Yuizaki 只负责集成和下载编排，不重新授权上游代码、模型、声音或角色素材。
+
 ## Resource lock review / 资源锁核验
 
 The downloadable resources in `resources.lock.json` have the following release boundary:

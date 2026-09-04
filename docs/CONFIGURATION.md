@@ -9,9 +9,9 @@ Yuizaki 将本地运行配置保存在 `python/.env` 和 `python/config/settings
 | Profile | Contents |
 | --- | --- |
 | `core` | Backend, SQLite, OCR foundations, Electron, and required runtime packages |
-| `full` | Core plus optional Sherpa ASR, Genie TTS, Qdrant, embeddings, and model helpers |
+| `full` | Core plus Sherpa ASR, Genie TTS, embeddings, Qdrant, and model helpers |
 
-The launcher selects the platform lock file under `python/`, installs Electron and node-mcp with `npm ci`, creates `python/.venv`, and validates the installed packages. Set `YUIZAKI_INSTALL_PROFILE=full` before setup when the optional local model stack is required. Native model compatibility still depends on the operating system, CPU, GPU, and model files.
+The launcher selects the platform lock file under `python/`, installs Electron and node-mcp with `npm ci`, creates `python/.venv`, and validates the installed packages. Use `YUIZAKI_INSTALL_PROFILE=full` before setup so the local ASR/TTS/embedding dependencies are installed. The model weights themselves remain first-run downloads in Settings > Resources and are not embedded in the installer. Native model compatibility still depends on the operating system, CPU, GPU, and model files.
 
 ## LLM / 大语言模型
 
@@ -107,7 +107,7 @@ Enabling a connector authorizes its declared inbound message and outbound reply 
 
 ## Avatars, models, and caches / 角色、模型与缓存
 
-Live2D/VRM assets, model weights, voices, and generated caches stay outside Git unless their exact licenses allow redistribution. Startup restores saved avatar references when the files still exist; missing assets are reported in the application.
+Live2D/VRM assets, model weights, voices, and generated caches stay outside Git unless their exact licenses allow redistribution. Sherpa, Embedding, and Genie are marked `requiredOnFirstRun` in `resources.lock.json`; the settings resource panel preselects missing entries and downloads them through the locked source/checksum path. Startup restores saved avatar references when the files still exist; missing assets are reported in the application.
 
 Default local data includes:
 

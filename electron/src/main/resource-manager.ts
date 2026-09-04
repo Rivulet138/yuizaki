@@ -85,6 +85,7 @@ type LockedResourceSource = {
 type LockedResource = {
   label: string
   version: string
+  requiredOnFirstRun?: boolean
   kind: 'archive' | 'huggingface_snapshot' | 'huggingface_bundle' | 'package_managed'
   license: string
   licenseUrl: string
@@ -118,6 +119,7 @@ const resourceMetadata = (resourceId: ManagedModelResourceId, inUseBy: string[] 
   return {
     label: resource.label,
     version: resource.version,
+    requiredOnFirstRun: resource.requiredOnFirstRun === true,
     license: resource.license,
     licenseUrl: resource.licenseUrl,
     downloadBytes: resource.downloadBytes,
@@ -595,6 +597,7 @@ const buildEmbeddingStatus = (settings: StoredSettings): EmbeddingResourceStatus
     : {
         label: modelName,
         version: 'unlocked',
+        requiredOnFirstRun: false,
         license: 'unverified',
         licenseUrl: '',
         downloadBytes: 0,

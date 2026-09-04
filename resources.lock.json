@@ -4,6 +4,7 @@
     "sherpa": {
       "label": "Sherpa SenseVoice",
       "version": "2025-09-09-int8",
+      "requiredOnFirstRun": true,
       "kind": "archive",
       "license": "FunASR Model License",
       "licenseUrl": "https://huggingface.co/FunAudioLLM/SenseVoiceSmall",
@@ -18,6 +19,7 @@
     "sherpa_online": {
       "label": "Sherpa Streaming Zipformer2 CTC",
       "version": "2025-04-01-int8",
+      "requiredOnFirstRun": true,
       "kind": "archive",
       "license": "Apache-2.0",
       "licenseUrl": "https://github.com/k2-fsa/icefall/blob/master/LICENSE",
@@ -32,6 +34,7 @@
     "embedding": {
       "label": "Qwen3 Embedding 0.6B",
       "version": "97b0c614be4d",
+      "requiredOnFirstRun": true,
       "kind": "huggingface_snapshot",
       "license": "Apache-2.0",
       "licenseUrl": "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B",
@@ -46,6 +49,7 @@
     "tts": {
       "label": "Genie TTS",
       "version": "2.0.2",
+      "requiredOnFirstRun": true,
       "kind": "package_managed",
       "license": "MIT",
       "licenseUrl": "https://github.com/High-Logic/Genie-TTS/blob/main/LICENSE",

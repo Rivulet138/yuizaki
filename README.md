@@ -18,6 +18,18 @@ Yuizaki 是本地优先的 Windows/Linux AI 桌面伴侣。它把文字和语音
 - 连接器：Telegram、Discord、QQ/微信个人桥，默认关闭并标为实验性。
 - 运行治理：Provider、设备、记忆索引、任务、连接器和错误状态可检查。
 
+## 首次运行必需下载
+
+安装包不携带大型模型权重。首次打开设置页时，资源面板会自动勾选以下必需资源；点击“下载选中项”会始终包含所有缺失的必需资源：
+
+| 资源 | 用途 | 预计下载量 | 下载来源 | 上游/致谢 |
+| --- | --- | ---: | --- | --- |
+| Sherpa SenseVoice + Streaming Zipformer2 | 离线/流式 ASR | 约 188 MiB | `resources.lock.json` 中的 Sherpa ONNX release | [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)、[k2-fsa/icefall](https://github.com/k2-fsa/icefall) |
+| Qwen3 Embedding 0.6B | 长期记忆向量化 | 约 1.12 GiB | Hugging Face 固定 revision | [QwenLM/Qwen3](https://github.com/QwenLM/Qwen3) |
+| Genie TTS 角色和模型 | 语音合成 | 约 391 MiB | Hugging Face `High-Logic/Genie` 固定 revision | [High-Logic/Genie-TTS](https://github.com/High-Logic/Genie-TTS) |
+
+Genie 的运行时数据暂时继续使用其官方数据仓库和 `genie-tts==2.0.2`，不改用第三方镜像。下载、版本、校验和许可证以 [resources.lock.json](resources.lock.json) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 为准。预留至少 2 GiB 可用磁盘空间；模型下载失败时可在资源面板续传或重试。
+
 ## 技术栈
 
 - Electron 42、Vue 3.5、TypeScript 6、Vite 8、Pinia 3、Element Plus 2。
@@ -41,7 +53,7 @@ services/                 可选外部服务（例如 soulx-svc）
 
 ## 安装与启动
 
-要求：Windows 10/11 x64 或 Linux x86_64、Python 3.11–3.13、Node.js >= 22.13、npm。需要自行编译 Launcher 时还需要 Go 1.22；Qdrant 自动启动需要 Docker（Windows）。
+要求：Windows 10/11 x64 或 Linux x86_64、Python 3.11–3.13、Node.js >= 22.13、npm。首次运行必需下载模型；需要自行编译 Launcher 时还需要 Go 1.22；Qdrant 自动启动需要 Docker（Windows）。
 
 ### 推荐：Launcher
 

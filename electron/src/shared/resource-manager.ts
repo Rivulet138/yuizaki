@@ -47,6 +47,7 @@ export interface ManagedResourceSummary {
 export interface ManagedResourceMetadata {
   label: string
   version: string
+  requiredOnFirstRun: boolean
   license: string
   licenseUrl: string
   downloadBytes: number
