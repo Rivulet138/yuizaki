@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field, ConfigDict
 from .paths import DEFAULT_AUDIO_CACHE_DIR, audio_cache_dir_from_env, data_dir_from_env
 DEFAULT_TTS_LANG = "ja"
 DEFAULT_GENIE_CHARACTER = "普拉琪娜_e15_e8_correct_sampling_v2"
-DEFAULT_GENIE_MODEL_DIR = "CharacterModels/v2ProPlus/普拉琪娜_e15_e8_correct_sampling_v2"
+DEFAULT_GENIE_MODEL_DIR = ""
+LEGACY_BUILTIN_GENIE_MODEL_DIR = "CharacterModels/v2ProPlus/普拉琪娜_e15_e8_correct_sampling_v2"
 DEFAULT_GENIE_REF_AUDIO = "CharacterModels/v2ProPlus/普拉琪娜_e15_e8_correct_sampling_v2/prompt_wav/もうこんなひどいことさせないからね.wav"
 DEFAULT_GENIE_REF_TEXT = "もうこんなひどいことさせないからね"
 DEFAULT_EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-0.6B"
@@ -18,6 +19,12 @@ DEFAULT_QDRANT_DOCKER_IMAGE = "qdrant/qdrant:v1.18.3"
 DEFAULT_QDRANT_DOCKER_CONTAINER = "yuizaki-qdrant"
 DEFAULT_QDRANT_DOCKER_VOLUME = "yuizaki-qdrant-storage"
 DEFAULT_MEMORY_SQLITE_PATH = data_dir_from_env() / "memory.db"
+
+
+def normalize_genie_model_dir(value: str | None) -> str:
+    """Treat the old default character path as the built-in Genie mode."""
+    normalized = str(value or "").strip().replace("\\", "/")
+    return "" if normalized == LEGACY_BUILTIN_GENIE_MODEL_DIR else normalized
 
 
 def normalize_qdrant_docker_image(value: str | None) -> str:
@@ -223,7 +230,7 @@ def _load_config_from_env() -> AppConfig:
         ),
         tts=TTSConfig(
             genie_character=os.getenv("TTS_GENIE_CHARACTER", DEFAULT_GENIE_CHARACTER),
-            genie_model_dir=os.getenv("TTS_GENIE_MODEL_DIR", DEFAULT_GENIE_MODEL_DIR),
+            genie_model_dir=normalize_genie_model_dir(os.getenv("TTS_GENIE_MODEL_DIR", DEFAULT_GENIE_MODEL_DIR)),
             ref_audio=os.getenv("TTS_REF_AUDIO", DEFAULT_GENIE_REF_AUDIO),
             ref_text=os.getenv("TTS_REF_TEXT", DEFAULT_GENIE_REF_TEXT),
             lang=os.getenv("TTS_LANG", DEFAULT_TTS_LANG),

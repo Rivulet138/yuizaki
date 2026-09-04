@@ -48,7 +48,7 @@ The full voice path requires all of the following:
 - a working LLM provider;
 - a configured TTS provider and voice.
 
-The default local providers are selected with `ASR_PROVIDER=sherpa-onnx-online` and `TTS_PROVIDER=genie-tts`. An OpenAI-compatible speech service uses `TTS_PROVIDER=openai-compatible`, `TTS_BASE_URL`, `TTS_API_KEY`, `TTS_MODEL`, and `TTS_VOICE`.
+The default local providers are selected with `ASR_PROVIDER=sherpa-onnx-online` and `TTS_PROVIDER=genie-tts`. Genie uses the built-in fixed character mode by default; leave `TTS_GENIE_MODEL_DIR` empty to use it. Set that variable only for a custom character directory. An OpenAI-compatible speech service uses `TTS_PROVIDER=openai-compatible`, `TTS_BASE_URL`, `TTS_API_KEY`, `TTS_MODEL`, and `TTS_VOICE`.
 
 Keep optional models lazy on constrained machines:
 
@@ -107,7 +107,7 @@ Enabling a connector authorizes its declared inbound message and outbound reply 
 
 ## Avatars, models, and caches / 角色、模型与缓存
 
-Live2D/VRM assets, model weights, voices, and generated caches stay outside Git unless their exact licenses allow redistribution. Sherpa, Embedding, and Genie are marked `requiredOnFirstRun` in `resources.lock.json`; the settings resource panel preselects missing entries and downloads them through the locked source/checksum path. Startup restores saved avatar references when the files still exist; missing assets are reported in the application.
+Live2D/VRM assets, model weights, voices, and generated caches stay outside Git unless their exact licenses allow redistribution. Sherpa, Embedding, and Genie are marked `requiredOnFirstRun` in `resources.lock.json`; Genie is marked `mode: builtin`, so its package and fixed character assets are prepared locally from the pinned official source. The settings resource panel preselects missing entries and downloads them through the locked source/revision path. Startup restores saved avatar references when the files still exist; missing assets are reported in the application.
 
 Default local data includes:
 

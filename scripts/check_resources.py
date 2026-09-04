@@ -40,6 +40,9 @@ def main() -> int:
         if not SHA256.fullmatch(source.get("sha256", "")):
             errors.append(f"{resource_id}: archive must have SHA256 integrity")
 
+    if resources.get("tts", {}).get("mode") != "builtin":
+        errors.append("tts: mode must be builtin")
+
     if errors:
         print("Resource lock validation failed:")
         for error in errors:

@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from modules.core.config import normalize_genie_model_dir
 from modules.core.paths import DEFAULT_AUDIO_CACHE_DIR, resolve_optional_backend_path
 from modules.system.experience_metrics import percentile
 from modules.system.voice_diagnostics import VoiceDiagnostics
@@ -116,7 +117,7 @@ class TTSClient:
         diagnostics: VoiceDiagnostics | None = None,
     ) -> None:
         self._character = genie_character.strip()
-        resolved_model_dir = resolve_optional_backend_path(genie_model_dir)
+        resolved_model_dir = resolve_optional_backend_path(normalize_genie_model_dir(genie_model_dir))
         self._model_dir = str(resolved_model_dir) if resolved_model_dir else None
         self._configured_language = (language or "").strip().lower() or "ja"
         self._language = _normalize_genie_language(language)

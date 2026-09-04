@@ -31,7 +31,7 @@ The required first-run resources are prepared from the following upstream projec
 | Sherpa ASR | [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) | Sherpa ONNX release archives |
 | Streaming ASR recipe | [k2-fsa/icefall](https://github.com/k2-fsa/icefall) | Streaming Zipformer2 model archive |
 | Qwen3 Embedding | [QwenLM/Qwen3](https://github.com/QwenLM/Qwen3) | [Qwen/Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B) |
-| Genie TTS | [High-Logic/Genie-TTS](https://github.com/High-Logic/Genie-TTS) | `High-Logic/Genie` fixed Hugging Face revision |
+| Genie TTS | [High-Logic/Genie-TTS](https://github.com/High-Logic/Genie-TTS) | Built-in local mode; `High-Logic/Genie` fixed Hugging Face revision |
 | SoulX SVC | [Soul-AILab/SoulX-Singer](https://github.com/Soul-AILab/SoulX-Singer) | SoulX model and preprocess repositories |
 
 感谢上述项目及其维护者。Yuizaki 只负责集成和下载编排，不重新授权上游代码、模型、声音或角色素材。

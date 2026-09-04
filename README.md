@@ -26,9 +26,9 @@ Yuizaki 是本地优先的 Windows/Linux AI 桌面伴侣。它把文字和语音
 | --- | --- | ---: | --- | --- |
 | Sherpa SenseVoice + Streaming Zipformer2 | 离线/流式 ASR | 约 188 MiB | `resources.lock.json` 中的 Sherpa ONNX release | [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)、[k2-fsa/icefall](https://github.com/k2-fsa/icefall) |
 | Qwen3 Embedding 0.6B | 长期记忆向量化 | 约 1.12 GiB | Hugging Face 固定 revision | [QwenLM/Qwen3](https://github.com/QwenLM/Qwen3) |
-| Genie TTS 角色和模型 | 语音合成 | 约 391 MiB | Hugging Face `High-Logic/Genie` 固定 revision | [High-Logic/Genie-TTS](https://github.com/High-Logic/Genie-TTS) |
+| Genie TTS 内置角色和模型 | 语音合成 | 约 391 MiB | Hugging Face `High-Logic/Genie` 固定 revision | [High-Logic/Genie-TTS](https://github.com/High-Logic/Genie-TTS) |
 
-Genie 的运行时数据暂时继续使用其官方数据仓库和 `genie-tts==2.0.2`，不改用第三方镜像。下载、版本、校验和许可证以 [resources.lock.json](resources.lock.json) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 为准。预留至少 2 GiB 可用磁盘空间；模型下载失败时可在资源面板续传或重试。
+Genie 已设置为内置模式：默认使用固定角色，模型数据首次运行下载到应用本地目录；用户仍可在设置中填写自定义模型目录。运行时使用官方 `High-Logic/Genie` 仓库和 `genie-tts==2.0.2`，不改用第三方镜像。下载、版本和许可证以 [resources.lock.json](resources.lock.json) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 为准。预留至少 2 GiB 可用磁盘空间；模型下载失败时可在资源面板续传或重试。
 
 ## 技术栈
 

@@ -8,6 +8,7 @@ from ..core.config import (
     DEFAULT_QDRANT_DOCKER_CONTAINER,
     DEFAULT_QDRANT_DOCKER_IMAGE,
     DEFAULT_QDRANT_DOCKER_VOLUME,
+    normalize_genie_model_dir,
 )
 from ..llm.providers import normalize_llm_base_url, normalize_llm_provider
 
@@ -244,7 +245,7 @@ def apply_runtime_config(config: RuntimeConfig, updates: RuntimeUpdates) -> set[
             config.tts.genie_character = str(tts_updates["genie_character"]).strip()
             changed.add("tts")
         if "genie_model_dir" in tts_updates and tts_updates["genie_model_dir"] is not None:
-            config.tts.genie_model_dir = str(tts_updates["genie_model_dir"]).strip()
+            config.tts.genie_model_dir = normalize_genie_model_dir(str(tts_updates["genie_model_dir"]))
             changed.add("tts")
         if "ref_audio" in tts_updates and tts_updates["ref_audio"] is not None:
             config.tts.ref_audio = str(tts_updates["ref_audio"])

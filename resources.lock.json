@@ -50,6 +50,7 @@
       "label": "Genie TTS",
       "version": "2.0.2",
       "requiredOnFirstRun": true,
+      "mode": "builtin",
       "kind": "package_managed",
       "license": "MIT",
       "licenseUrl": "https://github.com/High-Logic/Genie-TTS/blob/main/LICENSE",

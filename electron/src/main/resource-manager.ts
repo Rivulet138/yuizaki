@@ -86,6 +86,7 @@ type LockedResource = {
   label: string
   version: string
   requiredOnFirstRun?: boolean
+  mode?: 'builtin' | 'external' | 'local'
   kind: 'archive' | 'huggingface_snapshot' | 'huggingface_bundle' | 'package_managed'
   license: string
   licenseUrl: string
@@ -154,6 +155,8 @@ const DEFAULT_GENIE_ROOT = path.join(PYTHON_DIR, '.cache', 'GenieData')
 const DEFAULT_GENIE_DATA_DIR = path.join(DEFAULT_GENIE_ROOT, 'GenieData')
 const GENIE_CHARACTER_ROOT = path.join(PYTHON_DIR, 'CharacterModels', 'v2ProPlus')
 const GENIE_CHARACTER_METADATA_ROOT = path.join(HF_CACHE_ROOT, 'download', 'CharacterModels', 'v2ProPlus')
+const DEFAULT_GENIE_CHARACTER = '普拉琪娜_e15_e8_correct_sampling_v2'
+const LEGACY_BUILTIN_GENIE_MODEL_DIR = 'CharacterModels/v2ProPlus/普拉琪娜_e15_e8_correct_sampling_v2'
 const SOULX_SERVICE_DIR = path.join(PROJECT_ROOT, 'services', 'soulx-svc')
 const SOULX_DOWNLOAD_SCRIPT = path.join(SOULX_SERVICE_DIR, 'download_models.py')
 const SOULX_LAUNCHER = path.join(SOULX_SERVICE_DIR, 'docker-compose.yml')
@@ -402,7 +405,12 @@ const huggingFaceRepoLockPaths = (repoId: string): string[] => {
 
 const normalizeGenieCharacter = (value: string | undefined): string => {
   const character = String(value || '').trim()
-  return character && character !== '.' && character !== '..' && !/[\\/\0]/.test(character) ? character : 'feibi'
+  return character && character !== '.' && character !== '..' && !/[\\/\0]/.test(character) ? character : DEFAULT_GENIE_CHARACTER
+}
+const genieBuiltinMode = (): boolean => lockedResource('tts').mode === 'builtin'
+const normalizeGenieModelDir = (value: string | undefined): string => {
+  const normalized = value?.trim().replace(/\\/g, '/') ?? ''
+  return genieBuiltinMode() && normalized === LEGACY_BUILTIN_GENIE_MODEL_DIR ? '' : normalized
 }
 const genieCharacterDir = (character: string): string => path.join(GENIE_CHARACTER_ROOT, normalizeGenieCharacter(character))
 const genieCharacterMetadataDir = (character: string): string => path.join(GENIE_CHARACTER_METADATA_ROOT, normalizeGenieCharacter(character))
@@ -619,7 +627,7 @@ const buildEmbeddingStatus = (settings: StoredSettings): EmbeddingResourceStatus
 }
 
 const buildTtsStatus = (settings: StoredSettings): TtsResourceStatus => {
-  const configuredValue = settings.tts?.genie_model_dir?.trim() || ''
+  const configuredValue = normalizeGenieModelDir(settings.tts?.genie_model_dir)
   const configuredModelDir = configuredValue ? resolveBackendRelativePath(configuredValue, configuredValue) : null
   const character = normalizeGenieCharacter(settings.tts?.genie_character)
   const modelDir = configuredModelDir ?? genieCharacterDir(character)
@@ -911,10 +919,14 @@ export const prepareEmbeddingModel = async (petModelCatalog: PetModelCatalog): P
 }
 
 export const prepareGenieTts = async (petModelCatalog: PetModelCatalog): Promise<ResourceCommandResult> => {
+  const install = await ensurePythonModule('genie_tts', 'genie-tts==2.0.2')
+  if (install && !install.success) {
+    return buildResult(install, getModelResourceStatus(petModelCatalog), 'Genie TTS package installation failed')
+  }
   const settings = readStoredSettings()
   const character = normalizeGenieCharacter(settings.tts?.genie_character)
   const language = settings.tts?.lang?.trim() || 'ja'
-  const configuredModelDir = settings.tts?.genie_model_dir?.trim() || ''
+  const configuredModelDir = normalizeGenieModelDir(settings.tts?.genie_model_dir)
   const scriptPath = path.join(PYTHON_DIR, 'scripts', 'prefetch_genie_tts.py')
   const args = [
     scriptPath,
