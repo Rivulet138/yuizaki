@@ -76,6 +76,10 @@ htmlcov/
 /python/tmp*/
 /python/.test-tmp/
 
+# Local browser verification output
+/.tmp-*/
+/electron/src/renderer/node_modules/
+
 # Python tooling caches
 .mypy_cache/
 .ruff_cache/
