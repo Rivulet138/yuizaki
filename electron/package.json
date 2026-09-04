@@ -1,6 +1,6 @@
 {
   "name": "yuizaki",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Cross-platform local AI desktop companion agent with realtime voice, vision, memory, skills, Live2D and VRM",
   "private": true,
   "main": "dist/main/index.js",
