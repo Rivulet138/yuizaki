@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/Rivulet138/yuizaki)](https://github.com/Rivulet138/yuizaki/releases/latest)
 [![License](https://img.shields.io/github/license/Rivulet138/yuizaki)](LICENSE)
 
-Yuizaki 是本地优先的 Windows/Linux AI 桌面伴侣。它把文字和语音对话、Live2D/VRM 桌宠、按请求视觉、本地记忆、MCP/插件工具和可选桌面动作放在同一个应用中。
+本地优先的 Windows/Linux AI 桌面伴侣：文字与语音对话、Live2D/VRM 桌宠、长期记忆、按请求视觉、工具和本地桌面动作。
 
 ## 主要功能
 
@@ -20,7 +20,7 @@ Yuizaki 是本地优先的 Windows/Linux AI 桌面伴侣。它把文字和语音
 
 ## 首次运行必需下载
 
-安装包不携带大型模型权重。首次打开设置页时，资源面板会自动勾选以下必需资源；点击“下载选中项”会始终包含所有缺失的必需资源：
+安装包不携带模型权重。设置页会预选缺失资源；“下载选中项”会包含所有缺失必需资源。
 
 | 资源 | 用途 | 预计下载量 | 下载来源 | 上游/致谢 |
 | --- | --- | ---: | --- | --- |
@@ -28,7 +28,7 @@ Yuizaki 是本地优先的 Windows/Linux AI 桌面伴侣。它把文字和语音
 | Qwen3 Embedding 0.6B | 长期记忆向量化 | 约 1.12 GiB | Hugging Face 固定 revision | [QwenLM/Qwen3](https://github.com/QwenLM/Qwen3) |
 | Genie TTS 内置角色和模型 | 语音合成 | 约 391 MiB | Hugging Face `High-Logic/Genie` 固定 revision | [High-Logic/Genie-TTS](https://github.com/High-Logic/Genie-TTS) |
 
-Genie 已设置为内置模式：默认使用固定角色，模型数据首次运行下载到应用本地目录；用户仍可在设置中填写自定义模型目录。运行时使用官方 `High-Logic/Genie` 仓库和 `genie-tts==2.0.2`，不改用第三方镜像。下载、版本和许可证以 [resources.lock.json](resources.lock.json) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 为准。预留至少 2 GiB 可用磁盘空间；模型下载失败时可在资源面板续传或重试。
+Genie 为内置模式：默认固定角色，首次运行下载到本地；可在设置中指定自定义模型目录。使用官方 `High-Logic/Genie` 和 `genie-tts==2.0.2`。预留至少 2 GiB 磁盘空间。许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## 技术栈
 
@@ -81,7 +81,7 @@ Linux 对应：
 ./YuizakiLauncher start
 ```
 
-默认 `start` 打开浏览器对话页，并让 Electron 作为本地宿主运行；需要 Electron 控制面板和独立桌宠窗口时使用 `start --electron-ui`。常用参数包括 `--check`、`--smoke`、`--no-mcp`、`--with-mcp`、`--no-qdrant`、`--with-qdrant`、`--no-install`、`--no-open`、`--no-show-pet`、`--no-dev-renderer` 和 `--dev-renderer`。子命令为 `setup`、`start`、`status`、`logs`、`stop`、`install-desktop`、`remove-desktop`。
+默认 `start` 打开浏览器对话页；`start --electron-ui` 打开 Electron 控制面板和桌宠窗口。参数：`--check`、`--smoke`、`--no-mcp`、`--with-qdrant`、`--no-install`、`--no-open`、`--no-show-pet`、`--dev-renderer`。命令：`setup`、`start`、`status`、`logs`、`stop`、`install-desktop`、`remove-desktop`。
 
 ### 直接运行后端
 
@@ -129,7 +129,7 @@ LLM_MODEL=your-model
 | `RENDERER_PORT` | `5173` | Vite 开发服务器 |
 | `MCP_PORT` | `7777` | node-mcp Playwright 服务 |
 
-视觉默认关闭（`VISION_LLM_ENABLED=0`）。语音需要麦克风、扬声器、ASR、LLM 和 TTS 配置。SQLite 是记忆权威；Qdrant 只作为可重建索引。完整变量和 Provider 说明见 [docs/CONFIGURATION.md](docs/CONFIGURATION.md)。
+视觉默认关闭（`VISION_LLM_ENABLED=0`）。语音需要设备、ASR、LLM 和 TTS 资源。SQLite 是记忆权威；Qdrant 仅作可重建索引。变量见 [docs/CONFIGURATION.md](docs/CONFIGURATION.md)。
 
 ## API 与关键模块
 
