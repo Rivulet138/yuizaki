@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,58 @@ logger = logging.getLogger(__name__)
 
 TraceRecord = PlannerTrace | StepExecutionRecord | SchedulerRunRecord | RuntimeLoopRecord
 TraceCoercer = Callable[[dict[str, Any]], TraceRecord]
+
+_TRACE_MAX_TEXT = 512
+_TRACE_MAX_ITEMS = 32
+_TRACE_MAX_LIST_ITEMS = 16
+_TRACE_MAX_DEPTH = 6
+_TRACE_SECRET_PARTS = (
+    "api_key", "apikey", "authorization", "bearer", "cookie", "credential",
+    "password", "private_key", "secret", "token", "webhook", "raw_audio",
+)
+_TRACE_SECRET_TEXT_PATTERNS = (
+    re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}"),
+    re.compile(r"(?i)(?:[?&]|\b)(?:api[_-]?key|access[_-]?token|bot[_-]?token|token|password|secret|webhook(?:[_-]?secret)?)\s*[=:]\s*[^&#\s,;]+"),
+)
+
+
+def _sanitize_trace_value(value: Any, *, depth: int = 0) -> Any:
+    """Return a bounded trace projection safe for durable storage and replay."""
+    if depth >= _TRACE_MAX_DEPTH:
+        return "[TRUNCATED]"
+    if isinstance(value, str):
+        redacted = value
+        for pattern in _TRACE_SECRET_TEXT_PATTERNS:
+            redacted = pattern.sub("[REDACTED]", redacted)
+        if len(redacted) > _TRACE_MAX_TEXT:
+            return f"{redacted[:_TRACE_MAX_TEXT - 3]}..."
+        return redacted
+    if isinstance(value, Mapping):
+        entries = list(value.items())
+        result: dict[str, Any] = {}
+        for raw_key, child in entries[:_TRACE_MAX_ITEMS]:
+            key = str(raw_key)[:128]
+            normalized = key.lower().replace("-", "_")
+            if any(part in normalized for part in _TRACE_SECRET_PARTS):
+                result[key] = "[REDACTED]"
+            else:
+                result[key] = _sanitize_trace_value(child, depth=depth + 1)
+        if len(entries) > _TRACE_MAX_ITEMS:
+            result["__truncatedItems"] = len(entries) - _TRACE_MAX_ITEMS
+        return result
+    if isinstance(value, (list, tuple)):
+        result = [_sanitize_trace_value(item, depth=depth + 1) for item in value[:_TRACE_MAX_LIST_ITEMS]]
+        if len(value) > _TRACE_MAX_LIST_ITEMS:
+            result.append(f"[TRUNCATED {len(value) - _TRACE_MAX_LIST_ITEMS} ITEMS]")
+        return result
+    if isinstance(value, (bool, int, float)) or value is None:
+        return value
+    return _sanitize_trace_value(str(value), depth=depth)
+
+
+def _sanitize_trace_item(item: Mapping[str, Any]) -> dict[str, Any]:
+    projected = _sanitize_trace_value(item)
+    return projected if isinstance(projected, dict) else {}
 
 
 def _coerce_planner(item: dict[str, Any]) -> PlannerTrace:
@@ -176,8 +229,15 @@ class AgentTraceStore:
                     value = payload.get(key)
                     if isinstance(value, list):
                         coerce = COERCERS[key]
-                        records: list[TraceRecord] = [coerce(item) for item in value if isinstance(item, dict)]
+                        records: list[TraceRecord] = [
+                            coerce(_sanitize_trace_item(item))
+                            for item in value
+                            if isinstance(item, dict)
+                        ]
                         self.data[key] = records[-self.max_entries:]
+                # Rewrite legacy records after coercion so raw secrets do not
+                # remain on disk once the trace store has been opened.
+                self.save()
         except Exception as exc:  # noqa: BLE001 - corrupt trace files must fail open.
             logger.warning("Failed to load agent trace store: %s", exc)
             self.data = {"planner": [], "steps": [], "scheduler": [], "runtime_loop": []}
@@ -199,16 +259,17 @@ class AgentTraceStore:
             temporary_path.replace(self.path)
 
     def append(self, category: str, item: dict[str, Any]) -> None:
-        if category not in self.data:
-            self.data[category] = []
         coerce = COERCERS.get(category)
         if coerce is None:
             return
-        self.data[category].append(coerce(item))
-        self.data[category] = self.data[category][-self.max_entries:]
-        # 每 10 条批量写一次，避免每次 append 都写磁盘
-        if sum(len(v) for v in self.data.values()) % 10 == 0:
-            self.save()
+        with self._lock:
+            if category not in self.data:
+                self.data[category] = []
+            self.data[category].append(coerce(_sanitize_trace_item(item)))
+            self.data[category] = self.data[category][-self.max_entries:]
+            # 每 10 条批量写一次，避免每次 append 都写磁盘
+            if sum(len(v) for v in self.data.values()) % 10 == 0:
+                self.save()
 
     def append_once(
         self,
@@ -228,7 +289,7 @@ class AgentTraceStore:
             if normalized_key in self._projection_keys:
                 return False
             previous = list(self.data.get(category, []))
-            self.data.setdefault(category, []).append(coerce(item))
+            self.data.setdefault(category, []).append(coerce(_sanitize_trace_item(item)))
             self.data[category] = self.data[category][-self.max_entries:]
             self._projection_keys.add(normalized_key)
             try:
@@ -243,6 +304,6 @@ class AgentTraceStore:
         with self._lock:
             take = max(1, min(limit, self.max_entries))
             return {
-                key: [item.to_dict() for item in value[-take:]]
+                key: [_sanitize_trace_item(item.to_dict()) for item in value[-take:]]
                 for key, value in self.data.items()
             }

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { dialog } from 'electron'
+import { app, dialog } from 'electron'
 import type { PetModelCatalog } from './pet-model-catalog'
 import type {
   EmbeddingResourceStatus,
@@ -22,6 +22,7 @@ import type {
   TtsResourceStatus,
 } from '../shared/resource-manager'
 import { resolvePythonRuntime } from './python-runtime'
+import { isPackagedRuntime, resolveRuntimeProjectRoot, resolveWritableRuntimePaths } from './runtime-paths'
 
 type StoredSettings = {
   asr?: {
@@ -54,23 +55,9 @@ type CommandExecution = {
   message: string
 }
 
-const resolveProjectRoot = (): string => {
-  const explicitRoot = process.env['YUIZAKI_PROJECT_ROOT']?.trim()
-  if (explicitRoot) {
-    return path.resolve(explicitRoot)
-  }
-
-  const cwd = process.cwd()
-  if (fs.existsSync(path.join(cwd, 'python', 'app.py'))) {
-    return cwd
-  }
-  if (fs.existsSync(path.join(cwd, 'app.py'))) {
-    return path.resolve(cwd, '..')
-  }
-  return path.resolve(__dirname, '../../..')
-}
-
-const PROJECT_ROOT = resolveProjectRoot()
+const PROJECT_ROOT = resolveRuntimeProjectRoot()
+const PACKAGED_RUNTIME = isPackagedRuntime(PROJECT_ROOT)
+const WRITABLE_RUNTIME = PACKAGED_RUNTIME ? resolveWritableRuntimePaths(app.getPath('userData')) : null
 const RESOURCE_LOCK_PATH = path.join(PROJECT_ROOT, 'resources.lock.json')
 
 type LockedResourceSource = {
@@ -140,24 +127,29 @@ const DEFAULT_SHERPA_ONLINE_ASSET_URL = lockedSource('sherpa_online').url ?? ''
 const DEFAULT_SHERPA_ONLINE_SHA256 = lockedSource('sherpa_online').sha256 ?? ''
 const PYTHON_DIR = path.join(PROJECT_ROOT, 'python')
 const PYTHON_EXE = resolvePythonRuntime(PYTHON_DIR).executable
-const SETTINGS_PATH = path.join(PYTHON_DIR, 'config', 'settings.json')
-const SHERPA_DIR = path.join(PYTHON_DIR, '.cache', 'sherpa-onnx', 'sensevoice')
+const SETTINGS_PATH = WRITABLE_RUNTIME?.settingsPath ?? path.join(PYTHON_DIR, 'config', 'settings.json')
+const SHERPA_DIR = WRITABLE_RUNTIME?.sherpaDir ?? path.join(PYTHON_DIR, '.cache', 'sherpa-onnx', 'sensevoice')
 const DEFAULT_SHERPA_MODEL_PATH = path.join(SHERPA_DIR, 'model.int8.onnx')
 const DEFAULT_SHERPA_TOKENS_PATH = path.join(SHERPA_DIR, 'tokens.txt')
 const SHERPA_PARTIAL_ARCHIVE_PATH = path.join(SHERPA_DIR, '.download', 'sherpa-sensevoice.tar.bz2.part')
-const SHERPA_ONLINE_DIR = path.join(PYTHON_DIR, '.cache', 'sherpa-onnx', 'streaming-zipformer-small-ctc-zh')
+const SHERPA_ONLINE_DIR = WRITABLE_RUNTIME?.sherpaOnlineDir ?? path.join(PYTHON_DIR, '.cache', 'sherpa-onnx', 'streaming-zipformer-small-ctc-zh')
 const DEFAULT_SHERPA_ONLINE_MODEL_PATH = path.join(SHERPA_ONLINE_DIR, 'model.int8.onnx')
 const DEFAULT_SHERPA_ONLINE_TOKENS_PATH = path.join(SHERPA_ONLINE_DIR, 'tokens.txt')
 const SHERPA_ONLINE_PARTIAL_ARCHIVE_PATH = path.join(SHERPA_ONLINE_DIR, '.download', 'sherpa-streaming.tar.bz2.part')
-const HF_CACHE_ROOT = path.join(PYTHON_DIR, '.cache', 'huggingface')
+const HF_CACHE_ROOT = WRITABLE_RUNTIME?.huggingfaceHome ?? path.join(PYTHON_DIR, '.cache', 'huggingface')
 const DEFAULT_EMBEDDING_MODEL = 'Qwen/Qwen3-Embedding-0.6B'
-const DEFAULT_GENIE_ROOT = path.join(PYTHON_DIR, '.cache', 'GenieData')
-const DEFAULT_GENIE_DATA_DIR = path.join(DEFAULT_GENIE_ROOT, 'GenieData')
-const GENIE_CHARACTER_ROOT = path.join(PYTHON_DIR, 'CharacterModels', 'v2ProPlus')
+const DEFAULT_GENIE_DATA_DIR = WRITABLE_RUNTIME?.genieDataDir ?? path.join(PYTHON_DIR, '.cache', 'GenieData', 'GenieData')
+const DEFAULT_GENIE_ROOT = path.dirname(DEFAULT_GENIE_DATA_DIR)
+const GENIE_CHARACTER_ROOT = path.join(
+  WRITABLE_RUNTIME?.genieWorkspaceRoot ?? PYTHON_DIR,
+  'CharacterModels',
+  'v2ProPlus',
+)
 const GENIE_CHARACTER_METADATA_ROOT = path.join(HF_CACHE_ROOT, 'download', 'CharacterModels', 'v2ProPlus')
 const DEFAULT_GENIE_CHARACTER = '普拉琪娜_e15_e8_correct_sampling_v2'
 const LEGACY_BUILTIN_GENIE_MODEL_DIR = 'CharacterModels/v2ProPlus/普拉琪娜_e15_e8_correct_sampling_v2'
-const SOULX_SERVICE_DIR = path.join(PROJECT_ROOT, 'services', 'soulx-svc')
+const SOULX_SERVICE_DIR = WRITABLE_RUNTIME?.soulxServiceDir ?? path.join(PROJECT_ROOT, 'services', 'soulx-svc')
+const SOULX_SOURCE_DIR = path.join(PROJECT_ROOT, 'services', 'soulx-svc')
 const SOULX_DOWNLOAD_SCRIPT = path.join(SOULX_SERVICE_DIR, 'download_models.py')
 const SOULX_LAUNCHER = path.join(SOULX_SERVICE_DIR, 'docker-compose.yml')
 const SOULX_MODEL_DIR = path.join(SOULX_SERVICE_DIR, 'models', 'SoulX-Singer')
@@ -167,6 +159,14 @@ const SOULX_CHECKPOINT_CANDIDATES = [
   path.join(SOULX_MODEL_DIR, 'model-svc.pt'),
   path.join(SOULX_MODEL_DIR, 'model.pt'),
 ]
+
+const ensureWritableSoulxService = (): void => {
+  if (!PACKAGED_RUNTIME || fs.existsSync(SOULX_SERVICE_DIR)) return
+  fs.cpSync(SOULX_SOURCE_DIR, SOULX_SERVICE_DIR, {
+    recursive: true,
+    filter: (source) => !source.includes(`${path.sep}models${path.sep}`),
+  })
+}
 
 const RESOURCE_IDS = new Set<ManagedModelResourceId>(['soulx', 'sherpa', 'sherpa_online', 'embedding', 'tts'])
 const resourcePreparation = new Map<ManagedModelResourceId, Promise<ResourceCommandResult>>()
@@ -843,6 +843,18 @@ export const pickLocalModelPath = async (modelType: PetImportableModelType): Pro
 }
 
 export const prepareSoulxModels = async (petModelCatalog: PetModelCatalog): Promise<ResourceCommandResult> => {
+  try {
+    ensureWritableSoulxService()
+  } catch (error) {
+    return buildResult({
+      success: false,
+      cancelled: false,
+      code: 1,
+      stdout: [],
+      stderr: [],
+      message: error instanceof Error ? error.message : String(error),
+    }, getModelResourceStatus(petModelCatalog), 'SoulX service directory is not writable')
+  }
   const install = await ensurePythonModule('huggingface_hub')
   if (install && !install.success) {
     return buildResult(install, getModelResourceStatus(petModelCatalog), 'huggingface_hub installed')
@@ -852,6 +864,9 @@ export const prepareSoulxModels = async (petModelCatalog: PetModelCatalog): Prom
   const preprocessSource = lockedSource('soulx', 1)
   const execution = await runCommand(PYTHON_EXE, [
     SOULX_DOWNLOAD_SCRIPT,
+    '--models-dir', path.join(SOULX_SERVICE_DIR, 'models'),
+    '--references-dir', SOULX_REFERENCE_DIR,
+    '--lock-path', RESOURCE_LOCK_PATH,
     '--singer-revision',
     singerSource.revision ?? '',
     '--preprocess-revision',
@@ -933,6 +948,8 @@ export const prepareGenieTts = async (petModelCatalog: PetModelCatalog): Promise
     '--character', character,
     '--language', language,
     '--revision', lockedSource('tts').revision ?? '',
+    '--genie-data-dir', DEFAULT_GENIE_DATA_DIR,
+    '--workspace-root', WRITABLE_RUNTIME?.genieWorkspaceRoot ?? PYTHON_DIR,
   ]
   if (configuredModelDir) {
     args.push('--model-dir', configuredModelDir)
@@ -1119,7 +1136,7 @@ const embeddingRemovalTargets = (modelName: string): ManagedRemovalTarget[] => {
 
 const genieRemovalTargets = (character: string): ManagedRemovalTarget[] => {
   const targets: ManagedRemovalTarget[] = [
-    { targetPath: DEFAULT_GENIE_ROOT, managedRoot: path.join(PYTHON_DIR, '.cache') },
+    { targetPath: DEFAULT_GENIE_ROOT, managedRoot: WRITABLE_RUNTIME?.cacheDir ?? path.join(PYTHON_DIR, '.cache') },
     { targetPath: genieCharacterDir(character), managedRoot: GENIE_CHARACTER_ROOT },
     { targetPath: genieCharacterMetadataDir(character), managedRoot: GENIE_CHARACTER_METADATA_ROOT },
   ]
@@ -1135,7 +1152,7 @@ const genieRemovalTargets = (character: string): ManagedRemovalTarget[] => {
 }
 
 const managedRemovalTargets = (resourceId: ManagedModelResourceId, settings: StoredSettings): ManagedRemovalTarget[] => {
-  const pythonCacheRoot = path.join(PYTHON_DIR, '.cache')
+  const pythonCacheRoot = WRITABLE_RUNTIME?.cacheDir ?? path.join(PYTHON_DIR, '.cache')
   if (resourceId === 'sherpa') return [{ targetPath: SHERPA_DIR, managedRoot: pythonCacheRoot }]
   if (resourceId === 'sherpa_online') return [{ targetPath: SHERPA_ONLINE_DIR, managedRoot: pythonCacheRoot }]
   if (resourceId === 'embedding') {

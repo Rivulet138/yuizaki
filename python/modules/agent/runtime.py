@@ -157,7 +157,12 @@ def create_agent_runtime(
     resolved_policy_engine = policy_engine or PolicyEngine()
     resolved_trace_store = trace_store or AgentTraceStore()
     resolved_job_event_log = job_event_log or CompanionJobEventLog()
-    tool_executor = ToolExecutor(tool_registry, resolved_policy_engine, tool_outcome_observer)
+    tool_executor = ToolExecutor(
+        tool_registry,
+        resolved_policy_engine,
+        tool_outcome_observer,
+        job_event_log=resolved_job_event_log,
+    )
     step_executor = StepExecutor()
     agent_pipeline = AgentPipeline()
     plugin_manager = PluginManager()

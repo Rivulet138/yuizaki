@@ -66,7 +66,11 @@
 </template>
 
 <script setup lang="ts">
+import { ElIcon } from 'element-plus'
+import 'element-plus/es/components/icon/style/css'
 import { computed } from 'vue'
+import { ElSegmented } from 'element-plus'
+import 'element-plus/es/components/segmented/style/css'
 import { Headset, Microphone, Mute, Refresh } from '@element-plus/icons-vue'
 
 const props = defineProps<{

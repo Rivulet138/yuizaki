@@ -128,8 +128,28 @@
 </template>
 
 <script setup lang="ts">
+import { ElIcon } from 'element-plus'
+import 'element-plus/es/components/icon/style/css'
+import { ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import { ElSwitch } from 'element-plus'
+import 'element-plus/es/components/switch/style/css'
+import { ElInput } from 'element-plus'
+import 'element-plus/es/components/input/style/css'
+import { ElInputNumber } from 'element-plus'
+import 'element-plus/es/components/input-number/style/css'
+import { ElCard } from 'element-plus'
+import 'element-plus/es/components/card/style/css'
+import { ElTag } from 'element-plus'
+import 'element-plus/es/components/tag/style/css'
 import { computed } from 'vue'
 import { Connection, Refresh } from '@element-plus/icons-vue'
+import { ElRadioButton, ElRadioGroup } from 'element-plus'
+import { ElForm, ElFormItem } from 'element-plus'
+import 'element-plus/es/components/radio-button/style/css'
+import 'element-plus/es/components/radio-group/style/css'
+import 'element-plus/es/components/form/style/css'
+import 'element-plus/es/components/form-item/style/css'
 
 import { t } from '@/i18n'
 import SettingsSectionHeader from './SettingsSectionHeader.vue'

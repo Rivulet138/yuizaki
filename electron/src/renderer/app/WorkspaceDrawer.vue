@@ -87,6 +87,17 @@
 </template>
 
 <script setup lang="ts">
+import { ElDivider } from 'element-plus'
+import 'element-plus/es/components/divider/style/css'
+import { ElOption, ElSelect } from 'element-plus'
+import { ElInput } from 'element-plus'
+import 'element-plus/es/components/input/style/css'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
+import { ElDrawer, ElForm, ElFormItem } from 'element-plus'
+import 'element-plus/es/components/drawer/style/css'
+import 'element-plus/es/components/form/style/css'
+import 'element-plus/es/components/form-item/style/css'
 import { computed } from 'vue'
 import type { CompanionRuntimeSnapshot } from '@/../shared/agent'
 import { parseProactiveOpportunityIdentity } from '@/../shared/proactive'

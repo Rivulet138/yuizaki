@@ -42,6 +42,10 @@
 </template>
 
 <script setup lang="ts">
+import { ElAlert } from 'element-plus'
+import 'element-plus/es/components/alert/style/css'
+import { ElTag } from 'element-plus'
+import 'element-plus/es/components/tag/style/css'
 import { computed } from 'vue'
 import { inferModelCapabilities, type ModelCapabilitySupport } from '@/../shared/model-capabilities'
 import type { LlmProviderPreset } from '../llmProviders'

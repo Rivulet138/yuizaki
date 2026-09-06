@@ -74,8 +74,23 @@
 </template>
 
 <script setup lang="ts">
+import 'element-plus/es/components/tag/style/css'
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import {
+  ElAlert,
+  ElButton,
+  ElCard,
+  ElDescriptions,
+  ElDescriptionsItem,
+  ElEmpty,
+  ElMessage,
+  ElTable,
+  ElTableColumn,
+  ElTag,
+} from 'element-plus'
+import 'element-plus/es/components/card/style/css'
+import 'element-plus/es/components/descriptions/style/css'
+import 'element-plus/es/components/descriptions-item/style/css'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import { petControlClient, systemClient } from '@/api/client'
 import { useChatStore } from '@/stores/chatStore'

@@ -119,6 +119,12 @@
 </template>
 
 <script setup lang="ts">
+import { ElIcon } from 'element-plus'
+import 'element-plus/es/components/icon/style/css'
+import { ElDropdown, ElDropdownItem, ElDropdownMenu } from 'element-plus'
+import 'element-plus/es/components/dropdown/style/css'
+import 'element-plus/es/components/dropdown-item/style/css'
+import 'element-plus/es/components/dropdown-menu/style/css'
 import { ElMessage } from 'element-plus'
 import { FolderOpened, Loading, MoreFilled, Plus, Search, Star, StarFilled } from '@element-plus/icons-vue'
 import { computed, nextTick, ref } from 'vue'

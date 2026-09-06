@@ -53,6 +53,14 @@
         </el-select>
       </div>
 
+      <el-alert
+        v-if="state.settings.pushToTalk.enabled"
+        class="mouse-hook-warning"
+        type="warning"
+        :closable="false"
+        title="已启用全局鼠标侧键监听。它会监听系统鼠标事件，关闭后可避免影响其他应用的输入响应。"
+      />
+
       <div class="desktop-input-row" data-testid="desktop-action-beta">
         <div><strong>Desktop actions beta</strong></div>
         <div class="button-row">
@@ -140,6 +148,23 @@
 </template>
 
 <script setup lang="ts">
+import { ElAlert } from 'element-plus'
+import 'element-plus/es/components/alert/style/css'
+import { ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import { ElSwitch } from 'element-plus'
+import 'element-plus/es/components/switch/style/css'
+import { ElInput, ElOption, ElSelect } from 'element-plus'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
+import 'element-plus/es/components/input/style/css'
+import { ElCard } from 'element-plus'
+import 'element-plus/es/components/card/style/css'
+import { ElTag } from 'element-plus'
+import 'element-plus/es/components/tag/style/css'
+import { ElForm } from 'element-plus'
+import 'element-plus/es/components/form/style/css'
+import 'element-plus/es/components/form-item/style/css'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { CircleClose, Refresh } from '@element-plus/icons-vue'
 import type { InputBindingRegistrationStatus, InputBindingSettings, KeyboardShortcutAction, MouseSideButton } from '@/../shared/input-bindings'

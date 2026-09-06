@@ -247,12 +247,27 @@ export const handlePluginRoutes: HttpRouteHandler = async (req, res, method, url
       return resolvedPath
     }
 
-    const parentPath = path.dirname(resolvedPath)
-    if (fs.existsSync(parentPath)) {
-      const realParentPath = fs.realpathSync.native(parentPath)
-      if (!isPluginPathAllowed(allowedPathCandidates, realParentPath)) {
+    // For new files, resolve the nearest existing ancestor. A missing direct
+    // parent may sit below an existing symlink/junction, so checking only that
+    // parent would allow writes to escape the declared real path.
+    let existingAncestor = resolvedPath
+    while (!fs.existsSync(existingAncestor)) {
+      const parent = path.dirname(existingAncestor)
+      if (parent === existingAncestor) {
+        break
+      }
+      existingAncestor = parent
+    }
+    try {
+      const realAncestorPath = fs.realpathSync.native(existingAncestor)
+      if (!isPluginPathAllowed(allowedPathCandidates, realAncestorPath)) {
         throw new PluginPermissionDeniedError('Plugin file path permission denied')
       }
+    } catch (error) {
+      if (error instanceof PluginPermissionDeniedError) {
+        throw error
+      }
+      throw new PluginPermissionDeniedError('Plugin file path permission denied')
     }
 
     return resolvedPath

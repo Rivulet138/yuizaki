@@ -28,12 +28,16 @@ jobs:
 
   python-contracts:
     name: Python Companion Contracts
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
       - name: Install locked core dependencies
         working-directory: python
         run: python -m pip install -r requirements-core-lock-linux.txt
@@ -58,7 +62,45 @@ jobs:
           python/tests/test_connector_staging_check.py
           python/tests/test_connector_e2e.py
           python/tests/test_connector_resolution.py
+          python/tests/test_connector_recovery_controller.py
+          python/tests/test_companion_events.py
+          python/tests/test_agent_trace_store.py
+          python/tests/test_turn_service_recovery.py
+          python/tests/test_runtime_event_binding.py
+          python/tests/test_tool_executor_verification.py
+          python/tests/test_scheduler_outcome_contract.py
+          python/tests/test_mcp_error_redaction.py
+          python/tests/test_platform_release_check.py
+          python/tests/test_release_readiness.py
+          python/tests/test_step_recovery_contract.py
+          python/tests/test_turn_store_recovery.py
+          python/tests/test_memory_operations.py
+          python/tests/test_memory_context_recall.py
           python/tests/test_voice_comfort_check.py
+      - name: Verify fail-closed platform release CLI
+        run: |
+          set +e
+          python scripts/platform_release_check.py --target-platform windows > /tmp/release-readiness.json
+          status=$?
+          set -e
+          test "$status" -eq 2
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path('/tmp/release-readiness.json').read_text(encoding='utf-8'))
+          assert report['status'] == 'not_qualified'
+          assert report['claim'] == 'must_not_be_used_as_release_qualification'
+          PY
+      - name: Compile Python source and contracts
+        run: >-
+          python -m compileall -q
+          python/app.py
+          python/socket_server.py
+          python/modules
+          python/routes
+          python/socket_handlers
+          python/tests
 
   electron-build:
     name: Electron Validate & Build (${{ matrix.os }})
@@ -66,6 +108,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
+        node-version: ['22.13', '24.x']
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -75,7 +118,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22.13'
+          node-version: ${{ matrix.node-version }}
           cache: 'npm'
           cache-dependency-path: electron/package-lock.json
 
@@ -88,6 +131,7 @@ jobs:
       - run: npm run install:runtime
       - run: npm run type-check
       - run: npm run lint
+      - run: npm run test:unit
       - run: npm run build
       - run: npm run start:check
       - uses: actions/setup-go@v6
@@ -99,3 +143,19 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: ${{ github.workspace }}/tools/yuizaki-launcher
         run: go test ./...
+
+  node-mcp:
+    name: node-mcp Contract Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: node-mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13'
+          cache: npm
+          cache-dependency-path: node-mcp/package-lock.json
+      - run: npm ci
+      - run: npm test

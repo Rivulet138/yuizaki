@@ -928,6 +928,16 @@ class ToolExecutor:
             ))
         verification_data: dict[str, Any] = {}
         verifier = getattr(tool, "postcondition_verifier", None)
+        if state_changing and verifier is None:
+            # Every state-changing job exposes an explicit verification state,
+            # even when the integration has no side-effect-free probe yet.
+            verification_data.update(build_result_verification(
+                target=tool.name,
+                parameters=args,
+                raw=None,
+                retryability=True,
+                unknown_effect=result.outcome == "unknown_effect",
+            ).to_event_data())
         if verifier is not None:
             try:
                 verification, verification_cancelled = await self._await_with_cancellation(

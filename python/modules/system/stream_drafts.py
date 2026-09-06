@@ -30,6 +30,7 @@ _MAX_ID = 200
 _SEND_STATUSES = {"not_sent", "known_success", "unknown_effect", "failed"}
 _CONSUMER_SCHEMA_VERSION = "yuizaki.stream-draft-consumer.v1"
 LOGGER = logging.getLogger(__name__)
+_SAFE_PROVIDER_ERROR = "stream_draft_provider_exception"
 
 
 class StreamDraftError(ValueError):
@@ -400,7 +401,7 @@ class StreamDraftService:
             }
         except StreamDraftError:
             raise
-        except Exception as exc:  # noqa: BLE001 - provider failures are returned as draft failures.
+        except Exception:  # noqa: BLE001 - provider failures are returned as draft failures.
             now = datetime.now(timezone.utc).isoformat()
             draft = {
                 "draftId": f"stream-draft-{uuid4().hex}",
@@ -414,13 +415,16 @@ class StreamDraftService:
                 "eventText": text[:4000],
                 "reply": None,
                 "status": "failed",
-                "outcome": "failed",
                 "createdAt": now,
                 "updatedAt": now,
                 "externalSideEffects": False,
                 "sent": False,
                 "sendStatus": "not_sent",
-                "error": f"{type(exc).__name__}: {str(exc)[:320]}",
+                # Provider exceptions may contain URLs, tokens, or response
+                # bodies.  Persist only a stable safe code; the effect of the
+                # failed turn remains unknown and must not be retried implicitly.
+                "outcome": "unknown_effect",
+                "error": _SAFE_PROVIDER_ERROR,
             }
         with self._lock:
             self._drafts.append(draft)
@@ -547,9 +551,9 @@ class StreamDraftConsumer:
                     except Exception:
                         LOGGER.debug("failed to release interrupted stream draft claim", exc_info=True)
                 raise
-            except Exception as exc:  # noqa: BLE001 - consumer failures must not stop the host
+            except Exception:  # noqa: BLE001 - consumer failures must not stop the host
                 failures += 1
-                self._last_error = f"{type(exc).__name__}: {str(exc)[:320]}"
+                self._last_error = _SAFE_PROVIDER_ERROR
                 self._runtime.complete_draft_event(event_id, "failed", self._last_error)
         return {**self.snapshot(), "consumed": consumed, "failures": failures, "externalSideEffects": False}
 
@@ -559,9 +563,9 @@ class StreamDraftConsumer:
                 await self.consume_once()
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001 - keep the opt-in loop alive
+            except Exception:  # noqa: BLE001 - keep the opt-in loop alive
                 with self._lock:
-                    self._last_error = f"{type(exc).__name__}: {str(exc)[:320]}"
+                    self._last_error = _SAFE_PROVIDER_ERROR
                     self._persist_locked()
             await asyncio.sleep(self._interval)
 

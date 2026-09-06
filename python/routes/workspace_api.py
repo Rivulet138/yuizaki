@@ -203,7 +203,7 @@ def create_workspace_router(
                 if server is not None:
                     mcp_server = {
                         "name": server.name,
-                        "base_url": server.base_url,
+                        "base_url": server.public_base_url,
                         "transport": server.transport,
                         "enabled": server.enabled,
                     }

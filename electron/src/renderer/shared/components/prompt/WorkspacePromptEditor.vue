@@ -222,6 +222,20 @@
 </template>
 
 <script setup lang="ts">
+import { ElEmpty } from 'element-plus'
+import 'element-plus/es/components/empty/style/css'
+import { ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import { ElCheckbox, ElSwitch } from 'element-plus'
+import 'element-plus/es/components/checkbox/style/css'
+import 'element-plus/es/components/switch/style/css'
+import { ElInputNumber } from 'element-plus'
+import 'element-plus/es/components/input-number/style/css'
+import { ElInput } from 'element-plus'
+import 'element-plus/es/components/input/style/css'
+import { ElForm, ElFormItem } from 'element-plus'
+import 'element-plus/es/components/form/style/css'
+import 'element-plus/es/components/form-item/style/css'
 import { computed, reactive, ref, watch } from 'vue'
 import { DEFAULT_DAILY_PROMPT, DEFAULT_WORK_PROMPT, useWorkspaceStore } from '@/stores/workspaceStore'
 import type { WorkspacePromptEngineering, WorkspacePromptMode, WorkspaceRoleCard, WorkspaceWorldBook, WorkspaceWorldBookEntry } from '@/../shared/workspace'

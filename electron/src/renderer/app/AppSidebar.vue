@@ -74,6 +74,8 @@
 </template>
 
 <script setup lang="ts">
+import { ElIcon } from 'element-plus'
+import 'element-plus/es/components/icon/style/css'
 import { ArrowDown, Setting } from '@element-plus/icons-vue'
 import { computed, ref, watch } from 'vue'
 import type { Component } from 'vue'
@@ -210,6 +212,12 @@ watch(activeMenuId, (menuId) => {
   box-shadow: none;
 }
 
+.menu-item:focus-visible,
+.admin-toggle:focus-visible {
+  outline: 2px solid var(--yui-accent);
+  outline-offset: 2px;
+}
+
 .menu-item:hover::before,
 .menu-item.active::before {
   opacity: 1;
@@ -256,6 +264,13 @@ watch(activeMenuId, (menuId) => {
 
 .admin-toggle-icon.expanded {
   transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu-item,
+  .admin-toggle-icon {
+    transition: none;
+  }
 }
 
 .advanced-groups {

@@ -6,6 +6,14 @@ const panelHtml = readFileSync(resolve(rendererDir, 'index.html'), 'utf8')
 const petHtml = readFileSync(resolve(rendererDir, 'pet-window.html'), 'utf8')
 const assetDir = resolve(rendererDir, 'assets')
 
+const mainEntryBytes = readdirSync(assetDir)
+  .filter((name) => /^main-[^~].*\.js$/i.test(name))
+  .reduce((total, name) => total + statSync(resolve(assetDir, name)).size, 0)
+const mainEntryBudgetBytes = 450 * 1024
+if (mainEntryBytes > mainEntryBudgetBytes) {
+  throw new Error(`Control panel main entry exceeds ${mainEntryBudgetBytes} bytes: ${mainEntryBytes}`)
+}
+
 const panelHeavyRuntimePattern = /modulepreload[^>]+(?:live2d|pixi|three)-vendor/i
 if (panelHeavyRuntimePattern.test(panelHtml)) {
   throw new Error('Control panel entry must not preload Live2D, Pixi, or Three runtime chunks')
@@ -38,4 +46,4 @@ if (elementPlusCssBytes > elementPlusCssBudgetBytes) {
   throw new Error(`Control panel Element Plus CSS exceeds ${elementPlusCssBudgetBytes} bytes: ${elementPlusCssBytes}`)
 }
 
-console.log(`Renderer bundle audit passed: icon ${iconChunkBytes} bytes; Element Plus JS ${elementPlusChunkBytes} bytes; CSS ${elementPlusCssBytes} bytes`)
+console.log(`Renderer bundle audit passed: main ${mainEntryBytes} bytes; icon ${iconChunkBytes} bytes; Element Plus JS ${elementPlusChunkBytes} bytes; CSS ${elementPlusCssBytes} bytes`)

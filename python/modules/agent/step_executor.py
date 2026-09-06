@@ -93,6 +93,27 @@ def _missing_agent_result(name: str) -> dict[str, Any]:
     }
 
 
+def _project_non_retryable_recovery(failure: StepFailure) -> dict[str, Any]:
+    """Expose a closed recovery state without minting authority.
+
+    Permission failures require a fresh user decision in the current runtime;
+    they must never be represented as an automatic retry handle.
+    """
+    status = str(failure.status or "").strip()
+    permission_failure = failure.kind == "permission" or status in {
+        "permission_required",
+        "permission_denied",
+    }
+    return {
+        "available": False,
+        "action": "request_permission" if permission_failure else "inspect_failure",
+        "failed_step_id": failure.step_id,
+        "retryable": False,
+        "confirmation_required": permission_failure,
+        "reason": status or failure.kind,
+    }
+
+
 def _strict_json_object(value: str | bytes, *, path: str) -> dict[str, Any]:
     decoded = strict_json_loads(value, path=path)
     if not isinstance(decoded, dict):
@@ -2180,6 +2201,8 @@ class StepExecutor:
                         "confirmation_required": True,
                         "reason": "unknown_effect",
                     }
+                elif not failure.retryable:
+                    response["recovery"] = _project_non_retryable_recovery(failure)
                 else:
                     token_ttl_seconds = 900
                     resume_token_value = self.create_resume_token(

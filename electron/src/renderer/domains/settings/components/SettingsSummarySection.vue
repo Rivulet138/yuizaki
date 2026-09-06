@@ -33,6 +33,15 @@
 </template>
 
 <script setup lang="ts">
+import { ElOption, ElSelect } from 'element-plus'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
+import { ElInputNumber } from 'element-plus'
+import 'element-plus/es/components/input-number/style/css'
+import { ElCard, ElForm, ElFormItem } from 'element-plus'
+import 'element-plus/es/components/card/style/css'
+import 'element-plus/es/components/form/style/css'
+import 'element-plus/es/components/form-item/style/css'
 import { t } from '@/i18n'
 
 export type SummarySettings = {

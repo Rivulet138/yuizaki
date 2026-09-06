@@ -331,6 +331,23 @@
 </template>
 
 <script setup lang="ts">
+import { ElAlert } from 'element-plus'
+import 'element-plus/es/components/alert/style/css'
+import { ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import { ElSlider } from 'element-plus'
+import 'element-plus/es/components/slider/style/css'
+import { ElInput } from 'element-plus'
+import 'element-plus/es/components/input/style/css'
+import { ElInputNumber } from 'element-plus'
+import 'element-plus/es/components/input-number/style/css'
+import { ElCard } from 'element-plus'
+import 'element-plus/es/components/card/style/css'
+import { ElTag } from 'element-plus'
+import 'element-plus/es/components/tag/style/css'
+import { ElOption, ElSelect } from 'element-plus'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Clock } from '@element-plus/icons-vue'

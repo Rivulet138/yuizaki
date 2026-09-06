@@ -27,6 +27,10 @@ TRACKED_ASR_STAGES = (
     "asr_final",
 )
 TRACKED_CLIENT_STAGES = (
+    "renderer_dom_content_loaded",
+    "renderer_first_contentful_paint",
+    "renderer_lcp",
+    "socket_connected",
     "interrupt_ack",
     "realtime_connect",
     "realtime_transcript_stable",
@@ -361,6 +365,7 @@ class ExperienceMetricsStore:
             "latest_ms": round(values[-1], 1) if values else None,
             "p50_ms": percentile(values, 0.5),
             "p95_ms": percentile(values, 0.95),
+            "p99_ms": percentile(values, 0.99),
         }
 
     @staticmethod

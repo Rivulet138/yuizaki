@@ -13,7 +13,12 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from socket_events import AudioEvents
+from socket_events import (
+    SOCKET_PROTOCOL_VERSION,
+    AudioEvents,
+    SystemEvents,
+    protocol_version_status,
+)
 
 JsonDict = dict[str, object]
 EmitLatency = Callable[[str, Mapping[str, object]], Awaitable[None]]
@@ -49,6 +54,19 @@ def build_audio_chunk_handler(
     log = logger or logging.getLogger("socket-server.audio")
 
     async def on_audio_chunk(sid: str, data: JsonDict) -> None:
+        version, version_supported = protocol_version_status(data.get("version"))
+        if not version_supported:
+            await sio.emit(SystemEvents.ERROR, {
+                "code": "UNSUPPORTED_PROTOCOL_VERSION",
+                "message": "unsupported socket protocol version",
+                "session_id": _as_text(data.get("session_id"), sid),
+                "generation_id": _as_text(data.get("generation_id")),
+                "turn_id": _as_text(data.get("turn_id")),
+                "request_id": _as_text(data.get("request_id")),
+                "interruption_epoch": _as_int(data.get("interruption_epoch"), 0),
+                "version": SOCKET_PROTOCOL_VERSION,
+            }, to=sid)
+            return
         chunk_b64 = _as_text(data.get("chunk"))
         is_final = bool(data.get("is_final", False))
         log.debug("[SIO] audio:chunk from %s, len=%d, final=%s", sid, len(chunk_b64), is_final)
@@ -79,7 +97,7 @@ def build_audio_chunk_handler(
             "turn_id": _as_text(data.get("turn_id")),
             "request_id": _as_text(data.get("request_id")),
             "interruption_epoch": _as_int(data.get("interruption_epoch"), 0),
-            "version": _as_int(data.get("version"), 1),
+            "version": version,
         }
 
         pipeline = agent_pipeline_provider()

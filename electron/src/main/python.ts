@@ -18,6 +18,16 @@ export interface PythonServiceRecoveryOptions {
   logOutput?: boolean
 }
 
+const RUNTIME_PATH_ENV_KEYS = [
+  'YUIZAKI_DATA_DIR',
+  'YUIZAKI_SETTINGS_PATH',
+  'AUDIO_CACHE_DIR',
+  'HF_HOME',
+  'GENIE_DATA_DIR',
+  'SHERPA_ONNX_MODEL_PATH',
+  'SHERPA_ONNX_TOKENS_PATH',
+] as const
+
 type PythonRuntimeIdentity = {
   instanceId: string
   generation: number
@@ -132,7 +142,12 @@ export class PythonService {
   }
 
   updateProviderCredentialEnvironment(environment: Record<string, string>): void {
-    this.providerCredentialEnvironment = { ...environment }
+    const runtimePaths: Record<string, string> = {}
+    for (const key of RUNTIME_PATH_ENV_KEYS) {
+      const value = this.providerCredentialEnvironment[key]
+      if (value) runtimePaths[key] = value
+    }
+    this.providerCredentialEnvironment = { ...environment, ...runtimePaths }
   }
 
   getStatus(): {

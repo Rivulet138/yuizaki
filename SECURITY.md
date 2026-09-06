@@ -7,6 +7,7 @@ Yuizaki is a local, single-user AI desktop pet Agent, not a hardened public serv
 - Backend and Electron control services bind to loopback by default.
 - The Electron control service accepts loopback API requests and rejects remote, `file:`, and `null` browser origins.
 - Loopback Python, Socket.IO, and Electron control requests do not require per-request tokens. The launcher still creates one backend token for optional non-loopback Python and Socket.IO access.
+- Native desktop-action control routes are the exception: they require a separate Electron-issued host token even on loopback.
 - API keys belong in `python/.env` or local settings and must never be committed or logged.
 - Microphone capture requires explicit voice mode and desktop permission.
 - Vision is disabled until enabled and requested by an Agent turn.
@@ -51,6 +52,10 @@ MCP servers, plugins, shell tools, browser automation, and remote model provider
 
 Prompt content, OCR output, screenshots, web pages, and MCP results are untrusted evidence. They must not be treated as authorization to bypass policy or reveal secrets.
 
+When the Electron host is running, MCP configuration is stored as an encrypted `safeStorage` document and `mcp_servers.json` contains only a namespace/reference pointer. Legacy plaintext stores migrate only after the vault write succeeds; vault outage, corruption, or invalid schema fails closed without overwriting the previous pointer. Standalone Python mode without the host vault still supports environment references such as `{env:TOKEN}` or `Bearer {env:TOKEN}`, while rejecting new literal secrets. Public endpoint projections remove URL userinfo and mask query values. Real Windows/Linux encryption-backend coverage and multi-process compare-and-swap semantics remain release evidence items.
+
+The built-in node-mcp browser tools accept only HTTP(S) URLs and reject embedded URL credentials before starting Playwright. Localhost and private-network HTTP(S) targets remain reachable by design; this validation is not a network sandbox or a public proxy boundary.
+
 The Electron perception bridge masks active-application metadata for common password-manager, finance/payment, and medical applications before renderer projection. Deployments may add a main-process matcher for organization-specific sensitive windows. This is a privacy filter, not an authorization grant; request consent, scope, expiry, interruption, and emergency-stop checks remain mandatory.
 
 ## Native desktop actions
@@ -60,11 +65,17 @@ foreground focus, and graceful close requests. They do not launch a shell,
 terminate a process, inject keyboard or pointer input, or expose native window
 identifiers to the renderer or model.
 
-The feature starts disabled and uses a separate host-only token, explicit
-application selection, short-lived target leases, revocation, and an emergency
-stop. Windows and explicit Linux X11 sessions have adapters. Native Wayland and
-macOS actions are not implemented. A timeout after a possible state change is
-reported as an unknown effect and is not automatically retried as success.
+The feature starts disabled and uses explicit application selection,
+short-lived target leases, revocation, and an emergency stop. Every
+`/api/desktop-actions/*` request also requires the independent
+`YUIZAKI_HOST_DESKTOP_ACTION_TOKEN` as a strict Bearer credential. Missing,
+invalid, unconfigured, or backend-token-reused credentials fail closed. The
+ordinary loopback API keeps its existing local trust model. Externally managed
+Python must receive the same explicitly configured host token or desktop
+actions remain unavailable. Windows and explicit Linux X11 sessions have
+adapters. Native Wayland and macOS actions are not implemented. A timeout after
+a possible state change is reported as an unknown effect and is not
+automatically retried as success.
 
 ## Data handling
 
@@ -91,7 +102,7 @@ Yuizaki 是面向本机单用户的 AI 桌宠 Agent，不是经过加固的公�
 
 MCP、插件、Shell 工具、浏览器自动化和远程模型可能按配置读取或修改数据。请审查工具权限，将敏感目录置于工具作用域之外，并把提示、OCR、截图、网页和 MCP 结果视为不可信证据。聊天、记忆、设置和缓存默认保存在本地；服务运行时不要直接编辑 SQLite。
 
-原生桌面动作仅限可见顶层窗口发现、聚焦和优雅关闭，默认关闭，并使用独立宿主令牌、短期租约、撤销和紧急停止边界。Windows 与明确的 Linux X11 会话具有适配器；Wayland 原生动作和 macOS 动作未实现。超时后可能已经产生现实影响的操作不会被自动重试为成功。
+原生桌面动作仅限可见顶层窗口发现、聚焦和优雅关闭，默认关闭，并使用应用选择、短期租约、撤销和紧急停止边界。`/api/desktop-actions/*` 现在要求 Electron 每次启动生成的独立 `YUIZAKI_HOST_DESKTOP_ACTION_TOKEN`，使用严格 `Bearer` 校验；缺少令牌、令牌错误、令牌与 Backend API Token 相同或未配置时均 fail-closed。普通本机 loopback API 仍使用既有本机信任模型。外部托管 Python 必须显式注入同一 host token，否则桌面动作保持不可用。Windows 与明确的 Linux X11 会话具有适配器；Wayland 原生动作和 macOS 动作未实现。超时后可能已经产生现实影响的操作不会被自动重试为成功。
 
 SQLite 是记忆权威数据源，Qdrant 仅是可重建的检索投影。召回前会应用工作区、会话和生命周期过滤；纠正保留历史，软遗忘、过期、被替代、被拒绝和永久删除的记录不得作为有效记忆返回。
 

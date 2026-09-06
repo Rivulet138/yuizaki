@@ -53,6 +53,19 @@
 </template>
 
 <script setup lang="ts">
+import { ElAlert } from 'element-plus'
+import 'element-plus/es/components/alert/style/css'
+import { ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import { ElCard } from 'element-plus'
+import 'element-plus/es/components/card/style/css'
+import { ElTag } from 'element-plus'
+import 'element-plus/es/components/tag/style/css'
+import { ElInput } from 'element-plus'
+import 'element-plus/es/components/input/style/css'
+import { ElOption, ElSelect } from 'element-plus'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { setLocale as setFrontendLocale, useI18n } from '@/i18n'

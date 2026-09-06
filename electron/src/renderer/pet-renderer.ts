@@ -1784,7 +1784,9 @@ class PetRenderer {
 			handleWindowMouseDown: this.handleWindowMouseDown,
 			handleWindowMouseMove: this.handleWindowMouseMove,
 			handleWindowMouseUp: this.handleWindowMouseUp,
+			handleWindowPointerCancel: this.handleWindowPointerCancel,
 			handleWindowMouseLeave: this.handleWindowMouseLeave,
+			handleWindowBlur: this.handleWindowBlur,
 			handleWindowWheel: this.handleWindowWheel,
 			handleResize: this.handleResize,
 			handleWindowContextMenu: this.handleWindowContextMenu,
@@ -2564,6 +2566,21 @@ class PetRenderer {
 		this.syncMouseCaptureFromLastPoint("mouseup");
 	};
 
+	private readonly handleWindowPointerCancel = (event: PointerEvent): void => {
+		if (event.pointerId >= 0) {
+			this.canvas?.releasePointerCapture?.(event.pointerId);
+		}
+		this.clearLongPressTimer();
+		if (this.isDraggingWindow) {
+			this.finishWindowDrag();
+		}
+		this.mouseDownOnModel = false;
+		this.dragMoved = false;
+		this.modelHovering = false;
+		this.syncMouseCaptureFromLastPoint("pointer-cancel", true);
+		this.updateCursor(false);
+	};
+
 	private readonly handleWindowMouseLeave = (): void => {
 		this.hoverMoveCoalescer.cancel();
 		this.lastMouseClientPoint = null;
@@ -2579,6 +2596,20 @@ class PetRenderer {
 		}
 
 		this.requestMousePassthrough(true, "mouse-leave");
+		this.updateCursor(false);
+	};
+
+	private readonly handleWindowBlur = (): void => {
+		this.hoverMoveCoalescer.cancel();
+		this.clearLongPressTimer();
+		if (this.isDraggingWindow) {
+			this.finishWindowDrag();
+		}
+		this.mouseDownOnModel = false;
+		this.dragMoved = false;
+		this.modelHovering = false;
+		this.lastMouseClientPoint = null;
+		this.syncMouseCaptureFromLastPoint("window-blur", true);
 		this.updateCursor(false);
 	};
 
@@ -2922,7 +2953,9 @@ class PetRenderer {
 			handleWindowMouseDown: this.handleWindowMouseDown,
 			handleWindowMouseMove: this.handleWindowMouseMove,
 			handleWindowMouseUp: this.handleWindowMouseUp,
+			handleWindowPointerCancel: this.handleWindowPointerCancel,
 			handleWindowMouseLeave: this.handleWindowMouseLeave,
+			handleWindowBlur: this.handleWindowBlur,
 			handleWindowWheel: this.handleWindowWheel,
 			handleResize: this.handleResize,
 			handleWindowContextMenu: this.handleWindowContextMenu,

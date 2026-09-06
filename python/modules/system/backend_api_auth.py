@@ -83,9 +83,29 @@ def verify_backend_api_authorization(
 
 
 def verify_host_desktop_action_authorization(
-    _authorization: str | None,
-    _host_token: str,
-    _backend_token: str,
+    authorization: str | None,
+    host_token: str,
+    backend_token: str,
 ) -> tuple[bool, str]:
-    """Desktop actions are intentionally unauthenticated in this deployment."""
+    """Require the Electron-issued host token for desktop action controls.
+
+    The backend token is deliberately not accepted here: desktop actions are a
+    narrower capability than the general local API and must not inherit a
+    broader credential by accident. Direct Python deployments without the
+    Electron launcher therefore fail closed until they explicitly provision a
+    host token.
+    """
+    configured = host_token.strip()
+    if not configured:
+        return False, "Host desktop action token is not configured"
+    if backend_token.strip() and secrets.compare_digest(configured, backend_token.strip()):
+        return False, "Host desktop action token must be distinct from backend API token"
+    if authorization is None:
+        return False, "Missing host desktop action token"
+    header = authorization.strip()
+    if not header.startswith("Bearer "):
+        return False, "Invalid host desktop action token"
+    provided = header[7:].strip()
+    if not provided or not secrets.compare_digest(provided, configured):
+        return False, "Invalid host desktop action token"
     return True, ""

@@ -43,6 +43,12 @@
 </template>
 
 <script setup lang="ts">
+import 'element-plus/es/components/button/style/css'
+import 'element-plus/es/components/tag/style/css'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
+import { ElButton, ElInput, ElOption, ElSelect, ElTag } from 'element-plus'
+import 'element-plus/es/components/input/style/css'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import MemoryInspector from './MemoryInspector.vue'
 import type { MemoryOperation } from '@/api/clients/memory-client'

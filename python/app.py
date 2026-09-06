@@ -4,13 +4,11 @@ import importlib
 import json
 import logging
 import os
-import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Protocol, cast
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from modules.core import config, GenerationManager, public_config_snapshot
@@ -31,13 +29,7 @@ from modules.system.settings_api import SettingsAPI
 import modules.system.runtime_config as system_runtime_config
 from modules.system.active_workspace_state import ActiveWorkspaceState
 from modules.system.active_application import read_active_application
-from modules.system.backend_api_auth import (
-    HOST_DESKTOP_ACTION_PREFIX,
-    HOST_DESKTOP_ACTION_TOKEN_ENV,
-    backend_api_auth_required,
-    verify_backend_api_authorization,
-    verify_host_desktop_action_authorization,
-)
+from modules.system.backend_api_auth import HOST_DESKTOP_ACTION_TOKEN_ENV
 from modules.system.cache_janitor import run_audio_cache_janitor
 from modules.system.companion_runtime import build_companion_runtime_snapshot
 from modules.system.governance_alert_state import GovernanceAlertStateStore
@@ -45,6 +37,12 @@ from modules.system.memory_query import build_memory_query_request
 from modules.system.runtime_endpoints import build_companion_runtime_endpoint
 from modules.system.message_connectors import MessageConnectorRegistry
 from modules.system.schema_policy import enforce_schema_policy
+from app_factory import create_app
+from lifespan import with_runtime_container
+from middleware_registry import register_http_middleware
+from router_registry import RouterRegistry
+from runtime_container import RuntimeContainer
+from route_manifest import build_route_manifest
 import modules.system.runtime_composition as system_runtime_composition
 from modules.system.runtime_composition import build_runtime_handlers
 from evals.product_metrics import JsonProductConsentStateStore
@@ -172,6 +170,7 @@ _summary_detail_limiter = SlidingWindowRateLimiter(max_requests=30, window_secon
 _summary_rewrite_limiter = SlidingWindowRateLimiter(max_requests=3, window_seconds=30.0)
 _governance_alert_store = GovernanceAlertStateStore(data_dir_from_env() / "governance_alert_state.json", logger)
 _product_metrics_consent_store = JsonProductConsentStateStore(data_dir_from_env() / "product_metrics_consent.json")
+runtime_container = RuntimeContainer(config=config, logger=logger)
 
 
 def _apply_persisted_memory_config_before_backend_init() -> None:
@@ -234,13 +233,16 @@ async def _reload_memory_runtime() -> None:
 
 # Socket.IO 服务器实例
 sio_server = DesktopPetSocketServer()
+runtime_container.set("socket", sio_server)
 
 async def _init_llm():
     """Initialize LLM service."""
     global _llm_client, _vision_llm_client
     _llm_client = await _runtime_services().initialize_llm(config, logger)
+    runtime_container.set("llm", _llm_client)
     try:
         _vision_llm_client = await _runtime_services().initialize_vision_llm(config, logger)
+        runtime_container.set("vision_llm", _vision_llm_client)
     except Exception as exc:
         _vision_llm_client = None
         logger.warning("Vision LLM initialization failed; realtime visual analysis is unavailable: %s", exc)
@@ -252,54 +254,65 @@ async def _cleanup_llm():
     await _runtime_services().cleanup_llm(_llm_client)
     _vision_llm_client = None
     _llm_client = None
+    runtime_container.remove("vision_llm")
+    runtime_container.remove("llm")
 
 async def _init_tts():
     """Initialize TTS service using Genie-TTS."""
     global _tts_client
     _tts_client = await _runtime_services().initialize_tts(config, logger)
+    runtime_container.set("tts", _tts_client)
 
 async def _cleanup_tts():
     """Cleanup TTS service."""
     global _tts_client
     await _runtime_services().cleanup_tts(_tts_client)
     _tts_client = None
+    runtime_container.remove("tts")
 
 async def _init_asr():
     """Initialize ASR service using SenseVoiceSmall."""
     global _asr_manager
     _asr_manager = await _runtime_services().initialize_asr(config, logger)
+    runtime_container.set("asr", _asr_manager)
 
 async def _cleanup_asr():
     global _asr_manager
     await _runtime_services().cleanup_asr(_asr_manager)
     _asr_manager = None
+    runtime_container.remove("asr")
 
 async def _init_svc():
     """Initialize optional SVC service."""
     global _svc_client
     _svc_client = await _runtime_services().initialize_svc(config, logger)
+    runtime_container.set("svc", _svc_client)
 
 async def _cleanup_svc():
     """Cleanup SVC service."""
     global _svc_client
     await _runtime_services().cleanup_svc(_svc_client)
     _svc_client = None
+    runtime_container.remove("svc")
 
 async def _init_ocr():
     """Initialize OCR service."""
     global _ocr_client
     _ocr_client = await _runtime_services().initialize_ocr(logger)
+    runtime_container.set("ocr", _ocr_client)
 
 async def _cleanup_ocr():
     """Cleanup OCR service."""
     global _ocr_client
     await _runtime_services().cleanup_ocr(_ocr_client)
     _ocr_client = None
+    runtime_container.remove("ocr")
 
 async def _init_generation_manager():
     """Initialize generation manager."""
     global _generation_mgr
     _generation_mgr = GenerationManager()
+    runtime_container.set("generation_manager", _generation_mgr)
     logger.info("Generation manager initialized")
 
 async def _init_database():
@@ -312,6 +325,7 @@ async def _init_database():
         _relationship_evolution_summary,
         logger,
     )
+    runtime_container.set("database", db_repo)
 
 @asynccontextmanager
 async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
@@ -442,7 +456,8 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
         db_repo.close()
     logger.info("Backend shutdown complete")
 
-app = FastAPI(title="yuizaki", lifespan=app_lifespan)
+app = create_app(runtime_container, lifespan=with_runtime_container(app_lifespan, runtime_container))
+router_registry = RouterRegistry(app)
 _twitch_subscription_provider_mode = os.getenv("YUIZAKI_TWITCH_SUBSCRIPTION_PROVIDER", "").strip().lower()
 _twitch_subscription_provider = None
 if _twitch_subscription_provider_mode == "in-memory-staging":
@@ -497,6 +512,11 @@ async def ping():
     return payload
 
 
+@app.get("/api/system/route-manifest")
+async def route_manifest():
+    return build_route_manifest(app)
+
+
 @app.get("/api/system/ui-capabilities")
 async def ui_capabilities():
     return build_ui_capabilities()
@@ -513,55 +533,14 @@ async def active_application():
         )
 
 
-@app.middleware("http")
-async def backend_api_auth_middleware(request: Request, call_next):
-    if request.url.path in {"/api/ping", "/api/system/ui-capabilities"}:
-        return await call_next(request)
-    if request.url.path == HOST_DESKTOP_ACTION_PREFIX or request.url.path.startswith(
-        f"{HOST_DESKTOP_ACTION_PREFIX}/"
-    ):
-        allowed, message = verify_host_desktop_action_authorization(
-            request.headers.get("authorization"),
-            os.getenv(HOST_DESKTOP_ACTION_TOKEN_ENV, ""),
-            _BACKEND_API_TOKEN,
-        )
-        if not allowed:
-            return JSONResponse({"error": "unauthorized", "message": message}, status_code=401)
-        return await call_next(request)
-    client_host = request.client.host if request.client else None
-    if backend_api_auth_required(
-        request.url.path,
-        request.method,
-        client_host=client_host,
-    ):
-        allowed, message = verify_backend_api_authorization(
-            request.headers.get("authorization"),
-            _BACKEND_API_TOKEN,
-            request.headers.get("x-yuizaki-backend-token"),
-            client_host=client_host,
-        )
-        if not allowed:
-            return JSONResponse({"error": "unauthorized", "message": message}, status_code=401)
-    return await call_next(request)
-
-@app.middleware("http")
-async def trace_id_middleware(request: Request, call_next):
-    trace_id = request.headers.get("x-trace-id") or f"trace_{uuid.uuid4().hex[:12]}"
-    request.state.trace_id = trace_id
-    logger.info("[trace:%s] %s %s", trace_id, request.method, request.url.path)
-    response = await call_next(request)
-    response.headers["x-trace-id"] = trace_id
-    return response
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_parse_allowed_origins(os.getenv("YUIZAKI_ALLOWED_ORIGINS")),
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "x-trace-id", "x-yuizaki-backend-token"],
+register_http_middleware(
+    app,
+    logger=logger,
+    backend_api_token=_BACKEND_API_TOKEN,
+    allowed_origins=_parse_allowed_origins(os.getenv("YUIZAKI_ALLOWED_ORIGINS")),
 )
 
-app.include_router(settings_router)
+router_registry.include(settings_router, name="settings")
 
 # ============ Memory / RAG 路由 ============
 from modules.memory.routes import MemoryState, create_memory_pipeline_router, create_memory_router  # noqa: E402
@@ -650,25 +629,25 @@ memory_router = create_memory_router(
     clear_memory_references=lambda memory_ids: db_repo.clear_memory_references(memory_ids) if db_repo else 0,
     count_memory_references=lambda memory_ids: db_repo.count_memory_references(memory_ids) if db_repo else 0,
 )
-app.include_router(memory_router)
-app.include_router(
+router_registry.include(memory_router, name="memory")
+router_registry.include(
     create_storage_router(
         audio_cache_dir=config.tts.audio_cache_dir,
         runtime_temp_dir=DEFAULT_RUNTIME_TEMP_DIR,
         memory_store_provider=_get_memory_store,
     )
 )
-app.include_router(create_database_router(lambda: db_repo, get_active_workspace_id=_get_active_workspace_id))
-app.include_router(
+router_registry.include(create_database_router(lambda: db_repo, get_active_workspace_id=_get_active_workspace_id), name="database")
+router_registry.include(
     create_workspace_router(
         lambda: db_repo,
         lambda: sio_server.runtime.mcp_manager if sio_server and sio_server.runtime else None,
         get_active_workspace_id=_get_active_workspace_id,
     )
 )
-app.include_router(cast(Callable[..., Any], create_companion_router)(lambda: db_repo, relationship_history_handler=_companion_relationship_history))
-app.include_router(i18n_router)
-app.include_router(
+router_registry.include(cast(Callable[..., Any], create_companion_router)(lambda: db_repo, relationship_history_handler=_companion_relationship_history), name="companion")
+router_registry.include(i18n_router, name="i18n")
+router_registry.include(
     create_summary_router(
         get_generation_mgr=lambda: _generation_mgr,
         get_llm_client=lambda: _llm_client,
@@ -681,7 +660,7 @@ app.include_router(
         get_active_workspace_id=_get_active_workspace_id,
     )
 )
-app.include_router(
+router_registry.include(
     create_ai_router(
         get_config=lambda: config,
         get_generation_mgr=lambda: _generation_mgr,
@@ -696,7 +675,7 @@ app.include_router(
         get_active_workspace_id=_get_active_workspace_id,
     )
 )
-app.include_router(
+router_registry.include(
     create_realtime_router(
         get_config=lambda: config,
         get_db_repo=lambda: db_repo,
@@ -714,7 +693,7 @@ _connector_router = create_message_connector_router(
     recovery_metrics_path=data_dir_from_env() / "connector_recovery.json",
 )
 _connector_recovery_controller = getattr(_connector_router, "connector_recovery_controller", None)
-app.include_router(_connector_router)
+router_registry.include(_connector_router, name="connectors")
 config.tts.audio_cache_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/audio", StaticFiles(directory=str(config.tts.audio_cache_dir)), name="audio")
 
@@ -751,12 +730,12 @@ runtime_handlers = build_runtime_handlers(
     message_connector_registry=_message_connector_registry,
     stream_runtime_provider=lambda: _stream_runtime,
 )
-app.include_router(create_memory_pipeline_router(runtime_handlers.memory_pipeline_query, get_active_workspace_id=_get_active_workspace_id))
-app.include_router(create_computer_use_host_router(
+router_registry.include(create_memory_pipeline_router(runtime_handlers.memory_pipeline_query, get_active_workspace_id=_get_active_workspace_id), name="memory_pipeline")
+router_registry.include(create_computer_use_host_router(
     stop=sio_server.emergency_stop_computer_use,
     status=sio_server.computer_use_status,
 ))
-app.include_router(create_desktop_action_host_router(
+router_registry.include(create_desktop_action_host_router(
     status=sio_server.desktop_action_status,
     enable=sio_server.enable_desktop_actions,
     disable=sio_server.disable_desktop_actions,
@@ -769,7 +748,7 @@ app.include_router(create_desktop_action_host_router(
     backend_token_provider=lambda: _BACKEND_API_TOKEN,
 ))
 
-app.include_router(
+router_registry.include(
     cast(Callable[..., Any], getattr(system_runtime_composition, "build_system_router_from_handlers"))(
         create_system_router=cast(Callable[..., Any], create_system_router),
         handlers=runtime_handlers,

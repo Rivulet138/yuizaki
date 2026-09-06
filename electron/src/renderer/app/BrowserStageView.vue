@@ -96,6 +96,8 @@
 </template>
 
 <script setup lang="ts">
+import { ElIcon } from 'element-plus'
+import 'element-plus/es/components/icon/style/css'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ChatDotRound, Close, Refresh, ZoomIn, ZoomOut } from '@element-plus/icons-vue'
 import type { NavigationModule } from '@/navigation/types'

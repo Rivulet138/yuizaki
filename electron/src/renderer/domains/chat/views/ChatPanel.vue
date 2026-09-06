@@ -361,9 +361,20 @@
 </template>
 
 <script setup lang="ts">
+import { ElIcon, ElTooltip } from 'element-plus'
+import 'element-plus/es/components/icon/style/css'
+import 'element-plus/es/components/tooltip/style/css'
+import { ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import { ElDropdown, ElDropdownItem, ElDropdownMenu } from 'element-plus'
+import 'element-plus/es/components/dropdown/style/css'
+import 'element-plus/es/components/dropdown-item/style/css'
+import 'element-plus/es/components/dropdown-menu/style/css'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import type { Component } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElDialog, ElMessage, ElMessageBox, ElInput } from 'element-plus'
+import 'element-plus/es/components/dialog/style/css'
+import 'element-plus/es/components/input/style/css'
 import {
   ArrowDown,
   ArrowUp,

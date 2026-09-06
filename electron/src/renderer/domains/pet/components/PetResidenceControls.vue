@@ -76,9 +76,16 @@
 </template>
 
 <script setup lang="ts">
+import { ElIcon } from 'element-plus'
+import 'element-plus/es/components/icon/style/css'
+import { ElSwitch } from 'element-plus'
+import 'element-plus/es/components/switch/style/css'
 import { Aim, FullScreen, Lock, MuteNotification, Pointer } from '@element-plus/icons-vue'
+import { ElButton } from 'element-plus'
 import { useI18n } from '@/i18n'
 import type { PetControlState } from '../../../../shared/pet-control'
+
+import 'element-plus/es/components/button/style/css'
 
 defineProps<{
   state: PetControlState

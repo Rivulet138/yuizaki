@@ -81,7 +81,7 @@ Qdrant is an optional rebuildable projection. When the projection is unavailable
 
 Built-in tools, MCP services, plugins, browser automation, desktop actions, and message connectors enter through explicit registries or adapters. Tool output, OCR, web content, plugin output, and MCP output are untrusted data, not authorization.
 
-Native desktop actions are a narrow host capability: visible top-level window discovery, focus, and graceful close. Windows and explicit Linux X11 sessions have adapters. Native Wayland and macOS actions are not implemented. The feature starts disabled and uses host-side permission, lease, revocation, and emergency-stop boundaries.
+Native desktop actions are a narrow host capability: visible top-level window discovery, focus, and graceful close. Windows and explicit Linux X11 sessions have adapters. Native Wayland and macOS actions are not implemented. The feature starts disabled and uses a separate Electron-issued host Bearer token, host-side permission, lease, revocation, and emergency-stop boundaries; the ordinary loopback trust model does not authorize these routes by itself.
 
 ## Failure boundaries / 故障边界
 

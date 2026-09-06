@@ -9,6 +9,7 @@ import {
 } from '../shared/input-bindings'
 
 const INPUT_BINDINGS_FILENAME = 'input-bindings.json'
+const INPUT_BINDINGS_SCHEMA_VERSION = 1
 
 export class InputBindingStore {
   private readonly filePath: string
@@ -37,7 +38,17 @@ export class InputBindingStore {
 
   private load(): InputBindingSettings {
     try {
-      return normalizeInputBindingSettings(JSON.parse(fs.readFileSync(this.filePath, 'utf8')))
+      const raw = JSON.parse(fs.readFileSync(this.filePath, 'utf8')) as Record<string, unknown>
+      const migrated = normalizeInputBindingSettings(raw)
+      if (raw['schemaVersion'] !== INPUT_BINDINGS_SCHEMA_VERSION) {
+        // Older files implicitly enabled a native global mouse hook. Require
+        // an explicit opt-in once so existing installations get the safe
+        // startup behavior without losing their keyboard bindings.
+        migrated.pushToTalk.enabled = false
+        this.settings = migrated
+        this.save()
+      }
+      return migrated
     } catch {
       return structuredClone(DEFAULT_INPUT_BINDINGS)
     }
@@ -46,7 +57,7 @@ export class InputBindingStore {
   private save(): void {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true })
     const temporaryPath = `${this.filePath}.tmp`
-    fs.writeFileSync(temporaryPath, `${JSON.stringify(this.settings, null, 2)}\n`, {
+    fs.writeFileSync(temporaryPath, `${JSON.stringify({ schemaVersion: INPUT_BINDINGS_SCHEMA_VERSION, ...this.settings }, null, 2)}\n`, {
       encoding: 'utf8',
       mode: 0o600,
     })

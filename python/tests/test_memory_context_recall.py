@@ -64,6 +64,24 @@ def test_recall_applies_context_budget_and_reports_truncation() -> None:
     assert result["trace"]["budget_truncated"] is True
 
 
+def test_recall_trace_fails_closed_when_authority_changes_during_search() -> None:
+    backend = _MutatingBackend([_document("m1", "evidence")])
+
+    result = RetrievalPipeline(backend).recall(
+        RetrievalRequest(
+            query="evidence",
+            scope="workspace",
+            workspace_id="w1",
+            relation_expansion=False,
+        )
+    )
+
+    trace = result["trace"]
+    assert trace["complete"] is False
+    assert trace["error_code"] == "authority_changed_during_recall"
+    assert trace["revision_stable"] is False
+
+
 def test_recall_trace_reports_anchor_and_relation_evidence_ids() -> None:
     backend = _Backend([
         _document("anchor", "项目 alpha 发布计划", turn_id="turn-alpha", occurred_at="2026-01-01T10:00:00Z"),

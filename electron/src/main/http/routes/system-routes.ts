@@ -18,6 +18,7 @@ import {
 import type { ManagedModelResourceId } from '../../../shared/resource-manager'
 import type { HttpRouteHandler } from '../types'
 import { resolvePythonRuntime } from '../../python-runtime'
+import { isPackagedRuntime, resolveRuntimeProjectRoot, resolveWritableRuntimePaths } from '../../runtime-paths'
 import { parseRequestBody, sendJson } from '../utils'
 import { resolvePythonApiOrigin } from '../python-origin'
 import type { SkillCatalogItem, SkillCatalogSnapshot } from '../../../shared/capability'
@@ -59,26 +60,18 @@ const proxyPythonJsonRequest = async (target: string, init: RequestInit, pathnam
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 
+const resolveProjectRoot = (): string => resolveRuntimeProjectRoot({
+  projectRootOverride: process.env['YUIZAKI_PROJECT_ROOT'],
+})
+
 const resolveElectronRoot = (): string => {
-  const { YUIZAKI_ELECTRON_ROOT: explicitRoot } = process.env
-  if (explicitRoot) {
-    return path.resolve(explicitRoot)
-  }
-
+  const explicitRoot = process.env['YUIZAKI_ELECTRON_ROOT']?.trim()
+  if (explicitRoot) return path.resolve(explicitRoot)
   const cwd = process.cwd()
-  if (fs.existsSync(path.join(cwd, 'package.json')) && fs.existsSync(path.join(cwd, 'src/main'))) {
-    return cwd
-  }
-
-  const electronChild = path.join(cwd, 'electron')
-  if (fs.existsSync(path.join(electronChild, 'package.json'))) {
-    return electronChild
-  }
-
-  return cwd
+  if (fs.existsSync(path.join(cwd, 'package.json')) && fs.existsSync(path.join(cwd, 'src/main'))) return cwd
+  if (fs.existsSync(path.join(cwd, 'electron', 'package.json'))) return path.join(cwd, 'electron')
+  return path.resolve(__dirname, '../..')
 }
-
-const resolveProjectRoot = (): string => path.resolve(resolveElectronRoot(), '..')
 
 const buildProxyHeaders = (ctx: Parameters<HttpRouteHandler>[4], bodyIncluded: boolean, traceId: string | null) => {
   const headers: { Connection: string; 'Content-Type'?: string; 'x-trace-id'?: string; 'x-yuizaki-backend-token'?: string } = {
@@ -453,12 +446,16 @@ const collectBackupTargets = () => {
   const electronRoot = resolveElectronRoot()
   const projectRoot = resolveProjectRoot()
   const userDataDir = app.getPath('userData')
+  const writable = isPackagedRuntime(projectRoot) ? resolveWritableRuntimePaths(userDataDir) : null
+  const dataDir = writable?.dataDir ?? path.join(projectRoot, 'python', 'data')
+  const settingsPath = writable?.settingsPath ?? path.join(projectRoot, 'python', 'config', 'settings.json')
+  const audioCacheDir = writable?.audioCacheDir ?? path.join(projectRoot, 'python', 'audio_cache')
   return [
-    path.join(projectRoot, 'python/data/chat.db'),
-    path.join(projectRoot, 'python/data/memory.db'),
-    path.join(projectRoot, 'python/config/settings.json'),
-    path.join(projectRoot, 'python/data/governance_alert_state.json'),
-    path.join(projectRoot, 'python/audio_cache'),
+    path.join(dataDir, 'chat.db'),
+    path.join(dataDir, 'memory.db'),
+    settingsPath,
+    path.join(dataDir, 'governance_alert_state.json'),
+    audioCacheDir,
     path.join(userDataDir, 'pet-state.json'),
     path.join(electronRoot, 'plugins'),
   ]
@@ -596,24 +593,31 @@ const buildRestoreImpact = (restorePlan: RestorePlanItem[], dryRun: boolean): { 
     missingCurrentCount: restorable.filter((item) => !item.currentlyExists).length,
   }
 
-  const statusFor = (suffix: string): RestoreEffectStatus => {
-    const item = restorePlan.find((candidate) => candidate.path.replace(/\\/g, '/').endsWith(suffix))
+  const backupTargets = collectBackupTargets()
+  const statusForTarget = (targetPath: string): RestoreEffectStatus => {
+    const item = restorePlan.find((candidate) => comparablePath(candidate.path) === comparablePath(targetPath))
     if (!item || !item.backedUpAtSnapshot || item.skippedReason) return item ? 'skipped' : 'unchanged'
     return dryRun ? 'will_restore' : item.restored ? 'restored' : 'skipped'
   }
-
-  const memoryStatus = statusFor('/python/data/memory.db')
+  const memoryStatus = statusForTarget(backupTargets[1]!)
   const effects: RestoreEffectSummary = {
-    database: statusFor('/python/data/chat.db'),
+    database: statusForTarget(backupTargets[0]!),
     memoryIndex: memoryStatus === 'unchanged' ? 'unchanged' : memoryStatus === 'skipped' ? 'skipped' : 'rebuild_required',
-    settings: statusFor('/python/config/settings.json'),
-    governance: statusFor('/python/data/governance_alert_state.json'),
-    audioCache: statusFor('/python/audio_cache'),
-    petState: statusFor('/pet-state.json'),
-    plugins: statusFor('/plugins'),
+    settings: statusForTarget(backupTargets[2]!),
+    governance: statusForTarget(backupTargets[3]!),
+    audioCache: statusForTarget(backupTargets[4]!),
+    petState: statusForTarget(backupTargets[5]!),
+    plugins: statusForTarget(backupTargets[6]!),
   }
 
   return { summary, effects }
+}
+
+const resolveBackupRoot = (): string => {
+  const projectRoot = resolveProjectRoot()
+  return isPackagedRuntime(projectRoot)
+    ? path.join(app.getPath('userData'), 'backups')
+    : path.join(projectRoot, 'backups')
 }
 
 const buildRestorePlan = (manifest: BackupManifest, realBackupDir: string, dryRun: boolean) => {
@@ -695,7 +699,7 @@ const collectEnvironmentChecks = () => {
     pythonVenvPath: path.relative(projectRoot, pythonRuntime.venvPath).split(path.sep).join('/'),
     rendererDistExists: fs.existsSync(path.join(electronRoot, 'dist/renderer/index.html')),
     pluginDirExists: fs.existsSync(path.join(electronRoot, 'plugins')),
-    backupDirExists: fs.existsSync(path.join(projectRoot, 'backups')),
+    backupDirExists: fs.existsSync(resolveBackupRoot()),
   }
 }
 
@@ -716,12 +720,14 @@ const scanPetOverlayVisibility = async (ctx: Parameters<HttpRouteHandler>[4]): P
 const PYTHON_JSON_PROXY_PATHS = new Set([
   '/api/ping',
   '/api/system/ui-capabilities',
+  '/api/system/route-manifest',
   '/api/perception/active-application',
   '/api/readiness',
   '/health',
   '/memory/docs',
   '/memory/overview',
   '/memory/query',
+  '/memory/candidates',
   '/memory/index/status',
   '/memory/index/rebuild',
   '/memory/memory/add',
@@ -774,6 +780,26 @@ const PYTHON_JSON_PROXY_PATHS = new Set([
   '/api/sessions',
   '/api/session-branches',
 ])
+
+/** Validate the backend route contract without widening the control-server proxy surface. */
+export const validatePythonRouteManifest = (payload: unknown): { ok: boolean; missing: string[] } => {
+  if (!isRecord(payload) || payload['schema_version'] !== 1 || !Array.isArray(payload['routes'])) {
+    return { ok: false, missing: ['<invalid-manifest>'] }
+  }
+  const advertised = new Set<string>()
+  for (const route of payload['routes']) {
+    if (!isRecord(route) || typeof route['path'] !== 'string' || !Array.isArray(route['methods'])) continue
+    for (const method of route['methods']) {
+      if (typeof method === 'string') advertised.add(`${method.toUpperCase()} ${route['path']}`)
+    }
+  }
+  const required = [
+    'GET /api/ping',
+    'GET /api/system/route-manifest',
+    'GET /memory/candidates',
+  ]
+  return { ok: required.every((entry) => advertised.has(entry)), missing: required.filter((entry) => !advertised.has(entry)) }
+}
 
 const isPythonJsonProxyPath = (pathname: string): boolean =>
   PYTHON_JSON_PROXY_PATHS.has(pathname) ||
@@ -888,7 +914,7 @@ export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, ur
   }
 
   if (method === 'POST' && url.pathname === '/api/system/backup/create') {
-    const backupRoot = path.join(resolveProjectRoot(), 'backups')
+    const backupRoot = resolveBackupRoot()
     fs.mkdirSync(backupRoot, { recursive: true })
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
     const backupDir = path.join(backupRoot, `backup-${timestamp}`)
@@ -908,7 +934,7 @@ export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, ur
       return true
     }
 
-    const backupRoot = path.resolve(resolveProjectRoot(), 'backups')
+    const backupRoot = path.resolve(resolveBackupRoot())
     const backupDir = path.resolve(body.backupDir)
     if (!isPathInside(backupRoot, backupDir)) {
       sendJson(res, 403, { error: 'backupDir must stay within the managed backups directory' })
@@ -1158,7 +1184,22 @@ export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, ur
   }
 
   if (isProactivePythonProxyRoute(method, url.pathname) || isPythonJsonProxyPath(url.pathname)) {
-    await proxyPythonJson(_req, res, method, url, ctx)
+    await proxyPythonJson(
+      _req,
+      res,
+      method,
+      url,
+      ctx,
+      undefined,
+      url.pathname === '/api/system/route-manifest'
+        ? (payload) => {
+            const validation = validatePythonRouteManifest(payload)
+            if (!validation.ok) {
+              console.warn('[proxy-contract] Python route manifest is missing required routes', validation.missing)
+            }
+          }
+        : undefined,
+    )
     return true
   }
 

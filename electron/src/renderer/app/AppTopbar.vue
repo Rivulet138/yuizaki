@@ -55,6 +55,12 @@
 </template>
 
 <script setup lang="ts">
+import { ElBadge, ElIcon } from 'element-plus'
+import 'element-plus/es/components/badge/style/css'
+import 'element-plus/es/components/icon/style/css'
+import { ElOption, ElSelect } from 'element-plus'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
 import { Bell, Close, FullScreen, Minus, Moon, Sunny } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 import { useI18n } from '@/i18n'

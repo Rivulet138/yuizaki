@@ -23,6 +23,7 @@ from socket_events import (
     ToolCallData,
     ToolEvents,
     ToolResultData,
+    protocol_version_status,
 )
 
 JsonDict = dict[str, object]
@@ -37,18 +38,6 @@ def _as_json_dict(value: object) -> JsonDict:
     if not isinstance(value, Mapping):
         return {}
     return {str(key): item for key, item in value.items()}
-
-
-def _version_status(value: object) -> tuple[int, bool]:
-    if value is None:
-        return TOOL_PROTOCOL_VERSION, True
-    if not isinstance(value, (str, int, float)):
-        return TOOL_PROTOCOL_VERSION, False
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return TOOL_PROTOCOL_VERSION, False
-    return (parsed, True) if parsed == TOOL_PROTOCOL_VERSION else (TOOL_PROTOCOL_VERSION, False)
 
 
 def _as_outcome(value: object, *, success: bool) -> str:
@@ -153,7 +142,7 @@ def build_tool_call_handler(
     log = logger or logging.getLogger("socket-server.tool")
 
     async def on_tool_call(sid: str, data: JsonDict) -> None:
-        version, version_supported = _version_status(data.get("version", data.get("protocol_version")))
+        version, version_supported = protocol_version_status(data.get("version", data.get("protocol_version")))
         call = ToolCallData(
             id=_as_text(data.get("id")),
             name=_as_text(data.get("name")),
@@ -274,7 +263,7 @@ def build_tool_recheck_handler(
 
     async def on_tool_recheck(sid: str, data: JsonDict) -> None:
         tool_name = _as_text(data.get("name"))
-        version, version_supported = _version_status(data.get("version", data.get("protocol_version")))
+        version, version_supported = protocol_version_status(data.get("version", data.get("protocol_version")))
         args = _as_json_dict(data.get("args"))
         request_id = _as_text(data.get("requestId") or data.get("request_id")) or f"recheck:{uuid.uuid4().hex}"
         job_id = _as_text(data.get("jobId") or data.get("job_id")) or None

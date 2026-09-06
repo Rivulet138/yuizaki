@@ -236,7 +236,14 @@
 </template>
 
 <script setup lang="ts">
+import { ElIcon, ElTooltip } from 'element-plus'
+import 'element-plus/es/components/icon/style/css'
+import 'element-plus/es/components/tooltip/style/css'
+import { ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
 import { computed } from 'vue'
+import { ElInput } from 'element-plus'
+import 'element-plus/es/components/input/style/css'
 import { Aim, ChatLineRound, Connection, CopyDocument, Delete, EditPen, Refresh, Share } from '@element-plus/icons-vue'
 import type { ChatMemorySource, ChatMessage } from '@/../shared/types'
 import { renderMarkdown } from '@/utils/markdown'

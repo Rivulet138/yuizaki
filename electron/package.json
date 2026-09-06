@@ -19,6 +19,7 @@
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.json",
     "prepare:runtime": "node scripts/prepare-package-runtime.mjs",
+    "check:package-runtime": "npm run prepare:runtime && node scripts/check-package-runtime.mjs",
     "prepare:launcher": "node scripts/build-launcher.mjs --target=all",
     "prepare:launcher:win": "node scripts/build-launcher.mjs --target=windows",
     "prepare:launcher:linux": "node scripts/build-launcher.mjs --target=linux",
@@ -28,6 +29,7 @@
     "start:check": "node scripts/run-electron.mjs --check",
     "type-check": "tsc --noEmit",
     "lint": "eslint src",
+    "test:unit": "vitest run --root .",
     "format": "prettier --write \"src/**/*.{ts,tsx,vue,js,json}\"",
     "package:win": "npm run prepare:launcher:win && npm run prepare:runtime && npm run build && electron-builder --win nsis",
     "package:linux": "npm run prepare:launcher:linux && npm run prepare:runtime && npm run build && electron-builder --linux AppImage deb",
@@ -67,6 +69,7 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.60.1",
     "vite": "^8.0.16",
+    "vitest": "^4.1.11",
     "vue-eslint-parser": "^10.4.1",
     "wait-on": "^9.0.10"
   },

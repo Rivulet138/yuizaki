@@ -3,8 +3,34 @@ Socket.IO 事件命名空间与数据模型定义
 统一前后端事件协议，Phase 2-5 逐步扩展
 """
 from __future__ import annotations
-from dataclasses import dataclass, field, asdict
+
+import math
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
+
+SOCKET_PROTOCOL_VERSION = 1
+
+
+def protocol_version_status(value: object) -> tuple[int, bool]:
+    """Normalize the version field without allowing arbitrary versions through."""
+    if value is None:
+        return SOCKET_PROTOCOL_VERSION, True
+    if isinstance(value, bool):
+        return SOCKET_PROTOCOL_VERSION, False
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, float):
+        if not math.isfinite(value) or not value.is_integer():
+            return SOCKET_PROTOCOL_VERSION, False
+        parsed = int(value)
+    elif isinstance(value, str):
+        try:
+            parsed = int(value.strip())
+        except (TypeError, ValueError):
+            return SOCKET_PROTOCOL_VERSION, False
+    else:
+        return SOCKET_PROTOCOL_VERSION, False
+    return (parsed, True) if parsed == SOCKET_PROTOCOL_VERSION else (SOCKET_PROTOCOL_VERSION, False)
 
 
 # ═══════════════════════════════════════════════

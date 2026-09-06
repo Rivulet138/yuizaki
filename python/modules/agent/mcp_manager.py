@@ -1,23 +1,30 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
+import os
+import re
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
-import json
-import os
 from pathlib import Path
-import re
 from time import perf_counter
 from typing import Any
-import uuid
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
 from ..core.paths import data_dir_from_env
 from ..tools.mcp_bridge import MCPToolError, call_http_mcp_tool
-
-from .models import MCPHistoryEntry, MCPInventoryItem, MCPServerConfigSnapshot, MCPServerStatusSnapshot, MCPSnapshot
+from .models import (
+    MCPHistoryEntry,
+    MCPInventoryItem,
+    MCPServerConfigSnapshot,
+    MCPServerStatusSnapshot,
+    MCPSnapshot,
+)
 from .tool_registry import ToolDefinition, ToolRegistry
 from .tool_result import ToolResultEnvelope
 
@@ -34,11 +41,36 @@ MCP_STDIO_INHERITED_ENV_KEYS = frozenset({
     "NODE_PATH", "PATH", "PATHEXT", "SYSTEMDRIVE", "SYSTEMROOT",
     "TEMP", "TMP", "USERPROFILE", "WINDIR",
 })
+MCP_VAULT_REF_VERSION = 1
+MCP_SECRET_QUERY_KEYS = re.compile(r"(?:token|secret|password|passwd|api[_-]?key|auth|credential|signature|sig)", re.IGNORECASE)
+
+
+def _safe_exception_code(exc: BaseException) -> str:
+    name = re.sub(r"[^A-Za-z0-9_.-]", "_", type(exc).__name__ or "Exception")[:64]
+    return f"mcp_error:{name.lower()}"
+
+
+def _redact_mcp_url(value: str) -> str:
+    """Project endpoint metadata without URL credentials or query values."""
+    if not value:
+        return ""
+    try:
+        parsed = urlsplit(str(value))
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return "[REDACTED_URL]"
+        netloc = parsed.netloc.rsplit("@", 1)[-1]
+        query = [(key, "[REDACTED]") for key, _ in parse_qsl(parsed.query, keep_blank_values=True)]
+        return urlunsplit((parsed.scheme, netloc, parsed.path, urlencode(query), ""))
+    except (TypeError, ValueError):
+        return "[REDACTED_URL]"
 
 
 def _log_task_exception(task: asyncio.Task[object]) -> None:
-    if not task.cancelled() and task.exception():
-        logger.warning("Background MCP task %s failed: %s", task.get_name(), task.exception())
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("Background MCP task failed (%s)", _safe_exception_code(exc))
 
 
 @dataclass
@@ -51,6 +83,10 @@ class MCPServerConfig:
     args: list[str] | None = None
     env: dict[str, str] | None = None
     headers: dict[str, str] | None = None
+
+    @property
+    def public_base_url(self) -> str:
+        return _redact_mcp_url(self.base_url)
 
 
 @dataclass
@@ -74,7 +110,7 @@ class MCPServerPreset:
             "description": self.description,
             "category": self.category,
             "transport": self.transport,
-            "base_url": self.base_url,
+            "base_url": _redact_mcp_url(self.base_url),
             "command": self.command,
             "args": list(self.args or []),
             "env_keys": sorted((self.env or {}).keys()),
@@ -98,6 +134,12 @@ class MCPServerPreset:
 class MCPManager:
     def __init__(self, store_file: str | Path | None = None) -> None:
         self._store_file = Path(store_file) if store_file is not None else data_dir_from_env() / "mcp_servers.json"
+        self._vault_url = os.getenv("YUIZAKI_MCP_VAULT_URL", "").strip().rstrip("/")
+        self._vault_token = os.getenv("YUIZAKI_MCP_VAULT_TOKEN", "").strip()
+        configured_namespace = os.getenv("YUIZAKI_MCP_VAULT_NAMESPACE", "").strip()
+        self._vault_namespace = configured_namespace or hashlib.sha256(str(self._store_file.resolve()).encode("utf-8")).hexdigest()[:32]
+        self._vault_reference: str | None = None
+        self._vault_error: str | None = None
         self.servers: dict[str, MCPServerConfig] = {}
         self.status: dict[str, dict[str, Any]] = {}
         self._stdio_sessions: dict[str, dict[str, Any]] = {}
@@ -177,11 +219,100 @@ class MCPManager:
 
     def _server_public_payload(self, server: MCPServerConfig) -> dict[str, Any]:
         data = dict(server.__dict__)
+        data["base_url"] = server.public_base_url
         data.pop("env", None)
         data.pop("headers", None)
         data["env_keys"] = sorted((server.env or {}).keys())
         data["header_keys"] = sorted((server.headers or {}).keys())
         return data
+
+    def _vault_configured(self) -> bool:
+        if not self._vault_url or not self._vault_token:
+            return False
+        try:
+            parsed = urlsplit(self._vault_url)
+            return (
+                parsed.scheme == "http"
+                and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+                and not parsed.username
+                and not parsed.password
+                and not parsed.query
+                and not parsed.fragment
+            )
+        except ValueError:
+            return False
+
+    def _vault_request(self, operation: str, *, document: str | None = None, reference: str | None = None) -> dict[str, Any]:
+        if not self._vault_configured():
+            raise MCPToolError("mcp_error:vault_unavailable")
+        payload: dict[str, Any] = {"operation": operation, "namespace": self._vault_namespace}
+        if document is not None:
+            payload["document"] = document
+        if reference is not None:
+            payload["reference"] = reference
+        try:
+            with httpx.Client(timeout=5.0, trust_env=False) as client:
+                response = client.post(
+                    self._vault_url,
+                    json=payload,
+                    headers={"Authorization": f"Bearer {self._vault_token}"},
+                )
+            if response.status_code != 200:
+                raise MCPToolError("mcp_error:vault_unavailable")
+            result = response.json()
+            if not isinstance(result, dict) or result.get("ok") is not True:
+                raise MCPToolError("mcp_error:vault_unavailable")
+            return result
+        except MCPToolError:
+            raise
+        except Exception:
+            raise MCPToolError("mcp_error:vault_unavailable") from None
+
+    def _vault_read(self, reference: str) -> dict[str, Any]:
+        result = self._vault_request("read", reference=reference)
+        document = result.get("document")
+        if not isinstance(document, str):
+            raise MCPToolError("mcp_error:vault_corrupt")
+        try:
+            parsed = json.loads(document)
+        except (TypeError, ValueError):
+            raise MCPToolError("mcp_error:vault_corrupt") from None
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("servers"), dict):
+            raise MCPToolError("mcp_error:vault_corrupt")
+        return parsed
+
+    def _canonical_store_payload(self) -> dict[str, Any]:
+        return {
+            **{key: value for key, value in self._store_metadata.items() if key != "vault_ref"},
+            "servers": {name: server.__dict__ for name, server in self.servers.items()},
+        }
+
+    def _write_local_store(self, payload: dict[str, Any]) -> None:
+        self._store_file.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self._store_file.with_name(f"{self._store_file.name}.{os.getpid()}.tmp")
+        try:
+            temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(temporary, self._store_file)
+        except Exception:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+
+    def _server_requires_vault(self, server: MCPServerConfig) -> bool:
+        try:
+            parsed = urlsplit(server.base_url)
+            if parsed.username or parsed.password:
+                return True
+            if any(MCP_SECRET_QUERY_KEYS.search(key) for key, _ in parse_qsl(parsed.query, keep_blank_values=True)):
+                return True
+        except ValueError:
+            return True
+        for mapping in (server.env or {}, server.headers or {}):
+            if any("{env:" not in str(value) for value in mapping.values()):
+                return True
+        return False
 
     def _custom_stdio_enabled(self) -> bool:
         return os.getenv("YUIZAKI_ALLOW_CUSTOM_MCP_STDIO", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -366,6 +497,18 @@ class MCPManager:
             }
         return self._telemetry[name]
 
+    @staticmethod
+    def _safe_exception_code(exc: BaseException) -> str:
+        """Return a bounded diagnostic code without exposing exception text."""
+        return _safe_exception_code(exc)
+
+    @staticmethod
+    def _safe_diagnostic(value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value)
+        return text[:80] if re.fullmatch(r"mcp_error:[a-z0-9_.-]+", text[:80]) and len(text) <= 80 else "mcp_error:internal"
+
     def _pending_request_count(self, name: str) -> int | None:
         session = self._sse_sessions.get(name)
         pending = session.get("pending") if session else None
@@ -440,7 +583,7 @@ class MCPManager:
             resp.raise_for_status()
             return self._inventory_from_manifest(resp.json())
         except Exception as exc:
-            return self._empty_inventory(str(exc))
+            return self._empty_inventory(self._safe_exception_code(exc))
 
     def _capability_contribution_items(self) -> list[str]:
         items: list[str] = []
@@ -486,7 +629,7 @@ class MCPManager:
             tool=tool,
             request_id=request_id,
             duration_ms=duration_ms,
-            error=error,
+            error=self._safe_diagnostic(error),
             session_id=session_id or telemetry.get("session_id"),
             pending_requests=pending_requests if pending_requests is not None else self._pending_request_count(name),
             total_calls=int(telemetry.get("total_calls") or 0),
@@ -549,7 +692,18 @@ class MCPManager:
             return None
         allowed_fields = MCPServerConfig.__dataclass_fields__.keys()
         cleaned = {field: payload[field] for field in allowed_fields if field in payload}
-        cleaned["name"] = str(cleaned.get("name") or name)
+        if not isinstance(cleaned.get("name", name), str) or not isinstance(cleaned.get("base_url", ""), str) or not isinstance(cleaned.get("transport", ""), str):
+            return None
+        if "enabled" in cleaned and not isinstance(cleaned["enabled"], bool):
+            return None
+        if "command" in cleaned and cleaned["command"] is not None and not isinstance(cleaned["command"], str):
+            return None
+        if "args" in cleaned and cleaned["args"] is not None and (not isinstance(cleaned["args"], list) or not all(isinstance(item, str) for item in cleaned["args"])):
+            return None
+        for key in ("env", "headers"):
+            if key in cleaned and cleaned[key] is not None and (not isinstance(cleaned[key], dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in cleaned[key].items())):
+                return None
+        cleaned["name"] = cleaned.get("name") or name
         try:
             return MCPServerConfig(**cleaned)
         except TypeError:
@@ -578,24 +732,37 @@ class MCPManager:
 
     def _load_store(self) -> None:
         default_servers = self._builtin_server_configs()
+        self.servers = default_servers
         try:
             if not self._store_file.exists():
-                self.servers = default_servers
                 self._store_metadata["builtin_preset_version"] = MCP_BUILTIN_PRESET_STORE_VERSION
                 self._save_store()
                 return
-            data = json.loads(self._store_file.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                self._store_metadata = {key: value for key, value in data.items() if key != "servers"}
+            raw_data = json.loads(self._store_file.read_text(encoding="utf-8"))
+            if not isinstance(raw_data, dict):
+                raise ValueError("invalid_store")
+            data = raw_data
+            vault_ref = raw_data.get("vault_ref")
+            if vault_ref is not None:
+                if not self._vault_configured() or not isinstance(vault_ref, dict):
+                    raise MCPToolError("mcp_error:vault_unavailable")
+                reference = vault_ref.get("reference")
+                namespace = vault_ref.get("namespace")
+                if namespace != self._vault_namespace or not isinstance(reference, str):
+                    raise MCPToolError("mcp_error:vault_corrupt")
+                self._vault_reference = reference
+                data = self._vault_read(reference)
+            if not isinstance(data, dict):
+                raise ValueError("invalid_store")
+            self._store_metadata = {key: value for key, value in data.items() if key != "servers"}
             servers = data.get("servers") or {}
-            if isinstance(servers, dict):
-                self.servers = {
-                    name: server
-                    for name, payload in servers.items()
-                    if (server := self._coerce_server_config(name, payload)) is not None
-                }
-            else:
-                self.servers = default_servers
+            if not isinstance(servers, dict):
+                raise ValueError("invalid_servers")
+            self.servers = {
+                name: server
+                for name, payload in servers.items()
+                if (server := self._coerce_server_config(name, payload)) is not None
+            }
             store_changed = self._migrate_legacy_browser_mcp_default()
             try:
                 stored_builtin_version = int(self._store_metadata.get("builtin_preset_version") or 0)
@@ -605,25 +772,41 @@ class MCPManager:
                 changed = self._merge_builtin_server_configs()
                 self._store_metadata["builtin_preset_version"] = MCP_BUILTIN_PRESET_STORE_VERSION
                 store_changed = store_changed or changed or stored_builtin_version != MCP_BUILTIN_PRESET_STORE_VERSION
-            if store_changed:
+            if self._vault_configured() and self._vault_reference is None:
                 self._save_store()
-        except Exception:
-            self.servers = default_servers
-            self._store_metadata["builtin_preset_version"] = MCP_BUILTIN_PRESET_STORE_VERSION
+            elif store_changed:
+                self._save_store()
+        except Exception as exc:
+            self._vault_error = _safe_exception_code(exc)
+            logger.warning("MCP server store load failed (%s)", self._vault_error)
+            if self._vault_configured():
+                self.servers = {}
+            else:
+                self.servers = default_servers
+                self._store_metadata["builtin_preset_version"] = MCP_BUILTIN_PRESET_STORE_VERSION
 
     def _save_store(self) -> None:
-        self._store_file.parent.mkdir(parents=True, exist_ok=True)
-        self._store_file.write_text(
-            json.dumps(
-                {
-                    **self._store_metadata,
-                    "servers": {name: server.__dict__ for name, server in self.servers.items()},
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
+        document = json.dumps(self._canonical_store_payload(), ensure_ascii=False, separators=(",", ":"))
+        if self._vault_configured():
+            old_reference = self._vault_reference
+            result = self._vault_request("store", document=document)
+            new_reference = result.get("reference")
+            if not isinstance(new_reference, str):
+                raise MCPToolError("mcp_error:vault_corrupt")
+            self._write_local_store({
+                "version": MCP_VAULT_REF_VERSION,
+                "builtin_preset_version": self._store_metadata.get("builtin_preset_version", MCP_BUILTIN_PRESET_STORE_VERSION),
+                "vault_ref": {"namespace": self._vault_namespace, "reference": new_reference},
+            })
+            self._vault_reference = new_reference
+            self._vault_error = None
+            if old_reference and old_reference != new_reference:
+                try:
+                    self._vault_request("prune", reference=old_reference)
+                except MCPToolError:
+                    logger.warning("MCP vault old reference cleanup failed")
+            return
+        self._write_local_store(self._canonical_store_payload())
 
     def _disabled_status(self, server: MCPServerConfig) -> dict[str, Any]:
         telemetry = self._ensure_telemetry(server.name)
@@ -688,7 +871,7 @@ class MCPManager:
             servers={
                 name: MCPServerConfigSnapshot(
                     name=server.name,
-                    base_url=server.base_url,
+                    base_url=server.public_base_url,
                     transport=server.transport,
                     enabled=server.enabled,
                     command=server.command,
@@ -725,6 +908,8 @@ class MCPManager:
             },
         )
         payload = snapshot.to_dict()
+        if self._vault_error:
+            payload["storageError"] = self._vault_error
         payload["contributionSummary"] = contribution_summary
         payload["presets"] = self.presets_snapshot()
         return payload
@@ -733,7 +918,13 @@ class MCPManager:
         server = self.servers.get(name)
         if server is None:
             return None
+        previous_enabled = server.enabled
         server.enabled = enabled
+        try:
+            self._save_store()
+        except Exception:
+            server.enabled = previous_enabled
+            raise
         if not enabled:
             self._unregister_dynamic_tools(name)
             session = self._stdio_sessions.pop(name, None)
@@ -748,7 +939,6 @@ class MCPManager:
             self._append_history(name, "disabled", "server disabled", status="disabled")
         else:
             self._append_history(name, "enabled", "server enabled", status="enabled")
-        self._save_store()
         return self._server_public_payload(server)
 
     def add_server(
@@ -765,9 +955,19 @@ class MCPManager:
         server = MCPServerConfig(name=name, base_url=base_url, transport=transport, enabled=enabled, command=command, args=args, env=env, headers=headers)
         if server.transport == "stdio" and not self._stdio_launch_allowed(server):
             raise MCPToolError("Custom stdio MCP registration is disabled; install a preset or set YUIZAKI_ALLOW_CUSTOM_MCP_STDIO=true")
+        if self._server_requires_vault(server) and not self._vault_configured():
+            raise MCPToolError("mcp_error:credential_storage_unavailable")
+        previous_server = self.servers.get(name)
         self.servers[name] = server
+        try:
+            self._save_store()
+        except Exception:
+            if previous_server is None:
+                self.servers.pop(name, None)
+            else:
+                self.servers[name] = previous_server
+            raise
         self._append_history(name, "added", "server registered", status="ok", transport=transport)
-        self._save_store()
         return self._server_public_payload(server)
 
     def install_preset(self, preset_id: str) -> dict[str, Any] | None:
@@ -775,25 +975,41 @@ class MCPManager:
         if preset is None:
             return None
         server = preset.to_server_config()
+        previous_server = self.servers.get(server.name)
         self.servers[server.name] = server
+        try:
+            self._save_store()
+        except Exception:
+            if previous_server is None:
+                self.servers.pop(server.name, None)
+            else:
+                self.servers[server.name] = previous_server
+            raise
         self._append_history(server.name, "preset_installed", preset.name, status="ok", transport=server.transport)
-        self._save_store()
         return self._server_public_payload(server)
 
     def remove_server(self, name: str) -> bool:
         if name not in self.servers:
             return False
+        removed_server = self.servers[name]
+        removed_status = self.status.get(name)
+        self.servers.pop(name, None)
+        self.status.pop(name, None)
+        try:
+            self._save_store()
+        except Exception:
+            self.servers[name] = removed_server
+            if removed_status is not None:
+                self.status[name] = removed_status
+            raise
         session = self._stdio_sessions.pop(name, None)
         if session is not None:
             asyncio.create_task(self._close_stdio_session(session), name=f"mcp-stdio-remove-{name}").add_done_callback(_log_task_exception)
         sse_session = self._sse_sessions.pop(name, None)
         if sse_session is not None:
             asyncio.create_task(self._close_sse_session(sse_session), name=f"mcp-sse-remove-{name}").add_done_callback(_log_task_exception)
-        self._append_history(name, "removed", "server removed", status="removed")
         self._unregister_dynamic_tools(name)
-        self.servers.pop(name, None)
-        self.status.pop(name, None)
-        self._save_store()
+        self._append_history(name, "removed", "server removed", status="removed")
         return True
 
     async def shutdown(self) -> None:
@@ -826,7 +1042,7 @@ class MCPManager:
         telemetry["total_calls"] += 1
         request_id = f"mcp_call_{uuid.uuid4().hex[:10]}"
         started_at = perf_counter()
-        args_keys = sorted(str(key) for key in args.keys())
+        args_keys = sorted(str(key) for key in args)
         self._append_history(
             server_name,
             "tool_call_started",
@@ -857,7 +1073,7 @@ class MCPManager:
                 return output
             except Exception as exc:
                 telemetry["total_failures"] += 1
-                telemetry["last_error"] = str(exc)
+                telemetry["last_error"] = self._safe_exception_code(exc)
                 self._append_history(
                     server_name,
                     "tool_call_failed",
@@ -866,10 +1082,10 @@ class MCPManager:
                     tool=tool_name,
                     request_id=request_id,
                     duration_ms=int((perf_counter() - started_at) * 1000),
-                    error=str(exc),
+                    error=self._safe_exception_code(exc),
                     args_keys=args_keys,
                 )
-                raise
+                raise MCPToolError(self._safe_exception_code(exc)) from None
         if server.transport == "stdio":
             try:
                 output = await self._call_stdio_tool(server, tool_name, args)
@@ -887,7 +1103,7 @@ class MCPManager:
                 return output
             except Exception as exc:
                 telemetry["total_failures"] += 1
-                telemetry["last_error"] = str(exc)
+                telemetry["last_error"] = self._safe_exception_code(exc)
                 self._append_history(
                     server_name,
                     "tool_call_failed",
@@ -896,10 +1112,10 @@ class MCPManager:
                     tool=tool_name,
                     request_id=request_id,
                     duration_ms=int((perf_counter() - started_at) * 1000),
-                    error=str(exc),
+                    error=self._safe_exception_code(exc),
                     args_keys=args_keys,
                 )
-                raise
+                raise MCPToolError(self._safe_exception_code(exc)) from None
         if server.transport == "sse":
             try:
                 output = await self._call_sse_tool(server, tool_name, args, request_id, args_keys)
@@ -917,7 +1133,7 @@ class MCPManager:
                 return output
             except Exception as exc:
                 telemetry["total_failures"] += 1
-                telemetry["last_error"] = str(exc)
+                telemetry["last_error"] = self._safe_exception_code(exc)
                 self._append_history(
                     server_name,
                     "tool_call_failed",
@@ -926,10 +1142,10 @@ class MCPManager:
                     tool=tool_name,
                     request_id=request_id,
                     duration_ms=int((perf_counter() - started_at) * 1000),
-                    error=str(exc),
+                    error=self._safe_exception_code(exc),
                     args_keys=args_keys,
                 )
-                raise
+                raise MCPToolError(self._safe_exception_code(exc)) from None
         if server.transport == "streamable_http":
             try:
                 result = await self._streamable_http_request(server, "tools/call", {"name": tool_name, "arguments": args}, timeout=SSE_TOOL_TIMEOUT_SECONDS)
@@ -948,7 +1164,7 @@ class MCPManager:
                 return output
             except Exception as exc:
                 telemetry["total_failures"] += 1
-                telemetry["last_error"] = str(exc)
+                telemetry["last_error"] = self._safe_exception_code(exc)
                 self._append_history(
                     server_name,
                     "tool_call_failed",
@@ -957,10 +1173,10 @@ class MCPManager:
                     tool=tool_name,
                     request_id=request_id,
                     duration_ms=int((perf_counter() - started_at) * 1000),
-                    error=str(exc),
+                    error=self._safe_exception_code(exc),
                     args_keys=args_keys,
                 )
-                raise
+                raise MCPToolError(self._safe_exception_code(exc)) from None
         raise MCPToolError(f"Unsupported MCP transport: {server.transport}")
 
     async def _check_server_status(self, server: MCPServerConfig) -> dict[str, Any]:
@@ -976,8 +1192,9 @@ class MCPManager:
                     inventory = await self._fetch_http_inventory(server, client) if resp.is_success else self._empty_inventory()
                 return {"enabled": True, "ok": resp.is_success, "status_code": resp.status_code, "transport": server.transport, "connected": resp.is_success, **inventory, **telemetry}
             except Exception as exc:
-                telemetry["last_error"] = str(exc)
-                return {"enabled": True, "ok": False, "message": str(exc), "transport": server.transport, "connected": False, **self._empty_inventory(), **telemetry}
+                code = self._safe_exception_code(exc)
+                telemetry["last_error"] = code
+                return {"enabled": True, "ok": False, "message": code, "transport": server.transport, "connected": False, **self._empty_inventory(), **telemetry}
 
         if server.transport == "stdio":
             if not server.command:
@@ -997,8 +1214,9 @@ class MCPManager:
                     **telemetry,
                 }
             except Exception as exc:
-                telemetry["last_error"] = str(exc)
-                return {"enabled": True, "ok": False, "message": str(exc), "transport": server.transport, "connected": False, **self._empty_inventory(str(exc)), **telemetry}
+                code = self._safe_exception_code(exc)
+                telemetry["last_error"] = code
+                return {"enabled": True, "ok": False, "message": code, "transport": server.transport, "connected": False, **self._empty_inventory(code), **telemetry}
 
         if server.transport == "sse":
             try:
@@ -1014,8 +1232,9 @@ class MCPManager:
                 pending_requests = len(existing.get("pending", {})) if existing else 0
                 return {"enabled": True, "ok": resp.is_success, "status_code": resp.status_code, "transport": server.transport, "message": "sse connected" if connected else None, "connected": connected, "pending_requests": pending_requests, **inventory, **telemetry}
             except Exception as exc:
-                telemetry["last_error"] = str(exc)
-                return {"enabled": True, "ok": False, "message": str(exc), "transport": server.transport, "connected": False, **self._empty_inventory(), **telemetry}
+                code = self._safe_exception_code(exc)
+                telemetry["last_error"] = code
+                return {"enabled": True, "ok": False, "message": code, "transport": server.transport, "connected": False, **self._empty_inventory(), **telemetry}
 
         if server.transport == "streamable_http":
             try:
@@ -1033,8 +1252,9 @@ class MCPManager:
                     **telemetry,
                 }
             except Exception as exc:
-                telemetry["last_error"] = str(exc)
-                return {"enabled": True, "ok": False, "message": str(exc), "transport": server.transport, "connected": False, **self._empty_inventory(str(exc)), **telemetry}
+                code = self._safe_exception_code(exc)
+                telemetry["last_error"] = code
+                return {"enabled": True, "ok": False, "message": code, "transport": server.transport, "connected": False, **self._empty_inventory(code), **telemetry}
 
         return {"enabled": True, "ok": False, "message": f"unsupported transport: {server.transport}", "transport": server.transport, "connected": False, **self._empty_inventory(), **telemetry}
 
@@ -1144,12 +1364,7 @@ class MCPManager:
         next_session_id = response.headers.get("Mcp-Session-Id") or response.headers.get("mcp-session-id") or session_id
         data = self._parse_streamable_http_response(response, request_id)
         if data.get("error"):
-            error = data["error"]
-            if isinstance(error, dict):
-                message = error.get("message") or error.get("code") or error
-            else:
-                message = error
-            raise MCPToolError(str(message))
+            raise MCPToolError("mcp_error:jsonrpc_error")
         result = data.get("result")
         return (result if isinstance(result, dict) else {"value": result}), next_session_id
 
@@ -1255,8 +1470,8 @@ class MCPManager:
             line = await self._stdio_readline(process, timeout=timeout)
             try:
                 data = json.loads(line.decode("utf-8", errors="ignore").strip() or "{}")
-            except Exception as exc:
-                raise MCPToolError(f"Invalid JSON from stdio MCP server: {line[:200]!r}") from exc
+            except (ValueError, TypeError):
+                raise MCPToolError("mcp_error:invalid_json") from None
 
             if not isinstance(data, dict):
                 continue
@@ -1265,12 +1480,7 @@ class MCPManager:
             if str(data.get("id") or "") != request_id:
                 continue
             if data.get("error"):
-                error = data["error"]
-                if isinstance(error, dict):
-                    message = error.get("message") or error.get("code") or error
-                else:
-                    message = error
-                raise MCPToolError(str(message))
+                raise MCPToolError("mcp_error:jsonrpc_error")
             result = data.get("result")
             return result if isinstance(result, dict) else {"value": result}
 
@@ -1297,17 +1507,11 @@ class MCPManager:
             raise MCPToolError("stdio MCP response timed out") from exc
         if line:
             return line
-        stderr = process.stderr
-        detail = "stdio MCP process closed stdout"
-        if stderr is not None:
-            try:
-                more = await asyncio.wait_for(stderr.read(), timeout=0.2)
-                detail = (more.decode("utf-8", errors="ignore") or detail).strip()
-            except Exception:
-                pass
-        raise MCPToolError(detail)
+        raise MCPToolError("mcp_error:stdio_process_exit")
 
     def _format_stdio_tool_result(self, result: dict[str, Any]) -> str:
+        if result.get("isError"):
+            raise MCPToolError("mcp_error:tool_error")
         structured = result.get("structuredContent")
         content = result.get("content")
         parts: list[str] = []
@@ -1325,8 +1529,6 @@ class MCPManager:
         if structured is not None:
             parts.append(json.dumps(structured, ensure_ascii=False))
         output = "\n".join(part for part in parts if part)
-        if result.get("isError"):
-            raise MCPToolError(output or "MCP tool returned an error")
         return output or json.dumps(result, ensure_ascii=False)
 
     async def _call_stdio_tool(self, server: MCPServerConfig, tool_name: str, args: dict[str, Any]) -> str:
@@ -1359,19 +1561,14 @@ class MCPManager:
                 await self._close_stdio_session(session)
                 raise
         if process.returncode not in {None}:
-            stderr = process.stderr
-            detail = "stdio MCP process exited"
-            if stderr is not None:
-                more = await stderr.read()
-                detail = (more.decode("utf-8", errors="ignore") or detail).strip()
             self._stdio_sessions.pop(server.name, None)
-            raise MCPToolError(detail)
+            raise MCPToolError("mcp_error:stdio_process_exit")
         try:
             data = json.loads(line.decode("utf-8", errors="ignore").strip() or "{}")
-        except Exception as exc:
-            raise MCPToolError(f"Invalid JSON from stdio MCP server: {line[:200]!r}") from exc
+        except (ValueError, TypeError):
+            raise MCPToolError("mcp_error:invalid_json") from None
         if not data.get("ok", False):
-            raise MCPToolError(str(data.get("error", "Unknown stdio MCP error")))
+            raise MCPToolError("mcp_error:legacy_tool_error")
         return str(data.get("output", ""))
 
     async def _get_or_create_stdio_session(self, server: MCPServerConfig) -> dict[str, Any]:
@@ -1427,7 +1624,7 @@ class MCPManager:
             session["server_info"] = initialize_result.get("serverInfo") if isinstance(initialize_result, dict) else None
         except Exception as exc:
             session["protocol"] = "legacy"
-            session["initialization_error"] = str(exc)
+            session["initialization_error"] = self._safe_exception_code(exc)
         self._stdio_sessions[server.name] = session
         telemetry = self._ensure_telemetry(server.name)
         telemetry["session_id"] = session["session_id"]
@@ -1506,11 +1703,11 @@ class MCPManager:
                 transport="sse",
                 tool=tool_name,
                 request_id=request_id,
-                error=str(exc),
+                error=self._safe_exception_code(exc),
                 pending_requests=len(session["pending"]),
                 args_keys=args_keys,
             )
-            raise MCPToolError(f"MCP SSE transport request failed: {exc}") from exc
+            raise MCPToolError(self._safe_exception_code(exc)) from None
         try:
             data = await asyncio.wait_for(asyncio.shield(future), timeout=SSE_TOOL_TIMEOUT_SECONDS)
         except asyncio.TimeoutError as exc:
@@ -1525,7 +1722,7 @@ class MCPManager:
         finally:
             session["pending"].pop(request_id, None)
         if not data.get("ok", False):
-            raise MCPToolError(str(data.get("error", "Unknown SSE MCP error")))
+            raise MCPToolError("mcp_error:sse_tool_error")
         return str(data.get("output", ""))
 
     async def _wait_for_sse_ready(self, server_name: str, session: dict[str, Any], timeout_seconds: float = SSE_READY_TIMEOUT_SECONDS) -> None:
@@ -1604,7 +1801,7 @@ class MCPManager:
                                                 if future and not future.done():
                                                     future.set_result(parsed)
                                             except Exception as exc:
-                                                self._append_history(server_name, "sse_event_parse_failed", "invalid tool-result payload", status="error", transport="sse", error=str(exc))
+                                                self._append_history(server_name, "sse_event_parse_failed", "invalid tool-result payload", status="error", transport="sse", error=self._safe_exception_code(exc))
                                     event_name = "message"
                                     data_lines = []
                                     continue
@@ -1613,10 +1810,11 @@ class MCPManager:
                                 elif line.startswith("data:"):
                                     data_lines.append(line.split(":", 1)[1].lstrip())
                 except Exception as exc:
-                    telemetry["last_error"] = str(exc)
+                    code = self._safe_exception_code(exc)
+                    telemetry["last_error"] = code
                     telemetry["reconnect_count"] += 1
-                    self._append_history(server_name, "sse_reconnect", str(exc), status="error", transport="sse", error=str(exc), pending_requests=len(session["pending"]))
-                    self._fail_pending(session, f"MCP SSE listener error: {exc}", only_stale=False)
+                    self._append_history(server_name, "sse_reconnect", "SSE reconnect failed", status="error", transport="sse", error=code, pending_requests=len(session["pending"]))
+                    self._fail_pending(session, f"MCP SSE listener error: {code}", only_stale=False)
                     await asyncio.sleep(session["backoff_seconds"])
                     session["backoff_seconds"] = min(session["backoff_seconds"] * 2, 15.0)
         finally:

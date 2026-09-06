@@ -75,19 +75,20 @@ from modules.system.memory_write_pipeline import build_user_signal_event
 from modules.tts.synthesizer import StreamingSentenceBuffer, TTSClient
 from modules.tts.visemes import normalize_viseme_cues
 from modules.pet_control import legacy_pet_control_to_avatar_command
-from socket_handlers.tool import build_tool_call_handler, build_tool_recheck_handler
-from socket_handlers.voice import build_svc_convert_handler
-from socket_handlers.system import register_system_handlers
 from socket_handlers.audio import build_audio_chunk_handler
 from socket_handlers.perception import build_ocr_request_handler
-from socket_handlers.memory import build_memory_query_handler
-from socket_handlers.interrupt import register_interrupt_handler
-from socket_handlers.llm import LLMRequestSupport, register_llm_handler
+from socket_handlers.llm import LLMRequestSupport
+from socket_compositions import chat as chat_composition
+from socket_compositions import memory as memory_composition
+from socket_compositions import system as system_composition
+from socket_compositions import tool as tool_composition
+from socket_compositions import voice as voice_composition
 
 from socket_events import (
-    AudioEvents, LLMEvents, TTSEvents, SVCEvents, ToolEvents,
-    MemoryEvents, ScreenshotEvents, PetEvents, SystemEvents, AgentEvents,
+    AudioEvents, LLMEvents, TTSEvents,
+    ScreenshotEvents, PetEvents, SystemEvents, AgentEvents,
     LLMRequestData, LLMDeltaData, LLMFinalData,
+    SOCKET_PROTOCOL_VERSION, protocol_version_status,
 )
 
 logger = logging.getLogger("socket-server")
@@ -491,6 +492,8 @@ class DesktopPetSocketServer:
     """
 
     def __init__(self, *, allow_legacy_turn_pipeline: bool | None = None) -> None:
+        self.logger = logger
+        self.default_rag_layers = _DEFAULT_RAG_LAYERS
         # async_mode='asgi' 让 socketio 通过 ASGI mount 到 FastAPI
         self.sio: SocketIOAsyncServer = socketio.AsyncServer(
             async_mode="asgi",
@@ -2583,27 +2586,7 @@ class DesktopPetSocketServer:
             if callable(cancel_speculative):
                 cancel_speculative(sid)
 
-        register_interrupt_handler(
-            sio=self.sio,
-            generation_manager_provider=lambda: self.generation_mgr,
-            advance_interruption_epoch=self._advance_interruption_epoch,
-            cancel_visual_turn=self._cancel_visual_turn_for_interrupt,
-            cancel_direct_tool_calls=self._cancel_direct_tool_calls,
-            record_interrupt=self.experience_metrics.record_interrupt,
-            logger=logger,
-        )
-
-        register_system_handlers(
-            sio=self.sio,
-            generation_manager_provider=lambda: self.generation_mgr,
-            experience_metrics=self.experience_metrics,
-            emit_latency=self._emit_latency,
-            permission_request_sid_map=self._permission_request_sid_map,
-            permission_request_tool_map=self._permission_request_tool_map,
-            permission_request_scope_map=self._permission_request_scope_map,
-            tool_executor=self.tool_executor,
-            logger=logger,
-        )
+        system_composition.register(self)
 
         # ─── 音频 / ASR ────────────────────────
 
@@ -2624,9 +2607,8 @@ class DesktopPetSocketServer:
 
         # ─── LLM ───────────────────────────────
 
-        register_llm_handler(
-            sio=self.sio,
-            server=self,
+        chat_composition.register(
+            self,
             support=LLMRequestSupport(
                 request_identity=_request_identity,
                 as_text=_as_text,
@@ -2644,46 +2626,15 @@ class DesktopPetSocketServer:
                 generation_identity=_generation_identity,
                 agent_result_payload=_agent_result_payload,
             ),
-            logger=logger,
         )
 
         # ─── 工具调用 ──────────────────────────
 
-        on_tool_call = build_tool_call_handler(
-            sio=self.sio,
-            tool_executor=self.tool_executor,
-            tool_registry=self.tool_registry,
-            trace_store=self.trace_store,
-            plugin_manager=self.plugin_manager,
-            active_workspace_id=self._active_workspace_id,
-            bind_ctx_runtime=lambda ctx: self._bind_ctx_runtime(ctx, include_visual=False),
-            tool_cancellation_signals=self._tool_cancellation_signals,
-            permission_request_tool_map=self._permission_request_tool_map,
-            permission_request_scope_map=self._permission_request_scope_map,
-            permission_request_sid_map=self._permission_request_sid_map,
-            logger=logger,
-        )
-        self.sio.on(ToolEvents.CALL, handler=on_tool_call)
-        on_tool_recheck = build_tool_recheck_handler(
-            sio=self.sio,
-            tool_executor=self.tool_executor,
-            tool_registry=self.tool_registry,
-            trace_store=self.trace_store,
-            plugin_manager=self.plugin_manager,
-            active_workspace_id=self._active_workspace_id,
-            bind_ctx_runtime=lambda ctx: self._bind_ctx_runtime(ctx, include_visual=False),
-            logger=logger,
-        )
-        self.sio.on(ToolEvents.RECHECK, handler=on_tool_recheck)
+        tool_composition.register(self)
 
         # ─── SVC ────────────────────────────────
 
-        on_svc_convert = build_svc_convert_handler(
-            sio=self.sio,
-            svc_client_provider=lambda: self.svc_client,
-            logger=logger,
-        )
-        self.sio.on(SVCEvents.CONVERT, handler=on_svc_convert)
+        voice_composition.register(self)
 
         # ─── Pet 状态 ──────────────────────────
 
@@ -2837,20 +2788,23 @@ class DesktopPetSocketServer:
         # ─── RAG / 记忆 ────────────────────────
         # Phase 5 实现
 
-        on_rag_query = build_memory_query_handler(
-            sio=self.sio,
-            retrieval_pipeline_provider=lambda: self.agent_pipeline.retrieval_pipeline,
-            workspace_resolver=self._resolve_socket_workspace_id,
-            default_layers=list(_DEFAULT_RAG_LAYERS),
-            logger=logger,
-        )
-        self.sio.on(MemoryEvents.QUERY, handler=on_rag_query)
+        memory_composition.register(self)
 
         # ─── 规则驱动 Agent 对话 ─────────────────
 
         async def on_agent_chat(sid: str, data: JsonDict) -> None:
             """Agent 对话：走统一 Tool Loop，再返回最终文本与 pet_control。"""
             logger.info("[SIO] agent:chat from %s", sid)
+
+            envelope_version, version_supported = protocol_version_status(data.get("version"))
+            if not version_supported:
+                await self.sio.emit(SystemEvents.ERROR, {
+                    "code": "UNSUPPORTED_PROTOCOL_VERSION",
+                    "message": "unsupported socket protocol version",
+                    **_request_identity(data, _as_text(data.get("session_id"), sid)),
+                    "version": SOCKET_PROTOCOL_VERSION,
+                }, to=sid)
+                return
 
             autonomy_mode = _coerce_autonomy_mode(data.get("autonomy_mode"))
             if autonomy_mode == "silent":
@@ -2859,7 +2813,6 @@ class DesktopPetSocketServer:
                 generation_id = _as_text(data.get("generation_id")).strip()
                 turn_id = _as_text(data.get("turn_id")).strip()
                 interruption_epoch = max(0, _as_int(data.get("interruption_epoch"), 0))
-                envelope_version = max(1, _as_int(data.get("version"), 1))
                 ctx = AgentRequestContext(
                     sid=sid,
                     session_id=session_id,
@@ -2967,7 +2920,6 @@ class DesktopPetSocketServer:
             session_id = payload.session_id or sid
             generation_id = _as_text(data.get("generation_id")).strip() or None
             turn_id = _as_text(data.get("turn_id")).strip() or None
-            envelope_version = max(1, _as_int(data.get("version"), 1))
             gen = generation_mgr.start(
                 session_id,
                 generation_id=generation_id,

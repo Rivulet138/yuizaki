@@ -72,8 +72,20 @@
 </template>
 
 <script setup lang="ts">
+import { ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import { ElCheckbox } from 'element-plus'
+import 'element-plus/es/components/checkbox/style/css'
+import { ElOption, ElSelect } from 'element-plus'
+import { ElInput } from 'element-plus'
+import 'element-plus/es/components/input/style/css'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
 import { computed, nextTick, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElDialog, ElForm, ElFormItem, ElMessage } from 'element-plus'
+import 'element-plus/es/components/dialog/style/css'
+import 'element-plus/es/components/form/style/css'
+import 'element-plus/es/components/form-item/style/css'
 import { useDialogStore } from '@/stores/dialogStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useCompanionStore } from '@/stores/companionStore'

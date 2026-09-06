@@ -34,6 +34,13 @@
 </template>
 
 <script setup lang="ts">
+import { ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import { ElCard, ElInput } from 'element-plus'
+import 'element-plus/es/components/card/style/css'
+import 'element-plus/es/components/input/style/css'
+import { ElTag } from 'element-plus'
+import 'element-plus/es/components/tag/style/css'
 import { t } from '@/i18n'
 
 defineProps<{

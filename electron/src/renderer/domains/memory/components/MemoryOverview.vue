@@ -60,8 +60,11 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { ElButton } from 'element-plus'
 import type { MemoryOverview } from '@/api/clients/memory-client'
 import type { MemoryDoc, MemoryLayer } from './memory-panel-types'
+
+import 'element-plus/es/components/button/style/css'
 
 const props = defineProps<{
   overview: MemoryOverview | null

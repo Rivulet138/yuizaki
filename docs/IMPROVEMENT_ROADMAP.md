@@ -15,10 +15,25 @@
 ### 不变量
 
 - 默认 loopback 信任模型不在本路线图中削弱或替换；任何公网部署另行立项。
-- 用户确认、host token、lease、revocation 和 emergency stop 仍是高风险能力的权威边界。
+- 用户确认、lease、revocation、emergency stop 和独立 host token 仍是高风险能力的权威边界；`/api/desktop-actions/*` 要求独立 Bearer host token，普通 loopback API 的信任模型保持不变。
 - 工具、OCR、截图、网页、MCP 和插件输出永远是不可信 evidence，不得直接产生授权。
 - 状态改变后无法确认现实效果时，结果必须是 `unknown_effect`，不得自动重试为成功。
 - 视觉默认请求级、短期处理，不引入默认持续录屏或摄像头历史。
+
+## 2026-09-06 当前验收状态
+
+以下为当前工作树的验收结论；后续执行日志中的旧测试数字只代表当时快照。
+
+| 项目 | 当前证据 | 状态 / 下一步 |
+|---|---|---|
+| 本地 Python 合同 | `python -m pytest -q`：`292 passed`；MCP、recovery store fencing、connector probe、host-token middleware 与 Socket v1 版本门禁定向回归通过 | 本地回归通过；测试已在 CI 清单中 |
+| MCP 错误与端点展示 | 四种 transport 的异常出口、stdio stderr/JSON-RPC、HTTP bridge、SSE、`isError`、后台日志均隐藏上游错误原文；公开端点隐藏 URL userinfo/query values；重启配置与成功结果回归通过 | 本轮完成；该结论不覆盖成功工具输出中的任意敏感内容 |
+| 连接器错误 | malformed bridge port、probe 异常和 account `lastError` 使用固定说明或业务码；登录票据、账号信息与错误恢复回归通过 | 本轮完成 |
+| MCP 凭据托管 | Electron `safeStorage` vault 保存加密 canonical document；Python 使用 namespace/reference pointer，支持 legacy plaintext 迁移、重启恢复、更新、删除和 outage fail-closed | 本轮本地合同完成；仍需真实 Windows/Linux 加密后端、并发写入/CAS 和目标机证据 |
+| 桌面动作宿主认证 | Electron 每次启动生成独立 token；Python middleware/router 使用严格 Bearer + 常量时间比较，并拒绝未配置或复用 Backend Token | 本地合同完成；外部托管 Python 必须显式注入 token，真实平台动作仍需资格验证 |
+| 步骤级重启恢复 | 旧 recovery handle 重启后降级为 `process_state_missing` | 已验证 fail-closed；plan/context/capability 跨进程重建尚未实现 |
+| 受限 durable retry 基础 | `python/modules/agent/recovery_store.py` 已提供 typed ToolStep 严格序列化、敏感参数拒绝、SQLite TTL/lease/owner/fencing 边界和跨实例读写测试 | store 原型已完成；尚未接入 `StepExecutor`，不能执行跨进程恢复 |
+| 发布资格 | Windows/Linux 目标机、真实 provider/音频/GPU/角色资源、24 小时驻留、公网 webhook/桥接与真实 GUI sandbox 缺少资格证据 | 未通过；本地合同测试不提供这些资格 |
 
 ## 阶段路线图
 
@@ -35,6 +50,12 @@
 | P2-C | 3-6 月 | 角色/技能生态 | plugin SDK、manifest、签名、审核和版本 | 第三方能力声明权限、可禁用、可回滚；不影响基础文本链路 |
 
 ## 当前已完成改进
+
+- P0-A/P0-C 增加跨入口一致性回归：`python/tests/test_socket_turn_service_gate.py` 锁定 Socket 语义执行默认 fail-closed，只有显式 `YUIZAKI_ALLOW_LEGACY_TURN_PIPELINE` 兼容开关才允许旧 pipeline；`node-mcp/server.test.mjs` 覆盖 health、工具清单、SSE ready、缺少工具名和未知工具错误，避免 CI 以 0 个断言误报通过。
+- P0-B 修复根目录测试入口：新增 `pytest.ini`，将 `python/tests` 设为唯一测试根、声明 `python` import path 并排除本地缓存/临时目录；`python -m pytest -q` 现在可直接运行，不再因扫描 Windows 临时目录而失败。
+- P0 MCP 输入边界：`node-mcp/server.mjs` 在启动 Playwright 前验证参数形状、必填 URL/selector、长度、HTTP(S) 协议及 URL 内嵌凭据；非法输入返回 400，错误不回显凭据。本地/内网 HTTP(S) 仍按既有进程权限可达，不宣称网络沙箱。HTTP/SSE 合同测试增至 `7 passed`。
+- P0-B 打包 runtime 边界：`electron/scripts/prepare-package-runtime.mjs` 现在复制 Python 应用入口、资源下载脚本、Socket 组合/处理器、SoulX 服务骨架和 `resources.lock.json`，并过滤 `__pycache__`、`.pyc`、缓存目录及模型权重；`check:package-runtime` 对 staging 全树执行必需文件和模型权重检查。模型仍只在首次运行时按资源锁下载，根目录 Go Launcher 保持独立源码启动路径。
+- P0-B 修复只读安装包路径：`electron/src/main/runtime-paths.ts` 统一识别 `resources/runtime` 并为 `app.getPath('userData')` 生成 Python 数据、音频、HF、Sherpa、Genie 和 SoulX 可写目录；PythonService、资源管理器、备份/恢复路由和环境检查共享该边界，Genie 下载脚本新增可写 workspace 参数。模型/设置/SQLite 不再默认写入 AppImage 的只读 resources。
 
 - 规划阶段生成 `yuizaki.intent-envelope.v1`，显式记录意图类型、置信度、敏感度、证据 ID、确认要求和过期时间。
 - 该 envelope 仅作为上下文和 trace 元数据，不替代 `PolicyEngine`、PermissionReceipt 或 Electron host 权限。
@@ -96,13 +117,13 @@
 
 ## 退出条件
 
-- P0：文本主链路、可选语音/视觉降级、任务终态和安全回归全部通过；没有已知 P0 阻断项。
+- P0：文本主链路、可选语音/视觉降级、任务终态和本地安全回归通过；真实目标机资格、外部连接器、公网暴露和跨进程步骤恢复仍是 P0 阻断项。
 - P1：用户能理解主动行为原因、纠正记忆并看到任务验证状态；至少有一套多轮语音和长期记忆评测集。
 - P2：桌面上下文和 GUI Agent 在隔离环境中可证明收益；生态能力有权限、许可证和回滚机制。
 
 ## 2026-08-28 执行进度
 
-- P0-A：结果验证、终态投影和 `yuizaki.tool-event.v1` 已有代码与回归测试；剩余跨平台长任务/终态压力验证。
+- P0-A：结果验证、终态投影和 `yuizaki.tool-event.v1` 已有代码与回归测试；新增 `test_companion_events.py` 覆盖长序列 progress、终态保留、容量淘汰、workspace 隔离、投影故障和并发 revision；仍需目标 Windows/Linux 主机上的长任务压力样本。
 - P0-B：平台能力矩阵已有实现；本轮补齐发布门禁和 24 小时驻留报告 schema/CLI，当前仍等待 Windows/Linux 实机资格证明，状态为未资格化。
 - P0-C：应用入口已为 Telegram/Discord/QQ/微信个人桥启用“持久化后快速确认/Deferred ACK”；新增 `ConnectorRecoveryController` 按应用 lifespan 扫描过期 `processing` lease 并复用 retry 路由恢复，`sending`/unknown-effect 不自动重发；新增 Discord ACK 前 durable enqueue 回归测试；仍需公网 webhook/真实桥接器的目标机验收。
 - P0-C 本地端到端增量：新增 ASGI 级 Telegram Webhook 回归，覆盖验签、durable enqueue、Agent turn、provider 回复、重复事件幂等和错误签名拒绝；当前测试集合共 64 项通过，仍不替代真实平台 staging 验收。
@@ -132,6 +153,7 @@
 - P1-C 加固默认召回隔离：`python/modules/memory/vector_store.py:is_memory_recallable()` 对 `tool_permission` 执行默认拒绝，即使遗留/外部文档缺少 `candidate/pending` 治理字段，也只有显式 `memory_role=tool_permission` 的审计查询可以请求该角色。
 - P1-C 增强召回证据追溯：`python/modules/memory/schema.py:RetrievalTrace` 与 `pipeline.py` 现在投影 `authority_revision`、`index_snapshot_revision`、`revision_stable` 和 `index_consistency`；召回期间 SQLite 权威 revision 发生变化时标记 `complete=false`/`authority_changed_during_recall`，避免并发写入下误把结果当作稳定快照。
 - P0-C 补齐 connector lease 保护回归：真实 `TurnCommitStore` 的有效 `processing` lease 不会被恢复扫描抢占、重复执行或重复投递；过期 lease 仍按既有恢复状态机处理。
+- P0-C 加固 delivery retry 围栏：`reset_connector_delivery_for_retry()` 只允许无活动 claim 的失败记录或已过期 `sending` lease 被释放；活动 provider 调用和活动 retry claim 均保持原 owner，新增真实 SQLite 回归。
 - P0-B 测试稳定性加固：崩溃边界夹具将 Windows 冷启动/导入超时从 10 秒调整为仍有上限的 30 秒，保留子进程 barrier 和退出码断言，避免环境启动延迟伪造崩溃失败。
 - `AgentRuntime` 默认创建并注入共享 `SkillTrustStore`，`SkillRuntimeRegistry` 使用同一信任状态；密钥轮换在旧 key 预检、替换关系和单次原子写入后才提交，失败不会残留半轮换状态。
 - P0-B 增强 `python/modules/system/release_readiness.py`：资格门禁结果现在附带平台 attestation 与 soak report 的 SHA-256 evidence fingerprint，只输出摘要指纹，不回显设备标识或驻留采样内容，便于 CI/发布审计追溯输入版本。
@@ -149,7 +171,22 @@
 - 本轮验证：Electron 全量 `174 passed / 1230 tests`；Electron type-check、lint 通过；连接器恢复定向 `10 passed`（含有效 lease 不抢占、非 2xx 遥测、非有限时间和真实 `TurnCommitStore` 502 持久化断言）、连接器路由定向 `58 passed`（含重复 webhook、failed turn 不重跑、provider 失败回复复用、sending unknown-effect 和并发 canonical turn 回归）、GUI sandbox 定向 `10 passed`（含过期、跨任务、缺目标/验证证据和伪造聚合回归）、intent evaluation 定向 `5 passed`（含 malformed confidence/confirmation/result 回归）、release readiness 定向 `10 passed`（含时间戳、采样跨度、预算边界、空快照、资格目标错配及完整报告隐私投影回归）、发布检查 CLI 定向 `1 passed`（含退出码、原子输出和临时文件清理）、主动行为定向 `46 passed`（含固定时间回放摘要）、技能运行时/manifest/trust/启动定向 `18 passed`（含跨重启审计清洗和 schema fail-closed 回归）、工具 Socket 终态定向 `6 passed`（含 unknown-effect 成功伪装回归）、步骤计划契约定向 `114 passed`（含双路径 unknown-effect success 归一化回归）、tool-loop 定向 `36 passed`（含非流式/流式 malformed unknown-effect 投影回归）、job event capacity 定向 `15 passed`（含 100 次 progress、terminal 保留和非有限 timestamp 回归），关键变更文件 Ruff 与 `--select F,E9`、compileall、`git diff --check` 通过；`python/modules/memory/routes.py` 仍有既有 87 项全量风格告警，未在本轮扩大清理范围；Python 受版本控制测试集全量 `1347 passed, 1 skipped`。根目录 pytest 仍会扫描本地临时目录并受 Windows 权限阻断，因此全量证据以 `python/tests` 为准。
 - 本轮增量验证：intent envelope/context/planning/evaluation `16 passed`（含 malformed metadata），工具结果/计划/tool-loop `68 passed`，GUI sandbox/contract/host `47 passed`，主动行为/记忆反馈 `52 passed`（含回放时钟控制 retention），memory role/source/week1 `67 passed`（含权限角色默认隔离、revision trace 和并发变更回归）；最终全量受版本控制 Python 测试 `1354 passed, 1 skipped`。Ruff（关键变更文件）、compileall 和 `git diff --check` 通过。
 - 本轮增量验证：记忆过期/索引不完整及两条 dedupe 写入路径 `13 passed`，覆盖结构化 503、cause/trace 和未写入断言；Python 版本控制测试集全量为 `1347 passed, 1 skipped`。
-- 总体完成度：约 95%（按 P0/P1/P2 交付权重估算；近期补齐 IntentEnvelope 本体边界、共享成功谓词、GUI 证据输入边界、反馈回放时钟、权限记忆默认隔离和召回 revision 追溯，但不代表 Windows/Linux 实机、公网连接器、签名技能生态或 24 小时驻留发布资格）。
+- 本轮 P0 合同验证：Python 版本控制测试集全量 `188 passed`；node-mcp HTTP/SSE 合同测试 `5 passed`；Electron type-check、lint、build、renderer bundle audit、文档/资源/依赖锁检查及 Go Launcher `go test ./...` 通过。真实设备、外部账号和 24 小时驻留资格仍需目标环境证据。
+- 本轮打包验证：`electron/npm run check:package-runtime` 通过（15 个必需文件、全 staging 无模型权重/缓存）；Electron `type-check`、`lint`、`build`、`start:check` 通过；根目录 Python `188 passed`、node-mcp `7 passed`、文档/资源/依赖锁检查及 Go Launcher `go test ./...` 通过。安装包仍需在 Windows/Linux 目标机完成启动、音频/GPU/角色资源和 24 小时驻留验收。
+- 本轮恢复与打包契约补充：新增 `test_connector_recovery_controller.py`，覆盖活动任务不抢占、过期 delivery 单次恢复、retry 非 2xx/异常失败计数及遥测脱敏；新增 `test_soulx_download_models.py`，在无网络条件下验证 `--models-dir`、`--references-dir`、`--lock-path` 和 lock revision 转发；新增 `runtime-paths.test.ts`，覆盖 packaged runtime 标记、显式 root 优先级和 userData 可写路径映射。当前根目录 Python 回归为 `207 passed`；Electron runtime 合同测试以 `vitest run --root . src/main/runtime-paths.test.ts` 执行，结果 `3 passed`。这些测试不替代真实设备、外部账号、安装包启动或 24 小时驻留验收。
+- P0-A 权限恢复边界修复：`StepExecutor` 对 `permission_required`/`permission_denied` 不再生成自动恢复 token/handle，而是投影为 `available=false`、`confirmation_required=true` 的新鲜权限交互；`AgentPipelineResult` 同时拒绝明确矛盾的 `available=true + retryable=false` 投影。新增 `test_step_recovery_contract.py`，并保留 `unknown_effect` 的人工检查语义。该修复不代表步骤级恢复已支持跨进程重建。
+- P0-A 重启恢复可见性修复：`TurnCommitStore` 为可恢复 descriptor 加入仅供本进程校验的内部 epoch；同进程 replay 保留句柄，epoch 缺失或变化时降级为 `available=false`、`reason=process_state_missing` 并移除 handle，避免重启后 UI 暴露失效恢复能力。新增 `test_turn_store_recovery.py`；该机制不持久化 plan/context/credentials，也不把跨进程恢复标记为已完成。
+- P0-A durable replay 一致性修复：`TurnCommitStore` 的 `list_commits()`、`pending_outbox()` 和 `claim_next_outbox()` 现在共享 recovery descriptor 清洗，进程 epoch 变化时旧 outbox/rebuild payload 同样降级为 `available=false`、`reason=process_state_missing` 并移除 handle；新增跨入口回归，避免重启后的投影或审计日志错误宣称可自动恢复。
+- P0-B 发布门禁 CI 绑定：`python-contracts` 纳入 `test_release_readiness.py` 与 `test_platform_release_check.py`，并执行 CLI fail-closed 回归，明确无目标机资格/驻留证据时必须返回退出码 `2` 且报告为 `not_qualified`。CI 证据仍只覆盖本地契约，不替代真实 Windows/Linux 设备资格。
+- P0-A/P0-B 测试门禁补齐：`electron/package.json` 固定 `vitest` 开发依赖并新增 `test:unit`；Electron CI 在 `npm ci` 后执行全部单元测试。当前可复现证据为 `10` 个测试文件、`45` 项通过；历史文档中的 `174/1230` 测试数字不再作为当前证据。
+- P1-C 记忆一致性回归：新增 dedupe 索引不完整时两条写入入口的 fail-closed 测试，确认 HTTP 503、`complete=false` 且权威文档不变；新增检索期间 authority revision 变化测试，确认 trace 标记 `authority_changed_during_recall`、`complete=false`，不把不稳定召回宣称为完整结果。
+- P0-A/P0-C 未完成项明确化：步骤级 retry recovery 的 plan/context/capability 仍只存在 `StepExecutor` 进程内，重启后按现有设计 fail-closed；持久化 connector delivery recovery 不等同于 Agent step recovery。除非能重新执行 permission preflight 并重建最小上下文，否则不把该能力写成“崩溃后可恢复”。
+- P0 桌面动作宿主认证闭环：`verify_host_desktop_action_authorization()` 现在要求独立的非空 Bearer host token，使用常量时间比较，拒绝缺失/错误格式/错误值/未配置以及与 Backend API Token 复用；普通 loopback API 仍保持原有信任模型。Electron bridge 已经为每次启动生成并注入该 token，外部托管 Python 必须自行提供同一环境变量。新增 `python/tests/test_backend_api_auth.py` 覆盖认证矩阵；这只证明本地 HTTP 合同，不替代真实平台桌面动作资格验证。
+- recovery store fencing 增量：`SQLiteStepRecoveryStore.claim_due()` 现在向 worker 返回 fencing token，`finish()` 必须同时匹配 owner 和当前 fencing token，并返回是否真正提交；旧 lease 被重新 claim 后的迟到 worker 只能得到 `False`。新增 stale-worker 回归；该 store 仍未接入 `StepExecutor`，不代表跨进程步骤恢复完成。
+- Socket v1 版本契约增量：`socket_events.py` 提供严格的 `protocol_version_status()`，拒绝布尔值、非整数浮点、NaN、未知整数和非法字符串；LLM、legacy agent、audio 和 tool handler 在创建 generation、调用 ASR 或执行工具前 fail-closed，并回传 canonical version `1`。新增版本矩阵、LLM 无 generation、audio 无 ASR 副作用回归；完整 schema registry、旧客户端降级和真实跨平台 Socket 仍未完成。
+- 本轮可靠性与安全回归：`TurnService` 在 runner 或 finalizer 已可能产生外部副作用后抛出异常时持久化不可重试的 `unknown_effect`，相同幂等键重启后只 replay 终态；`AgentTraceStore` 与 `CompanionJobEventLog` 对敏感键、异常文本、递归深度、文本和集合大小执行有界脱敏，并覆盖 `append_once`/recheck 持久化路径；state-changing 工具即使没有探针也显式报告 `verificationStatus=unverified`；runtime 注入共享 job log；连接器、MCP、scheduler 和 stream provider/turn 异常只持久化固定错误码，不回显含凭据的 URL；scheduler replay 强制 unknown effect 不可重试；插件文件写入对不存在目标向上解析最近存在祖先的 realpath，阻断 symlink/junction 越界；MCP vault 增加加密存储、pointer 迁移、严格 schema 和故障回滚回归；受限 durable retry store 增加严格 typed plan、敏感参数、lease 和 fencing 边界回归；桌面动作 host-token 增加严格 Bearer、distinct token 与 middleware 路由回归；Electron 外部托管 token 解析增加纯函数回归。当前 Python 全量为 `278 passed`，Electron 为 `12 files / 51 tests`；上述证据仍不替代真实目标机、公网连接器或 24 小时驻留验收。
+- 本轮可靠性与安全回归：`TurnService` 在 runner 或 finalizer 已可能产生外部副作用后抛出异常时持久化不可重试的 `unknown_effect`，相同幂等键重启后只 replay 终态；`AgentTraceStore` 与 `CompanionJobEventLog` 对敏感键、异常文本、递归深度、文本和集合大小执行有界脱敏，并覆盖 `append_once`/recheck 持久化路径；state-changing 工具即使没有探针也显式报告 `verificationStatus=unverified`；runtime 注入共享 job log；连接器、MCP、scheduler 和 stream provider/turn 异常只持久化固定错误码，不回显含凭据的 URL；scheduler replay 强制 unknown effect 不可重试；插件文件写入对不存在目标向上解析最近存在祖先的 realpath，阻断 symlink/junction 越界；MCP vault 增加加密存储、pointer 迁移、严格 schema 和故障回滚回归；受限 durable retry store 增加严格 typed plan、敏感参数、lease 和 fencing 边界回归；桌面动作 host-token 增加严格 Bearer、distinct token 与 middleware 路由回归；Electron 外部托管 token 解析增加纯函数回归。当前 Python 全量为 `292 passed`，Electron 为 `12 files / 51 tests`；上述证据仍不替代真实目标机、公网连接器或 24 小时驻留验收。
+- 总体状态：本地合同改进持续通过回归；Windows/Linux 实机、公网连接器、签名技能生态、真实 GUI sandbox 和 24 小时驻留仍有未完成验收项。各阶段按上方验收状态及对应门禁判断，路线图尚未全部完成。
 
 ### 2026-08-29 增量：直播执行与 Twitch 入站
 
@@ -215,7 +252,7 @@
 
 | 能力面 | 当前仓库状态 | 下一道门禁 |
 |---|---|---|
-| 对话与任务 | `TurnService` 统一文字、HTTP、heartbeat、语音入口；工具结果有 `known_success/unknown_effect` | 长任务恢复、取消和回放压力测试 |
+| 对话与任务 | `TurnService` 统一文字、HTTP、heartbeat、语音入口；工具结果有 `known_success/unknown_effect`；`CompanionJobEventLog` 已有本地长序列/容量/并发回归 | Windows/Linux 目标机上的长任务恢复、取消和回放压力样本 |
 | 语音与桌宠 | Electron 音频捕获/播放、ASR/TTS、Live2D/VRM、延迟诊断；comfort signal 记录入口；运行设置可调 VAD 抢话灵敏度 | Windows/Linux 真实设备的首包、打断、回声和 30 分钟稳定性证据 |
 | 记忆 | SQLite 权威源；`memory_role`、候选审核、删除/导出、索引 revision 和 provenance | 长期对话集上的召回准确率、敏感事实泄漏率、用户纠错闭环 |
 | 主动陪伴 | heartbeat、安静时段、类别预算、接受/忽略/取消/延后反馈、原因码 | 明确拒绝后的再次触达率为 0；打扰率、接受率和延后率可回放 |

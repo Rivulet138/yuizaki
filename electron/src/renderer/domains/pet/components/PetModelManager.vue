@@ -104,8 +104,21 @@
 </template>
 
 <script setup lang="ts">
+import { ElIcon, ElTooltip } from 'element-plus'
+import 'element-plus/es/components/icon/style/css'
+import 'element-plus/es/components/tooltip/style/css'
+import { ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import { ElInput } from 'element-plus'
+import 'element-plus/es/components/input/style/css'
+import { ElOption, ElSelect } from 'element-plus'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
 import { CircleCheck, CircleClose, Delete, FolderOpened, Refresh, Upload } from '@element-plus/icons-vue'
 import { computed } from 'vue'
+import { ElRadioButton, ElRadioGroup } from 'element-plus'
+import 'element-plus/es/components/radio-button/style/css'
+import 'element-plus/es/components/radio-group/style/css'
 import { useI18n } from '@/i18n'
 import type { AvatarCapabilitySnapshot } from '../../../../shared/avatar-command'
 import type { PetModelDefinition } from '../../../../shared/pet-control'

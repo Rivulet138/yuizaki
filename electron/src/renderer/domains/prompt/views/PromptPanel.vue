@@ -57,6 +57,10 @@
 </template>
 
 <script setup lang="ts">
+import { ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import { ElInput } from 'element-plus'
+import 'element-plus/es/components/input/style/css'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'

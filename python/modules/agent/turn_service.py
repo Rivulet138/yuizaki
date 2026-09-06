@@ -1032,6 +1032,20 @@ class TurnService:
                     retryable=False,
                     configured_budget=self._configured_budget(ctx),
                 )
+            except TurnClaimLostError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - an effect may already have escaped the runner.
+                result = AgentPipelineResult(
+                    reply="",
+                    outcome="unknown_effect",
+                    retryable=False,
+                    failure={
+                        "kind": "turn_runner_exception",
+                        "exception_type": type(exc).__name__[:120],
+                        "message": "turn runner failed after execution began; external effect is unknown",
+                    },
+                    configured_budget=self._configured_budget(ctx),
+                )
             if not isinstance(result, AgentPipelineResult):
                 raise TypeError("turn runner must return AgentPipelineResult")
             current_task = asyncio.current_task()
@@ -1063,6 +1077,21 @@ class TurnService:
                         reply="",
                         outcome="unknown_effect",
                         retryable=False,
+                        configured_budget=self._configured_budget(ctx),
+                        consumed_usage=result.consumed_usage,
+                    )
+                except TurnClaimLostError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - finalization may observe an unknown external effect.
+                    result = AgentPipelineResult(
+                        reply="",
+                        outcome="unknown_effect",
+                        retryable=False,
+                        failure={
+                            "kind": "turn_finalizer_exception",
+                            "exception_type": type(exc).__name__[:120],
+                            "message": "turn finalization failed; external effect is unknown",
+                        },
                         configured_budget=self._configured_budget(ctx),
                         consumed_usage=result.consumed_usage,
                     )

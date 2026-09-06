@@ -114,6 +114,27 @@
 </template>
 
 <script setup lang="ts">
+import { ElAlert, ElIcon } from 'element-plus'
+import 'element-plus/es/components/alert/style/css'
+import 'element-plus/es/components/icon/style/css'
+import { ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import { ElSlider } from 'element-plus'
+import 'element-plus/es/components/slider/style/css'
+import { ElInput } from 'element-plus'
+import 'element-plus/es/components/input/style/css'
+import { ElOption, ElSelect } from 'element-plus'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
+import { ElInputNumber } from 'element-plus'
+import 'element-plus/es/components/input-number/style/css'
+import { ElCard } from 'element-plus'
+import 'element-plus/es/components/card/style/css'
+import { ElTag } from 'element-plus'
+import 'element-plus/es/components/tag/style/css'
+import { ElForm, ElFormItem } from 'element-plus'
+import 'element-plus/es/components/form/style/css'
+import 'element-plus/es/components/form-item/style/css'
 import { Connection } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 

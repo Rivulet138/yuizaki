@@ -16,8 +16,14 @@
 </template>
 
 <script setup lang="ts">
+import 'element-plus/es/components/button/style/css'
+import 'element-plus/es/components/slider/style/css'
+import 'element-plus/es/components/tag/style/css'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
 import { computed, inject, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElButton, ElEmpty, ElInput, ElMessage, ElSelect, ElOption, ElSlider, ElTag } from 'element-plus'
+import 'element-plus/es/components/input/style/css'
 import { memoryInspectorActionsKey } from './memory-panel-types'
 import type { MemoryOperation } from '@/api/clients/memory-client'
 import type { MemoryDoc, MemoryInspectorDraft, MemoryLayer, MemoryOption, MemoryVersionSnapshot } from './memory-panel-types'

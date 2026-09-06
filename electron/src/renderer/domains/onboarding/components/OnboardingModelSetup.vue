@@ -38,7 +38,19 @@
 </template>
 
 <script setup lang="ts">
+import { ElIcon } from 'element-plus'
+import 'element-plus/es/components/icon/style/css'
+import { ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import { ElOption, ElSelect } from 'element-plus'
+import { ElInput } from 'element-plus'
+import 'element-plus/es/components/input/style/css'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
 import { computed, onMounted, reactive, ref } from 'vue'
+import { ElForm, ElFormItem } from 'element-plus'
+import 'element-plus/es/components/form/style/css'
+import 'element-plus/es/components/form-item/style/css'
 import { CircleCheckFilled, Connection } from '@element-plus/icons-vue'
 import { settingsClient } from '@/api/clients/settings-client'
 import { t } from '@/i18n'

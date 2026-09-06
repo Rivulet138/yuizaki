@@ -57,8 +57,16 @@
 </template>
 
 <script setup lang="ts">
+import { ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import { ElSegmented } from 'element-plus'
+import 'element-plus/es/components/segmented/style/css'
+import { ElTag } from 'element-plus'
+import 'element-plus/es/components/tag/style/css'
 import { computed, ref, watch } from 'vue'
 import { getActivePinia } from 'pinia'
+import { ElDrawer } from 'element-plus'
+import 'element-plus/es/components/drawer/style/css'
 import { Refresh } from '@element-plus/icons-vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import {

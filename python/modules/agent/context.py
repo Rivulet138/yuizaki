@@ -173,3 +173,9 @@ class AgentPipelineResult:
             and bool(self.recovery.get("available"))
         ):
             raise ValueError("unknown_effect cannot advertise automatic recovery")
+        if (
+            isinstance(self.recovery, dict)
+            and self.recovery.get("available") is True
+            and self.recovery.get("retryable") is False
+        ):
+            raise ValueError("non-retryable recovery cannot advertise automatic recovery")

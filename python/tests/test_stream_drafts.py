@@ -10,7 +10,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from modules.system.stream_drafts import StreamDraftService
 from modules.system.stream_platforms import (
     InMemoryTwitchSubscriptionProvider,
@@ -681,7 +680,7 @@ def test_stream_action_provider_error_persists_unknown_effect_without_retry(tmp_
         configured = True
 
         def start_stream(self) -> dict[str, object]:
-            raise TimeoutError("provider timed out")
+            raise TimeoutError("POST https://example.test/send?access_token=secret-token failed: Bearer hidden")
 
     stream = StreamRuntime(obs_adapter=FailingObs(), actions_path=actions_path)
     preview = stream.preview({"action": "stream.broadcast_start", "params": {}})
@@ -698,7 +697,29 @@ def test_stream_action_provider_error_persists_unknown_effect_without_retry(tmp_
     assert statuses == ["unknown_effect", "sending"]
     restarted = StreamRuntime(actions_path=actions_path)
     assert [item["status"] for item in restarted.actions(10)["actions"]] == statuses
-    assert "TimeoutError" == restarted.actions(1)["actions"][0]["errorCode"]
+    assert restarted.actions(1)["actions"][0]["errorCode"] == "TimeoutError"
+
+
+@pytest.mark.asyncio
+async def test_stream_draft_provider_error_does_not_persist_token_bearing_text(tmp_path: Path) -> None:
+    stream, _turn_service, service = _service(tmp_path)
+    event_id = stream.enqueue_event({"kind": "chat", "text": "hello", "author": "viewer"})["event"]["eventId"]
+
+    class FailingTurn:
+        def build_context(self, *_args, **_kwargs):
+            return SimpleNamespace(extra={})
+
+        async def execute_context(self, *_args, **_kwargs):
+            raise RuntimeError("GET https://example.test/?token=secret-token Authorization: Bearer hidden")
+
+    service._turn_service_provider = lambda: FailingTurn()
+    result = await service.generate({"eventId": event_id})
+
+    assert result["draft"]["outcome"] == "unknown_effect"
+    assert result["draft"]["error"] == "stream_draft_provider_exception"
+    serialized = (tmp_path / "stream_drafts.json").read_text(encoding="utf-8")
+    assert "secret-token" not in serialized
+    assert "Bearer hidden" not in serialized
 
 
 def test_stream_actions_route_is_exposed() -> None:

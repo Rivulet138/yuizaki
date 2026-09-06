@@ -51,9 +51,14 @@
 </template>
 
 <script setup lang="ts">
+import { ElIcon } from 'element-plus'
+import 'element-plus/es/components/icon/style/css'
 import { CircleCheckFilled, CircleCloseFilled, Clock, Loading, RemoveFilled, WarningFilled } from '@element-plus/icons-vue'
+import { ElButton } from 'element-plus'
 import { isOnboardingProbeMessageKey, isOnboardingRepairActionId, type OnboardingProbeResult, type OnboardingRepairActionId } from '@/../shared/onboarding-readiness'
 import { currentLocale, t } from '@/i18n'
+
+import 'element-plus/es/components/button/style/css'
 
 defineProps<{ probes: OnboardingProbeResult[] }>()
 const emit = defineEmits<{ repair: [actionId: OnboardingRepairActionId] }>()

@@ -455,6 +455,10 @@ export class SocketClient {
   }
 
   sendClientTiming(stage:
+    | 'renderer_dom_content_loaded'
+    | 'renderer_first_contentful_paint'
+    | 'renderer_lcp'
+    | 'socket_connected'
     | 'playback_start'
     | 'interrupt_ack'
     | 'realtime_connect'

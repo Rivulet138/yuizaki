@@ -15,7 +15,6 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-
 from modules.agent.turn_service import SemanticTurnRequest
 from modules.system.message_connectors import (
     ConnectorMessage,
@@ -25,6 +24,16 @@ from modules.system.message_connectors import (
 
 MAX_CONNECTOR_BODY_BYTES = 512 * 1024
 LOGGER = logging.getLogger(__name__)
+
+# Delivery errors are exposed through the API and durable delivery records.
+# Keep these values deliberately opaque: provider exceptions can contain URLs,
+# request headers, or credentials.
+_SAFE_PROVIDER_FAILURE_REASONS = frozenset({"provider_rejected", "empty_reply"})
+
+
+def _safe_delivery_failure_reason(value: object, *, fallback: str = "provider_rejected") -> str:
+    candidate = str(value or "").strip()
+    return candidate if candidate in _SAFE_PROVIDER_FAILURE_REASONS else fallback
 
 
 class ConnectorRecoveryController:
@@ -337,8 +346,8 @@ def create_message_connector_router(
             result = await asyncio.to_thread(registry_provider().probe, connector_id)
         except MessageConnectorError as exc:
             return JSONResponse({"ok": False, "error": exc.code, "message": str(exc)}, status_code=exc.status_code)
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            return JSONResponse({"ok": False, "error": "probe_failed", "message": str(exc)[:160]}, status_code=502)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return JSONResponse({"ok": False, "error": "probe_failed", "message": "Connector probe failed"}, status_code=502)
         return JSONResponse(result)
 
     @router.get("/api/system/connectors/{connector_id}/account")
@@ -464,6 +473,7 @@ def create_message_connector_router(
             reply = str(row.get("reply_text") or "").strip()
             retry_turn = not reply and row.get("last_error") in {
                 "connector_turn_failed",
+                "connector_turn_exception",
                 "connector_turn_interrupted",
             }
             if not reply and not retry_turn:
@@ -524,7 +534,9 @@ def create_message_connector_router(
                 provider_ok = isinstance(status_code, int) and 200 <= status_code < 300
             sent = not isinstance(delivery, Mapping) or delivery.get("sent", True) is not False
             if not provider_ok or not sent:
-                reason = str(delivery.get("reason") or "provider_rejected") if isinstance(delivery, Mapping) else "provider_rejected"
+                reason = _safe_delivery_failure_reason(
+                    delivery.get("reason") if isinstance(delivery, Mapping) else None,
+                )
                 if not store.mark_connector_delivery_failed(delivery_key, owner, reason):
                     return JSONResponse({
                         "ok": False,
@@ -548,14 +560,14 @@ def create_message_connector_router(
             else:
                 store.mark_connector_delivery_failed(delivery_key, owner, "connector_retry_cancelled")
             raise
-        except Exception as exc:
+        except Exception:
             LOGGER.exception(
                 "connector manual retry failed connector=%s event_id=%s delivery_key=%s",
                 connector_id,
                 message.event_id,
                 delivery_key,
             )
-            reason = "connector_turn_failed" if retry_turn and not turn_retry_promoted else str(exc)
+            reason = "connector_turn_exception" if retry_turn and not turn_retry_promoted else "connector_provider_exception"
             if retry_turn and not turn_retry_promoted:
                 store.release_connector_turn_retry(delivery_key, owner, reason)
             else:
@@ -995,9 +1007,13 @@ def create_message_connector_router(
                 try:
                     active_phases[task_key] = "sending"
                     delivery = await asyncio.to_thread(registry.send_reply, message, reply)
-                except Exception as exc:
+                except Exception:
                     if delivery_store is not None and delivery_claimed:
-                        delivery_store.mark_connector_delivery_failed(delivery_key, delivery_owner, str(exc))
+                        delivery_store.mark_connector_delivery_failed(
+                            delivery_key,
+                            delivery_owner,
+                            "connector_provider_exception",
+                        )
                     raise
                 provider_ok = isinstance(delivery, Mapping) and delivery.get("ok") is True
                 if isinstance(delivery, Mapping) and not provider_ok:
@@ -1007,9 +1023,9 @@ def create_message_connector_router(
                 delivery_ok = bool(reply) and provider_ok and sent
                 if not delivery_ok:
                     reason = "empty_reply" if not reply else (
-                        str(delivery.get("reason") or "provider_rejected")
-                        if isinstance(delivery, Mapping)
-                        else "provider_rejected"
+                        _safe_delivery_failure_reason(
+                            delivery.get("reason") if isinstance(delivery, Mapping) else None,
+                        )
                     )
                     if delivery_store is not None and delivery_claimed:
                         delivery_store.mark_connector_delivery_failed(delivery_key, delivery_owner, reason)

@@ -12,6 +12,9 @@
   </section>
 </template>
 <script setup lang="ts">
+import 'element-plus/es/components/button/style/css'
+import 'element-plus/es/components/tag/style/css'
+import { ElButton, ElTag } from 'element-plus'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import type { MemoryDoc } from './memory-panel-types'
 const props = defineProps<{ docs: MemoryDoc[]; compactText: (text?: string | null, limit?: number) => string; qualityPercent: (doc: MemoryDoc) => string; processingId: string; loading?: boolean; error?: string }>()

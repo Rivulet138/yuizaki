@@ -37,6 +37,8 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue'
+import { ElEmpty } from 'element-plus'
+import 'element-plus/es/components/empty/style/css'
 import { createReducedMotionObserver } from '@/app/runtime/reducedMotion'
 
 const props = withDefaults(defineProps<{

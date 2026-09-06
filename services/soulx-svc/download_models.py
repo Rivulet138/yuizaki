@@ -16,12 +16,6 @@ def emit_progress(phase: str, message: str) -> None:
     print(f"YUIZAKI_RESOURCE_PROGRESS {payload}", flush=True)
 
 
-def locked_revisions() -> tuple[str, str]:
-    lock = json.loads(RESOURCE_LOCK_PATH.read_text(encoding="utf-8"))
-    sources = lock["resources"]["soulx"]["sources"]
-    return str(sources[0]["revision"]), str(sources[1]["revision"])
-
-
 def download(repo_id: str, local_dir: Path, revision: str) -> None:
     local_dir.mkdir(parents=True, exist_ok=True)
     emit_progress("downloading", f"Downloading {repo_id}")
@@ -53,9 +47,15 @@ def download_soulx_checkpoint(local_dir: Path, revision: str) -> Path:
 
 
 def main() -> None:
-    singer_revision, preprocess_revision = locked_revisions()
     parser = argparse.ArgumentParser(description="Download SoulX-Singer SVC model assets for the Docker service.")
     parser.add_argument("--models-dir", type=Path, default=Path(__file__).resolve().parent / "models")
+    parser.add_argument("--references-dir", type=Path, default=Path(__file__).resolve().parent / "references")
+    parser.add_argument("--lock-path", type=Path, default=RESOURCE_LOCK_PATH)
+    args, _ = parser.parse_known_args()
+    lock = json.loads(args.lock_path.resolve().read_text(encoding="utf-8"))
+    sources = lock["resources"]["soulx"]["sources"]
+    singer_revision = str(sources[0]["revision"])
+    preprocess_revision = str(sources[1]["revision"])
     parser.add_argument("--singer-revision", default=singer_revision)
     parser.add_argument("--preprocess-revision", default=preprocess_revision)
     args = parser.parse_args()
@@ -67,7 +67,7 @@ def main() -> None:
         args.preprocess_revision,
     )
     emit_progress("verifying", "Verifying SoulX model files")
-    references = Path(__file__).resolve().parent / "references"
+    references = args.references_dir.resolve()
     references.mkdir(parents=True, exist_ok=True)
     print(f"Downloaded SoulX models under {args.models_dir}")
     print(f"Checkpoint ready at {checkpoint}")

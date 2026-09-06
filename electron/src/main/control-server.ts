@@ -21,6 +21,8 @@ import { createTransientBackendApiTokenStore, type BackendApiTokenStoreLike } fr
 import { ProviderCredentialStore } from './provider-credential-store'
 import type { OnboardingReadinessCoordinator } from './onboarding-readiness-coordinator'
 import { handleOnboardingRoutes } from './http/routes/onboarding-routes'
+import { handleMcpVaultRoutes } from './http/routes/mcp-vault-routes'
+import type { McpConfigVault } from './mcp-config-vault'
 
 const parseLocalPort = (value: string | undefined, fallback: number): number => {
   const port = Number.parseInt(String(value || '').trim(), 10)
@@ -81,6 +83,8 @@ export class ControlServer {
     private readonly providerCredentialStore: ProviderCredentialStore,
     private readonly backendApiTokenStore: BackendApiTokenStoreLike = createTransientBackendApiTokenStore(),
     private readonly hostPerceptionToken: string = '',
+    private readonly mcpConfigVault: McpConfigVault | null = null,
+    private readonly mcpVaultToken: string = '',
   ) {}
 
   private resolveAllowedOrigin(originHeader: string | undefined): string | null {
@@ -93,7 +97,7 @@ export class ControlServer {
     }
     try {
       const parsed = new URL(origin)
-      const isLoopbackHost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1'
+      const isLoopbackHost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '[::1]'
       const isHttpOrigin = parsed.protocol === 'http:' || parsed.protocol === 'https:'
       return isLoopbackHost && isHttpOrigin && parsed.origin === origin ? origin : null
     } catch {
@@ -119,6 +123,10 @@ export class ControlServer {
 
   getControlToken(): string {
     return this.backendApiTokenStore.getBackendApiToken()
+  }
+
+  get mcpVaultUrl(): string {
+    return `http://127.0.0.1:${this.port}/api/internal/mcp-config-vault`
   }
 
   setPerceptionBridge(bridge: AuthorizedPerceptionBridge): void {
@@ -276,6 +284,9 @@ export class ControlServer {
     method: string,
     url: URL,
   ): Promise<void> {
+    if (await handleMcpVaultRoutes(req, res, method, url, this.mcpConfigVault, this.mcpVaultToken)) {
+      return
+    }
     if (this.onboardingCoordinator && await handleOnboardingRoutes(req, res, method, url, this.onboardingCoordinator)) {
       return
     }

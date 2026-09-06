@@ -202,6 +202,11 @@ export class Live2DWindow {
   private lastCompanionIdleProfile: PetCompanionIdleProfile | null = null
   private topMostGuardTimer: NodeJS.Timeout | null = null
   private recoveryTimer: NodeJS.Timeout | null = null
+  private blurHandler: (() => void) | null = null
+
+  setBlurHandler(handler: (() => void) | null): void {
+    this.blurHandler = handler
+  }
 
   create(controlOrigin = ''): BrowserWindow {
     const primaryDisplay = screen.getPrimaryDisplay()
@@ -317,6 +322,7 @@ export class Live2DWindow {
     })
 
     this.win.on('blur', () => {
+      this.blurHandler?.()
       this.ensureTopMost()
     })
 

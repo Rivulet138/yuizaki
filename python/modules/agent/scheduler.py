@@ -1,24 +1,24 @@
 from __future__ import annotations
 
 import asyncio
-from collections import OrderedDict
-from collections.abc import Mapping
-from dataclasses import dataclass, field
-from datetime import datetime
 import inspect
 import logging
 import os
 import time
 import uuid
-from typing import Any, Callable
+from collections import OrderedDict
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
 
+from ..system.memory_write_pipeline import build_task_completed_event
 from .companion_events import CompanionJobCapacityError, CompanionJobEventLog
 from .context import AgentRequestContext
 from .models import SchedulerRunRecord
 from .pipeline import AgentPipeline
 from .route_policy import resolve_schedule_route
-from .schedule_store import ScheduleStore, ScheduledTask
-from ..system.memory_write_pipeline import build_task_completed_event
+from .schedule_store import ScheduledTask, ScheduleStore
 
 logger = logging.getLogger(__name__)
 
@@ -315,8 +315,8 @@ class AgentScheduler:
             task.result()
         except asyncio.CancelledError:
             pass
-        except Exception as exc:
-            logger.exception("Scheduled task background run failed: %s", exc)
+        except Exception:
+            logger.exception("Scheduled task background run failed")
 
     async def _load_durable_commit(
         self,
@@ -362,7 +362,9 @@ class AgentScheduler:
         summary = str(field_value("reply", "") or "")[:160] or None
         run.status = outcome
         run.outcome = outcome
-        run.retryable = bool(field_value("retryable", False))
+        # An unknown external effect is terminal and must never advertise an
+        # automatic retry, including when replaying malformed durable data.
+        run.retryable = False if outcome == "unknown_effect" else bool(field_value("retryable", False))
         run.summary = summary
         run.configured_budget = dict(field_value("configured_budget", {}) or {})
         run.consumed_usage = dict(field_value("consumed_usage", {}) or {})
@@ -564,7 +566,7 @@ class AgentScheduler:
                 try:
                     from .context import get_runtime_bindings
                     bindings = get_runtime_bindings(ctx)
-                except Exception:
+                except Exception:  # noqa: BLE001 - optional relationship bindings must not fail a run
                     bindings = None
                 relationship_writer = bindings.relationship_event_writer if bindings is not None else None
                 if relationship_writer:
@@ -579,7 +581,7 @@ class AgentScheduler:
                 trace_store = getattr(ctx, "trace_store", None)
                 if trace_store is not None:
                     trace_store.append("scheduler", SchedulerRunRecord(
-                        timestamp=datetime.now().isoformat(),
+                        timestamp=datetime.now(UTC).isoformat(),
                         task_id=task.id,
                         task_name=task.name,
                         mode=task.mode,
@@ -625,21 +627,21 @@ class AgentScheduler:
                 self._emit_event(run, task, "cancelled", reason="cancelled")
             terminal_emitted = True
             raise
-        except Exception as exc:
-            task.last_status = f"error:{exc}"
+        except Exception:  # noqa: BLE001 - scheduler must persist a safe terminal projection
+            task.last_status = "error:scheduled_task_exception"
             task.last_request_id = str(getattr(ctx, "request_id", None) or run.request_id) if ctx is not None else run.request_id
-            task.last_run_summary = str(exc)
+            task.last_run_summary = "scheduled task failed; inspect the local log"
             trace_store = getattr(ctx, "trace_store", None) if ctx is not None else None
             if not uses_turn_authority and trace_store is not None:
                 trace_store.append("scheduler", SchedulerRunRecord(
-                    timestamp=datetime.now().isoformat(),
+                    timestamp=datetime.now(UTC).isoformat(),
                     task_id=task.id,
                     task_name=task.name,
                     mode=task.mode,
-                    status=f"error:{exc}",
+                    status="error:scheduled_task_exception",
                     run_id=run.run_id,
                     job_id=run.job_id,
-                    summary=str(exc),
+                    summary="scheduled task failed; inspect the local log",
                     request_id=getattr(ctx, "request_id", None) or run.request_id,
                     owner_agent_id=task.owner_agent_id,
                     owner_agent_role=task.owner_agent_role,
@@ -649,7 +651,7 @@ class AgentScheduler:
             if durable_commit is not None:
                 self._reconcile_durable_commit(run, task, durable_commit)
             else:
-                self._emit_event(run, task, "failed", error=str(exc))
+                self._emit_event(run, task, "failed", error="scheduled_task_exception")
             terminal_emitted = True
         finally:
             self._active_task_ids.discard(task.id)

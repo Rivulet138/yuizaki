@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from collections import OrderedDict
 from collections.abc import Mapping
 from copy import deepcopy
@@ -36,6 +37,52 @@ _LIFECYCLE_EVENT_SUFFIXES = ("started", "completed", "failed", "cancelled", "int
 _JOB_STATUS_TO_PRESENTATION_TYPE = {
     status: event_type for status, event_type in _EVENT_TYPES.items()
 }
+
+_JOB_DATA_MAX_TEXT = 512
+_JOB_DATA_MAX_ITEMS = 32
+_JOB_DATA_MAX_LIST_ITEMS = 16
+_JOB_DATA_MAX_DEPTH = 6
+_JOB_DATA_SECRET_PARTS = (
+    "api_key", "apikey", "authorization", "bearer", "cookie", "credential",
+    "password", "private_key", "secret", "token", "webhook", "raw_audio",
+)
+_JOB_DATA_SECRET_TEXT_PATTERNS = (
+    re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}"),
+    re.compile(r"(?i)(?:[?&]|\b)(?:api[_-]?key|access[_-]?token|bot[_-]?token|token|password|secret|webhook(?:[_-]?secret)?)\s*[=:]\s*[^&#\s,;]+"),
+)
+
+
+def _sanitize_job_data(value: Any, *, depth: int = 0) -> Any:
+    """Return a bounded, redacted projection suitable for durable job events."""
+    if depth >= _JOB_DATA_MAX_DEPTH:
+        return "[TRUNCATED]"
+    if isinstance(value, str):
+        redacted = value
+        for pattern in _JOB_DATA_SECRET_TEXT_PATTERNS:
+            redacted = pattern.sub("[REDACTED]", redacted)
+        return redacted if len(redacted) <= _JOB_DATA_MAX_TEXT else f"{redacted[:_JOB_DATA_MAX_TEXT - 3]}..."
+    if isinstance(value, Mapping):
+        entries = list(value.items())
+        result: dict[str, Any] = {}
+        for raw_key, child in entries[:_JOB_DATA_MAX_ITEMS]:
+            key = str(raw_key)[:128]
+            normalized = key.lower().replace("-", "_")
+            result[key] = (
+                "[REDACTED]"
+                if any(part in normalized for part in _JOB_DATA_SECRET_PARTS)
+                else _sanitize_job_data(child, depth=depth + 1)
+            )
+        if len(entries) > _JOB_DATA_MAX_ITEMS:
+            result["__truncatedItems"] = len(entries) - _JOB_DATA_MAX_ITEMS
+        return result
+    if isinstance(value, (list, tuple)):
+        result = [_sanitize_job_data(item, depth=depth + 1) for item in value[:_JOB_DATA_MAX_LIST_ITEMS]]
+        if len(value) > _JOB_DATA_MAX_LIST_ITEMS:
+            result.append(f"[TRUNCATED {len(value) - _JOB_DATA_MAX_LIST_ITEMS} ITEMS]")
+        return result
+    if isinstance(value, (bool, int, float)) or value is None:
+        return value
+    return _sanitize_job_data(str(value), depth=depth)
 
 
 class CompanionJobCapacityError(RuntimeError):
@@ -436,6 +483,8 @@ class CompanionJobEventLog:
         normalized_step_index = None if step_index is None else max(0, int(step_index))
         projection_key = str(idempotency_key or "").strip() or None
         normalized_timestamp = _normalize_event_timestamp(timestamp)
+        sanitized_data = _sanitize_job_data(data) if data is not None else None
+        data = sanitized_data if isinstance(sanitized_data, dict) else None
         with self._lock:
             scoped_job_id = self._storage_key(workspace_id, job_id)
             if projection_key is not None and projection_key in self._projection_events:

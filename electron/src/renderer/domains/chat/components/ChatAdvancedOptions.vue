@@ -58,6 +58,16 @@
 </template>
 
 <script setup lang="ts">
+import { ElIcon, ElPopover } from 'element-plus'
+import 'element-plus/es/components/icon/style/css'
+import 'element-plus/es/components/popover/style/css'
+import { ElSlider } from 'element-plus'
+import 'element-plus/es/components/slider/style/css'
+import { ElOption, ElSelect } from 'element-plus'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
+import { ElInputNumber } from 'element-plus'
+import 'element-plus/es/components/input-number/style/css'
 import { Timer } from '@element-plus/icons-vue'
 
 export type ChatAdvancedOptionsModel = {

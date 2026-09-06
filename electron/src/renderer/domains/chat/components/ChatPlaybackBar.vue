@@ -34,6 +34,8 @@
 </template>
 
 <script setup lang="ts">
+import { ElIcon } from 'element-plus'
+import 'element-plus/es/components/icon/style/css'
 import { computed } from 'vue'
 import { Headset, Mute, StarFilled } from '@element-plus/icons-vue'
 import { useI18n } from '@/i18n'

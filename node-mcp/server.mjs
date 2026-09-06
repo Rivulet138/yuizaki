@@ -42,6 +42,41 @@ const manifestPayload = {
   prompts: [],
 };
 
+class McpInputError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'McpInputError';
+    this.code = 'INVALID_TOOL_INPUT';
+  }
+}
+
+function browserUrl(value, fallback) {
+  const raw = value === undefined || value === null || value === '' ? fallback : value;
+  if (typeof raw !== 'string' || raw.length > 2_048) {
+    throw new McpInputError('Browser URL must be a string of at most 2048 characters');
+  }
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new McpInputError('Browser URL is invalid');
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new McpInputError('Browser URL must use http or https');
+  }
+  if (parsed.username || parsed.password) {
+    throw new McpInputError('Browser URL must not contain credentials');
+  }
+  return parsed.toString();
+}
+
+function browserSelector(value) {
+  if (typeof value !== 'string' || !value.trim() || value.length > 1_024) {
+    throw new McpInputError('Browser selector must be a non-empty string of at most 1024 characters');
+  }
+  return value;
+}
+
 const emitSseEvent = (event, payload) => {
   const frame = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
   for (const client of sseClients) {
@@ -64,8 +99,11 @@ async function withBrowser(fn) {
 }
 
 async function handleToolCall(name, args) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    throw new McpInputError('Tool args must be an object');
+  }
   if (name === 'browser.open_page') {
-    const url = args.url || 'https://example.com';
+    const url = browserUrl(args.url);
     await withBrowser(async (page) => {
       await page.goto(url, { waitUntil: 'networkidle' });
     });
@@ -73,8 +111,8 @@ async function handleToolCall(name, args) {
   }
 
   if (name === 'browser.click') {
-    const url = args.url || 'https://example.com';
-    const selector = args.selector || 'body';
+    const url = browserUrl(args.url, 'https://example.com');
+    const selector = browserSelector(args.selector);
     await withBrowser(async (page) => {
       await page.goto(url, { waitUntil: 'networkidle' });
       await page.click(selector);
@@ -150,7 +188,7 @@ if (useStdio) {
       if (requestId) {
         emitSseEvent('tool-result', payload);
       }
-      res.status(500).json(payload);
+      res.status(err?.code === 'INVALID_TOOL_INPUT' ? 400 : 500).json(payload);
     }
   });
 

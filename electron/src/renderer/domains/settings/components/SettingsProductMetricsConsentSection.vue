@@ -36,6 +36,14 @@
 </template>
 
 <script setup lang="ts">
+import { ElAlert } from 'element-plus'
+import 'element-plus/es/components/alert/style/css'
+import { ElSwitch } from 'element-plus'
+import 'element-plus/es/components/switch/style/css'
+import { ElCard } from 'element-plus'
+import 'element-plus/es/components/card/style/css'
+import { ElTag } from 'element-plus'
+import 'element-plus/es/components/tag/style/css'
 import { computed, onMounted, ref } from 'vue'
 import { t } from '@/i18n'
 import { systemClient } from '@/api/clients/system-client'

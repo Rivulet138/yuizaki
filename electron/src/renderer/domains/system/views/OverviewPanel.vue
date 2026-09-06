@@ -435,6 +435,20 @@
 </template>
 
 <script setup lang="ts">
+import { ElEmpty } from 'element-plus'
+import 'element-plus/es/components/empty/style/css'
+import { ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import { ElAlert } from 'element-plus'
+import 'element-plus/es/components/alert/style/css'
+import { ElSlider, ElSwitch } from 'element-plus'
+import 'element-plus/es/components/slider/style/css'
+import 'element-plus/es/components/switch/style/css'
+import { ElOption, ElSelect } from 'element-plus'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
+import { ElTag } from 'element-plus'
+import 'element-plus/es/components/tag/style/css'
 import { computed, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref } from 'vue'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'

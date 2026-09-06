@@ -40,7 +40,28 @@
   </div>
 </template>
 <script setup lang="ts">
+import 'element-plus/es/components/button/style/css'
+import 'element-plus/es/components/switch/style/css'
+import { ElInputNumber } from 'element-plus'
+import 'element-plus/es/components/input-number/style/css'
+import 'element-plus/es/components/tag/style/css'
+import 'element-plus/es/components/form/style/css'
+import 'element-plus/es/components/form-item/style/css'
 import { computed, reactive } from 'vue'
+import {
+  ElButton,
+  ElForm,
+  ElFormItem,
+  ElInput,
+  ElProgress,
+  ElSelect,
+  ElOption,
+  ElSlider,
+  ElSwitch,
+  ElTag,
+} from 'element-plus'
+import 'element-plus/es/components/input/style/css'
+import 'element-plus/es/components/progress/style/css'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import type { MemoryIndexStatus, MemoryLayer, MemoryMaintenancePolicy, MemoryMaintenancePreview, MemoryQueryForm, MemoryScoreComponents, TagType } from './memory-panel-types'
 import type { MemoryIndexRebuildJob, MemoryRecallFeedback } from '@/api/clients/memory-client'

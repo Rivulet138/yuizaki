@@ -122,12 +122,18 @@ def main() -> None:
         type=Path,
         default=Path(__file__).resolve().parents[1] / ".cache" / "GenieData" / "GenieData",
     )
+    parser.add_argument(
+        "--workspace-root",
+        type=Path,
+        default=Path(__file__).resolve().parents[1],
+        help="Writable workspace root for downloaded CharacterModels assets.",
+    )
     args = parser.parse_args()
 
     character = validate_character_name(args.character)
     language = normalize_genie_language(args.language)
     genie_data_dir = args.genie_data_dir.resolve()
-    workspace_root = Path(__file__).resolve().parents[1]
+    workspace_root = args.workspace_root.resolve()
     os.environ.setdefault("GENIE_DATA_DIR", str(genie_data_dir))
     os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "30")
     os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "10")

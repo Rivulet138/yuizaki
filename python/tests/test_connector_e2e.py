@@ -100,6 +100,41 @@ async def test_telegram_webhook_durable_delivery_and_replay_are_idempotent(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_provider_exception_is_redacted_from_delivery_state_and_response(tmp_path: Path) -> None:
+    secret_url = "https://api.example.test/send?bot_token=token-bearing-secret"
+
+    def http_post(_url: str, _headers: object, _payload: object) -> dict[str, object]:
+        raise RuntimeError(f"POST {secret_url} failed")
+
+    registry = MessageConnectorRegistry(http_post=http_post)
+    registry.update_config("telegram", {
+        "botToken": "bot-token",
+        "webhookSecret": "webhook-secret",
+        "enabled": True,
+    })
+    store = TurnCommitStore(tmp_path / "turns.sqlite3")
+    app = FastAPI()
+    app.include_router(create_message_connector_router(
+        registry_provider=lambda: registry,
+        turn_service_provider=lambda: FakeTurnService(),
+        active_workspace_id_provider=lambda: "default",
+        delivery_store_provider=lambda: store,
+        fast_ack_connectors={"telegram"},
+    ))
+    payload = {"update_id": 99, "message": {"chat": {"id": 123}, "from": {"id": 456}, "text": "你好"}}
+    headers = {"X-Telegram-Bot-Api-Secret-Token": "webhook-secret"}
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/system/connectors/telegram/webhook", json=payload, headers=headers)
+        assert response.status_code == 200
+        assert secret_url not in response.text
+        row = await _wait_for_status(store, "connector:telegram:99", "failed")
+
+    assert row["last_error"] == "connector_provider_exception"
+    assert secret_url not in str(row)
+
+
+@pytest.mark.asyncio
 async def test_discord_interaction_webhook_verifies_signature_and_converges_deferred_reply(tmp_path: Path) -> None:
     # RFC 8032 test-vector key, reused only for deterministic local signing.
     public_key = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"

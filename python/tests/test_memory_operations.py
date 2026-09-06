@@ -4,11 +4,16 @@ import sqlite3
 from pathlib import Path
 
 import numpy as np
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
+from modules.memory.backend import MemorySearchIncompleteError
 from modules.memory.operations import MemoryOperationLog, new_operation
-from modules.memory.routes import MemoryState, create_memory_pipeline_router, create_memory_router
+from modules.memory.routes import (
+    MemoryState,
+    create_memory_pipeline_router,
+    create_memory_router,
+)
 from modules.memory.schema import MemorySearchFilters
 from modules.memory.sqlite_store import SQLiteMemoryStore
 from modules.memory.vector_store import Document, VectorStore, is_memory_recallable
@@ -21,6 +26,19 @@ class _Embedding:
         return np.array([float(len(text)), 1.0, 0.0, 0.0], dtype=np.float32)
 
 
+class _DedupeScanIncompleteStore(VectorStore):
+    """Backend double: duplicate evidence is incomplete before any write."""
+
+    def search_with_rerank(self, **kwargs):
+        raise MemorySearchIncompleteError(
+            requested_count=1,
+            selected_ids=[],
+            scanned_count=32,
+            rejected_count=32,
+            scan_limit=32,
+        )
+
+
 def test_operation_log_is_bounded_and_newest_first() -> None:
     log = MemoryOperationLog(max_operations=100)
     for index in range(105):
@@ -29,6 +47,35 @@ def test_operation_log_is_bounded_and_newest_first() -> None:
     operations = log.list(limit=200)
     assert len(operations) == 100
     assert operations[0]["document_id"] == "doc-104"
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        (
+            "/memory/docs",
+            {"text": "dedupe scan incomplete", "scope": "workspace", "workspace_id": "ws-1"},
+        ),
+        (
+            "/memory/memory/add",
+            {"text": "dedupe scan incomplete", "scope": "workspace", "workspace_id": "ws-1"},
+        ),
+    ],
+)
+def test_dedupe_incomplete_fails_closed_without_writing(path: str, payload: dict[str, object]) -> None:
+    state = MemoryState(store=_DedupeScanIncompleteStore(embedding_service=_Embedding()))
+    app = FastAPI()
+    app.include_router(create_memory_router(state, get_active_workspace_id=lambda: "ws-1"))
+    client = TestClient(app)
+    before = state.store.list_documents()
+
+    response = client.post(path, json=payload)
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert detail["error"] == "memory_dedupe_incomplete"
+    assert detail["complete"] is False
+    assert state.store.list_documents() == before
 
 
 def test_operation_log_normalizes_scope_ids() -> None:

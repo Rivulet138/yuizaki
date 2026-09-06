@@ -23,6 +23,12 @@
 </template>
 
 <script setup lang="ts">
+import { ElSegmented } from 'element-plus'
+import 'element-plus/es/components/segmented/style/css'
+import { ElCard, ElForm, ElFormItem } from 'element-plus'
+import 'element-plus/es/components/card/style/css'
+import 'element-plus/es/components/form/style/css'
+import 'element-plus/es/components/form-item/style/css'
 import { t } from '@/i18n'
 
 export type InterfaceSettings = {

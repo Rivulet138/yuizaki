@@ -1,4 +1,4 @@
-import { app, clipboard, desktopCapturer, dialog, screen, shell } from 'electron'
+import { app, clipboard, desktopCapturer, dialog, powerMonitor, screen, shell } from 'electron'
 import path from 'path'
 import { readFile, stat } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
@@ -22,6 +22,7 @@ import { BackendApiTokenStore } from './backend-api-token-store'
 import { InputBindingStore } from './input-binding-store'
 import { resolvePythonApiOrigin } from './http/python-origin'
 import { ProviderCredentialStore } from './provider-credential-store'
+import { McpConfigVault } from './mcp-config-vault'
 import {
   DEFAULT_INPUT_BINDINGS,
   mergeInputBindingSettings,
@@ -56,6 +57,8 @@ import {
 import { fenceDesktopActionsWhenHotkeyUnavailable } from './desktop-action-hotkey-coordinator'
 import { rebindInputBindingsWithDesktopActionFence } from './input-binding-rebind-coordinator'
 import { configureLinuxDesktop } from './linux-desktop'
+import { isPackagedRuntime, resolveRuntimeProjectRoot, resolveWritableRuntimePaths } from './runtime-paths'
+import { resolveHostDesktopActionToken } from './runtime-auth'
 
 registerRendererProtocolPrivileges()
 configureLinuxDesktop(app, process.env)
@@ -72,6 +75,7 @@ let pluginRegistry: PluginRegistry
 let backendApiTokenStore: BackendApiTokenStore
 let inputBindingStore: InputBindingStore
 let providerCredentialStore: ProviderCredentialStore
+let mcpConfigVault: McpConfigVault
 let packageLifecycle: PackageLifecycle
 let onboardingCoordinator: OnboardingReadinessCoordinator
 let computerUseBridge: ComputerUseBridge
@@ -176,6 +180,9 @@ async function applyInputBindings(settings: InputBindingSettings): Promise<Input
     petShortcuts,
     desktopActionBridge,
   )
+  const registrationErrors = inputBindingStatus.errors
+  const settledStatus = await petShortcuts.waitForMouseHook()
+  inputBindingStatus = { ...settledStatus, errors: registrationErrors }
   fenceDesktopActionsWhenHotkeyUnavailable(inputBindingStatus, desktopActionBridge)
   refreshTrayVoiceBinding(settings)
   return { settings, status: inputBindingStatus }
@@ -212,15 +219,21 @@ function setPetVisible(visible: boolean): void {
 
 async function createApp(): Promise<void> {
   const hostPerceptionToken = process.env['YUIZAKI_HOST_PERCEPTION_TOKEN']?.trim() || randomBytes(32).toString('base64url')
-  const hostDesktopActionToken = randomBytes(32).toString('base64url')
+  const hostDesktopActionToken = resolveHostDesktopActionToken(
+    process.env,
+    () => randomBytes(32).toString('base64url'),
+  )
+  const mcpVaultToken = randomBytes(32).toString('base64url')
   petWindow = new PetWindow()
   live2dWindow = new Live2DWindow()
   petTray = new PetTray()
   pluginRegistry = new PluginRegistry()
   backendApiTokenStore = new BackendApiTokenStore(path.join(app.getPath('userData'), 'auth'))
   providerCredentialStore = new ProviderCredentialStore(path.join(app.getPath('userData'), 'credentials'))
-  providerCredentialStore.migratePlaintextSettings(path.resolve(__dirname, '../../../python/config/settings.json'))
-  providerCredentialStore.migratePlaintextConnectorState(path.resolve(__dirname, '../../../python/data/message_connectors.json'))
+  mcpConfigVault = new McpConfigVault(path.join(app.getPath('userData'), 'credentials'))
+  const runtimeRoot = resolveRuntimeProjectRoot()
+  providerCredentialStore.migratePlaintextSettings(path.join(runtimeRoot, 'python', 'config', 'settings.json'))
+  providerCredentialStore.migratePlaintextConnectorState(path.join(runtimeRoot, 'python', 'data', 'message_connectors.json'))
   inputBindingStore = new InputBindingStore(path.join(app.getPath('userData'), 'input'))
   const packageStateStore: JsonPackageStateStore = createDefaultPackageStateStore(app.getPath('userData'))
   const packageArtifactStore: LocalPackageArtifactStore = createDefaultPackageArtifactStore(app.getPath('userData'))
@@ -256,6 +269,8 @@ async function createApp(): Promise<void> {
     providerCredentialStore,
     backendApiTokenStore,
     hostPerceptionToken,
+    mcpConfigVault,
+    mcpVaultToken,
   )
   computerUseBridge = new ComputerUseBridge(createAuthenticatedComputerUseBackendPort(
     resolvePythonApiOrigin(),
@@ -413,9 +428,21 @@ async function createApp(): Promise<void> {
       )
     },
   )
+  live2dWindow.setBlurHandler(() => petShortcuts.releasePushToTalk())
+  const pythonEnvironment = providerCredentialStore.getPythonEnvironment()
+  if (isPackagedRuntime(runtimeRoot)) {
+    const writable = resolveWritableRuntimePaths(app.getPath('userData'))
+    pythonEnvironment['YUIZAKI_DATA_DIR'] ||= writable.dataDir
+    pythonEnvironment['YUIZAKI_SETTINGS_PATH'] ||= writable.settingsPath
+    pythonEnvironment['AUDIO_CACHE_DIR'] ||= writable.audioCacheDir
+    pythonEnvironment['HF_HOME'] ||= writable.huggingfaceHome
+    pythonEnvironment['GENIE_DATA_DIR'] ||= writable.genieDataDir
+    pythonEnvironment['SHERPA_ONNX_MODEL_PATH'] ||= path.join(writable.sherpaOnlineDir, 'model.int8.onnx')
+    pythonEnvironment['SHERPA_ONNX_TOKENS_PATH'] ||= path.join(writable.sherpaOnlineDir, 'tokens.txt')
+  }
   pythonService = new PythonService(
     controlServer.getControlToken(),
-    providerCredentialStore.getPythonEnvironment(),
+    pythonEnvironment,
     hostPerceptionToken,
     hostDesktopActionToken,
   )
@@ -466,6 +493,11 @@ async function createApp(): Promise<void> {
   setupIPC()
 
   await controlServer.start()
+  pythonService.updateProviderCredentialEnvironment({
+    ...pythonEnvironment,
+    YUIZAKI_MCP_VAULT_URL: controlServer.mcpVaultUrl,
+    YUIZAKI_MCP_VAULT_TOKEN: mcpVaultToken,
+  })
   live2dWindow.create(controlServer.panelUrl.replace(/\/$/, ''))
   applyPetStateToRenderer(petStateStore.getState())
   if (browserOnly) {
@@ -480,6 +512,12 @@ async function createApp(): Promise<void> {
   const inputSettings = inputBindingStore.get()
   inputBindingStatus = petShortcuts.register(inputSettings)
   fenceDesktopActionsWhenHotkeyUnavailable(inputBindingStatus, desktopActionBridge)
+  void petShortcuts.waitForMouseHook().then((status) => {
+    const errors = inputBindingStatus.errors
+    inputBindingStatus = { ...status, errors }
+    fenceDesktopActionsWhenHotkeyUnavailable(inputBindingStatus, desktopActionBridge)
+    refreshTrayVoiceBinding(inputSettings)
+  })
 
   petTray.create(
     live2dWindow,
@@ -673,6 +711,18 @@ app.on('window-all-closed', () => {
   if (isQuitting && process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+powerMonitor.on('lock-screen', () => {
+  petShortcuts?.releasePushToTalk()
+})
+
+powerMonitor.on('suspend', () => {
+  petShortcuts?.releasePushToTalk()
+})
+
+app.on('browser-window-blur', () => {
+  petShortcuts?.releasePushToTalk()
 })
 
 app.on('before-quit', async () => {

@@ -28,7 +28,8 @@ export interface InputBindingSnapshot {
 
 export const DEFAULT_INPUT_BINDINGS: InputBindingSettings = {
   pushToTalk: {
-    enabled: true,
+    // Global mouse hooks require explicit user opt-in.
+    enabled: false,
     mouseButton: 5,
   },
   keyboard: {

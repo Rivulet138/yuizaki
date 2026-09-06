@@ -103,11 +103,14 @@ npm ci
 npm run dev
 npm run type-check
 npm run lint
+npm run test:unit
 npm run build
 npm run start:check
 ```
 
-`npm run dev` 同时启动 TypeScript watch、Vite 和 Electron。发行包使用 `npm run package:win` 或 `npm run package:linux`。Electron 没有 `npm test` 脚本。
+`npm run dev` 同时启动 TypeScript watch、Vite 和 Electron。`npm run test:unit` 执行当前 Vitest 单元测试。发行包使用 `npm run package:win` 或 `npm run package:linux`。
+
+桌面输入中的鼠标侧键“按住说话”默认关闭。启用后才会按需加载全局鼠标监听；键盘快捷键不受影响。应用会在退出、锁屏和挂起时释放语音按键状态。
 
 ## 配置
 
@@ -139,15 +142,15 @@ Python 入口是 [python/app.py](python/app.py)，AI 路由在 `python/routes/ai
 
 - Python：`/api/ping`、`/api/system/*`、`/v1/models`、`/v1/chat/completions`、工作区/会话/记忆/连接器/存储接口，以及 `/socket.io`。
 - Electron：`/api/pet/*`、模型与资源管理、系统诊断、Provider 设置、工作区和会话控制接口。
-- node-mcp：`http://127.0.0.1:7777/health`、`/tools`、`/sse`。
+- node-mcp：`http://127.0.0.1:7777/health`、`/tools`、`/events`（SSE）。
 
 详细字段和事件契约见 [docs/API.md](docs/API.md)；架构边界见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 验证
 
 ```powershell
+python -m pytest -q
 cd python
-python -m pytest tests -q
 python -m compileall -q modules routes app.py socket_server.py
 cd ..
 python scripts/check_docs.py
@@ -156,7 +159,7 @@ cd python
 python scripts/check_requirements_lock.py
 ```
 
-CI 还会运行内存、流、连接器和语音 staging checks，以及 Electron `npm ci`、type-check、lint、build、start-check 和 Windows Launcher `go test ./...`。第三方 Provider、音频设备、GPU、桌面 compositor 和角色资源仍需目标机器验证。
+CI 还会运行内存、流、连接器和语音 staging checks，以及 Electron `npm ci`、type-check、lint、unit tests、build、start-check 和 Windows Launcher `go test ./...`。第三方 Provider、音频设备、GPU、桌面 compositor 和角色资源仍需目标机器验证。
 
 ## 数据、许可与贡献
 

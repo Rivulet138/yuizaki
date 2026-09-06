@@ -110,6 +110,7 @@ import GlobalDialogs from './components/dialogs/GlobalDialogs.vue'
 import { useAppOrchestrator } from './orchestrators/useAppOrchestrator'
 import { useVoiceConversationBridge } from './composables/useVoiceConversationBridge'
 import { useCompanionRuntimeBridge } from './composables/useCompanionRuntimeBridge'
+import { useClientPerformanceMetrics } from './composables/useClientPerformanceMetrics'
 import { publishCompanionRuntimeEvent } from './runtime/companionRuntime'
 import { createAppRuntimeTeardown } from './runtime/appRuntimeTeardown'
 import { createVisualCaptureRuntime } from './runtime/visualCaptureRuntime'
@@ -125,6 +126,7 @@ const chatStore = useChatStore()
 const orchestrator = useAppOrchestrator()
 const companionRuntime = useCompanionRuntimeBridge()
 useVoiceConversationBridge()
+useClientPerformanceMetrics()
 const route = useRoute()
 const router = useRouter()
 const petApi = window.petApi
@@ -501,6 +503,8 @@ watch(
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  contain: layout paint;
+  isolation: isolate;
   border: 1px solid var(--yui-panel-border);
   border-radius: 8px;
   background: var(--yui-app-main-panel-bg);
@@ -539,6 +543,7 @@ watch(
   position: relative;
   flex: 1;
   min-height: 0;
+  contain: layout paint;
 }
 
 .view-component {
@@ -673,7 +678,7 @@ watch(
   --yui-surface-muted: rgba(246, 248, 251, 0.62);
   --yui-surface-subtle: rgba(238, 244, 251, 0.56);
   --yui-panel-surface: rgba(255, 255, 255, 0.58);
-  --yui-panel-surface-strong: rgba(255, 255, 255, 0.76);
+  --yui-panel-surface-strong: rgba(255, 255, 255, 0.88);
   --yui-panel-outline: rgba(255, 255, 255, 0.78);
   --yui-panel-outline-strong: rgba(255, 255, 255, 0.94);
   --yui-panel-shadow: 0 12px 28px rgba(15, 23, 42, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.5);
@@ -689,14 +694,14 @@ watch(
   --yui-warning-soft: #fffbeb;
   --yui-danger-soft: #fff1f2;
   --yui-app-main-panel-bg: transparent;
-  --yui-panel-wallpaper-opacity: 1;
-  --yui-panel-wallpaper-mask: transparent;
+  --yui-panel-wallpaper-opacity: 0.92;
+  --yui-panel-wallpaper-mask: rgba(255, 255, 255, 0.08);
   --yui-chat-page-bg: transparent;
   --yui-chat-wallpaper-opacity: 1;
   --yui-chat-wallpaper-mask: transparent;
-  --yui-chat-surface: rgba(255, 255, 255, 0.74);
-  --yui-chat-surface-muted: rgba(241, 245, 249, 0.66);
-  --yui-chat-sidebar-bg: rgba(244, 247, 251, 0.62);
+  --yui-chat-surface: rgba(255, 255, 255, 0.86);
+  --yui-chat-surface-muted: rgba(241, 245, 249, 0.8);
+  --yui-chat-sidebar-bg: rgba(244, 247, 251, 0.76);
   --yui-chat-border: rgba(203, 213, 225, 0.82);
   --yui-chat-text: #172033;
   --yui-chat-muted: #64748b;
@@ -720,8 +725,8 @@ watch(
   --yui-surface-raised: #111827;
   --yui-surface-muted: rgba(30, 41, 59, 0.64);
   --yui-surface-subtle: rgba(36, 48, 68, 0.58);
-  --yui-panel-surface: rgba(15, 23, 42, 0.64);
-  --yui-panel-surface-strong: rgba(15, 23, 42, 0.8);
+  --yui-panel-surface: rgba(15, 23, 42, 0.78);
+  --yui-panel-surface-strong: rgba(15, 23, 42, 0.9);
   --yui-panel-outline: rgba(148, 163, 184, 0.46);
   --yui-panel-outline-strong: rgba(203, 213, 225, 0.66);
   --yui-panel-shadow: 0 14px 32px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -737,14 +742,14 @@ watch(
   --yui-warning-soft: rgba(245, 158, 11, 0.14);
   --yui-danger-soft: rgba(244, 63, 94, 0.14);
   --yui-app-main-panel-bg: transparent;
-  --yui-panel-wallpaper-opacity: 1;
-  --yui-panel-wallpaper-mask: transparent;
+  --yui-panel-wallpaper-opacity: 0.88;
+  --yui-panel-wallpaper-mask: rgba(11, 18, 32, 0.16);
   --yui-chat-page-bg: transparent;
   --yui-chat-wallpaper-opacity: 1;
   --yui-chat-wallpaper-mask: transparent;
-  --yui-chat-surface: rgba(17, 24, 39, 0.76);
-  --yui-chat-surface-muted: rgba(30, 41, 59, 0.68);
-  --yui-chat-sidebar-bg: rgba(11, 18, 32, 0.68);
+  --yui-chat-surface: rgba(17, 24, 39, 0.86);
+  --yui-chat-surface-muted: rgba(30, 41, 59, 0.8);
+  --yui-chat-sidebar-bg: rgba(11, 18, 32, 0.78);
   --yui-chat-border: rgba(71, 85, 105, 0.82);
   --yui-chat-text: #e5e7eb;
   --yui-chat-muted: #94a3b8;
@@ -763,8 +768,8 @@ watch(
   --yui-browser-text: #1f2937;
   --yui-success-text: #16713a;
   --yui-warning-text: #8a5a00;
-  --yui-panel-wallpaper-opacity: 0.82;
-  --yui-panel-wallpaper-mask: transparent;
+  --yui-panel-wallpaper-opacity: 0.86;
+  --yui-panel-wallpaper-mask: rgba(255, 255, 255, 0.06);
   --yui-panel-surface: rgba(255, 255, 255, 0.12);
   --yui-panel-surface-strong: rgba(255, 255, 255, 0.28);
   --yui-browser-card-surface: rgba(255, 255, 255, 0.68);
@@ -772,9 +777,9 @@ watch(
   --yui-browser-card-shadow: 0 10px 26px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.66);
   --yui-browser-composer-surface: #fff;
   --yui-browser-composer-shadow: 0 10px 24px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.56);
-  --yui-chat-surface: rgba(255, 255, 255, 0.58);
-  --yui-chat-surface-muted: rgba(255, 255, 255, 0.46);
-  --yui-chat-sidebar-bg: rgba(255, 255, 255, 0.52);
+  --yui-chat-surface: rgba(255, 255, 255, 0.78);
+  --yui-chat-surface-muted: rgba(255, 255, 255, 0.68);
+  --yui-chat-sidebar-bg: rgba(255, 255, 255, 0.7);
   --yui-chat-user-bg: rgba(255, 255, 255, 0.64);
   --yui-chat-assistant-bg: rgba(255, 255, 255, 0.7);
   --yui-chat-wallpaper-opacity: 1;
@@ -793,8 +798,8 @@ watch(
   --yui-browser-text: #e5e7eb;
   --yui-success-text: #6ee7a0;
   --yui-warning-text: #f5c76b;
-  --yui-panel-wallpaper-opacity: 0.78;
-  --yui-panel-wallpaper-mask: rgba(11, 18, 32, 0.14);
+  --yui-panel-wallpaper-opacity: 0.82;
+  --yui-panel-wallpaper-mask: rgba(11, 18, 32, 0.22);
   --yui-panel-surface: rgba(15, 23, 42, 0.36);
   --yui-panel-surface-strong: rgba(15, 23, 42, 0.5);
   --yui-browser-card-surface: rgba(15, 23, 42, 0.76);
@@ -802,9 +807,9 @@ watch(
   --yui-browser-card-shadow: 0 12px 28px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   --yui-browser-composer-surface: rgba(15, 23, 42, 0.86);
   --yui-browser-composer-shadow: 0 12px 28px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  --yui-chat-surface: rgba(17, 24, 39, 0.64);
-  --yui-chat-surface-muted: rgba(30, 41, 59, 0.54);
-  --yui-chat-sidebar-bg: rgba(11, 18, 32, 0.6);
+  --yui-chat-surface: rgba(17, 24, 39, 0.82);
+  --yui-chat-surface-muted: rgba(30, 41, 59, 0.72);
+  --yui-chat-sidebar-bg: rgba(11, 18, 32, 0.74);
   --yui-chat-user-bg: rgba(38, 52, 73, 0.7);
   --yui-chat-assistant-bg: rgba(17, 24, 39, 0.74);
   --yui-chat-wallpaper-opacity: 1;
@@ -817,6 +822,17 @@ watch(
   background: var(--yui-browser-surface);
   box-shadow: none;
   backdrop-filter: blur(4px) saturate(1.06);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .yuizaki-bg *,
+  .yuizaki-bg *::before,
+  .yuizaki-bg *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .yuizaki-bg.browser-mode .main {

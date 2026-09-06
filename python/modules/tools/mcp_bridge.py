@@ -46,19 +46,22 @@ async def call_http_mcp_tool(base_url: str, name: str, args: Dict[str, Any], hea
 
     server_url = base_url.rstrip("/") + "/tools"
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        try:
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(server_url, json={"name": name, "args": args}, headers=headers)
-        except httpx.RequestError as exc:  # pragma: no cover - network
-            raise MCPToolError(f"MCP server unreachable: {exc}") from exc
+        resp.raise_for_status()
+    except httpx.HTTPError:
+        raise MCPToolError("mcp_error:http_transport") from None
 
     try:
         data = resp.json()
-    except ValueError as exc:
-        raise MCPToolError(f"Invalid JSON from MCP server: {resp.text[:200]}") from exc
+    except ValueError:
+        raise MCPToolError("mcp_error:invalid_json") from None
 
+    if not isinstance(data, dict):
+        raise MCPToolError("mcp_error:invalid_response")
     if not data.get("ok", False):
-        raise MCPToolError(str(data.get("error", "Unknown MCP error")))
+        raise MCPToolError("mcp_error:tool_error")
 
     return str(data.get("output", ""))
 

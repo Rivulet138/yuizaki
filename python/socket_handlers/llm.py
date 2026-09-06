@@ -20,6 +20,7 @@ from modules.agent.response_profile import (
     resolve_thinking_mode,
 )
 from socket_events import (
+    SOCKET_PROTOCOL_VERSION,
     AgentEvents,
     LLMDeltaData,
     LLMEvents,
@@ -27,6 +28,7 @@ from socket_events import (
     LLMRequestData,
     PetEvents,
     SystemEvents,
+    protocol_version_status,
 )
 from starlette.concurrency import run_in_threadpool
 
@@ -71,6 +73,15 @@ def build_llm_request_handler(
             data,
             support.as_text(data.get("session_id"), sid),
         )
+        envelope_version, version_supported = protocol_version_status(data.get("version"))
+        if not version_supported:
+            await server.sio.emit(SystemEvents.ERROR, {
+                "code": "UNSUPPORTED_PROTOCOL_VERSION",
+                "message": "unsupported socket protocol version",
+                **request_identity,
+                "version": SOCKET_PROTOCOL_VERSION,
+            }, to=sid)
+            return
 
         llm_client = server.llm_client
         if llm_client is None:
@@ -153,7 +164,6 @@ def build_llm_request_handler(
         generation_id = support.as_text(data.get("generation_id")).strip() or None
         turn_id = support.as_text(data.get("turn_id")).strip() or None
         interruption_epoch = max(0, support.as_int(data.get("interruption_epoch"), 0))
-        envelope_version = max(1, support.as_int(data.get("version"), 1))
         gen = generation_mgr.start(
             session_id,
             generation_id=generation_id,

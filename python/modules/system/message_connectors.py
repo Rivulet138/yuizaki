@@ -683,7 +683,7 @@ class MessageConnectorRegistry:
         if account["loginState"] == "connected":
             self._account_login_urls[connector_id] = None
         self._config[connector_id] = account
-        self._account_last_error[connector_id] = _text(result.get("error")) or None
+        self._account_last_error[connector_id] = "bridge_provider_error" if _text(result.get("error")) else None
         self._save_disabled()
         return self.account_status(connector_id) or {}
 
@@ -705,7 +705,7 @@ class MessageConnectorRegistry:
                     account[key] = _bounded_text(result.get(alias), 256)
                     break
         self._config[connector_id] = account
-        self._account_last_error[connector_id] = _text(result.get("error")) or None
+        self._account_last_error[connector_id] = "bridge_provider_error" if _text(result.get("error")) else None
         self._save_disabled()
         return self.account_status(connector_id)
 
@@ -760,7 +760,7 @@ class MessageConnectorRegistry:
             try:
                 existing["bridgeUrl"] = _validate_bridge_url(payload.get("bridgeUrl"))
             except ValueError as exc:
-                raise MessageConnectorError("invalid_bridge_url", str(exc), status_code=422) from exc
+                raise MessageConnectorError("invalid_bridge_url", "bridge URL is invalid", status_code=422) from exc
         if "enabled" in payload:
             existing["enabled"] = bool(payload.get("enabled"))
         if connector_id in {"qq", "wechat"}:

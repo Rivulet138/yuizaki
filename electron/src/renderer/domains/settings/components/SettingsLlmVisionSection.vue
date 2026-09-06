@@ -38,6 +38,18 @@
 </template>
 
 <script setup lang="ts">
+import { ElSwitch } from 'element-plus'
+import 'element-plus/es/components/switch/style/css'
+import { ElInput } from 'element-plus'
+import 'element-plus/es/components/input/style/css'
+import { ElOption, ElSelect } from 'element-plus'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
+import { ElInputNumber } from 'element-plus'
+import 'element-plus/es/components/input-number/style/css'
+import { ElFormItem } from 'element-plus'
+import 'element-plus/es/components/form/style/css'
+import 'element-plus/es/components/form-item/style/css'
 import type { LlmProviderPreset } from '../llmProviders'
 
 type VisionDetail = 'low' | 'high' | 'auto' | 'original'

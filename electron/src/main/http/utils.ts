@@ -22,12 +22,14 @@ export const sendJson = (res: ServerResponse, statusCode: number, payload: unkno
   const allowMethods = res.getHeader('Access-Control-Allow-Methods')
   const allowOrigin = res.getHeader('Access-Control-Allow-Origin')
   const vary = res.getHeader('Vary')
+  const cacheControl = res.getHeader('Cache-Control')
 
   res.writeHead(statusCode, {
     ...(allowHeaders ? { 'Access-Control-Allow-Headers': String(allowHeaders) } : {}),
     ...(allowMethods ? { 'Access-Control-Allow-Methods': String(allowMethods) } : {}),
     ...(allowOrigin ? { 'Access-Control-Allow-Origin': String(allowOrigin) } : {}),
     ...(vary ? { Vary: String(vary) } : {}),
+    ...(cacheControl ? { 'Cache-Control': String(cacheControl) } : {}),
     'Content-Type': 'application/json; charset=utf-8',
   })
   res.end(JSON.stringify(payload))

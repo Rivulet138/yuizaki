@@ -1,7 +1,7 @@
 import { globalShortcut } from 'electron'
-import { uIOhook, type UiohookMouseEvent } from 'uiohook-napi'
 import { Live2DWindow } from './live2d-window'
 import { logger } from './logger'
+import { MousePttController } from './mouse-ptt-controller'
 import {
   DEFAULT_INPUT_BINDINGS,
   normalizeInputBindingSettings,
@@ -13,21 +13,29 @@ import {
 export class PetShortcuts {
   private readonly registeredAccelerators = new Set<string>()
   private settings = structuredClone(DEFAULT_INPUT_BINDINGS)
-  private mouseHookStarted = false
-  private pushToTalkPressed = false
+  private readonly mousePtt: MousePttController
+  private keyboardStatus: InputBindingRegistrationStatus['keyboard'] = {
+    interact: false,
+    lock: false,
+    openPanel: false,
+    toggleVision: false,
+    emergencyStop: false,
+  }
 
   constructor(
     private readonly live2dWindow: Live2DWindow,
     private readonly toggleLockHandler: () => void,
     private readonly openPanelHandler: () => void,
-    private readonly startVoiceHandler: () => void,
-    private readonly stopVoiceHandler: () => void,
+    startVoiceHandler: () => void,
+    stopVoiceHandler: () => void,
     private readonly toggleVisionHandler: () => void,
     private readonly emergencyStopHandler: () => void,
-  ) {}
+  ) {
+    this.mousePtt = new MousePttController(startVoiceHandler, stopVoiceHandler)
+  }
 
   register(settings: InputBindingSettings = DEFAULT_INPUT_BINDINGS): InputBindingRegistrationStatus {
-    this.releasePushToTalk()
+    this.mousePtt.release()
     this.unregisterKeyboardShortcuts()
     this.settings = normalizeInputBindingSettings(settings)
 
@@ -51,10 +59,15 @@ export class PetShortcuts {
         errors,
       ),
     }
+    this.keyboardStatus = keyboard
 
-    const mouseHookAvailable = this.settings.pushToTalk.enabled
-      ? this.startMouseHook(errors)
-      : this.stopMouseHook()
+    // Loading the native hook is asynchronous and only occurs after explicit opt-in.
+    const mouseHookAvailable = false
+    if (this.settings.pushToTalk.enabled) {
+      void this.mousePtt.start(this.settings.pushToTalk.mouseButton).then((available) => {
+        if (available) logger.info(`[PetShortcuts] push-to-talk registered on mouse button ${this.settings.pushToTalk.mouseButton}`)
+      })
+    } else this.mousePtt.stop()
 
     return {
       mouseHookAvailable,
@@ -64,11 +77,29 @@ export class PetShortcuts {
     }
   }
 
+  async waitForMouseHook(): Promise<InputBindingRegistrationStatus> {
+    const mouseHookAvailable = this.settings.pushToTalk.enabled
+      ? await this.mousePtt.start(this.settings.pushToTalk.mouseButton)
+      : false
+    return {
+      mouseHookAvailable,
+      pushToTalkActive: this.settings.pushToTalk.enabled && mouseHookAvailable,
+      keyboard: { ...this.keyboardStatus },
+      errors: mouseHookAvailable || !this.settings.pushToTalk.enabled
+        ? []
+        : [`mouse hook unavailable${this.mousePtt.getError() ? `: ${this.mousePtt.getError()}` : ''}`],
+    }
+  }
+
   unregister(): void {
-    this.releasePushToTalk()
+    this.mousePtt.release()
     this.unregisterKeyboardShortcuts()
-    this.stopMouseHook()
+    this.mousePtt.stop()
     logger.info('[PetShortcuts] global input bindings unregistered')
+  }
+
+  releasePushToTalk(): void {
+    this.mousePtt.release()
   }
 
   private registerKeyboardShortcut(
@@ -106,54 +137,4 @@ export class PetShortcuts {
     this.registeredAccelerators.clear()
   }
 
-  private startMouseHook(errors: string[]): boolean {
-    if (this.mouseHookStarted) return true
-    try {
-      uIOhook.on('mousedown', this.handleMouseDown)
-      uIOhook.on('mouseup', this.handleMouseUp)
-      uIOhook.start()
-      this.mouseHookStarted = true
-      logger.info(`[PetShortcuts] push-to-talk registered on mouse button ${this.settings.pushToTalk.mouseButton}`)
-      return true
-    } catch (error) {
-      uIOhook.off('mousedown', this.handleMouseDown)
-      uIOhook.off('mouseup', this.handleMouseUp)
-      const message = error instanceof Error ? error.message : String(error)
-      errors.push(`mouse hook unavailable: ${message}`)
-      logger.warn(`[PetShortcuts] failed to start mouse hook: ${message}`)
-      return false
-    }
-  }
-
-  private stopMouseHook(): boolean {
-    if (!this.mouseHookStarted) return true
-    try {
-      uIOhook.stop()
-    } catch (error) {
-      logger.warn('[PetShortcuts] failed to stop mouse hook:', error)
-    }
-    uIOhook.off('mousedown', this.handleMouseDown)
-    uIOhook.off('mouseup', this.handleMouseUp)
-    this.mouseHookStarted = false
-    return true
-  }
-
-  private readonly handleMouseDown = (event: UiohookMouseEvent): void => {
-    if (!this.settings.pushToTalk.enabled) return
-    if (Number(event.button) !== this.settings.pushToTalk.mouseButton) return
-    if (this.pushToTalkPressed) return
-    this.pushToTalkPressed = true
-    this.startVoiceHandler()
-  }
-
-  private readonly handleMouseUp = (event: UiohookMouseEvent): void => {
-    if (Number(event.button) !== this.settings.pushToTalk.mouseButton) return
-    this.releasePushToTalk()
-  }
-
-  private releasePushToTalk(): void {
-    if (!this.pushToTalkPressed) return
-    this.pushToTalkPressed = false
-    this.stopVoiceHandler()
-  }
 }

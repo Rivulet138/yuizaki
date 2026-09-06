@@ -140,6 +140,13 @@
 </template>
 
 <script setup lang="ts">
+import { ElIcon } from 'element-plus'
+import 'element-plus/es/components/icon/style/css'
+import { ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import { ElOption, ElSelect } from 'element-plus'
+import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/option/style/css'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ChatDotRound, CircleCheckFilled, Close, FullScreen, Lock, Minus, Refresh, VideoPlay, WarningFilled } from '@element-plus/icons-vue'
 import type { OnboardingDeviceProbeReport, OnboardingProbeId, OnboardingReadinessSnapshot, OnboardingRepairActionId } from '@/../shared/onboarding-readiness'

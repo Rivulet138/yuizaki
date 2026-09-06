@@ -92,6 +92,8 @@ The launcher may select a fallback port when a default is occupied and passes th
 
 The default services bind to loopback. Loopback HTTP and Socket.IO clients are trusted by the desktop runtime. `YUIZAKI_BACKEND_API_TOKEN` protects optional non-loopback access; it does not turn Yuizaki into a hardened public service.
 
+Desktop action controls are a narrower capability than the general loopback API. Electron generates `YUIZAKI_HOST_DESKTOP_ACTION_TOKEN` at startup and sends it only to the managed Python child and desktop-action bridge. `/api/desktop-actions/*` rejects missing, malformed, incorrect, or backend-token-reused credentials. When Python is managed externally, set the same sufficiently random value in the Electron and Python environments; otherwise desktop actions remain unavailable by design. Keep this token separate from `YUIZAKI_BACKEND_API_TOKEN` and never put either value in logs or source control.
+
 ## Connectors / 消息连接器
 
 Telegram, Discord, QQ personal bridge, and WeChat personal bridge adapters are experimental and disabled until enabled in the governance panel.

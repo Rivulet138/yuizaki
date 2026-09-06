@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import secrets
 import sqlite3
 import threading
 import time
@@ -15,6 +16,48 @@ from typing import Any
 from .turn_service import TurnClaimLostError
 
 StoreBarrier = Callable[[str, dict[str, Any]], None]
+_PROCESS_RECOVERY_EPOCH = secrets.token_hex(16)
+
+
+def _persist_recovery_descriptor(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    descriptor = dict(value)
+    if descriptor.get("available") is True:
+        # This marker is internal database metadata. It proves only that the
+        # in-memory handle belongs to this process; it is never an authority.
+        descriptor["_process_epoch"] = _PROCESS_RECOVERY_EPOCH
+    return descriptor
+
+
+def _load_recovery_descriptor(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    descriptor = {
+        str(key): item for key, item in value.items() if str(key) != "_process_epoch"
+    }
+    if value.get("available") is True and value.get("_process_epoch") != _PROCESS_RECOVERY_EPOCH:
+        stale = {
+            key: descriptor[key]
+            for key in ("scope", "single_use", "failed_step_id")
+            if key in descriptor
+        }
+        return {
+            **stale,
+            "available": False,
+            "action": "inspect_failure",
+            "retryable": False,
+            "confirmation_required": True,
+            "reason": "process_state_missing",
+        }
+    return descriptor
+
+
+def _load_persisted_payload(value: Any) -> dict[str, Any]:
+    """Load a durable event payload while fencing process-local recovery state."""
+    payload = dict(value) if isinstance(value, Mapping) else {}
+    payload["recovery"] = _load_recovery_descriptor(payload.get("recovery"))
+    return payload
 
 
 def _intent_envelope_snapshot(value: Any) -> dict[str, Any] | None:
@@ -352,7 +395,7 @@ class TurnCommitStore:
             "tool_calls": result.tool_calls,
             "action_envelope": result.action_envelope,
             "failure": getattr(result, "failure", None),
-            "recovery": getattr(result, "recovery", None),
+            "recovery": _persist_recovery_descriptor(getattr(result, "recovery", None)),
             "outcome": getattr(result, "outcome", "completed"),
             "retryable": bool(getattr(result, "retryable", False)),
             "configured_budget": dict(
@@ -467,6 +510,7 @@ class TurnCommitStore:
         result = json.loads(row["result_json"])
         result.setdefault("outcome", "completed")
         result.setdefault("retryable", False)
+        result["recovery"] = _load_recovery_descriptor(result.get("recovery"))
         result["configured_budget"] = dict(result.get("configured_budget") or {})
         result["consumed_usage"] = dict(result.get("consumed_usage") or {})
         return {
@@ -794,8 +838,16 @@ class TurnCommitStore:
                 """UPDATE connector_deliveries
                    SET status = 'failed', claimed_by = NULL, claim_expires_at = NULL,
                        updated_at = ?
-                   WHERE delivery_key = ? AND status IN ('failed', 'sending')""",
-                (now, key),
+                   WHERE delivery_key = ?
+                     AND (
+                       (status = 'failed' AND
+                        (claimed_by IS NULL OR
+                         (typeof(claim_expires_at) IN ('integer', 'real') AND claim_expires_at <= ?)))
+                       OR
+                       (status = 'sending' AND
+                        typeof(claim_expires_at) IN ('integer', 'real') AND claim_expires_at <= ?)
+                     )""",
+                (now, key, now, now),
             )
             return cursor.rowcount == 1
 
@@ -837,7 +889,7 @@ class TurnCommitStore:
                 "event_id": row["event_id"],
                 "event_type": row["event_type"],
                 "idempotency_key": row["idempotency_key"],
-                "payload": json.loads(row["result_json"]),
+                "payload": _load_persisted_payload(json.loads(row["result_json"])),
                 "created_at": row["created_at"],
             }
             for row in rows
@@ -859,7 +911,7 @@ class TurnCommitStore:
                 "event_id": row["event_id"],
                 "idempotency_key": row["idempotency_key"],
                 "event_type": row["event_type"],
-                "payload": json.loads(row["payload_json"]),
+                "payload": _load_persisted_payload(json.loads(row["payload_json"])),
                 "available_at": row["available_at"],
                 "attempt_count": row["attempt_count"],
                 "claimed_by": row["claimed_by"],
@@ -913,7 +965,7 @@ class TurnCommitStore:
                 "event_id": event_id,
                 "idempotency_key": row["idempotency_key"],
                 "event_type": row["event_type"],
-                "payload": json.loads(row["payload_json"]),
+                "payload": _load_persisted_payload(json.loads(row["payload_json"])),
                 "attempt_count": int(row["attempt_count"] or 0),
                 "claim_expires_at": expires_at,
             }

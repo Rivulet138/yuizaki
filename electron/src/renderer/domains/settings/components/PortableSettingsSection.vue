@@ -57,6 +57,13 @@
 </template>
 
 <script setup lang="ts">
+import { ElAlert, ElIcon } from 'element-plus'
+import 'element-plus/es/components/alert/style/css'
+import 'element-plus/es/components/icon/style/css'
+import { ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import { ElTag } from 'element-plus'
+import 'element-plus/es/components/tag/style/css'
 import { ref } from 'vue'
 import { Download, Refresh, Upload } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'

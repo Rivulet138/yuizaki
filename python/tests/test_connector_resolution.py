@@ -41,6 +41,31 @@ def _seed_sending(store: TurnCommitStore, *, lease_seconds: float) -> None:
     )["status"] == "claimed"
 
 
+def test_retry_reset_does_not_clear_active_leases(tmp_path: Path) -> None:
+    clock = [1000.0]
+    store = TurnCommitStore(tmp_path / "turns.sqlite3", wall_clock=lambda: clock[0])
+    assert store.claim_connector_delivery(
+        "connector:telegram:orphan-1",
+        "connector:telegram:orphan-1",
+        "telegram",
+        "orphan-1",
+        "crashed-worker",
+        lease_seconds=60,
+        message={"connector_id": "telegram", "event_id": "orphan-1", "text": "hello"},
+    )["status"] == "claimed"
+
+    assert store.reset_connector_delivery_for_retry("connector:telegram:orphan-1") is False
+    assert store.connector_delivery("connector:telegram:orphan-1")["status"] == "sending"
+
+    clock[0] += 61
+    assert store.reset_connector_delivery_for_retry("connector:telegram:orphan-1") is True
+    assert store.connector_delivery("connector:telegram:orphan-1")["status"] == "failed"
+
+    retry = store.claim_connector_turn_retry("connector:telegram:orphan-1", "retry-owner")
+    assert retry["status"] == "claimed"
+    assert store.reset_connector_delivery_for_retry("connector:telegram:orphan-1") is False
+
+
 @pytest.mark.asyncio
 async def test_manual_resolution_requires_expired_lease_and_is_idempotent(tmp_path: Path) -> None:
     clock = [time.time()]
