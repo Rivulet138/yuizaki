@@ -27,7 +27,7 @@ jobs:
         run: python scripts/check_requirements_lock.py
 
   python-contracts:
-    name: Python Companion Contracts
+    name: Python Companion Contracts (Python ${{ matrix.python-version }})
     strategy:
       fail-fast: false
       matrix:
@@ -103,7 +103,7 @@ jobs:
           python/tests
 
   electron-build:
-    name: Electron Validate & Build (${{ matrix.os }})
+    name: Electron Validate & Build (${{ matrix.os }}, Node ${{ matrix.node-version }})
     strategy:
       fail-fast: false
       matrix:
