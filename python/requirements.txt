@@ -27,7 +27,7 @@ Pillow>=12.3,<13
 sherpa-onnx>=1.13.6,<2
 rapidocr-onnxruntime>=1.2.3,<2
 genie-tts==2.0.2
-huggingface-hub>=1.26,<2
+huggingface-hub>=1.30.0,<2
 
 # Vector database and embeddings
 qdrant-client>=1.18,<2
