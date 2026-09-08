@@ -12,7 +12,7 @@ python-socketio>=5.16.4,<6
 websocket-client>=1.9,<2
 
 # Database
-sqlalchemy>=2.0.50,<3
+sqlalchemy>=2.0.52,<3
 alembic>=1.18,<2
 
 # Numeric and media foundations

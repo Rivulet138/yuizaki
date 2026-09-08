@@ -8,7 +8,7 @@ aiofiles==25.1.0
 python-multipart==0.0.32
 python-socketio==5.16.4
 websocket-client==1.9.1
-sqlalchemy==2.0.50
+sqlalchemy==2.0.52
 alembic==1.18.4
 numpy==2.4.4
 Pillow==12.3.0
