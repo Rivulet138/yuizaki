@@ -42,7 +42,7 @@
     "easy-live2d": "^0.4.4",
     "element-plus": "^2.14.1",
     "pinia": "^3.0.4",
-    "pixi.js": "^8.19.0",
+    "pixi.js": "^8.20.1",
     "socket.io-client": "^4.8.3",
     "three": "^0.184.0",
     "uiohook-napi": "^1.5.5",
