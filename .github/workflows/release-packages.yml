@@ -27,7 +27,7 @@ jobs:
         working-directory: electron
         run: npm run package:win
       - name: Upload current Windows installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: yuizaki-windows-installer
           path: |
@@ -58,7 +58,7 @@ jobs:
         run: npm ci
       - working-directory: electron
         run: npm run package:linux
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: yuizaki-linux-packages
           path: |
