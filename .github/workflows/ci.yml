@@ -15,8 +15,8 @@ jobs:
     name: Documentation Contract
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - run: python scripts/check_docs.py
@@ -34,8 +34,8 @@ jobs:
         python-version: ['3.11', '3.12', '3.13']
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install locked core dependencies
@@ -90,7 +90,7 @@ jobs:
       run:
         working-directory: electron
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -98,7 +98,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: electron/package-lock.json
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: runner.os == 'Linux'
         with:
           python-version: '3.12'
@@ -129,7 +129,7 @@ jobs:
       run:
         working-directory: node-mcp
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: '22.13'
