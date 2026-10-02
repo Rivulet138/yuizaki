@@ -8,6 +8,12 @@ Yuizaki 是一个**本地优先的 Windows/Linux AI 桌面伴侣 Agent**。它�
 
 它适合希望把 AI 长时间放在桌面上、又希望掌握模型提供商、对话数据、记忆和本地权限的用户。项目默认面向单用户本机运行，不是经过公网加固的 SaaS，也不应直接暴露到互联网。
 
+> **Genie 角色模型下载入口**
+>
+> [下载 Genie 角色模型 Release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02)（包含 `feibi` 和其他内置角色包）。四个非 `feibi` 角色按目录声明 CC BY-NC-SA 4.0，`feibi` 遵循 Genie 上游 MIT 许可；许可证随每个压缩包提供。
+>
+> 使用应用自动下载时，打开 **设置 → 资源 → Genie TTS 资源 → 预取 Genie 资源**。资源版本和来源由 [`resources.lock.json`](resources.lock.json) 锁定。
+
 ## 能做什么
 
 ### 对话与 Agent
@@ -49,7 +55,7 @@ Yuizaki 的源码、运行数据和可下载资源分开管理。安装包不默
 | LLM Provider 和模型 | 文字 Agent、规划和工具调用 | 用户配置的 OpenAI-compatible 本地或远程端点 | 文字对话必需 |
 | Sherpa SenseVoice / Zipformer2 | 本地或流式 ASR | `resources.lock.json` 锁定的 Sherpa/icefall 资源 | 启用本地语音时必需，约 188 MiB |
 | Qwen3 Embedding 0.6B | 长期记忆向量化 | 锁定的 Hugging Face revision | 使用语义记忆检索时必需，约 1.12 GiB |
-| Genie TTS | 本地语音合成 | `High-Logic/Genie` 固定 revision | 使用内置本地 TTS 时必需，约 391 MiB |
+| Genie TTS | 本地语音合成 | `High-Logic/Genie` 固定 revision；[角色包 Release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02) | 使用内置本地 TTS 时必需，约 391 MiB |
 | SoulX Singer | 可选的音色转换服务资源 | `resources.lock.json` 锁定的服务资源 | 可选，体积大，不是基础启动依赖 |
 | Live2D / VRM 资源 | 桌宠角色、动作、表情和纹理 | 用户导入或明确许可的资源目录 | 使用桌宠时需要 |
 | Qdrant | 可重建的语义索引 | 本机 Docker 或远程地址 | 可选 |
@@ -57,6 +63,16 @@ Yuizaki 的源码、运行数据和可下载资源分开管理。安装包不默
 | 本地运行数据 | 对话、记忆、设置、日志、音频缓存 | `python/data/`、`python/config/`、`python/audio_cache/` 或 userData | 运行时生成 |
 
 资源版本和校验信息以 [`resources.lock.json`](resources.lock.json) 为准。模型、声音、角色、字体和美术素材有独立许可，分发前必须阅读 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。不要把密钥、数据库、个人对话、截图、音频缓存或模型权重提交到 Git。
+
+### Genie 资源位置
+
+- 应用内下载：**设置 → 资源 → Genie TTS 资源 → 预取 Genie 资源**。
+- 源码运行的共享资源：`python/.cache/GenieData/GenieData`。
+- 源码运行的角色目录：`python/CharacterModels/v2ProPlus/<character>`。
+- 打包运行的共享资源：`<Electron userData>/python-data/.cache/GenieData/GenieData`。
+- 打包运行的角色目录：`<Electron userData>/python-data/CharacterModels/v2ProPlus/<character>`。
+
+应用会从锁定的 `High-Logic/Genie` revision 下载 Genie TTS 运行时和内置角色资源；Release 中的角色包适合手动保存或离线分发。
 
 ## 技术栈
 

@@ -58,7 +58,8 @@ chmod +x YuizakiLauncher
 1. 确认对话页和 Live2D/VRM 模型显示。
 2. 配置 LLM provider、endpoint 和 model。
 3. 发送文字消息并收到最终响应。
-4. 在设置页下载 Sherpa、Embedding、Genie 必需资源。
+4. 在 **设置 → 资源** 中下载 Sherpa、Embedding 和 Genie 必需资源；Genie 使用 **Genie TTS 资源 → 预取 Genie 资源**。
+   角色模型也可以从 [Genie character models Release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02) 手动下载。
 5. 再启用语音、视觉、工具、MCP 或连接器。
 
 ## Launcher 命令
