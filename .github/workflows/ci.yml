@@ -104,6 +104,8 @@ jobs:
           python-version: '3.12'
 
       - run: npm ci
+      - name: Audit npm dependencies
+        run: npm audit --audit-level=low
       - run: npm run install:runtime
       - run: npm run type-check
       - run: npm run lint
