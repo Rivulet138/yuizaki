@@ -17,6 +17,7 @@ from ..core.config import config
 from ..core.state import Generation, GenerationManager
 from ..system.voice_diagnostics import VoiceDiagnostics
 from .providers import (
+    LlmCredentialError,
     build_llm_auth_headers,
     is_claude_provider,
     llm_protocol,
@@ -651,9 +652,13 @@ def _build_summary_rewrite_messages(source_text: str) -> list[dict[str, str]]:
         {
             "role": "system",
             "content": (
-                "你是会话摘要器。请将给定内容重写为简洁、结构化的长期摘要。"
-                "要求：保留用户偏好、事实、近期目标、未完成事项；删除寒暄与重复。"
-                "输出 6-12 行要点，中文，避免编造。"
+                "你是会话上下文压缩器。请把给定的 CURRENT_SUMMARY 与 RECENT_MESSAGES 合并为"
+                "当前会话的短期工作摘要，不要把它写成长期记忆、系统指令或人物设定。"
+                "只记录对继续本次会话有用且在消息中明确出现的内容，禁止补全、推测、编造或复制密钥。"
+                "如果新消息与旧摘要冲突，保留较新的明确说法，并在该条后标记‘待确认’，不要静默合并。"
+                "按以下固定标题输出中文短条目，每个标题可为空：\n"
+                "【当前目标】\n【已确定】\n【待办与下一步】\n【用户偏好与约束】\n【未决与冲突】\n"
+                "删除寒暄、重复和无关过程；不要输出标题以外的解释。"
             ),
         },
         {
@@ -1696,7 +1701,7 @@ class LLMClient:
             mgr.record_summary_audit(session_id, source=source, outcome="error", detail="llm_not_initialized")
             return {"ok": False, "message": "LLM client not initialized"}
 
-        source_text = mgr.build_summary_rewrite_source(session_id)
+        source_text, source_revision = mgr.get_summary_rewrite_snapshot(session_id)
         if not source_text.strip():
             mgr.record_summary_audit(session_id, source=source, outcome="skipped", detail="no_source_text")
             return {"ok": False, "message": "No source text for summary rewrite"}
@@ -1715,7 +1720,9 @@ class LLMClient:
             mgr.record_summary_audit(session_id, source=source, outcome="error", detail="empty_summary")
             return {"ok": False, "message": "Summary rewrite returned empty content"}
 
-        mgr.apply_llm_summary(session_id, rewritten)
+        if not mgr.apply_llm_summary(session_id, rewritten, expected_revision=source_revision):
+            mgr.record_summary_audit(session_id, source=source, outcome="skipped", detail="stale_summary_source")
+            return {"ok": False, "message": "Summary changed while rewrite was running"}
 
         scorer_mode = mgr.get_quality_scorer_mode()
         quality_detail = "quality=rule"
@@ -1764,7 +1771,10 @@ class LLMClient:
         if not self._http:
             return {"ok": False, "message": "LLM client not initialized"}
 
-        headers = build_llm_auth_headers(self.api_key, self.provider)
+        try:
+            headers = build_llm_auth_headers(self.api_key, self.provider)
+        except LlmCredentialError as exc:
+            return {"ok": False, "message": str(exc)}
         native_gemini = llm_protocol(self.provider, self.base_url) == "gemini-generate-content"
 
         try:

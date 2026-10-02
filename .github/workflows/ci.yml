@@ -49,34 +49,10 @@ jobs:
         run: python scripts/connector_staging_check.py
       - name: Run synthetic voice comfort replay gate
         run: python scripts/voice_comfort_check.py
-      - name: Run proactive and stream contract tests
+      - name: Run full Python regression suite
         env:
           PYTHONPATH: python
-        run: >-
-          python -m pytest -q
-          python/tests/test_proactive_evaluation.py
-          python/tests/test_stream_staging_check.py
-          python/tests/test_stream_drafts.py
-          python/tests/test_stream_moderation.py
-          python/tests/test_connector_probe.py
-          python/tests/test_connector_staging_check.py
-          python/tests/test_connector_e2e.py
-          python/tests/test_connector_resolution.py
-          python/tests/test_connector_recovery_controller.py
-          python/tests/test_companion_events.py
-          python/tests/test_agent_trace_store.py
-          python/tests/test_turn_service_recovery.py
-          python/tests/test_runtime_event_binding.py
-          python/tests/test_tool_executor_verification.py
-          python/tests/test_scheduler_outcome_contract.py
-          python/tests/test_mcp_error_redaction.py
-          python/tests/test_platform_release_check.py
-          python/tests/test_release_readiness.py
-          python/tests/test_step_recovery_contract.py
-          python/tests/test_turn_store_recovery.py
-          python/tests/test_memory_operations.py
-          python/tests/test_memory_context_recall.py
-          python/tests/test_voice_comfort_check.py
+        run: python -m pytest -q
       - name: Verify fail-closed platform release CLI
         run: |
           set +e

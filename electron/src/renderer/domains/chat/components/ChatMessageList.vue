@@ -67,21 +67,15 @@
               >
                 <details v-if="message.agentSteps?.length" class="message-disclosure">
                   <summary>
-                    <span>Agent 步骤 {{ message.agentSteps.length }}</span>
+                    <span>执行过程 {{ message.agentSteps.length }}</span>
                   </summary>
                   <ol class="agent-step-list">
                     <li v-for="step in message.agentSteps" :key="step.id" class="agent-step-row">
                       <span class="agent-step-status" :data-status="step.status">{{ agentStepStatusLabel(step.status) }}</span>
                       <span class="agent-step-copy">
                         <strong>{{ step.title }}</strong>
-                        <small v-if="step.tool">{{ step.tool }}</small>
                         <small v-if="step.progress !== undefined">{{ Math.round(step.progress * 100) }}%</small>
                         <small v-if="step.resultSummary">{{ step.resultSummary }}</small>
-                        <small v-if="step.durationMs !== undefined || step.artifactCount !== undefined" class="agent-step-meta">
-                          <template v-if="step.durationMs !== undefined">{{ step.durationMs }} ms</template>
-                          <template v-if="step.durationMs !== undefined && step.artifactCount !== undefined"> · </template>
-                          <template v-if="step.artifactCount !== undefined">{{ step.artifactCount }} artifacts</template>
-                        </small>
                         <small v-if="step.artifacts?.length" class="agent-step-artifacts">
                           <a
                             v-for="artifact in step.artifacts"
@@ -99,19 +93,14 @@
                 </details>
                 <details v-if="message.memorySources?.length" class="message-disclosure">
                   <summary>
-                    <span>使用记忆 {{ message.memorySources.length }}</span>
+                    <span>参考记忆 {{ message.memorySources.length }}</span>
                   </summary>
                   <ul class="memory-source-list">
                     <li v-for="source in message.memorySources" :key="source.id" class="memory-source-row">
                       <p>{{ source.text }}</p>
-                      <div class="memory-source-meta">
-                        <span v-if="source.layer">{{ source.layer }}</span>
-                        <span v-if="source.source">{{ source.source }}</span>
-                        <span v-if="source.confidence !== undefined">{{ Math.round(source.confidence * 100) }}%</span>
-                        <span v-if="source.traceId">{{ source.traceId }}</span>
-                        <span v-if="source.modelVersion">{{ source.modelVersion }}</span>
-                        <span v-if="source.correctionState && source.correctionState !== 'none'">{{ source.correctionState }}</span>
-                      </div>
+                       <div v-if="source.confidence !== undefined" class="memory-source-meta">
+                         相关度 {{ Math.round(source.confidence * 100) }}%
+                       </div>
                       <div class="memory-source-actions">
                         <button type="button" data-memory-action="correct" @click.stop="emit('correct-memory', source)">纠正</button>
                         <button type="button" data-memory-action="forget" @click.stop="emit('forget-memory', source)">忘记</button>

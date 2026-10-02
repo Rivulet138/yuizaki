@@ -4,7 +4,6 @@ import {
   Connection,
   Cpu,
   DataAnalysis,
-  HomeFilled,
   MagicStick,
   Operation,
   Setting,
@@ -45,11 +44,9 @@ const createNavigationModule = (module: NavigationModuleInput, order: number): N
 }
 
 const moduleViewDefinitions: Record<NavigationModuleId, { icon: Component; loader: AsyncComponentLoader }> = {
-  overview: { icon: HomeFilled, loader: () => import('@/domains/system/views/OverviewPanel.vue') },
   pet: { icon: StarFilled, loader: () => import('@/domains/pet/views/PetControlPanel.vue') },
   chat: { icon: ChatDotRound, loader: () => import('@/domains/chat/views/ChatPanel.vue') },
   prompt: { icon: Tickets, loader: () => import('@/domains/prompt/views/PromptPanel.vue') },
-  companion: { icon: ChatDotRound, loader: () => import('@/domains/chat/views/ChatPanel.vue') },
   svc: { icon: Cpu, loader: () => import('@/domains/tools/views/SVCPanel.vue') },
   tool: { icon: Tools, loader: () => import('@/domains/tools/views/ToolPanel.vue') },
   plugins: { icon: Operation, loader: () => import('@/domains/plugin/views/PluginManagementPanel.vue') },

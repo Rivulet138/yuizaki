@@ -681,6 +681,24 @@
   gap: 6px;
 }
 
+.chat-top-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--yui-chat-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--yui-chat-surface) 88%, transparent);
+}
+
+.chat-top-group--settings {
+  margin-left: 2px;
+}
+
+.chat-auxiliary-row { display: flex; min-width: 0; align-items: stretch; gap: 8px; }
+.chat-auxiliary-row > :deep(*) { min-width: 0; flex: 1 1 0; }
+.chat-auxiliary-row:empty { display: none; }
+
 .chat-search-strip {
   display: flex;
   align-items: center;

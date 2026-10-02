@@ -46,7 +46,11 @@
           <el-button plain @click="lookupError">{{ t('i18n.lookup.error') }}</el-button>
         </div>
         <el-alert v-if="lastLookup" :title="lastLookup" type="info" show-icon :closable="false" />
-        <pre class="messages-preview">{{ messagesPreview }}</pre>
+        <details v-if="Object.keys(messages).length" class="messages-details">
+          <summary>查看当前语言内容</summary>
+          <pre class="messages-preview">{{ messagesPreview }}</pre>
+        </details>
+        <el-empty v-else description="尚未读取翻译内容" :image-size="48" />
       </el-card>
     </div>
   </PanelShell>
@@ -229,6 +233,16 @@ watch(locale, (value) => {
   color: var(--yui-text);
   font-size: 12px;
   line-height: 1.55;
+}
+
+.messages-details summary {
+  cursor: pointer;
+  color: var(--yui-muted);
+  font-size: 12px;
+}
+
+.messages-details .messages-preview {
+  margin-top: 10px;
 }
 
 @media (max-width: 760px) {

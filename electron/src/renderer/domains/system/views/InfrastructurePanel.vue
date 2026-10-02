@@ -1,9 +1,9 @@
 <template>
-  <PanelShell title="服务与数据" tone="admin">
+  <PanelShell title="服务与资源" tone="admin">
     <div class="infra-console">
       <section class="infra-hero">
-        <div class="hero-copy">
-          <strong>本地运行状态</strong>
+          <div class="hero-copy">
+          <strong>服务与资源</strong>
           <span>{{ serviceStatusLabel }}，{{ envStatusLabel }}</span>
         </div>
         <div class="hero-actions">
@@ -12,7 +12,6 @@
             <el-icon><Download /></el-icon>
             导出运行诊断
           </el-button>
-          <span>{{ controlServerLabel }}</span>
         </div>
       </section>
 
@@ -45,7 +44,7 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>环境依赖 · {{ envStatusLabel }}</strong>
+                <strong>环境依赖</strong>
               </div>
             </div>
           </template>
@@ -57,9 +56,6 @@
                 <el-tag size="small" :type="item.ok ? 'success' : 'danger'">{{ item.ok ? '存在' : '缺失' }}</el-tag>
               </div>
             </div>
-            <div v-if="diagnostics?.envCheck.electronRoot" class="root-path" :title="diagnostics.envCheck.electronRoot">
-              Electron 根目录：{{ diagnostics.envCheck.electronRoot }}
-            </div>
             <el-empty v-if="!diagnostics" description="等待诊断快照" :image-size="64" />
           </AsyncState>
         </el-card>
@@ -69,7 +65,6 @@
             <div class="card-head">
               <div>
                 <strong>运行时资源</strong>
-                <span>{{ runtimeSnapshot ? `采样于 ${formatRuntimeTime(runtimeSnapshot.measuredAt)}` : 'Electron 进程与 HTTP 缓存' }}</span>
               </div>
               <div class="action-row">
                 <el-button plain size="small" :loading="runtimeLoading" :disabled="!runtimeAvailable" @click="loadRuntimeSnapshot">刷新采样</el-button>
@@ -83,12 +78,15 @@
             <div><span>HTTP 缓存</span><strong>{{ formatBytes(runtimeSnapshot.cacheBytes) }}</strong></div>
             <div><span>进程数量</span><strong>{{ runtimeSnapshot.processes.length }}</strong></div>
           </div>
-          <div v-if="runtimeSnapshot?.processes.length" class="runtime-processes">
-            <article v-for="item in runtimeProcesses" :key="`${item.pid}-${item.type}`">
-              <div><strong>{{ runtimeProcessLabel(item.type) }}</strong><span>PID {{ item.pid }}</span></div>
-              <span>{{ formatBytes(item.privateKb * 1024) }}</span>
-            </article>
-          </div>
+          <details v-if="runtimeSnapshot?.processes.length" class="runtime-process-details">
+            <summary>查看进程资源</summary>
+            <div class="runtime-processes">
+              <article v-for="item in runtimeProcesses" :key="`${item.pid}-${item.type}`">
+                <div><strong>{{ runtimeProcessLabel(item.type) }}</strong><span>进程 {{ item.pid }}</span></div>
+                <span>{{ formatBytes(item.privateKb * 1024) }}</span>
+              </article>
+            </div>
+          </details>
           <el-empty v-else-if="!runtimeAvailable" description="浏览器模式无法读取 Electron 进程资源" :image-size="56" />
           <el-empty v-else-if="!runtimeLoading" description="等待运行时资源采样" :image-size="56" />
         </el-card>
@@ -97,7 +95,7 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>接口响应</strong>
+                <strong>高级诊断数据</strong>
               </div>
               <div class="action-row">
                 <el-button plain size="small" :loading="apiGapLoading" @click="loadApiGaps">读取快照</el-button>
@@ -107,8 +105,8 @@
           </template>
           <el-alert v-if="apiGapError" :title="apiGapError" type="error" show-icon :closable="false" />
           <el-skeleton v-if="apiGapLoading" :rows="4" animated />
-          <el-collapse v-else-if="apiGapLoaded" class="api-collapse">
-            <el-collapse-item title="接口响应" name="api-snapshots">
+          <el-collapse v-else-if="apiGapLoaded" v-model="apiCollapseNames" class="api-collapse">
+            <el-collapse-item title="详细数据" name="api-snapshots">
               <div class="api-grid">
                 <article>
                   <strong>system/status</strong>
@@ -135,8 +133,8 @@
           </el-collapse>
           <el-empty v-else description="暂无接口快照" :image-size="56" />
           <div class="action-row">
-            <el-button type="primary" plain :loading="exportingKind === 'json'" @click="downloadExport('json')">导出 JSON</el-button>
-            <el-button type="primary" plain :loading="exportingKind === 'csv'" @click="downloadExport('csv')">导出 CSV</el-button>
+            <el-button type="primary" plain :loading="exportingKind === 'json'" @click="downloadExport('json')">导出运行数据</el-button>
+            <el-button type="primary" plain :loading="exportingKind === 'csv'" @click="downloadExport('csv')">导出表格</el-button>
           </div>
         </el-card>
       </section>
@@ -353,6 +351,7 @@ const effectivePreset = ref<Record<string, unknown> | null>(null)
 const apiGapError = ref('')
 const apiGapLoading = ref(false)
 const apiGapLoaded = ref(false)
+const apiCollapseNames = ref<string[]>([])
 const exportingKind = ref<'json' | 'csv' | null>(null)
 const restoreBackupDir = ref('')
 const restorePreview = ref<BackupRestoreResponse | null>(null)
@@ -460,11 +459,6 @@ const restoreEffectEntries = computed(() => {
     { key: 'plugins', label: '插件目录', status: effects.plugins },
   ]
 })
-const controlServerLabel = computed(() => {
-  const panelUrl = diagnostics.value?.panelUrl
-  return panelUrl ? `控制服务 · ${panelUrl}` : '控制服务 · 等待检测'
-})
-
 const envChecks = computed(() => {
   const env = diagnostics.value?.envCheck
   if (!env) return []
@@ -568,11 +562,6 @@ const formatBytes = (bytes: number) => {
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
   return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`
-}
-
-const formatRuntimeTime = (value: string) => {
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
 const runtimeProcessLabel = (type: string) => ({
@@ -801,6 +790,7 @@ const restoreEffectTagType = (status: BackupRestoreEffectStatus): 'success' | 'w
 
 onMounted(() => {
   void refreshAll()
+  void refreshLogs()
 })
 </script>
 
@@ -989,6 +979,16 @@ onMounted(() => {
 
 .runtime-processes {
   margin-top: 10px;
+}
+
+.runtime-process-details {
+  margin-top: 10px;
+  color: var(--yui-muted);
+  font-size: 12px;
+}
+
+.runtime-process-details summary {
+  cursor: pointer;
 }
 
 .runtime-processes article {

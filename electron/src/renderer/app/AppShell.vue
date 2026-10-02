@@ -100,6 +100,7 @@ import { useSystemStore } from '@/stores/systemStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useSettingsStore } from '@/state/settingsStore'
 import { useInputBindingsStore } from '@/state/inputBindingsStore'
+import { acceleratorMatchesKeyboardEvent, type KeyboardShortcutAction } from '@/../shared/input-bindings'
 import { setLocale, syncLocaleFromSettings, t } from '@/i18n'
 import { logger } from '@/logger'
 import { adminNavigationModules, isPanelKey, primaryNavigationModules, type NavigationModuleId } from '@/navigation/modules'
@@ -262,11 +263,64 @@ const activeModuleTitle = computed(() => {
 const companionStateLabel = computed(() => t(`companion.home.state.${companionRuntime.presentationState.value}`))
 
 const handleGlobalKeydown = (event: KeyboardEvent) => {
+  if (inputBindingsStore.state.browserFallback && handleBrowserShortcut(event)) return
   if (event.key === '?' && !event.ctrlKey && !event.metaKey && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
     showShortcuts.value = !showShortcuts.value
   }
   if (event.key === 'Escape') showShortcuts.value = false
 }
+
+const isEditableInputTarget = (target: EventTarget | null): boolean => {
+  const element = target instanceof HTMLElement ? target : null
+  return Boolean(element?.matches('input, textarea, select, [contenteditable="true"]'))
+}
+
+const dispatchBrowserInputAction = (action: KeyboardShortcutAction | 'startVoice' | 'stopVoice' | 'openPanel', force = false) => {
+  if (!force && !inputBindingsStore.state.browserShortcutsEnabled) return
+  if (!force) inputBindingsStore.markBrowserAction(action)
+  window.dispatchEvent(new CustomEvent('yuizaki:input-action', { detail: { action } }))
+}
+
+const handleBrowserShortcut = (event: KeyboardEvent): boolean => {
+  if (!inputBindingsStore.state.browserShortcutsEnabled) return false
+  if (isEditableInputTarget(event.target)) return false
+  const bindings = inputBindingsStore.state.settings.keyboard
+  const action = (Object.keys(bindings) as KeyboardShortcutAction[]).find((candidate) => (
+    acceleratorMatchesKeyboardEvent(event, bindings[candidate])
+  ))
+  if (!action) return false
+  event.preventDefault()
+  event.stopPropagation()
+  if (action === 'toggleVision') {
+    handleToggleVisionShortcut()
+  } else if (action === 'emergencyStop') {
+    chatStore.interrupt()
+    dispatchBrowserInputAction(action)
+  } else if (action === 'openPanel') {
+    handlePanelOpenTab('chat')
+    dispatchBrowserInputAction(action)
+  } else {
+    dispatchBrowserInputAction(action)
+  }
+  return true
+}
+
+const browserMouseButton = computed(() => inputBindingsStore.state.settings.pushToTalk.mouseButton - 1)
+const handleBrowserMouseDown = (event: MouseEvent) => {
+  if (!inputBindingsStore.state.browserFallback || !inputBindingsStore.state.browserShortcutsEnabled || !inputBindingsStore.state.settings.pushToTalk.enabled) return
+  if (event.button !== browserMouseButton.value) return
+  event.preventDefault()
+  dispatchBrowserInputAction('startVoice')
+}
+const handleBrowserMouseUp = (event: MouseEvent) => {
+  if (!inputBindingsStore.state.browserFallback || !inputBindingsStore.state.browserShortcutsEnabled) return
+  if (event.button === browserMouseButton.value) dispatchBrowserInputAction('stopVoice')
+}
+const releaseBrowserMouseVoice = () => dispatchBrowserInputAction('stopVoice', true)
+
+watch(() => inputBindingsStore.state.browserShortcutsEnabled, (enabled) => {
+  if (!enabled) releaseBrowserMouseVoice()
+})
 
 const handlePanelOpenTab = (tab: string) => {
   const normalizedTab = String(tab || '').trim().toLowerCase()
@@ -329,6 +383,9 @@ const handlePermissionRequest = (data: PermissionRequestPayload) => {
 const stopAppRuntime = () => {
   visualCaptureRuntime.stop()
   window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('mousedown', handleBrowserMouseDown, true)
+  window.removeEventListener('mouseup', handleBrowserMouseUp, true)
+  window.removeEventListener('blur', releaseBrowserMouseVoice)
   petApi?.off?.('panel:open-tab', handlePanelOpenTab)
   petApi?.off?.('shortcut:toggle-vision', handleToggleVisionShortcut)
   themeMediaQuery?.removeEventListener('change', applyTheme)
@@ -363,6 +420,9 @@ onMounted(() => {
   void inputBindingsStore.load()
   wallpaperMode.value = activeWorkspace.value.context?.wallpaperMode ?? true
   window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('mousedown', handleBrowserMouseDown, true)
+  window.addEventListener('mouseup', handleBrowserMouseUp, true)
+  window.addEventListener('blur', releaseBrowserMouseVoice)
   document.addEventListener('visibilitychange', handleDocumentVisibilityChange)
   petApi?.on?.('panel:open-tab', handlePanelOpenTab)
   petApi?.on?.('shortcut:toggle-vision', handleToggleVisionShortcut)
@@ -380,7 +440,7 @@ onMounted(() => {
 
   companionRuntime.startCompanionRuntime(() => systemStore.controlRunning && systemStore.pythonRunning)
   const restoredTab = activeWorkspace.value.context.activeTab
-  if (activeTab.value === 'companion' && restoredTab && isPanelKey(restoredTab) && restoredTab !== 'companion') {
+  if (activeTab.value === 'chat' && restoredTab && isPanelKey(restoredTab) && restoredTab !== 'chat') {
     void router.replace(`/w/${encodeURIComponent(activeWorkspace.value.id)}/${restoredTab}`)
   }
 })
@@ -763,8 +823,8 @@ watch(
 
 .yuizaki-bg.browser-mode {
   --yui-browser-bg: #edf2f7;
-  --yui-browser-surface: rgba(255, 255, 255, 0.18);
-  --yui-browser-border: rgba(255, 255, 255, 0.58);
+  --yui-browser-surface: rgba(255, 255, 255, 0.26);
+  --yui-browser-border: rgba(255, 255, 255, 0.68);
   --yui-browser-text: #1f2937;
   --yui-success-text: #16713a;
   --yui-warning-text: #8a5a00;
@@ -772,9 +832,9 @@ watch(
   --yui-panel-wallpaper-mask: rgba(255, 255, 255, 0.06);
   --yui-panel-surface: rgba(255, 255, 255, 0.12);
   --yui-panel-surface-strong: rgba(255, 255, 255, 0.28);
-  --yui-browser-card-surface: rgba(255, 255, 255, 0.68);
-  --yui-browser-card-border: rgba(15, 23, 42, 0.16);
-  --yui-browser-card-shadow: 0 10px 26px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.66);
+  --yui-browser-card-surface: rgba(255, 255, 255, 0.74);
+  --yui-browser-card-border: rgba(15, 23, 42, 0.14);
+  --yui-browser-card-shadow: 0 12px 28px rgba(15, 23, 42, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.66);
   --yui-browser-composer-surface: #fff;
   --yui-browser-composer-shadow: 0 10px 24px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.56);
   --yui-chat-surface: rgba(255, 255, 255, 0.78);
@@ -793,7 +853,7 @@ watch(
 
 :root[data-theme='dark'] .yuizaki-bg.browser-mode {
   --yui-browser-bg: #111827;
-  --yui-browser-surface: rgba(24, 34, 53, 0.42);
+  --yui-browser-surface: rgba(24, 34, 53, 0.52);
   --yui-browser-border: #334155;
   --yui-browser-text: #e5e7eb;
   --yui-success-text: #6ee7a0;
@@ -802,7 +862,7 @@ watch(
   --yui-panel-wallpaper-mask: rgba(11, 18, 32, 0.22);
   --yui-panel-surface: rgba(15, 23, 42, 0.36);
   --yui-panel-surface-strong: rgba(15, 23, 42, 0.5);
-  --yui-browser-card-surface: rgba(15, 23, 42, 0.76);
+  --yui-browser-card-surface: rgba(15, 23, 42, 0.82);
   --yui-browser-card-border: rgba(203, 213, 225, 0.32);
   --yui-browser-card-shadow: 0 12px 28px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   --yui-browser-composer-surface: rgba(15, 23, 42, 0.86);

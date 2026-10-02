@@ -78,8 +78,36 @@
   padding: 0;
 }
 
-.product-metrics-consent-card {
-  margin-top: 12px;
+.runtime-guide-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-card);
+  background: var(--yui-surface-raised, #fff);
+}
+
+.runtime-guide-section h2 {
+  margin: 0;
+  color: var(--yui-text);
+  font-size: 16px;
+}
+
+.runtime-guide-section p {
+  max-width: 65ch;
+  margin: 6px 0 0;
+  color: var(--yui-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+@media (max-width: 680px) {
+  .runtime-guide-section {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 .card-header,
@@ -163,9 +191,7 @@
 }
 
 .header-title,
-.profile-rail-head,
-.profile-card,
-.credential-card {
+.profile-rail-head {
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -173,18 +199,9 @@
 }
 
 .header-title span,
-.profile-rail-head strong,
-.profile-card strong,
-.credential-card strong {
+.profile-rail-head strong {
   color: var(--yui-text);
   font-weight: 750;
-}
-
-.profile-card span,
-.credential-card span {
-  color: var(--yui-muted);
-  font-size: 12px;
-  line-height: 1.45;
 }
 
 .sr-only-input {
@@ -298,52 +315,6 @@
   justify-content: center;
 }
 
-.profile-card,
-.credential-card {
-  padding: 10px;
-  border: 1px solid var(--yui-border);
-  border-radius: 8px;
-  background: var(--yui-surface-raised);
-}
-
-.credential-card {
-  border-color: color-mix(in srgb, var(--yui-accent) 34%, var(--yui-border));
-  background: color-mix(in srgb, var(--yui-accent) 8%, var(--yui-surface-raised));
-}
-
-.credential-card.empty {
-  border-color: var(--yui-border);
-  background: var(--yui-surface);
-}
-
-.llm-connection-summary {
-  display: grid;
-  gap: 8px;
-}
-
-.summary-row {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-  padding: 9px 10px;
-  border: 1px solid var(--yui-border);
-  border-radius: 8px;
-  background: var(--yui-surface);
-}
-
-.summary-row span {
-  color: var(--yui-muted);
-  font-size: 11px;
-}
-
-.summary-row strong {
-  overflow-wrap: anywhere;
-  color: var(--yui-text);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.35;
-}
-
 .llm-main-form,
 .voice-main-form {
   min-width: 0;
@@ -354,11 +325,22 @@
   background-clip: padding-box;
 }
 
+.tts-runtime-details {
+  margin-bottom: 12px;
+}
+
+.tts-runtime-details summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--yui-muted);
+  font-size: 12px;
+}
+
 .tts-runtime-panel {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(156px, 1fr));
   gap: 8px;
-  margin-bottom: 12px;
+  margin-top: 8px;
   padding: 10px;
   border: 1px solid var(--yui-border);
   border-radius: 8px;
@@ -407,14 +389,83 @@
   font-weight: 760;
 }
 
-.parameter-strip {
+.inference-layout {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 16px;
-  padding: 13px 14px;
+  gap: 12px;
+}
+
+.inference-group {
+  min-width: 0;
+  padding: 12px 13px 8px;
   border: 1px solid var(--yui-border);
   border-radius: 8px;
-  background: var(--yui-surface-muted);
+  background: var(--yui-surface);
+}
+
+.inference-group-repetition,
+.inference-group-limits {
+  grid-column: 1 / -1;
+}
+
+.inference-group-title {
+  margin: 0 0 10px;
+  color: var(--yui-text);
+  font-size: 12px;
+  font-weight: 760;
+  line-height: 1.3;
+}
+
+.inference-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+
+.inference-group-repetition .inference-fields,
+.inference-group-limits .inference-fields {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.inference-field {
+  min-width: 0;
+}
+
+.inference-field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 2px;
+  color: var(--yui-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.inference-field-head span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inference-field-head output {
+  flex: 0 0 auto;
+  color: var(--yui-text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.inference-field :deep(.el-form-item) {
+  margin-bottom: 2px;
+}
+
+.inference-field :deep(.el-slider) {
+  margin: 0 4px;
+}
+
+.inference-number {
+  width: 100%;
 }
 
 .form-grid {
@@ -574,7 +625,10 @@
   .form-grid.three,
   .llm-workspace,
   .voice-workspace,
-  .parameter-strip {
+  .inference-layout,
+  .inference-fields,
+  .inference-group-repetition .inference-fields,
+  .inference-group-limits .inference-fields {
     grid-template-columns: 1fr;
   }
 

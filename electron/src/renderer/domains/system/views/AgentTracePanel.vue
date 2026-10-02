@@ -40,20 +40,20 @@
             v-for="metric in primaryExperienceMetrics"
             :key="metric.key"
             class="experience-metric"
-            :title="`${metric.label}：P95 ${formatLatency(metric.p95)}，${metric.samples} 次采样`"
+            :title="`${metric.label}：大多数请求在 ${formatLatency(metric.p95)} 内完成，共 ${metric.samples} 次采样`"
           >
             <span>{{ metric.label }}</span>
             <strong>{{ formatLatency(metric.p50) }}</strong>
           </div>
         </div>
-        <details v-if="secondaryExperienceMetrics.length" class="experience-more">
+          <details v-if="secondaryExperienceMetrics.length" class="experience-more">
           <summary>更多指标</summary>
           <div class="experience-grid experience-grid--secondary">
             <div
               v-for="metric in secondaryExperienceMetrics"
               :key="metric.key"
               class="experience-metric"
-              :title="`${metric.label}：P95 ${formatLatency(metric.p95)}，${metric.samples} 次采样`"
+              :title="`${metric.label}：大多数请求在 ${formatLatency(metric.p95)} 内完成，共 ${metric.samples} 次采样`"
             >
               <span>{{ metric.label }}</span>
               <strong>{{ formatLatency(metric.p50) }}</strong>
@@ -64,7 +64,7 @@
           <span :title="`${experienceMetrics?.interrupts.by_source.voice?.hits ?? 0}/${experienceMetrics?.interrupts.by_source.voice?.requests ?? 0}`">语音打断 <strong>{{ formatRate(experienceMetrics?.interrupts.by_source.voice?.hit_rate) }}</strong></span>
           <span :title="`${experienceMetrics?.interrupts.by_source.manual?.hits ?? 0}/${experienceMetrics?.interrupts.by_source.manual?.requests ?? 0}`">手动中断 <strong>{{ formatRate(experienceMetrics?.interrupts.by_source.manual?.hit_rate) }}</strong></span>
           <span :title="`${experienceMetrics?.tools.successes ?? 0}/${experienceMetrics?.tools.calls ?? 0}`">工具成功 <strong>{{ formatRate(experienceMetrics?.tools.success_rate) }}</strong></span>
-          <span :title="`${experienceMetrics?.voice_runtime?.playback_recovery.successes ?? 0}/${experienceMetrics?.voice_runtime?.playback_recovery.attempts ?? 0}，underrun ${experienceMetrics?.voice_runtime?.playback_recovery.underruns ?? 0} 次`">播放恢复 <strong>{{ formatRate(experienceMetrics?.voice_runtime?.playback_recovery.success_rate) }}</strong></span>
+          <span :title="`${experienceMetrics?.voice_runtime?.playback_recovery.successes ?? 0}/${experienceMetrics?.voice_runtime?.playback_recovery.attempts ?? 0}，缓冲不足 ${experienceMetrics?.voice_runtime?.playback_recovery.underruns ?? 0} 次`">播放恢复 <strong>{{ formatRate(experienceMetrics?.voice_runtime?.playback_recovery.success_rate) }}</strong></span>
           <span :title="`分析 ${experienceMetrics?.visual?.analysis_requests ?? 0}/${experienceMetrics?.visual?.frames ?? 0}，复用 ${experienceMetrics?.visual?.analysis_skipped ?? 0} 帧`">视觉调用 <strong>{{ formatRate(experienceMetrics?.visual?.analysis_rate) }}</strong></span>
           <span :title="`${experienceMetrics?.visual?.usable ?? 0}/${experienceMetrics?.visual?.completed ?? 0}`">视觉结论 <strong>{{ formatRate(experienceMetrics?.visual?.usable_rate) }}</strong></span>
         </div>
@@ -76,8 +76,8 @@
             <h3>后台任务</h3>
           </div>
           <div class="job-summary">
-            <el-tag size="small" type="success" effect="plain">{{ activeCompanionJobs.length }} active</el-tag>
-            <el-tag size="small" type="info" effect="plain">{{ companionJobs.length }} recent</el-tag>
+            <el-tag size="small" type="success" effect="plain">{{ activeCompanionJobs.length }} 个进行中</el-tag>
+            <el-tag size="small" type="info" effect="plain">{{ companionJobs.length }} 条记录</el-tag>
           </div>
         </div>
         <AsyncState :loading="companionRuntimeRequest.loading" :error="companionRuntimeRequest.error" :show-retry="false">
@@ -88,11 +88,9 @@
                   <strong>{{ companionJobTitle(job) }}</strong>
                   <el-tag size="small" :type="companionJobTagType(job)" effect="light">{{ companionJobStatusLabel(job) }}</el-tag>
                 </div>
-                <p class="job-subtitle">{{ job.source }} · {{ job.jobId }}</p>
                 <div class="tag-row">
-                  <el-tag v-if="job.runId" size="small" type="primary" effect="plain">run {{ job.runId }}</el-tag>
-                  <el-tag size="small" type="info" effect="plain">rev {{ job.revision }}</el-tag>
-                  <el-tag v-if="job.data?.goalId" size="small" type="success" effect="plain">goal {{ String(job.data.goalId) }}</el-tag>
+                  <el-tag v-if="job.runId" size="small" type="primary" effect="plain">运行 {{ job.runId }}</el-tag>
+                  <el-tag v-if="job.data?.goalId" size="small" type="success" effect="plain">目标 {{ String(job.data.goalId) }}</el-tag>
                   <el-tag v-if="job.data?.phase" size="small" type="warning" effect="plain">{{ String(job.data.phase) }}</el-tag>
                 </div>
                 <el-progress v-if="companionJobProgress(job) !== null" class="job-progress" :percentage="companionJobProgress(job) || 0" :show-text="false" :status="job.status === 'failed' || job.status === 'unknown_effect' ? 'exception' : undefined" />
@@ -104,7 +102,7 @@
                 <ul v-if="failureEvidenceLines(job).length" class="job-failure-evidence" aria-label="失败证据">
                   <li v-for="line in failureEvidenceLines(job)" :key="line">{{ line }}</li>
                 </ul>
-                <p v-if="companionJobDuration(job)" class="job-meta">耗时 {{ companionJobDuration(job) }}<span v-if="projectCompanionJob(job).artifactCount !== null"> · 产物 {{ projectCompanionJob(job).artifactCount }}</span></p>
+                <p v-if="companionJobDuration(job)" class="job-meta">用时 {{ companionJobDuration(job) }}</p>
               </div>
               <div class="job-card-actions">
                 <el-button v-if="canResumeCompanionJob(job)" size="small" type="primary" plain :loading="retryingJobIds.has(job.jobId)" :disabled="retryingJobIds.has(job.jobId)" @click="resumeCompanionJob(job)">从失败步骤继续</el-button>
@@ -115,7 +113,7 @@
               </div>
             </article>
           </div>
-          <el-empty v-else description="暂无 Agent Job" :image-size="52" />
+          <el-empty v-else description="暂无后台任务" :image-size="52" />
         </AsyncState>
       </section>
 
@@ -155,11 +153,11 @@
                 </div>
                 <p>{{ task.prompt }}</p>
                 <div class="tag-row">
-                  <el-tag size="small" type="info" effect="light">{{ task.mode }}</el-tag>
-                  <el-tag size="small" :type="statusTagType(task.last_status || 'pending')" effect="light">{{ task.last_status || 'pending' }}</el-tag>
+                  <el-tag size="small" type="info" effect="light">{{ scheduleModeLabel(task.mode) }}</el-tag>
+                  <el-tag size="small" :type="statusTagType(task.last_status || 'pending')" effect="light">{{ scheduleStatusLabel(task.last_status) }}</el-tag>
                   <el-tag v-if="task.owner_agent_role" size="small" type="danger" effect="plain">{{ task.owner_agent_role }}</el-tag>
-                  <el-tag v-if="task.last_run_id" size="small" type="primary" effect="plain">run {{ task.last_run_id }}</el-tag>
-                  <el-tag v-if="task.last_job_id" size="small" type="info" effect="plain">job {{ task.last_job_id }}</el-tag>
+                  <el-tag v-if="task.last_run_id" size="small" type="primary" effect="plain">运行 {{ task.last_run_id }}</el-tag>
+                  <el-tag v-if="task.last_job_id" size="small" type="info" effect="plain">任务 {{ task.last_job_id }}</el-tag>
                   <el-tag v-if="task.last_request_id" size="small" type="success" effect="plain">{{ task.last_request_id }}</el-tag>
                 </div>
                 <div class="schedule-times">
@@ -184,7 +182,7 @@
               <el-form-item label="任务名称">
                 <el-input v-model="scheduleForm.name" placeholder="如：晚间复盘 / 喝水提醒" />
               </el-form-item>
-              <el-form-item label="任务提示词 / Prompt">
+              <el-form-item label="任务内容">
                 <el-input v-model="scheduleForm.prompt" type="textarea" :rows="3" placeholder="描述任务目标、提醒内容或例行工作..." resize="none" />
               </el-form-item>
               <div class="create-controls">
@@ -208,7 +206,7 @@
             </div>
 
             <div class="trace-toolbar">
-              <el-input v-model="traceSearch" placeholder="搜索请求、任务、Agent、工具、摘要..." clearable>
+              <el-input v-model="traceSearch" placeholder="搜索请求、任务、智能体、工具、摘要..." clearable>
                 <template #prefix><span class="search-prefix">⌕</span></template>
               </el-input>
               <el-select v-model="traceFilter" class="toolbar-select" placeholder="事件类型">
@@ -216,7 +214,7 @@
                 <el-option label="有步骤链" value="steps" />
                 <el-option label="运行循环" value="runtime_loop" />
                 <el-option label="计划器" value="scheduler" />
-                <el-option label="Planner" value="planner" />
+                <el-option label="规划器" value="planner" />
               </el-select>
               <el-select v-model="statusFilter" class="toolbar-select" placeholder="状态">
                 <el-option label="全部状态" value="all" />
@@ -226,7 +224,7 @@
               </el-select>
             </div>
 
-            <el-alert v-if="unlinkedTraceCount" class="trace-alert" type="warning" :closable="false" show-icon :title="`${unlinkedTraceCount} 条追踪事件缺少 request_id，已临时分组为未关联运行`" />
+            <el-alert v-if="unlinkedTraceCount" class="trace-alert" type="warning" :closable="false" show-icon :title="`${unlinkedTraceCount} 条记录暂未关联到运行`" />
 
         <AsyncState :loading="agentTraceRequest.loading" :error="agentTraceRequest.error" :show-retry="false">
               <div v-if="filteredTraceGroups.length" class="run-list">
@@ -240,7 +238,7 @@
                 >
                   <div class="run-main">
                     <div class="run-title">
-                      <span class="request-id">{{ group.requestId }}</span>
+                      <span class="request-id">运行记录</span>
                       <el-tag size="small" :type="statusTagType(group.status)" effect="light">{{ statusLabel(group.status) }}</el-tag>
                     </div>
                     <p>{{ group.summary }}</p>
@@ -249,11 +247,6 @@
                       <span>{{ group.entries.length }} 条事件</span>
                       <span>{{ group.stepChain.length }} 个步骤</span>
                       <span v-if="group.ownerRoles.length">{{ group.ownerRoles.join(' / ') }}</span>
-                    </div>
-                    <div v-if="group.operationId || group.conversationId || group.runId" class="run-identity" aria-label="run identity">
-                      <span v-if="group.operationId">op {{ group.operationId }}</span>
-                      <span v-if="group.conversationId">conversation {{ group.conversationId }}</span>
-                      <span v-if="group.runId">run {{ group.runId }}</span>
                     </div>
                   </div>
                   <div class="run-counts">
@@ -269,7 +262,7 @@
           <aside class="trace-detail">
             <template v-if="selectedTrace">
               <div class="detail-heading">
-                <h3>{{ selectedTrace.requestId }}</h3>
+                <h3>运行详情</h3>
                 <p>{{ selectedTrace.summary }}</p>
               </div>
 
@@ -280,12 +273,15 @@
                 <div><span>循环</span><strong>{{ selectedTrace.runtimeLoop }}</strong></div>
               </div>
 
-              <div v-if="selectedTrace.operationId || selectedTrace.conversationId || selectedTrace.turnId || selectedTrace.runId" class="detail-identity">
-                <span v-if="selectedTrace.operationId">operation {{ selectedTrace.operationId }}</span>
-                <span v-if="selectedTrace.conversationId">conversation {{ selectedTrace.conversationId }}</span>
-                <span v-if="selectedTrace.turnId">turn {{ selectedTrace.turnId }}</span>
-                <span v-if="selectedTrace.runId">run {{ selectedTrace.runId }}</span>
-              </div>
+              <details v-if="selectedTrace.operationId || selectedTrace.conversationId || selectedTrace.turnId || selectedTrace.runId" class="detail-identity-details">
+                <summary>查看运行编号</summary>
+                <div class="detail-identity">
+                  <span v-if="selectedTrace.operationId">操作 {{ selectedTrace.operationId }}</span>
+                  <span v-if="selectedTrace.conversationId">会话 {{ selectedTrace.conversationId }}</span>
+                  <span v-if="selectedTrace.turnId">轮次 {{ selectedTrace.turnId }}</span>
+                  <span v-if="selectedTrace.runId">运行 {{ selectedTrace.runId }}</span>
+                </div>
+              </details>
 
               <div v-if="selectedTrace.stepChain.length" class="detail-section">
                 <div class="detail-section-title">步骤链路</div>
@@ -346,8 +342,8 @@
                     </div>
                     <p>{{ entry.task_name || '-' }}</p>
                     <div v-if="entry.run_id || entry.job_id" class="tag-row">
-                      <el-tag v-if="entry.run_id" size="small" type="primary" effect="plain">run {{ entry.run_id }}</el-tag>
-                      <el-tag v-if="entry.job_id" size="small" type="info" effect="plain">job {{ entry.job_id }}</el-tag>
+                      <el-tag v-if="entry.run_id" size="small" type="primary" effect="plain">运行 {{ entry.run_id }}</el-tag>
+                      <el-tag v-if="entry.job_id" size="small" type="info" effect="plain">任务 {{ entry.job_id }}</el-tag>
                     </div>
                     <div v-if="entry.summary" class="summary-note">{{ entry.summary }}</div>
                     <div v-if="entry.route_reason" class="route-note">{{ entry.route_reason }}</div>
@@ -360,7 +356,7 @@
                 <div class="raw-events">
                   <div v-for="(entry, index) in selectedTrace.entries" :key="index" class="raw-line">
                     <span>{{ formatTime(entry.timestamp) }}</span>
-                    <strong>{{ entry.traceType }}</strong>
+                    <strong>{{ traceTypeLabel(entry.traceType) }}</strong>
                     <em>{{ entry.kind || entry.status || entry.stage || '-' }}</em>
                     <code>{{ entry.task_name || entry.goal || entry.summary || '' }}</code>
                   </div>
@@ -599,7 +595,31 @@ function companionJobResultSummary(job: CompanionEventEnvelope) {
 
 function companionJobDuration(job: CompanionEventEnvelope) {
   const value = projectCompanionJob(job).durationMs
-  return value === null ? '' : `${value} ms`
+  if (value === null) return ''
+  return value >= 1000 ? `${(value / 1000).toFixed(1)} 秒` : `${Math.round(value)} 毫秒`
+}
+
+function scheduleModeLabel(mode?: string | null) {
+  const labels: Record<string, string> = { once: '单次', interval: '循环', scheduled: '计划' }
+  const value = String(mode || '')
+  return labels[value] || value || '计划'
+}
+
+function scheduleStatusLabel(status?: string | null) {
+  const value = String(status || '')
+  const labels: Record<string, string> = {
+    pending: '等待中', queued: '排队中', running: '运行中', success: '已完成', completed: '已完成',
+    error: '失败', failed: '失败', cancelled: '已停止', interrupted: '已中断', partial: '部分完成',
+  }
+  return labels[value] || statusLabel(value)
+}
+
+function traceTypeLabel(type?: string | null) {
+  const labels: Record<string, string> = {
+    planner: '规划', steps: '执行步骤', scheduler: '计划任务', runtime_loop: '运行循环',
+  }
+  const value = String(type || '')
+  return labels[value] || value || '运行记录'
 }
 
 function companionJobOutcome(job: CompanionEventEnvelope) {
@@ -658,10 +678,21 @@ const resumeCompanionJob = async (job: CompanionEventEnvelope) => {
       ElMessage.error('恢复句柄已失效，请重新执行任务')
       return
     }
-    ElMessage.success('已从失败步骤继续')
     await loadCompanionRuntime()
-  } catch {
-    ElMessage.error('无法从失败步骤继续，请稍后重试')
+    ElMessage.success('已从失败步骤继续')
+  } catch (error) {
+    const status = typeof error === 'object' && error !== null && 'status' in error
+      ? Number((error as { status?: unknown }).status)
+      : 0
+    // HttpClientError normalizes both ``code`` and legacy payload.error.
+    const backendCode = typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code || '')
+      : ''
+    if (status === 409 || backendCode === 'invalid_or_expired_recovery_handle') {
+      ElMessage.error('恢复句柄已失效，请重新执行任务')
+    } else {
+      ElMessage.error('无法从失败步骤继续，请稍后重试')
+    }
   } finally {
     removePending(retryingJobIds, job.jobId)
   }
@@ -676,14 +707,19 @@ const retryCompanionJob = async (job: CompanionEventEnvelope, unknownEffectAckno
       const args = companionJobToolArgs(job)
       if (!toolName || !args) return
       const retryRequestId = `${job.requestId}:retry:${Date.now()}`
-      getSocketClient().sendToolCall(retryRequestId, toolName, args, {
+      const socketClient = getSocketClient()
+      if (!socketClient.isConnected()) {
+        ElMessage.error('实时连接已断开，无法提交重试请求')
+        return
+      }
+      socketClient.sendToolCall(retryRequestId, toolName, args, {
         requestId: retryRequestId,
         runId: job.runId,
         jobId: job.jobId,
         source: 'desktop',
         retry: true,
       })
-      ElMessage.success('Tool retry requested')
+      ElMessage.success('已发送工具重试请求')
       await new Promise(resolve => window.setTimeout(resolve, 80))
       await loadCompanionRuntime()
       return
@@ -903,7 +939,7 @@ const selectedTrace = computed(() => {
 })
 
 const activeTraceFilterLabel = computed(() => {
-  const typeLabel: Record<TraceFilter, string> = { all: '全部运行', planner: '含 Planner', steps: '含步骤链', scheduler: '含计划器', runtime_loop: '含运行循环' }
+  const typeLabel: Record<TraceFilter, string> = { all: '全部运行', planner: '含规划过程', steps: '含步骤链', scheduler: '含计划器', runtime_loop: '含运行循环' }
   const statusLabelText: Record<StatusFilter, string> = { all: '全部状态', ok: '成功/完成', error: '失败', partial: '跳过/部分完成' }
   const search = traceSearch.value.trim()
   return `${typeLabel[traceFilter.value]} · ${statusLabelText[statusFilter.value]}${search ? ` · 搜索“${search}”` : ''}`
@@ -963,8 +999,8 @@ const secondaryExperienceMetrics = computed(() => (
 
 function formatLatency(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return '待采样'
-  if (value >= 1000) return `${(value / 1000).toFixed(2)} s`
-  return `${Math.round(value)} ms`
+  if (value >= 1000) return `${(value / 1000).toFixed(2)} 秒`
+  return `${Math.round(value)} 毫秒`
 }
 
 function formatRate(value: number | null | undefined) {
@@ -1140,7 +1176,7 @@ function statusLabel(status?: string | null) {
   if (normalized === 'ok') return '成功'
   if (normalized === 'error') return '失败'
   if (normalized === 'partial') return '部分/跳过'
-  return status || 'pending'
+  return status ? String(status) : '等待中'
 }
 
 function groupSearchText(group: TraceGroup) {

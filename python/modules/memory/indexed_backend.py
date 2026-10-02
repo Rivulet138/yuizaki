@@ -8,6 +8,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 from .backend import MemoryBackend, MemoryBackendStatus
+from .operations import MemoryOperation
 from .schema import MemorySearchFilters
 from .vector_store import (
     Document,
@@ -213,6 +214,40 @@ class IndexedMemoryBackend:
 
     def list_documents(self) -> list[Document]:
         return self.authority.list_documents()
+
+    def record_operation(self, operation: MemoryOperation) -> None:
+        """Persist lifecycle operations in the durable memory authority.
+
+        The search index is a replaceable projection and must never own the
+        operation ledger.  Indexed backends therefore forward this call to
+        the authority so the ledger survives index rebuilds and restarts.
+        """
+        recorder = getattr(self.authority, "record_operation", None)
+        if not callable(recorder):
+            raise TypeError("memory authority does not support operation recording")
+        cast(Callable[[MemoryOperation], None], recorder)(operation)
+
+    def list_operations(
+        self,
+        *,
+        document_id: str | None = None,
+        scope: str | None = None,
+        workspace_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Read lifecycle operations from the durable memory authority."""
+        reader = getattr(self.authority, "list_operations", None)
+        if not callable(reader):
+            raise TypeError("memory authority does not support operation listing")
+        operation_reader = cast(Callable[..., list[dict[str, Any]]], reader)
+        return operation_reader(
+            document_id=document_id,
+            scope=scope,
+            workspace_id=workspace_id,
+            session_id=session_id,
+            limit=limit,
+        )
 
     def persist_rebuild_job(self, snapshot: dict[str, Any]) -> None:
         persist = getattr(self.authority, "persist_rebuild_job", None)

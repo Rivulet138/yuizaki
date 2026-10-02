@@ -39,3 +39,10 @@ Dockerfile text eol=lf
 *.wav binary
 *.mp3 binary
 *.flac binary
+
+# Genie character bundles are large binary assets and are stored with Git LFS.
+python/CharacterModels/v2ProPlus/*/prompt_wav/*.wav filter=lfs diff=lfs merge=lfs -text
+python/CharacterModels/v2ProPlus/*/*.bin filter=lfs diff=lfs merge=lfs -text
+python/CharacterModels/v2ProPlus/*/*.onnx filter=lfs diff=lfs merge=lfs -text
+python/CharacterModels/v2ProPlus/*/tts_models/*.bin filter=lfs diff=lfs merge=lfs -text
+python/CharacterModels/v2ProPlus/*/tts_models/*.onnx filter=lfs diff=lfs merge=lfs -text

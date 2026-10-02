@@ -23,13 +23,14 @@ chmod +x YuizakiLauncher
 ```
 
 ```bash
-./YuizakiLauncher --check
-./YuizakiLauncher
+./YuizakiLauncher setup
+./YuizakiLauncher start --check
+./YuizakiLauncher start
 ```
 
-默认会启动 MCP。使用 `--no-mcp` 可运行精简模式，使用 `--dev-renderer` 可通过 Vite 提供渲染器服务。
+默认不启动可选 MCP。需要扩展工具时使用 `--with-mcp`，使用 `--no-mcp` 可显式保持关闭；`--dev-renderer` 可通过 Vite 提供渲染器服务。
 
-MCP starts by default. Use `--no-mcp` for a reduced run and `--dev-renderer` to serve the renderer through Vite.
+Optional MCP is disabled by default. Use `--with-mcp` when extension tools are needed, keep it explicitly disabled with `--no-mcp`, and use `--dev-renderer` to serve the renderer through Vite.
 
 ## Audio and input / 音频与输入
 

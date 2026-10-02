@@ -31,17 +31,15 @@
         <div class="block-heading">
           <div>
             <h4 id="memory-storage-heading">{{ t('settings.memory.storageTitle') }}</h4>
-            <p>{{ t('settings.memory.storageDescription') }}</p>
           </div>
         </div>
         <el-form-item :label="t('settings.memory.backend')">
           <el-radio-group class="backend-selector" :model-value="modelValue.backend" @change="$emit('change-backend', String($event))">
             <el-radio-button value="sqlite">SQLite</el-radio-button>
-            <el-radio-button value="inmemory">In-memory</el-radio-button>
-            <el-radio-button value="qdrant">SQLite + Qdrant</el-radio-button>
+            <el-radio-button value="inmemory">仅本次运行</el-radio-button>
+            <el-radio-button value="qdrant">SQLite + 向量检索</el-radio-button>
           </el-radio-group>
         </el-form-item>
-        <p class="field-hint">{{ backendDescription }}</p>
         <el-form-item v-if="modelValue.backend === 'sqlite'" :label="t('settings.memory.sqlitePath')">
           <el-input
             :model-value="modelValue.sqlite_path"
@@ -55,7 +53,6 @@
         <div class="block-heading">
           <div>
             <h4 id="memory-search-heading">{{ t('settings.memory.semanticTitle') }}</h4>
-            <p>{{ t('settings.memory.semanticDescription') }}</p>
           </div>
           <el-switch
             :model-value="modelValue.reranker_enabled"
@@ -91,7 +88,6 @@
         <div class="block-heading">
           <div>
             <h4 id="memory-qdrant-heading">Qdrant</h4>
-            <p>{{ t('settings.memory.qdrantDescription') }}</p>
           </div>
         </div>
         <div class="form-grid">
@@ -186,12 +182,6 @@ const backendLabel = computed(() => ({
   inmemory: 'In-memory',
   qdrant: 'SQLite + Qdrant',
 }[props.modelValue.backend] || props.modelValue.backend))
-
-const backendDescription = computed(() => ({
-  sqlite: t('settings.memory.backendSqliteDescription'),
-  inmemory: t('settings.memory.backendMemoryDescription'),
-  qdrant: t('settings.memory.backendQdrantDescription'),
-}[props.modelValue.backend] || ''))
 
 const emit = defineEmits<{
   'update-field': [field: keyof MemorySettings, value: MemorySettingValue]

@@ -153,11 +153,11 @@
         </template>
         <div class="resource-details">
           <div><strong>{{ t('settings.resource.model') }}</strong><code class="resource-path">{{ resourceView.sherpaOnline.modelPath }}</code></div>
-          <div><strong>Sherpa Tokens</strong><code class="resource-path">{{ resourceView.sherpaOnline.tokensPath }}</code></div>
+          <div><strong>Sherpa Tokens（词表文件）</strong><code class="resource-path">{{ resourceView.sherpaOnline.tokensPath }}</code></div>
           <div>
-            <strong>Runtime validation</strong>
+            <strong>模型检查</strong>
             <el-tag :type="resourceView.sherpaOnline.validated ? 'success' : 'warning'">
-              {{ resourceView.sherpaOnline.validated ? 'Zipformer2 CTC verified' : 'Not verified' }}
+              {{ resourceView.sherpaOnline.validated ? 'Zipformer2 CTC 已通过' : 'Zipformer2 CTC 未检查' }}
             </el-tag>
           </div>
         </div>
@@ -221,7 +221,7 @@
         </template>
         <div class="resource-details">
           <div><strong>{{ t('settings.resource.model') }}</strong><code class="resource-path">{{ resourceView.sherpa.modelPath }}</code></div>
-          <div><strong>Sherpa Tokens</strong><code class="resource-path">{{ resourceView.sherpa.tokensPath }}</code></div>
+          <div><strong>Sherpa Tokens（词表文件）</strong><code class="resource-path">{{ resourceView.sherpa.tokensPath }}</code></div>
         </div>
         <ul v-if="resourceView.sherpa.details.length" class="resource-list">
           <li v-for="detail in resourceView.sherpa.details" :key="detail">{{ detail }}</li>

@@ -12,7 +12,6 @@
     <div class="product-metrics-consent">
       <div class="consent-copy">
         <strong>{{ t('settings.productMetrics.consent') }}</strong>
-        <p>{{ t('settings.productMetrics.description') }}</p>
       </div>
       <el-switch
         data-testid="product-metrics-consent"

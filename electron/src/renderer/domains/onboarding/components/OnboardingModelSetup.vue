@@ -3,7 +3,6 @@
     <div class="section-heading">
       <div>
         <h2 id="onboarding-model-title">{{ t('onboarding.model.title') }}</h2>
-        <p>{{ t('onboarding.model.description') }}</p>
       </div>
       <span v-if="tested" class="tested-status" role="status">
         <el-icon><CircleCheckFilled /></el-icon>{{ t('onboarding.model.testPassed') }}

@@ -39,7 +39,7 @@
         <el-slider :model-value="modelValue.repetition_penalty" :min="0" :max="2" :step="0.05" @update:model-value="emitField('repetition_penalty', $event)" />
       </label>
       <label>
-        <span>最大回复 tokens</span>
+        <span>最大回复长度</span>
         <el-input-number :model-value="modelValue.max_tokens" :min="128" :max="maxOutputTokens" :step="128" size="small" @update:model-value="emitField('max_tokens', $event)" />
       </label>
       <label>

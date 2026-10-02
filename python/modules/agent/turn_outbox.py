@@ -1,4 +1,10 @@
-"""Ordered, retryable projections for durable semantic-turn commits."""
+"""Deliver committed turn projections in order without duplicating effects.
+
+The SQLite outbox is the retry boundary after a semantic turn is persisted.
+Each projection has its own acknowledgement; an expired claim or uncertain
+external effect is kept pending/dead-lettered for inspection instead of being
+reported as a successful new turn.
+"""
 
 from __future__ import annotations
 
@@ -195,20 +201,34 @@ class TurnOutboxDispatcher:
     ) -> bool:
         """Recover an ACK-only crash or confirm an already delivered replay."""
         workspace_id = str(getattr(context, "workspace_id", "") or "").strip()
-        if not workspace_id:
-            return False
-        event = next(
-            (
-                item
-                for item in self.store.list_commits(workspace_id, limit=10000)
-                if str(item.get("idempotency_key") or "") == idempotency_key
-            ),
-            None,
-        )
+        event: dict[str, Any] | None = None
+        # Prefer the exact-key lookup when the request lost its workspace
+        # context.  Older stores may not expose it, so retain the scoped
+        # rebuild path as a compatibility fallback.
+        lookup = getattr(self.store, "find_outbox_by_idempotency_key", None)
+        if callable(lookup):
+            candidate = lookup(idempotency_key)
+            if isinstance(candidate, dict):
+                event = candidate
+        if event is None and workspace_id:
+            event = next(
+                (
+                    item
+                    for item in self.store.list_commits(workspace_id, limit=10000)
+                    if str(item.get("idempotency_key") or "") == idempotency_key
+                ),
+                None,
+            )
         if event is None:
             return False
+        if event.get("dead_lettered_at") is not None:
+            return False
+        if event.get("delivered_at") is not None:
+            return True
         event_id = int(event["event_id"])
-        acknowledged = self.store.acknowledged_projections(event_id)
+        acknowledged = set(event.get("acknowledged_projections") or ())
+        if not acknowledged:
+            acknowledged = self.store.acknowledged_projections(event_id)
         if not all(projection.name in acknowledged for projection in self.projections):
             return False
         # This is idempotent. It closes the narrow crash window after every

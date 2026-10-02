@@ -117,8 +117,37 @@ def llm_request_url(
     return llm_chat_url(endpoint, normalized)
 
 
+class LlmCredentialError(ValueError):
+    """Raised when a configured LLM credential cannot be sent over HTTP."""
+
+
+def validate_llm_api_key(api_key: str) -> str:
+    """Return a header-safe API key or raise a readable credential error.
+
+    HTTP header values must be ASCII, so a key that picked up non-ASCII text
+    (for example a pasted credential blob or CJK characters) can never be sent.
+    Failing here keeps the failure readable instead of surfacing a raw
+    ``'ascii' codec can't encode characters`` error from the HTTP client.
+    """
+    clean = (api_key or "").strip()
+    if not clean:
+        return ""
+    if any(character in clean for character in "\r\n\x00"):
+        raise LlmCredentialError(
+            "LLM API key contains invalid control characters; "
+            "please clear the API key field and enter the key again"
+        )
+    if not clean.isascii():
+        raise LlmCredentialError(
+            "LLM API key contains non-ASCII characters, which cannot be sent in an HTTP header; "
+            "please clear the API key field and enter a valid ASCII key"
+        )
+    return clean
+
+
 def build_llm_auth_headers(api_key: str, provider: str = "custom") -> dict[str, str]:
     normalized_provider = normalize_llm_provider(provider)
+    api_key = validate_llm_api_key(api_key)
     if normalized_provider == "gemini":
         return {"x-goog-api-key": api_key} if api_key else {}
     if normalized_provider == "claude":

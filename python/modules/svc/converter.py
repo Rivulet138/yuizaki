@@ -8,6 +8,7 @@ import logging
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -27,6 +28,17 @@ def normalize_provider(provider: str) -> str:
     return normalized
 
 
+def normalize_base_url(value: str) -> str:
+    raw = str(value or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    candidate = raw if "://" in raw else f"http://{raw}"
+    parsed = urlsplit(candidate)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return candidate
+
+
 class SVCClient:
     """Brokered SVC client for the external SoulX-Singer-SVC service."""
 
@@ -40,7 +52,7 @@ class SVCClient:
         audio_cache_dir: Path = DEFAULT_AUDIO_CACHE_DIR,
     ) -> None:
         self._provider = normalize_provider(provider)
-        self._base_url = base_url.rstrip("/")
+        self._base_url = normalize_base_url(base_url)
         self.speaker_id = speaker_id
         self.pitch = pitch
         self._timeout = timeout

@@ -32,44 +32,63 @@ const (
 	defaultControlPort  = "38945"
 	defaultRendererPort = "5173"
 	defaultMCPPort      = "7777"
-	defaultMCPEnabled   = true
+	// MCP is an optional capability. Keep the core text-chat startup path
+	// independent from the Node service and let users opt in explicitly.
+	defaultMCPEnabled = false
 )
 
 type launcherConfig struct {
-	rootDir          string
-	pythonDir        string
-	electronDir      string
-	nodeMCPDir       string
-	scriptsDir       string
-	logDir           string
-	stateDir         string
-	statePath        string
-	backendURL       string
-	controlURL       string
-	rendererOrigin   string
-	rendererURL      string
-	panelOpenURL     string
-	mcpURL           string
-	withMCP          bool
-	devRenderer      bool
-	noOpen           bool
-	noShowPet        bool
-	browserOnly      bool
-	noQdrant         bool
-	smoke            bool
-	checkOnly        bool
-	serverHost       string
-	serverPort       string
-	serverFallbacks  string
-	controlPort      string
-	controlFallbacks string
-	rendererPort     string
-	renderFallbacks  string
-	mcpPort          string
-	token            string
-	autoInstall      bool
-	env              map[string]string
-	logger           *logHub
+	rootDir           string
+	pythonDir         string
+	electronDir       string
+	nodeMCPDir        string
+	scriptsDir        string
+	logDir            string
+	stateDir          string
+	statePath         string
+	backendURL        string
+	controlURL        string
+	rendererOrigin    string
+	rendererURL       string
+	panelOpenURL      string
+	mcpURL            string
+	withMCP           bool
+	devRenderer       bool
+	noOpen            bool
+	noShowPet         bool
+	browserOnly       bool
+	noQdrant          bool
+	smoke             bool
+	checkOnly         bool
+	serverHost        string
+	serverPort        string
+	serverFallbacks   string
+	controlPort       string
+	controlFallbacks  string
+	rendererPort      string
+	renderFallbacks   string
+	mcpPort           string
+	token             string
+	autoInstall       bool
+	env               map[string]string
+	runtimeService    string
+	runtimeVersion    string
+	runtimeInstance   string
+	runtimeGeneration string
+	runtimeNonce      string
+	logger            *logHub
+}
+
+type backendRuntimeIdentity struct {
+	Service      string `json:"service"`
+	Version      string `json:"version"`
+	InstanceID   string `json:"instance_id"`
+	Generation   string `json:"generation"`
+	StartupNonce string `json:"startup_nonce"`
+}
+
+type backendPingResponse struct {
+	Runtime *backendRuntimeIdentity `json:"runtime"`
 }
 
 type commandRunner struct {
@@ -343,6 +362,24 @@ func newConfig() (*launcherConfig, error) {
 		cfg.token = token
 	}
 	cfg.env["YUIZAKI_BACKEND_API_TOKEN"] = cfg.token
+	// Every supervised launch gets a fresh identity. This prevents a stale
+	// process left on the preferred port from being mistaken for our backend.
+	cfg.runtimeService = "yuizaki-python-backend"
+	cfg.runtimeVersion = envOrMap(cfg.env, "YUIZAKI_RUNTIME_SERVICE_VERSION", "dev")
+	cfg.runtimeInstance, err = randomHex(16)
+	if err != nil {
+		return nil, err
+	}
+	cfg.runtimeGeneration = fmt.Sprintf("%d", time.Now().UTC().UnixNano())
+	cfg.runtimeNonce, err = randomHex(16)
+	if err != nil {
+		return nil, err
+	}
+	cfg.env["YUIZAKI_RUNTIME_SERVICE"] = cfg.runtimeService
+	cfg.env["YUIZAKI_RUNTIME_SERVICE_VERSION"] = cfg.runtimeVersion
+	cfg.env["YUIZAKI_RUNTIME_INSTANCE_ID"] = cfg.runtimeInstance
+	cfg.env["YUIZAKI_RUNTIME_GENERATION"] = cfg.runtimeGeneration
+	cfg.env["YUIZAKI_RUNTIME_STARTUP_NONCE"] = cfg.runtimeNonce
 	cfg.env["YUIZAKI_SUPERVISOR"] = "1"
 	cfg.env["APP_ENV"] = envOrMap(cfg.env, "APP_ENV", "development")
 	cfg.env["ENV"] = envOrMap(cfg.env, "ENV", "development")
@@ -416,7 +453,10 @@ func (r *commandRunner) Run(ctx context.Context) error {
 	}
 	if cfg.withMCP {
 		if err := r.ensureMCP(ctx); err != nil {
-			return err
+			// MCP is an extension capability. Preserve the core chat/runtime
+			// startup when its optional process or dependencies are unavailable.
+			cfg.logger.Log("mcp", "optional MCP startup failed; continuing without MCP: "+err.Error())
+			cfg.withMCP = false
 		}
 	}
 	if cfg.devRenderer {
@@ -510,8 +550,12 @@ func (r *commandRunner) installRuntime(ctx context.Context, profile string) erro
 	if err := r.runLogged(ctx, "install-electron-runtime", r.cfg.electronDir, npm, "run", "install:runtime"); err != nil {
 		return err
 	}
-	if err := r.runLogged(ctx, "install-mcp", r.cfg.nodeMCPDir, npm, "ci"); err != nil {
-		return err
+	if r.cfg.withMCP {
+		if err := r.runLogged(ctx, "install-mcp", r.cfg.nodeMCPDir, npm, "ci"); err != nil {
+			return err
+		}
+	} else {
+		r.cfg.logger.Log("setup", "MCP disabled; skipping Node MCP dependency installation")
 	}
 
 	pythonCommand, pythonArgs := pythonBootstrapCommand()
@@ -654,24 +698,60 @@ func (r *commandRunner) selectControlAndRendererPorts(ctx context.Context) error
 }
 
 func (r *commandRunner) selectAndCheckBackend(ctx context.Context) (bool, error) {
-	port, status, err := r.selectPort(ctx, "backend", r.cfg.serverPort, r.cfg.serverFallbacks)
+	ports := append([]string{r.cfg.serverPort}, strings.Split(r.cfg.serverFallbacks, ",")...)
+	seen := map[string]bool{}
+	for _, port := range ports {
+		port = strings.TrimSpace(port)
+		if port == "" || seen[port] {
+			continue
+		}
+		seen[port] = true
+		url := fmt.Sprintf("http://%s:%s/api/ping", r.cfg.serverHost, port)
+		if r.httpOK(ctx, url, nil, 2*time.Second) {
+			if r.backendIdentityMatches(ctx, url) {
+				r.cfg.serverPort = port
+				r.cfg.refreshURLs()
+				r.cfg.logger.Log("launcher", fmt.Sprintf("Backend port selected: %s (reused matching identity)", port))
+				return true, nil
+			}
+			r.cfg.logger.Log("launcher", fmt.Sprintf("Backend port %s is occupied by an unowned or stale instance; skipping", port))
+			continue
+		}
+		listener, err := net.Listen("tcp", net.JoinHostPort(r.cfg.serverHost, port))
+		if err == nil {
+			_ = listener.Close()
+			r.cfg.serverPort = port
+			r.cfg.refreshURLs()
+			r.cfg.logger.Log("launcher", fmt.Sprintf("Backend port selected: %s (available)", port))
+			return false, nil
+		}
+	}
+	return false, fmt.Errorf("backend ports are occupied or owned by another runtime; preferred=%s", r.cfg.serverPort)
+}
+
+func (r *commandRunner) backendIdentityMatches(ctx context.Context, url string) bool {
+	reqCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
 	if err != nil {
-		return false, err
+		return false
 	}
-	if status == "blocked" {
-		return false, fmt.Errorf("backend ports are occupied; preferred=%s", r.cfg.serverPort)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
 	}
-	r.cfg.serverPort = port
-	r.cfg.refreshURLs()
-	r.cfg.logger.Log("launcher", fmt.Sprintf("Backend port selected: %s (%s)", port, status))
-	if status == "healthy" {
-		return true, nil
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return false
 	}
-	ok := r.httpOK(ctx, r.cfg.backendURL+"/api/ping", nil, 5*time.Second)
-	if ok {
-		return true, nil
+	var payload backendPingResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil || payload.Runtime == nil {
+		return false
 	}
-	return false, nil
+	identity := payload.Runtime
+	return identity.Service == r.cfg.runtimeService && identity.Version == r.cfg.runtimeVersion &&
+		identity.InstanceID == r.cfg.runtimeInstance && identity.Generation == r.cfg.runtimeGeneration &&
+		identity.StartupNonce == r.cfg.runtimeNonce
 }
 
 func (r *commandRunner) selectPort(ctx context.Context, mode, preferred, fallbacks string) (string, string, error) {
@@ -716,7 +796,7 @@ func (r *commandRunner) buildElectron(ctx context.Context) error {
 		filepath.Join(r.cfg.electronDir, "package.json"),
 		filepath.Join(r.cfg.electronDir, "package-lock.json"),
 		filepath.Join(r.cfg.electronDir, "tsconfig.json"),
-		filepath.Join(r.cfg.electronDir, "vite.config.ts"),
+		filepath.Join(r.cfg.electronDir, "vite.config.mts"),
 	}
 	if buildIsCurrent(outputPath, statePath, inputs, outputs) {
 		r.cfg.logger.Log("build", "Electron build is current; skipping frontend and TypeScript compilation")
@@ -1334,6 +1414,14 @@ func generateToken() (string, error) {
 		return "", err
 	}
 	return strings.TrimRight(base64.URLEncoding.EncodeToString(buf), "="), nil
+}
+
+func randomHex(size int) (string, error) {
+	buf := make([]byte, size)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 func envMap() map[string]string {

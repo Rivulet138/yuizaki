@@ -4,12 +4,12 @@ import json
 import logging
 import os
 from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
-from datetime import datetime
 
-from .dynamic_config import redact_sensitive_config_value
 from ..core.paths import DEFAULT_SETTINGS_PATH, settings_path_from_env
+from .dynamic_config import redact_sensitive_config_value
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,12 @@ DEFAULT_SETTINGS_PATH_STR = str(DEFAULT_SETTINGS_PATH)
 PROVIDER_CREDENTIALS_ENV = "YUIZAKI_PROVIDER_CREDENTIALS_JSON"
 SETTINGS_SECRET_MASK = "********"
 _SECRET_FIELD_NAMES = {"api_key", "vision_api_key", "qdrant_api_key"}
+_PROVIDER_CREDENTIAL_SECTIONS = {"llm", "tts", "asr", "svc", "memory"}
+
+
+def _is_provider_credential_path(field_path: str) -> bool:
+    parts = field_path.split(".")
+    return len(parts) == 2 and parts[0] in _PROVIDER_CREDENTIAL_SECTIONS and parts[1] in _SECRET_FIELD_NAMES
 
 
 def _set_path(target: Dict[str, Any], field_path: str, value: str) -> None:
@@ -47,7 +53,10 @@ def _credential_environment() -> Dict[str, str]:
     return {
         str(key): str(value)
         for key, value in payload.items()
-        if isinstance(key, str) and isinstance(value, str) and value
+        if isinstance(key, str)
+        and _is_provider_credential_path(key)
+        and isinstance(value, str)
+        and value
     }
 
 
@@ -124,6 +133,35 @@ class SettingsStore:
             else:
                 return default
         return value
+
+    def reload_provider_credentials(self, credentials: Dict[str, str]) -> int:
+        """Replace in-memory provider secrets from an authenticated local sync.
+
+        Credentials are deliberately never written to the settings JSON file. The
+        caller must provide the complete allowlisted set, so removed vault values
+        are cleared from this process as well.
+        """
+        if not isinstance(credentials, dict):
+            raise ValueError("credentials must be an object")
+        normalized: Dict[str, str] = {}
+        for field_path, value in credentials.items():
+            if not isinstance(field_path, str) or not _is_provider_credential_path(field_path):
+                raise ValueError("unsupported provider credential field")
+            if not isinstance(value, str):
+                raise ValueError("provider credential values must be strings")
+            clean = value.strip()
+            if clean:
+                normalized[field_path] = clean
+        changed = 0
+        for section in _PROVIDER_CREDENTIAL_SECTIONS:
+            for field in _SECRET_FIELD_NAMES:
+                field_path = f"{section}.{field}"
+                current = self.get(field_path)
+                next_value = normalized.get(field_path)
+                if current != next_value:
+                    self.set(field_path, next_value or "")
+                    changed += 1
+        return changed
 
     def set(self, key: str, value: Any) -> None:
         """Set a setting value.

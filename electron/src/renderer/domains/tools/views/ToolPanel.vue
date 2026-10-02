@@ -41,7 +41,6 @@
         <div class="section-heading">
           <div>
             <h3>直播能力</h3>
-            <p>{{ streamSummaryText }}</p>
           </div>
           <div class="section-actions">
             <el-tag :type="streamStatusTagType" effect="light">{{ streamStatusLabel }}</el-tag>
@@ -55,9 +54,8 @@
         <div v-if="streamSnapshot" class="stream-status-line">
           <span>适配器：{{ streamSnapshot.adapter?.name || streamSnapshot.adapter?.id || '未连接' }}</span>
           <span>{{ streamSnapshot.adapter?.configured ? '已配置' : '未配置' }}</span>
-          <span>{{ streamSnapshot.policy?.humanApprovalRequired !== false ? '需要人工确认' : '可自动执行' }}</span>
-          <span>Twitch EventSub：{{ streamSnapshot.platforms?.twitch?.revoked ? '订阅已撤销，需重新配置' : streamSnapshot.platforms?.twitch?.eventsubConfigured ? '已配置，仅接收入站事件' : '未配置' }}</span>
-          <span>Twitch 出站聊天：{{ streamSnapshot.platforms?.twitch?.outboundActions ? '已配置，仍需确认' : '未配置' }}</span>
+           <span>Twitch EventSub：{{ streamSnapshot.platforms?.twitch?.revoked ? '订阅已撤销，需重新配置' : streamSnapshot.platforms?.twitch?.eventsubConfigured ? '已配置，仅接收入站事件' : '未配置' }}</span>
+           <span>Twitch 出站聊天：{{ streamSnapshot.platforms?.twitch?.outboundActions ? '已配置，仍需确认' : '未配置' }}</span>
           <span>Twitch IRC：{{ twitchIrcStatusLabel }}</span>
           <el-button
             v-if="!streamSnapshot.platforms?.twitch?.ircConnection?.desired"
@@ -80,8 +78,6 @@
             :loading="reconfiguringTwitch"
             @click="reconfigureTwitch"
           >标记已重新配置</el-button>
-          <span v-if="streamSnapshot.platforms?.twitch?.inboundRateLimitPerMinute">Twitch 入站配额：{{ streamSnapshot.platforms.twitch.inboundRateLimitPerMinute }}/分钟</span>
-          <span v-if="streamSnapshot.platforms?.twitch?.throttledEvents">已限流：{{ streamSnapshot.platforms.twitch.throttledEvents }} 条</span>
         </div>
         <div class="stream-safety-controls stream-twitch-config">
           <div>
@@ -203,9 +199,8 @@
         </div>
         <el-empty v-else description="暂无可用能力" :image-size="48" />
         <div v-if="streamSnapshot?.preview" class="stream-preview-note">
-          <strong>预览：{{ streamSnapshot.preview.summary || streamSnapshot.preview.action || streamSnapshot.preview.kind }}</strong>
-          <span>风险：{{ streamRiskLabel(streamSnapshot.preview.riskLevel) }} · 参数：{{ formatStreamParams(streamSnapshot.preview.params) }}</span>
-          <span v-if="streamSnapshot.preview.steps?.length">{{ streamSnapshot.preview.steps.join(' → ') }}</span>
+          <strong>预览：{{ streamSnapshot.preview.summary || streamActionLabel(streamSnapshot.preview.action || streamSnapshot.preview.kind) }}</strong>
+           <span>风险：{{ streamRiskLabel(streamSnapshot.preview.riskLevel) }}</span>
           <el-button
             size="small"
             type="primary"
@@ -217,8 +212,7 @@
         </div>
         <div v-if="streamExecution" class="stream-execution-note" :class="{ failed: !streamExecution.ok }">
           <strong>{{ streamExecution.ok ? '执行完成' : '执行失败' }}</strong>
-          <span>结果：{{ streamExecution.outcome || (streamExecution.ok ? 'known_success' : 'failed') }} · 验证：{{ streamExecution.verificationStatus || '未提供' }}</span>
-          <span v-if="streamExecution.auditEvent">审计事件已记录</span>
+           <span v-if="!streamExecution.ok">请检查配置后重试</span>
           <el-button v-if="!streamExecution.ok" size="small" plain :loading="loadingStreamExecute" @click="confirmStreamExecution">手动重试</el-button>
         </div>
         <div class="stream-actions-heading">
@@ -231,12 +225,10 @@
               <strong>{{ action.action }}</strong>
               <small>{{ formatStreamActionStatus(action.status) }} · {{ formatStreamEventTime(action.at) }}</small>
             </div>
-            <span :class="`stream-action-status status-${action.status}`">{{ formatStreamActionStatus(action.status) }}</span>
             <small v-if="action.verificationStatus || action.errorCode">{{ action.verificationStatus || action.errorCode }}</small>
           </div>
         </div>
         <el-empty v-else description="暂无直播动作审计" :image-size="40" />
-        <div v-if="streamProbeSummary" class="stream-probe-note">探测：{{ streamProbeSummary }}</div>
         <div class="stream-events-heading">
           <strong>最近本地事件</strong>
             <div class="stream-event-heading-actions">
@@ -246,7 +238,7 @@
         </div>
         <div v-if="streamEvents.length" class="stream-event-list">
           <div v-for="event in streamEvents" :key="event.eventId || event.id || `${event.kind}-${event.createdAt || event.receivedAt}`" class="stream-event-row">
-            <span>{{ event.kind }}</span>
+            <span>{{ streamEventKindLabel(event.kind) }}</span>
             <strong>{{ event.text || event.message || '（无文本）' }}</strong>
             <small>{{ event.author || event.source || '本地' }} · {{ formatStreamEventTime(event.createdAt ?? event.receivedAt ?? event.at) }} · {{ event.delivered ? '已投递' : '仅本地队列' }}</small>
             <div class="stream-event-actions">
@@ -304,7 +296,10 @@
             <div>
               <h3>{{ activeFilterLabel }}</h3>
             </div>
-            <el-button plain :icon="Refresh" :loading="loadingSnapshots" @click="refreshSnapshots">刷新能力</el-button>
+            <div class="section-actions">
+              <el-button v-if="filterKind === 'mcp-tool'" plain size="small" @click="openMcpManagement">管理 MCP 服务</el-button>
+              <el-button plain :icon="Refresh" :loading="loadingSnapshots" @click="refreshSnapshots">刷新能力</el-button>
+            </div>
           </div>
 
           <div class="toolbar">
@@ -378,10 +373,6 @@
 
             <div class="detail-grid">
               <div>
-                <span>ID</span>
-                <strong>{{ selectedCapability.id }}</strong>
-              </div>
-              <div>
                 <span>类型</span>
                 <strong>{{ kindLabel(selectedCapability.kind) }}</strong>
               </div>
@@ -394,6 +385,11 @@
                 <strong>{{ formatTimeout(selectedCapability.timeoutMs) }}</strong>
               </div>
             </div>
+
+            <details class="capability-identity-details">
+              <summary>查看内部标识</summary>
+              <code>{{ selectedCapability.id }}</code>
+            </details>
 
             <div class="detail-section">
               <span class="section-label">作用范围</span>
@@ -583,6 +579,7 @@ import 'element-plus/es/components/input-number/style/css'
 import { ElTag } from 'element-plus'
 import 'element-plus/es/components/tag/style/css'
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Check, Close, Delete, Refresh, Search, Upload } from '@element-plus/icons-vue'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
@@ -614,6 +611,8 @@ const toolViews: Array<{ id: ToolViewId; label: string }> = [
   { id: 'history', label: '记录' },
 ]
 const activeToolView = ref<ToolViewId>('status')
+const route = useRoute()
+const router = useRouter()
 
 interface SourceCard {
   kind: CapabilityKindFilter
@@ -680,6 +679,11 @@ const skillCategoryFilter = ref<SkillCategoryFilter>('all')
 const skillImportInput = ref<HTMLInputElement | null>(null)
 const importedSkillItems = ref<ImportedSkillCatalogItem[]>([])
 const selectedSkillIds = ref(new Set<string>())
+
+const openMcpManagement = () => {
+  const workspaceId = String(route.params.workspaceId || 'default')
+  void router.push(`/w/${encodeURIComponent(workspaceId)}/agent-governance`)
+}
 
 const loadingCapabilities = ref(false)
 const loadingPlugins = ref(false)
@@ -757,7 +761,7 @@ const capabilityDescriptionOverrides: Record<string, string> = {
   'time.now': '获取当前本地时间。',
   mcp_playwright_browser_open_page: '在 Playwright 浏览器上下文中打开 URL，并等待网络空闲。',
   mcp_playwright_browser_click: '打开 URL 后点击指定 CSS 选择器。',
-  'yuizaki.observe-recall-loop': '收集运行时输入，召回相关记忆，并送入桌宠 Agent 链路。',
+  'yuizaki.observe-recall-loop': '收集运行时输入，召回相关记忆，并送入桌宠智能体链路。',
   'yuizaki.capability-routing': '通过统一能力快照选择内置工具、插件工具或 MCP 工具。',
   'yuizaki.create-once-task': '在本地调度器中创建一次性任务。',
   'yuizaki.create-interval-task': '在本地调度器中创建按间隔重复执行的任务。',
@@ -781,7 +785,7 @@ const capabilityDescriptionOverrides: Record<string, string> = {
   'yuizaki.skill.document-export': '把摘要、报告和会话结果导出为 PDF、DOCX、PPTX 或 XLSX。',
   'yuizaki.skill.spreadsheet-helper': '编写和调试 Excel/表格公式，适合导入数据、统计结果和批量整理。',
   'yuizaki.skill.task-triage': '把用户反馈、长对话或问题清单拆成优先级、复现步骤、下一步动作和回复草稿。',
-  'yuizaki.skill.agent-trace-debug': '分析 LLM、工具调用、记忆召回和插件钩子的执行轨迹，用于排查输出和耗时问题。',
+  'yuizaki.skill.agent-trace-debug': '分析模型、工具调用、记忆召回和插件钩子的执行轨迹，用于排查输出问题。',
   'yuizaki.skill.release-notes': '把技术改动整理成用户可读的更新说明。',
   'yuizaki.skill.design-system': '沉淀颜色、间距、组件状态和文案规则，让设置页、桌宠页和能力页保持一致。',
   'yuizaki.skill.web-research': '对需要时效性的模型、插件、依赖和工具信息进行搜索、比对和资料整理。',
@@ -800,7 +804,7 @@ const capabilityNameDescriptionOverrides: Record<string, string> = {
   'time.now': '获取当前本地时间。',
   mcp_playwright_browser_open_page: '在 Playwright 浏览器上下文中打开 URL，并等待网络空闲。',
   mcp_playwright_browser_click: '打开 URL 后点击指定 CSS 选择器。',
-  'Observe / Recall Loop': '收集运行时输入，召回相关记忆，并送入桌宠 Agent 链路。',
+  'Observe / Recall Loop': '收集运行时输入，召回相关记忆，并送入桌宠智能体链路。',
   'Capability Routing': '通过统一能力快照选择内置工具、插件工具或 MCP 工具。',
   'Create Once Task': '在本地调度器中创建一次性任务。',
   'Create Interval Task': '在本地调度器中创建按间隔重复执行的任务。',
@@ -816,7 +820,7 @@ const capabilityRawDescriptionOverrides: Record<string, string> = {
   'get the current local time': '获取当前本地时间。',
   'open a url in a playwright browser context and wait for network idle. (mcp: playwright/browser.open_page)': '在 Playwright 浏览器上下文中打开 URL，并等待网络空闲。',
   'open a url and click a css selector with playwright. (mcp: playwright/browser.click)': '打开 URL 后点击指定 CSS 选择器。',
-  'collect runtime input, recall memory, and feed the companion agent pipeline.': '收集运行时输入，召回相关记忆，并送入桌宠 Agent 链路。',
+  'collect runtime input, recall memory, and feed the companion agent pipeline.': '收集运行时输入，召回相关记忆，并送入桌宠智能体链路。',
   'route builtin, plugin, and mcp capabilities through the unified registry snapshot.': '通过统一能力快照选择内置工具、插件工具或 MCP 工具。',
   'create a one-shot scheduled task in the local scheduler.': '在本地调度器中创建一次性任务。',
   'create a recurring scheduled task in the local scheduler.': '在本地调度器中创建按间隔重复执行的任务。',
@@ -885,21 +889,22 @@ const streamStatusTagType = computed<TagType>(() => {
   if (state === 'error') return 'danger'
   return 'info'
 })
-const streamSummaryText = computed(() => {
-  if (!streamSnapshot.value) return '读取直播适配器状态与可预览动作'
-  const available = streamCapabilities.value.filter(item => item.available).length
-  return `${available}/${streamCapabilities.value.length} 可预览`
-})
 const streamPreviewExecutionReady = computed(() => {
   const action = streamSnapshot.value?.preview?.action || streamSnapshot.value?.preview?.kind
   if (!action) return false
   return streamCapabilities.value.find(item => item.id === action)?.executionReady === true
 })
-const streamProbeSummary = computed(() => {
-  if (!streamProbe.value) return ''
-  const values = Object.entries(streamProbe.value).slice(0, 4).map(([key, value]) => `${key}=${String(value)}`)
-  return values.length ? values.join('，') : '已完成，未返回附加信息'
-})
+function streamActionLabel(action: unknown) {
+  const labels: Record<string, string> = {
+    'stream.chat_send': '发送聊天消息',
+    'stream.profile_switch': '切换 OBS 配置档',
+    'stream.scene_switch': '切换 OBS 场景',
+    'stream.start': '开始直播',
+    'stream.stop': '结束直播',
+  }
+  const value = typeof action === 'string' ? action : ''
+  return labels[value] || value || '直播动作'
+}
 
 const twitchSubscriptionOptions = [
   { value: 'channel.chat.message', label: '聊天消息' },
@@ -1163,7 +1168,7 @@ function kindFallbackDescription(kind: CapabilityKind) {
     'builtin-tool': 'Yuizaki 后端内置能力，用于基础动作或本地资源访问。',
     'plugin-tool': '插件贡献能力，是否可用取决于插件加载状态。',
     'mcp-tool': 'MCP 服务暴露的工具，是否可用取决于对应服务连接状态。',
-    skill: '编排技能，用来描述一段可复用的 Agent 流程。',
+    skill: '编排技能，用来描述一段可复用的智能体流程。',
     command: '本地命令入口，用来触发后端任务或调度动作。',
   }
   return map[kind]
@@ -2290,6 +2295,19 @@ function formatStreamActionStatus(status: string | undefined) {
   return labels[status || ''] || status || '未知'
 }
 
+function streamEventKindLabel(kind: string | undefined) {
+  const labels: Record<string, string> = {
+    'channel.chat.message': '聊天消息',
+    'channel.follow': '新关注',
+    'channel.subscribe': '新订阅',
+    'channel.cheer': '打赏',
+    'channel.raid': 'Raid',
+    'stream.online': '开播',
+    'stream.offline': '下播',
+  }
+  return labels[kind || ''] || kind || '本地事件'
+}
+
 async function probeStream() {
   loadingStreamProbe.value = true
   streamLoadError.value = ''
@@ -2373,7 +2391,7 @@ async function confirmStreamExecution() {
   }
   try {
     await ElMessageBox.confirm(
-      `确认执行“${pending.action}”？风险：${streamRiskLabel(streamSnapshot.value?.preview?.riskLevel)}。`,
+        `确认执行“${streamActionLabel(pending.action)}”？风险：${streamRiskLabel(streamSnapshot.value?.preview?.riskLevel)}。`,
       '确认直播动作',
       { type: 'warning', confirmButtonText: '确认执行', cancelButtonText: '取消' },
     )
@@ -2404,11 +2422,6 @@ async function confirmStreamExecution() {
   } finally {
     loadingStreamExecute.value = false
   }
-}
-
-function formatStreamParams(params: Record<string, unknown> | undefined) {
-  if (!params || !Object.keys(params).length) return '无'
-  return Object.entries(params).slice(0, 6).map(([key, value]) => `${key}=${String(value)}`).join('，')
 }
 
 async function refreshSnapshots() {
@@ -2665,19 +2678,6 @@ onMounted(async () => {
   font-size: 10px;
   overflow-wrap: anywhere;
 }
-
-.stream-action-status {
-  align-self: start;
-  color: var(--yui-muted);
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.stream-action-status.status-known_success { color: #047857; }
-.stream-action-status.status-unknown_effect { color: #b45309; }
-.stream-action-status.status-failed { color: #be123c; }
-.stream-action-status.status-sending { color: #2563eb; }
 
 .stream-action-row > small {
   grid-column: 1 / -1;
@@ -3118,6 +3118,22 @@ onMounted(async () => {
 
 .schema-summary details {
   margin-top: 8px;
+}
+
+.capability-identity-details {
+  margin-top: 12px;
+  color: var(--yui-muted);
+  font-size: 12px;
+}
+
+.capability-identity-details summary {
+  cursor: pointer;
+}
+
+.capability-identity-details code {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
 }
 
 .schema-summary summary {

@@ -1,24 +1,11 @@
 <template>
   <PanelShell title="插件管理" tone="companion">
     <div class="plugin-console">
-<section class="plugin-toolbar" aria-label="插件操作">
-        <div class="toolbar-summary">
-          <strong>{{ pluginRows.length }} 个插件 · {{ auditLogs.length }} 条调用记录</strong>
-          <span>运行 {{ activeExecutionCount }} · 失败 {{ loadFailures.length }}</span>
-        </div>
+      <section class="plugin-toolbar" aria-label="插件操作">
         <div class="toolbar-actions">
-          <el-tag :type="blockedOrErrorCount > 0 ? 'danger' : 'success'">{{ blockedOrErrorCount > 0 ? '存在异常' : '无异常' }}</el-tag>
           <el-button plain :disabled="problemPluginCount === 0 && loadFailures.length === 0" @click="showProblemPlugins">筛选异常插件</el-button>
 <el-button type="primary" :loading="pluginsRequest.loading" @click="loadPlugins">刷新插件状态</el-button>
         </div>
-      </section>
-
-      <section class="metric-grid" aria-label="技能运行概况">
-        <article v-for="metric in metrics" :key="metric.label" class="metric-card" :class="metric.tone">
-          <span>{{ metric.label }}</span>
-          <strong>{{ metric.value }}</strong>
-          <small>{{ metric.detail }}</small>
-        </article>
       </section>
 
       <section class="plugin-layout">
@@ -66,11 +53,10 @@
                 type="button"
                 @click="selectPlugin(plugin.id)"
               >
-                <div class="plugin-card-head">
+                  <div class="plugin-card-head">
                   <div class="plugin-avatar">{{ plugin.name.slice(0, 1).toUpperCase() }}</div>
                   <div>
                     <strong>{{ plugin.name }}</strong>
-                    <span>{{ plugin.id }}</span>
                   </div>
                 </div>
                 <p>{{ pluginSkillSummary(plugin) }}</p>
@@ -98,19 +84,6 @@
           </template>
 
           <div v-if="selectedPlugin" class="detail-stack">
-            <div class="manifest-summary">
-              <div>
-                <span>技能包版本</span>
-                <strong>v{{ selectedPlugin.manifestVersion }}</strong>
-                <small>{{ selectedPlugin.version ? `技能版本 ${selectedPlugin.version}` : '未声明技能版本' }}</small>
-              </div>
-              <div>
-                <span>调用预算</span>
-                <strong>{{ selectedPlugin.execution.maxExecutionTimeMs }}ms</strong>
-                <small>并发 {{ selectedPlugin.execution.maxConcurrentExecutions }} · {{ selectedPlugin.execution.allowCancellation ? '支持取消' : '不可取消' }}</small>
-              </div>
-            </div>
-
             <div class="detail-block skill-benefit-block">
               <label>插件能力</label>
               <p class="skill-benefit-text">{{ selectedSkillSummary }}</p>
@@ -149,19 +122,12 @@
             </div>
 
             <div class="detail-block">
-              <label>权限说明</label>
-              <div class="permission-explain-list">
-                <p v-for="item in selectedPermissionExplanations" :key="item">{{ item }}</p>
-              </div>
-            </div>
-
-            <div class="detail-block">
               <label>底层权限</label>
               <div class="tag-wrap permission-tags">
                 <el-tag v-for="routeId in selectedPlugin.permissions.routes" :key="`route:${routeId}`" type="primary">路由：{{ routeId }}</el-tag>
                 <el-tag v-for="toolId in selectedPlugin.permissions.toolScopes" :key="`tool:${toolId}`" type="success">工具：{{ toolId }}</el-tag>
                 <el-tag v-for="providerId in selectedPlugin.permissions.modelScopes" :key="`model:${providerId}`" type="warning">模型：{{ providerId }}</el-tag>
-                <el-tag v-if="selectedPlugin.permissions.agentBridge" type="danger">Agent 桥接</el-tag>
+                <el-tag v-if="selectedPlugin.permissions.agentBridge" type="danger">智能体连接</el-tag>
                 <el-tag v-for="host in selectedPlugin.permissions.allowedHosts ?? []" :key="`host:${host}`" type="info">主机：{{ host }}</el-tag>
                 <el-tag v-for="allowedPath in selectedPlugin.permissions.allowedPaths ?? []" :key="`path:${allowedPath}`">路径：{{ allowedPath }}</el-tag>
                 <el-tag v-for="command in selectedPlugin.permissions.allowedCommands ?? []" :key="`command:${command}`" type="danger">命令：{{ command }}</el-tag>
@@ -201,8 +167,7 @@
           </template>
           <el-empty v-if="selectedPluginState == null || selectedPluginState.activeExecutions.length === 0" description="当前没有插件在运行" :image-size="56" />
           <el-table v-else :data="selectedPluginState.activeExecutions" size="small" stripe>
-            <el-table-column prop="invocationId" label="调用 ID" min-width="240" />
-            <el-table-column prop="routeId" label="路由" min-width="120" />
+            <el-table-column prop="routeId" label="功能" min-width="140" />
             <el-table-column prop="startedAt" label="开始时间" min-width="160" />
             <el-table-column prop="status" label="状态" width="110">
               <template #default="scope">
@@ -254,7 +219,7 @@
           <el-empty v-if="loadFailures.length === 0" description="暂无插件加载失败记录" :image-size="56" />
           <el-table v-else :data="loadFailures" size="small" stripe height="220">
             <el-table-column prop="manifestPath" label="清单路径" min-width="220" />
-            <el-table-column prop="pluginId" label="技能 ID" min-width="120" />
+            <el-table-column prop="pluginId" label="技能名称" min-width="120" />
             <el-table-column prop="reason" label="原因" min-width="220" />
           </el-table>
         </el-card>
@@ -262,7 +227,7 @@
         <el-card class="panel-card" shadow="never">
           <template #header>
             <div class="card-head compact">
-            <strong>调用审计记录</strong>
+            <strong>运行记录</strong>
               <el-tag type="info">最近 {{ auditLogs.length }} 条</el-tag>
             </div>
           </template>
@@ -276,7 +241,6 @@
                 <el-tag :type="auditTagType(scope.row.status)">{{ auditStatusLabel(scope.row.status) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="durationMs" label="耗时(ms)" width="100" />
             <el-table-column prop="detail" label="详情" min-width="220" />
           </el-table>
         </el-card>
@@ -325,7 +289,6 @@ const {
   payload,
   pluginsRequest,
   cancelRequest,
-  plugins,
   pluginRows,
   loadFailures,
   auditLogs,
@@ -333,7 +296,6 @@ const {
   selectedPluginId,
   selectedPluginState,
   blockedOrErrorCount,
-  activeExecutionCount,
   cancellingInvocationIds,
   loadPlugins,
   cancelExecution
@@ -434,67 +396,12 @@ const pluginSkillSummary = (plugin: DesktopPetPlugin & { lastError?: string }) =
   return '已安装，暂未声明额外桌宠能力'
 }
 
-const buildPermissionExplanations = (plugin: DesktopPetPlugin) => {
-  const permissions = plugin.permissions
-  const items: string[] = []
-  if (permissions.routes.length) {
-    items.push(`可执行 ${permissions.routes.length} 个技能动作：${permissions.routes.join('、')}`)
-  }
-  if (permissions.toolScopes.length) {
-    items.push(`可调用 ${permissions.toolScopes.length} 个工具能力：${permissions.toolScopes.join('、')}`)
-  }
-  if (permissions.modelScopes.length) {
-    items.push(`可提供 ${permissions.modelScopes.length} 个角色模型：${permissions.modelScopes.join('、')}`)
-  }
-  if (permissions.agentBridge) {
-    items.push('可接入 Agent 执行链，适合需要主动规划或调用工具的技能')
-  }
-  if (permissions.allowedHosts?.length) {
-    items.push(`可访问指定网络主机：${permissions.allowedHosts.join('、')}`)
-  }
-  if (permissions.allowedPaths?.length) {
-    items.push(`可读取或写入指定路径范围：${permissions.allowedPaths.join('、')}`)
-  }
-  if (permissions.allowedCommands?.length) {
-    items.push(`可运行指定本地命令：${permissions.allowedCommands.join('、')}`)
-  }
-  return items.length ? items : ['不申请额外权限，只提供本地展示或静态能力']
-}
-
 const contributionSummaries = computed(() =>
   (payload.value?.contributionSummary ?? []).filter((item) => item.category !== 'ui'),
 )
 const problemPluginCount = computed(() => pluginRows.value.filter((plugin) => plugin.status !== 'loaded').length)
-const selectedSkillSummary = computed(() => selectedPlugin.value ? pluginSkillSummary(selectedPlugin.value) : '选择插件查看能力、权限和触发条件')
+const selectedSkillSummary = computed(() => selectedPlugin.value ? pluginSkillSummary(selectedPlugin.value) : '')
 const selectedPetEventRows = computed(() => (selectedPlugin.value?.petEvents ?? []).map(buildPetEventRow))
-const selectedPermissionExplanations = computed(() => selectedPlugin.value ? buildPermissionExplanations(selectedPlugin.value) : [])
-
-const metrics = computed(() => [
-  {
-    label: '已启用技能',
-    value: plugins.value.length,
-    detail: `${pluginRows.value.length} 个已注册`,
-    tone: 'blue',
-  },
-  {
-    label: '需处理',
-    value: blockedOrErrorCount.value,
-    detail: blockedOrErrorCount.value > 0 ? '需处理' : '暂无异常',
-    tone: blockedOrErrorCount.value > 0 ? 'red' : 'green',
-  },
-  {
-    label: '正在行动',
-    value: activeExecutionCount.value,
-    detail: activeExecutionCount.value > 0 ? '可取消支持的调用' : '当前无运行',
-    tone: activeExecutionCount.value > 0 ? 'amber' : 'slate',
-  },
-  {
-    label: '安装异常',
-    value: loadFailures.value.length,
-    detail: loadFailures.value.length > 0 ? '检查清单' : '装载正常',
-    tone: loadFailures.value.length > 0 ? 'red' : 'green',
-  },
-])
 
 const permissionCount = computed(() => {
   const permissions = selectedPlugin.value?.permissions
@@ -607,22 +514,6 @@ onMounted(() => {
   box-shadow: var(--yui-shadow-card);
 }
 
-.toolbar-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.plugin-toolbar strong {
-  color: var(--yui-text);
-  font-size: 16px;
-}
-
-.toolbar-summary span {
-  color: var(--yui-muted);
-  font-size: 12px;
-}
-
 .toolbar-actions {
   display: flex;
   align-items: center;
@@ -630,44 +521,11 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.metric-card,
 .panel-card {
   border: 1px solid var(--yui-border);
   background: var(--yui-surface);
   box-shadow: var(--yui-shadow-card);
 }
-
-.metric-card {
-  display: flex;
-  min-height: 96px;
-  flex-direction: column;
-  justify-content: space-between;
-  padding: 16px;
-  border-radius: var(--yui-radius-card);
-}
-
-.metric-card span,
-.metric-card small {
-  color: var(--yui-muted);
-}
-
-.metric-card strong {
-  color: var(--yui-text);
-  font-size: 26px;
-  letter-spacing: 0;
-}
-
-.metric-card.blue { background: var(--yui-accent-soft); }
-.metric-card.green { background: var(--yui-success-soft); }
-.metric-card.amber { background: var(--yui-warning-soft); }
-.metric-card.red { background: var(--yui-danger-soft); }
-.metric-card.slate { background: var(--yui-surface-muted); }
 
 .plugin-layout {
   display: grid;
@@ -959,7 +817,6 @@ onMounted(() => {
 }
 
 @media (max-width: 1180px) {
-  .metric-grid,
   .plugin-layout,
   .lower-grid,
   .audit-grid {

@@ -149,6 +149,7 @@ const HOVER_HYSTERESIS_PX = 14;
 const DOUBLE_CLICK_INTERVAL_MS = 280;
 const LONG_PRESS_MENU_MS = 560;
 const LONG_PRESS_MOVE_CANCEL_PX = 10;
+const DRAG_FAILSAFE_MS = 15000;
 const ACTIVE_FPS = 60;
 const IDLE_FPS = 30;
 const IDLE_THRESHOLD_MS = 30000;
@@ -237,6 +238,8 @@ class PetRenderer {
 	private mousePassthrough = true;
 	private lastPassthroughSwitchAt = 0;
 	private passthroughTimer: number | null = null;
+	private dragFailsafeTimer: number | null = null;
+	private dragLastMoveAt = 0;
 
 	private isDraggingWindow = false;
 	private dragMoved = false;
@@ -1894,6 +1897,7 @@ class PetRenderer {
 			this.isDraggingWindow = true;
 			this.dragLastScreen = screenPoint;
 			this.dragLastClient = fallbackClientPoint;
+			this.noteDragActivity();
 			this.requestMousePassthrough(false, "drag-lock", true);
 			this.canvas?.setPointerCapture?.(event.pointerId);
 			this.updateCursor(true);
@@ -1984,9 +1988,23 @@ class PetRenderer {
 		ignore: boolean,
 		_reason: string,
 		immediate = false,
+		force = false,
 	): void {
 		if (this.config.clickThrough) {
 			ignore = true;
+		}
+
+		if (force) {
+			// Recovery path: a lost pointerup or an aborted gesture can leave the
+			// main process and this renderer disagreeing about the passthrough
+			// state, and the throttle below would then keep the window swallowing
+			// desktop mouse input. Re-assert the state on both sides instead of
+			// trusting the cached values.
+			this.clearPassthroughTimer();
+			this.mousePassthrough = ignore;
+			this.lastPassthroughSwitchAt = Date.now();
+			window.live2dApi?.pet.setMouseIgnore(ignore, ignore, true);
+			return;
 		}
 
 		const strategy = resolvePassthroughStrategy({
@@ -2009,10 +2027,7 @@ class PetRenderer {
 			window.live2dApi?.pet.setMouseIgnore(ignore, ignore);
 		};
 
-		if (this.passthroughTimer !== null) {
-			window.clearTimeout(this.passthroughTimer);
-			this.passthroughTimer = null;
-		}
+		this.clearPassthroughTimer();
 
 		if (strategy.shouldApplyImmediately) {
 			apply();
@@ -2023,6 +2038,51 @@ class PetRenderer {
 			this.passthroughTimer = null;
 			apply();
 		}, strategy.delayMs);
+	}
+
+	private clearPassthroughTimer(): void {
+		if (this.passthroughTimer !== null) {
+			window.clearTimeout(this.passthroughTimer);
+			this.passthroughTimer = null;
+		}
+	}
+
+	/**
+	 * Watchdog for the window drag. While a drag is active the renderer holds
+	 * mouse capture over the whole work area, so a lost pointerup would leave the
+	 * desktop unable to receive clicks. Movement refreshes the deadline; once the
+	 * drag goes quiet the gesture is finished and passthrough is re-asserted.
+	 */
+	private noteDragActivity(): void {
+		this.dragLastMoveAt = Date.now();
+		if (this.dragFailsafeTimer === null) {
+			this.scheduleDragFailsafe();
+		}
+	}
+
+	private scheduleDragFailsafe(): void {
+		this.dragFailsafeTimer = window.setTimeout(() => {
+			this.dragFailsafeTimer = null;
+			if (!this.isDraggingWindow) {
+				return;
+			}
+			if (Date.now() - this.dragLastMoveAt < DRAG_FAILSAFE_MS) {
+				this.scheduleDragFailsafe();
+				return;
+			}
+			logger.warn("[PetRenderer] window drag stalled; restoring mouse passthrough");
+			this.finishWindowDrag();
+			if (!this.interactMode) {
+				this.requestMousePassthrough(true, "drag-failsafe", true, true);
+			}
+		}, DRAG_FAILSAFE_MS);
+	}
+
+	private clearDragFailsafe(): void {
+		if (this.dragFailsafeTimer !== null) {
+			window.clearTimeout(this.dragFailsafeTimer);
+			this.dragFailsafeTimer = null;
+		}
 	}
 
 	private syncMouseCaptureFromPoint(
@@ -2500,6 +2560,7 @@ class PetRenderer {
 				}
 			}
 
+			this.noteDragActivity();
 			this.markActivity("window-drag");
 			return;
 		}
@@ -2595,7 +2656,7 @@ class PetRenderer {
 			return;
 		}
 
-		this.requestMousePassthrough(true, "mouse-leave");
+		this.requestMousePassthrough(true, "mouse-leave", true, true);
 		this.updateCursor(false);
 	};
 
@@ -2610,6 +2671,10 @@ class PetRenderer {
 		this.modelHovering = false;
 		this.lastMouseClientPoint = null;
 		this.syncMouseCaptureFromLastPoint("window-blur", true);
+		// A blur can land mid-gesture (alt-tab or a lost pointerup) while the
+		// window still captures the work area; re-assert the intended state so a
+		// stale capture cannot keep swallowing desktop mouse input.
+		this.requestMousePassthrough(!this.interactMode, "window-blur-recover", true, true);
 		this.updateCursor(false);
 	};
 
@@ -2731,6 +2796,7 @@ class PetRenderer {
 			return;
 		}
 
+		this.clearDragFailsafe();
 		this.isDraggingWindow = false;
 		this.dragLastScreen = null;
 		this.dragLastClient = null;
@@ -2927,10 +2993,8 @@ class PetRenderer {
 		this.adjustmentCancelButton?.removeEventListener("click", this.handleAdjustmentCancel);
 		window.removeEventListener("keydown", this.handleAdjustmentKeyDown);
 
-		if (this.passthroughTimer !== null) {
-			window.clearTimeout(this.passthroughTimer);
-			this.passthroughTimer = null;
-		}
+		this.clearPassthroughTimer();
+		this.clearDragFailsafe();
 
 		if (this.scalePersistTimer !== null) {
 			window.clearTimeout(this.scalePersistTimer);

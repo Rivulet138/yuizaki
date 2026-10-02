@@ -85,8 +85,8 @@
       </label>
 
       <div class="runtime-toggles">
-        <label :title="mcpSummary">
-          <span>MCP</span>
+        <label>
+          <span>MCP 外部工具</span>
           <el-switch :model-value="modelValue.mcp_enabled" @update:model-value="emitField('mcp_enabled', $event)" />
         </label>
         <label>
@@ -162,7 +162,6 @@ defineProps<{
   responseModeOptions: SelectOption[]
   maxOutputTokens: number
   modelLabel: string
-  mcpSummary: string
   promptActive: boolean
   audioInputDevices: AudioInputDeviceOption[]
   audioDevicesLoading?: boolean

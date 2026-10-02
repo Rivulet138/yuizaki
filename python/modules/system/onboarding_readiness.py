@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 ProbeStatus = Literal["pending", "running", "ready", "degraded", "unavailable", "cancelled"]
-RunState = Literal["idle", "running", "completed", "cancelled"]
+RunState = Literal["idle", "running", "ready", "blocked", "cancelled"]
 ProbeFunction = Callable[[], Awaitable[tuple[bool, str, Mapping[str, Any]]]]
 
 SCHEMA_VERSION = 1
@@ -257,7 +257,11 @@ class OnboardingReadiness:
         async with self._lock:
             if self._run_id != run_id or self._state != "running":
                 return
-            self._state = "completed"
+            required = [
+                result for result in self._results.values()
+                if result["requiredForText"]
+            ]
+            self._state = "ready" if required and all(result["status"] == "ready" for result in required) else "blocked"
             self._completed_at = _now()
             self._revision += 1
 

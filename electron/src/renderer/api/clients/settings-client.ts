@@ -1,4 +1,5 @@
 import { CONTROL_ORIGIN, requestBlob, requestJson } from './http-client'
+import { resolveLlmModelsClientTimeoutMs } from '../../../shared/llm-models-timeout'
 
 const MODEL_CONNECTION_TIMEOUT_MS = 60_000
 const TTS_WARMUP_TIMEOUT_MS = 5 * 60 * 1000
@@ -143,6 +144,21 @@ export interface TtsSettingsResponse {
     model: string
     voice: string
     timeout: number
+}
+
+export interface GenieCharacterResource {
+  id: string
+  label: string
+  language: string
+  model_dir: string
+  ref_audio: string
+  ref_text: string
+  ready: boolean
+  details: string[]
+}
+
+export interface GenieCharacterResourcesResponse {
+  characters: GenieCharacterResource[]
 }
 
 export interface SettingsMutationResponse {
@@ -309,6 +325,7 @@ export interface LocalRuntimeDiscoveryResponse {
 }
 
 let loadSettingsRequest: Promise<SettingsResponse> | null = null
+let warmupTtsRequest: Promise<TtsWarmupResponse> | null = null
 
 const loadSettings = async (): Promise<SettingsResponse> => {
   if (!loadSettingsRequest) {
@@ -341,10 +358,23 @@ export const settingsClient = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    timeoutMs: resolveLlmModelsClientTimeoutMs(payload.timeout),
   }),
   testTts: async () => requestJson<TestConnectionResponse>(`${CONTROL_ORIGIN}/api/settings/test/tts`, { method: 'POST', timeoutMs: MODEL_CONNECTION_TIMEOUT_MS }),
+  testSvc: async () => requestJson<TestConnectionResponse>(`${CONTROL_ORIGIN}/api/settings/test/svc`, { method: 'POST', timeoutMs: MODEL_CONNECTION_TIMEOUT_MS }),
   ttsStatus: async () => requestJson<TtsRuntimeStatusResponse>(`${CONTROL_ORIGIN}/api/settings/tts/status`),
-  warmupTts: async () => requestJson<TtsWarmupResponse>(`${CONTROL_ORIGIN}/api/settings/tts/warmup`, { method: 'POST', timeoutMs: TTS_WARMUP_TIMEOUT_MS }),
+  ttsCharacters: async () => requestJson<GenieCharacterResourcesResponse>(`${CONTROL_ORIGIN}/api/settings/tts/characters`),
+  warmupTts: async () => {
+    if (!warmupTtsRequest) {
+      warmupTtsRequest = requestJson<TtsWarmupResponse>(`${CONTROL_ORIGIN}/api/settings/tts/warmup`, {
+        method: 'POST',
+        timeoutMs: TTS_WARMUP_TIMEOUT_MS,
+      }).finally(() => {
+        warmupTtsRequest = null
+      })
+    }
+    return warmupTtsRequest
+  },
   discoverLocal: async () => requestJson<LocalRuntimeDiscoveryResponse>(`${CONTROL_ORIGIN}/api/settings/local-discovery`),
   metadata: async () => requestJson<SettingsMetadataResponse>(`${CONTROL_ORIGIN}/api/settings/metadata`),
   history: async () => requestJson<SettingsHistoryResponse>(`${CONTROL_ORIGIN}/api/settings/history`),

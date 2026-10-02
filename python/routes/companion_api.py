@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Literal
-
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
-from starlette.concurrency import run_in_threadpool
+from collections.abc import Callable
+from typing import Any, Literal
 
 from database.repository import DatabaseError, NotFoundError
+from fastapi import APIRouter
+from modules.system.api_response import error_response
+from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 
 
 class CompanionVoiceProfile(BaseModel):
@@ -53,29 +53,63 @@ def create_companion_router(
     async def list_companions():
         db_repo = get_db_repo()
         if not db_repo:
-            return JSONResponse({"error": "Database not initialized"}, status_code=503)
+            return error_response(
+                code="database_not_initialized",
+                message="Database is not initialized",
+                status_code=503,
+                legacy_error="Database not initialized",
+            )
         return {"companions": await run_in_threadpool(db_repo.list_companions)}
 
-    if relationship_history_handler is not None:
-        @router.get("/api/companions/{companion_id:path}/relationship-history")
-        async def get_companion_relationship_history(companion_id: str, limit: int = 20):
-            return await run_in_threadpool(relationship_history_handler, companion_id, limit)
+    @router.get("/api/companions/{companion_id:path}/relationship-history")
+    async def get_companion_relationship_history(companion_id: str, limit: int = 20):
+        """Expose a stable capability boundary for relationship history.
+
+        The route stays registered in minimal deployments so clients can
+        distinguish an unavailable capability (501) from a missing resource
+        (404).  The production handler is still injected by the application
+        composition layer and runs off the event loop.
+        """
+        if relationship_history_handler is None:
+            return error_response(
+                code="relationship_history_unavailable",
+                message="Relationship history is unavailable in this runtime",
+                status_code=501,
+                retryable=False,
+                legacy_error="relationship_history_unavailable",
+            )
+        return await run_in_threadpool(relationship_history_handler, companion_id, limit)
 
     @router.get("/api/companions/{companion_id:path}")
     async def get_companion(companion_id: str):
         db_repo = get_db_repo()
         if not db_repo:
-            return JSONResponse({"error": "Database not initialized"}, status_code=503)
+            return error_response(
+                code="database_not_initialized",
+                message="Database is not initialized",
+                status_code=503,
+                legacy_error="Database not initialized",
+            )
         companion = await run_in_threadpool(db_repo.get_companion, companion_id)
         if not companion:
-            return JSONResponse({"error": "companion_not_found"}, status_code=404)
+            return error_response(
+                code="companion_not_found",
+                message="Companion was not found",
+                status_code=404,
+                legacy_error="companion_not_found",
+            )
         return companion
 
     @router.post("/api/companions")
     async def create_companion(payload: CompanionPayload):
         db_repo = get_db_repo()
         if not db_repo:
-            return JSONResponse({"error": "Database not initialized"}, status_code=503)
+            return error_response(
+                code="database_not_initialized",
+                message="Database is not initialized",
+                status_code=503,
+                legacy_error="Database not initialized",
+            )
         payload_dict = payload.model_dump(exclude_none=True)
         companion_id = str(payload_dict.get("id") or f"comp_{payload_dict.get('name', 'companion')}").strip()
         name = str(payload_dict.get("name") or "新結崎")
@@ -83,32 +117,42 @@ def create_companion_router(
         try:
             return await run_in_threadpool(db_repo.create_companion, companion_id=companion_id, name=name, **kwargs)
         except DatabaseError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
+            return error_response(code="database_error", message=str(exc), status_code=400, legacy_error=str(exc))
 
     @router.patch("/api/companions/{companion_id:path}")
     async def update_companion(companion_id: str, payload: CompanionPayload):
         db_repo = get_db_repo()
         if not db_repo:
-            return JSONResponse({"error": "Database not initialized"}, status_code=503)
+            return error_response(
+                code="database_not_initialized",
+                message="Database is not initialized",
+                status_code=503,
+                legacy_error="Database not initialized",
+            )
         try:
             return await run_in_threadpool(db_repo.update_companion, companion_id, payload.model_dump(exclude_none=True))
         except NotFoundError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=404)
+            return error_response(code="companion_not_found", message=str(exc), status_code=404, legacy_error=str(exc))
         except DatabaseError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
+            return error_response(code="database_error", message=str(exc), status_code=400, legacy_error=str(exc))
 
     @router.delete("/api/companions/{companion_id:path}")
     async def delete_companion(companion_id: str):
         db_repo = get_db_repo()
         if not db_repo:
-            return JSONResponse({"error": "Database not initialized"}, status_code=503)
+            return error_response(
+                code="database_not_initialized",
+                message="Database is not initialized",
+                status_code=503,
+                legacy_error="Database not initialized",
+            )
         try:
             impacted_workspaces = await run_in_threadpool(db_repo.list_workspaces_referencing_companion, companion_id)
             await run_in_threadpool(db_repo.delete_companion, companion_id)
             return {"status": "deleted", "fallback_companion_id": "default", "rebound_workspaces": impacted_workspaces}
         except NotFoundError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=404)
+            return error_response(code="companion_not_found", message=str(exc), status_code=404, legacy_error=str(exc))
         except DatabaseError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
+            return error_response(code="database_error", message=str(exc), status_code=400, legacy_error=str(exc))
 
     return router

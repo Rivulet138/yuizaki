@@ -3,27 +3,41 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import json
-from copy import deepcopy
+import logging
+import os
 from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from pathlib import Path
 from typing import Annotated, Protocol, TypeGuard, cast
+from urllib.parse import urlsplit
 
 import httpx
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from ..llm.client import fetch_available_models
-from ..llm.providers import normalize_llm_base_url, normalize_llm_provider
+from ..llm.providers import (
+    LlmCredentialError,
+    normalize_llm_base_url,
+    normalize_llm_provider,
+)
 from ..tts.capabilities import resolve_tts_provider_capabilities
 from .api_security import ensure_safe_relative_json_path
+from .backend_api_auth import verify_backend_api_authorization
 from .dynamic_config import redact_sensitive_config_value
 from .runtime_config import RuntimeConfig
-from .service_discovery import discover_local_runtime_candidates
-from .settings_models import SettingValueResponse, SettingsExportResponse, SettingsHistoryResponse, SettingsImportResponse, SettingsMetadataResponse, SettingsMutationResponse, SettingsRollbackResponse
-from .settings_store import SETTINGS_SECRET_MASK
+from .service_discovery import discover_genie_tts_characters, discover_local_runtime_candidates
+from .settings_models import (
+    SettingsExportResponse,
+    SettingsHistoryResponse,
+    SettingsImportResponse,
+    SettingsMetadataResponse,
+    SettingsMutationResponse,
+    SettingsRollbackResponse,
+    SettingValueResponse,
+)
 from .settings_schema import (
     PersistedSettingsSchema,
     merge_settings,
@@ -31,6 +45,7 @@ from .settings_schema import (
     validate_runtime_patch,
     validation_errors_to_detail,
 )
+from .settings_store import SETTINGS_SECRET_MASK
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +91,9 @@ _RUNTIME_RELOAD_FIELDS: dict[str, set[str]] = {
         "qdrant_docker_container",
         "qdrant_docker_volume",
         "embedding_model",
+        "reranker_enabled",
+        "reranker_model",
+        "reranker_candidate_count",
     },
     "summary": {
         "trigger_messages",
@@ -109,7 +127,10 @@ def _drop_secret_placeholders(value: object) -> object:
         return deepcopy(value)
     result: dict[str, object] = {}
     for key, child in value.items():
-        if key in _SECRET_FIELD_NAMES and child == SETTINGS_SECRET_MASK:
+        # Secret values are owned by the Electron credential vault. A masked or
+        # empty value in a regular settings patch means "leave it unchanged";
+        # clearing is an explicit DELETE /api/settings/{key} operation.
+        if key in _SECRET_FIELD_NAMES and (child == SETTINGS_SECRET_MASK or child == ""):
             continue
         cleaned = _drop_secret_placeholders(child)
         if isinstance(child, dict) and isinstance(cleaned, dict) and not cleaned:
@@ -163,6 +184,7 @@ class SettingsStoreProtocol(Protocol):
     def export_managed(self, relative_path: str) -> Path: ...
     def import_managed(self, relative_path: str) -> Path: ...
     def get_metadata(self) -> dict[str, object]: ...
+    def reload_provider_credentials(self, credentials: dict[str, str]) -> int: ...
 
 
 class DynamicConfigProtocol(Protocol):
@@ -444,6 +466,43 @@ class SettingsAPI:
         self.llm_client_provider = llm_provider
         self.tts_client_provider = tts_provider
 
+    async def reload_provider_credentials(self, credentials: dict[str, str]) -> int:
+        """Apply vault credentials and synchronously refresh affected clients.
+
+        The vault sync endpoint is used by an external Electron supervisor, so
+        returning before the LLM/TTS clients are rebuilt would report a false
+        ready state. Secrets remain memory-only; this method never saves the
+        settings JSON file.
+        """
+        changed = await self._run_store_call(
+            lambda: self.settings_store.reload_provider_credentials(credentials)
+        )
+        if not changed:
+            return 0
+        settings = await self._validated_settings_dump_async()
+        runtime_updates = self._validated_runtime_updates(settings)
+        try:
+            await self.dynamic_config.update_batch(runtime_updates)
+            if self.config is not None:
+                from .runtime_config import apply_runtime_config
+
+                changed_sections = apply_runtime_config(
+                    cast(RuntimeConfig, self.config), runtime_updates
+                )
+            else:
+                changed_sections = {
+                    str(field).split(".", 1)[0]
+                    for field in credentials
+                    if isinstance(field, str) and "." in field
+                }
+            sections = self._runtime_reload_sections(runtime_updates, changed_sections)
+            if self.reload_runtime_services is not None and sections:
+                await self.reload_runtime_services(sections)
+        except Exception as exc:
+            logger.error("Provider credential runtime reload failed: %s", type(exc).__name__)
+            raise RuntimeError("provider credential runtime reload failed") from exc
+        return int(changed)
+
     def init_api(self) -> None:
         global _settings_api
         self._apply_persisted_runtime_config()
@@ -460,7 +519,7 @@ class SettingsAPI:
         return SettingValueResponse(key=key, value=redact_sensitive_config_value(value, key))
 
     async def set_setting(self, key: str, value: object) -> SettingsMutationResponse:
-        if key.rsplit(".", 1)[-1] in _SECRET_FIELD_NAMES and value == SETTINGS_SECRET_MASK:
+        if key.rsplit(".", 1)[-1] in _SECRET_FIELD_NAMES and (value == SETTINGS_SECRET_MASK or value == ""):
             return SettingsMutationResponse(
                 key=key,
                 value=SETTINGS_SECRET_MASK,
@@ -604,7 +663,15 @@ class SettingsAPI:
                 _preserve_current_secrets(self.dynamic_config.get_all(), current_settings),
             )
             next_settings = validate_persisted_settings(rolled_back).model_dump()
-            await self._run_store_call(lambda: self._replace_and_save_settings(next_settings))
+            previous_dynamic = deepcopy(self.dynamic_config.config)
+            try:
+                await self._run_store_call(lambda: self._replace_and_save_settings(next_settings))
+                runtime_updates = self._validated_runtime_updates(next_settings)
+                await self._apply_runtime(runtime_updates)
+            except Exception:
+                await self._run_store_call(lambda: self._replace_and_save_settings(current_settings))
+                self.dynamic_config.config = previous_dynamic
+                raise
             return SettingsRollbackResponse(steps=steps, status="rolled_back")
         raise HTTPException(status_code=400, detail=f"Cannot rollback {steps} steps")
 
@@ -671,6 +738,17 @@ class SettingsAPI:
 
         try:
             models = await fetch_available_models(base_url, api_key, timeout, provider)
+        except LlmCredentialError as exc:
+            return {"ok": False, "models": [], "message": str(exc)}
+        except UnicodeError:
+            # A non-ASCII credential or endpoint can never be encoded into an
+            # HTTP request; report it as a configuration problem instead of
+            # surfacing the raw codec failure.
+            return {
+                "ok": False,
+                "models": [],
+                "message": "LLM request failed: the configured LLM API key or Base URL cannot be encoded for HTTP; please re-enter the LLM API key",
+            }
         except ValueError as exc:
             return {"ok": False, "models": [], "message": str(exc)}
         except httpx.HTTPStatusError as exc:
@@ -695,6 +773,43 @@ class SettingsAPI:
         if not tts_client:
             return {"ok": False, "message": "TTS client not initialized"}
         return await tts_client.test_connection()
+
+    async def test_svc_connection(self) -> dict[str, object]:
+        settings = await self._validated_settings_dump_async()
+        svc_settings = cast(dict[str, object], settings.get("svc", {}))
+        provider = str(svc_settings.get("provider", "")).strip().lower()
+        if provider == "disabled":
+            return {"ok": False, "message": "SVC is disabled"}
+
+        base_url = str(svc_settings.get("base_url", "")).strip().rstrip("/")
+        if not base_url:
+            return {"ok": False, "message": "SVC Base URL is required"}
+        parsed_url = urlsplit(base_url if "://" in base_url else f"http://{base_url}")
+        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+            return {"ok": False, "message": "SVC Base URL must be an HTTP(S) URL"}
+
+        try:
+            configured_timeout = float(svc_settings.get("timeout", 120))
+        except (TypeError, ValueError):
+            configured_timeout = 120.0
+        probe_timeout = max(1.0, min(configured_timeout, 10.0))
+        try:
+            async with httpx.AsyncClient(timeout=probe_timeout, follow_redirects=True) as client:
+                response = await client.get(base_url)
+        except httpx.RequestError as exc:
+            return {"ok": False, "message": f"SVC service unreachable: {exc}"}
+
+        if response.status_code >= 500:
+            return {
+                "ok": False,
+                "status_code": response.status_code,
+                "message": f"SVC service returned HTTP {response.status_code}",
+            }
+        return {
+            "ok": True,
+            "status_code": response.status_code,
+            "message": f"SVC service reachable (HTTP {response.status_code})",
+        }
 
     async def warmup_tts(self) -> dict[str, object]:
         tts_client = self.tts_client_provider() if self.tts_client_provider is not None else None
@@ -796,6 +911,39 @@ async def get_metadata(api: SettingsAPIDependency):
     return await api.get_metadata()
 
 
+@router.post("/credentials/reload")
+async def reload_provider_credentials(request: Request, api: SettingsAPIDependency):
+    """Hot reload vault credentials for an externally managed backend.
+
+    This endpoint requires the backend token even for loopback callers. Values
+    are validated by SettingsStore and remain in memory only; they are never
+    persisted or logged.
+    """
+    backend_token = os.getenv("YUIZAKI_BACKEND_API_TOKEN", "").strip()
+    allowed, message = verify_backend_api_authorization(
+        request.headers.get("authorization"),
+        backend_token,
+        request.headers.get("x-yuizaki-backend-token"),
+        client_host=None,
+    )
+    if not allowed:
+        raise HTTPException(status_code=401, detail=message)
+    try:
+        payload = await request.json()
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="invalid JSON payload") from exc
+    if not isinstance(payload, dict) or set(payload) != {"credentials"} or not isinstance(payload["credentials"], dict):
+        raise HTTPException(status_code=400, detail="credentials object is required")
+    credentials = payload["credentials"]
+    try:
+        changed = await api.reload_provider_credentials(credentials)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"ok": True, "changed": changed}
+
+
 @router.get("/history", response_model=SettingsHistoryResponse)
 async def get_history(api: SettingsAPIDependency, key: str | None = None, limit: int = 10):
     return await api.get_change_history(key, limit)
@@ -840,9 +988,19 @@ async def test_tts_connection(api: SettingsAPIDependency):
     return await api.test_tts_connection()
 
 
+@router.post("/test/svc")
+async def test_svc_connection(api: SettingsAPIDependency):
+    return await api.test_svc_connection()
+
+
 @router.get("/tts/status")
 async def get_tts_status(api: SettingsAPIDependency):
     return await api.get_tts_status()
+
+
+@router.get("/tts/characters")
+async def get_tts_characters():
+    return {"characters": discover_genie_tts_characters()}
 
 
 @router.post("/tts/warmup")

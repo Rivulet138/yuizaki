@@ -5,21 +5,6 @@ const routes: RouteRecordRaw[] = enabledNavigationModules().map((module) => {
   const path = `/w/:workspaceId/${module.id}/:sessionId?`
   const meta = { title: module.title, desc: module.desc }
 
-  if (module.id === 'companion') {
-    return {
-      path,
-      name: module.id,
-      redirect: (to) => {
-        const workspaceId = encodeURIComponent(String(to.params.workspaceId || 'default'))
-        const sessionId = to.params.sessionId
-          ? `/${encodeURIComponent(String(to.params.sessionId))}`
-          : ''
-        return `/w/${workspaceId}/chat${sessionId}`
-      },
-      meta,
-    }
-  }
-
   return {
     path,
     name: module.id,
@@ -36,6 +21,18 @@ routes.unshift({
 routes.unshift({
   path: '/w/:workspaceId',
   redirect: (to) => `/w/${encodeURIComponent(String(to.params.workspaceId || 'default'))}/chat`
+})
+
+// 桌宠总览已移除，保留旧链接到对话中心，避免书签或历史状态进入通用默认页。
+routes.push({
+  path: '/w/:workspaceId/companion/:sessionId?',
+  redirect: (to) => {
+    const workspaceId = encodeURIComponent(String(to.params.workspaceId || 'default'))
+    const sessionId = to.params.sessionId
+    return sessionId
+      ? `/w/${workspaceId}/chat/${encodeURIComponent(String(sessionId))}`
+      : `/w/${workspaceId}/chat`
+  },
 })
 
 // Fallback 路由

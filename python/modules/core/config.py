@@ -101,9 +101,10 @@ class ASRConfig(BaseModel):
     """ASR (Automatic Speech Recognition) configuration."""
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    # Streaming Sherpa is the lightweight default. SenseVoice remains an
-    # explicit opt-in provider because its model/service stack is optional.
-    provider: str = Field(default="sherpa-onnx-online")
+    # Offline Sherpa SenseVoice is the stable local default. Streaming Sherpa
+    # remains available as an explicit opt-in when its Zipformer resources are
+    # installed and the paths are kept separate from SenseVoice resources.
+    provider: str = Field(default="sherpa-onnx")
     base_url: str = Field(default="")
     api_key: str = Field(default="")
     timeout: float = Field(default=60.0)
@@ -248,7 +249,7 @@ def _load_config_from_env() -> AppConfig:
             audio_cache_dir=audio_cache_dir_from_env(),
         ),
         asr=ASRConfig(
-            provider=os.getenv("ASR_PROVIDER", "sherpa-onnx-online").strip().lower(),
+            provider=os.getenv("ASR_PROVIDER", "sherpa-onnx").strip().lower(),
             base_url=os.getenv("ASR_BASE_URL", "").rstrip("/"),
             api_key=os.getenv("ASR_API_KEY", ""),
             timeout=float(os.getenv("ASR_TIMEOUT", "60")),

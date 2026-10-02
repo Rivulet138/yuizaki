@@ -26,26 +26,26 @@
       >
         <template v-if="payload">
           <dl class="relationship-summary" aria-label="关系摘要">
-            <div><dt>阶段</dt><dd>{{ payload.summary.relationship_stage || '未设置' }}</dd></div>
-            <div><dt>趋势</dt><dd>{{ payload.summary.relationship_trend || '未设置' }}</dd></div>
+            <div><dt>相处阶段</dt><dd>{{ relationshipStageLabel(payload.summary.relationship_stage) }}</dd></div>
+            <div><dt>最近趋势</dt><dd>{{ relationshipTrendLabel(payload.summary.relationship_trend) }}</dd></div>
             <div><dt>事件</dt><dd>{{ payload.summary.event_count }}</dd></div>
             <div><dt>里程碑</dt><dd>{{ payload.summary.milestone_count }}</dd></div>
-            <div><dt>主动预算</dt><dd>{{ payload.summary.proactive_budget }}</dd></div>
+            <div><dt>互动节奏</dt><dd>{{ proactiveBudgetLabel(payload.summary.proactive_budget) }}</dd></div>
           </dl>
 
           <ol v-if="visibleEvents.length" class="history-list">
             <li v-for="(event, index) in visibleEvents" :key="eventKey(event, index)" class="history-row">
               <div class="history-row__head">
-                <strong>{{ event.kind || 'event' }}</strong>
+                <strong>{{ relationshipEventLabel(event.kind) }}</strong>
                 <time>{{ formatTime(event.timestamp) }}</time>
               </div>
               <p v-if="event.text">{{ event.text }}</p>
               <dl class="history-row__meta">
-                <div v-if="event.mood"><dt>心情</dt><dd>{{ event.mood }}</dd></div>
+                <div v-if="event.mood"><dt>最近状态</dt><dd>{{ moodLabel(event.mood) }}</dd></div>
                 <div v-if="isNumber(event.affinity)"><dt>亲近度</dt><dd>{{ formatRatio(event.affinity) }}</dd></div>
                 <div v-if="isNumber(event.energy)"><dt>精力</dt><dd>{{ formatRatio(event.energy) }}</dd></div>
                 <div v-if="isNumber(event.importance)"><dt>重要度</dt><dd>{{ formatRatio(event.importance) }}</dd></div>
-                <div><dt>范围</dt><dd>{{ event.scope || 'workspace' }}</dd></div>
+                <div><dt>保存范围</dt><dd>{{ scopeLabel(event.scope) }}</dd></div>
                 <div v-if="event.milestone"><dt>类型</dt><dd>里程碑</dd></div>
               </dl>
             </li>
@@ -118,6 +118,45 @@ const load = async () => {
 
 const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 const formatRatio = (value: number | undefined) => isNumber(value) ? `${Math.round(value * 100)}%` : '未设置'
+const relationshipEventLabels: Record<string, string> = {
+  care_signal: '记录了你的近况',
+  mood_shift: '更新了最近状态',
+  trust_shift: '更新了相处状态',
+  gratitude: '记住了你的感谢',
+  preference_confirmed: '记住了一个偏好',
+  task_completed: '记录了一项已完成事项',
+  state_snapshot: '记录了当前状态',
+}
+const relationshipStageLabels: Record<string, string> = {
+  warming: '正在熟悉',
+  stable: '相处稳定',
+  close: '关系亲近',
+}
+const relationshipTrendLabels: Record<string, string> = {
+  rising: '逐渐靠近',
+  steady: '保持稳定',
+  falling: '需要留意',
+}
+const moodLabels: Record<string, string> = {
+  tired: '有些疲惫',
+  happy: '心情不错',
+  sad: '有些低落',
+  anxious: '有些焦虑',
+  calm: '比较平静',
+  busy: '比较忙',
+}
+const scopeLabels: Record<string, string> = { global: '所有工作区', workspace: '当前工作区', session: '当前会话' }
+const relationshipEventLabel = (value?: string | null) => relationshipEventLabels[String(value || '')] || '更新了相处状态'
+const relationshipStageLabel = (value?: string | null) => relationshipStageLabels[String(value || '')] || '未设置'
+const relationshipTrendLabel = (value?: string | null) => relationshipTrendLabels[String(value || '')] || '未设置'
+const moodLabel = (value?: string | null) => moodLabels[String(value || '')] || value || '未设置'
+const scopeLabel = (value?: string | null) => scopeLabels[String(value || '')] || '当前工作区'
+const proactiveBudgetLabel = (value?: number | null) => {
+  if (!isNumber(value)) return '未设置'
+  if (value < 0.85) return '较克制'
+  if (value >= 1.2) return '较主动'
+  return '适中'
+}
 const formatTime = (value: string | null | undefined) => {
   if (!value) return '时间未知'
   const date = new Date(value)

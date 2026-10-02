@@ -2,6 +2,8 @@
 
 状态：2026-08-28 启动，按小步迭代执行。本文档以当前仓库代码为基线，不改变默认 loopback 信任、现有权限收据、请求级视觉和“unknown effect 不自动重试”安全约束。
 
+本轮执行边界：优先完成基础功能链路、入口可达性、错误契约、关键模块注释和测试收束；第四阶段（直播/外部生态扩展）暂不扩大范围，也不作为本轮完成条件。
+
 ## 目标与不变量
 
 ### 90 天目标
@@ -20,19 +22,22 @@
 - 状态改变后无法确认现实效果时，结果必须是 `unknown_effect`，不得自动重试为成功。
 - 视觉默认请求级、短期处理，不引入默认持续录屏或摄像头历史。
 
-## 2026-09-06 当前验收状态
+## 2026-09-26 当前验收状态
 
 以下为当前工作树的验收结论；后续执行日志中的旧测试数字只代表当时快照。
 
 | 项目 | 当前证据 | 状态 / 下一步 |
 |---|---|---|
-| 本地 Python 合同 | `python -m pytest -q`：`292 passed`；MCP、recovery store fencing、connector probe、host-token middleware 与 Socket v1 版本门禁定向回归通过 | 本地回归通过；测试已在 CI 清单中 |
+| 本地 Python 合同 | `python -m pytest -q`：`333 passed`；MCP、recovery store fencing、read-only cross-process recovery、已提交但投影待重试、connector probe、host-token middleware、Socket v1 版本门禁、credential env 白名单、错误 envelope、runtime identity 和 recovery schema 版本回归通过 | 本地回归通过；CI 已改为运行完整 `python/tests` 集合 |
+| Electron 合同 | Vitest `18 files / 93 tests`、type-check、lint、Electron/renderer build 通过 | 本地回归通过；主入口约 432.88 kB，真实设备性能仍未知 |
 | MCP 错误与端点展示 | 四种 transport 的异常出口、stdio stderr/JSON-RPC、HTTP bridge、SSE、`isError`、后台日志均隐藏上游错误原文；公开端点隐藏 URL userinfo/query values；重启配置与成功结果回归通过 | 本轮完成；该结论不覆盖成功工具输出中的任意敏感内容 |
 | 连接器错误 | malformed bridge port、probe 异常和 account `lastError` 使用固定说明或业务码；登录票据、账号信息与错误恢复回归通过 | 本轮完成 |
 | MCP 凭据托管 | Electron `safeStorage` vault 保存加密 canonical document；Python 使用 namespace/reference pointer，支持 legacy plaintext 迁移、重启恢复、更新、删除和 outage fail-closed | 本轮本地合同完成；仍需真实 Windows/Linux 加密后端、并发写入/CAS 和目标机证据 |
 | 桌面动作宿主认证 | Electron 每次启动生成独立 token；Python middleware/router 使用严格 Bearer + 常量时间比较，并拒绝未配置或复用 Backend Token | 本地合同完成；外部托管 Python 必须显式注入 token，真实平台动作仍需资格验证 |
-| 步骤级重启恢复 | 旧 recovery handle 重启后降级为 `process_state_missing` | 已验证 fail-closed；plan/context/capability 跨进程重建尚未实现 |
-| 受限 durable retry 基础 | `python/modules/agent/recovery_store.py` 已提供 typed ToolStep 严格序列化、敏感参数拒绝、SQLite TTL/lease/owner/fencing 边界和跨实例读写测试 | store 原型已完成；尚未接入 `StepExecutor`，不能执行跨进程恢复 |
+| 外部托管 Python 身份 | `/api/ping?challenge=` 返回 backend-token HMAC proof；Electron 在发送 provider/connector/Twitch 凭据前做 constant-time 校验 | 本地合同完成；challenge 失败时不发送 secret，仍需外部部署矩阵 |
+| 错误契约 | Python canonical `code/message/details/retryable/request_id` 与 renderer JSON/blob 解析已对齐，保留旧 `error`/FastAPI `detail` 兼容 | 本地合同完成；各业务路由仍需逐步迁移到统一 envelope |
+| 步骤级重启恢复 | 进程内 handle 仍按 epoch fail-closed；独立 builtin 只读 ToolStep 现在可用 durable id 重建 fresh context | 已接入 read-only 独立步骤的 claim/fencing、TurnCommit+outbox；依赖上游、写入、确认型和未知效果步骤仍需人工处理 |
+| 受限 durable retry 基础 | `recovery_store.py` 持久化 bounded context/result snapshot，按 id 精确 claim，记录 attempt/lease/fencing/result；`StepExecutor` 重新执行 registry/policy preflight | 本轮完成安全 read-only 子集；完整 plan/downstream/capability 重建仍未实现，不能泛化为所有 Agent 步骤可恢复 |
 | 发布资格 | Windows/Linux 目标机、真实 provider/音频/GPU/角色资源、24 小时驻留、公网 webhook/桥接与真实 GUI sandbox 缺少资格证据 | 未通过；本地合同测试不提供这些资格 |
 
 ## 阶段路线图
@@ -52,9 +57,18 @@
 ## 当前已完成改进
 
 - P0-A/P0-C 增加跨入口一致性回归：`python/tests/test_socket_turn_service_gate.py` 锁定 Socket 语义执行默认 fail-closed，只有显式 `YUIZAKI_ALLOW_LEGACY_TURN_PIPELINE` 兼容开关才允许旧 pipeline；`node-mcp/server.test.mjs` 覆盖 health、工具清单、SSE ready、缺少工具名和未知工具错误，避免 CI 以 0 个断言误报通过。
+- P0-A 重启恢复安全子集：`SQLiteStepRecoveryStore` 增加 bounded context/result snapshot、按 recovery id 的 scope claim、attempt 上限和完成证据；`StepExecutor` 仅对 builtin、独立、typed、`effect_kind=read` 步骤从 fresh runtime context 执行，并通过 `TurnService.execute_recovery_context()` 写入新的 TurnCommit/outbox。新增 `test_cross_process_step_recovery.py` 覆盖成功回放和写入拒绝；写入、确认型、依赖型和 unknown-effect 仍 fail-closed。
+- P1 错误与可达性修复：Python/renderer 统一错误 envelope，取消请求保留 `AbortError`；AgentTracePanel 只在恢复后的诊断刷新成功后提示成功，工具重试先检查 Socket 连接并显示“已发送请求”，避免断线时伪报成功。
+- P0 外部托管身份修复：Electron 使用随机 challenge 验证 Python `/api/ping` 的 HMAC proof，通过后才热同步 provider、connector 和 Twitch 凭据；Python 仅在 token 与 challenge 格式均有效时生成 proof。
+- P2 durable marker 版本门禁：recovery store 序列化与反序列化都严格锁定 typed plan version 2，未来版本先拒绝写入，避免重启后留下不可读取的 marker。
 - P0-B 修复根目录测试入口：新增 `pytest.ini`，将 `python/tests` 设为唯一测试根、声明 `python` import path 并排除本地缓存/临时目录；`python -m pytest -q` 现在可直接运行，不再因扫描 Windows 临时目录而失败。
+- P1 凭据环境边界：`YUIZAKI_PROVIDER_CREDENTIALS_JSON` 现在在 Python 和 Electron 两端都只接受 `llm/tts/asr/svc/memory` 下的 API secret 路径；恶意或损坏的 `llm.model` 等字段不会覆盖运行配置，并有环境载荷回归测试。
 - P0 MCP 输入边界：`node-mcp/server.mjs` 在启动 Playwright 前验证参数形状、必填 URL/selector、长度、HTTP(S) 协议及 URL 内嵌凭据；非法输入返回 400，错误不回显凭据。本地/内网 HTTP(S) 仍按既有进程权限可达，不宣称网络沙箱。HTTP/SSE 合同测试增至 `7 passed`。
 - P0-B 打包 runtime 边界：`electron/scripts/prepare-package-runtime.mjs` 现在复制 Python 应用入口、资源下载脚本、Socket 组合/处理器、SoulX 服务骨架和 `resources.lock.json`，并过滤 `__pycache__`、`.pyc`、缓存目录及模型权重；`check:package-runtime` 对 staging 全树执行必需文件和模型权重检查。模型仍只在首次运行时按资源锁下载，根目录 Go Launcher 保持独立源码启动路径。
+- P0-B 发行安装闭环：package runtime staging 与检查现在同时包含 Windows/Linux 的 core/full Python lock 文件；CI 用 `python -m pytest -q` 覆盖完整 `python/tests`，避免新增恢复、错误契约或凭据测试只在本地运行。
+- P0/P1 链路收束：HTTP SSE 现在按异常类型输出稳定的 `code/retryable/request_id/turn_id`；Socket silent 请求经过 TurnService、持久化和 outbox；outbox 支持不依赖 workspace 的精确 idempotency key ACK 查询。
+- P1 前端入口修复：Companion 路由现在展示真实桌宠总览，提供档案、状态、关系历史和 Chat/人格/模型/记忆入口；relationship-history 在能力缺失时稳定返回 `501 relationship_history_unavailable`。
+- 测试收束：Realtime Voice 保留状态机核心 smoke 和独有边界回归，共享 VAD/终态阈值，删除同层重复断言。
 - P0-B 修复只读安装包路径：`electron/src/main/runtime-paths.ts` 统一识别 `resources/runtime` 并为 `app.getPath('userData')` 生成 Python 数据、音频、HF、Sherpa、Genie 和 SoulX 可写目录；PythonService、资源管理器、备份/恢复路由和环境检查共享该边界，Genie 下载脚本新增可写 workspace 参数。模型/设置/SQLite 不再默认写入 AppImage 的只读 resources。
 
 - 规划阶段生成 `yuizaki.intent-envelope.v1`，显式记录意图类型、置信度、敏感度、证据 ID、确认要求和过期时间。

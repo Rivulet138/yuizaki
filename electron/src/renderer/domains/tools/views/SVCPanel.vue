@@ -2,15 +2,12 @@
   <PanelShell :title="t('navigation.svc.title')">
     <div class="voice-panel">
       <section class="voice-toolbar">
-        <div>
-          <strong>{{ runtimeSummary }}</strong>
-        </div>
         <div class="toolbar-actions">
           <el-tag :type="selectedFile ? 'success' : 'info'">{{ selectedFile ? selectedFile.name : t('svcPanel.noAudio') }}</el-tag>
-          <el-button :loading="settingsLoading" :disabled="settingsLoading" @click="loadSettings">{{ t('svcPanel.refreshSettings') }}</el-button>
+          <el-button :loading="svcCheckState === 'checking'" :disabled="svcCheckState === 'checking'" @click="testService">{{ t('svcPanel.checkService') }}</el-button>
+          <el-button type="primary" plain @click="openSettings">{{ t('svcPanel.openSettings') }}</el-button>
         </div>
       </section>
-      <el-alert v-if="voiceSaveStatusVisible" :title="voiceSaveStatusLabel" :description="voiceSaveStatusDetail" :type="voiceSaveAlertType" show-icon :closable="false" />
 
       <section class="voice-grid">
         <el-card class="voice-card svc-card" shadow="never">
@@ -19,37 +16,14 @@
               <div>
                 <strong>{{ svcProviderLabel }}</strong>
               </div>
-              <el-tag :type="svcModelReady ? 'success' : 'warning'">{{ svcReadinessLabel }}</el-tag>
+              <el-tag :type="svcReadinessType">{{ svcReadinessLabel }}</el-tag>
             </div>
           </template>
 
           <el-upload drag action="#" :auto-upload="false" :show-file-list="false" accept="audio/*" :on-change="handleFileChange">
             <el-icon class="upload-icon"><UploadFilled /></el-icon>
             <div class="el-upload__text">{{ t('svcPanel.dropAudio') }}</div>
-            <template #tip>
-              <div class="el-upload__tip">{{ t('svcPanel.uploadTip') }}</div>
-            </template>
           </el-upload>
-
-          <el-form class="svc-form" label-position="top" @submit.prevent>
-            <el-form-item :label="t('settings.svc.provider')">
-              <el-select v-model="voiceConfig.svc.provider" @change="saveSvcProvider">
-                <el-option label="SoulX-Singer-SVC Service" value="soulx-service" />
-                <el-option :label="t('common.disabled')" value="disabled" />
-              </el-select>
-            </el-form-item>
-            <el-form-item :label="t('settings.svc.baseUrl')">
-              <el-input v-model="voiceConfig.svc.base_url" @change="saveSvcSettings({ base_url: String($event) })" />
-            </el-form-item>
-            <div class="form-row">
-              <el-form-item :label="t('settings.svc.referenceAudioId')">
-                <el-input-number v-model="voiceConfig.svc.speaker_id" :min="0" controls-position="right" @change="saveSvcSettings({ speaker_id: Number($event) })" />
-              </el-form-item>
-            </div>
-            <el-form-item :label="t('svcPanel.pitchShiftValue', { value: `${conversionPitch > 0 ? '+' : ''}${conversionPitch}` })">
-              <el-slider v-model="conversionPitch" :min="-36" :max="36" show-stops @change="saveSvcPitch" />
-            </el-form-item>
-          </el-form>
 
           <div class="execution-area">
             <el-button type="primary" :loading="isConverting" :disabled="!canStartConversion" @click="startConversion">
@@ -79,29 +53,20 @@ import 'element-plus/es/components/alert/style/css'
 import 'element-plus/es/components/icon/style/css'
 import { ElButton } from 'element-plus'
 import 'element-plus/es/components/button/style/css'
-import { ElSlider } from 'element-plus'
-import 'element-plus/es/components/slider/style/css'
-import { ElInput } from 'element-plus'
-import 'element-plus/es/components/input/style/css'
-import { ElOption, ElSelect } from 'element-plus'
-import 'element-plus/es/components/select/style/css'
-import 'element-plus/es/components/option/style/css'
-import { ElInputNumber } from 'element-plus'
-import 'element-plus/es/components/input-number/style/css'
 import { ElCard } from 'element-plus'
 import 'element-plus/es/components/card/style/css'
 import { ElTag } from 'element-plus'
 import 'element-plus/es/components/tag/style/css'
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { UploadFilled } from '@element-plus/icons-vue'
-import { ElForm, ElFormItem, ElMessage, ElUpload, type UploadFile } from 'element-plus'
+import { ElMessage, ElUpload, type UploadFile } from 'element-plus'
 import 'element-plus/es/components/upload/style/css'
-import 'element-plus/es/components/form/style/css'
-import 'element-plus/es/components/form-item/style/css'
 import { t } from '@/i18n'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import { API_ORIGIN, requestJson, resolveBackendUrl } from '@/api/clients/http-client'
 import { settingsClient, type SettingsResponse } from '@/api/clients/settings-client'
+import { useSettingsStore } from '@/state/settingsStore'
+import { useRoute, useRouter } from 'vue-router'
 
 interface SvcConvertResponse {
   status?: string
@@ -109,11 +74,6 @@ interface SvcConvertResponse {
   url?: string
   error?: string
 }
-
-type SaveTimeout = ReturnType<typeof window.setTimeout>
-type SettingsPatch = Record<string, unknown>
-type AlertType = 'success' | 'warning' | 'info' | 'error'
-type SvcSettingsPatch = Partial<SettingsResponse['svc']>
 
 const defaultVoiceConfig: Pick<SettingsResponse, 'svc'> = {
   svc: {
@@ -125,46 +85,36 @@ const defaultVoiceConfig: Pick<SettingsResponse, 'svc'> = {
   },
 }
 
+const settingsStore = useSettingsStore()
+const route = useRoute()
+const router = useRouter()
 const voiceConfig = reactive<Pick<SettingsResponse, 'svc'>>(structuredClone(defaultVoiceConfig))
 const selectedFile = ref<File | null>(null)
-const settingsLoading = ref(false)
+const svcCheckState = ref<'idle' | 'checking' | 'ready' | 'error'>('idle')
 const isConverting = ref(false)
-const conversionPitch = ref(0)
 const resultAudioUrl = ref('')
 const conversionError = ref('')
-const voiceSaveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
-const voiceSaveError = ref('')
-const voiceLastSavedAt = ref('')
-const voiceLastApplied = ref<string[]>([])
-const pendingSavePatch = ref<SettingsPatch | null>(null)
-let saveTimeout: SaveTimeout | null = null
 let settingsLoadSequence = 0
 let unmounted = false
-
-const isPlainRecord = (value: unknown): value is SettingsPatch => {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-const mergePatch = (base: SettingsPatch, patch: SettingsPatch): SettingsPatch => {
-  const merged: SettingsPatch = { ...base }
-  for (const [key, value] of Object.entries(patch)) {
-    const existing = merged[key]
-    merged[key] = isPlainRecord(existing) && isPlainRecord(value)
-      ? mergePatch(existing, value)
-      : value
-  }
-  return merged
-}
 
 const svcModelReady = computed(() => {
   if (voiceConfig.svc.provider === 'disabled') return false
   return Boolean(voiceConfig.svc.base_url.trim())
 })
-const svcProviderLabel = computed(() => voiceConfig.svc.provider === 'disabled' ? t('svcPanel.svcDisabled') : 'SoulX-Singer-SVC Service')
+const svcProviderLabel = computed(() => voiceConfig.svc.provider === 'disabled' ? t('svcPanel.svcDisabled') : t('settings.svc.providerSoulx'))
 const svcReadinessLabel = computed(() => {
   if (voiceConfig.svc.provider === 'disabled') return t('svcPanel.svcDisabled')
   if (!voiceConfig.svc.base_url.trim()) return t('svcPanel.endpointMissing')
+  if (svcCheckState.value === 'ready') return t('svcPanel.serviceReachable')
+  if (svcCheckState.value === 'error') return t('svcPanel.serviceUnavailable')
+  if (svcCheckState.value === 'checking') return t('svcPanel.checkingService')
   return t('svcPanel.serviceConfigured')
+})
+const svcReadinessType = computed(() => {
+  if (voiceConfig.svc.provider === 'disabled') return 'info'
+  if (!voiceConfig.svc.base_url.trim() || svcCheckState.value === 'error') return 'warning'
+  if (svcCheckState.value === 'ready') return 'success'
+  return 'info'
 })
 const svcReadinessMessage = computed(() => {
   if (voiceConfig.svc.provider === 'disabled') return t('svcPanel.enableSvcFirst')
@@ -174,36 +124,13 @@ const svcReadinessMessage = computed(() => {
 const canStartConversion = computed(() => {
   return Boolean(selectedFile.value && svcModelReady.value && !isConverting.value)
 })
-const runtimeSummary = computed(() => `SoulX · ${voiceConfig.svc.provider}`)
-const voiceSaveStatusVisible = computed(() => voiceSaveStatus.value !== 'idle')
-const voiceSaveAlertType = computed<AlertType>(() => {
-  if (voiceSaveStatus.value === 'error') return 'error'
-  if (voiceSaveStatus.value === 'saving') return 'warning'
-  if (voiceSaveStatus.value === 'saved') return 'success'
-  return 'info'
-})
-const voiceSaveStatusLabel = computed(() => {
-  if (voiceSaveStatus.value === 'saving') return t('settings.status.saving')
-  if (voiceSaveStatus.value === 'error') return t('svcPanel.saveFailed')
-  if (voiceSaveStatus.value === 'saved') return t('settings.status.saved')
-  return ''
-})
-const voiceSaveStatusDetail = computed(() => {
-  if (voiceSaveStatus.value === 'error') return voiceSaveError.value
-  if (voiceSaveStatus.value === 'saving') return t('settings.status.savingShort')
-  if (voiceLastApplied.value.length) return t('settings.status.applied', { items: voiceLastApplied.value.join(' / ') })
-  if (voiceLastSavedAt.value) return t('settings.status.recent', { time: voiceLastSavedAt.value })
-  return ''
-})
-
 const applySettings = (settings: SettingsResponse) => {
+  Object.assign(settingsStore.state.svc, settings.svc)
   Object.assign(voiceConfig.svc, settings.svc)
-  conversionPitch.value = settings.svc.pitch
 }
 
 const loadSettings = async () => {
   const requestId = ++settingsLoadSequence
-  settingsLoading.value = true
   try {
     const settings = await settingsClient.load()
     if (unmounted || requestId !== settingsLoadSequence) return
@@ -211,78 +138,35 @@ const loadSettings = async () => {
   } catch (error) {
     if (unmounted || requestId !== settingsLoadSequence) return
     ElMessage.error(error instanceof Error ? error.message : t('svcPanel.loadFailed'))
-  } finally {
-    if (!unmounted && requestId === settingsLoadSequence) settingsLoading.value = false
   }
 }
 
-const errorMessage = (error: unknown, fallback: string) => {
-  return error instanceof Error ? error.message : fallback
-}
-
-const savePatch = async (patch: SettingsPatch) => {
-  if (!unmounted) {
-    voiceSaveStatus.value = 'saving'
-    voiceSaveError.value = ''
+const testService = async () => {
+  if (voiceConfig.svc.provider === 'disabled' || !voiceConfig.svc.base_url.trim()) {
+    ElMessage.warning(svcReadinessMessage.value || t('svcPanel.configureEndpointFirst'))
+    return
   }
+  svcCheckState.value = 'checking'
   try {
-    const result = await settingsClient.save(patch)
-    if (unmounted) return true
-    voiceLastSavedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
-    voiceLastApplied.value = result.runtime_applied || result.runtime_changed || []
-    voiceSaveStatus.value = 'saved'
-    return true
-  } catch (error) {
-    if (unmounted) {
-      console.error('[SVCPanel Save]:', error)
-      return false
+    const result = await settingsClient.testSvc()
+    svcCheckState.value = result.ok ? 'ready' : 'error'
+    if (result.ok) {
+      ElMessage.success(result.message || t('svcPanel.serviceReachable'))
+    } else {
+      ElMessage.error(result.message || t('svcPanel.serviceUnavailable'))
     }
-    voiceSaveError.value = errorMessage(error, t('svcPanel.saveFailed'))
-    voiceSaveStatus.value = 'error'
-    ElMessage.error(voiceSaveError.value)
-    return false
+  } catch (error) {
+    svcCheckState.value = 'error'
+    ElMessage.error(error instanceof Error ? error.message : t('svcPanel.serviceUnavailable'))
   }
 }
 
-const scheduleSave = (patch: SettingsPatch) => {
-  if (unmounted) return
-  if (saveTimeout) clearTimeout(saveTimeout)
-  pendingSavePatch.value = pendingSavePatch.value
-    ? mergePatch(pendingSavePatch.value, patch)
-    : patch
-
-  saveTimeout = setTimeout(async () => {
-    const currentPatch = pendingSavePatch.value
-    pendingSavePatch.value = null
-    if (currentPatch) await savePatch(currentPatch)
-  }, 800)
-}
-
-const flushPendingSave = async () => {
-  if (!pendingSavePatch.value) return true
-  if (saveTimeout) {
-    clearTimeout(saveTimeout)
-    saveTimeout = null
-  }
-  const currentPatch = pendingSavePatch.value
-  pendingSavePatch.value = null
-  return savePatch(currentPatch)
-}
-
-const saveSvcSettings = (patch: SvcSettingsPatch) => {
-  scheduleSave({ svc: patch })
-}
-
-const saveSvcProvider = (value: string | number | boolean) => {
-  const provider = String(value) as SettingsResponse['svc']['provider']
-  voiceConfig.svc.provider = provider
-  saveSvcSettings({ provider })
-}
-
-const saveSvcPitch = (value: number | number[]) => {
-  const pitch = Array.isArray(value) ? value[0] ?? 0 : value
-  voiceConfig.svc.pitch = pitch
-  saveSvcSettings({ pitch })
+const openSettings = () => {
+  const workspaceId = String(route.params.workspaceId || 'default')
+  void router.push({
+    path: `/w/${encodeURIComponent(workspaceId)}/settings`,
+    query: { section: 'svc' },
+  })
 }
 
 const handleFileChange = (uploadFile: UploadFile) => {
@@ -297,6 +181,14 @@ const normalizeAudioUrl = async (audioUrl: string) => {
   return resolveBackendUrl(audioUrl)
 }
 
+const conversionRequestTimeoutMs = (configuredSeconds: number | undefined): number => {
+  const seconds = Number(configuredSeconds)
+  if (!Number.isFinite(seconds)) return 120_000
+  // The backend uses the same timeout for the upstream SVC call. Keep the
+  // browser request alive slightly longer so it can receive the backend result.
+  return Math.max(12_000, Math.min(905_000, Math.ceil(seconds * 1000) + 5_000))
+}
+
 const startConversion = async () => {
   if (isConverting.value) return
   if (!selectedFile.value) {
@@ -307,20 +199,20 @@ const startConversion = async () => {
     ElMessage.warning(svcReadinessMessage.value || t('svcPanel.waitingService'))
     return
   }
-  if (voiceConfig.svc.pitch !== conversionPitch.value) {
-    voiceConfig.svc.pitch = conversionPitch.value
-    saveSvcSettings({ pitch: conversionPitch.value })
-  }
-  if (!(await flushPendingSave())) return
   isConverting.value = true
   resultAudioUrl.value = ''
   conversionError.value = ''
   try {
     const formData = new FormData()
     formData.append('file', selectedFile.value)
-    formData.append('speaker_id', String(voiceConfig.svc.speaker_id))
-    formData.append('pitch', String(conversionPitch.value))
-    const result = await requestJson<SvcConvertResponse>(`${API_ORIGIN}/svc/convert`, { method: 'POST', body: formData })
+    const svcSettings = settingsStore.state.svc
+    formData.append('speaker_id', String(svcSettings.speaker_id))
+    formData.append('pitch', String(svcSettings.pitch))
+    const result = await requestJson<SvcConvertResponse>(`${API_ORIGIN}/svc/convert`, {
+      method: 'POST',
+      body: formData,
+      timeoutMs: conversionRequestTimeoutMs(svcSettings.timeout),
+    })
     if (result.status === 'error') {
       throw new Error(result.error || t('svcPanel.requestFailed', { status: 'error' }))
     }
@@ -342,13 +234,15 @@ onMounted(() => {
   void loadSettings()
 })
 
+watch(() => settingsStore.state.svc, (value) => {
+  if (unmounted) return
+  Object.assign(voiceConfig.svc, value)
+  svcCheckState.value = 'idle'
+}, { deep: true })
+
 onUnmounted(() => {
   unmounted = true
   settingsLoadSequence += 1
-  if (saveTimeout) clearTimeout(saveTimeout)
-  const currentPatch = pendingSavePatch.value
-  pendingSavePatch.value = null
-  if (currentPatch) void savePatch(currentPatch)
 })
 </script>
 
@@ -369,19 +263,12 @@ onUnmounted(() => {
 .voice-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 16px;
   border-radius: var(--yui-radius-card);
   padding: 14px 16px;
 }
 
-.voice-toolbar > div:first-child {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.voice-toolbar strong,
 .card-header strong {
   color: var(--yui-text);
   font-size: 16px;
@@ -427,19 +314,8 @@ onUnmounted(() => {
   background: var(--yui-accent-soft);
 }
 
-.svc-form,
 .execution-area {
   margin-top: 16px;
-}
-
-.form-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.form-row.three {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .execution-area {
@@ -453,9 +329,7 @@ onUnmounted(() => {
 }
 
 @media (max-width: 1180px) {
-  .voice-grid,
-  .form-row,
-  .form-row.three {
+  .voice-grid {
     grid-template-columns: 1fr;
   }
 }

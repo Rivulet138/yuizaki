@@ -107,7 +107,17 @@ class ASRManager:
         asr = self.get_or_create(session_id)
         event = asr.feed_chunk(pcm16_bytes)
         if bool(getattr(self.sensevoice_client, "supports_streaming", False)):
-            await self._handle_streaming_chunk(ws, session_id, mgr, asr, pcm16_bytes, event, is_final)
+            try:
+                await self._handle_streaming_chunk(ws, session_id, mgr, asr, pcm16_bytes, event, is_final)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # A sherpa stream can become invalid after a model/runtime
+                # error (for example a missing ONNX input). Drop only this
+                # session's stream so the next utterance starts cleanly and
+                # the Socket.IO event task does not fail noisily.
+                logger.error("[%s] streaming ASR reset after failure: %s", session_id, exc, exc_info=True)
+                self.cleanup(session_id)
             return
 
         if event == "vad_start":

@@ -20,7 +20,11 @@ const pythonFiles = [
   'socket_events.py',
   'socket_server.py',
   'requirements-core.txt',
+  'requirements-core-lock-windows.txt',
+  'requirements-core-lock-linux.txt',
   'requirements.txt',
+  'requirements-lock-windows.txt',
+  'requirements-lock-linux.txt',
   '.env.example',
 ]
 const pythonDirectories = [

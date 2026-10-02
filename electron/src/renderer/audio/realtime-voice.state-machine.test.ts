@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { SHORT_VAD_DURATION_MS, SUSTAINED_VAD_DURATION_MS } from './realtime-voice.test-fixtures'
 
 const requestJsonMock = vi.fn()
 
@@ -117,9 +118,9 @@ describe('RealtimeVoiceSession comfort state machine', () => {
     channel.serverEvent({ type: 'response.created', response: { id: 'response-1' } })
     channel.serverEvent({ type: 'output_audio_buffer.started', response_id: 'response-1' })
     channel.serverEvent({ type: 'input_audio_buffer.speech_started' })
-    vi.advanceTimersByTime(80)
+    vi.advanceTimersByTime(SHORT_VAD_DURATION_MS)
     channel.serverEvent({ type: 'input_audio_buffer.speech_stopped' })
-    vi.advanceTimersByTime(160)
+    vi.advanceTimersByTime(SUSTAINED_VAD_DURATION_MS)
 
     const sentTypes = channel.sent.map((payload) => JSON.parse(payload).type)
     expect(sentTypes).not.toContain('response.cancel')

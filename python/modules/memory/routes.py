@@ -33,6 +33,7 @@ from .metadata import (
   memory_state,
   normalize_memory_metadata,
   normalize_memory_validity,
+  is_auto_admitted_candidate,
   recall_rejection_reason,
 )
 from .operations import MemoryOperationLog, new_operation
@@ -1499,6 +1500,10 @@ def create_memory_router(
           'state': memory_state(doc.metadata),
           'layer': (doc.metadata or {}).get('layer') or 'semantic',
           'source': (doc.metadata or {}).get('source_kind') or (doc.metadata or {}).get('source') or 'unknown',
+          'scope': (doc.metadata or {}).get('scope') or 'workspace',
+          'memory_role': (doc.metadata or {}).get('memory_role'),
+          'review_status': (doc.metadata or {}).get('review_status'),
+          'relationship_event': (doc.metadata or {}).get('relationship_event'),
           'action': (
             ((doc.metadata or {}).get('audit') or [{}])[-1].get('action')
             if isinstance((doc.metadata or {}).get('audit'), list)
@@ -1512,7 +1517,7 @@ def create_memory_router(
       key=lambda item: str(item.get('updated_at') or ''),
       reverse=True,
     )[:10]
-    review_counts = _counts(lambda doc: str((doc.metadata or {}).get('review_status') or 'unreviewed'))
+    review_counts = _counts(lambda doc: 'approved' if is_auto_admitted_candidate(doc.metadata) else str((doc.metadata or {}).get('review_status') or 'unreviewed'))
     recallable_count = sum(1 for doc in scoped if recall_rejection_reason(doc.metadata) is None)
     return {
       'total': len(scoped),
@@ -2179,6 +2184,8 @@ def create_memory_router(
     for doc in documents:
       metadata = dict(doc.metadata or {})
       if not metadata.get('candidate'):
+        continue
+      if is_auto_admitted_candidate(metadata):
         continue
       review_status = str(metadata.get('review_status') or 'pending').lower()
       if requested != 'all' and review_status != requested:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import socket
 from pathlib import Path
@@ -177,6 +178,96 @@ async def _discover_asr(timeout: float) -> list[dict[str, object]]:
             "message": "service reachable" if tcp_ok else message,
         })
     return results
+
+
+_GENIE_MODEL_FILES = (
+    "t2s_encoder_fp32.onnx",
+    "t2s_first_stage_decoder_fp32.onnx",
+    "t2s_stage_decoder_fp32.onnx",
+    "vits_fp32.onnx",
+    "prompt_encoder_fp32.onnx",
+)
+_GENIE_CHARACTER_LANGUAGES = {
+    "mika": "ja",
+    "feibi": "zh",
+    "thirtyseven": "en",
+}
+
+
+def discover_genie_tts_characters(
+    *,
+    character_root: Path | None = None,
+    genie_data_dir: Path | None = None,
+) -> list[dict[str, object]]:
+    """Enumerate local Genie character bundles and their reference prompts."""
+    root = character_root or (_backend_root() / "CharacterModels" / "v2ProPlus")
+    data_dir = genie_data_dir or (
+        Path(os.getenv("GENIE_DATA_DIR", "")).expanduser()
+        if os.getenv("GENIE_DATA_DIR")
+        else _backend_root() / ".cache" / "GenieData" / "GenieData"
+    )
+    shared_missing: list[str] = []
+    if not (data_dir / "speaker_encoder.onnx").is_file():
+        shared_missing.append("speaker_encoder.onnx")
+    if not (data_dir / "chinese-hubert-base").is_dir():
+        shared_missing.append("chinese-hubert-base")
+    if not (data_dir / "G2P").is_dir():
+        shared_missing.append("G2P")
+
+    if not root.is_dir():
+        return []
+
+    characters: list[dict[str, object]] = []
+    for character_dir in sorted((item for item in root.iterdir() if item.is_dir()), key=lambda item: item.name.casefold()):
+        model_dir = character_dir / "tts_models"
+        if not model_dir.is_dir():
+            model_dir = character_dir
+        missing = [name for name in _GENIE_MODEL_FILES if not (model_dir / name).is_file()]
+
+        prompt_audio: Path | None = None
+        prompt_text = ""
+        metadata_path = character_dir / "prompt_wav.json"
+        if metadata_path.is_file():
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
+                normal = metadata.get("Normal") if isinstance(metadata, dict) else None
+                if not isinstance(normal, dict) and isinstance(metadata, dict):
+                    normal = next((item for item in metadata.values() if isinstance(item, dict)), None)
+                if isinstance(normal, dict):
+                    prompt_text = str(normal.get("text") or "").strip()
+                    wav_name = str(normal.get("wav") or "").strip()
+                    if wav_name and Path(wav_name).name == wav_name:
+                        candidate = character_dir / "prompt_wav" / wav_name
+                        if candidate.is_file():
+                            prompt_audio = candidate
+            except (OSError, ValueError, TypeError):
+                missing.append("prompt_wav.json")
+        if prompt_audio is None:
+            prompt_candidates = sorted((character_dir / "prompt_wav").glob("*.wav")) if (character_dir / "prompt_wav").is_dir() else []
+            prompt_audio = prompt_candidates[0] if prompt_candidates else None
+        if prompt_audio is None:
+            missing.append("prompt_wav/*.wav")
+        if not prompt_text:
+            missing.append("prompt text")
+
+        def relative(path: Path) -> str:
+            resolved = path.resolve()
+            try:
+                return resolved.relative_to(_backend_root().resolve()).as_posix()
+            except ValueError:
+                return str(resolved)
+        details = list(dict.fromkeys(shared_missing + missing))
+        characters.append({
+            "id": character_dir.name,
+            "label": character_dir.name,
+            "language": _GENIE_CHARACTER_LANGUAGES.get(character_dir.name.casefold(), "auto"),
+            "model_dir": relative(model_dir),
+            "ref_audio": relative(prompt_audio) if prompt_audio else "",
+            "ref_text": prompt_text,
+            "ready": not details,
+            "details": details,
+        })
+    return characters
 
 
 def _discover_tts() -> list[dict[str, object]]:

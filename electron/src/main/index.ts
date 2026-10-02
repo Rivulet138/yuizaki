@@ -182,7 +182,10 @@ async function applyInputBindings(settings: InputBindingSettings): Promise<Input
   )
   const registrationErrors = inputBindingStatus.errors
   const settledStatus = await petShortcuts.waitForMouseHook()
-  inputBindingStatus = { ...settledStatus, errors: registrationErrors }
+  inputBindingStatus = {
+    ...settledStatus,
+    errors: [...registrationErrors, ...settledStatus.errors.filter((error) => !registrationErrors.includes(error))],
+  }
   fenceDesktopActionsWhenHotkeyUnavailable(inputBindingStatus, desktopActionBridge)
   refreshTrayVoiceBinding(settings)
   return { settings, status: inputBindingStatus }
@@ -232,7 +235,13 @@ async function createApp(): Promise<void> {
   providerCredentialStore = new ProviderCredentialStore(path.join(app.getPath('userData'), 'credentials'))
   mcpConfigVault = new McpConfigVault(path.join(app.getPath('userData'), 'credentials'))
   const runtimeRoot = resolveRuntimeProjectRoot()
-  providerCredentialStore.migratePlaintextSettings(path.join(runtimeRoot, 'python', 'config', 'settings.json'))
+  const settingsPaths = new Set<string>([path.join(runtimeRoot, 'python', 'config', 'settings.json')])
+  if (isPackagedRuntime(runtimeRoot)) {
+    settingsPaths.add(resolveWritableRuntimePaths(app.getPath('userData')).settingsPath)
+  }
+  for (const settingsPath of settingsPaths) {
+    providerCredentialStore.migratePlaintextSettings(settingsPath)
+  }
   providerCredentialStore.migratePlaintextConnectorState(path.join(runtimeRoot, 'python', 'data', 'message_connectors.json'))
   inputBindingStore = new InputBindingStore(path.join(app.getPath('userData'), 'input'))
   const packageStateStore: JsonPackageStateStore = createDefaultPackageStateStore(app.getPath('userData'))

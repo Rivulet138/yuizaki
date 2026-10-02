@@ -61,7 +61,7 @@ const state = reactive<SettingsState>({
     timeout: 60,
   },
   asr: {
-    provider: 'sherpa-onnx-online',
+    provider: 'sherpa-onnx',
     base_url: '',
     api_key: '',
     timeout: 60,

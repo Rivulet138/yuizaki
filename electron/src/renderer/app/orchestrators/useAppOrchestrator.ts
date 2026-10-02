@@ -77,7 +77,7 @@ export function useAppOrchestrator() {
     } else {
       const activeSession = sessionStore.activeSession
       await runRecoverableTask('route after workspace change', () =>
-        router.push(moduleRoute(workspace.id, 'companion', activeSession?.id)),
+        router.push(moduleRoute(workspace.id, 'chat', activeSession?.id)),
       )
     }
 
@@ -106,7 +106,7 @@ export function useAppOrchestrator() {
     if (hashTab && isPanelKey(hashTab)) {
       return hashTab
     }
-    return 'companion'
+    return 'chat'
   }
 
   onMounted(async () => {

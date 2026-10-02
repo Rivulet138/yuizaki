@@ -49,43 +49,25 @@
               <el-icon><Close /></el-icon>
             </button>
           </div>
-          <el-tooltip :content="t('chat.search.open')" placement="bottom">
-            <button class="top-icon-button" type="button" :aria-label="t('chat.search.open')" @click="toggleMessageSearch">
-              <el-icon><Search /></el-icon>
-            </button>
-          </el-tooltip>
-          <el-tooltip :content="showSessionRail ? t('chat.session.hide') : t('chat.session.show')" placement="bottom">
-            <button class="top-icon-button" type="button" :aria-label="showSessionRail ? t('chat.session.hide') : t('chat.session.show')" @click="toggleSessionRail">
-              <el-icon>
-                <Fold v-if="showSessionRail" />
-                <Expand v-else />
-              </el-icon>
-            </button>
-          </el-tooltip>
-          <el-tooltip :content="resolvedTheme === 'dark' ? t('chat.theme.light') : t('chat.theme.dark')" placement="bottom">
-            <button class="top-icon-button" type="button" :aria-label="resolvedTheme === 'dark' ? t('chat.theme.light') : t('chat.theme.dark')" @click="toggleTheme">
-              <el-icon>
-                <Sunny v-if="resolvedTheme === 'dark'" />
-                <Moon v-else />
-              </el-icon>
-            </button>
-          </el-tooltip>
-          <el-tooltip :content="t('chat.petSettings')" placement="bottom">
-            <button
-              class="top-icon-button"
-              type="button"
-              :aria-label="t('chat.petSettings')"
-              data-testid="chat-pet-settings"
-              @click="openPetSettings"
-            >
-              <el-icon><StarFilled /></el-icon>
-            </button>
-          </el-tooltip>
-          <el-tooltip :content="t('chat.settings')" placement="bottom">
-            <button class="top-icon-button" type="button" :aria-label="t('chat.settings')" @click="openSettings">
-              <el-icon><Setting /></el-icon>
-            </button>
-          </el-tooltip>
+          <div class="chat-top-group" aria-label="对话工具">
+            <el-tooltip :content="t('chat.search.open')" placement="bottom">
+              <button class="top-icon-button" type="button" :aria-label="t('chat.search.open')" @click="toggleMessageSearch"><el-icon><Search /></el-icon></button>
+            </el-tooltip>
+            <el-tooltip :content="showSessionRail ? t('chat.session.hide') : t('chat.session.show')" placement="bottom">
+              <button class="top-icon-button" type="button" :aria-label="showSessionRail ? t('chat.session.hide') : t('chat.session.show')" @click="toggleSessionRail"><el-icon><Fold v-if="showSessionRail" /><Expand v-else /></el-icon></button>
+            </el-tooltip>
+            <el-tooltip :content="resolvedTheme === 'dark' ? t('chat.theme.light') : t('chat.theme.dark')" placement="bottom">
+              <button class="top-icon-button" type="button" :aria-label="resolvedTheme === 'dark' ? t('chat.theme.light') : t('chat.theme.dark')" @click="toggleTheme"><el-icon><Sunny v-if="resolvedTheme === 'dark'" /><Moon v-else /></el-icon></button>
+            </el-tooltip>
+          </div>
+          <div class="chat-top-group chat-top-group--settings" aria-label="对话设置">
+            <el-tooltip :content="t('chat.petSettings')" placement="bottom">
+              <button class="top-icon-button" type="button" :aria-label="t('chat.petSettings')" data-testid="chat-pet-settings" @click="openPetSettings"><el-icon><StarFilled /></el-icon></button>
+            </el-tooltip>
+            <el-tooltip :content="t('chat.settings')" placement="bottom">
+              <button class="top-icon-button" type="button" :aria-label="t('chat.settings')" @click="openSettings"><el-icon><Setting /></el-icon></button>
+            </el-tooltip>
+          </div>
         </div>
 
         <div v-if="chatState.lastError" class="chat-error-banner">
@@ -151,14 +133,33 @@
         <div class="composer-panel shrink-0" :class="{ 'composer-panel--tools-open': toolsExpanded }">
           <input ref="fileInput" class="hidden-file-input" type="file" multiple @change="handleFileInputChange" />
 
-          <ChatPlaybackBar
-            :playing="chatState.isTTSPlaying"
-            :speaking="chatState.isSpeaking"
-            :pet-link-enabled="chatOptions.pet_link_enabled !== false"
-            :text="playbackText"
-            @interrupt="handleInterrupt"
-            @toggle-pet-link="togglePetLink"
-          />
+          <div class="chat-auxiliary-row">
+            <ChatPlaybackBar
+              :playing="chatState.isTTSPlaying"
+              :speaking="chatState.isSpeaking"
+              :pet-link-enabled="chatOptions.pet_link_enabled !== false"
+              :text="playbackText"
+              @interrupt="handleInterrupt"
+              @toggle-pet-link="togglePetLink"
+            />
+            <ChatVoiceStatus
+              v-if="toolsExpanded"
+              v-model:mode="voiceMode"
+              :mode-options="voiceModeOptions"
+              :hold-active="isHoldActive"
+              :connected="socketDomain.isConnected.value"
+              :shortcut-title="pushToTalkShortcutTitle"
+              :interruptible="voiceInterruptible"
+              :show-recovery-action="showRealtimeRecovery"
+              @hold-pointer-down="handleHoldPointerDown"
+              @hold-pointer-up="handleHoldPointerUp"
+              @begin-hold="beginHoldToTalk"
+              @end-hold="endHoldToTalk"
+              @toggle-mic="toggleMic"
+              @interrupt="handleInterrupt"
+              @retry-realtime="retryRealtimeVoice"
+            />
+          </div>
 
           <div v-if="attachments.length" class="attachment-strip">
             <div v-for="attachment in attachments" :key="attachment.id" class="attachment-chip" :title="attachment.name">
@@ -191,7 +192,6 @@
                   </span>
                   <span class="quick-panel-copy">
                     <strong>{{ item.label }}</strong>
-                    <small v-if="item.description">{{ item.description }}</small>
                   </span>
                 </button>
               </div>
@@ -240,7 +240,6 @@
                   :response-mode-options="responseModeOptions"
                   :max-output-tokens="maxChatOutputTokens"
                   :model-label="effectiveModelLabel"
-                  :mcp-summary="mcpSummaryLabel"
                   :prompt-active="promptProfileActive"
                   :audio-input-devices="audioInputDevices"
                   :audio-devices-loading="audioDevicesLoading"
@@ -275,40 +274,6 @@
                 </button>
               </div>
             </div>
-            <ChatComposerStatusLine
-              :connected="socketDomain.isConnected.value"
-              :generating="chatState.isGenerating"
-              :recording="isRecording"
-              :tts-playing="chatState.isTTSPlaying"
-              :show-recovery-action="showRealtimeRecovery"
-              @retry="retryRealtimeVoice"
-            />
-
-            <ChatVoiceStatus
-              v-if="toolsExpanded"
-              v-model:mode="voiceMode"
-              :status-class="voiceStatusClass"
-              :status-text="voiceStatusText"
-              :pipeline-text="voicePipelineText"
-              :processing-text="voiceProcessingText"
-              :latency-summary="voiceLatencySummary"
-              :recording="isRecording"
-              :meter-bars="voiceMeterBars"
-              :level-percent="voiceLevelPercent"
-              :mode-options="voiceModeOptions"
-              :hold-active="isHoldActive"
-              :connected="socketDomain.isConnected.value"
-              :shortcut-title="pushToTalkShortcutTitle"
-              :tts-playing="chatState.isTTSPlaying"
-              :interruptible="voiceInterruptible"
-              @hold-pointer-down="handleHoldPointerDown"
-              @hold-pointer-up="handleHoldPointerUp"
-              @begin-hold="beginHoldToTalk"
-              @end-hold="endHoldToTalk"
-              @toggle-mic="toggleMic"
-              @interrupt="handleInterrupt"
-              @retry-realtime="retryRealtimeVoice"
-            />
           </div>
         </div>
       </div>
@@ -408,7 +373,6 @@ import { useSessionDrafts } from '../composables/useSessionDrafts'
 import { useSessionViewState } from '../composables/useSessionViewState'
 import ChatMessageList from '../components/ChatMessageList.vue'
 import SessionRail from '../components/SessionRail.vue'
-import ChatComposerStatusLine from '../components/ChatComposerStatusLine.vue'
 import ChatPlaybackBar from '../components/ChatPlaybackBar.vue'
 import ChatRuntimeSettings, { type ChatRuntimeSettingsModel } from '../components/ChatRuntimeSettings.vue'
 import ChatVoiceStatus from '../components/ChatVoiceStatus.vue'
@@ -421,7 +385,7 @@ import { useSettingsStore } from '@/state/settingsStore'
 import { DEFAULT_LLM_MAX_OUTPUT_TOKENS } from '@/../shared/runtime-defaults'
 import { useInputBindingsStore } from '@/state/inputBindingsStore'
 import { useI18n } from '@/i18n'
-import { settingsClient, systemClient } from '@/api/client'
+import { settingsClient } from '@/api/client'
 import { memoryClient } from '@/api/clients/memory-client'
 import type { ChatAttachment, ChatMemorySource, ChatMessage, ChatOptions } from '@/../shared/types'
 import type { WorkspacePromptMode } from '@/../shared/workspace'
@@ -495,7 +459,6 @@ const {
   chatState,
   inputText,
   isRecording,
-  audioCaptureState,
   startMic,
   stopMic,
   toggleMic,
@@ -534,7 +497,6 @@ const audioInputDevices = ref<AudioInputDevice[]>([])
 const audioDevicesLoading = ref(false)
 const modelOptionsProviderKey = ref('')
 let warmupTimer: number | null = null
-const mcpSummaryLabel = ref(t('chat.status.refreshingMcp'))
 const attachments = ref<ChatAttachment[]>([])
 const isCreatingSession = ref(false)
 const voiceMode = ref<'tap' | 'hold'>('tap')
@@ -862,73 +824,6 @@ const quickPanelItems = computed(() => {
     return label.includes(query) || description.includes(query)
   })
 })
-const voiceMeterBars = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
-const voiceLevelPercent = computed(() => Math.round(Math.min(1, audioCaptureState.level) * 100))
-const voiceStatusText = computed(() => {
-  if (audioCaptureState.inputHealth === 'disconnected') return t('chat.status.micDisconnected')
-  if (audioCaptureState.phase === 'error') return audioCaptureState.error || t('chat.status.micError')
-  if (isRecording.value && audioCaptureState.inputHealth === 'silent') return t('chat.status.noSound')
-  if (isRecording.value) return t('chat.status.listening')
-  if (!socketDomain.isConnected.value) return t('chat.status.channelConnecting')
-  if (chatState.isTTSPlaying) return t('chat.status.playing')
-  if (chatState.asrPartialText) return t('chat.status.recognizing')
-  return t('chat.status.ready')
-})
-const voicePipelineText = computed(() => {
-  if (!socketDomain.isConnected.value) return t('chat.status.channelOffline')
-  if (isRecording.value) {
-    const silenceHint = audioCaptureState.inputHealth === 'silent'
-      ? ` · ${t('chat.status.silence', { seconds: Math.round(audioCaptureState.silenceMs / 1000) })}`
-      : ''
-    return `${t('chat.recording.metrics', { duration: formatDuration(audioCaptureState.elapsedMs), chunks: audioCaptureState.chunksSent, bytes: formatBytes(audioCaptureState.bytesSent) })}${silenceHint}`
-  }
-  if (chatState.asrPartialText) return t('chat.status.asrPartial')
-  if (chatState.isGenerating) return t('chat.status.llmProcessing')
-  if (chatState.isTTSPlaying) return t('chat.status.ttsOutput')
-  return chatOptions.tts_enabled ? t('chat.status.pipelineReady') : t('chat.status.pipelineNoTts')
-})
-const voiceProcessingText = computed(() => {
-  const processing = audioCaptureState.audioProcessing
-  const formatState = (label: string, value: boolean | null) => (
-    value === null ? null : t(value ? 'chat.status.processingOn' : 'chat.status.processingOff', { label })
-  )
-  return [
-    formatState(t('chat.processing.aec'), processing.echoCancellation),
-    formatState(t('chat.processing.noise'), processing.noiseSuppression),
-    formatState(t('chat.processing.agc'), processing.autoGainControl),
-    audioCaptureState.inputSampleRate
-      ? t('chat.status.sampleRate', { input: Math.round(audioCaptureState.inputSampleRate / 1000) })
-      : null,
-  ].filter(Boolean).join(' · ')
-})
-const voiceLatencySummary = computed(() => {
-  const asrStages = chatState.voiceLatency.asr?.stages
-  const generationStages = chatState.voiceLatency.generation?.stages
-  const endpointMs = asrStages?.endpoint_detected
-  const asrFinalMs = asrStages?.asr_final
-  const firstTokenMs = generationStages?.llm_first_token
-  const firstSentenceMs = generationStages?.llm_first_sentence
-  const firstAudioMs = generationStages?.tts_first_audio_ready
-  const playbackMs = generationStages?.playback_start
-  const parts: string[] = []
-  if (endpointMs !== undefined) parts.push(t('chat.status.endpoint', { value: Math.round(endpointMs) }))
-  if (firstTokenMs !== undefined) parts.push(t('chat.status.firstToken', { value: Math.round(firstTokenMs) }))
-  if (firstSentenceMs !== undefined) parts.push(t('chat.status.firstSentence', { value: Math.round(firstSentenceMs) }))
-  if (playbackMs !== undefined) {
-    parts.push(t('chat.status.firstPlayback', { value: Math.round((asrFinalMs ?? 0) + playbackMs) }))
-  } else if (firstAudioMs !== undefined) {
-    parts.push(t('chat.status.firstAudio', { value: Math.round((asrFinalMs ?? 0) + firstAudioMs) }))
-  }
-  return parts.join(' · ')
-})
-const voiceStatusClass = computed(() => ({
-  recording: isRecording.value,
-  error: audioCaptureState.phase === 'error',
-  silent: isRecording.value && audioCaptureState.inputHealth === 'silent',
-  disconnected: audioCaptureState.inputHealth === 'disconnected',
-  offline: !socketDomain.isConnected.value,
-  speaking: chatState.isTTSPlaying,
-}))
 const showRealtimeRecovery = computed(() => shouldOfferRealtimeRecovery({
   responseMode: chatOptions.response_mode,
   recording: isRecording.value,
@@ -962,12 +857,6 @@ const {
   roleLabel: messageRoleLabel,
   onMatchSelected: (index) => scrollToMessage(index),
 })
-const formatDuration = (ms: number) => {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
-  const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0')
-  const seconds = (totalSeconds % 60).toString().padStart(2, '0')
-  return `${minutes}:${seconds}`
-}
 const formatBytes = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`
   return `${Math.round(bytes / 1024)} KB`
@@ -1809,18 +1698,6 @@ const refreshModelOptions = async (force = false) => {
   }
 }
 
-const refreshMcpSummary = async () => {
-  try {
-    const snapshot = await systemClient.mcp()
-    const rows = Object.entries(snapshot.servers || {})
-    const connected = rows.filter(([name, server]) => snapshot.status?.[name]?.connected && (snapshot.status?.[name]?.enabled ?? server.enabled)).length
-    const enabled = rows.filter(([name, server]) => snapshot.status?.[name]?.enabled ?? server.enabled).length
-    mcpSummaryLabel.value = t('chat.mcp.ready', { connected, enabled })
-  } catch {
-    mcpSummaryLabel.value = t('chat.mcp.failed')
-  }
-}
-
 const beginHoldToTalk = async () => {
   if (voiceMode.value !== 'hold' || isHoldActive.value || holdStartPending.value) return
   isHoldActive.value = true
@@ -1915,22 +1792,29 @@ watch(voiceMode, (mode) => {
   }
 })
 
+const handleBrowserInputAction = (event: Event): void => {
+  const action = (event as CustomEvent<{ action?: string }>).detail?.action
+  if (action === 'startVoice') void startMic()
+  if (action === 'stopVoice') stopMic()
+}
+
 onMounted(() => {
   window.addEventListener('click', closeContextMenu)
   window.addEventListener('click', closeQuickPanel)
   window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('yuizaki:input-action', handleBrowserInputAction)
   scrollToBottom()
   void settingsStore.fetchSettings().then(refreshModelOptions)
   const warmupTts = () => {
     void settingsClient.warmupTts().catch(() => undefined)
   }
   warmupTimer = window.setTimeout(warmupTts, 4000)
-  void refreshMcpSummary()
 })
 onUnmounted(() => {
   window.removeEventListener('click', closeContextMenu)
   window.removeEventListener('click', closeQuickPanel)
   window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('yuizaki:input-action', handleBrowserInputAction)
   endHoldToTalk()
   sessionDrafts.flushDrafts()
   if (warmupTimer !== null) {

@@ -372,7 +372,7 @@ export class OnboardingReadinessCoordinator {
         'host.runtime',
         'Desktop runtime',
         ready ? 'ready' : 'unavailable',
-        true,
+        REQUIRED_TEXT_IDS.has('host.runtime'),
         ready ? 'Desktop runtime is supported' : 'Desktop runtime is not qualified',
         ready ? null : 'guide.open',
         {

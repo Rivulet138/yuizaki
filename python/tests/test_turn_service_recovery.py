@@ -69,3 +69,40 @@ async def test_finalizer_exception_is_durable_unknown_effect(tmp_path: Path) -> 
     assert commit.result.retryable is False
     assert commit.result.failure["kind"] == "turn_finalizer_exception"
     assert store.load(commit.idempotency_key) is not None
+
+
+@pytest.mark.asyncio
+async def test_projection_failure_does_not_turn_durable_commit_into_request_failure(tmp_path: Path) -> None:
+    store = TurnCommitStore(tmp_path / "turns.sqlite3")
+    runs: list[str] = []
+
+    async def runner(_ctx: AgentRequestContext) -> AgentPipelineResult:
+        runs.append("run")
+        return AgentPipelineResult(reply="committed", outcome="completed")
+
+    async def dispatch(_commit: object) -> None:
+        raise RuntimeError("projection temporarily unavailable")
+
+    service = TurnService(TurnPorts(
+        run=runner,
+        persist=store.persist,
+        load=store.load,
+        dispatch=dispatch,
+    ))
+
+    first = await service.execute_context("http", _context())
+
+    assert first.result.outcome == "completed"
+    assert first.projection_pending is True
+    assert first.projection_error == "RuntimeError"
+    assert store.load(first.idempotency_key) is not None
+
+    replay = await TurnService(TurnPorts(
+        run=runner,
+        persist=store.persist,
+        load=store.load,
+        dispatch=dispatch,
+    )).execute_context("http", _context())
+    assert replay.replayed is True
+    assert replay.projection_pending is True
+    assert runs == ["run"]

@@ -4,6 +4,9 @@ import importlib
 import json
 import logging
 import os
+import hashlib
+import hmac
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Protocol, cast
 from contextlib import asynccontextmanager
@@ -497,18 +500,34 @@ _BACKEND_API_TOKEN = os.getenv("YUIZAKI_BACKEND_API_TOKEN", "").strip()
 
 
 @app.get("/api/ping")
-async def ping():
+async def ping(challenge: str | None = None):
     payload: dict[str, Any] = {"ok": True}
+    service = os.getenv("YUIZAKI_RUNTIME_SERVICE", "").strip()
+    version = os.getenv("YUIZAKI_RUNTIME_SERVICE_VERSION", "").strip()
     instance_id = os.getenv("YUIZAKI_RUNTIME_INSTANCE_ID", "").strip()
     generation = os.getenv("YUIZAKI_RUNTIME_GENERATION", "").strip()
     startup_nonce = os.getenv("YUIZAKI_RUNTIME_STARTUP_NONCE", "").strip()
-    if instance_id and generation and startup_nonce:
+    # Runtime identity is emitted only when complete. Supervisors must fail
+    # closed when talking to an unowned or legacy process on the same port.
+    if service and version and instance_id and generation and startup_nonce:
         payload["runtime"] = {
+            "service": service,
+            "version": version,
             "instance_id": instance_id,
             "generation": generation,
             "startup_nonce": startup_nonce,
             "pid": os.getpid(),
         }
+    if (
+        challenge
+        and _BACKEND_API_TOKEN
+        and re.fullmatch(r"[0-9a-f]{64}", challenge)
+    ):
+        payload["runtime_proof"] = hmac.new(
+            _BACKEND_API_TOKEN.encode("utf-8"),
+            f"yuizaki-backend-proof-v1:{challenge}".encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
     return payload
 
 

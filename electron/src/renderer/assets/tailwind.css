@@ -52,6 +52,11 @@ html[data-reduced-motion] .skeleton-line {
 }
 
 @layer components {
+  .el-card {
+    --el-card-bg-color: var(--yui-surface-raised, #fff);
+    background-color: var(--el-card-bg-color);
+  }
+
   .panel-card {
     border-radius: min(var(--yui-radius-card, 12px), 10px);
     border: 1px solid var(--yui-panel-outline, var(--yui-border, rgba(203, 213, 225, 0.9)));
@@ -71,6 +76,14 @@ html[data-reduced-motion] .skeleton-line {
   .yui-field-stack {
     display: grid;
     gap: 10px;
+  }
+
+  .panel-purpose {
+    display: block;
+    margin: 3px 0 0;
+    color: var(--yui-muted);
+    font-size: 12px;
+    line-height: 1.45;
   }
 
   .custom-scrollbar::-webkit-scrollbar {

@@ -234,6 +234,7 @@ def apply_runtime_config(config: RuntimeConfig, updates: RuntimeUpdates) -> set[
             changed.add("llm")
         if "vision_timeout" in llm_updates and llm_updates["vision_timeout"] is not None:
             config.llm.vision_timeout = _to_float(llm_updates["vision_timeout"])
+            changed.add("llm")
         if "vision_detail" in llm_updates and llm_updates["vision_detail"] is not None:
             detail = str(llm_updates["vision_detail"]).strip().lower()
             config.llm.vision_detail = detail if detail in {"low", "high", "auto", "original"} else "low"
@@ -287,7 +288,7 @@ def apply_runtime_config(config: RuntimeConfig, updates: RuntimeUpdates) -> set[
     asr_updates = _section(updates, "asr")
     if asr_updates is not None:
         if "provider" in asr_updates and asr_updates["provider"] is not None:
-            provider = str(asr_updates["provider"]).strip().lower() or "sherpa-onnx-online"
+            provider = str(asr_updates["provider"]).strip().lower() or "sherpa-onnx"
             config.asr.provider = provider
             changed.add("asr")
         if "base_url" in asr_updates and asr_updates["base_url"] is not None:
@@ -337,16 +338,16 @@ def apply_runtime_config(config: RuntimeConfig, updates: RuntimeUpdates) -> set[
             config.svc.provider = str(svc_updates["provider"]).strip().lower() or "soulx-service"
             changed.add("svc")
         if "base_url" in svc_updates and svc_updates["base_url"] is not None:
-            config.svc.base_url = str(svc_updates["base_url"]).rstrip("/")
+            config.svc.base_url = str(svc_updates["base_url"]).strip().rstrip("/")
             changed.add("svc")
         if "speaker_id" in svc_updates and svc_updates["speaker_id"] is not None:
-            config.svc.speaker_id = _to_int(svc_updates["speaker_id"])
+            config.svc.speaker_id = max(0, _to_int(svc_updates["speaker_id"]))
             changed.add("svc")
         if "pitch" in svc_updates and svc_updates["pitch"] is not None:
-            config.svc.pitch = _to_int(svc_updates["pitch"])
+            config.svc.pitch = max(-36, min(36, _to_int(svc_updates["pitch"])))
             changed.add("svc")
         if "timeout" in svc_updates and svc_updates["timeout"] is not None:
-            config.svc.timeout = _to_float(svc_updates["timeout"])
+            config.svc.timeout = max(1.0, _to_float(svc_updates["timeout"]))
             changed.add("svc")
 
     summary_updates = _section(updates, "summary")

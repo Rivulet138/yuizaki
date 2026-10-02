@@ -91,9 +91,12 @@ func TestQdrantAutoStartDefaultsToMemoryBackend(t *testing.T) {
 	}
 }
 
-func TestMCPIsEnabledByDefault(t *testing.T) {
-	if !mcpEnabled(map[string]string{}) {
-		t.Fatal("the supervised launcher must start MCP unless explicitly disabled")
+func TestMCPIsOptionalByDefault(t *testing.T) {
+	if mcpEnabled(map[string]string{}) {
+		t.Fatal("the supervised launcher must keep optional MCP disabled by default")
+	}
+	if !mcpEnabled(map[string]string{"YUIZAKI_WITH_MCP": "1"}) {
+		t.Fatal("YUIZAKI_WITH_MCP=1 must opt into MCP startup")
 	}
 	if mcpEnabled(map[string]string{"YUIZAKI_WITH_MCP": "0"}) {
 		t.Fatal("YUIZAKI_WITH_MCP=0 must disable MCP startup")
@@ -128,6 +131,38 @@ func TestPetReadyRequiresSuccessfulReadyState(t *testing.T) {
 				t.Fatalf("petReady() = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestBackendIdentityMatchesAllFields(t *testing.T) {
+	t.Parallel()
+	cfg := &launcherConfig{runtimeService: "yuizaki-python-backend", runtimeVersion: "dev", runtimeInstance: "instance-a", runtimeGeneration: "42", runtimeNonce: "nonce-a"}
+	runner := &commandRunner{cfg: cfg}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/api/ping" {
+			t.Fatalf("unexpected path: %s", req.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"runtime":{"service":"yuizaki-python-backend","version":"dev","instance_id":"instance-a","generation":"42","startup_nonce":"nonce-a"}}`))
+	}))
+	defer server.Close()
+	if !runner.backendIdentityMatches(context.Background(), server.URL+"/api/ping") {
+		t.Fatal("matching runtime identity should be accepted")
+	}
+	cfg.runtimeNonce = "stale"
+	if runner.backendIdentityMatches(context.Background(), server.URL+"/api/ping") {
+		t.Fatal("stale startup nonce must be rejected")
+	}
+}
+
+func TestBackendIdentityMissingFailsClosed(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+	runner := &commandRunner{cfg: &launcherConfig{runtimeService: "service", runtimeVersion: "dev", runtimeInstance: "id", runtimeGeneration: "1", runtimeNonce: "nonce"}}
+	if runner.backendIdentityMatches(context.Background(), server.URL+"/api/ping") {
+		t.Fatal("missing identity must fail closed")
 	}
 }
 

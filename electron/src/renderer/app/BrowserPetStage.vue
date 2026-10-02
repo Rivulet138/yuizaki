@@ -25,6 +25,8 @@ const error = ref(false)
 const ready = ref(false)
 const modelType = ref<PetModelType>('live2d')
 const modelLabel = ref('Live2D')
+const browserInteractMode = ref(false)
+const browserLocked = ref(false)
 const zoomBounds = { min: 1.2, max: 3 }
 const zoomScale = ref(typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches ? 1.48 : 1.7)
 const emit = defineEmits<{ 'zoom-change': [scale: number] }>()
@@ -50,10 +52,23 @@ const resetZoom = (): void => {
   emit('zoom-change', zoomScale.value)
 }
 
+const handleInputAction = (event: Event): void => {
+  const action = (event as CustomEvent<{ action?: string }>).detail?.action
+  if (action === 'interact') browserInteractMode.value = !browserInteractMode.value
+  if (action === 'lock') browserLocked.value = !browserLocked.value
+  if (!renderer || (action !== 'interact' && action !== 'lock')) return
+  void renderer.applyBrowserConfig({
+    interactMode: browserInteractMode.value,
+    locked: browserLocked.value,
+    clickThrough: false,
+  })
+}
+
 defineExpose({ adjustZoom, resetZoom, zoomScale, zoomBounds })
 
 onMounted(async () => {
   if (!mountEl.value) return
+  window.addEventListener('yuizaki:input-action', handleInputAction)
   emit('zoom-change', zoomScale.value)
   const mountId = `browser-pet-stage-${Math.random().toString(36).slice(2)}`
   mountEl.value.id = mountId
@@ -92,7 +107,8 @@ onMounted(async () => {
       modelPath: selectedPath,
       scale: selectedType === 'vrm' ? 0.96 : 0.9,
       clickThrough: false,
-      locked: false,
+      locked: browserLocked.value,
+      interactMode: browserInteractMode.value,
       opacity: 1,
       placement: 'center',
     })
@@ -126,6 +142,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('yuizaki:input-action', handleInputAction)
   resizeObserver?.disconnect()
   resizeObserver = null
   if (refreshTimer) clearInterval(refreshTimer)

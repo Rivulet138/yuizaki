@@ -73,13 +73,13 @@ const createDefaultMemoryPolicy = (): WorkspaceMemoryPolicy => ({
 })
 
 const createDefaultWorkspaceContext = (): WorkspaceContext => ({
-  activeTab: 'companion',
+  activeTab: 'chat',
   modelType: 'live2d',
   modelId: null,
   wallpaperMode: true,
   heroHeight: 460,
   menuOrder: [],
-  recentTabs: ['companion'],
+  recentTabs: ['chat'],
   layoutPreset: 'balanced',
   promptVersion: DEFAULT_PROMPT_VERSION,
   promptMode: 'auto',
@@ -179,6 +179,12 @@ const normalizeWorkspaceContext = (context: Partial<WorkspaceContext> | undefine
     ...createDefaultWorkspaceContext(),
     ...(context ?? {}),
   }
+  if (normalized.activeTab === 'companion') normalized.activeTab = 'chat'
+  normalized.recentTabs = Array.isArray(normalized.recentTabs)
+    ? normalized.recentTabs
+        .map((tab) => tab === 'companion' ? 'chat' : tab)
+        .filter((tab, index, tabs) => tabs.indexOf(tab) === index)
+    : ['chat']
   if (!['auto', 'work', 'daily'].includes(normalized.promptMode)) {
     normalized.promptMode = 'auto'
   }

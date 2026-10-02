@@ -34,6 +34,26 @@ const TWITCH_CREDENTIALS: Record<string, string> = {
 
 const TWITCH_CREDENTIAL_FIELDS = new Set(Object.keys(TWITCH_CREDENTIALS))
 
+/** Restore vault-backed fields through the same config APIs used by settings. */
+export function credentialConfigUpdates(environment: Record<string, string>): Array<{ path: string; body: Record<string, unknown> }> {
+  const updates: Array<{ path: string; body: Record<string, unknown> }> = []
+  for (const [connector, fields] of Object.entries(CONNECTOR_CREDENTIALS)) {
+    const body: Record<string, unknown> = {}
+    for (const [field, env] of Object.entries(fields)) {
+      if (environment[env]) body[field] = environment[env]!
+      else body[`clear${field.charAt(0).toUpperCase()}${field.slice(1)}`] = true
+    }
+    updates.push({ path: `/api/system/connectors/${connector}/config`, body })
+  }
+  const twitch: Record<string, unknown> = {}
+  for (const [field, env] of Object.entries(TWITCH_CREDENTIALS)) {
+    if (environment[env]) twitch[field] = environment[env]!
+    else twitch[`clear${field.charAt(0).toUpperCase()}${field.slice(1)}`] = true
+  }
+  updates.push({ path: '/api/system/stream/twitch/config', body: twitch })
+  return updates
+}
+
 const CONNECTOR_SECRET_FIELDS = new Set(['botToken', 'webhookSecret', 'publicKey', 'bridgeToken'])
 const CONNECTOR_PLAINTEXT_SECRET_FIELDS = new Set([
   'botToken',
@@ -50,6 +70,14 @@ const SECRET_FIELD_NAMES = new Set([
   'vision_api_key',
   'qdrant_api_key',
 ])
+const PROVIDER_CREDENTIAL_SECTIONS = new Set(['llm', 'tts', 'asr', 'svc', 'memory'])
+
+const isProviderCredentialPath = (fieldPath: string): boolean => {
+  const [section = '', field = '', ...rest] = fieldPath.split('.')
+  return rest.length === 0
+    && PROVIDER_CREDENTIAL_SECTIONS.has(section)
+    && SECRET_FIELD_NAMES.has(field)
+}
 
 interface CredentialFile {
   version: 1
@@ -121,7 +149,7 @@ export class ProviderCredentialStore {
   getPythonEnvironment(): Record<string, string> {
     const environment: Record<string, string> = {}
     const providerValues = Object.fromEntries(
-      Object.entries(this.values).filter(([fieldPath]) => !fieldPath.startsWith('connector.')),
+      Object.entries(this.values).filter(([fieldPath]) => isProviderCredentialPath(fieldPath)),
     )
     if (Object.keys(providerValues).length) {
       environment[PROVIDER_CREDENTIALS_ENV] = JSON.stringify(providerValues)
@@ -219,10 +247,9 @@ export class ProviderCredentialStore {
           this.values[fieldPath] = clean
           changed += 1
         }
-      } else if (fieldPath in this.values) {
-        delete this.values[fieldPath]
-        changed += 1
       }
+      // Empty values are partial-form placeholders. Only the explicit DELETE
+      // settings route removes a credential from the vault.
     })
     if (changed) this.save()
     return changed
@@ -239,8 +266,8 @@ export class ProviderCredentialStore {
       if (this.values[fieldPath] === clean) return false
       this.values[fieldPath] = clean
     } else {
-      if (!(fieldPath in this.values)) return false
-      delete this.values[fieldPath]
+      // Empty values are intentionally ignored; use DELETE to clear a key.
+      return false
     }
     this.save()
     return true

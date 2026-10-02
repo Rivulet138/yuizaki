@@ -138,24 +138,28 @@ const createLocalTimeoutSignal = (
   }
 }
 
-const fetchWithLocalTimeout = async (url: string, init: LocalRequestInit): Promise<Response> => {
+type TimedResponse = { response: Response; timedOut: () => boolean; dispose: () => void }
+
+const fetchWithLocalTimeout = async (url: string, init: LocalRequestInit): Promise<TimedResponse> => {
   const { timeoutMs = LOCAL_REQUEST_TIMEOUT_MS, ...requestInit } = init
   const normalizedTimeoutMs = Math.max(1_000, Math.trunc(timeoutMs))
   const timeout = createLocalTimeoutSignal(url, requestInit.signal, normalizedTimeoutMs)
   try {
-    return await fetch(url, {
+    const response = await fetch(url, {
       ...requestInit,
       signal: timeout.signal,
     })
+    return { response, timedOut: timeout.timedOut, dispose: timeout.dispose }
   } catch (error) {
+    timeout.dispose()
+    // Caller cancellation stays an AbortError; our deadline becomes a visible timeout.
+    if (init.signal?.aborted) throw error
     if (timeout.timedOut()) {
       const timeoutError = new LocalRequestTimeoutError(localServiceTimeoutMessage(normalizedTimeoutMs)) as Error & { cause?: unknown }
       timeoutError.cause = error
       throw timeoutError
     }
     throw error
-  } finally {
-    timeout.dispose()
   }
 }
 
@@ -291,10 +295,15 @@ export const refreshControlTokenFromServer = async (): Promise<string> => {
   }
   if (!controlTokenRefreshRequest) {
     controlTokenRefreshRequest = fetchWithLocalTimeout(`${CONTROL_ORIGIN}/`, { cache: 'no-store' })
-      .then(async (response) => {
-        if (!response.ok) return ''
-        const token = extractControlTokenFromHtml(await response.text())
-        return token ? rememberControlToken(token, true) : ''
+      .then(async (timed) => {
+        try {
+          const response = timed.response
+          if (!response.ok) return ''
+          const token = extractControlTokenFromHtml(await response.text())
+          return token ? rememberControlToken(token, true) : ''
+        } finally {
+          timed.dispose()
+        }
       })
       .catch(() => '')
       .then((token) => {
@@ -367,12 +376,17 @@ export const refreshRuntimeApiOrigin = async (
       cache: 'no-store',
       headers: authHeaders,
     })
-      .then(async (response) => {
-        if (!response.ok) return runtimeApiOrigin
-        const payload = await response.json() as RuntimeEnvCheckResponse
-        runtimeApiOrigin = normalizeRuntimeApiOrigin(payload.pythonApiOrigin)
-        runtimeApiOriginFetchedAt = Date.now()
-        return runtimeApiOrigin
+      .then(async (timed) => {
+        try {
+          const response = timed.response
+          if (!response.ok) return runtimeApiOrigin
+          const payload = await response.json() as RuntimeEnvCheckResponse
+          runtimeApiOrigin = normalizeRuntimeApiOrigin(payload.pythonApiOrigin)
+          runtimeApiOriginFetchedAt = Date.now()
+          return runtimeApiOrigin
+        } finally {
+          timed.dispose()
+        }
       })
       .catch(() => runtimeApiOrigin)
       .finally(() => {
@@ -426,35 +440,90 @@ const createTraceId = (): string => `trace_${Date.now()}_${Math.random().toStrin
 export interface HttpClientError extends Error {
   status?: number
   payload?: unknown
-  code?: 'auth_missing' | 'service_unavailable' | 'request_timeout'
+  code?: string
+  details?: unknown
+  retryable?: boolean
+  requestId?: string
   requestPath?: string
 }
 
-const payloadMessage = (payload: unknown): string | null => {
-  if (!payload || typeof payload !== 'object') return null
-  if ('message' in payload && typeof payload.message === 'string') return payload.message
-  if ('error' in payload && typeof payload.error === 'string') return payload.error
-  if ('detail' in payload) {
-    const detail = payload.detail
-    if (typeof detail === 'string') return detail
-    if (Array.isArray(detail)) {
-      return detail
-        .map((item) => {
-          if (typeof item === 'string') return item
-          if (item && typeof item === 'object' && 'msg' in item && typeof item.msg === 'string') return item.msg
-          return null
-        })
-        .filter((item): item is string => Boolean(item))
-        .join('; ') || null
-    }
+type NormalizedErrorPayload = {
+  code?: string
+  message?: string
+  details?: unknown
+  retryable?: boolean
+  requestId?: string
+}
+
+const normalizeErrorPayload = (payload: unknown): NormalizedErrorPayload => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return {}
+  const value = payload as Record<string, unknown>
+  const detail = value.detail
+  const structuredDetail = detail && typeof detail === 'object' && !Array.isArray(detail)
+    ? detail as Record<string, unknown>
+    : {}
+  const firstString = (...candidates: unknown[]): string | undefined =>
+    candidates.find((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0)
+  const detailMessage = typeof detail === 'string'
+    ? detail
+    : Array.isArray(detail)
+      ? detail.map((item) => item && typeof item === 'object' && 'msg' in item ? String(item.msg) : String(item))
+        .join('; ')
+      : undefined
+  // Prefer canonical fields while accepting older FastAPI HTTPException detail payloads.
+  return {
+    code: firstString(value.code, structuredDetail.code, structuredDetail.error, value.error),
+    message: firstString(value.message, structuredDetail.message, structuredDetail.error, detailMessage, value.error),
+    details: value.details !== undefined ? value.details : structuredDetail.details,
+    retryable: typeof value.retryable === 'boolean'
+      ? value.retryable
+      : typeof structuredDetail.retryable === 'boolean' ? structuredDetail.retryable : false,
+    requestId: firstString(value.request_id, value.requestId, structuredDetail.request_id, structuredDetail.requestId),
   }
-  return null
+}
+
+const applyErrorPayload = (error: HttpClientError, payload: unknown): void => {
+  error.payload = payload
+  const normalized = normalizeErrorPayload(payload)
+  if (normalized.message) error.message = normalized.message
+  if (normalized.code) error.code = normalized.code
+  if (normalized.details !== undefined) error.details = normalized.details
+  error.retryable = normalized.retryable ?? false
+  if (normalized.requestId) error.requestId = normalized.requestId
 }
 
 const createClientError = (
   message: string,
   patch: Partial<Pick<HttpClientError, 'status' | 'payload' | 'code' | 'requestPath'>> = {},
 ): HttpClientError => Object.assign(new Error(message) as HttpClientError, patch)
+
+const throwResponseError = async (response: Response, requestUrl: string, needsLocalAuth: boolean, hasAuthHeader: boolean): Promise<never> => {
+  const error = createClientError(`HTTP ${response.status}`, {
+    status: response.status,
+    requestPath: requestPath(requestUrl),
+  })
+  try {
+    const contentType = response.headers.get('Content-Type') || ''
+    if (contentType.includes('application/json')) {
+      applyErrorPayload(error, await response.json())
+    } else {
+      const text = await response.text()
+      if (text) {
+        error.payload = text
+        error.message = text
+        error.retryable = false
+      }
+    }
+  } catch (parseError) {
+    if (parseError instanceof DOMException && parseError.name === 'AbortError') throw parseError
+    error.retryable = false
+  }
+  if (needsLocalAuth && response.status === 401 && !hasAuthHeader) {
+    error.message = BACKEND_AUTH_MISSING_MESSAGE
+    error.code = 'auth_missing'
+  }
+  throw error
+}
 
 const requestPath = (url: string): string => {
   try {
@@ -465,27 +534,12 @@ const requestPath = (url: string): string => {
   }
 }
 
-const sendJsonRequest = async (
-  url: string,
-  init: LocalRequestInit | undefined,
-  traceId: string,
-  authHeaders: Record<string, string>,
-): Promise<Response> => fetchWithLocalTimeout(url, {
-  cache: 'no-store',
-  ...init,
-  headers: {
-    'x-trace-id': traceId,
-    ...authHeaders,
-    ...(init?.headers ?? {}),
-  },
-})
-
 const sendAuthedRequest = async (
   url: string,
   init: LocalRequestInit | undefined,
   traceId: string,
   authHeaders: Record<string, string>,
-): Promise<Response> => fetchWithLocalTimeout(url, {
+): Promise<TimedResponse> => fetchWithLocalTimeout(url, {
   cache: 'no-store',
   ...init,
   headers: {
@@ -504,7 +558,23 @@ export const isAuthMissingError = (error: unknown): boolean => {
     error.message.includes('未授权')
 }
 
-export const requestJson = async <T>(url: string, init?: LocalRequestInit): Promise<T> => {
+// Bootstrap requests are shared: cancel the caller's wait without cancelling other callers.
+const awaitWithCallerSignal = <T>(pending: Promise<T>, signal?: AbortSignal | null): Promise<T> => {
+  if (!signal) return pending
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new DOMException('Request aborted', 'AbortError'))
+    if (signal.aborted) abort()
+    else signal.addEventListener('abort', abort, { once: true })
+    pending.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort))
+  })
+}
+
+// JSON and downloads share authentication, cancellation, retry, and error semantics.
+const requestResponse = async <T>(
+  url: string,
+  init: LocalRequestInit | undefined,
+  decode: (response: Response) => Promise<T>,
+): Promise<T> => {
   consumeControlTokenFromUrl()
   const ensureRequestActive = () => {
     if (init?.signal?.aborted) {
@@ -517,7 +587,7 @@ export const requestJson = async <T>(url: string, init?: LocalRequestInit): Prom
   let authHeaders = needsLocalAuth ? getControlAuthHeaders() : {}
   let hasAuthHeader = Boolean(authHeaders['Authorization'])
   if (needsLocalAuth && !hasAuthHeader) {
-    const refreshedToken = await refreshControlTokenFromServer()
+    const refreshedToken = await awaitWithCallerSignal(refreshControlTokenFromServer(), init?.signal)
     ensureRequestActive()
     if (refreshedToken) {
       authHeaders = { Authorization: `Bearer ${refreshedToken}` }
@@ -527,12 +597,17 @@ export const requestJson = async <T>(url: string, init?: LocalRequestInit): Prom
   if (needsLocalAuth && !hasAuthHeader) {
     throw createClientError(BACKEND_AUTH_MISSING_MESSAGE, { code: 'auth_missing' })
   }
-  let requestUrl = await rewriteBackendRequestUrl(url, authHeaders)
+  let requestUrl = await awaitWithCallerSignal(rewriteBackendRequestUrl(url, authHeaders), init?.signal)
   ensureRequestActive()
   let response: Response
+  let timeoutLease: TimedResponse | undefined
   try {
-    response = await sendJsonRequest(requestUrl, init, traceId, authHeaders)
+    const timed = await sendAuthedRequest(requestUrl, init, traceId, authHeaders)
+    response = timed.response
+    timeoutLease = timed
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    if (init?.signal?.aborted) throw error
     if (needsLocalAuth && !hasAuthHeader) {
       throw createClientError(BACKEND_AUTH_MISSING_MESSAGE, { code: 'auth_missing' })
     }
@@ -543,16 +618,23 @@ export const requestJson = async <T>(url: string, init?: LocalRequestInit): Prom
     throw createClientError(`${LOCAL_SERVICE_UNAVAILABLE_MESSAGE}${detail}`, { code: 'service_unavailable' })
   }
   if (needsLocalAuth && response.status === 401) {
-    const refreshedToken = await refreshControlTokenFromServer()
+    timeoutLease?.dispose()
+    timeoutLease = undefined
+    const refreshedToken = await awaitWithCallerSignal(refreshControlTokenFromServer(), init?.signal)
     ensureRequestActive()
     const previousAuthHeader = authHeaders['Authorization'] || ''
     if (refreshedToken && `Bearer ${refreshedToken}` !== previousAuthHeader) {
       try {
         const refreshedAuthHeaders = { Authorization: `Bearer ${refreshedToken}` }
-        requestUrl = await rewriteBackendRequestUrl(url, refreshedAuthHeaders)
+        requestUrl = await awaitWithCallerSignal(rewriteBackendRequestUrl(url, refreshedAuthHeaders), init?.signal)
         ensureRequestActive()
-        response = await sendJsonRequest(requestUrl, init, traceId, refreshedAuthHeaders)
+        const timed = await sendAuthedRequest(requestUrl, init, traceId, refreshedAuthHeaders)
+        response = timed.response
+        timeoutLease = timed
+        hasAuthHeader = true
       } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') throw error
+        if (init?.signal?.aborted) throw error
         if (error instanceof LocalRequestTimeoutError) {
           throw createClientError(error.message, { code: 'request_timeout' })
         }
@@ -562,103 +644,31 @@ export const requestJson = async <T>(url: string, init?: LocalRequestInit): Prom
     }
   }
   if (!response.ok) {
-    const error = createClientError(`HTTP ${response.status}`, {
-      status: response.status,
-      requestPath: requestPath(requestUrl),
-    })
     try {
-      error.payload = await response.json()
-      const message = payloadMessage(error.payload)
-      if (message) {
-        error.message = message
+      return await throwResponseError(response, requestUrl, needsLocalAuth, hasAuthHeader)
+    } catch (error) {
+      if (timeoutLease?.timedOut() && !(init?.signal?.aborted)) {
+        throw createClientError(localServiceTimeoutMessage(Math.max(1_000, Math.trunc(init?.timeoutMs ?? LOCAL_REQUEST_TIMEOUT_MS))), { code: 'request_timeout' })
       }
-    } catch {
-      // ignore non-json payloads
+      throw error
+    } finally {
+      timeoutLease?.dispose()
     }
-    if (needsLocalAuth && response.status === 401 && !hasAuthHeader) {
-      error.message = BACKEND_AUTH_MISSING_MESSAGE
-      error.code = 'auth_missing'
+  }
+  try {
+    return await decode(response)
+  } catch (error) {
+    if (timeoutLease?.timedOut() && !(init?.signal?.aborted)) {
+      throw createClientError(localServiceTimeoutMessage(Math.max(1_000, Math.trunc(init?.timeoutMs ?? LOCAL_REQUEST_TIMEOUT_MS))), { code: 'request_timeout' })
     }
     throw error
+  } finally {
+    timeoutLease?.dispose()
   }
-  return response.json() as Promise<T>
 }
 
-export const requestBlob = async (url: string, init?: LocalRequestInit): Promise<Blob> => {
-  consumeControlTokenFromUrl()
-  const traceId = createTraceId()
-  const needsLocalAuth = isBackendRequest(url)
-  let authHeaders = needsLocalAuth ? getControlAuthHeaders() : {}
-  let hasAuthHeader = Boolean(authHeaders['Authorization'])
-  if (needsLocalAuth && !hasAuthHeader) {
-    const refreshedToken = await refreshControlTokenFromServer()
-    if (refreshedToken) {
-      authHeaders = { Authorization: `Bearer ${refreshedToken}` }
-      hasAuthHeader = true
-    }
-  }
-  if (needsLocalAuth && !hasAuthHeader) {
-    throw createClientError(BACKEND_AUTH_MISSING_MESSAGE, { code: 'auth_missing' })
-  }
-  let requestUrl = await rewriteBackendRequestUrl(url, authHeaders)
-  let response: Response
-  try {
-    response = await sendAuthedRequest(requestUrl, init, traceId, authHeaders)
-  } catch (error) {
-    if (needsLocalAuth && !hasAuthHeader) {
-      throw createClientError(BACKEND_AUTH_MISSING_MESSAGE, { code: 'auth_missing' })
-    }
-    if (error instanceof LocalRequestTimeoutError) {
-      throw createClientError(error.message, { code: 'request_timeout' })
-    }
-    const detail = error instanceof Error && error.message ? `: ${error.message}` : ''
-    throw createClientError(`${LOCAL_SERVICE_UNAVAILABLE_MESSAGE}${detail}`, { code: 'service_unavailable' })
-  }
-  if (needsLocalAuth && response.status === 401) {
-    const refreshedToken = await refreshControlTokenFromServer()
-    const previousAuthHeader = authHeaders['Authorization'] || ''
-    if (refreshedToken && `Bearer ${refreshedToken}` !== previousAuthHeader) {
-      try {
-        const refreshedAuthHeaders = { Authorization: `Bearer ${refreshedToken}` }
-        requestUrl = await rewriteBackendRequestUrl(url, refreshedAuthHeaders)
-        response = await sendAuthedRequest(requestUrl, init, traceId, refreshedAuthHeaders)
-      } catch (error) {
-        if (error instanceof LocalRequestTimeoutError) {
-          throw createClientError(error.message, { code: 'request_timeout' })
-        }
-        const detail = error instanceof Error && error.message ? `: ${error.message}` : ''
-        throw createClientError(`${LOCAL_SERVICE_UNAVAILABLE_MESSAGE}${detail}`, { code: 'service_unavailable' })
-      }
-    }
-  }
-  if (!response.ok) {
-    const error = createClientError(`HTTP ${response.status}`, {
-      status: response.status,
-      requestPath: requestPath(requestUrl),
-    })
-    try {
-      const contentType = response.headers.get('Content-Type') || ''
-      if (contentType.includes('application/json')) {
-        error.payload = await response.json()
-        const message = payloadMessage(error.payload)
-        if (message) {
-          error.message = message
-        }
-      } else {
-        const text = await response.text()
-        if (text) {
-          error.payload = text
-          error.message = text
-        }
-      }
-    } catch {
-      // ignore unreadable error payloads
-    }
-    if (needsLocalAuth && response.status === 401 && !hasAuthHeader) {
-      error.message = BACKEND_AUTH_MISSING_MESSAGE
-      error.code = 'auth_missing'
-    }
-    throw error
-  }
-  return response.blob()
-}
+export const requestJson = async <T>(url: string, init?: LocalRequestInit): Promise<T> =>
+  requestResponse(url, init, (response) => response.json() as Promise<T>)
+
+export const requestBlob = async (url: string, init?: LocalRequestInit): Promise<Blob> =>
+  requestResponse(url, init, (response) => response.blob())

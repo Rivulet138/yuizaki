@@ -14,8 +14,8 @@ const live2dApi = {
     dragWindow: (deltaX: number, deltaY: number) =>
       ipcRenderer.send('pet:drag-window', { deltaX, deltaY }),
     endWindowDrag: () => ipcRenderer.send('pet:drag-window-end'),
-    setMouseIgnore: (ignore: boolean, forward = true) =>
-      ipcRenderer.send('pet:set-ignore-mouse-events', { ignore, forward }),
+    setMouseIgnore: (ignore: boolean, forward = true, force = false) =>
+      ipcRenderer.send('pet:set-ignore-mouse-events', { ignore, forward, force }),
     setExpression: (name: string) =>
       ipcRenderer.send('pet:set-expression', { name }),
     playAnimation: (name: string) =>

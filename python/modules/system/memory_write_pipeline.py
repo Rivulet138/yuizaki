@@ -46,6 +46,14 @@ SENSITIVE_CATEGORIES = frozenset({
 })
 TRUST_LEVELS = frozenset({"untrusted", "verified", "trusted"})
 LOW_RISK_ADMISSION_SOURCE_KINDS = frozenset({"builtin", "runtime"})
+# These are derived from the local conversation/runtime and are safe to use as
+# context when they do not contain an explicitly sensitive category. They do
+# not represent a permission grant or an external claim that needs approval.
+AUTO_ADMISSION_EVENT_KINDS = frozenset({
+    "gratitude", "preference_confirmed", "support_request", "comfort_event",
+    "task_completed", "reflection", "adjustment", "strategy_update",
+    "state_snapshot", "mood_shift", "trust_shift", "care_signal",
+})
 TOOL_SOURCE_KINDS = frozenset({"builtin", "web", "ocr", "mcp", "plugin"})
 AUTOMATIC_MEMORY_EVENT_KINDS = frozenset(EVENT_WRITE_RULES)
 
@@ -98,10 +106,7 @@ def _authoritative_source_kind(
 
 
 def _default_trust_level(source_kind: str) -> str:
-    return "verified" if source_kind in LOW_RISK_ADMISSION_SOURCE_KINDS or source_kind in {
-        "task_completed",
-        "reflection",
-    } else "untrusted"
+    return "verified" if source_kind in LOW_RISK_ADMISSION_SOURCE_KINDS or source_kind in AUTO_ADMISSION_EVENT_KINDS else "untrusted"
 
 
 def _candidate_admission(
@@ -112,23 +117,24 @@ def _candidate_admission(
     allow_low_risk_admission: bool,
 ) -> dict[str, Any]:
     eligible = (
-        allow_low_risk_admission
+        (allow_low_risk_admission or source_kind in AUTO_ADMISSION_EVENT_KINDS)
         and sensitivity == "none"
         and trust_level in {"verified", "trusted"}
-        and source_kind in LOW_RISK_ADMISSION_SOURCE_KINDS
+        and source_kind in (LOW_RISK_ADMISSION_SOURCE_KINDS | AUTO_ADMISSION_EVENT_KINDS)
     )
     if eligible:
+        automatic_event = source_kind in AUTO_ADMISSION_EVENT_KINDS
         return {
             "review_status": "approved",
             "review_required": False,
             "low_risk_admission_requested": True,
             "admission_policy": "low_risk_auto",
-            "admission_reason": "explicit_low_risk_trusted_source",
+            "admission_reason": "automatic_runtime_event" if automatic_event else "explicit_low_risk_trusted_source",
         }
-    if not allow_low_risk_admission:
-        reason = "low_risk_admission_not_requested"
-    elif sensitivity != "none":
+    if sensitivity != "none":
         reason = "sensitive_memory_requires_review"
+    elif not allow_low_risk_admission:
+        reason = "low_risk_admission_not_requested"
     elif trust_level not in {"verified", "trusted"}:
         reason = "untrusted_source_requires_review"
     else:

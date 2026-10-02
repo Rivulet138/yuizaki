@@ -21,26 +21,19 @@ import { resolvePythonRuntime } from '../../python-runtime'
 import { isPackagedRuntime, resolveRuntimeProjectRoot, resolveWritableRuntimePaths } from '../../runtime-paths'
 import { parseRequestBody, sendJson } from '../utils'
 import { resolvePythonApiOrigin } from '../python-origin'
+import { resolvePythonProxyRequestTimeout } from '../python-proxy-timeout'
 import type { SkillCatalogItem, SkillCatalogSnapshot } from '../../../shared/capability'
 
-const PYTHON_PROXY_TIMEOUT_MS = 12000
-const PYTHON_LOCAL_DISCOVERY_TIMEOUT_MS = 30000
-const PYTHON_SESSION_READ_TIMEOUT_MS = 30000
-const PYTHON_TTS_WARMUP_TIMEOUT_MS = 5 * 60 * 1000
-const PYTHON_PING_ATTEMPT_TIMEOUT_MS = 4000
 const PYTHON_PING_MAX_ATTEMPTS = 3
 
-const resolvePythonProxyTimeout = (pathname: string): number => {
-  if (pathname === '/api/settings/local-discovery') return PYTHON_LOCAL_DISCOVERY_TIMEOUT_MS
-  if (pathname === '/api/sessions') return PYTHON_SESSION_READ_TIMEOUT_MS
-  if (pathname === '/api/settings/tts/warmup') return PYTHON_TTS_WARMUP_TIMEOUT_MS
-  if (pathname === '/api/ping') return PYTHON_PING_ATTEMPT_TIMEOUT_MS
-  return PYTHON_PROXY_TIMEOUT_MS
-}
-
-const proxyPythonJsonRequest = async (target: string, init: RequestInit, pathname: string): Promise<Response> => {
+const proxyPythonJsonRequest = async (
+  target: string,
+  init: RequestInit,
+  pathname: string,
+  timeoutMs: number = resolvePythonProxyRequestTimeout(pathname),
+): Promise<Response> => {
   const attempts = pathname === '/api/ping' ? PYTHON_PING_MAX_ATTEMPTS : 1
-  const attemptTimeout = resolvePythonProxyTimeout(pathname)
+  const attemptTimeout = timeoutMs
   let lastError: unknown
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const controller = new AbortController()
@@ -112,7 +105,12 @@ const proxyPythonJson = async (
   }
   let response: Response
   try {
-    response = await proxyPythonJsonRequest(`${resolvePythonApiOrigin()}${url.pathname}${url.search}`, init, url.pathname)
+    response = await proxyPythonJsonRequest(
+      `${resolvePythonApiOrigin()}${url.pathname}${url.search}`,
+      init,
+      url.pathname,
+      resolvePythonProxyRequestTimeout(url.pathname, body),
+    )
   } catch (error) {
     const aborted = error instanceof Error && error.name === 'AbortError'
     sendJson(res, aborted ? 504 : 502, {
@@ -140,15 +138,27 @@ const proxyPythonJson = async (
       return
     }
     if (method === 'PATCH' && url.pathname === '/api/settings/' && body !== undefined) {
-      ctx.providerCredentialStore.captureSettingsPayload(body)
+      const changed = ctx.providerCredentialStore.captureSettingsPayload(body)
+      if (changed) {
+        ctx.updatePythonProviderEnvironment?.(ctx.providerCredentialStore.getPythonEnvironment())
+      }
     } else if (method === 'POST' && url.pathname === '/api/settings/import' && body !== undefined) {
-      ctx.providerCredentialStore.captureSettingsPayload(body)
+      const changed = ctx.providerCredentialStore.captureSettingsPayload(body)
+      if (changed) {
+        ctx.updatePythonProviderEnvironment?.(ctx.providerCredentialStore.getPythonEnvironment())
+      }
     } else if (method === 'POST' && url.pathname.startsWith('/api/settings/') && body !== undefined) {
       const fieldPath = decodeURIComponent(url.pathname.slice('/api/settings/'.length))
-      ctx.providerCredentialStore.captureSettingValue(fieldPath, body)
+      const changed = ctx.providerCredentialStore.captureSettingValue(fieldPath, body)
+      if (changed) {
+        ctx.updatePythonProviderEnvironment?.(ctx.providerCredentialStore.getPythonEnvironment())
+      }
     } else if (method === 'DELETE' && url.pathname.startsWith('/api/settings/')) {
       const fieldPath = decodeURIComponent(url.pathname.slice('/api/settings/'.length))
-      ctx.providerCredentialStore.delete(fieldPath)
+      const changed = ctx.providerCredentialStore.delete(fieldPath)
+      if (changed) {
+        ctx.updatePythonProviderEnvironment?.(ctx.providerCredentialStore.getPythonEnvironment())
+      }
     }
   }
   sendJson(res, response.status, payload)
@@ -163,7 +173,7 @@ const sendProxyBlob = async (
 ) => {
   const body = method === 'GET' || method === 'DELETE' ? undefined : await parseRequestBody<unknown>(req)
   const abortController = new AbortController()
-  const timeout = setTimeout(() => abortController.abort(), PYTHON_PROXY_TIMEOUT_MS)
+  const timeout = setTimeout(() => abortController.abort(), resolvePythonProxyRequestTimeout(url.pathname, body))
   const init: RequestInit = {
     method,
     headers: buildProxyHeaders(ctx, body !== undefined, String(req.headers['x-trace-id'] || '').trim() || null),
@@ -730,6 +740,9 @@ const PYTHON_JSON_PROXY_PATHS = new Set([
   '/memory/candidates',
   '/memory/index/status',
   '/memory/index/rebuild',
+  '/memory/operations',
+  '/memory/export',
+  '/memory/import',
   '/memory/memory/add',
   '/memory/rag/query',
   '/memory/maintenance/preview',
@@ -801,7 +814,11 @@ export const validatePythonRouteManifest = (payload: unknown): { ok: boolean; mi
   return { ok: required.every((entry) => advertised.has(entry)), missing: required.filter((entry) => !advertised.has(entry)) }
 }
 
-const isPythonJsonProxyPath = (pathname: string): boolean =>
+/**
+ * Keep this allowlist aligned with python/route_manifest.py. Dynamic routes
+ * are deliberately narrow so a malformed path cannot widen the proxy.
+ */
+export const isPythonJsonProxyPath = (pathname: string): boolean =>
   PYTHON_JSON_PROXY_PATHS.has(pathname) ||
   pathname.startsWith('/memory/docs/') ||
   pathname.startsWith('/api/companions/') ||
@@ -816,6 +833,8 @@ const isPythonJsonProxyPath = (pathname: string): boolean =>
   pathname.startsWith('/api/system/agent-plugins/') ||
   pathname.startsWith('/api/system/connectors/') ||
   pathname.startsWith('/api/system/stream/') ||
+  /^\/memory\/index\/rebuild\/[^/]+$/.test(pathname) ||
+  /^\/memory\/index\/rebuild\/[^/]+\/(cancel|retry)$/.test(pathname) ||
   /^\/api\/messages\/[^/]+$/.test(pathname) ||
   /^\/api\/sessions\/[^/]+$/.test(pathname) ||
   /^\/api\/sessions\/[^/]+\/messages$/.test(pathname) ||
@@ -823,13 +842,13 @@ const isPythonJsonProxyPath = (pathname: string): boolean =>
   /^\/api\/workspaces\/[^/]+\/sessions$/.test(pathname) ||
   /^\/api\/workspaces\/[^/]+\/effective-preset$/.test(pathname)
 
-const isPythonBlobProxyPath = (pathname: string): boolean =>
+export const isPythonBlobProxyPath = (pathname: string): boolean =>
   pathname === '/api/settings/export' ||
   pathname === '/api/summary/report/csv' ||
   pathname === '/api/export/json' ||
   pathname === '/api/export/csv'
 
-const isProactivePythonProxyRoute = (method: string, pathname: string): boolean =>
+export const isProactivePythonProxyRoute = (method: string, pathname: string): boolean =>
   (method === 'GET' && pathname === '/api/system/proactive/settings')
   || (method === 'PATCH' && pathname === '/api/system/proactive/settings')
   || (method === 'POST' && pathname === '/api/system/proactive/feedback')
@@ -838,6 +857,7 @@ const isProactivePythonProxyRoute = (method: string, pathname: string): boolean 
   || (method === 'POST' && /^\/api\/system\/heartbeat\/opportunities\/[^/]+\/accept$/.test(pathname))
   || (method === 'POST' && /^\/api\/system\/heartbeat\/goals\/[^/]+\/cancel$/.test(pathname))
   || (method === 'GET' && pathname === '/api/system/activity-frames')
+  || (method === 'POST' && pathname === '/api/system/activity-frames/rebuild')
   || (method === 'DELETE' && /^\/api\/system\/activity-frames\/(?!rebuild$)[^/]+$/.test(pathname))
 
 export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, url, ctx) => {
@@ -1178,11 +1198,16 @@ export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, ur
     return true
   }
 
+  // Dispatch blobs before JSON: export/report routes must preserve the
+  // backend's content type and disposition instead of JSON parsing bytes.
   if (isPythonBlobProxyPath(url.pathname)) {
     await sendProxyBlob(_req, res, method, url, ctx)
     return true
   }
 
+  // Proactive routes are method-aware because they share path prefixes with
+  // ordinary JSON routes. The path allowlist remains explicit to prevent a
+  // malformed dynamic URL from turning the control server into an open proxy.
   if (isProactivePythonProxyRoute(method, url.pathname) || isPythonJsonProxyPath(url.pathname)) {
     await proxyPythonJson(
       _req,

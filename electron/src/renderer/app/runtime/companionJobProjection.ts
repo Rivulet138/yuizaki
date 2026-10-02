@@ -20,6 +20,7 @@ export interface CompanionJobProjection {
   failedStep: string
   completedSteps: string[]
   recoveryHandle: string
+  durableRecoveryAvailable: boolean
   /** User-facing completion state; wire status remains backward compatible. */
   actionStatus: 'executing' | 'completed' | 'verified' | 'failed' | 'unknown_effect' | 'cancelled'
   evidence: string[]
@@ -147,8 +148,8 @@ export const canResumeCompanionJob = (event: CompanionEventEnvelope): boolean =>
     && projection.failedStep.length > 0
     && projection.status === 'failed'
     && !isUnknownEffectEvent(event)
-    && recovery?.available === true
-    && recovery.action === 'resume_failed_step'
+    && (recovery?.available === true || recovery?.durable_available === true)
+    && (recovery.action === 'resume_failed_step' || recovery.action === 'resume_read_step')
     && recovery.retryable === true
     && /^rh_[A-Za-z0-9_-]{5,160}$/.test(handle)
 }
@@ -194,7 +195,8 @@ export const projectCompanionJob = (event: CompanionEventEnvelope): CompanionJob
     failureCategory: text(data.failureCategory ?? data.failure_category ?? data.category).slice(0, 120),
     failedStep: text(data.failedStep ?? data.failed_step ?? data.stepId ?? data.step_id).slice(0, 120),
     completedSteps: textList(data.completedSteps ?? data.completed_steps),
-    recoveryHandle: text(recovery?.handle ?? data.recoveryHandle ?? data.recovery_handle).slice(0, 160),
+    recoveryHandle: text(recovery?.handle ?? recovery?.durable_recovery_id ?? data.recoveryHandle ?? data.recovery_handle).slice(0, 160),
+    durableRecoveryAvailable: recovery?.durable_available === true,
     actionStatus: actionStatus(event, data),
     evidence,
   }

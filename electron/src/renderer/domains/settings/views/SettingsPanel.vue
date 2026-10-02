@@ -1,8 +1,5 @@
 <template>
   <PanelShell :title="t('settings.title')" tone="admin">
-    <template #actions>
-      <el-button plain @click="openOnboarding">{{ t('onboarding.reopen') }}</el-button>
-    </template>
     <AsyncState :loading="settingsRequest.loading && !settings" :empty="!settings && !settingsRequest.error" :empty-text="t('settings.empty')">
       <div class="settings-panel">
         <el-alert
@@ -22,7 +19,11 @@
         />
 
         <div class="settings-workspace">
-          <nav class="settings-section-nav" :aria-label="t('settings.sectionNav')">
+          <nav
+            class="settings-section-nav"
+            role="tablist"
+            :aria-label="t('settings.sectionNav')"
+          >
             <section v-for="group in settingSectionGroups" :key="group.id" class="settings-section-group">
               <span class="settings-section-group-label">{{ group.label }}</span>
               <button
@@ -30,7 +31,10 @@
                 :key="item.id"
                 type="button"
                 class="settings-section-button"
+                role="tab"
                 :class="{ active: activeSection === item.id }"
+                :aria-selected="activeSection === item.id"
+                :aria-controls="`pane-${item.id}`"
                 :aria-current="activeSection === item.id ? 'page' : undefined"
                 @click="activeSection = item.id"
               >
@@ -65,9 +69,7 @@
                     <div class="llm-status-strip">
                       <el-tag :type="hasLlmEndpoint ? 'success' : 'warning'">{{ hasLlmEndpoint ? t('common.configured') : t('settings.tts.incomplete') }}</el-tag>
                       <el-tag :type="hasLlmApiKey ? 'success' : 'info'">{{ llmApiKeyTagLabel }}</el-tag>
-                      <el-tag :type="llmDetectionTagType">{{ llmDetectionStatus }}</el-tag>
                       <el-tag :type="llmRuntimeTagType">{{ llmRuntimeLabel }}</el-tag>
-                      <el-tag v-if="llmModels.length" type="info">{{ t('settings.llm.modelsCount', { count: llmModels.length }) }}</el-tag>
                     </div>
                     <div class="llm-actions">
                       <div class="llm-action-group">
@@ -135,36 +137,28 @@
                       <el-icon><Refresh /></el-icon>
                       {{ t('settings.llm.resetProfile') }}
                     </el-button>
-                    <div class="profile-card">
-                      <span>{{ t('settings.llm.activeProfile') }}</span>
-                      <strong>{{ activeLlmProfileLabel }}</strong>
-                    </div>
-                    <div class="llm-connection-summary">
-                      <div class="summary-row">
-                        <span>{{ t('settings.llm.summaryEndpoint') }}</span>
-                        <strong>{{ llmEndpointSummary }}</strong>
-                      </div>
-                      <div class="summary-row">
-                        <span>{{ t('settings.llm.summaryModel') }}</span>
-                        <strong>{{ llmModelSummary }}</strong>
-                      </div>
-                      <div class="summary-row">
-                        <span>{{ t('settings.llm.summaryAuth') }}</span>
-                        <strong>{{ llmAuthSummary }}</strong>
-                      </div>
-                    </div>
                   </aside>
 
                   <div class="llm-main-form">
                     <div class="subsection-title">{{ t('settings.llm.sectionConnection') }}</div>
                     <div class="form-grid">
                       <el-form-item :label="t('settings.llm.baseUrl')">
-                        <el-input v-model="form.llm.base_url" name="llm-base-url" @change="handleLlmEndpointChange('base_url', $event)" @keyup.enter="scheduleLlmModelDiscovery">
-                          <template #append>{{ llmEndpointAppendLabel }}</template>
-                        </el-input>
+                        <el-input v-model="form.llm.base_url" name="llm-base-url" @change="handleLlmEndpointChange('base_url', $event)" @keyup.enter="scheduleLlmModelDiscovery" />
                       </el-form-item>
                       <el-form-item v-if="llmProviderNeedsApiKey" :label="t('settings.llm.apiKeyLabel')">
-                        <el-input v-model="form.llm.api_key" type="password" show-password @change="handleLlmEndpointChange('api_key', $event)" @keyup.enter="scheduleLlmModelDiscovery" />
+                        <el-input
+                          v-model="form.llm.api_key"
+                          type="password"
+                          show-password
+                          :placeholder="llmApiKeyPlaceholder"
+                          @focus="handleLlmApiKeyFocus"
+                          @change="handleLlmEndpointChange('api_key', $event)"
+                          @keyup.enter="scheduleLlmModelDiscovery"
+                        >
+                          <template #append>
+                            <el-button v-if="llmApiKeyStored" text type="danger" @click="clearLlmApiKey">{{ t('settings.llm.apiKeyClear') }}</el-button>
+                          </template>
+                        </el-input>
                       </el-form-item>
                     </div>
 
@@ -176,19 +170,11 @@
                         allow-create
                         default-first-option
                         :loading="llmModelsRequest.loading"
-                        @focus="scheduleLlmModelDiscovery"
                         @change="handleLlmModelChange"
                       >
                         <el-option v-for="model in llmModelSelectOptions" :key="model" :label="model" :value="model" />
                       </el-select>
                       <p v-if="llmModelStatusLabel" class="field-hint" :class="{ error: llmModelsRequest.error }">{{ llmModelStatusLabel }}</p>
-                      <SettingsLlmCapabilityPanel
-                        :provider="llmProviderPreset"
-                        :model="form.llm.model"
-                        :context-max-tokens="Number(form.llm.context_max_tokens)"
-                        :max-output-tokens="Number(form.llm.default_max_output_tokens)"
-                        :vision-enabled="form.llm.vision_enabled"
-                      />
                     </el-form-item>
 
                     <SettingsLlmVisionSection
@@ -198,40 +184,120 @@
                     />
 
                     <div class="subsection-title">{{ t('settings.llm.sectionSampling') }}</div>
-                    <div class="parameter-strip">
-                      <el-form-item :label="t('settings.llm.temperature', { value: form.llm.temperature.toFixed(2) })">
-                        <el-slider v-model="form.llm.temperature" :min="0" :max="2" :step="0.1" @change="saveLlmField('temperature', $event)" />
-                      </el-form-item>
-                      <el-form-item :label="t('settings.llm.topP', { value: form.llm.top_p.toFixed(2) })">
-                        <el-slider v-model="form.llm.top_p" :min="0" :max="1" :step="0.05" @change="saveLlmField('top_p', $event)" />
-                      </el-form-item>
-                      <el-form-item :label="t('settings.llm.minP', { value: form.llm.min_p.toFixed(2) })">
-                        <el-slider v-model="form.llm.min_p" :min="0" :max="1" :step="0.01" @change="saveLlmField('min_p', $event)" />
-                      </el-form-item>
-                      <el-form-item :label="t('settings.llm.frequencyPenalty', { value: form.llm.frequency_penalty.toFixed(2) })">
-                        <el-slider v-model="form.llm.frequency_penalty" :min="-2" :max="2" :step="0.05" @change="saveLlmField('frequency_penalty', $event)" />
-                      </el-form-item>
-                      <el-form-item :label="t('settings.llm.presencePenalty', { value: form.llm.presence_penalty.toFixed(2) })">
-                        <el-slider v-model="form.llm.presence_penalty" :min="-2" :max="2" :step="0.05" @change="saveLlmField('presence_penalty', $event)" />
-                      </el-form-item>
-                      <el-form-item :label="t('settings.llm.repetitionPenalty', { value: form.llm.repetition_penalty.toFixed(2) })">
-                        <el-slider v-model="form.llm.repetition_penalty" :min="0" :max="2" :step="0.05" @change="saveLlmField('repetition_penalty', $event)" />
-                      </el-form-item>
-                    </div>
+                    <div class="inference-layout">
+                      <section class="inference-group">
+                        <h3 class="inference-group-title">{{ t('settings.llm.sectionGeneration') }}</h3>
+                        <div class="inference-fields">
+                          <div class="inference-field">
+                            <div class="inference-field-head">
+                              <span>{{ t('settings.llm.temperatureName') }}</span>
+                              <output>{{ form.llm.temperature.toFixed(2) }}</output>
+                            </div>
+                            <el-form-item>
+                              <el-slider v-model="form.llm.temperature" :min="0" :max="2" :step="0.1" :aria-label="t('settings.llm.temperatureName')" @change="saveLlmField('temperature', $event)" />
+                            </el-form-item>
+                          </div>
+                          <div class="inference-field">
+                            <div class="inference-field-head">
+                              <span>{{ t('settings.llm.topPName') }}</span>
+                              <output>{{ form.llm.top_p.toFixed(2) }}</output>
+                            </div>
+                            <el-form-item>
+                              <el-slider v-model="form.llm.top_p" :min="0" :max="1" :step="0.05" :aria-label="t('settings.llm.topPName')" @change="saveLlmField('top_p', $event)" />
+                            </el-form-item>
+                          </div>
+                        </div>
+                      </section>
 
-                    <div class="form-grid three">
-                      <el-form-item :label="t('settings.llm.topK')">
-                        <el-input-number v-model="form.llm.top_k" :min="0" :max="2000" :step="50" controls-position="right" @change="saveLlmField('top_k', $event)" />
-                      </el-form-item>
-                      <el-form-item :label="t('settings.llm.contextTokens')">
-                        <el-input-number v-model="form.llm.context_max_tokens" :min="1000" :max="2000000" :step="1000" controls-position="right" @change="saveLlmField('context_max_tokens', $event)" />
-                      </el-form-item>
-                      <el-form-item :label="t('settings.llm.maxOutputTokens')">
-                        <el-input-number v-model="form.llm.default_max_output_tokens" :min="256" :max="65535" :step="256" controls-position="right" @change="saveLlmField('default_max_output_tokens', $event)" />
-                      </el-form-item>
-                      <el-form-item :label="t('settings.llm.timeout')">
-                        <el-input-number v-model="form.llm.timeout" :min="10" :max="300" controls-position="right" @change="saveLlmField('timeout', $event)" />
-                      </el-form-item>
+                      <section class="inference-group">
+                        <h3 class="inference-group-title">{{ t('settings.llm.sectionFiltering') }}</h3>
+                        <div class="inference-fields">
+                          <div class="inference-field">
+                            <div class="inference-field-head">
+                              <span>{{ t('settings.llm.minPName') }}</span>
+                              <output>{{ form.llm.min_p.toFixed(2) }}</output>
+                            </div>
+                            <el-form-item>
+                              <el-slider v-model="form.llm.min_p" :min="0" :max="1" :step="0.01" :aria-label="t('settings.llm.minPName')" @change="saveLlmField('min_p', $event)" />
+                            </el-form-item>
+                          </div>
+                          <div class="inference-field">
+                            <div class="inference-field-head">
+                              <span>{{ t('settings.llm.topKName') }}</span>
+                              <output>{{ form.llm.top_k }}</output>
+                            </div>
+                            <el-form-item>
+                              <el-input-number v-model="form.llm.top_k" class="inference-number" :min="0" :max="2000" :step="50" controls-position="right" :aria-label="t('settings.llm.topKName')" @change="saveLlmField('top_k', $event)" />
+                            </el-form-item>
+                          </div>
+                        </div>
+                      </section>
+
+                      <section class="inference-group inference-group-repetition">
+                        <h3 class="inference-group-title">{{ t('settings.llm.sectionRepetition') }}</h3>
+                        <div class="inference-fields">
+                          <div class="inference-field">
+                            <div class="inference-field-head">
+                              <span>{{ t('settings.llm.frequencyPenaltyName') }}</span>
+                              <output>{{ form.llm.frequency_penalty.toFixed(2) }}</output>
+                            </div>
+                            <el-form-item>
+                              <el-slider v-model="form.llm.frequency_penalty" :min="-2" :max="2" :step="0.05" :aria-label="t('settings.llm.frequencyPenaltyName')" @change="saveLlmField('frequency_penalty', $event)" />
+                            </el-form-item>
+                          </div>
+                          <div class="inference-field">
+                            <div class="inference-field-head">
+                              <span>{{ t('settings.llm.presencePenaltyName') }}</span>
+                              <output>{{ form.llm.presence_penalty.toFixed(2) }}</output>
+                            </div>
+                            <el-form-item>
+                              <el-slider v-model="form.llm.presence_penalty" :min="-2" :max="2" :step="0.05" :aria-label="t('settings.llm.presencePenaltyName')" @change="saveLlmField('presence_penalty', $event)" />
+                            </el-form-item>
+                          </div>
+                          <div class="inference-field">
+                            <div class="inference-field-head">
+                              <span>{{ t('settings.llm.repetitionPenaltyName') }}</span>
+                              <output>{{ form.llm.repetition_penalty.toFixed(2) }}</output>
+                            </div>
+                            <el-form-item>
+                              <el-slider v-model="form.llm.repetition_penalty" :min="0" :max="2" :step="0.05" :aria-label="t('settings.llm.repetitionPenaltyName')" @change="saveLlmField('repetition_penalty', $event)" />
+                            </el-form-item>
+                          </div>
+                        </div>
+                      </section>
+
+                      <section class="inference-group inference-group-limits">
+                        <h3 class="inference-group-title">{{ t('settings.llm.sectionLimits') }}</h3>
+                        <div class="inference-fields">
+                          <div class="inference-field">
+                            <div class="inference-field-head">
+                              <span>{{ t('settings.llm.contextTokensName') }}</span>
+                              <output>{{ form.llm.context_max_tokens }}</output>
+                            </div>
+                            <el-form-item>
+                              <el-input-number v-model="form.llm.context_max_tokens" class="inference-number" :min="1000" :max="2000000" :step="1000" controls-position="right" :aria-label="t('settings.llm.contextTokensName')" @change="saveLlmField('context_max_tokens', $event)" />
+                            </el-form-item>
+                          </div>
+                          <div class="inference-field">
+                            <div class="inference-field-head">
+                              <span>{{ t('settings.llm.maxOutputTokensName') }}</span>
+                              <output>{{ form.llm.default_max_output_tokens }}</output>
+                            </div>
+                            <el-form-item>
+                              <el-input-number v-model="form.llm.default_max_output_tokens" class="inference-number" :min="256" :max="65535" :step="256" controls-position="right" :aria-label="t('settings.llm.maxOutputTokensName')" @change="saveLlmField('default_max_output_tokens', $event)" />
+                            </el-form-item>
+                          </div>
+                          <div class="inference-field">
+                            <div class="inference-field-head">
+                              <span>{{ t('settings.llm.timeoutName') }}</span>
+                              <output>{{ form.llm.timeout }}</output>
+                            </div>
+                            <el-form-item>
+                              <el-input-number v-model="form.llm.timeout" class="inference-number" :min="10" :max="300" controls-position="right" :aria-label="t('settings.llm.timeoutName')" @change="saveLlmField('timeout', $event)" />
+                            </el-form-item>
+                          </div>
+                        </div>
+                      </section>
                     </div>
                   </div>
                 </div>
@@ -257,6 +323,10 @@
                         <el-icon><Refresh /></el-icon>
                         {{ t('settings.tts.refreshStatus') }}
                       </el-button>
+                      <el-button plain :loading="genieCharactersRequest.loading" @click="loadGenieCharacters">
+                        <el-icon><Connection /></el-icon>
+                        {{ t('settings.tts.detectCharacters') }}
+                      </el-button>
                       <el-button plain :loading="warmupTtsRequest.loading" :disabled="!hasTtsVoice" @click="handleWarmupTts">
                         <el-icon><Refresh /></el-icon>
                         {{ t('settings.tts.warmup') }}
@@ -279,13 +349,16 @@
               </template>
               <el-form label-position="top" @submit.prevent>
                 <div class="voice-main-form single">
-                  <div v-if="ttsStatus || ttsStatusRequest.loading || ttsStatusRequest.error" class="tts-runtime-panel">
-                    <div v-for="item in ttsRuntimeMetricItems" :key="item.label" class="tts-runtime-item">
-                      <span>{{ item.label }}</span>
-                      <strong>{{ item.value }}</strong>
-                      <small v-if="item.detail">{{ item.detail }}</small>
+                  <details v-if="ttsStatus || ttsStatusRequest.loading || ttsStatusRequest.error" class="tts-runtime-details">
+                    <summary>运行详情</summary>
+                    <div class="tts-runtime-panel">
+                      <div v-for="item in ttsRuntimeMetricItems" :key="item.label" class="tts-runtime-item">
+                        <span>{{ item.label }}</span>
+                        <strong>{{ item.value }}</strong>
+                        <small v-if="item.detail">{{ item.detail }}</small>
+                      </div>
                     </div>
-                  </div>
+                  </details>
                   <el-alert
                     v-if="ttsRuntimeError"
                     class="tts-runtime-alert"
@@ -323,7 +396,29 @@
                   </div>
                   <div class="form-grid">
                     <el-form-item :label="t('settings.tts.character')">
-                      <el-input v-model="form.tts.genie_character" @input="saveTtsField('genie_character', $event)" @change="flushTtsSave" />
+                      <el-select
+                        v-model="form.tts.genie_character"
+                        class="full-width"
+                        filterable
+                        allow-create
+                        default-first-option
+                        @change="selectGenieCharacter"
+                      >
+                        <el-option
+                          v-for="character in genieCharacters"
+                          :key="character.id"
+                          :label="genieCharacterOptionLabel(character)"
+                          :value="character.id"
+                        />
+                      </el-select>
+                      <el-alert
+                        v-if="selectedGenieCharacter && !selectedGenieCharacter.ready"
+                        class="tts-character-resource-alert"
+                        :title="selectedGenieCharacter.details.join(', ')"
+                        type="warning"
+                        :closable="false"
+                        show-icon
+                      />
                     </el-form-item>
                     <el-form-item :label="t('settings.tts.modelDir')">
                       <el-input v-model="form.tts.genie_model_dir" @input="saveTtsField('genie_model_dir', $event)" @change="flushTtsSave" />
@@ -401,7 +496,6 @@
               @discover-local="applyLocalMemoryDiscovery"
               @rebuild="handleRebuildMemoryIndex"
             />
-            <SettingsProductMetricsConsentSection class="product-metrics-consent-card" />
           </el-tab-pane>
 
           <el-tab-pane :label="t('settings.tabs.summary')" name="summary" lazy>
@@ -413,7 +507,12 @@
               :model-value="form.svc"
               :discovery-loading="localDiscoveryRequest.loading"
               :discovery-error="localDiscoveryRequest.error"
+              :test-loading="testSvcRequest.loading"
+              :test-result="svcTestResult"
               @discover-local="applyLocalSvcDiscovery"
+              @open-converter="openSvcConverter"
+              @test-service="handleTestSvc"
+              @reset="resetSvcSettings"
               @update-field="saveSvcField"
             />
           </el-tab-pane>
@@ -456,15 +555,18 @@
             <SettingsDesktopInputSection
               :state="inputBindingState"
               @reset="resetDesktopInputBindings"
+              @set-browser-shortcuts-enabled="setBrowserShortcutsEnabled"
               @set-push-to-talk-enabled="setPushToTalkEnabled"
               @set-push-to-talk-mouse-button="setPushToTalkMouseButton"
               @capture-keyboard="captureKeyboardBinding"
               @clear-keyboard="clearKeyboardBinding"
+              @set-keyboard="setKeyboardBinding"
+              @retry="retryDesktopInputBindings"
             />
 
             <el-card class="settings-admin-card" shadow="never">
               <template #header>{{ t('settings.admin.title') }}</template>
-              <el-collapse>
+              <el-collapse v-model="adminCollapseNames">
                 <el-collapse-item :title="t('settings.admin.editor')" name="metadata">
                   <div class="button-row">
                     <el-button plain @click="loadSettingsAdmin">{{ t('settings.admin.metadata') }}</el-button>
@@ -509,11 +611,13 @@
               </el-collapse>
             </el-card>
           </el-tab-pane>
-          <el-tab-pane :label="t('settings.tabs.portable')" name="portable" lazy>
-            <PortableSettingsSection
-              :before-import="flushPendingSave"
-              @imported="handlePortableImported"
-            />
+          <el-tab-pane :label="t('settings.tabs.runtimeGuide')" name="runtime-guide" lazy>
+            <section class="runtime-guide-section" aria-labelledby="runtime-guide-title">
+              <h2 id="runtime-guide-title">{{ t('settings.runtimeGuide.title') }}</h2>
+              <el-button type="primary" plain @click="openOnboarding">
+                {{ t('settings.runtimeGuide.open') }}
+              </el-button>
+            </section>
           </el-tab-pane>
           </el-tabs>
         </div>
@@ -539,6 +643,7 @@ import { ElCard } from 'element-plus'
 import 'element-plus/es/components/card/style/css'
 import 'element-plus/es/components/tag/style/css'
 import { computed, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElCollapse, ElCollapseItem, ElForm, ElFormItem, ElMessage, ElMessageBox, ElOption, ElSelect, ElTabPane, ElTable, ElTableColumn, ElTabs } from 'element-plus'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
@@ -562,33 +667,30 @@ import {
   DEFAULT_QDRANT_DOCKER_IMAGE,
 } from '@/../shared/runtime-defaults'
 import { useInputBindingsStore } from '@/state/inputBindingsStore'
-import { settingsClient, type BackendTokenMutationResponse, type BackendTokenStatusResponse, type LocalRuntimeCandidate, type LocalRuntimeDiscoveryResponse, type TtsRuntimeStatusResponse } from '@/api/clients/settings-client'
+import { settingsClient, type BackendTokenMutationResponse, type BackendTokenStatusResponse, type GenieCharacterResource, type GenieCharacterResourcesResponse, type LocalRuntimeCandidate, type LocalRuntimeDiscoveryResponse, type TtsRuntimeStatusResponse } from '@/api/clients/settings-client'
 import { resourceClient } from '@/api/clients/resource-client'
 import { memoryClient } from '@/api/clients/memory-client'
 import type { ManagedModelResourceId, ManagedResourceMetadata, ModelResourceStatusPayload, ResumableResourceDownload, ResourceCommandResult, StorageCategoryId, StorageStatusPayload } from '@/../shared/resource-manager'
 import { DEFAULT_VAD_MIN_SILENCE_MS } from '@/../shared/runtime-defaults'
-import type { InputBindingSettingsPatch, KeyboardShortcutAction, MouseSideButton } from '@/../shared/input-bindings'
+import { findKeyboardBindingConflicts, keyboardEventToAccelerator, normalizeKeyboardAccelerator, type InputBindingSettingsPatch, type KeyboardShortcutAction, type MouseSideButton } from '@/../shared/input-bindings'
 import { useSettingsDomain } from '../composables/useSettingsDomain'
 import { openOnboarding } from '@/domains/onboarding/onboardingEvents'
 import SettingsAsrSection, { type AsrSettings } from '../components/SettingsAsrSection.vue'
 import SettingsAccessSection from '../components/SettingsAccessSection.vue'
-import SettingsLlmCapabilityPanel from '../components/SettingsLlmCapabilityPanel.vue'
 import SettingsLlmVisionSection from '../components/SettingsLlmVisionSection.vue'
 import SettingsMemorySection, { type MemorySettings } from '../components/SettingsMemorySection.vue'
-import SettingsProductMetricsConsentSection from '../components/SettingsProductMetricsConsentSection.vue'
 import SettingsSummarySection, { type SummarySettings } from '../components/SettingsSummarySection.vue'
 import SettingsSvcSection, { type SvcSettings } from '../components/SettingsSvcSection.vue'
 import SettingsDesktopInputSection from '../components/SettingsDesktopInputSection.vue'
 import SettingsInterfaceSection from '../components/SettingsInterfaceSection.vue'
 import SettingsResourcesSection from '../components/SettingsResourcesSection.vue'
-import PortableSettingsSection from '../components/PortableSettingsSection.vue'
 import { isLocalLlmEndpoint, normalizeOpenAiBaseUrl, shouldAutoDiscoverLlmModels } from '../llmDiscovery'
-import { LLM_PROVIDER_BASE_URLS, LLM_PROVIDER_ENDPOINTS, choosePreferredLlmModel, getLlmProviderOptions, inferLlmProviderPreset } from '../llmProviders'
+import { LLM_PROVIDER_BASE_URLS, choosePreferredLlmModel, getLlmProviderOptions, inferLlmProviderPreset } from '../llmProviders'
 import type { LlmProviderPreset } from '../llmProviders'
 import { isPlainRecord, normalizeResourceStatus, normalizeStorageStatus } from '../resourceStatus'
 
 type SaveTimeout = ReturnType<typeof window.setTimeout>
-type SettingSectionId = 'access' | 'llm' | 'voice' | 'asr' | 'memory' | 'summary' | 'svc' | 'resources' | 'system' | 'portable'
+type SettingSectionId = 'access' | 'llm' | 'voice' | 'asr' | 'memory' | 'summary' | 'svc' | 'resources' | 'system' | 'runtime-guide'
 type QualityScorerMode = 'rule' | 'llm'
 type SettingsPatch = Record<string, unknown>
 type AlertType = 'success' | 'warning' | 'info' | 'error'
@@ -626,6 +728,7 @@ type LlmVisionPatch = Partial<{
   detail: 'low' | 'high' | 'auto' | 'original'
 }>
 type ProviderStatusClass = 'ready' | 'warning' | 'muted'
+const SETTINGS_SECRET_MASK = '********'
 type TtsProviderPreset = 'genie-tts' | 'openai-compatible'
 type SaveFieldOptions = {
   flush?: boolean
@@ -669,6 +772,7 @@ const {
   ttsStatusRequest,
   testLlmRequest,
   testTtsRequest,
+  testSvcRequest,
   loadSettings,
   patchSettings,
   loadLlmModels,
@@ -676,11 +780,17 @@ const {
   loadTtsStatus,
   testLlm,
   testTts,
+  testSvc,
   warmupTtsRequest,
   warmupTts,
 } = useSettingsDomain()
 
+const genieCharacters = ref<GenieCharacterResource[]>([])
+const genieCharactersRequest = useDomainRequest<GenieCharacterResourcesResponse>()
+
 const settingsStore = useSettingsStore()
+const route = useRoute()
+const router = useRouter()
 const inputBindingsStore = useInputBindingsStore()
 const inputBindingState = inputBindingsStore.state
 
@@ -727,7 +837,7 @@ const form = reactive({
     timeout: 60,
   },
   asr: {
-    provider: 'sherpa-onnx-online',
+    provider: 'sherpa-onnx',
     base_url: '',
     api_key: '',
     timeout: 60,
@@ -812,16 +922,27 @@ const settingSectionGroups = computed(() => [
     items: [
       { id: 'resources' as const, label: t('settings.tabs.resources') },
       { id: 'system' as const, label: t('settings.tabs.system') },
-      { id: 'portable' as const, label: t('settings.tabs.portable') },
+      { id: 'runtime-guide' as const, label: t('settings.tabs.runtimeGuide') },
     ],
   },
 ])
 const activeSection = ref<SettingSectionId>('llm')
+const settingSectionIds: SettingSectionId[] = ['access', 'llm', 'voice', 'asr', 'memory', 'summary', 'svc', 'resources', 'system', 'runtime-guide']
+const syncSectionFromRoute = () => {
+  const requested = Array.isArray(route.query.section) ? route.query.section[0] : route.query.section
+  if (typeof requested === 'string' && settingSectionIds.includes(requested as SettingSectionId)) {
+    activeSection.value = requested as SettingSectionId
+  }
+}
+const adminCollapseNames = ref<string[]>([])
 const lastSavedAt = ref('')
 const lastApplied = ref<string[]>([])
 let saveTimeout: SaveTimeout | null = null
 let modelDiscoveryTimeout: SaveTimeout | null = null
 let modelDiscoveryRun = 0
+let lastLlmModelDiscoveryKey = ''
+let activeLlmModelDiscoveryKey: string | null = null
+let scheduledLlmModelDiscoveryKey: string | null = null
 let suppressModelDiscovery = false
 const pendingSavePatch = ref<SettingsPatch | null>(null)
 const failedSavePatch = ref<SettingsPatch | null>(null)
@@ -845,8 +966,10 @@ const backendTokenStatus = ref<BackendTokenStatusResponse | null>(null)
 const backendTokenStatusRequest = useDomainRequest<BackendTokenStatusResponse>()
 const backendTokenMutationRequest = useDomainRequest<BackendTokenMutationResponse>()
 const localDiscoveryRequest = useDomainRequest<LocalRuntimeDiscoveryResponse>()
+const svcTestResult = ref<{ ok: boolean; message?: string } | null>(null)
 const llmProviderPreset = ref<LlmProviderPreset>('custom')
 const llmProfiles = reactive<LlmProfiles>({})
+const llmApiKeyStored = ref(false)
 const llmImportInput = ref<HTMLInputElement | null>(null)
 const llmImporting = ref(false)
 const llmExporting = ref(false)
@@ -867,6 +990,9 @@ const storageActionKey = ref('')
 
 const invalidateLlmModelDiscovery = () => {
   modelDiscoveryRun += 1
+  activeLlmModelDiscoveryKey = null
+  scheduledLlmModelDiscoveryKey = null
+  lastLlmModelDiscoveryKey = ''
   if (modelDiscoveryTimeout) clearTimeout(modelDiscoveryTimeout)
   modelDiscoveryTimeout = null
   llmModelsRequest.reset()
@@ -891,8 +1017,9 @@ const llmProviderNeedsApiKey = computed(() => llmProfileNeedsApiKey({
 }))
 const llmApiKeyTagLabel = computed(() => {
   if (!llmProviderNeedsApiKey.value) return t('settings.llm.apiKeyNotRequired')
-  return form.llm.api_key.trim() ? t('settings.llm.apiKeySavedTag') : t('settings.llm.apiKeyMissing')
+  return form.llm.api_key.trim() || llmApiKeyStored.value ? t('settings.llm.apiKeySavedTag') : t('settings.llm.apiKeyMissing')
 })
+const llmApiKeyPlaceholder = computed(() => llmApiKeyStored.value ? t('settings.llm.apiKeyPlaceholder') : '')
 
 const saveAsrField = (field: keyof AsrSettings, value: string | number) => {
   Object.assign(form.asr, { [field]: value })
@@ -1082,7 +1209,9 @@ const snapshotLlmProfile = (provider = llmProviderPreset.value): LlmProfile => s
 const applyLlmProfileToForm = (profile: LlmProfile) => {
   form.llm.provider = profile.provider
   form.llm.base_url = profile.base_url
-  form.llm.api_key = KEYLESS_LLM_PROVIDERS.has(profile.provider) ? '' : profile.api_key
+  const masked = profile.api_key === SETTINGS_SECRET_MASK
+  form.llm.api_key = KEYLESS_LLM_PROVIDERS.has(profile.provider) || masked ? '' : profile.api_key
+  llmApiKeyStored.value = !KEYLESS_LLM_PROVIDERS.has(profile.provider) && (masked || Boolean(profile.api_key.trim()))
   form.llm.model = profile.model
   form.llm.temperature = profile.temperature
   form.llm.top_p = profile.top_p
@@ -1138,6 +1267,22 @@ const saveLlmField = (field: LlmProfileField, value: unknown) => {
     return
   }
   saveActiveLlmPatch({ [field]: value })
+}
+
+const handleLlmApiKeyFocus = () => {
+  if (form.llm.api_key === SETTINGS_SECRET_MASK) form.llm.api_key = ''
+}
+
+const clearLlmApiKey = async () => {
+  try {
+    await settingsClient.deleteSetting('llm.api_key')
+    form.llm.api_key = ''
+    llmApiKeyStored.value = false
+    llmProfiles[llmProviderPreset.value] = snapshotLlmProfile()
+    ElMessage.success(t('settings.llm.apiKeyCleared'))
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : t('common.error.unknown'))
+  }
 }
 
 const defaultTtsProfile = (): TtsProfile => {
@@ -1231,6 +1376,36 @@ const saveActiveTtsPatch = (patch: SettingsPatch) => {
   debouncedSave({ tts: { ...ttsRuntimePatchFromProfile(activeProfile), ...patch, save_mode: '禁用自动保存' } })
 }
 
+const selectedGenieCharacter = computed(() => genieCharacters.value.find((item) => item.id === form.tts.genie_character) || null)
+
+const genieCharacterOptionLabel = (character: GenieCharacterResource): string => (
+  character.ready ? character.label : `${character.label} · ${t('settings.tts.resourceIncomplete')}`
+)
+
+const loadGenieCharacters = async () => {
+  const result = await genieCharactersRequest.execute(() => settingsClient.ttsCharacters())
+  if (result) genieCharacters.value = result.characters
+}
+
+const selectGenieCharacter = (value: unknown) => {
+  const selected = genieCharacters.value.find((item) => item.id === String(value || ''))
+  if (!selected) {
+    saveTtsField('genie_character', value)
+    return
+  }
+  form.tts.genie_character = selected.id
+  form.tts.genie_model_dir = selected.model_dir
+  form.tts.ref_audio = selected.ref_audio
+  form.tts.ref_text = selected.ref_text
+  saveActiveTtsPatch({
+    genie_character: selected.id,
+    genie_model_dir: selected.model_dir,
+    ref_audio: selected.ref_audio,
+    ref_text: selected.ref_text,
+  })
+  void flushPendingSave()
+}
+
 const setTtsFormField = (field: TtsProfileField, value: unknown) => {
   if (field === 'provider') {
     form.tts.provider = value === 'openai-compatible' ? 'openai-compatible' : 'genie-tts'
@@ -1288,29 +1463,10 @@ const llmProviderOptionRows = computed(() => llmProviderOptions.value.map((optio
 })))
 
 const hasLlmEndpoint = computed(() => Boolean(form.llm.base_url.trim() && form.llm.model.trim()))
-const hasLlmApiKey = computed(() => !llmProviderNeedsApiKey.value || Boolean(form.llm.api_key.trim()))
+const hasLlmApiKey = computed(() => !llmProviderNeedsApiKey.value || Boolean(form.llm.api_key.trim()) || llmApiKeyStored.value)
 const canRequestLlmModels = computed(() => Boolean(normalizeOpenAiBaseUrl(form.llm.base_url) && hasLlmApiKey.value))
 const hasTtsVoice = computed(() => {
   return ttsProfileHasRunnableConfig(sanitizeTtsProfile(form.tts))
-})
-const llmEndpointSummary = computed(() => {
-  const value = normalizeOpenAiBaseUrl(form.llm.base_url)
-  if (!value) return t('settings.llm.summaryMissing')
-  try {
-    const url = new URL(value)
-    return `${url.hostname}${url.pathname === '/' ? '' : url.pathname}`.replace(/\/$/, '')
-  } catch {
-    return value
-  }
-})
-const llmEndpointAppendLabel = computed(() => {
-  const endpoints = LLM_PROVIDER_ENDPOINTS[llmProviderPreset.value] || LLM_PROVIDER_ENDPOINTS.custom
-  return `${endpoints.modelsPath} + ${endpoints.chatPath}`
-})
-const llmModelSummary = computed(() => form.llm.model.trim() || t('settings.llm.summaryMissing'))
-const llmAuthSummary = computed(() => {
-  if (!llmProviderNeedsApiKey.value) return t('settings.llm.apiKeyNotRequired')
-  return form.llm.api_key.trim() ? t('settings.llm.apiKeySaved') : t('settings.llm.apiKeyMissing')
 })
 const llmModelSelectOptions = computed(() => {
   const current = form.llm.model.trim()
@@ -1319,20 +1475,6 @@ const llmModelSelectOptions = computed(() => {
     options.unshift(current)
   }
   return options
-})
-
-const llmDetectionStatus = computed(() => {
-  if (llmModelsRequest.loading) return t('settings.llm.detection.detecting')
-  if (llmModelsRequest.error) return t('settings.llm.detection.failed')
-  if (llmModels.value.length) return llmModelAutoSelected.value ? t('settings.llm.detection.autoSelected') : t('settings.llm.detection.detected')
-  return t('settings.llm.detection.none')
-})
-
-const llmDetectionTagType = computed(() => {
-  if (llmModelsRequest.error) return 'danger'
-  if (llmModelsRequest.loading) return 'warning'
-  if (llmModels.value.length) return 'success'
-  return 'info'
 })
 
 const llmRuntimeLabel = computed(() => {
@@ -1359,7 +1501,10 @@ const llmModelStatusLabel = computed(() => {
 })
 
 const canAutoDiscoverLlmModels = computed(() => {
-  return shouldAutoDiscoverLlmModels(form.llm.base_url, llmProviderNeedsApiKey.value ? form.llm.api_key : '')
+  return shouldAutoDiscoverLlmModels(
+    form.llm.base_url,
+    llmProviderNeedsApiKey.value ? (form.llm.api_key || (llmApiKeyStored.value ? SETTINGS_SECRET_MASK : '')) : '',
+  )
 })
 
 const saveBusy = computed(() => updateRequest.loading || saveInFlight.value || Boolean(pendingSavePatch.value))
@@ -1474,6 +1619,12 @@ const savePatch = async (patch: SettingsPatch) => {
   const result = await patchSettings(patch)
   if (unmounted) return result
   if (result) {
+    for (const [section, values] of Object.entries(patch)) {
+      const target = settingsStore.state[section as keyof typeof settingsStore.state]
+      if (target && typeof target === 'object' && values && typeof values === 'object') {
+        Object.assign(target, values)
+      }
+    }
     const appliedSections = result.runtime_applied || result.runtime_changed || []
     lastSavedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
     lastApplied.value = appliedSections
@@ -1655,48 +1806,50 @@ const setPushToTalkEnabled = (value: string | number | boolean) => {
   void updateDesktopInputBindings({ pushToTalk: { enabled: Boolean(value) } })
 }
 
+const setBrowserShortcutsEnabled = (value: string | number | boolean) => {
+  inputBindingsStore.setBrowserShortcutsEnabled(Boolean(value))
+}
+
 const setPushToTalkMouseButton = (value: unknown) => {
   const mouseButton: MouseSideButton = Number(value) === 4 ? 4 : 5
   void updateDesktopInputBindings({ pushToTalk: { mouseButton } })
 }
 
-const keyboardEventKey = (event: KeyboardEvent): string | null => {
-  const aliases: Record<string, string> = {
-    ' ': 'Space',
-    ArrowUp: 'Up',
-    ArrowDown: 'Down',
-    ArrowLeft: 'Left',
-    ArrowRight: 'Right',
-    Esc: 'Escape',
-  }
-  const key = aliases[event.key] ?? event.key
-  if (['Control', 'Shift', 'Alt', 'Meta'].includes(key)) return null
-  if (/^[a-z0-9]$/i.test(key)) return key.toUpperCase()
-  if (/^F(?:[1-9]|1\d|2[0-4])$/.test(key)) return key
-  if (['Space', 'Tab', 'Enter', 'Escape', 'Up', 'Down', 'Left', 'Right', 'Home', 'End', 'PageUp', 'PageDown', 'Insert', 'Delete'].includes(key)) {
-    return key
-  }
-  return null
-}
-
 const captureKeyboardBinding = (action: KeyboardShortcutAction, event: KeyboardEvent) => {
-  const key = keyboardEventKey(event)
-  if (!key) return
-  const modifiers: string[] = []
-  if (event.ctrlKey) modifiers.push('Control')
-  if (event.metaKey) modifiers.push('Command')
-  if (event.altKey) modifiers.push('Alt')
-  if (event.shiftKey) modifiers.push('Shift')
-  if (!modifiers.length && !key.startsWith('F')) {
+  if (event.key === 'Escape') return
+  const accelerator = keyboardEventToAccelerator(event, Boolean(inputBindingState.browserFallback))
+  if (!accelerator) {
     ElMessage.warning('字母、数字和导航键至少需要一个修饰键')
     return
   }
-  void updateDesktopInputBindings({ keyboard: { [action]: [...modifiers, key].join('+') } })
-  ;(event.currentTarget as HTMLInputElement | null)?.blur()
+  void setKeyboardBinding(action, accelerator)
 }
 
 const clearKeyboardBinding = (action: KeyboardShortcutAction) => {
   void updateDesktopInputBindings({ keyboard: { [action]: '' } })
+}
+
+const setKeyboardBinding = async (action: KeyboardShortcutAction, value: string) => {
+  const accelerator = normalizeKeyboardAccelerator(value)
+  if (value.trim() && !accelerator) {
+    ElMessage.warning('请输入有效的组合键，例如 Control+Shift+P')
+    return
+  }
+  if (!inputBindingState.browserFallback && accelerator && !accelerator.includes('+') && !accelerator.startsWith('F')) {
+    ElMessage.warning('桌面全局快捷键需要修饰键，或使用 F1-F24')
+    return
+  }
+  const keyboard = { ...inputBindingState.settings.keyboard, [action]: accelerator }
+  const conflicts = findKeyboardBindingConflicts(keyboard)
+  if (conflicts.length) {
+    ElMessage.warning(`快捷键重复：${conflicts[0].actions.join('、')}`)
+    return
+  }
+  await updateDesktopInputBindings({ keyboard: { [action]: accelerator } })
+}
+
+const retryDesktopInputBindings = () => {
+  void inputBindingsStore.load()
 }
 
 const resetDesktopInputBindings = async () => {
@@ -1770,7 +1923,7 @@ const applyLocalAsrDiscovery = async () => {
     warnNoLocalCandidate('ASR')
     return
   }
-  const provider = String(candidate.provider || 'sherpa-onnx-online')
+  const provider = String(candidate.provider || 'sherpa-onnx')
   form.asr.provider = provider
   form.asr.base_url = candidate.base_url
   debouncedSave({ asr: { provider, base_url: candidate.base_url } })
@@ -1800,7 +1953,27 @@ const applyLocalTtsDiscovery = async () => {
 
 const saveSvcField = (field: keyof SvcSettings, value: string | number) => {
   form.svc[field] = value as never
+  svcTestResult.value = null
   debouncedSave({ svc: { [field]: value } })
+}
+
+const resetSvcSettings = () => {
+  const defaults: SvcSettings = {
+    provider: 'soulx-service',
+    base_url: '',
+    speaker_id: 0,
+    pitch: 0,
+    timeout: 120,
+  }
+  Object.assign(form.svc, defaults)
+  svcTestResult.value = null
+  debouncedSave({ svc: defaults })
+}
+
+const openSvcConverter = async () => {
+  if (!(await flushPendingSave())) return
+  const workspaceId = String(route.params.workspaceId || 'default')
+  void router.push(`/w/${encodeURIComponent(workspaceId)}/svc`)
 }
 
 const applyLocalSvcDiscovery = async () => {
@@ -1918,6 +2091,13 @@ const applyDetectedLlmModel = (models: string[], options?: LlmModelDiscoveryOpti
   llmModelAutoSelected.value = true
   saveLlmField('model', nextModel)
 }
+
+const llmModelDiscoveryKey = (): string => JSON.stringify([
+  llmProviderPreset.value,
+  normalizeOpenAiBaseUrl(form.llm.base_url),
+  llmProviderNeedsApiKey.value ? (form.llm.api_key.trim() || (llmApiKeyStored.value ? SETTINGS_SECRET_MASK : '')) : '',
+  form.llm.timeout,
+])
 
 const firstString = (source: SettingsPatch, keys: string[]): string | undefined => {
   for (const key of keys) {
@@ -2192,6 +2372,21 @@ const handleTestTts = async () => {
   }
 }
 
+const handleTestSvc = async () => {
+  if (!(await flushPendingSave())) return
+  svcTestResult.value = null
+  const res = await testSvc()
+  if (res?.status === 'ok' || res?.ok) {
+    svcTestResult.value = { ok: true, message: res.message }
+    ElMessage.success(res.message || t('settings.messages.svcOk'))
+  } else if (res) {
+    svcTestResult.value = { ok: false, message: res.message }
+    ElMessage.error(t('settings.messages.svcFailed', { message: res.message || t('common.error.unknown') }))
+  } else {
+    svcTestResult.value = { ok: false, message: testSvcRequest.error || t('common.error.unknown') }
+  }
+}
+
 const loadSettingsAdmin = async () => {
   try {
     settingsMetadata.value = await settingsClient.metadata()
@@ -2442,12 +2637,6 @@ const removeModelResource = async (
   }
 }
 
-const handlePortableImported = async (): Promise<void> => {
-  await loadSettings()
-  hydrateForm()
-  await loadSettingsAdmin()
-}
-
 const handleLlmModelChange = (value: string | number | boolean) => {
   llmModelAutoSelected.value = false
   saveLlmField('model', String(value ?? ''))
@@ -2553,10 +2742,16 @@ const discoverLlmModels = async (options?: LlmModelDiscoveryOptions) => {
   modelDiscoveryTimeout = null
   const baseUrl = normalizeOpenAiBaseUrl(form.llm.base_url)
   const provider = llmProviderPreset.value
-  const apiKey = llmProviderNeedsApiKey.value ? form.llm.api_key.trim() : ''
+  const apiKey = llmProviderNeedsApiKey.value
+    ? (form.llm.api_key.trim() || (llmApiKeyStored.value ? SETTINGS_SECRET_MASK : ''))
+    : ''
   const timeout = form.llm.timeout
+  const discoveryKey = llmModelDiscoveryKey()
+  if (!options?.manual && activeLlmModelDiscoveryKey === discoveryKey && llmModelsRequest.loading) return
   const runId = ++modelDiscoveryRun
+  activeLlmModelDiscoveryKey = discoveryKey
   if (!baseUrl) {
+    activeLlmModelDiscoveryKey = null
     llmModels.value = []
     llmModelStatus.value = ''
     llmModelAutoSelected.value = false
@@ -2564,6 +2759,7 @@ const discoverLlmModels = async (options?: LlmModelDiscoveryOptions) => {
     return
   }
   if (!options?.manual && !canAutoDiscoverLlmModels.value) {
+    activeLlmModelDiscoveryKey = null
     llmModels.value = []
     llmModelStatus.value = t('settings.llm.modelsSkippedNoKey')
     llmModelAutoSelected.value = false
@@ -2577,7 +2773,9 @@ const discoverLlmModels = async (options?: LlmModelDiscoveryOptions) => {
     api_key: apiKey,
     timeout,
   })
-  const currentApiKey = llmProviderNeedsApiKey.value ? form.llm.api_key.trim() : ''
+  const currentApiKey = llmProviderNeedsApiKey.value
+    ? (form.llm.api_key.trim() || (llmApiKeyStored.value ? SETTINGS_SECRET_MASK : ''))
+    : ''
   if (
     runId !== modelDiscoveryRun
     || provider !== llmProviderPreset.value
@@ -2585,6 +2783,9 @@ const discoverLlmModels = async (options?: LlmModelDiscoveryOptions) => {
     || apiKey !== currentApiKey
     || timeout !== form.llm.timeout
   ) return
+
+  activeLlmModelDiscoveryKey = null
+  lastLlmModelDiscoveryKey = discoveryKey
 
   if (result?.ok) {
     llmModels.value = result.models
@@ -2604,12 +2805,20 @@ const discoverLlmModels = async (options?: LlmModelDiscoveryOptions) => {
 
 const scheduleLlmModelDiscovery = (options?: LlmModelDiscoveryOptions) => {
   if (suppressModelDiscovery) return
+  const discoveryKey = llmModelDiscoveryKey()
+  if (
+    !options?.manual
+    && (discoveryKey === lastLlmModelDiscoveryKey
+      || discoveryKey === activeLlmModelDiscoveryKey
+      || discoveryKey === scheduledLlmModelDiscoveryKey)
+  ) return
   invalidateLlmModelDiscovery()
   if (!normalizeOpenAiBaseUrl(form.llm.base_url)) {
     llmModels.value = []
     llmModelStatus.value = ''
     llmModelAutoSelected.value = false
     llmModelsRequest.reset()
+    lastLlmModelDiscoveryKey = discoveryKey
     return
   }
   if (!options?.manual && !canAutoDiscoverLlmModels.value) {
@@ -2617,10 +2826,13 @@ const scheduleLlmModelDiscovery = (options?: LlmModelDiscoveryOptions) => {
     llmModelStatus.value = t('settings.llm.modelsSkippedNoKey')
     llmModelAutoSelected.value = false
     llmModelsRequest.reset()
+    lastLlmModelDiscoveryKey = discoveryKey
     return
   }
+  scheduledLlmModelDiscoveryKey = discoveryKey
   modelDiscoveryTimeout = setTimeout(() => {
     modelDiscoveryTimeout = null
+    scheduledLlmModelDiscoveryKey = null
     void discoverLlmModels(options)
   }, 650)
 }
@@ -2658,6 +2870,7 @@ const handleLlmEndpointChange = (field: 'base_url' | 'api_key', value: string | 
   }
   llmModelAutoSelected.value = false
   form.llm.api_key = llmProviderNeedsApiKey.value ? String(value ?? '') : ''
+  if (form.llm.api_key.trim()) llmApiKeyStored.value = true
   saveLlmField(field, form.llm.api_key)
   if (field === 'api_key') {
     invalidateLlmModelDiscovery()
@@ -2790,7 +3003,7 @@ const hydrateForm = () => {
   }
 
   if (s.asr) {
-    form.asr.provider = s.asr.provider || 'sherpa-onnx-online'
+    form.asr.provider = s.asr.provider || 'sherpa-onnx'
     form.asr.base_url = s.asr.base_url ?? ''
     form.asr.api_key = s.asr.api_key || ''
     form.asr.timeout = s.asr.timeout ?? 60
@@ -2850,6 +3063,7 @@ const hydrateForm = () => {
 }
 
 onMounted(async () => {
+  syncSectionFromRoute()
   document.addEventListener('visibilitychange', handleResourceProgressVisibility)
   await Promise.all([refreshBackendTokenStatus(), inputBindingsStore.load()])
   await loadSettings()
@@ -2857,7 +3071,7 @@ onMounted(async () => {
   if (!settingsRequest.error) {
     await loadSettingsAdmin()
   }
-  await Promise.all([refreshResourcePanel(), loadTtsStatus(), loadLlmStatus()])
+  await Promise.all([refreshResourcePanel(), loadTtsStatus(), loadLlmStatus(), loadGenieCharacters()])
   void queueTtsWarmup()
   scheduleLlmModelDiscovery({ manual: false })
 })
@@ -2886,6 +3100,8 @@ onUnmounted(() => {
 watch(currentLocale, (value) => {
   form.system.language = value
 })
+
+watch(() => route.query.section, syncSectionFromRoute)
 
 watch(activeSection, (value) => {
   if (value === 'voice') {

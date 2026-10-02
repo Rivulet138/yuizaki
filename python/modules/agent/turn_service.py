@@ -1,9 +1,19 @@
+"""Own the semantic-turn boundary shared by every transport.
+
+TurnService is the only place that turns a pipeline result into a durable
+commit.  HTTP, Socket.IO, scheduler and recovery callers may have different
+event projections, but they share identity checks, persistence, claim fencing
+and outbox dispatch here.  A projection failure therefore remains observable
+without changing an already committed semantic outcome.
+"""
+
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import inspect
 import json
+import logging
 import math
 import uuid
 from collections import OrderedDict
@@ -19,8 +29,8 @@ from .perception import (
     PerceptionRequest,
 )
 
-TurnTrigger = Literal["http", "socket", "voice", "scheduler", "heartbeat"]
-VALID_TURN_TRIGGERS = frozenset({"http", "socket", "voice", "scheduler", "heartbeat"})
+TurnTrigger = Literal["http", "socket", "voice", "scheduler", "heartbeat", "recovery"]
+VALID_TURN_TRIGGERS = frozenset({"http", "socket", "voice", "scheduler", "heartbeat", "recovery"})
 
 TurnRunner = Callable[[AgentRequestContext], AgentPipelineResult | Awaitable[AgentPipelineResult]]
 TurnStreamingRunner = Callable[
@@ -46,6 +56,7 @@ TurnContextBinder = Callable[
     AgentRequestContext | Awaitable[AgentRequestContext],
 ]
 _TURN_SERVICE_PERCEPTION_GRANT = object()
+logger = logging.getLogger(__name__)
 
 
 def is_turn_service_perception_request(request: PerceptionRequest) -> bool:
@@ -104,6 +115,11 @@ class TurnCommit:
     retryable: bool = False
     configured_budget: dict[str, Any] = field(default_factory=dict)
     consumed_usage: dict[str, Any] = field(default_factory=dict)
+    # Persistence is authoritative.  A projection can remain pending in the
+    # outbox without turning an already committed semantic turn into a failed
+    # request or inviting a duplicate client retry.
+    projection_pending: bool = False
+    projection_error: str | None = None
 
     def __post_init__(self) -> None:
         self.outcome = self.result.outcome
@@ -290,6 +306,9 @@ class TurnService:
         "task_id",
         "task_mode",
         "task_name",
+        "recovery_id",
+        "recovery_attempt",
+        "recovery_source",
     })
     _PROJECTION_NESTED_FIELDS: ClassVar[dict[str, frozenset[str]]] = {
         "heartbeat_opportunity": frozenset({
@@ -760,6 +779,29 @@ class TurnService:
         self._normalize_context_identity(normalized_trigger, ctx)
         return await self._execute_prepared(normalized_trigger, ctx, apply_bind_context=True)
 
+    async def execute_recovery_context(
+        self,
+        ctx: AgentRequestContext,
+        runner: TurnRunner,
+    ) -> TurnCommit:
+        """Commit a narrowly scoped recovery attempt through the normal boundary.
+
+        Recovery attempts receive a new request/generation identity while
+        retaining the original turn identity. This keeps the failed commit
+        immutable and still gives the attempt the same claim, persistence, and
+        outbox guarantees as every other semantic turn.
+        """
+        if not isinstance(ctx, AgentRequestContext):
+            raise TypeError("execute_recovery_context expects AgentRequestContext")
+        if not callable(runner):
+            raise TypeError("execute_recovery_context runner must be callable")
+        return await self._execute_prepared(
+            "recovery",
+            ctx,
+            apply_bind_context=True,
+            runner=runner,
+        )
+
     async def execute_streaming_context(
         self,
         trigger: TurnTrigger | str,
@@ -934,7 +976,7 @@ class TurnService:
                     raise TurnIdentityConflictError(f"in-flight semantic turn identity reused with different input: {key}")
         if cached is not None:
             if self.ports.dispatch is not None:
-                await _await_if_needed(self.ports.dispatch(cached))
+                await self._dispatch_commit(cached)
             if replay_deliverer is not None:
                 await _await_if_needed(replay_deliverer(ctx, cached.result))
             return cached
@@ -963,7 +1005,7 @@ class TurnService:
         stored = await self._load_persisted(trigger, ctx, key, fingerprint)
         if stored is not None:
             if self.ports.dispatch is not None:
-                await _await_if_needed(self.ports.dispatch(stored))
+                await self._dispatch_commit(stored)
             if replay_deliverer is not None:
                 await _await_if_needed(replay_deliverer(ctx, stored.result))
             await self._remember(stored)
@@ -982,7 +1024,7 @@ class TurnService:
             )
             if stored is not None:
                 if self.ports.dispatch is not None:
-                    await _await_if_needed(self.ports.dispatch(stored))
+                    await self._dispatch_commit(stored)
                 if replay_deliverer is not None:
                     await _await_if_needed(replay_deliverer(ctx, stored.result))
                 await self._remember(stored)
@@ -1002,11 +1044,15 @@ class TurnService:
                 _await_if_needed((runner or self.ports.run)(ctx)),
                 name=f"turn-run:{key[-12:]}",
             )
+            lost_task: asyncio.Task[bool] | None = None
             try:
                 if renew_task is None:
                     result = await run_task
                 else:
-                    lost_task = asyncio.create_task(claim_lost.wait())
+                    lost_task = asyncio.create_task(
+                        claim_lost.wait(),
+                        name=f"turn-claim-lost:{key[-12:]}",
+                    )
                     done, _pending = await asyncio.wait(
                         {run_task, lost_task},
                         return_when=asyncio.FIRST_COMPLETED,
@@ -1017,8 +1063,6 @@ class TurnService:
                         raise TurnClaimLostError(
                             f"semantic turn claim was lost before commit: {key}"
                         )
-                    lost_task.cancel()
-                    await asyncio.gather(lost_task, return_exceptions=True)
                     result = await run_task
             except asyncio.CancelledError:
                 run_task.cancel()
@@ -1046,6 +1090,15 @@ class TurnService:
                     },
                     configured_budget=self._configured_budget(ctx),
                 )
+            finally:
+                # The caller can be cancelled while asyncio.wait() is still
+                # waiting. Always reap the auxiliary Event.wait task so it
+                # cannot outlive the turn and trigger a destroyed-pending
+                # warning during a renderer refresh or backend shutdown.
+                if lost_task is not None:
+                    if not lost_task.done():
+                        lost_task.cancel()
+                    await asyncio.gather(lost_task, return_exceptions=True)
             if not isinstance(result, AgentPipelineResult):
                 raise TypeError("turn runner must return AgentPipelineResult")
             current_task = asyncio.current_task()
@@ -1121,13 +1174,7 @@ class TurnService:
                 if authority is not None:
                     commit.result = authority.result
             if self.ports.dispatch is not None:
-                try:
-                    await _await_if_needed(self.ports.dispatch(commit))
-                except asyncio.CancelledError:
-                    # The core result is already durable. Projection delivery
-                    # remains recoverable through the existing outbox/retry
-                    # path, so do not turn a completed turn into a lost one.
-                    pass
+                await self._dispatch_commit(commit)
             await self._remember(commit)
             return commit
         finally:
@@ -1142,6 +1189,31 @@ class TurnService:
                 await _await_if_needed(
                     self.ports.release_claim(key, claim_owner, claim_fencing_token)
                 )
+
+    async def _dispatch_commit(self, commit: TurnCommit) -> None:
+        """Deliver a committed turn without masking durable authority.
+
+        The outbox is the retry boundary for projections.  Once persistence
+        succeeds, a projection timeout or provider error must not make the
+        semantic turn look uncommitted to its caller, otherwise a client retry
+        can repeat model/tool work.  Keep the exception type only as a bounded
+        diagnostic and let the worker retry the pending outbox row.
+        """
+        if self.ports.dispatch is None:
+            return
+        try:
+            await _await_if_needed(self.ports.dispatch(commit))
+        except asyncio.CancelledError:
+            commit.projection_pending = True
+            commit.projection_error = "cancelled"
+        except Exception as exc:  # noqa: BLE001 - durable commit already exists.
+            commit.projection_pending = True
+            commit.projection_error = type(exc).__name__[:120]
+            logger.warning(
+                "Turn projection pending after durable commit key=%s error=%s",
+                commit.idempotency_key,
+                commit.projection_error,
+            )
 
     async def _load_persisted(
         self,

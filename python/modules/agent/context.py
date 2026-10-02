@@ -26,6 +26,13 @@ VALID_AUTONOMY_MODES: tuple[AutonomyMode, ...] = (
 
 
 def _contains_raw_resume_token(value: Any) -> bool:
+    """Return whether a renderer-facing mapping contains a resume credential.
+
+    Recovery handles are intentionally opaque and process-bound.  This
+    recursive guard covers nested failure/recovery payloads so a future
+    producer cannot accidentally expose a usable token through a different
+    response field.
+    """
     if isinstance(value, dict):
         return any(
             key in {"resume_token", "resumeToken"}
@@ -38,6 +45,11 @@ def _contains_raw_resume_token(value: Any) -> bool:
 
 
 def coerce_autonomy_mode(value: object) -> AutonomyMode:
+    """Normalize untrusted mode input to the small, supported mode set.
+
+    Unknown or empty values use ``companion`` so older callers remain safe and
+    deterministic when they do not know about a newer autonomy mode.
+    """
     mode = str(value or "companion")
     if mode in VALID_AUTONOMY_MODES:
         return mode  # type: ignore[return-value]
@@ -46,6 +58,13 @@ def coerce_autonomy_mode(value: object) -> AutonomyMode:
 
 @dataclass
 class AgentRuntimeBindings:
+    """Mutable per-turn service handles shared through ``context.extra``.
+
+    The lists and mappings are copied at bind time to prevent a caller's
+    mutable request object from changing the runtime view after the turn has
+    started.  Legacy individual keys are populated alongside this container.
+    """
+
     db_repo: Any | None = None
     relationship_event_writer: Callable[[dict[str, Any]], Any] | None = None
     relationship_history: list[dict[str, Any]] = field(default_factory=list)
@@ -62,6 +81,12 @@ def bind_runtime_bindings(
     relationship_summary: dict[str, Any] | None = None,
     retrieved_chunks: list[str] | None = None,
 ) -> AgentRequestContext:
+    """Attach workspace services and compatibility aliases to a request.
+
+    Binding is deliberately explicit at turn construction.  Consumers should
+    use :func:`get_runtime_bindings` rather than creating a second container,
+    otherwise projection and memory writes can observe different snapshots.
+    """
     bindings = AgentRuntimeBindings(
         db_repo=db_repo,
         relationship_event_writer=relationship_event_writer,
@@ -79,6 +104,12 @@ def bind_runtime_bindings(
 
 
 def get_runtime_bindings(ctx: AgentRequestContext) -> AgentRuntimeBindings:
+    """Return the canonical service container, rebuilding it for old callers.
+
+    Contexts created before ``runtime_bindings`` was introduced may only have
+    legacy ``extra`` keys; the one-time upgrade below preserves that input and
+    makes subsequent readers share one object.
+    """
     existing = ctx.extra.get("runtime_bindings")
     if isinstance(existing, AgentRuntimeBindings):
         return existing
@@ -95,6 +126,13 @@ def get_runtime_bindings(ctx: AgentRequestContext) -> AgentRuntimeBindings:
 
 @dataclass
 class AgentRequestContext:
+    """Per-turn execution context and trusted runtime boundary.
+
+    Identity fields are owned by TurnService and are kept separate from the
+    extensible ``extra`` mapping.  ``messages`` and ``extra`` are in-memory
+    inputs; neither is a durable recovery capability.
+    """
+
     sid: str
     session_id: str
     messages: list[dict[str, Any]]
@@ -126,6 +164,9 @@ class AgentRequestContext:
     tool_registry: ToolRegistry | None = None
     tool_executor: ToolExecutor | None = None
     step_executor: StepExecutor | None = None
+    # The semantic-turn service is kept explicit for restart recovery. It is
+    # an execution boundary, never a serialized recovery capability.
+    turn_service: Any | None = None
     scheduler: AgentScheduler | None = None
     trace_store: AgentTraceStore | None = None
     plugin_manager: PluginManager | None = None
@@ -146,6 +187,13 @@ class AgentRequestContext:
 
 @dataclass
 class AgentPipelineResult:
+    """Normalized terminal result returned by pipeline and recovery paths.
+
+    ``outcome`` describes what happened in the external world.  A recovery
+    object may explain how to inspect or request permission, but it cannot
+    expose a raw resume token or claim automatic recovery for terminal effects.
+    """
+
     reply: str
     pet_control: dict[str, Any] | None = None
     tool_calls: list[dict[str, Any]] = field(default_factory=list)

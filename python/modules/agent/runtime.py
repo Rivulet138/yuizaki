@@ -29,10 +29,12 @@ from .desktop_actions import (
     register_desktop_action_tools,
 )
 from .mcp_manager import MCPManager
+from .context import AgentRequestContext
 from .perception import PerceptionProviderRegistry
 from .pipeline import AgentPipeline
 from .policy_engine import PolicyEngine
 from .runtime_context import RuntimeContext, RuntimeContextRegistry
+from .recovery_store import SQLiteStepRecoveryStore
 from .schedule_store import ScheduleStore
 from .scheduler import AgentScheduler
 from .skill_runtime import SkillRuntimeRegistry
@@ -51,7 +53,8 @@ _FAILURE_PROJECTION_FIELDS = frozenset({
 })
 _RECOVERY_PROJECTION_FIELDS = frozenset({
     "available", "action", "failed_step_id", "retryable", "scope",
-    "single_use", "ttl_seconds", "handle",
+    "single_use", "ttl_seconds", "handle", "durable_recovery_id",
+    "recovery_schema", "durable_available", "reason",
 })
 _JOB_TERMINAL_PROJECTION_FIELDS = frozenset({
     "status", "job_id", "run_id", "conversation_id", "operation_id",
@@ -65,11 +68,12 @@ def _bounded_terminal_descriptor(
     *,
     fields: frozenset[str],
 ) -> dict[str, Any] | None:
-    """Copy only renderer-safe, bounded terminal metadata across the outbox.
+    """Copy only allow-listed, renderer-safe terminal metadata across the outbox.
 
     TurnCommitStore is the authority, but old or manually-authored commits may
-    contain richer dictionaries.  Projection must remain fail-closed: payload,
-    nested metadata, and raw resume tokens are never forwarded to the job log.
+    contain richer dictionaries. Projection must remain fail-closed: values are
+    type-checked and truncated, while payloads, nested metadata, and raw resume
+    tokens are never forwarded to the job log.
     """
     if not isinstance(value, dict):
         return None
@@ -82,6 +86,9 @@ def _bounded_terminal_descriptor(
         elif key == "ttl_seconds":
             if isinstance(candidate, int) and not isinstance(candidate, bool):
                 result[key] = max(0, min(candidate, 86_400))
+        elif key in {"durable_available"}:
+            if isinstance(candidate, bool):
+                result[key] = candidate
         elif key == "completed_steps":
             if isinstance(candidate, (list, tuple)):
                 result[key] = [
@@ -96,6 +103,14 @@ def _bounded_terminal_descriptor(
 
 @dataclass
 class AgentRuntime:
+    """Container for one process's shared agent services and persistence.
+
+    ``create_agent_runtime`` wires these components to one ToolRegistry,
+    policy boundary, TurnService, and outbox.  Optional fields preserve direct
+    construction compatibility for tests and legacy callers; production
+    assembly should use the factory so recovery and projection share stores.
+    """
+
     tool_registry: ToolRegistry
     mcp_manager: MCPManager
     policy_engine: PolicyEngine
@@ -142,6 +157,13 @@ def create_agent_runtime(
     perception_registry: PerceptionProviderRegistry | None = None,
     turn_store: TurnCommitStore | None = None,
 ) -> AgentRuntime:
+    """Build the runtime graph in dependency order.
+
+    Registration happens before execution: built-in, desktop, computer-use,
+    and MCP tools enter one registry; ToolExecutor enforces policy; StepExecutor
+    receives a fresh-context factory for the restricted durable recovery path;
+    TurnService then owns semantic-turn commits and outbox projections.
+    """
     tool_registry = ToolRegistry()
     register_default_tools(tool_registry)
     desktop_action_controller = DesktopActionController(adapter=desktop_adapter)
@@ -154,6 +176,55 @@ def create_agent_runtime(
     mcp_manager = MCPManager()
     mcp_manager.register_tools(tool_registry)
 
+    # Recovery must rebuild a request from the current workspace snapshot.
+    # Keeping this factory next to the registry wiring prevents a persisted
+    # marker from smuggling callables, credentials, or stale capability state
+    # across a process boundary.
+    resolved_runtime_context_registry = runtime_context_registry or RuntimeContextRegistry()
+
+    def _recovery_context_factory(snapshot: dict[str, Any]) -> AgentRequestContext:
+        """Rebuild a bounded request from the current workspace runtime.
+
+        The snapshot carries identity and budget metadata only.  Registry,
+        policy, model, and service objects are taken from the current
+        ``RuntimeContext`` so a restart cannot resurrect stale capabilities.
+        """
+        workspace_id = str(snapshot.get("workspace_id") or "").strip()
+        runtime_context = resolved_runtime_context_registry.require(workspace_id)
+        expected_revision = snapshot.get("runtime_revision")
+        if expected_revision is not None and int(expected_revision) != runtime_context.revision:
+            raise RuntimeError("recovery_runtime_context_changed")
+        context = AgentRequestContext(
+            sid=str(snapshot.get("sid") or f"recovery:{snapshot.get('recovery_id') or 'request'}"),
+            session_id=str(snapshot.get("session_id") or ""),
+            workspace_id=workspace_id,
+            request_id=str(snapshot.get("request_id") or ""),
+            turn_id=str(snapshot.get("turn_id") or ""),
+            generation_id=str(snapshot.get("generation_id") or "") or None,
+            interruption_epoch=max(0, int(snapshot.get("interruption_epoch") or 0)),
+            model=str(snapshot.get("model") or "") or None,
+            max_tokens=max(1, min(262_144, int(snapshot.get("max_tokens") or 8192))),
+            permission_scope=str(snapshot.get("permission_scope") or "") or None,
+            autonomy_mode=str(snapshot.get("autonomy_mode") or "companion"),
+            messages=[],
+            llm_client=runtime_context.llm_client,
+            tool_registry=runtime_context.tool_registry or tool_registry,
+            tool_executor=runtime_context.tool_executor or tool_executor,
+            step_executor=runtime_context.step_executor or step_executor,
+            turn_service=runtime_context.turn_service,
+            perception=runtime_context.perception,
+            extra={
+                "turn_id": str(snapshot.get("turn_id") or ""),
+                "runtime_revision": runtime_context.revision,
+                "recovery_rebuilt": True,
+                "recovery_id": str(snapshot.get("recovery_id") or ""),
+            },
+        )
+        # The TurnService recovery wrapper performs the actual bind/release
+        # around the attempt. Returning an unbound snapshot here prevents a
+        # second lease when the normal semantic-turn boundary is entered.
+        return context
+
     resolved_policy_engine = policy_engine or PolicyEngine()
     resolved_trace_store = trace_store or AgentTraceStore()
     resolved_job_event_log = job_event_log or CompanionJobEventLog()
@@ -163,7 +234,10 @@ def create_agent_runtime(
         tool_outcome_observer,
         job_event_log=resolved_job_event_log,
     )
-    step_executor = StepExecutor()
+    step_executor = StepExecutor(
+        recovery_store=SQLiteStepRecoveryStore(data_dir_from_env() / "agent_recovery.sqlite3"),
+        recovery_context_factory=_recovery_context_factory,
+    )
     agent_pipeline = AgentPipeline()
     plugin_manager = PluginManager()
     schedule_store = ScheduleStore()
@@ -175,7 +249,6 @@ def create_agent_runtime(
         interruption_epoch_provider=schedule_interruption_epoch_provider,
         job_event_log=resolved_job_event_log,
     )
-    resolved_runtime_context_registry = runtime_context_registry or RuntimeContextRegistry()
     resolved_turn_store = turn_store or TurnCommitStore(data_dir_from_env() / "turn_commits.sqlite3")
     skill_catalog_store = SkillCatalogStore()
     skill_trust_store = SkillTrustStore()
@@ -190,6 +263,7 @@ def create_agent_runtime(
     )
 
     def _projection_runtime_context(workspace_id: str | None) -> RuntimeContext | None:
+        """Resolve the context that owns projection repositories for a workspace."""
         if not workspace_id:
             return None
         registered = resolved_runtime_context_registry.get(workspace_id)
@@ -201,12 +275,19 @@ def create_agent_runtime(
         return None
 
     def _projection_trigger(payload: dict[str, Any]) -> str:
+        """Normalize producer-specific trigger names before projection routing."""
         trigger = str(payload.get("trigger") or payload.get("source") or "").strip().lower()
         if trigger in {"schedule", "scheduled", "scheduler"}:
             return "scheduler"
         return trigger or "agent"
 
     async def _project_relationship_user_signal(event: dict[str, Any], context: Any | None) -> None:
+        """Project committed user/scheduler signals into relationship history.
+
+        Stream drafts, silent turns, and unsupported producers are deliberately
+        ignored.  Only committed semantic turns reach this side-effecting
+        projection, which is retried by the outbox when its writer is absent.
+        """
         payload = event.get("payload")
         trigger = _projection_trigger(payload) if isinstance(payload, dict) else ""
         if (
@@ -266,6 +347,7 @@ def create_agent_runtime(
             await outcome
 
     async def _project_chat_exchange(event: dict[str, Any], context: Any | None) -> None:
+        """Persist one committed user/assistant pair with bounded trace data."""
         payload = event.get("payload")
         if (
             not isinstance(payload, dict)
@@ -331,6 +413,7 @@ def create_agent_runtime(
             }
 
     def _project_agent_trace(event: dict[str, Any], _context: Any | None) -> None:
+        """Write an idempotent, renderer-safe terminal trace projection."""
         payload = event.get("payload")
         if not isinstance(payload, dict):
             raise TypeError("turn outbox trace projection requires a payload")
@@ -388,6 +471,7 @@ def create_agent_runtime(
         )
 
     def _project_job_terminal(event: dict[str, Any], _context: Any | None) -> None:
+        """Append one authoritative terminal job event from a TurnCommit."""
         payload = event.get("payload")
         if not isinstance(payload, dict):
             raise TypeError("turn outbox job projection requires a payload")
@@ -486,8 +570,13 @@ def create_agent_runtime(
     turn_outbox_worker = TurnOutboxWorker(turn_outbox_dispatcher)
 
     def _bind_registered_runtime_context(context: Any) -> Any:
-        # Runtime context is opt-in per workspace until legacy entry points are
-        # migrated; an unregistered workspace keeps the existing behavior.
+        """Bind trusted desktop scope and, when available, workspace services.
+
+        Desktop actions require a complete semantic identity.  RuntimeContext
+        binding remains optional for legacy entry points, but any registered
+        workspace is upgraded before execution so policy and projection use the
+        same dependency snapshot.
+        """
         workspace_id = str(getattr(context, "workspace_id", None) or "workspace:default").strip()
         session_id = str(getattr(context, "session_id", "") or "").strip()
         request_id = str(getattr(context, "request_id", "") or f"request:{session_id}").strip()

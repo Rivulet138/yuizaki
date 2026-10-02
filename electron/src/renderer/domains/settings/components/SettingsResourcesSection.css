@@ -2,6 +2,10 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--yui-border);
+  border-radius: 8px;
+  background: var(--yui-surface-raised, #fff);
 }
 
 .button-row,

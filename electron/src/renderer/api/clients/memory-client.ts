@@ -153,6 +153,10 @@ export interface MemoryOverview {
     state: MemoryLifecycleState
     layer?: string
     source?: string
+    scope?: string
+    memory_role?: string
+    review_status?: string
+    relationship_event?: Record<string, unknown>
     updated_at?: string
     action?: string
   }>

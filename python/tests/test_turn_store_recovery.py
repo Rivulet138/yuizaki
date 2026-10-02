@@ -92,3 +92,15 @@ def test_outbox_and_rebuild_replays_fail_closed_after_process_epoch_changes(tmp_
         assert recovery["reason"] == "process_state_missing"
         assert "handle" not in recovery
         assert "_process_epoch" not in recovery
+
+
+def test_find_outbox_by_idempotency_key_does_not_require_workspace(tmp_path) -> None:
+    store = _persist_recovery(tmp_path)
+
+    event = store.find_outbox_by_idempotency_key("turn-key")
+
+    assert event is not None
+    assert event["idempotency_key"] == "turn-key"
+    assert event["event_id"] > 0
+    assert event["delivered_at"] is None
+    assert event["acknowledged_projections"] == set()

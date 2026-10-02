@@ -14,7 +14,51 @@
       </SettingsSectionHeader>
     </template>
 
-    <p class="asr-action-note">{{ t('settings.asr.actionHint') }}</p>
+    <section class="asr-guide" :aria-label="t('settings.asr.guide.title')">
+      <div class="asr-guide-title-row">
+        <span class="asr-guide-provider">{{ providerGuide.title }}</span>
+      </div>
+      <div v-if="providerGuide.links.length" class="asr-guide-line">
+        <span class="asr-guide-label">{{ t('settings.asr.guide.download') }}</span>
+        <span class="asr-guide-links">
+          <a
+            v-for="link in providerGuide.links"
+            :key="link.href"
+            :href="link.href"
+            target="_blank"
+            rel="noreferrer"
+          >
+            {{ link.label }}
+          </a>
+        </span>
+      </div>
+
+      <div v-if="providerGuide.placement" class="asr-guide-line">
+        <span class="asr-guide-label">{{ t('settings.asr.guide.placement') }}</span>
+        <code>{{ providerGuide.placement }}</code>
+      </div>
+
+      <template v-if="usesService">
+        <div class="asr-guide-line">
+          <span class="asr-guide-label">{{ t('settings.asr.guide.serviceEntry') }}</span>
+          <code>{{ providerGuide.baseUrl }}</code>
+        </div>
+        <div class="asr-guide-line">
+          <span class="asr-guide-label">{{ t('settings.asr.guide.serviceDocs') }}</span>
+          <span class="asr-guide-links">
+            <a
+              v-for="link in providerGuide.serviceLinks"
+              :key="link.href"
+              :href="link.href"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {{ link.label }}
+            </a>
+          </span>
+        </div>
+      </template>
+    </section>
 
     <el-alert
       v-if="discoveryError"
@@ -29,26 +73,26 @@
       <div class="form-grid">
         <el-form-item :label="t('settings.asr.provider')">
           <el-select :model-value="modelValue.provider" class="full-width" @change="emitField('provider', $event)">
-            <el-option label="SenseVoice Service" value="sensevoice-service" />
-            <el-option label="FunASR Service" value="funasr-service" />
-            <el-option label="OpenAI Compatible" value="openai-compatible" />
-            <el-option label="Sherpa ONNX" value="sherpa-onnx" />
-            <el-option label="Sherpa Streaming + SenseVoice" value="sherpa-onnx-online" />
-            <el-option label="SenseVoice Local" value="sensevoice-local" />
+          <el-option label="SenseVoice Service" value="sensevoice-service" />
+          <el-option label="FunASR Service" value="funasr-service" />
+          <el-option label="OpenAI Compatible" value="openai-compatible" />
+          <el-option label="Sherpa ONNX" value="sherpa-onnx" />
+          <el-option label="Sherpa Streaming + SenseVoice" value="sherpa-onnx-online" />
+          <el-option label="SenseVoice Local" value="sensevoice-local" />
             <el-option :label="t('common.disabled')" value="disabled" />
           </el-select>
         </el-form-item>
         <el-form-item v-if="usesService" :label="t('settings.asr.baseUrl')">
-          <el-input :model-value="modelValue.base_url" @change="emitField('base_url', $event)" />
+          <el-input :model-value="modelValue.base_url" :placeholder="providerGuide.baseUrl" @change="emitField('base_url', $event)" />
         </el-form-item>
-        <el-form-item v-if="modelValue.provider === 'openai-compatible'" :label="t('settings.asr.apiKey')">
+        <el-form-item v-if="usesService" :label="t('settings.asr.apiKey')">
           <el-input :model-value="modelValue.api_key" type="password" show-password @change="emitField('api_key', $event)" />
         </el-form-item>
       </div>
 
       <div v-if="usesService || usesLocalSenseVoice" class="form-grid three">
-        <el-form-item :label="t('settings.asr.sensevoiceModel')">
-          <el-input :model-value="modelValue.sensevoice_model" placeholder="iic/SenseVoiceSmall" @change="emitField('sensevoice_model', $event)" />
+        <el-form-item :label="usesService ? t('settings.asr.serviceModel') : t('settings.asr.sensevoiceModel')">
+          <el-input :model-value="modelValue.sensevoice_model" :placeholder="providerGuide.model" @change="emitField('sensevoice_model', $event)" />
         </el-form-item>
         <el-form-item v-if="usesLocalSenseVoice" :label="t('settings.asr.sensevoiceDevice')">
           <el-select :model-value="modelValue.sensevoice_device" class="full-width" @change="emitField('sensevoice_device', $event)">
@@ -138,7 +182,7 @@ import 'element-plus/es/components/form-item/style/css'
 import { Connection } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 
-import { t } from '@/i18n'
+import { currentLocale, t } from '@/i18n'
 import SettingsSectionHeader from './SettingsSectionHeader.vue'
 
 export type AsrSettings = {
@@ -176,6 +220,111 @@ const enabled = computed(() => props.modelValue.provider !== 'disabled')
 const statusLabel = computed(() => enabled.value ? props.modelValue.provider : t('common.disabled'))
 const statusType = computed(() => enabled.value ? 'success' : 'info')
 
+type GuideLink = { label: string; href: string }
+type ProviderGuide = {
+  title: string
+  description: string
+  placement: string
+  model: string
+  baseUrl: string
+  links: GuideLink[]
+  serviceLinks: GuideLink[]
+}
+
+const providerGuide = computed<ProviderGuide>(() => {
+  void currentLocale.value
+  if (props.modelValue.provider === 'sherpa-onnx') {
+    return {
+      title: 'Sherpa ONNX',
+      description: t('settings.asr.guide.sherpa.description'),
+      placement: 'python/.cache/sherpa-onnx/sensevoice/',
+      model: 'iic/SenseVoiceSmall',
+      baseUrl: '',
+      links: [
+        { label: t('settings.asr.guide.sherpa.download'), href: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09.tar.bz2' },
+        { label: t('settings.asr.guide.sherpa.modelPage'), href: 'https://huggingface.co/FunAudioLLM/SenseVoiceSmall' },
+      ],
+      serviceLinks: [],
+    }
+  }
+  if (props.modelValue.provider === 'sherpa-onnx-online') {
+    return {
+      title: 'Sherpa Streaming + SenseVoice',
+      description: t('settings.asr.guide.sherpaOnline.description'),
+      placement: 'python/.cache/sherpa-onnx/streaming-zipformer-small-ctc-zh/',
+      model: 'iic/SenseVoiceSmall',
+      baseUrl: '',
+      links: [
+        { label: t('settings.asr.guide.sherpaOnline.download'), href: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01.tar.bz2' },
+        { label: t('settings.asr.guide.sherpaOnline.modelPage'), href: 'https://github.com/k2-fsa/sherpa-onnx' },
+      ],
+      serviceLinks: [],
+    }
+  }
+  if (props.modelValue.provider === 'sensevoice-local') {
+    return {
+      title: 'SenseVoice Local',
+      description: t('settings.asr.guide.sensevoiceLocal.description'),
+      placement: t('settings.asr.guide.sensevoiceLocal.placement'),
+      model: 'iic/SenseVoiceSmall',
+      baseUrl: '',
+      links: [
+        { label: t('settings.asr.guide.sensevoiceLocal.modelScope'), href: 'https://www.modelscope.cn/models/iic/SenseVoiceSmall' },
+        { label: t('settings.asr.guide.sensevoiceLocal.huggingFace'), href: 'https://huggingface.co/FunAudioLLM/SenseVoiceSmall' },
+      ],
+      serviceLinks: [],
+    }
+  }
+  if (props.modelValue.provider === 'sensevoice-service') {
+    return {
+      title: 'SenseVoice Service',
+      description: t('settings.asr.guide.sensevoiceService.description'),
+      placement: '',
+      model: 'iic/SenseVoiceSmall',
+      baseUrl: 'http://127.0.0.1:8899/v1',
+      links: [],
+      serviceLinks: [
+        { label: t('settings.asr.guide.service.funASRDocs'), href: 'https://github.com/modelscope/FunASR/tree/main/runtime/docs' },
+      ],
+    }
+  }
+  if (props.modelValue.provider === 'funasr-service') {
+    return {
+      title: 'FunASR Service',
+      description: t('settings.asr.guide.funasrService.description'),
+      placement: '',
+      model: 'iic/SenseVoiceSmall',
+      baseUrl: 'http://127.0.0.1:8899/v1',
+      links: [],
+      serviceLinks: [
+        { label: t('settings.asr.guide.service.funASRDocs'), href: 'https://github.com/modelscope/FunASR/tree/main/runtime/docs' },
+      ],
+    }
+  }
+  if (props.modelValue.provider === 'openai-compatible') {
+    return {
+      title: 'OpenAI Compatible',
+      description: t('settings.asr.guide.openaiCompatible.description'),
+      placement: '',
+      model: t('settings.asr.guide.openaiCompatible.model'),
+      baseUrl: 'https://api.openai.com/v1',
+      links: [],
+      serviceLinks: [
+        { label: t('settings.asr.guide.service.openAIDocs'), href: 'https://platform.openai.com/docs/api-reference/audio/createTranscription' },
+      ],
+    }
+  }
+  return {
+    title: t('common.disabled'),
+    description: t('settings.asr.guide.disabled.description'),
+    placement: '',
+    model: 'iic/SenseVoiceSmall',
+    baseUrl: '',
+    links: [],
+    serviceLinks: [],
+  }
+})
+
 const emitField = (field: keyof AsrSettings, value: unknown) => {
   if (typeof value === 'string' || typeof value === 'number') {
     emit('update-field', field, value)
@@ -197,6 +346,75 @@ const emitField = (field: keyof AsrSettings, value: unknown) => {
   background: var(--yui-surface-muted);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.asr-guide {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--yui-border);
+  border-radius: 8px;
+  background: var(--yui-surface-muted);
+  color: var(--yui-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.asr-guide-title-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  color: var(--yui-text);
+}
+
+.asr-guide-provider {
+  color: var(--yui-muted);
+  font-weight: 400;
+}
+
+.asr-guide-copy {
+  max-width: 76ch;
+  margin: 3px 0 8px;
+}
+
+.asr-guide-copy-tight {
+  margin: 6px 0;
+}
+
+.asr-guide-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 5px;
+}
+
+.asr-guide-label {
+  color: var(--yui-text);
+  font-weight: 600;
+}
+
+.asr-guide code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--yui-text);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.asr-guide-links {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.asr-guide-links a {
+  color: var(--yui-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.asr-guide-links a:hover {
+  color: var(--yui-accent-strong, var(--yui-accent));
 }
 
 .form-grid {

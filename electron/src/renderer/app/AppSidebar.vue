@@ -15,14 +15,16 @@
         <router-link
           v-for="menu in primaryMenus"
           :key="menu.id"
-          :to="`/w/${activeWorkspaceId}/${menu.id}`"
+          :to="menuRoute(menu.id)"
           class="menu-item"
           active-class="active"
           :aria-label="menu.title"
           :title="menu.title"
         >
           <el-icon class="menu-icon"><component :is="menu.icon" /></el-icon>
-          <span class="menu-label">{{ menu.title }}</span>
+          <span class="menu-copy">
+            <span class="menu-label">{{ menu.title }}</span>
+          </span>
         </router-link>
       </section>
 
@@ -40,18 +42,23 @@
 
       <div v-show="advancedOpen" id="advanced-navigation" class="advanced-groups">
         <section v-for="group in advancedMenuGroups" :key="group.id" class="menu-group" :aria-label="group.label">
-          <div class="menu-group-label">{{ group.label }}</div>
+          <div class="menu-group-label">
+            <span>{{ group.label }}</span>
+            <small v-if="group.hint" class="menu-group-hint">{{ group.hint }}</small>
+          </div>
           <router-link
             v-for="menu in group.items"
             :key="menu.id"
-            :to="`/w/${activeWorkspaceId}/${menu.id}`"
+            :to="menuRoute(menu.id)"
             class="menu-item"
             active-class="active"
             :aria-label="menu.title"
-            :title="menu.title"
+            :title="menu.desc ? `${menu.title} · ${menu.desc}` : menu.title"
           >
             <el-icon class="menu-icon"><component :is="menu.icon" /></el-icon>
-            <span class="menu-label">{{ menu.title }}</span>
+            <span class="menu-copy">
+              <span class="menu-label">{{ menu.title }}</span>
+            </span>
           </router-link>
         </section>
       </div>
@@ -61,13 +68,13 @@
       <button
         class="menu-item settings-action"
         type="button"
-        title="桌宠场景设置"
-        aria-label="桌宠场景设置"
+        :title="t('workspaceDrawer.title')"
+        :aria-label="t('workspaceDrawer.title')"
         data-testid="workspace-settings"
         @click="emit('open-workspace-settings')"
       >
         <el-icon class="menu-icon"><Setting /></el-icon>
-        <span class="menu-label">场景设置</span>
+        <span class="menu-label">{{ t('workspaceDrawer.title') }}</span>
       </button>
     </div>
   </aside>
@@ -77,12 +84,12 @@
 import { ElIcon } from 'element-plus'
 import 'element-plus/es/components/icon/style/css'
 import { ArrowDown, Setting } from '@element-plus/icons-vue'
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { useRoute } from 'vue-router'
 import { yuizakiConfig } from '@/config/yuizaki'
 import { t } from '@/i18n'
-import { buildSidebarNavigation, isPrimarySidebarMenu } from '@/navigation/sidebarNavigation'
+import { buildSidebarNavigation, buildSidebarRoute, isPrimarySidebarMenu } from '@/navigation/sidebarNavigation'
 
 type SidebarMenu = { id: string; title: string; icon: Component; desc?: string }
 
@@ -94,18 +101,40 @@ const emit = defineEmits<{
   (e: 'open-workspace-settings'): void
 }>()
 const route = useRoute()
+const ADVANCED_NAV_STATE_KEY = 'yuizaki.sidebar.advanced-open'
 
 const activeMenuId = computed(() => String(route.name || 'chat'))
-// Keep the advanced navigation visible by default. Route changes should not
-// collapse it, so users can move between chat and advanced tools without
-// losing their navigation context.
-const advancedOpen = ref(true)
+// Keep the advanced navigation compact on primary screens and open it when an
+// advanced destination is active, so the current route remains discoverable.
+const advancedOpen = ref(false)
 const sidebarNavigation = computed(() => buildSidebarNavigation(props.menus))
 const primaryMenus = computed(() => sidebarNavigation.value.primary)
 const advancedMenuGroups = computed(() => sidebarNavigation.value.advanced)
 
+// Workspace IDs can be user-created and may contain spaces or reserved URL
+// characters. Encode the route segment so every sidebar link resolves to the
+// intended workspace instead of falling through to the default route.
+const menuRoute = (menuId: string): string => buildSidebarRoute(props.activeWorkspaceId, menuId)
+
 watch(activeMenuId, (menuId) => {
   if (!isPrimarySidebarMenu(menuId)) advancedOpen.value = true
+}, { immediate: true })
+
+onMounted(() => {
+  try {
+    const stored = window.localStorage.getItem(ADVANCED_NAV_STATE_KEY)
+    if (stored !== null && isPrimarySidebarMenu(activeMenuId.value)) advancedOpen.value = stored === 'true'
+  } catch {
+    // Storage can be unavailable in restricted browser contexts.
+  }
+})
+
+watch(advancedOpen, (value) => {
+  try {
+    window.localStorage.setItem(ADVANCED_NAV_STATE_KEY, String(value))
+  } catch {
+    // Storage can be unavailable in restricted browser contexts.
+  }
 })
 </script>
 
@@ -290,6 +319,7 @@ watch(activeMenuId, (menuId) => {
 }
 
 .menu-icon,
+.menu-copy,
 .menu-label {
   position: relative;
   z-index: 1;
@@ -306,6 +336,15 @@ watch(activeMenuId, (menuId) => {
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.menu-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  overflow: hidden;
 }
 
 .menu-divider {
@@ -391,6 +430,7 @@ watch(activeMenuId, (menuId) => {
     .admin-toggle-label,
     .admin-group-label,
     .menu-group-label,
+    .menu-group-hint,
     .menu-divider,
     .menu-item.active::after {
     display: none;
@@ -462,11 +502,25 @@ watch(activeMenuId, (menuId) => {
 }
 
 .menu-group-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   padding: 0 10px 2px;
   color: var(--yui-muted);
   font-size: 10.5px;
   font-weight: 800;
   line-height: 1;
+}
+
+.menu-group-hint {
+  overflow: hidden;
+  color: color-mix(in srgb, var(--yui-muted) 78%, transparent);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sidebar > .menu {

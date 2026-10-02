@@ -32,6 +32,7 @@ export function useSettingsDomain() {
   const llmStatusRequest = useDomainRequest<LlmRuntimeStatusResponse>()
   const testLlmRequest = useDomainRequest<TestConnectionResponse>()
   const testTtsRequest = useDomainRequest<TestConnectionResponse>()
+  const testSvcRequest = useDomainRequest<TestConnectionResponse>()
   const ttsStatusRequest = useDomainRequest<TtsRuntimeStatusResponse>()
   const warmupTtsRequest = useDomainRequest<TtsWarmupResponse>()
 
@@ -70,6 +71,10 @@ export function useSettingsDomain() {
     return testTtsRequest.execute(() => settingsClient.testTts())
   }
 
+  const testSvc = async () => {
+    return testSvcRequest.execute(() => settingsClient.testSvc())
+  }
+
   const warmupTts = async () => {
     const result = await warmupTtsRequest.execute(() => settingsClient.warmupTts())
     if (result?.runtime) {
@@ -98,6 +103,7 @@ export function useSettingsDomain() {
     ttsStatusRequest,
     testLlmRequest,
     testTtsRequest,
+    testSvcRequest,
     warmupTtsRequest,
     loadSettings,
     patchSettings,
@@ -106,6 +112,7 @@ export function useSettingsDomain() {
     loadTtsStatus,
     testLlm,
     testTts,
+    testSvc,
     warmupTts,
   }
 }

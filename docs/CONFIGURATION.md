@@ -48,7 +48,21 @@ The full voice path requires all of the following:
 - a working LLM provider;
 - a configured TTS provider and voice.
 
-The default local providers are selected with `ASR_PROVIDER=sherpa-onnx-online` and `TTS_PROVIDER=genie-tts`. Genie uses the built-in fixed character mode by default; leave `TTS_GENIE_MODEL_DIR` empty to use it. Set that variable only for a custom character directory. An OpenAI-compatible speech service uses `TTS_PROVIDER=openai-compatible`, `TTS_BASE_URL`, `TTS_API_KEY`, `TTS_MODEL`, and `TTS_VOICE`.
+The default local providers are selected with `ASR_PROVIDER=sherpa-onnx` and `TTS_PROVIDER=genie-tts`. `sherpa-onnx` uses the offline SenseVoice model under `python/.cache/sherpa-onnx/sensevoice`. Use `ASR_PROVIDER=sherpa-onnx-online` only when the separate Zipformer streaming resources under `python/.cache/sherpa-onnx/streaming-zipformer-small-ctc-zh` are installed. Genie uses the built-in fixed character mode by default; leave `TTS_GENIE_MODEL_DIR` empty to use it. Set that variable only for a custom character directory. An OpenAI-compatible speech service uses `TTS_PROVIDER=openai-compatible`, `TTS_BASE_URL`, `TTS_API_KEY`, `TTS_MODEL`, and `TTS_VOICE`.
+
+ASR providers available in Settings are:
+
+| Provider | Use | Required settings |
+| --- | --- | --- |
+| `sherpa-onnx` | Local offline SenseVoice ONNX; recommended default | Sherpa model and tokens under `python/.cache/sherpa-onnx/sensevoice` |
+| `sherpa-onnx-online` | Streaming Zipformer recognition with SenseVoice final refinement | Separate Zipformer model and tokens under `python/.cache/sherpa-onnx/streaming-zipformer-small-ctc-zh` |
+| `sensevoice-local` | Local FunASR/ModelScope SenseVoice | `SENSEVOICE_MODEL`, `SENSEVOICE_DEVICE`, and the `funasr` runtime |
+| `sensevoice-service` | SenseVoice/FunASR HTTP service | `ASR_BASE_URL`, optional `ASR_API_KEY`, `SENSEVOICE_MODEL` |
+| `funasr-service` | OpenAI-compatible FunASR HTTP service | `ASR_BASE_URL`, optional `ASR_API_KEY`, `SENSEVOICE_MODEL` |
+| `openai-compatible` | Any compatible `/v1/audio/transcriptions` service | `ASR_BASE_URL`, `ASR_API_KEY`, `SENSEVOICE_MODEL` |
+| `disabled` | Disable microphone transcription | None |
+
+For Sherpa, `SHERPA_ONNX_MODEL_PATH` and `SHERPA_ONNX_TOKENS_PATH` may override the managed paths. Keep `SHERPA_ONNX_PROVIDER=cpu` unless the installed runtime and model support CUDA/Core ML. `SHERPA_ONNX_NUM_THREADS=2` is a good CPU starting point; use `4` on a capable machine. The UI Settings > ASR section writes these values to `python/config/settings.json`, which takes precedence over environment defaults after saving and restarting the backend.
 
 Keep optional models lazy on constrained machines:
 

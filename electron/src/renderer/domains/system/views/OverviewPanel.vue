@@ -23,7 +23,6 @@
         <div class="ops-card-head">
           <div>
             <h3>{{ runtimeActionItems.length ? `需要处理 ${runtimeActionItems.length} 项` : '运行链路就绪' }}</h3>
-            <span>{{ readyChainCount }}/{{ chainChecks.length }} 个核心环节可用</span>
           </div>
         </div>
         <el-alert
@@ -46,7 +45,6 @@
         </div>
         <div v-else class="runtime-ready-state">
           <strong>可以开始对话</strong>
-          <span>核心链路正常</span>
         </div>
         <div class="runtime-chain" aria-label="核心链路状态">
           <span v-for="item in chainChecks" :key="item.label" class="runtime-chain-item" :class="item.tone" :title="item.desc">
@@ -61,36 +59,44 @@
         <div class="ops-card-head">
           <div>
             <h3>语音体验</h3>
-            <span>只读指标</span>
           </div>
         </div>
         <AsyncState :loading="voiceRequest.loading" :error="voiceRequest.error" :show-retry="false">
           <div v-if="voiceSnapshot" class="voice-quality-grid">
             <div class="voice-quality-metric">
-              <strong>{{ voiceEvidenceLabel }}</strong>
-              <span>证据类型</span>
-            </div>
-            <div class="voice-quality-metric">
-              <strong>{{ voiceSnapshot.sample_count }}</strong>
-              <span>采样数</span>
-            </div>
-            <div class="voice-quality-metric">
-              <strong>{{ voiceP95Label(voiceSnapshot.stages.first_audio) }}</strong>
-              <span>首包 p95</span>
-            </div>
-            <div class="voice-quality-metric">
-              <strong>{{ voiceP95Label(voiceSnapshot.stages.interruption) }}</strong>
-              <span>打断 p95</span>
+              <strong>{{ voiceSnapshot.sample_count > 0 ? '已记录' : '暂无数据' }}</strong>
+              <span>语音响应</span>
             </div>
             <div class="voice-quality-metric">
               <strong>{{ voiceComfortLabel }}</strong>
-              <span>舒适度回归</span>
+              <span>语音体验</span>
             </div>
             <div class="voice-quality-metric">
               <strong>{{ voiceQualificationLabel }}</strong>
-              <span>发布资格</span>
+              <span>设备检查</span>
             </div>
           </div>
+          <details v-if="voiceSnapshot" class="voice-diagnostics-details">
+            <summary>查看详细诊断</summary>
+            <div class="voice-quality-grid">
+              <div class="voice-quality-metric">
+                <strong>{{ voiceEvidenceLabel }}</strong>
+                <span>数据来源</span>
+              </div>
+              <div class="voice-quality-metric">
+                <strong>{{ voiceSnapshot.sample_count }}</strong>
+                <span>记录数量</span>
+              </div>
+              <div class="voice-quality-metric">
+                <strong>{{ voiceP95Label(voiceSnapshot.stages.first_audio) }}</strong>
+                <span>首段响应通常耗时</span>
+              </div>
+              <div class="voice-quality-metric">
+                <strong>{{ voiceP95Label(voiceSnapshot.stages.interruption) }}</strong>
+                <span>打断响应通常耗时</span>
+              </div>
+            </div>
+          </details>
           <div v-if="voiceComfortSummary" class="voice-quality-notes">
             <span>{{ voiceComfortSummary }}</span>
           </div>
@@ -167,7 +173,6 @@
           <div class="ops-card-head">
             <div>
               <h3>运行编排</h3>
-              <span>Agent / 技能 / 命令 / 钩子</span>
             </div>
             <el-tag :type="orchestrationSnapshot ? 'success' : 'info'">
               {{ orchestrationSnapshot ? '已读取' : '不可用' }}
@@ -176,7 +181,7 @@
           <div v-if="orchestrationRequest.loading" class="compact-status">读取中</div>
           <template v-else-if="orchestrationSnapshot">
             <div class="orchestration-counts">
-              <span>Agent <strong>{{ orchestrationSnapshot.summary?.agents ?? orchestrationSnapshot.agents?.length ?? 0 }}</strong></span>
+              <span>智能体 <strong>{{ orchestrationSnapshot.summary?.agents ?? orchestrationSnapshot.agents?.length ?? 0 }}</strong></span>
               <span>技能 <strong>{{ orchestrationSnapshot.summary?.skills ?? orchestrationSnapshot.skills.length }}</strong></span>
               <span>命令 <strong>{{ orchestrationSnapshot.summary?.commands ?? orchestrationSnapshot.commands.length }}</strong></span>
               <span>钩子 <strong>{{ orchestrationSnapshot.summary?.hooks ?? orchestrationSnapshot.hooks.length }}</strong></span>
@@ -191,102 +196,6 @@
             </details>
           </template>
           <div v-else class="compact-status">{{ orchestrationRequest.error || '暂无编排数据' }}</div>
-        </article>
-      </section>
-
-      <section v-show="activeOverviewView === 'runtime'" class="ops-grid">
-        <article class="ops-card governance-card">
-          <div class="ops-card-head">
-            <div>
-              <h3>摘要统计</h3>
-            </div>
-            <div class="action-row">
-              <el-button type="primary" size="small" @click="exportGovernanceJson">JSON</el-button>
-              <el-button type="primary" size="small" @click="exportGovernanceCsv">CSV</el-button>
-            </div>
-          </div>
-
-          <AsyncState :loading="governanceReq.loading" :error="governanceReq.error" :show-retry="false">
-            <div v-if="governanceData" class="metric-grid">
-              <div v-for="stat in governanceStats" :key="stat.label" class="metric-tile" :class="stat.tone">
-                <strong>{{ stat.value }}</strong>
-                <span>{{ stat.label }}</span>
-              </div>
-            </div>
-            <el-empty v-else description="暂无摘要状态" :image-size="56" />
-          </AsyncState>
-
-          <div v-if="governanceData?.alerts?.length" class="alert-stack">
-            <div v-for="alert in governanceData.alerts.slice(0, 3)" :key="alert.key" class="alert-item">
-              <el-tag :type="alert.severity === 'high' ? 'danger' : 'warning'" size="small">{{ alert.type }}</el-tag>
-              <span>{{ alert.message }}</span>
-              <div class="alert-actions">
-                <el-button text size="small" :loading="alertActionKey === alert.key" @click="acknowledgeAlert(alert.key)">确认</el-button>
-                <el-button text size="small" :loading="alertActionKey === alert.key" @click="snoozeAlert(alert.key)">稍后</el-button>
-              </div>
-            </div>
-            <el-button text size="small" :loading="alertActionKey === '__clear__'" @click="clearAlertState">清空</el-button>
-          </div>
-        </article>
-
-        <article class="ops-card summary-watch-card">
-          <div class="ops-card-head">
-            <div>
-              <h3>会话摘要</h3>
-            </div>
-            <div class="action-row">
-              <el-button
-                type="primary"
-                :loading="rewriteReq.loading"
-                :disabled="!selectedSummarySessionId || !summaryReady"
-                @click="rewriteSummary"
-              >
-                立即重写
-              </el-button>
-            </div>
-          </div>
-
-          <div class="summary-selector-block">
-            <label>会话</label>
-            <el-select
-              v-model="selectedSummarySessionId"
-              class="field"
-              placeholder="请选择会话"
-              :disabled="summarySessions.length === 0"
-              @change="() => loadSummaryDetail()"
-            >
-              <el-option
-                v-for="session in summarySessions"
-                :key="session.session_id"
-                :label="session.session_id"
-                :value="session.session_id"
-              />
-            </el-select>
-            <div class="summary-footnote">
-              <span>共 {{ summarySessions.length }} 个会话</span>
-              <el-tag :type="summaryReady ? 'success' : 'warning'">
-                摘要服务{{ summaryReady ? '就绪' : '未就绪' }}
-              </el-tag>
-            </div>
-          </div>
-
-          <AsyncState
-            :loading="summaryDetailReq.loading"
-            :error="summaryDetailReq.error"
-            :empty="!selectedSummaryDetail?.summary"
-            empty-text="未选择会话"
-            class="summary-detail-state"
-            @retry="loadSummaryDetail"
-          >
-            <div class="summary-detail-card">
-              <div class="summary-detail-meta">
-                <el-tag type="info">长度 {{ selectedSummaryDetail?.stats?.summary_length ?? 0 }}</el-tag>
-                <el-tag type="success">重写 {{ selectedSummaryDetail?.stats?.rewrite_count ?? 0 }}</el-tag>
-                <el-tag type="warning">质量 {{ selectedSummaryDetail?.stats?.quality_band || 'unknown' }}</el-tag>
-              </div>
-              <pre>{{ selectedSummaryDetail?.summary }}</pre>
-            </div>
-          </AsyncState>
         </article>
       </section>
 
@@ -453,7 +362,6 @@ import { computed, onActivated, onDeactivated, onMounted, onUnmounted, reactive,
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import { useSystemOverview } from '../composables/useSystemOverview'
-import { summaryClient } from '@/api/clients/summary-client'
 import { useSettingsStore } from '@/state/settingsStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { inferLlmProviderPreset } from '@/domains/settings/llmProviders'
@@ -488,9 +396,6 @@ const overviewViews: Array<{ id: OverviewView; label: string }> = [
 ]
 const activeOverviewView = ref<OverviewView>('status')
 
-const governanceData = ref<any>(null)
-const governanceReq = reactive({ loading: false, error: '' })
-const alertActionKey = ref<string | null>(null)
 const platformSnapshot = ref<PlatformCapabilitySnapshot | null>(null)
 const platformRequest = reactive({ loading: false, error: '' })
 const providerSnapshot = ref<ProviderRegistrySnapshot | null>(null)
@@ -506,54 +411,6 @@ const orchestrationRequest = reactive({ loading: false, error: '' })
 const settingsStore = useSettingsStore()
 const workspaceStore = useWorkspaceStore()
 const canonicalPath = (moduleId: string) => `/w/${workspaceStore.activeWorkspaceId}/${moduleId}`
-
-const loadGovernance = async () => {
-  governanceReq.loading = true
-  governanceReq.error = ''
-  try {
-    governanceData.value = await summaryClient.getGovernanceReport(7)
-  } catch (e: any) { governanceReq.error = e?.message || '加载失败' }
-  finally { governanceReq.loading = false }
-}
-
-const acknowledgeAlert = async (key: string) => {
-  if (alertActionKey.value) return
-  alertActionKey.value = key
-  try {
-    await summaryClient.ackAlert(key)
-    await loadGovernance()
-  } catch (error: any) {
-    governanceReq.error = error?.message || '告警确认失败'
-  } finally {
-    alertActionKey.value = null
-  }
-}
-
-const snoozeAlert = async (key: string) => {
-  if (alertActionKey.value) return
-  alertActionKey.value = key
-  try {
-    await summaryClient.snoozeAlert(key, 60)
-    await loadGovernance()
-  } catch (error: any) {
-    governanceReq.error = error?.message || '告警延后失败'
-  } finally {
-    alertActionKey.value = null
-  }
-}
-
-const clearAlertState = async () => {
-  if (alertActionKey.value) return
-  alertActionKey.value = '__clear__'
-  try {
-    await summaryClient.clearAlerts()
-    await loadGovernance()
-  } catch (error: any) {
-    governanceReq.error = error?.message || '告警清空失败'
-  } finally {
-    alertActionKey.value = null
-  }
-}
 
 const loadPlatformMatrix = async () => {
   platformRequest.loading = true
@@ -640,7 +497,7 @@ const voiceEvidenceLabel = computed(() => {
 })
 const voiceP95Label = (stage: Record<string, unknown> | undefined): string => {
   const value = stage?.p95_ms
-  return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value)} ms` : '暂无'
+  return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value)} 毫秒` : '暂无'
 }
 const voiceComfortLabel = computed(() => {
   const comfort = voiceSnapshot.value?.comfort
@@ -699,7 +556,7 @@ const orchestrationEntries = computed(() => {
   const snapshot = orchestrationSnapshot.value
   if (!snapshot) return []
   return [
-    ...(snapshot.agents ?? []).map(item => ({ id: item.id, name: item.name, kind: 'Agent' })),
+    ...(snapshot.agents ?? []).map(item => ({ id: item.id, name: item.name, kind: '智能体' })),
     ...snapshot.skills.map(item => ({ id: item.id, name: item.name, kind: '技能' })),
     ...snapshot.commands.map(item => ({ id: item.id, name: item.name, kind: '命令' })),
     ...snapshot.hooks.map(item => ({ id: item.id, name: item.name, kind: '钩子' })),
@@ -772,33 +629,6 @@ const runtimeRows = computed(() => {
   ] as Array<{ key: string; label: string; value: string; desc: string; tone: CheckTone; to: string }>
 })
 
-const downloadBlob = (blob: Blob, filename: string) => {
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(url)
-}
-
-const exportGovernanceReport = async (format: 'json' | 'csv') => {
-  governanceReq.loading = true
-  governanceReq.error = ''
-  try {
-    const blob = await summaryClient.exportGovernanceReport(format, 7)
-    downloadBlob(blob, `yuizaki-governance-7d.${format}`)
-  } catch (e: any) {
-    governanceReq.error = e?.message || '导出失败'
-  } finally {
-    governanceReq.loading = false
-  }
-}
-
-const exportGovernanceJson = () => exportGovernanceReport('json')
-const exportGovernanceCsv = () => exportGovernanceReport('csv')
-
 const {
   systemStore,
   petState,
@@ -806,19 +636,6 @@ const {
   scaleDraft,
   opacityDraft,
   selectedModelId,
-  summarySessions,
-  selectedSummaryDetail,
-  summaryReady,
-  readinessMessage,
-  selectedSummarySessionId,
-  summarySessionsReq,
-  summaryDetailReq,
-  readinessReq,
-  rewriteReq,
-  loadSummarySessions,
-  loadSummaryDetail,
-  refreshReadiness,
-  rewriteSummary,
   syncPetData,
   applyModel,
   applyScale,
@@ -874,7 +691,7 @@ const asrStatusText = computed(() => {
   return asrReady.value ? '已配置' : '缺少地址'
 })
 
-const ttsConfigured = computed(() => settingsStore.state.tts.provider === 'genie-tts')
+const ttsConfigured = computed(() => ['genie-tts', 'openai-compatible'].includes(settingsStore.state.tts.provider))
 const ttsReady = computed(() => Boolean(canAssessConfiguredServices.value && systemStore.pythonRunning && ttsConfigured.value))
 const ttsStatusText = computed(() => {
   if (!canAssessConfiguredServices.value) return '待检测'
@@ -902,7 +719,7 @@ const chainIssues = computed<ChainIssue[]>(() => {
     issues.push({
       key: 'control',
       title: '控制服务未连接',
-      desc: systemStore.controlHealthError || '设置、摘要和桌宠状态暂不可读',
+      desc: systemStore.controlHealthError || '设置和桌宠状态暂不可读',
       tone: 'offline',
     })
   }
@@ -941,14 +758,9 @@ const chainIssues = computed<ChainIssue[]>(() => {
     }
 
     if (!ttsConfigured.value) {
-      issues.push({ key: 'tts-provider', title: 'TTS 配置冲突', desc: '当前只保留 Genie TTS，请切回 Genie', tone: 'offline' })
+      issues.push({ key: 'tts-provider', title: 'TTS 配置冲突', desc: '请选择有效的 TTS 提供商', tone: 'offline' })
     }
 
-    if (readinessReq.error) {
-      issues.push({ key: 'readiness-error', title: '摘要检测失败', desc: readinessReq.error, tone: 'warning' })
-    } else if (readinessReq.data && !summaryReady.value) {
-      issues.push({ key: 'summary-ready', title: '摘要服务未就绪', desc: readinessMessage || '请检查 LLM、TTS 和数据库', tone: 'warning' })
-    }
   }
 
   if (!currentModel.value) {
@@ -1026,7 +838,7 @@ const chainChecks = computed<Array<{ label: string; value: string; desc: string;
   {
     label: 'TTS',
     value: ttsStatusText.value,
-    desc: ttsConfigured.value ? '仅使用 Genie TTS' : '请切回 Genie',
+    desc: ttsConfigured.value ? `${settingsStore.state.tts.provider} 已配置` : '请选择有效的 TTS 提供商',
     tone: ttsReady.value ? 'online' : 'offline',
   },
   {
@@ -1042,21 +854,16 @@ const chainChecks = computed<Array<{ label: string; value: string; desc: string;
     tone: voiceChainReady.value ? 'online' : 'warning',
   },
 ])
-const readyChainCount = computed(() => chainChecks.value.filter((item) => item.tone === 'online').length)
 
 const refreshChainStatus = async () => {
   await Promise.all([
     settingsStore.fetchSettings(),
-    refreshReadiness(),
     syncPetData(false),
   ])
 }
 
 const overviewRefreshLoading = computed(() => (
   settingsStore.state.loading
-  || readinessReq.loading
-  || summarySessionsReq.loading
-  || governanceReq.loading
   || platformRequest.loading
   || runtimeRequest.loading
   || voiceRequest.loading
@@ -1067,8 +874,6 @@ const overviewRefreshLoading = computed(() => (
 const refreshOverview = async () => {
   await Promise.all([
     refreshChainStatus(),
-    loadSummarySessions(),
-    loadGovernance(),
     loadPlatformMatrix(),
     loadRuntimeDependencies(),
     loadVoiceDiagnostics(),
@@ -1077,16 +882,6 @@ const refreshOverview = async () => {
     loadOrchestration(),
   ])
 }
-
-const governanceStats = computed(() => {
-  const summary = governanceData.value?.summary ?? {}
-  return [
-    { label: '审计总数', value: summary.audit_total || 0, tone: 'neutral' },
-    { label: '成功率', value: `${summary.ok_rate || 0}%`, tone: 'ok' },
-    { label: '跳过率', value: `${summary.guard_skip_rate || 0}%`, tone: 'warn' },
-    { label: '回退率', value: `${summary.fallback_rate || 0}%`, tone: 'err' },
-  ]
-})
 
 const petChips = computed(() => [
   { label: currentModel.value?.name ?? '未发现模型', tone: 'ok' },
@@ -1576,112 +1371,12 @@ onDeactivated(() => {
   gap: 10px;
 }
 
-.metric-tile {
-  min-height: 92px;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-card);
-  padding: 14px;
-  text-align: center;
-}
-
-.metric-tile.neutral { background: var(--yui-surface-muted); }
-.metric-tile.ok { background: var(--yui-success-soft); }
-.metric-tile.warn { background: var(--yui-warning-soft); }
-.metric-tile.err { background: var(--yui-danger-soft); }
-
-.metric-tile strong {
-  display: block;
-  color: var(--yui-text);
-  font-size: 24px;
-  font-weight: 950;
-  letter-spacing: 0;
-}
-
-.metric-tile span {
-  display: block;
-  margin-top: 4px;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.alert-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 14px;
-}
-
-.alert-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-card);
-  background: var(--yui-surface-muted);
-}
-
-.alert-item span:last-child {
-  color: #475569;
-  font-size: 12px;
-}
-
-.summary-selector-block {
-  padding: 12px;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-card);
-  background: var(--yui-surface-muted);
-}
-
-.summary-selector-block label,
 .control-block label {
   display: block;
   margin-bottom: 10px;
   color: var(--yui-text);
   font-size: 13px;
   font-weight: 800;
-}
-
-.summary-footnote {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 12px;
-  color: var(--yui-muted);
-  font-size: 12px;
-}
-
-.summary-detail-state {
-  margin-top: 12px;
-}
-
-.summary-detail-card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  border: 1px solid var(--yui-border);
-  border-radius: var(--yui-radius-card);
-  background: var(--yui-surface-muted);
-  padding: 12px;
-}
-
-.summary-detail-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.summary-detail-card pre {
-  max-height: 160px;
-  overflow: auto;
-  margin: 0;
-  color: var(--yui-text);
-  font-family: var(--yui-font-sans);
-  font-size: 13px;
-  line-height: 1.7;
-  white-space: pre-wrap;
 }
 
 .pet-ops-card {
@@ -1831,8 +1526,7 @@ onDeactivated(() => {
   }
 
   .ops-card-head,
-  .pet-head,
-  .summary-footnote {
+  .pet-head {
     align-items: flex-start;
     flex-direction: column;
   }

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator
 
 from ..core.config import (
     DEFAULT_QDRANT_DOCKER_CONTAINER,
@@ -164,7 +165,7 @@ def _tts_device_default() -> TTSDevice:
 
 
 def _asr_provider_default() -> ASRProvider:
-    return _ASR_PROVIDER_OPTIONS.get(env_config.asr.provider.strip().lower(), "sherpa-onnx-online")
+    return _ASR_PROVIDER_OPTIONS.get(env_config.asr.provider.strip().lower(), "sherpa-onnx")
 
 
 def _svc_provider_default() -> SVCProvider:
@@ -244,11 +245,23 @@ class ASRSettingsModel(BaseModel):
 class SVCSettingsModel(BaseModel):
     provider: SVCProvider = Field(default_factory=_svc_provider_default)
     base_url: str = Field(default_factory=lambda: env_config.svc.base_url)
-    speaker_id: int = Field(default_factory=lambda: env_config.svc.speaker_id)
-    pitch: int = Field(default_factory=lambda: env_config.svc.pitch)
-    timeout: float = Field(default_factory=lambda: env_config.svc.timeout)
+    speaker_id: int = Field(default_factory=lambda: env_config.svc.speaker_id, ge=0)
+    pitch: int = Field(default_factory=lambda: env_config.svc.pitch, ge=-36, le=36)
+    timeout: float = Field(default_factory=lambda: env_config.svc.timeout, gt=0)
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("base_url", mode="before")
+    @classmethod
+    def _normalize_base_url(cls, value: Any) -> str:
+        raw = str(value or "").strip().rstrip("/")
+        if not raw:
+            return ""
+        candidate = raw if "://" in raw else f"http://{raw}"
+        parsed = urlsplit(candidate)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("SVC base_url must be an HTTP(S) URL")
+        return candidate
 
 
 class SummarySettingsModel(BaseModel):
@@ -261,6 +274,23 @@ class SummarySettingsModel(BaseModel):
     quality_score_budget_per_hour: int = Field(default_factory=lambda: env_config.summary.quality_score_budget_per_hour)
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator(
+        "trigger_messages",
+        "keep_recent_messages",
+        "item_max_chars",
+        "rewrite_interval_messages",
+        "quality_score_cooldown_seconds",
+        "quality_score_budget_per_hour",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_summary_limits(cls, value: Any, info: ValidationInfo) -> int:
+        minimum = 20 if info.field_name == "item_max_chars" else 1
+        try:
+            return max(minimum, int(float(value)))
+        except (TypeError, ValueError):
+            return minimum
 
 
 class UISystemSettingsModel(BaseModel):
@@ -410,11 +440,25 @@ class ASRSettingsPatchModel(BaseModel):
 class SVCSettingsPatchModel(BaseModel):
     provider: SVCProvider | None = None
     base_url: str | None = None
-    speaker_id: int | None = None
-    pitch: int | None = None
-    timeout: float | None = None
+    speaker_id: int | None = Field(default=None, ge=0)
+    pitch: int | None = Field(default=None, ge=-36, le=36)
+    timeout: float | None = Field(default=None, gt=0)
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("base_url", mode="before")
+    @classmethod
+    def _normalize_optional_base_url(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        raw = str(value).strip().rstrip("/")
+        if not raw:
+            return ""
+        candidate = raw if "://" in raw else f"http://{raw}"
+        parsed = urlsplit(candidate)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("SVC base_url must be an HTTP(S) URL")
+        return candidate
 
 
 class SummarySettingsPatchModel(BaseModel):
@@ -427,6 +471,25 @@ class SummarySettingsPatchModel(BaseModel):
     quality_score_budget_per_hour: int | None = None
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator(
+        "trigger_messages",
+        "keep_recent_messages",
+        "item_max_chars",
+        "rewrite_interval_messages",
+        "quality_score_cooldown_seconds",
+        "quality_score_budget_per_hour",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_summary_limits(cls, value: Any, info: ValidationInfo) -> int | None:
+        if value is None:
+            return None
+        minimum = 20 if info.field_name == "item_max_chars" else 1
+        try:
+            return max(minimum, int(float(value)))
+        except (TypeError, ValueError):
+            return minimum
 
 
 class MemorySettingsPatchModel(BaseModel):

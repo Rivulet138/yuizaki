@@ -1,12 +1,12 @@
 # Yuizaki 产品与技术专业评估（证据版）
 
-更新时间：2026-09-06。范围是当前工作区的代码、测试、配置、文档和本轮可执行的本地验证。本文不把 README、路线图或预印本结论当作成熟度证明。证据标签：`[代码事实]`、`[测试证据]`、`[文档意图]`、`[外部基准]`、`[推断]`、`[未知]`。
+更新时间：2026-09-26。范围是当前工作区的代码、测试、配置、文档和本轮可执行的本地验证。本文不把 README、路线图或预印本结论当作成熟度证明。证据标签：`[代码事实]`、`[测试证据]`、`[文档意图]`、`[外部基准]`、`[推断]`、`[未知]`。
 
 说明：原始评估请求要求只读分析；本文件描述的是当前工作区（包含此前已实施的改进），不是未修改基线的历史快照。实施记录与产品能力判断已用证据标签区分。
 
 ## 1. 执行摘要与总体结论
 
-Yuizaki 已形成一个本地优先的桌面伴侣雏形：文字流式对话、语音管线、Live2D/VRM、按请求视觉、工具/MCP、长期记忆、连接器和调度器均有代码入口与部分测试。[代码事实] 但跨进程 Agent 步骤恢复尚未接入，真实 Windows/Linux 设备、音频/GPU、外部账号、24 小时稳定性和 GUI 沙箱尚未由仓库证据证明。[未知] 当前阶段是**可用 Alpha，接近 Beta 的工程化阶段**，不是生产级。
+Yuizaki 已形成一个本地优先的桌面伴侣雏形：文字流式对话、语音管线、Live2D/VRM、按请求视觉、工具/MCP、长期记忆、连接器和调度器均有代码入口与部分测试。[代码事实] 本轮已接入受限的跨进程恢复子集：独立、typed、builtin 只读 ToolStep 可经 fresh runtime context 和新的 TurnCommit/outbox 回放；完整计划、写入型步骤、确认型步骤和未知效果仍不能自动恢复。真实 Windows/Linux 设备、音频/GPU、外部账号、24 小时稳定性和 GUI 沙箱尚未由仓库证据证明。[未知] 当前阶段是**可用 Alpha，接近 Beta 的工程化阶段**，不是生产级。
 
 **结论：适合有条件开源。** 开源前必须完成安装/首次运行与平台资格证据、密钥和 host-token 契约、插件/MCP/桌面动作信任边界、崩溃/取消/unknown_effect 回放、模型与素材许可清单、跨平台发布和故障排查。P1/P2 可在开源后迭代，但必须公开声明实验性连接器、macOS 缺失能力、模型需单独下载和未经真实设备验证的性能目标。[代码事实][未知]
 
@@ -15,7 +15,7 @@ Yuizaki 已形成一个本地优先的桌面伴侣雏形：文字流式对话、
 | 维度 | 分数 | 理由 |
 |---|---:|---|
 | 产品熟练度 | 6/10 | 主要场景入口齐全，状态与失败语义已有 `known_success/unknown_effect`；真实设备和陪伴闭环证据不足。[代码事实][测试证据] |
-| 功能完善度 | 6/10 | 对话、记忆、工具、桌宠已有实现；跨进程步骤恢复、真实公网连接器、GUI 沙箱仍缺。[代码事实][未知] |
+| 功能完善度 | 6/10 | 对话、记忆、工具、桌宠已有实现；完整跨进程步骤恢复、真实公网连接器、GUI 沙箱仍缺。[代码事实][未知] |
 | 技术栈合理性 | 7/10 | Electron/Vue + Python/FastAPI + SQLite/Qdrant 与本地优先目标匹配，双运行时和 Socket 契约带来成本。[推断] |
 | 架构与可改进性 | 6/10 | Runtime/Repository/Policy/Composition 边界正在形成，`app.py`/`socket_server.py` 仍偏重。[代码事实] |
 | Agent 全链路完整性 | 5/10 | 感知到反馈可运行，验证、恢复、重启后恢复和主动反馈闭环未完整。[代码事实][未知] |
@@ -70,13 +70,13 @@ Yuizaki 已形成一个本地优先的桌面伴侣雏形：文字流式对话、
 | 能力 | 现状 | 风险 | 优先级 | 证据 |
 |---|---|---|---|---|
 | 文字/流式输出 | 已有实现 | schema registry、Provider 行为和目标机延迟仍未知 | P0 | `socket_handlers/llm.py`、`socket_events.py` |
-| 多会话/恢复/取消 | 部分实现 | 重启后步骤上下文缺失 | P0 | `turn_store.py`、`step_executor.py` |
+| 多会话/恢复/取消 | 部分实现 | 只读独立步骤可重建；写入/依赖步骤重启后仍需人工处理 | P0 | `turn_store.py`、`step_executor.py` |
 | 语音/VAD/打断 | 部分实现 | 设备、延迟、回声未知 | P0 | `audio-capture.ts` |
 | 情感/动作/口型/注视 | 部分实现 | 真实终态映射未证明 | P1 | pet renderer/events |
 | Live2D/VRM/资源 | 部分实现 | 资源许可与性能未知 | P0 | pet domains、notices |
 | 屏幕/OCR/视觉 | 部分实现 | 权限、截图泄漏、GUI 成功率 | P0 | authorized perception |
 | 桌面窗口动作 | 部分实现 | 平台能力有限，真实动作资格未知 | P0 | `backend_api_auth.py`、`host_control.py` |
-| 规划/执行/验证/恢复 | 部分实现 | durable step recovery 未接线 | P0 | `step_executor.py`、`recovery_store.py` |
+| 规划/执行/验证/恢复 | 部分实现 | durable read-step recovery 已接线；完整 plan/downstream 恢复未接线 | P0 | `step_executor.py`、`recovery_store.py` |
 | MCP/插件/技能 | 部分实现 | 第三方供应链和沙箱 | P0 | `mcp_manager.py`、vault |
 | 记忆纠正/删除/索引 | 部分实现 | 删除传播和召回回归未知 | P0 | memory modules |
 | 画像/关系 | 部分实现 | 关系操控与漂移 | P1 | runtime projections |
@@ -94,7 +94,7 @@ Yuizaki 已形成一个本地优先的桌面伴侣雏形：文字流式对话、
 
 | 维度 | 分数 | 依据与风险 |
 |---|---:|---|
-| 性能/资源 | 6 | Three/Pixi 适合桌宠但静态 chunk 较大；主入口约 431.86 kB，320 kB 目标未达成。[测试证据] |
+| 性能/资源 | 6 | Three/Pixi 适合桌宠但静态 chunk 较大；主入口约 432.88 kB，320 kB 目标未达成。[测试证据] |
 | 实时交互 | 7 | Socket.IO、Web Audio、SSE 覆盖流式场景；音频设备/网络抖动未知。[代码事实][未知] |
 | 跨平台 | 5 | Windows/Linux 有目标路径；Wayland/macOS 和桌面动作未证明。[文档意图][未知] |
 | 可维护性 | 6 | domain modules、runtime container、socket compositions 已建立；入口仍重。[代码事实] |
@@ -129,7 +129,7 @@ SQLite 是 turn/job/记忆权威；Qdrant 是可重建索引；Pinia 是 UI 投�
 | 位置 | 当前问题 | 改造与验收 |
 |---|---|---|
 | `socket_server.py` | handler 注册和生命周期偏重 | 继续迁移 `socket_compositions/`；事件 schema 测试全覆盖 |
-| `step_executor.py`/`recovery_store.py` | 跨进程恢复依赖进程内 capability/context | `RecoveryContextFactory`、plan hash、attestation、lease fencing；重启后仅 fresh preflight 可恢复 |
+| `step_executor.py`/`recovery_store.py` | 只读独立步骤可跨进程 claim；完整 recovery 仍依赖进程内 capability/context | fresh context、read-only gate、lease/fencing、TurnCommit/outbox；写入/依赖/确认步骤继续 fail-closed |
 | `socket_events.py` | 完整跨语言 schema 仍未集中生成 | 当前协议版本已严格限制为 v1，未知/非法版本 fail-closed；仍需 schema registry、`schema_version` 和旧版本显式降级 |
 | memory modules | 删除/纠正和索引传播缺长期证据 | raw/derived/profile/index revision 回归集，删除后不可召回 |
 | `backend_api_auth.py` | 桌面动作需要独立 host-token，普通 loopback 仍信任 | 继续补 middleware/路由矩阵和外部托管配置文档 |
@@ -142,13 +142,13 @@ SQLite 是 turn/job/记忆权威；Qdrant 是可重建索引；Pinia 是 UI 投�
 | 环境感知 | 请求级截图/OCR → evidence；perception bridge/handler | 单次 consent、scope、TTL、redaction、cancel | 真 GUI 和泄漏红队未知 |
 | 请求理解 | 文本/音频 → canonical turn/context；`llm.py`/`context.py` | workspace、generation、interruption | 置信度和意图信封参与路由需核验 |
 | 决策规划 | context → typed plan；`planner.py` | policy、敏感参数、依赖限制 | plan closure 未跨重启持久化 |
-| 工具执行 | plan → result；`step_executor.py` | permission、timeout、cancel、known/unknown | durable recovery 未接入，副作用只能人工处理 |
+| 工具执行 | plan → result；`step_executor.py` | permission、timeout、cancel、known/unknown | 仅独立 builtin 只读步骤可跨进程恢复；写入、确认、依赖和未知效果仍需人工处理 |
 | 结果验证 | action + verifier → receipt/unknown_effect | `tool_executor.py`、verification tests | 真实平台 receipt 未验证 |
 | 反馈输出 | events → chat/TTS/avatar | `socket_events.py`、renderer/audio/pet | 断线回放和真实终态一致性未知 |
 | 记忆写入 | exchange/event → raw/derived/profile/index | SQLite authority、review/delete | 长期召回与删除传播未知 |
 | 后续召回/学习 | retrieval + accept/ignore/cancel → next context | memory、scheduler、proactive | 主动反馈闭环和拒绝后 0 触达未测量 |
 
-判定：**存在关键断点（5/10）**。本地合同、状态枚举、权限路径和异常测试已证明；跨进程恢复、真实副作用、设备/平台、长期记忆和主动行为安全尚未证明。[测试证据][未知]
+判定：**存在关键断点（5/10）**。本地合同、状态枚举、权限路径和异常测试已证明；完整跨进程恢复、真实副作用、设备/平台、长期记忆和主动行为安全尚未证明。只读独立步骤的重启回放已有定向证据。[测试证据][未知]
 
 ## 8. 2025–2026 资料与同类项目参考
 
@@ -173,7 +173,7 @@ SQLite 是 turn/job/记忆权威；Qdrant 是可重建索引；Pinia 是 UI 投�
 |---|---|---|---|
 | P0 安装与首次运行 | launcher readiness、资源锁、诊断、回滚；launcher/scripts；2–3 人周 | 真实 Win/Linux runner、许可 | clean install/升级/重启/失败恢复归档，降低流失 |
 | P0 host-token/桌面动作 | 独立 Bearer host-token、常量时间比较和 distinct 检查已落地；补 middleware/路由矩阵；0.5–1 人周 | 外部托管 Python 需显式注入 token | 错/缺/复用 token 明确拒绝，避免越权 |
-| P0 durable step recovery | `RecoveryContextFactory`、plan hash、attestation、lease fencing 接入 runtime；3–5 人周 | capability 生命周期 | 崩溃后只恢复安全 typed step，副作用不自动重试 |
+| P0 durable step recovery | 已接入 read-only independent ToolStep 的 context snapshot、exact claim、fresh preflight、TurnCommit/outbox；后续扩展完整 plan 需另行设计 | capability 生命周期与副作用证明 | read-only 崩溃后可回放；写入、确认和 unknown effect 不自动重试 |
 | P0 MCP/插件供应链 | manifest 签名、权限、撤销、catalog-only；`mcp_manager.py`/plugin routes；2–4 人周 | 第三方沙箱 | 无签名/过期/越权能力不执行，审计可回放 |
 | P0 语音/Avatar/视觉资格 | Win/Linux 设备矩阵、30 分钟 soak、GPU/音频/compositor 回归；2–4 人周 | 真实设备资源 | 首包/打断/帧率/崩溃阈值达标或诚实降级 |
 | P0 法律与发布 | 完成 notices、模型/声音/角色/字体清单、artifact hash；1–2 人周 | 上游许可核验 | 每项资源有来源、版本、许可、卸载说明 |
@@ -206,7 +206,7 @@ SQLite 是 turn/job/记忆权威；Qdrant 是可重建索引；Pinia 是 UI 投�
 | 风险 | 可能性/影响 | 当前控制 | 缺口与动作 |
 |---|---|---|---|
 | 桌面动作越权 | 中/高 | policy、独立 host-token、loopback、审计 | 外部托管和真实平台红队仍需验证 |
-| 副作用重复执行 | 中/高 | known/unknown effect、lease 原型 | StepExecutor 未跨进程恢复；接入 attestation/fencing |
+| 副作用重复执行 | 中/高 | known/unknown effect、connector lease、read-only recovery gate | 写入型 Agent step 仍未跨进程自动恢复；继续接入副作用 receipt/attestation/fencing |
 | 凭据泄漏 | 中/高 | vault、脱敏、no-store | 真实 OS backend/CAS 和插件审计未知 |
 | 截图/音频/记忆泄漏 | 中/高 | 请求级感知、SQLite 删除 | 长期删除传播和红队未知 |
 | 多运行时崩溃/升级 | 中/高 | launcher、CI | Win/Linux soak 缺 |
@@ -230,22 +230,22 @@ SQLite 是 turn/job/记忆权威；Qdrant 是可重建索引；Pinia 是 UI 投�
 
 ## 13. 验证结果与覆盖边界
 
-- `python -m pytest -q`：292 passed。[测试证据] 覆盖合同、异常、脱敏、恢复、recovery-store fencing、host-token middleware、Socket v1 版本门禁和模拟路径；不覆盖真实 GPU、声卡、外部平台、跨进程重启和 24h soak。[未知]
+- `python -m pytest -q`：333 passed；Electron Vitest 为 18 个文件/93 项，type-check、lint、Electron/renderer build 和 Go launcher 测试通过。[测试证据] 覆盖合同、异常、脱敏、recovery-store fencing、read-only 跨进程恢复、已提交但投影待重试、host-token middleware、Socket v1 版本门禁、凭据环境白名单、外部 Python challenge proof、HTTP JSON/blob body timeout/cancel 和 recovery schema 版本门禁；不覆盖完整 plan/写入步骤恢复、真实 GPU、声卡、外部平台和 24h soak。[未知]
 - 变更文件的 Ruff import/F/E9 检查与 `compileall`：通过；全仓 Ruff 仍有 `socket_events.py` 等既有 typing 风格告警，未在本轮扩大清理范围。[测试证据]
-- Electron `npm run test:unit`：12 files / 51 tests；`npm run type-check`、`npm run lint`、`npm run build`：通过；主入口约 431.86 kB，320 kB 目标未达成。[测试证据]
+- Electron `npm run test:unit`：18 files / 93 tests；`npm run type-check`、`npm run lint`、Electron/renderer build：通过；主入口约 432.88 kB，320 kB 目标未达成。[测试证据]
 - `npm run check:package-runtime`：15 required files，无模型权重；node-mcp：7 passed；Go `go test ./...`：通过。[测试证据]
 - `git diff --check`：通过（既有 CRLF warning）。[测试证据]
 - `python scripts/platform_release_check.py --target-platform windows`：按设计 `not_qualified`，缺平台 attestation、24h soak、desktop/text_voice qualification；这是 fail-closed 门禁证据，不是实现失败。[测试证据]
 
 ## 14. 未知项与下一步验证建议
 
-未知项包括 Windows/Linux 真实音频、GPU、Wayland、Live2D/VRM 资源，macOS，Provider 成本与行为，公网 Telegram/Discord/Twitch staging，连接器重复 webhook，GUI VM/sandbox，长期记忆质量，主动行为打扰率，逐项资源许可证，外部托管 host-token 配置和跨进程 Agent step recovery。[未知]
+未知项包括 Windows/Linux 真实音频、GPU、Wayland、Live2D/VRM 资源，macOS，Provider 成本与行为，公网 Telegram/Discord/Twitch staging，连接器重复 webhook，GUI VM/sandbox，长期记忆质量，主动行为打扰率，逐项资源许可证，外部托管 host-token 配置，以及完整计划/写入型 Agent step recovery。[未知]
 
 1. 在干净 Windows/Linux 主机执行安装、升级、卸载、重启和 24h soak，保存 artifact hash、日志和资源曲线。
 2. 用真实声卡/GPU 测量语音首包、端到端延迟、barge-in、TTS underrun、Avatar 帧率和崩溃恢复。
 3. 在 staging 账号验证 Telegram/Discord webhook 去重、发送 receipt、撤销和 unknown_effect，不接生产账号。
 4. 建立长期对话和敏感记忆回归集，测召回 precision/recall、删除传播时间、泄漏率和 provenance。
-5. 验证外部托管 host-token 配置与 middleware/路由矩阵，再将 `recovery_store.py` 接入 fresh context/capability preflight。
+5. 验证外部托管 host-token 配置与 middleware/路由矩阵，并在真实进程重启场景复核 `recovery_store.py` 的 fresh context/capability preflight；继续保持写入型、确认型和未知效果步骤 fail-closed。
 6. 对 MCP、插件、网页内容、OCR、截图和桌面动作做越权、凭据泄漏、提示注入和人工接管红队。
 
 在证据收齐前，最准确的外部表述是“本地优先、功能广泛、正在封板的可用 Alpha”，不能宣称生产级桌面 Agent、离线全能力产品或公网连接器平台。[推断][未知]

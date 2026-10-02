@@ -1,8 +1,10 @@
 # pyright: reportUnusedFunction=false
 
-"""
-Socket.IO 服务器骨架
-与现有 FastAPI WebSocket 并行运行，逐步迁移事件
+"""Socket.IO transport and event composition for the desktop runtime.
+
+The server owns event validation and transport projections.  Semantic turn
+identity, persistence and recovery are delegated to TurnService; legacy
+handlers remain only behind an explicit compatibility flag.
 """
 from __future__ import annotations
 import asyncio
@@ -59,7 +61,7 @@ from modules.agent.scheduler import AgentScheduler
 from modules.agent.step_executor import StepExecutor
 from modules.agent.tool_executor import ToolExecutor
 from modules.agent.tool_registry import ToolRegistry
-from modules.agent.turn_service import is_turn_service_perception_request
+from modules.agent.turn_service import TurnIdentityConflictError, is_turn_service_perception_request
 from modules.agent.runtime_context import RuntimeContext
 from modules.agent_plugins.manager import PluginManager
 from modules.asr.transcriber import ASRManager
@@ -468,6 +470,8 @@ def _socket_auth_allowed(auth: object, backend_api_token: str, environ: object |
 
 
 def _chat_task_error_message(exc: BaseException) -> str:
+    if isinstance(exc, TurnIdentityConflictError):
+        return "本次对话请求身份已被占用，请重新发送消息"
     message = str(exc).strip()
     if message.startswith("LLM API "):
         return message
@@ -815,6 +819,7 @@ class DesktopPetSocketServer:
                 "outcome": _as_text(getattr(commit, "outcome", "completed"), "completed"),
                 "retryable": bool(getattr(commit, "retryable", False)),
                 "replayed": bool(getattr(commit, "replayed", False)),
+                "projection_pending": bool(getattr(commit, "projection_pending", False)),
                 "configured_budget": dict(getattr(commit, "configured_budget", {}) or {}),
                 "consumed_usage": dict(getattr(commit, "consumed_usage", {}) or {}),
             }
@@ -2149,8 +2154,9 @@ class DesktopPetSocketServer:
                 return
             except Exception as exc:
                 logger.error("[SIO] chat task failed: %s", exc, exc_info=True)
+                error_code = "AGENT_TURN_IDENTITY_CONFLICT" if isinstance(exc, TurnIdentityConflictError) else code
                 asyncio.create_task(self.sio.emit(SystemEvents.ERROR, {
-                    "code": code,
+                    "code": error_code,
                     "message": _chat_task_error_message(exc),
                     "session_id": session_id,
                     **_generation_identity(generation),
@@ -2786,7 +2792,8 @@ class DesktopPetSocketServer:
         self.sio.on(PetEvents.STATE, handler=on_pet_state)
 
         # ─── RAG / 记忆 ────────────────────────
-        # Phase 5 实现
+        # Register memory handlers after the transport has its shared runtime
+        # dependencies; the composition keeps retrieval out of socket parsing.
 
         memory_composition.register(self)
 
@@ -2813,32 +2820,78 @@ class DesktopPetSocketServer:
                 generation_id = _as_text(data.get("generation_id")).strip()
                 turn_id = _as_text(data.get("turn_id")).strip()
                 interruption_epoch = max(0, _as_int(data.get("interruption_epoch"), 0))
+                requested_workspace_id = _as_text(data.get("workspace_id")) or None
+                workspace_id, workspace_allowed = self._resolve_socket_workspace_id(requested_workspace_id)
+                resolved_turn_id = turn_id or f"turn:{request_id}"
+                if not workspace_allowed:
+                    await self.sio.emit(SystemEvents.ERROR, {
+                        "code": "workspace_mismatch",
+                        "error": "workspace_mismatch",
+                        "message": "Socket request workspace does not match the active workspace",
+                        "retryable": False,
+                        "session_id": session_id,
+                        "request_id": request_id,
+                        "turn_id": resolved_turn_id,
+                        "version": envelope_version,
+                    }, to=sid)
+                    return
                 ctx = AgentRequestContext(
                     sid=sid,
                     session_id=session_id,
                     request_id=request_id,
+                    turn_id=resolved_turn_id,
+                    generation_id=generation_id or f"generation:{resolved_turn_id}",
+                    interruption_epoch=interruption_epoch,
+                    workspace_id=workspace_id,
                     messages=_as_messages(data.get("messages")),
+                    llm_client=self.llm_client,
+                    generation_mgr=self.generation_mgr,
+                    tool_registry=self.tool_registry,
+                    tool_executor=self.tool_executor,
+                    step_executor=self.step_executor,
+                    scheduler=self.scheduler,
+                    trace_store=self.trace_store,
+                    plugin_manager=self.plugin_manager,
                     autonomy_mode=autonomy_mode,
                     permission_scope=f"socket:{sid}",
                 )
-                result = AgentPipeline._silent_result(ctx)
+                self._bind_ctx_runtime(ctx)
+                turn_service = self._active_turn_service()
+                if turn_service is None:
+                    # Silent requests still create semantic turns. Refuse the
+                    # legacy bypass rather than emitting a result that cannot
+                    # be replayed or deduplicated by the outbox.
+                    await self.sio.emit(SystemEvents.ERROR, {
+                        "code": "turn_service_required",
+                        "error": "turn_service_required",
+                        "message": "TurnService is required for silent semantic turns",
+                        "retryable": False,
+                        "session_id": session_id,
+                        "request_id": request_id,
+                        "turn_id": ctx.turn_id,
+                        "version": envelope_version,
+                    }, to=sid)
+                    return
+                commit = await turn_service.execute_context("socket", ctx)
+                result = commit.result
                 if result.action_envelope:
                     await self.sio.emit(
                         AgentEvents.RESULT,
                         _agent_result_payload(result.action_envelope, session_id, {
-                            "generation_id": generation_id,
-                            "turn_id": turn_id,
+                            "generation_id": ctx.generation_id,
+                            "turn_id": ctx.turn_id,
                             "request_id": request_id,
                             "interruption_epoch": interruption_epoch,
                             "version": envelope_version,
+                            **self._turn_commit_fields(commit, result),
                         }),
                         to=sid,
                     )
                 await self.sio.emit(LLMEvents.FINAL, _event_payload(LLMFinalData(
                     text="",
                     session_id=session_id,
-                    generation_id=generation_id,
-                    turn_id=turn_id,
+                    generation_id=ctx.generation_id or generation_id,
+                    turn_id=ctx.turn_id or turn_id,
                     request_id=request_id,
                     interruption_epoch=interruption_epoch,
                     version=envelope_version,

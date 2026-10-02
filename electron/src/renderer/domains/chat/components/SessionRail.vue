@@ -3,7 +3,6 @@
     <div class="session-rail-header">
       <div class="session-title-stack">
         <span class="session-title">会话</span>
-        <small v-if="sessions.length">{{ railSummary }}</small>
       </div>
       <div class="session-header-actions">
         <button
@@ -99,8 +98,8 @@
                 <el-dropdown-menu>
                   <el-dropdown-item command="rename">重命名</el-dropdown-item>
                   <el-dropdown-item command="archive">{{ session.archived ? '恢复会话' : '归档会话' }}</el-dropdown-item>
-                  <el-dropdown-item command="export-json">导出 JSON</el-dropdown-item>
-                  <el-dropdown-item command="export-csv">导出 CSV</el-dropdown-item>
+                  <el-dropdown-item command="export-json">导出会话数据</el-dropdown-item>
+                  <el-dropdown-item command="export-csv">导出表格</el-dropdown-item>
                   <el-dropdown-item divided command="delete">
                     <span class="session-danger-action">删除</span>
                   </el-dropdown-item>
@@ -228,15 +227,6 @@ const filteredSessions = computed(() => {
     workspaceName(session.workspace_id).toLowerCase().includes(q)
   )
 })
-const activeWorkspaceSessionCount = computed(() => props.sessions.filter((session) =>
-  !session.archived && normalizeWorkspaceId(session.workspace_id) === normalizedActiveWorkspaceId.value,
-).length)
-const visibleSessionCount = computed(() => props.sessions.filter((session) => !session.archived).length)
-const railSummary = computed(() => {
-  if (!props.sessions.length) return '准备开始'
-  return `本项目 ${activeWorkspaceSessionCount.value} / 全部 ${visibleSessionCount.value}`
-})
-
 const sessionTimestamp = (session: SessionRailRecord) => {
   const value = session.updated_at || session.created_at
   if (!value) return 0

@@ -6,19 +6,19 @@ import asyncio
 import base64
 import json
 import uuid
-from typing import Any, Awaitable, Callable, Optional, cast
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
 
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
-
 from modules.agent import AgentRuntime
 from modules.agent.context import AgentRequestContext, bind_runtime_bindings
 from modules.agent.permission_receipt import serialize_permission_payload
+from modules.agent.turn_service import TurnClaimLostError, TurnIdentityConflictError
 from modules.system.api_response import error_response
 from modules.system.memory_write_pipeline import build_user_signal_event
+from pydantic import BaseModel, ConfigDict, Field
 from state.schemas import ChatCompletionRequest
-
 
 MAX_SVC_UPLOAD_BYTES = 25 * 1024 * 1024
 UPLOAD_READ_CHUNK_BYTES = 64 * 1024
@@ -43,6 +43,55 @@ def _chat_error_message(exc: Exception) -> str:
     if message.startswith("LLM API "):
         return message
     return "Chat completion failed"
+
+
+def _stream_error_contract(
+    exc: Exception,
+    *,
+    request_id: str | None,
+    turn_id: str | None,
+) -> dict[str, Any]:
+    """Map stream failures to the same stable envelope used by JSON APIs.
+
+    Streaming responses cannot change their HTTP status after headers are sent,
+    so the event itself carries the retry decision and turn identity.  Keep the
+    legacy ``error`` field for existing clients while making retryability
+    explicit instead of treating every exception as transient.
+    """
+    message = _chat_error_message(exc)
+    code = "chat_completion_failed"
+    retryable = False
+    status = 500
+    if isinstance(exc, TurnIdentityConflictError):
+        code, message, status = "turn_identity_conflict", "Turn identity conflicts with an existing request", 409
+    elif isinstance(exc, TurnClaimLostError):
+        code, message, status = "turn_claim_lost", "Turn execution claim was lost", 409
+    elif isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        code, message, retryable, status = "upstream_timeout", "Chat completion timed out", True, 504
+    elif isinstance(exc, (ConnectionError, OSError)):
+        code, message, retryable, status = "upstream_unavailable", "Chat provider is temporarily unavailable", True, 503
+    else:
+        lowered = str(exc).lower()
+        if "unknown effect" in lowered or "external effect" in lowered:
+            code, message = "unknown_effect", "External effect status is unknown; manual review is required"
+        elif "permission" in lowered or "confirmation" in lowered:
+            code, message = "permission_required", "Additional permission or confirmation is required"
+        elif "workspace" in lowered and ("mismatch" in lowered or "active" in lowered):
+            code, message, status = "workspace_mismatch", "Chat workspace does not match the active workspace", 403
+        elif "not initialized" in lowered or "not configured" in lowered or "unavailable" in lowered:
+            code, message, retryable, status = "service_unavailable", "Chat service is temporarily unavailable", True, 503
+    payload: dict[str, Any] = {
+        "error": code,
+        "code": code,
+        "message": message,
+        "retryable": retryable,
+        "status_code": status,
+    }
+    if request_id:
+        payload["request_id"] = request_id
+    if turn_id:
+        payload["turn_id"] = turn_id
+    return payload
 
 
 async def _read_upload_limited(file: UploadFile, max_bytes: int) -> bytes:
@@ -158,13 +207,12 @@ def create_ai_router(
 
         active_workspace_id = str(get_active_workspace_id() or "").strip() or "default"
         if requested and requested != active_workspace_id:
-            return None, JSONResponse(
-                {
-                    "error": "workspace_mismatch",
-                    "message": "Chat workspace does not match the active workspace",
-                    "active_workspace_id": active_workspace_id,
-                },
+            return None, error_response(
+                code="workspace_mismatch",
+                message="Chat workspace does not match the active workspace",
                 status_code=403,
+                details={"active_workspace_id": active_workspace_id},
+                legacy_fields={"active_workspace_id": active_workspace_id},
             )
         return active_workspace_id, None
 
@@ -217,6 +265,7 @@ def create_ai_router(
             "outcome": commit.outcome,
             "retryable": bool(commit.retryable),
             "replayed": bool(commit.replayed),
+            "projection_pending": bool(getattr(commit, "projection_pending", False)),
             "workspace_id": ctx.workspace_id,
             "session_id": ctx.session_id,
             "request_id": ctx.request_id,
@@ -257,6 +306,7 @@ def create_ai_router(
             relationship_summary=get_relationship_summary() or {},
         )
 
+    @router.get("/v1/models")
     @router.post("/v1/models")
     async def list_models():
         config = get_config()
@@ -271,7 +321,11 @@ def create_ai_router(
         step_executor = getattr(runtime, "step_executor", None)
         resume = getattr(step_executor, "resume_recovery_handle", None)
         if not callable(resume):
-            return JSONResponse({"error": "recovery_not_available"}, status_code=503)
+            return error_response(
+                code="recovery_not_available",
+                message="Recovery is not available in the current runtime",
+                status_code=503,
+            )
         try:
             resume_fn = cast(Callable[..., Awaitable[dict[str, Any]]], resume)
             result = await resume_fn(
@@ -286,8 +340,33 @@ def create_ai_router(
             return error_response(code="recovery_resume_failed", message="Recovery resume failed", status_code=500)
         if not isinstance(result, dict):
             return error_response(code="recovery_resume_invalid", message="Recovery resume returned an invalid result", status_code=500)
-        if result.get("error") == "invalid_or_expired_recovery_handle":
-            return JSONResponse({"error": result["error"]}, status_code=409)
+        recovery_error = str(result.get("error") or "").strip()
+        if recovery_error:
+            status_code = {
+                "invalid_or_expired_recovery_handle": 409,
+                "recovery_in_progress": 409,
+                "durable_recovery_not_allowed": 409,
+                "recovery_context_missing": 409,
+                "recovery_context_invalid": 409,
+                "recovery_context_unavailable": 503,
+                "recovery_turn_service_unavailable": 503,
+                "recovery_not_available": 503,
+            }.get(recovery_error, 500)
+            return error_response(
+                code=recovery_error,
+                message=(
+                    "The recovery handle is invalid or expired"
+                    if recovery_error == "invalid_or_expired_recovery_handle"
+                    else "Recovery could not be resumed"
+                ),
+                status_code=status_code,
+                details={
+                    key: result[key]
+                    for key in ("recovery", "recovery_id", "attempt")
+                    if key in result
+                },
+                legacy_error=recovery_error,
+            )
         result.pop("resume_token", None)
         return JSONResponse(result)
 
@@ -308,14 +387,21 @@ def create_ai_router(
         plugin_manager = runtime.plugin_manager
         scheduler = runtime.scheduler
         if not llm_client:
-            return JSONResponse({"error": "LLM client not initialized"}, status_code=503)
+            return error_response(
+                code="llm_not_initialized",
+                message="LLM client is not initialized",
+                status_code=503,
+                legacy_error="LLM client not initialized",
+            )
         if req.stream:
             async def stream_generator():
                 session_id = _resolve_chat_session_id(req.session_id)
+                request_id = req.request_id or f"agent_{uuid.uuid4().hex[:12]}"
+                turn_id = f"turn:{request_id}"
                 try:
                     messages = [m.model_dump() for m in req.messages]
-                    request_id = req.request_id or f"agent_{uuid.uuid4().hex[:12]}"
                     gen = _bind_http_generation(generation_mgr, session_id, request_id)
+                    turn_id = gen.turn_id
                     ctx = AgentRequestContext(
                         sid="http-stream",
                         session_id=session_id,
@@ -378,14 +464,23 @@ def create_ai_router(
                     if commit is not None:
                         terminal["turn_commit"] = _commit_metadata(commit)
                     yield f"data: {json.dumps(terminal)}\n\n"
+                except asyncio.CancelledError:
+                    raise
                 except Exception as e:
                     logger.error("Chat error: %s", e, exc_info=True)
-                    error_message = _chat_error_message(e)
-                    yield f"data: {json.dumps({'error': error_message})}\n\n"
+                    error_payload = _stream_error_contract(
+                        e,
+                        request_id=request_id,
+                        turn_id=turn_id,
+                    )
+                    yield f"data: {json.dumps(error_payload, ensure_ascii=False)}\n\n"
                     yield f"data: {json.dumps({
                         'choices': [{'delta': {'content': ''}, 'finish_reason': 'error'}],
                         'outcome': 'failed',
-                        'retryable': True,
+                        'retryable': bool(error_payload['retryable']),
+                        'code': error_payload['code'],
+                        'request_id': request_id,
+                        'turn_id': turn_id,
                     })}\n\n"
             return StreamingResponse(stream_generator(), media_type="text/event-stream")
         session_id = _resolve_chat_session_id(req.session_id)
@@ -466,11 +561,21 @@ def create_ai_router(
     async def translate_text(payload: dict[str, Any]):
         llm_client = get_llm_client()
         if not llm_client:
-            return JSONResponse({"error": "LLM client not initialized"}, status_code=503)
+            return error_response(
+                code="llm_not_initialized",
+                message="LLM client is not initialized",
+                status_code=503,
+                legacy_error="LLM client not initialized",
+            )
 
         text = _as_text(payload.get("text")).strip()
         if not text:
-            return JSONResponse({"error": "text is required"}, status_code=422)
+            return error_response(
+                code="text_required",
+                message="text is required",
+                status_code=422,
+                legacy_error="text is required",
+            )
 
         target_language = _as_text(payload.get("target_language"), "zh-CN").strip() or "zh-CN"
         source_language = _as_text(payload.get("source_language"), "auto").strip() or "auto"
@@ -511,12 +616,17 @@ def create_ai_router(
     @router.post("/svc/convert")
     async def svc_convert(
         file: UploadFile = File(...),
-        speaker_id: Optional[int] = Form(None),
-        pitch: Optional[int] = Form(None),
+        speaker_id: int | None = Form(None),
+        pitch: int | None = Form(None),
     ):
         svc_client = get_svc_client()
         if not svc_client:
-            return JSONResponse({"error": "SVC client not initialized"}, status_code=503)
+            return error_response(
+                code="svc_not_initialized",
+                message="SVC client is not initialized",
+                status_code=503,
+                legacy_error="SVC client not initialized",
+            )
         try:
             content = await _read_upload_limited(file, MAX_SVC_UPLOAD_BYTES)
             audio_base64 = base64.b64encode(content).decode()
@@ -529,7 +639,13 @@ def create_ai_router(
             )
             return result
         except UploadTooLargeError:
-            return JSONResponse({"error": "file_too_large", "max_bytes": MAX_SVC_UPLOAD_BYTES}, status_code=413)
+            return error_response(
+                code="file_too_large",
+                message="Uploaded file exceeds the size limit",
+                status_code=413,
+                details={"max_bytes": MAX_SVC_UPLOAD_BYTES},
+                legacy_fields={"max_bytes": MAX_SVC_UPLOAD_BYTES},
+            )
         except Exception as e:
             logger.error("SVC error: %s", e)
             return error_response(code="svc_error", message="SVC conversion failed", status_code=500)

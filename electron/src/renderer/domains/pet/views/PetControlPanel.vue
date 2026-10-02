@@ -69,7 +69,7 @@
             </el-button>
           </div>
           <el-slider v-model="scaleDraft" :min="0.12" :max="0.6" :step="0.01" @change="applyScale" />
-          <label class="field-label">透明度 {{ opacityDraft.toFixed(2) }}</label>
+          <label class="field-label">透明度 {{ ratioPercent(opacityDraft) }}</label>
           <el-slider v-model="opacityDraft" :min="0.1" :max="1" :step="0.05" @change="applyOpacity" />
         </el-card>
 
@@ -85,7 +85,6 @@
           <div class="capability-summary">
             <span>{{ state.modelType.toUpperCase() }} · {{ currentModel?.name ?? '未选择模型' }}</span>
             <span>状态：{{ state.ready ? '已就绪' : '未就绪' }}</span>
-            <span v-if="avatarCapabilities">修订 {{ avatarCapabilities.revision.slice(0, 12) }}</span>
           </div>
           <div v-if="avatarCapabilities" class="capability-tags" aria-label="模型动作能力">
             <el-tag
@@ -146,7 +145,7 @@
         <el-card class="control-card manifest-card" shadow="never">
           <template #header>
             <div class="card-heading">
-              <span>Agent 可用模型上下文</span>
+              <span>可用模型上下文</span>
               <el-tag size="small" type="info">{{ currentModel?.type.toUpperCase() ?? '模型' }}</el-tag>
             </div>
           </template>
@@ -160,7 +159,7 @@
             type="textarea"
             :rows="5"
             readonly
-            placeholder="当前模型没有可注入给 agent 的动作上下文"
+            placeholder="当前模型没有可用的动作上下文"
           />
           <div class="button-row">
             <el-button plain :disabled="!currentModel?.promptContext" @click="copyPromptContext">复制模型上下文</el-button>
@@ -191,11 +190,11 @@
             <el-option
               v-for="expression in expressionOptions"
               :key="expression.id"
-              :label="`${expression.label} · ${expression.kind}`"
+              :label="expression.label"
               :value="expression.id"
             />
           </el-select>
-          <label class="field-label">权重 {{ expressionWeight.toFixed(2) }}</label>
+          <label class="field-label">权重 {{ ratioPercent(expressionWeight) }}</label>
           <el-slider v-model="expressionWeight" :min="0" :max="1" :step="0.05" />
           <div class="button-row">
             <el-button type="primary" :disabled="!selectedExpressionId" @click="previewExpressionMix">预览表情</el-button>
@@ -206,7 +205,7 @@
             <el-option
               v-for="parameter in parameterOptions"
               :key="parameter.id"
-              :label="`${parameter.label} · ${parameter.id}`"
+              :label="parameter.label"
               :value="parameter.id"
             />
           </el-select>
@@ -290,13 +289,13 @@
             <el-input v-model="idleProfileDraft.relationshipTrend" placeholder="关系变化，例如升温" clearable />
           </div>
           <div class="form-grid compact-grid">
-            <label class="field-label">精力 {{ idleProfileDraft.energy.toFixed(2) }}</label>
+            <label class="field-label">空闲活跃度 {{ ratioPercent(idleProfileDraft.energy) }}</label>
             <el-slider v-model="idleProfileDraft.energy" :min="0" :max="1" :step="0.05" />
-            <label class="field-label">亲近度 {{ idleProfileDraft.affinity.toFixed(2) }}</label>
+            <label class="field-label">互动亲和度 {{ ratioPercent(idleProfileDraft.affinity) }}</label>
             <el-slider v-model="idleProfileDraft.affinity" :min="0" :max="1" :step="0.05" />
-            <label class="field-label">信任 {{ idleProfileDraft.trust.toFixed(2) }}</label>
+            <label class="field-label">信任感 {{ ratioPercent(idleProfileDraft.trust) }}</label>
             <el-slider v-model="idleProfileDraft.trust" :min="0" :max="1" :step="0.05" />
-            <label class="field-label">亲密度 {{ idleProfileDraft.intimacy.toFixed(2) }}</label>
+            <label class="field-label">关系亲密度 {{ ratioPercent(idleProfileDraft.intimacy) }}</label>
             <el-slider v-model="idleProfileDraft.intimacy" :min="0" :max="1" :step="0.05" />
           </div>
           <div class="button-row">
@@ -421,6 +420,7 @@ const modelSourceLabels = {
   local: '本地',
   plugin: '插件',
 } as const
+const ratioPercent = (value: number) => `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`
 let refreshSequence = 0
 let readyRetryTimer: number | null = null
 let readyRetryCount = 0

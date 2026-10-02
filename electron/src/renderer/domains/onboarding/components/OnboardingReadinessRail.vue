@@ -22,9 +22,6 @@
           <span>{{ statusLabel(probe) }}</span>
         </div>
         <p>{{ probeMessage(probe) }}</p>
-        <small v-if="typeof probe.durationMs === 'number'" class="readiness-duration">
-          {{ t('onboarding.duration', { ms: Math.round(probe.durationMs) }) }}
-        </small>
         <div v-if="repairAction(probe) || settingsAction(probe)" class="readiness-item-actions">
           <el-button
             v-if="repairAction(probe)"

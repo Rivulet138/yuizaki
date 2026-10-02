@@ -78,7 +78,7 @@
 
       <small v-if="syncHint" class="pet-model-manager__warning">{{ syncHint }}</small>
 
-      <details class="pet-model-manager__import">
+      <details class="pet-model-manager__import" open>
         <summary>{{ t('pet.model.manualImport') }}</summary>
         <div class="pet-model-manager__import-controls">
           <el-radio-group v-model="localModelType" size="small">

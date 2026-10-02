@@ -16,12 +16,12 @@
       <el-form-item label="视觉超时">
         <el-input-number :model-value="modelValue.timeout" :min="5" :max="120" controls-position="right" @change="updateTimeout" />
       </el-form-item>
-      <el-form-item label="Vision detail">
+      <el-form-item label="图像细节">
         <el-select :model-value="modelValue.detail" class="full-width" @change="update('detail', String($event) as VisionDetail)">
-          <el-option label="Low latency" value="low" />
-          <el-option label="Auto" value="auto" />
-          <el-option label="High fidelity" value="high" />
-          <el-option label="Original" value="original" />
+          <el-option label="优先速度" value="low" />
+          <el-option label="自动" value="auto" />
+          <el-option label="优先细节" value="high" />
+          <el-option label="原始质量" value="original" />
         </el-select>
       </el-form-item>
       <el-form-item label="视觉 API 地址（OpenAI 兼容）">

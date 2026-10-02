@@ -127,7 +127,8 @@ const MODEL_ZOOM_MIN = 1.2
 const MODEL_ZOOM_MAX = 3
 const ZOOM_STEP = 0.1
 const modelZoom = ref(1.7)
-const realtimeConnected = getSocketClient().connected
+const socketClient = getSocketClient()
+const realtimeConnected = socketClient.connected
 let compactMediaQuery: MediaQueryList | null = null
 
 const localeOptions = [
@@ -159,13 +160,20 @@ const resetModelZoom = (): void => {
   petStageRef.value?.resetZoom()
 }
 
+const handleInputAction = (event: Event): void => {
+  const action = (event as CustomEvent<{ action?: string }>).detail?.action
+  if (action === 'openPanel') chatOpen.value = true
+}
+
 onMounted(() => {
+  window.addEventListener('yuizaki:input-action', handleInputAction)
   compactMediaQuery = window.matchMedia('(max-width: 860px)')
   syncCompactStage()
   compactMediaQuery.addEventListener('change', syncCompactStage)
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('yuizaki:input-action', handleInputAction)
   compactMediaQuery?.removeEventListener('change', syncCompactStage)
 })
 </script>
@@ -180,17 +188,17 @@ onBeforeUnmount(() => {
   overflow: hidden;
   color: var(--yui-text);
   background: transparent;
-  --stage-border: rgba(255, 255, 255, .58);
-  --stage-chrome-surface: rgba(255, 255, 255, .18);
-  --stage-frame: rgba(255, 255, 255, .68);
-  --stage-window-surface: rgba(255, 255, 255, .86);
+  --stage-border: rgba(255, 255, 255, .68);
+  --stage-chrome-surface: rgba(255, 255, 255, .26);
+  --stage-frame: rgba(255, 255, 255, .72);
+  --stage-window-surface: rgba(255, 255, 255, .92);
 }
 
 :global(:root[data-theme='dark']) .browser-stage {
-  --stage-border: rgba(173, 207, 233, .42);
-  --stage-chrome-surface: rgba(15, 23, 42, .58);
-  --stage-frame: rgba(30, 41, 59, .9);
-  --stage-window-surface: rgba(15, 23, 42, .78);
+  --stage-border: rgba(173, 207, 233, .48);
+  --stage-chrome-surface: rgba(15, 23, 42, .68);
+  --stage-frame: rgba(30, 41, 59, .92);
+  --stage-window-surface: rgba(15, 23, 42, .88);
 }
 
 .browser-stage::before {
@@ -206,8 +214,11 @@ onBeforeUnmount(() => {
 }
 
 :global(.yuizaki-bg.browser-mode .stage-sidebar.sidebar) {
+  position: relative;
   flex: 0 0 202px;
   height: 100%;
+  z-index: 5;
+  pointer-events: auto;
   background: var(--stage-chrome-surface);
   background-image: none;
   border-color: var(--stage-border);
@@ -220,8 +231,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 58px;
-  padding: 12px 20px;
+  min-height: 60px;
+  padding: 10px 20px;
   border-bottom: 1px solid var(--stage-border);
   color: var(--yui-browser-text);
   background: var(--stage-chrome-surface);
@@ -244,8 +255,8 @@ onBeforeUnmount(() => {
   flex: 1;
   width: auto;
   min-height: 0;
-  gap: 14px;
-  margin: 14px 18px 18px;
+  gap: 16px;
+  margin: 14px 20px 20px;
   overflow: hidden;
 }
 
@@ -258,24 +269,24 @@ onBeforeUnmount(() => {
   place-items: center;
   overflow: hidden;
   isolation: isolate;
-  border: 6px solid var(--stage-frame);
-  border-radius: 26px;
+  border: 4px solid var(--stage-frame);
+  border-radius: 22px;
   background-color: #edf2f7;
   background-image: url('/assets/echobot-reference-bg.jpg');
   background-position: center;
   background-size: cover;
   background-repeat: no-repeat;
   backdrop-filter: none;
-  box-shadow: 0 0 0 1px rgba(15, 23, 42, .18), 0 18px 46px rgba(15, 23, 42, .18), inset 0 0 0 1px rgba(255, 255, 255, .58);
-  padding: 18px 26px;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, .14), 0 16px 38px rgba(15, 23, 42, .16), inset 0 0 0 1px rgba(255, 255, 255, .58);
+  padding: 16px 22px;
 }
 
-.stage-window { position: relative; z-index: 3; display: flex; flex-direction: column; width: clamp(360px, 31vw, 480px); min-width: 340px; margin: 0; overflow: hidden; border: 7px solid var(--stage-frame); border-radius: 28px; color: var(--yui-text); background: var(--stage-window-surface); box-shadow: 0 0 0 1px rgba(15, 23, 42, .18), 0 20px 52px rgba(15, 23, 42, .2), inset 0 0 0 1px rgba(255, 255, 255, .68); }
-.stage-window-header { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 8px 12px 8px 16px; border-bottom: 1px solid rgba(255, 255, 255, .42); background: rgba(255, 255, 255, .28); }
+.stage-window { position: relative; z-index: 3; display: flex; flex-direction: column; width: clamp(360px, 31vw, 480px); min-width: 340px; margin: 0; overflow: hidden; border: 4px solid var(--stage-frame); border-radius: 22px; color: var(--yui-text); background: var(--stage-window-surface); box-shadow: 0 0 0 1px rgba(15, 23, 42, .14), 0 18px 44px rgba(15, 23, 42, .18), inset 0 0 0 1px rgba(255, 255, 255, .68); }
+.stage-window-header { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; min-height: 46px; padding: 8px 12px 8px 14px; border-bottom: 1px solid rgba(255, 255, 255, .42); background: rgba(255, 255, 255, .44); }
 .stage-window-header div { display: flex; align-items: baseline; }
 .stage-window-header strong { font-size: 14px; }
 .stage-window-header span { color: var(--yui-muted); font-size: 10px; }
-.stage-window-body { position: relative; z-index: 1; flex: 1; min-height: 0; overflow: hidden; background: rgba(255, 255, 255, .08); }
+.stage-window-body { position: relative; z-index: 1; flex: 1; min-height: 0; overflow: hidden; background: var(--yui-chat-surface); }
 .stage-route-component { width: 100%; height: 100%; }
 .stage-window-zoom-controls { position: absolute; top: 78px; left: 14px; z-index: 4; display: inline-flex; align-items: center; gap: 6px; padding: 5px; border: 1px solid rgba(255, 255, 255, .72); border-radius: 10px; background: rgba(255, 255, 255, .62); box-shadow: 0 8px 18px rgba(15, 23, 42, .14); backdrop-filter: blur(5px); }
 .stage-window-zoom-button { display: inline-grid; width: 30px; height: 30px; padding: 0; place-items: center; border: 1px solid rgba(148, 163, 184, .42); border-radius: 7px; color: #334155; background: rgba(255, 255, 255, .72); cursor: pointer; transition: background .16s ease, border-color .16s ease, color .16s ease, opacity .16s ease; }
@@ -288,7 +299,7 @@ onBeforeUnmount(() => {
 .stage-window-body :deep(.chat-workspace) {
   border: 0;
   border-radius: 0;
-  background: transparent;
+  background: var(--yui-chat-surface);
   box-shadow: none;
 }
 
@@ -316,22 +327,20 @@ onBeforeUnmount(() => {
   background: rgba(30, 41, 59, .82);
 }
 
-:global(:root[data-theme='dark']) .stage-window-body {
-  background: rgba(15, 23, 42, .2);
-}
+:global(:root[data-theme='dark']) .stage-window-body { background: var(--yui-chat-surface); }
 
 @media (max-width: 860px) {
   .stage-sidebar { flex-basis: 68px; width: 68px; }
   .stage-sidebar :deep(.sidebar) { width: 68px; min-width: 68px; padding: 14px 8px; }
-  .stage-sidebar :deep(.brand-wordmark), .stage-sidebar :deep(.menu-label), .stage-sidebar :deep(.admin-toggle-label), .stage-sidebar :deep(.admin-toggle-icon), .stage-sidebar :deep(.menu-group-label), .stage-sidebar :deep(.settings-action) { display: none; }
+  .stage-sidebar :deep(.brand-wordmark), .stage-sidebar :deep(.menu-label), .stage-sidebar :deep(.admin-toggle-label), .stage-sidebar :deep(.admin-toggle-icon), .stage-sidebar :deep(.menu-group-label) { display: none; }
   .stage-sidebar :deep(.brand) { justify-content: center; padding: 0 0 14px; }
   .stage-sidebar :deep(.brand-name) { display: block; font-size: 16px; }
   .stage-sidebar :deep(.menu-item) { justify-content: center; padding: 0; }
   .stage-main { display: block; overflow: auto; }
-  .stage-display { min-height: 520px; height: calc(100vh - 58px); }
+  .stage-display { min-height: 520px; height: calc(100dvh - 60px); }
   .stage-main { margin: 10px 10px 12px; }
   .stage-display { padding: 12px 14px; }
-  .stage-window { position: absolute; top: 12px; right: 12px; bottom: 12px; width: min(360px, calc(100% - 24px)); min-width: 0; border-width: 5px; border-radius: 24px; }
+  .stage-window { position: absolute; top: 12px; right: 12px; bottom: 12px; width: min(360px, calc(100% - 24px)); min-width: 0; border-width: 3px; border-radius: 18px; }
   .stage-display :deep(.browser-pet-stage) { transform: translateX(-28%); }
   .stage-actions { gap: 6px; }
   .stage-brand strong, .stage-subtitle, .stage-live { display: none; }

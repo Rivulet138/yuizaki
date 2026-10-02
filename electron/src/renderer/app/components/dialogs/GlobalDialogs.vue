@@ -16,7 +16,6 @@
     </template>
     <div v-if="dialogStore.permissionRequest" id="permission-dialog-description">
       <p><strong>{{ t('dialogs.permission.tool') }}：</strong>{{ dialogStore.permissionRequest.tool_name }}</p>
-      <p v-if="dialogStore.permissionRequest.capability_id"><strong>Capability：</strong>{{ dialogStore.permissionRequest.capability_id }}</p>
       <p v-if="dialogStore.permissionRequest.capability_kind"><strong>{{ t('dialogs.permission.category') }}：</strong>{{ dialogStore.permissionRequest.capability_type }} / {{ dialogStore.permissionRequest.capability_kind }}</p>
       <p><strong>{{ t('dialogs.permission.risk') }}：</strong>{{ dialogStore.permissionRequest.risk_level }}</p>
       <p><strong>{{ t('dialogs.permission.reason') }}：</strong>{{ dialogStore.permissionRequest.reason }}</p>
@@ -51,7 +50,7 @@
       <el-form-item :label="t('dialogs.profile.temperament')"><el-select v-model="editCompanionForm.temperament" style="width:100%"><el-option :label="t('dialogs.profile.temperament.warm')" value="warm" /><el-option :label="t('dialogs.profile.temperament.playful')" value="playful" /><el-option :label="t('dialogs.profile.temperament.reserved')" value="reserved" /></el-select></el-form-item>
       <el-form-item :label="t('dialogs.profile.attachment')"><el-select v-model="editCompanionForm.attachment_style" style="width:100%"><el-option :label="t('dialogs.profile.attachment.secure')" value="secure" /><el-option :label="t('dialogs.profile.attachment.independent')" value="independent" /><el-option :label="t('dialogs.profile.attachment.attached')" value="attached" /></el-select></el-form-item>
       <el-form-item :label="t('dialogs.profile.support')"><el-select v-model="editCompanionForm.support_style" style="width:100%"><el-option :label="t('dialogs.profile.support.gentle')" value="gentle" /><el-option :label="t('dialogs.profile.support.analytical')" value="analytical" /><el-option :label="t('dialogs.profile.support.cheerful')" value="cheerful" /></el-select></el-form-item>
-      <el-form-item label="TTS Base URL"><el-input v-model="editCompanionForm.voice_profile.base_url" /></el-form-item>
+      <el-form-item label="语音服务地址"><el-input v-model="editCompanionForm.voice_profile.base_url" /></el-form-item>
       <el-form-item :label="t('dialogs.profile.referenceAudio')"><el-input v-model="editCompanionForm.voice_profile.ref_audio" /></el-form-item>
       <el-form-item :label="t('dialogs.profile.referenceText')"><el-input v-model="editCompanionForm.voice_profile.ref_text" type="textarea" :rows="2" /></el-form-item>
       <el-form-item :label="t('dialogs.profile.voiceLanguage')"><el-input v-model="editCompanionForm.voice_profile.lang" /></el-form-item>

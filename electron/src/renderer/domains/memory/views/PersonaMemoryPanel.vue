@@ -3,7 +3,7 @@
     <div class="persona-panel">
       <div class="panel-toolbar">
         <div>
-          <h3>Heartbeat Snapshot</h3>
+          <h3>当前状态</h3>
         </div>
         <el-button type="primary" plain :loading="loading" :disabled="loading" @click="loadHeartbeat">刷新状态</el-button>
       </div>
@@ -11,34 +11,34 @@
       <el-alert v-if="loadError" :title="loadError" type="warning" show-icon :closable="false" />
 
       <el-card shadow="never">
-        <template #header>Persona 状态</template>
+         <template #header>桌宠状态</template>
         <el-descriptions :column="3" border>
           <el-descriptions-item label="心情">{{ heartbeat?.persona?.mood || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="精力">{{ heartbeat?.persona?.energy || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="亲密度">{{ heartbeat?.persona?.affinity?.toFixed(3) || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="活跃程度">{{ heartbeat?.persona?.energy || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="互动熟悉度">{{ formatAffinity(heartbeat?.persona?.affinity) }}</el-descriptions-item>
           <el-descriptions-item label="运行状态">{{ heartbeat?.running ? '运行中' : '已停止' }}</el-descriptions-item>
-          <el-descriptions-item label="心跳次数">{{ heartbeat?.tick_count || 0 }}</el-descriptions-item>
-          <el-descriptions-item label="间隔">{{ heartbeat?.interval_seconds || '-' }} 秒</el-descriptions-item>
+          <el-descriptions-item label="已运行次数">{{ heartbeat?.tick_count || 0 }}</el-descriptions-item>
+          <el-descriptions-item label="自动检查间隔">{{ heartbeat?.interval_seconds || '-' }} 秒</el-descriptions-item>
         </el-descriptions>
       </el-card>
 
       <el-card shadow="never">
-        <template #header>最近行为事件</template>
+        <template #header>最新行为</template>
         <el-empty v-if="!latestBehaviorEvent" description="暂无截获的行为事件" />
         <div v-else class="event-section">
           <el-descriptions :column="2" border>
-            <el-descriptions-item label="类型">{{ latestBehaviorEvent.type }}</el-descriptions-item>
+            <el-descriptions-item label="类型">{{ behaviorTypeLabel(latestBehaviorEvent.type) }}</el-descriptions-item>
             <el-descriptions-item label="触发原因">{{ latestBehaviorEvent.trigger_reason || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="情绪">{{ latestBehaviorEvent.emotion_id || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="动作">{{ latestBehaviorEvent.motion_group || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="动作提示" :span="2">{{ latestBehaviorEvent.prompt || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="情绪">{{ behaviorValueLabel(latestBehaviorEvent.emotion_id) }}</el-descriptions-item>
+            <el-descriptions-item label="动作">{{ behaviorValueLabel(latestBehaviorEvent.motion_group) }}</el-descriptions-item>
+            <el-descriptions-item label="互动提示" :span="2">{{ latestBehaviorEvent.prompt || '-' }}</el-descriptions-item>
           </el-descriptions>
 
           <el-alert :title="latestBehaviorEvent.message || '(无消息体)'" type="info" :closable="false" />
 
           <el-alert
             v-if="latestBehaviorEvent.proactive_state?.suppression_reasons?.length"
-            :title="latestBehaviorEvent.proactive_state.suppression_reasons.join(', ')"
+            :title="`暂未主动互动：${latestBehaviorEvent.proactive_state.suppression_reasons.map(suppressionReasonLabel).join('、')}`"
             type="warning"
             show-icon
             :closable="false"
@@ -53,17 +53,19 @@
       </el-card>
 
       <el-card shadow="never">
-        <template #header>行为事件日志</template>
+        <template #header>最近行为</template>
         <el-empty v-if="!heartbeat?.behavior_events?.length" description="暂无行为事件" />
-        <el-table v-else :data="heartbeat.behavior_events.slice().reverse()" size="small" border>
-          <el-table-column prop="at" label="时间" width="180" />
-          <el-table-column prop="type" label="类型" width="160" />
-          <el-table-column prop="message" label="消息" min-width="260" show-overflow-tooltip />
-        </el-table>
+        <div v-else class="event-table-wrap">
+          <el-table :data="heartbeat.behavior_events.slice().reverse()" size="small" border>
+            <el-table-column prop="at" label="时间" width="180" />
+            <el-table-column label="类型" width="160"><template #default="scope">{{ behaviorTypeLabel(scope.row.type) }}</template></el-table-column>
+            <el-table-column prop="message" label="消息" min-width="260" show-overflow-tooltip />
+          </el-table>
+        </div>
       </el-card>
 
       <el-card shadow="never">
-        <template #header>行为建议</template>
+        <template #header>互动建议</template>
         <div v-if="behaviorSuggestions.length" class="suggestion-list">
           <el-tag v-for="(item, index) in behaviorSuggestions" :key="index" type="info">{{ item }}</el-tag>
         </div>
@@ -110,6 +112,50 @@ const latestBehaviorEvent = computed(() => {
   return Array.isArray(events) && events.length > 0 ? events[events.length - 1] : null
 })
 
+const formatAffinity = (value: number | undefined) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-'
+  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`
+}
+
+const behaviorValueLabel = (value: unknown) => {
+  const labels: Record<string, string> = {
+    happy: '开心',
+    sad: '低落',
+    angry: '生气',
+    surprised: '惊讶',
+    neutral: '平静',
+    excited: '兴奋',
+    idle: '待机',
+    wave: '挥手',
+    nod: '点头',
+  }
+  const text = typeof value === 'string' ? value.trim() : ''
+  return labels[text] || text.replaceAll('_', ' ') || '-'
+}
+
+const suppressionReasonLabel = (value: string) => {
+  const labels: Record<string, string> = {
+    cooldown: '仍在冷却时间内',
+    disabled: '主动互动已关闭',
+    quiet_hours: '处于免打扰时段',
+    no_signal: '暂时没有可用内容',
+    rate_limited: '互动频率已达到上限',
+  }
+  return labels[value] || value.replaceAll('_', ' ')
+}
+
+const behaviorTypeLabel = (value: unknown) => {
+  const labels: Record<string, string> = {
+    proactive_message: '主动消息',
+    scheduled_task: '计划任务',
+    emotion: '情绪变化',
+    motion: '动作变化',
+    reminder: '提醒',
+  }
+  const text = typeof value === 'string' ? value : ''
+  return labels[text] || text || '行为事件'
+}
+
 const loadHeartbeat = async () => {
   const requestId = ++heartbeatLoadSequence
   loading.value = true
@@ -122,7 +168,7 @@ const loadHeartbeat = async () => {
     behaviorSuggestions.value = Array.isArray(events) ? events.slice(-5).map((item) => item.message).filter(Boolean) : []
   } catch (error) {
     if (requestId !== heartbeatLoadSequence) return
-    loadError.value = error instanceof Error ? error.message : '无法读取 Heartbeat 状态'
+    loadError.value = error instanceof Error ? error.message : '无法读取桌宠状态'
     console.warn('加载 Heartbeat 状态失败', error)
   } finally {
     if (requestId === heartbeatLoadSequence) loading.value = false
@@ -137,7 +183,7 @@ const triggerEmotion = async () => {
   triggeringEmotion.value = true
   try {
     await petControlClient.triggerEmotion(emotionId)
-    ElMessage.success(`已触发表情 ${emotionId}`)
+    ElMessage.success('已播放表情')
   } catch {
     ElMessage.warning('当前行为事件未映射到可用表情预设')
   } finally {
@@ -153,7 +199,7 @@ const triggerMotion = async () => {
   triggeringMotion.value = true
   try {
     await petControlClient.triggerMotion(motionGroup, 0)
-    ElMessage.success(`已触发动作 ${motionGroup}`)
+    ElMessage.success('已播放动作')
   } catch {
     ElMessage.warning('当前行为事件未映射到可用动作组')
   } finally {
@@ -197,6 +243,15 @@ onMounted(() => {
   margin: 0 0 4px;
   color: var(--yui-text);
   font-size: 16px;
+}
+
+.event-table-wrap {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.event-table-wrap :deep(.el-table) {
+  min-width: 560px;
 }
 
 .event-section,

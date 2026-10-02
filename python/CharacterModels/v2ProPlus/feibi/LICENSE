@@ -1,0 +1,13 @@
+MIT License
+
+SPDX-License-Identifier: MIT
+
+This character bundle is distributed under the same MIT license as the Genie
+TTS built-in character assets from High-Logic/Genie. The upstream project and
+license information are available at:
+
+https://github.com/High-Logic/Genie-TTS
+https://github.com/High-Logic/Genie-TTS/blob/main/LICENSE
+
+This notice does not change the license of the Yuizaki source code, the Genie
+TTS runtime, or any other character bundle.

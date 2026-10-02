@@ -1,9 +1,11 @@
 ﻿import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
-import path from 'path';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const rendererPort = Number.parseInt(process.env.RENDERER_PORT || '', 10);
-const rendererRoot = path.resolve(__dirname, 'src/renderer');
+const configDir = path.dirname(fileURLToPath(import.meta.url));
+const rendererRoot = path.resolve(configDir, 'src/renderer');
 const rendererInputs = {
   // UI window entry (Vue app)
   main: path.resolve(rendererRoot, 'index.html'),
@@ -91,7 +93,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src/renderer'),
+      '@': path.resolve(configDir, './src/renderer'),
     },
   },
 });

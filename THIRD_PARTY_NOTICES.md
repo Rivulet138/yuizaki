@@ -36,6 +36,25 @@ The required first-run resources are prepared from the following upstream projec
 
 感谢上述项目及其维护者。Yuizaki 只负责集成和下载编排，不重新授权上游代码、模型、声音或角色素材。
 
+## Genie character bundles / Genie 角色模型
+
+The following locally supplied Genie character bundles are published in their
+own directories under `python/CharacterModels/v2ProPlus/`. Each directory has
+an individual `LICENSE` file declaring CC BY-NC-SA 4.0 for that bundle only:
+
+| Character | License | Scope |
+| --- | --- | --- |
+| 辉夜 | [CC BY-NC-SA 4.0](python/CharacterModels/v2ProPlus/辉夜/LICENSE) | This character bundle only |
+| 莓华 | [CC BY-NC-SA 4.0](python/CharacterModels/v2ProPlus/莓华/LICENSE) | This character bundle only |
+| 美久栗 | [CC BY-NC-SA 4.0](python/CharacterModels/v2ProPlus/美久栗/LICENSE) | This character bundle only |
+| 普拉琪娜_e15_e8_correct_sampling_v2 | [CC BY-NC-SA 4.0](python/CharacterModels/v2ProPlus/普拉琪娜_e15_e8_correct_sampling_v2/LICENSE) | This character bundle only |
+| feibi | [Genie upstream MIT](python/CharacterModels/v2ProPlus/feibi/LICENSE) | Genie built-in character bundle |
+
+The four CC BY-NC-SA 4.0 declarations above apply only to their respective
+bundles. `feibi` follows the Genie upstream MIT license. The root MIT license
+remains the license for Yuizaki source code; it does not license these
+character assets or the shared GenieData runtime resources.
+
 ## Resource lock review / 资源锁核验
 
 The downloadable resources in `resources.lock.json` have the following release boundary:

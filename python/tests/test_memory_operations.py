@@ -7,7 +7,9 @@ import numpy as np
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
 from modules.memory.backend import MemorySearchIncompleteError
+from modules.memory.indexed_backend import IndexedMemoryBackend
 from modules.memory.operations import MemoryOperationLog, new_operation
 from modules.memory.routes import (
     MemoryState,
@@ -161,6 +163,30 @@ def test_sqlite_operation_ledger_keeps_scoped_queries_exact(tmp_path: Path) -> N
 
     operations = store.list_operations(scope="workspace", workspace_id="ws-1")
     assert [item["document_id"] for item in operations] == ["workspace-doc"]
+
+
+def test_indexed_backend_delegates_operation_ledger_to_authority() -> None:
+    class Authority:
+        def __init__(self) -> None:
+            self.recorded = []
+
+        def record_operation(self, operation) -> None:
+            self.recorded.append(operation)
+
+        def list_operations(self, **kwargs):
+            return [{"operation_id": "op-1", **kwargs}]
+
+    authority = Authority()
+    backend = IndexedMemoryBackend.__new__(IndexedMemoryBackend)
+    backend.authority = authority
+    operation = new_operation(operation="create", document_id="doc-1")
+
+    backend.record_operation(operation)
+    assert authority.recorded == [operation]
+    assert backend.list_operations(document_id="doc-1", limit=1) == [
+        {"operation_id": "op-1", "document_id": "doc-1", "scope": None,
+         "workspace_id": None, "session_id": None, "limit": 1}
+    ]
 
 
 def test_sqlite_operation_ledger_migrates_legacy_scope_id_whitespace(tmp_path: Path) -> None:

@@ -16,8 +16,9 @@ from collections.abc import Callable
 from typing import Any
 
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import Response
 
+from modules.system.api_response import error_response
 from modules.system.backend_api_auth import (
     HOST_DESKTOP_ACTION_PREFIX,
     HOST_DESKTOP_ACTION_TOKEN_ENV,
@@ -82,7 +83,12 @@ def install_backend_http_middleware(
                 backend_api_token,
             )
             if not allowed:
-                return JSONResponse({"error": "unauthorized", "message": message}, status_code=401)
+                return error_response(
+                    code="unauthorized",
+                    message=message,
+                    status_code=401,
+                    request_id=getattr(request.state, "trace_id", None),
+                )
             return await call_next(request)
         client_host = request.client.host if request.client else None
         if backend_api_auth_required(request.url.path, request.method, client_host=client_host):
@@ -93,7 +99,12 @@ def install_backend_http_middleware(
                 client_host=client_host,
             )
             if not allowed:
-                return JSONResponse({"error": "unauthorized", "message": message}, status_code=401)
+                return error_response(
+                    code="unauthorized",
+                    message=message,
+                    status_code=401,
+                    request_id=getattr(request.state, "trace_id", None),
+                )
         return await call_next(request)
 
     @app.middleware("http")

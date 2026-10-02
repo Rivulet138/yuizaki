@@ -39,15 +39,19 @@ def _load_recovery_descriptor(value: Any) -> dict[str, Any] | None:
     if value.get("available") is True and value.get("_process_epoch") != _PROCESS_RECOVERY_EPOCH:
         stale = {
             key: descriptor[key]
-            for key in ("scope", "single_use", "failed_step_id")
+            for key in (
+                "scope", "single_use", "failed_step_id", "durable_recovery_id",
+                "recovery_schema", "durable_available",
+            )
             if key in descriptor
         }
+        durable = bool(stale.get("durable_available") and stale.get("durable_recovery_id"))
         return {
             **stale,
             "available": False,
-            "action": "inspect_failure",
-            "retryable": False,
-            "confirmation_required": True,
+            "action": "resume_read_step" if durable else "inspect_failure",
+            "retryable": durable,
+            "confirmation_required": not durable,
             "reason": "process_state_missing",
         }
     return descriptor
@@ -380,6 +384,9 @@ class TurnCommitStore:
             "task_id": extra.get("task_id"),
             "task_name": extra.get("task_name"),
             "task_mode": extra.get("task_mode"),
+            "recovery_id": extra.get("recovery_id"),
+            "recovery_attempt": extra.get("recovery_attempt"),
+            "recovery_source": extra.get("recovery_source"),
             "owner_agent_id": extra.get("owner_agent_id"),
             "owner_agent_role": extra.get("owner_agent_role"),
             "route_reason": extra.get("route_reason"),
@@ -520,6 +527,40 @@ class TurnCommitStore:
             "result": result,
             "created_at": row["created_at"],
             "persisted": True,
+        }
+
+    def find_outbox_by_idempotency_key(self, idempotency_key: str) -> dict[str, Any] | None:
+        """Return one outbox event by its globally unique idempotency key.
+
+        This lookup intentionally does not require a workspace.  It is used
+        only to confirm an already persisted ACK after a caller lost its
+        in-memory context; the exact key remains the authorization boundary.
+        """
+        key = str(idempotency_key or "").strip()
+        if not key:
+            return None
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                """SELECT event_id, idempotency_key, event_type, payload_json,
+                          delivered_at, dead_lettered_at
+                   FROM turn_outbox WHERE idempotency_key = ?""",
+                (key,),
+            ).fetchone()
+            if row is None:
+                return None
+            acknowledgements = conn.execute(
+                """SELECT projection_name FROM turn_outbox_projection_acks
+                   WHERE event_id = ?""",
+                (int(row["event_id"]),),
+            ).fetchall()
+        return {
+            "event_id": int(row["event_id"]),
+            "idempotency_key": str(row["idempotency_key"]),
+            "event_type": str(row["event_type"]),
+            "payload": _load_persisted_payload(json.loads(row["payload_json"])),
+            "delivered_at": row["delivered_at"],
+            "dead_lettered_at": row["dead_lettered_at"],
+            "acknowledged_projections": {str(item["projection_name"]) for item in acknowledgements},
         }
 
     def connector_delivery(self, delivery_key: str) -> dict[str, Any] | None:

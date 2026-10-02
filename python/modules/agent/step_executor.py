@@ -3,21 +3,24 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import inspect
 import re
 import secrets
+import sqlite3
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from threading import Lock
 from typing import Any, ClassVar, cast
 
-from .context import AgentRequestContext
+from .context import AgentPipelineResult, AgentRequestContext
 from .failure_recovery import (
     FailureRecoveryManager,
     ResumeTokenError,
     StepFailure,
     classify_failure,
+    plan_hash,
 )
 from .models import StepConditionRecord, StepExecutionRecord, StepResultRecord
 from .permission_receipt import PermissionReceipt
@@ -35,6 +38,7 @@ from .planner import (
     strict_json_loads,
     validate_plan,
 )
+from .recovery_store import RecoverySerializationError, SQLiteStepRecoveryStore
 from .route_policy import system_prompt_for_agent_role
 from .tool_loop import run_tool_loop
 from .tool_result import ToolResultEnvelope, is_known_success
@@ -75,6 +79,7 @@ class _LedgerAttestation:
 
 
 def _missing_agent_result(name: str) -> dict[str, Any]:
+    """Build the stable terminal payload used when an agent dependency is absent."""
     return {
         "reply": "",
         "tool_calls": [],
@@ -115,6 +120,7 @@ def _project_non_retryable_recovery(failure: StepFailure) -> dict[str, Any]:
 
 
 def _strict_json_object(value: str | bytes, *, path: str) -> dict[str, Any]:
+    """Decode one strict JSON object for capability and attestation checks."""
     decoded = strict_json_loads(value, path=path)
     if not isinstance(decoded, dict):
         raise PlanValidationError(f"{path} must be a JSON object")
@@ -122,6 +128,14 @@ def _strict_json_object(value: str | bytes, *, path: str) -> dict[str, Any]:
 
 
 class StepExecutor:
+    """Validate, authorize, execute, and attest typed plan steps.
+
+    Every execution path is capability-bound: the plan is validated first,
+    each step is claimed once, and the result ledger is attested before it can
+    satisfy a downstream dependency.  In-process resume handles are single-use;
+    the optional durable store contains only the restricted read-step subset.
+    """
+
     max_tool_retries = 1
     _MAX_RECOVERY_ENTRIES = 512
     success_statuses: ClassVar[set[str]] = {"ok", "created"}
@@ -130,6 +144,8 @@ class StepExecutor:
     def __init__(
         self,
         *,
+        recovery_store: SQLiteStepRecoveryStore | None = None,
+        recovery_context_factory: Callable[[dict[str, Any]], AgentRequestContext | Awaitable[AgentRequestContext]] | None = None,
         max_plan_steps: int = 32,
         max_retry_budget: int = 8,
         max_timeout_seconds: int = 900,
@@ -165,6 +181,11 @@ class StepExecutor:
         self._plan_max_schedule_seconds = max_schedule_seconds
         self._plan_max_join_chars = max_join_chars
         self._allow_external_dependencies = bool(allow_external_dependencies)
+        self._recovery_store = recovery_store
+        # Persist only identity and typed step data.  On restart this factory
+        # must rebuild registry/policy bindings from the current workspace;
+        # serializing runtime objects would carry stale callables or secrets.
+        self._recovery_context_factory = recovery_context_factory
         self._capability_secret = secrets.token_bytes(32)
         self._executor_identity = secrets.token_hex(16)
         self._validated_results: dict[str, dict[str, _LedgerAttestation]] = {}
@@ -172,9 +193,8 @@ class StepExecutor:
         self._active_step_leases: dict[tuple[str, str], str] = {}
         self._rollback_states: dict[tuple[str, str], str] = {}
         self._resume_capabilities: dict[str, _PlanCapability] = {}
-        # A resume token is bound to the exact step slice that minted it.  A
-        # retry may operate on a downstream closure rather than the original
-        # full plan, so subsequent opaque handles must retain that slice.
+        # A retry may execute a downstream closure, but every chained handle
+        # still needs the exact validated graph that minted its capability.
         self._resume_steps: dict[str, tuple[PlanStepUnion, ...]] = {}
         self._consumed_resume_tokens: set[str] = set()
         self._recovery_handles: dict[str, _RecoveryHandle] = {}
@@ -183,7 +203,91 @@ class StepExecutor:
 
     @staticmethod
     def _turn_id(ctx: AgentRequestContext, turn_id: str | None = None) -> str:
+        """Resolve the semantic turn identity used by scope and recovery checks."""
         return str(turn_id or ctx.turn_id or ctx.extra.get("turn_id") or ctx.request_id or ctx.sid)
+
+    @staticmethod
+    def _recovery_context_snapshot(
+        ctx: AgentRequestContext,
+        *,
+        recovery_id: str,
+    ) -> dict[str, Any]:
+        """Capture only bounded, non-secret request identity for restart rebuilds.
+
+        Messages, credentials, callables, and capability tokens are excluded.
+        The current runtime revision fences a recovery against a hot-swapped
+        workspace context; a changed revision requires a fresh user action.
+        """
+        runtime_context = getattr(ctx, "runtime_context", None)
+        return {
+            "recovery_id": str(recovery_id),
+            "sid": str(ctx.sid or "")[:256],
+            "workspace_id": str(ctx.workspace_id or "")[:256],
+            "session_id": str(ctx.session_id or "")[:256],
+            "request_id": str(ctx.request_id or "")[:256],
+            "turn_id": str(ctx.turn_id or ctx.extra.get("turn_id") or "")[:256],
+            "generation_id": str(ctx.generation_id or "")[:256],
+            "interruption_epoch": max(0, int(ctx.interruption_epoch or 0)),
+            "runtime_revision": getattr(runtime_context, "revision", None),
+            "model": str(ctx.model or "")[:256] or None,
+            "max_tokens": max(1, min(262_144, int(ctx.max_tokens or 8192))),
+            "permission_scope": str(ctx.permission_scope or "")[:256] or None,
+            "autonomy_mode": str(ctx.autonomy_mode or "companion")[:64],
+        }
+
+    @staticmethod
+    def _is_durable_read_step(ctx: AgentRequestContext, step: ToolStep) -> bool:
+        """Return whether a step is safe for the restricted restart path.
+
+        Durable recovery requires a currently registered builtin read tool with
+        no confirmation gate.  Registry metadata is evaluated at resume time,
+        so a changed or missing definition fails closed.
+        """
+        registry = getattr(ctx.tool_executor, "registry", None) or ctx.tool_registry
+        get_definition = getattr(registry, "get", None)
+        definition = get_definition(step.tool_name) if callable(get_definition) else None
+        return bool(
+            definition is not None
+            and getattr(definition, "source", "") == "builtin"
+            and getattr(definition, "effect_kind", "unknown") == "read"
+            and getattr(definition, "require_confirm", False) is False
+        )
+
+    def _decorate_durable_recovery(
+        self,
+        ctx: AgentRequestContext,
+        steps: Sequence[PlanStepUnion],
+        failure: StepFailure,
+        recovery: dict[str, Any],
+        handle: str,
+    ) -> dict[str, Any]:
+        """Annotate a recovery response only when a restart-safe row exists.
+
+        The opaque in-process handle remains the same.  This method merely
+        reports that the failed step also has a bounded durable marker; it never
+        turns an unsafe write, dependency, or stale runtime into a resumable
+        operation.
+        """
+        failed_step = next((step for step in steps if getattr(step, "id", None) == failure.step_id), None)
+        runtime_context = getattr(ctx, "runtime_context", None)
+        runtime_revision = getattr(runtime_context, "revision", None)
+        has_fresh_context_boundary = (
+            bool(str(ctx.workspace_id or "").strip())
+            and isinstance(runtime_revision, int)
+            and not isinstance(runtime_revision, bool)
+            and runtime_revision > 0
+        )
+        if (
+            isinstance(failed_step, ToolStep)
+            and has_fresh_context_boundary
+            and self._is_durable_read_step(ctx, failed_step)
+        ):
+            recovery.update({
+                "durable_recovery_id": handle,
+                "recovery_schema": "tool-step.v1",
+                "durable_available": True,
+            })
+        return recovery
 
     def create_resume_token(
         self,
@@ -194,6 +298,12 @@ class StepExecutor:
         turn_id: str | None = None,
         ttl_seconds: int = 900,
     ) -> str:
+        """Mint a scope-bound, single-use token for the supplied plan slice.
+
+        The token is an in-process capability.  It is retained with the exact
+        step slice that created it because chained retries may execute a
+        downstream closure while still needing the original graph for proof.
+        """
         self._prune_recovery_state()
         token = self.failure_recovery.create_resume_token(
             failure,
@@ -210,6 +320,14 @@ class StepExecutor:
     def _prune_recovery_state(self) -> None:
         """Bound in-process recovery authority even when handles are abandoned."""
         now = time.time()
+        if self._recovery_store is not None:
+            # Durable rows are markers, not authority. Reap expired rows so an
+            # abandoned turn cannot grow the SQLite file indefinitely.
+            try:
+                self._recovery_store.reap_expired(now=now)
+            except sqlite3.Error as exc:
+                # Housekeeping is best effort and must never block the turn.
+                _ = exc
         with self._recovery_handle_lock:
             for handle, record in list(self._recovery_handles.items()):
                 if record.expires_at <= now:
@@ -232,6 +350,7 @@ class StepExecutor:
         *,
         turn_id: str | None = None,
     ) -> dict[str, Any]:
+        """Validate a resume token against identity, plan, and failed step."""
         return self.failure_recovery.validate_resume_token(
             token,
             workspace_id=ctx.workspace_id,
@@ -262,8 +381,46 @@ class StepExecutor:
         ttl_seconds: int,
         completed_step_ids: Sequence[str] = (),
     ) -> str:
+        """Register one process-local handle and best-effort durable marker.
+
+        Durable serialization failures are intentionally swallowed here: the
+        primary failed turn must remain reportable, while only a fully valid
+        read-step marker may be advertised for restart recovery.
+        """
         handle = f"rh_{secrets.token_urlsafe(24)}"
         now = time.time()
+        failed_step = next((step for step in steps if getattr(step, "id", None) == failure.step_id), None)
+        durable_read = isinstance(failed_step, ToolStep) and self._is_durable_read_step(ctx, failed_step)
+        if self._recovery_store is not None:
+            if isinstance(failed_step, ToolStep):
+                try:
+                    try:
+                        recovery_plan_hash = plan_hash(steps)
+                    except (TypeError, ValueError):
+                        # The marker is advisory; a legacy/non-JSON plan must
+                        # not turn an already failed turn into a second error.
+                        recovery_plan_hash = None
+                    self._recovery_store.put(
+                        handle,
+                        failed_step,
+                        next_attempt_at=now,
+                        expires_at=now + max(1, int(ttl_seconds)),
+                        workspace_id=str(ctx.workspace_id or ""),
+                        session_id=str(ctx.session_id or ""),
+                        turn_id=self._turn_id(ctx),
+                        failed_step_id=failure.step_id,
+                        plan_hash=recovery_plan_hash,
+                        context_snapshot=(
+                            self._recovery_context_snapshot(ctx, recovery_id=handle)
+                            if durable_read
+                            else None
+                        ),
+                    )
+                except (RecoverySerializationError, ValueError, sqlite3.Error) as exc:
+                    # Serialization is optional for legacy plans. Keep the
+                    # in-process capability authoritative and never advertise
+                    # an unsafe step as restart-recoverable.
+                    _ = exc
         with self._recovery_handle_lock:
             self._recovery_handles[handle] = _RecoveryHandle(
                 token=token,
@@ -292,6 +449,13 @@ class StepExecutor:
         turn_id: str,
         failed_step_id: str,
     ) -> _RecoveryHandle | None:
+        """Consume a matching local handle while leaving its durable row claimable.
+
+        Scope mismatches and expired handles return ``None`` without revealing
+        whether another session owns the handle.  The SQLite marker is kept
+        until a fenced attempt finishes so a crash after this consume can be
+        recovered by a later process.
+        """
         now = time.time()
         with self._recovery_handle_lock:
             record = self._recovery_handles.get(handle)
@@ -299,6 +463,11 @@ class StepExecutor:
                 return None
             if record.expires_at <= now:
                 self._recovery_handles.pop(handle, None)
+                if self._recovery_store is not None:
+                    try:
+                        self._recovery_store.delete(handle)
+                    except sqlite3.Error as exc:
+                        _ = exc
                 return None
             if (
                 record.workspace_id != str(workspace_id or "")
@@ -308,7 +477,196 @@ class StepExecutor:
             ):
                 return None
             self._recovery_handles.pop(handle, None)
+            # Keep the durable row until a fenced attempt finishes. A crash
+            # after this local consume must remain claimable after lease expiry.
             return record
+
+    @staticmethod
+    def _as_pipeline_result(result: Mapping[str, Any]) -> AgentPipelineResult:
+        """Convert a step execution into the normal durable turn result type."""
+        raw_steps = result.get("step_results")
+        step_results = raw_steps if isinstance(raw_steps, list) else []
+        statuses = {
+            str(item.get("status") or "").strip().lower()
+            for item in step_results
+            if isinstance(item, Mapping)
+        }
+        failure = result.get("failure")
+        failure_value = dict(failure) if isinstance(failure, Mapping) else None
+        recovery = result.get("recovery")
+        recovery_value = dict(recovery) if isinstance(recovery, Mapping) else None
+        if "unknown_effect" in statuses:
+            outcome = "unknown_effect"
+        elif result.get("error") or failure_value is not None or "error" in statuses:
+            outcome = "failed"
+        else:
+            outcome = "completed"
+        return AgentPipelineResult(
+            reply=str(result.get("reply") or ""),
+            pet_control=(
+                dict(result["pet_control"])
+                if isinstance(result.get("pet_control"), Mapping)
+                else None
+            ),
+            tool_calls=[
+                dict(item) for item in result.get("tool_calls", [])
+                if isinstance(item, Mapping)
+            ],
+            action_envelope=(
+                dict(result["action_envelope"])
+                if isinstance(result.get("action_envelope"), Mapping)
+                else None
+            ),
+            failure=failure_value,
+            recovery=recovery_value,
+            outcome=outcome,
+            retryable=bool(recovery_value and recovery_value.get("available") is True),
+            configured_budget=dict(result.get("configured_budget") or {}),
+            consumed_usage=dict(result.get("consumed_usage") or {}),
+        )
+
+    async def _resume_durable_recovery_handle(
+        self,
+        handle: str,
+        *,
+        workspace_id: str | None,
+        session_id: str,
+        turn_id: str,
+        failed_step_id: str,
+    ) -> dict[str, Any]:
+        """Resume one independent read step after a process restart.
+
+        This path intentionally excludes writes, confirmation-gated tools,
+        dependent plans, and the old in-memory capability/token graph. The
+        fresh runtime context is revalidated by TurnService before execution;
+        completion is accepted only with the store's fencing token.
+        """
+        store = self._recovery_store
+        factory = self._recovery_context_factory
+        if store is None or not callable(factory):
+            return {"ok": False, "error": "recovery_not_available"}
+        claim = store.claim_recovery(
+            handle,
+            self._executor_identity,
+            workspace_id=str(workspace_id or ""),
+            session_id=session_id,
+            turn_id=turn_id,
+            failed_step_id=failed_step_id,
+        )
+        if claim is None:
+            persisted = store.get_recovery(handle)
+            if persisted is not None and persisted.get("status") == "claimed":
+                return {"ok": False, "error": "recovery_in_progress"}
+            return {"ok": False, "error": "invalid_or_expired_recovery_handle"}
+        record = claim.get("record") if isinstance(claim, Mapping) else None
+        step = claim.get("step") if isinstance(claim, Mapping) else None
+        fencing_token = str(claim.get("fencing_token") or "") if isinstance(claim, Mapping) else ""
+        if not isinstance(record, Mapping) or not isinstance(step, ToolStep) or not fencing_token:
+            return {"ok": False, "error": "recovery_record_invalid"}
+        snapshot = record.get("context_snapshot")
+        if not isinstance(snapshot, Mapping):
+            store.finish(
+                handle,
+                success=False,
+                owner=self._executor_identity,
+                fencing_token=fencing_token,
+                error={"code": "recovery_context_missing"},
+            )
+            return {"ok": False, "error": "recovery_context_missing"}
+        attempt = max(1, int(record.get("attempts") or 1))
+        rebuilt = dict(snapshot)
+        rebuilt["recovery_id"] = handle
+        base_request = str(rebuilt.get("request_id") or f"recovery:{handle}")
+        base_generation = str(rebuilt.get("generation_id") or f"generation:{turn_id}")
+        rebuilt["request_id"] = f"{base_request}:recovery:{attempt}"[:256]
+        rebuilt["generation_id"] = f"{base_generation}:recovery:{attempt}"[:256]
+        try:
+            context = factory(rebuilt)
+            if inspect.isawaitable(context):
+                context = await context
+        except Exception:  # noqa: BLE001 - runtime availability is reported without details.
+            return {"ok": False, "error": "recovery_context_unavailable", "retryable": True}
+        if not isinstance(context, AgentRequestContext):
+            store.finish(
+                handle,
+                success=False,
+                owner=self._executor_identity,
+                fencing_token=fencing_token,
+                error={"code": "recovery_context_invalid"},
+            )
+            return {"ok": False, "error": "recovery_context_invalid"}
+        if not self._is_durable_read_step(context, step):
+            store.finish(
+                handle,
+                success=False,
+                owner=self._executor_identity,
+                fencing_token=fencing_token,
+                error={"code": "durable_recovery_not_allowed", "reason": "tool_effect_not_read"},
+            )
+            return {
+                "ok": False,
+                "error": "durable_recovery_not_allowed",
+                "recovery": {
+                    "available": False,
+                    "action": "inspect_failure",
+                    "failed_step_id": failed_step_id,
+                    "retryable": False,
+                    "reason": "tool_effect_not_read",
+                },
+            }
+        context.extra["recovery_id"] = handle
+        context.extra["recovery_attempt"] = attempt
+        context.extra["recovery_source"] = "durable_step_recovery"
+        turn_service = getattr(context, "turn_service", None)
+        execute_recovery = getattr(turn_service, "execute_recovery_context", None)
+        if not callable(execute_recovery):
+            return {"ok": False, "error": "recovery_turn_service_unavailable", "retryable": True}
+
+        async def runner(bound_context: AgentRequestContext) -> AgentPipelineResult:
+            raw = await self.execute_plan(bound_context, [step])
+            return self._as_pipeline_result(raw)
+
+        try:
+            commit = await execute_recovery(context, runner)
+        except Exception:  # noqa: BLE001 - TurnService persists unknown effect when runner began.
+            return {"ok": False, "error": "recovery_resume_failed", "retryable": True}
+        result = commit.result
+        safe_result = {
+            "ok": result.outcome == "completed",
+            "outcome": result.outcome,
+            "idempotency_key": commit.idempotency_key,
+            "recovery_id": handle,
+            "attempt": attempt,
+        }
+        success = result.outcome == "completed"
+        finished = store.finish(
+            handle,
+            success=success,
+            owner=self._executor_identity,
+            fencing_token=fencing_token,
+            result=safe_result if success else None,
+            error=None if success else safe_result,
+        )
+        if not finished:
+            return {
+                "ok": False,
+                "error": "recovery_fencing_lost",
+                "recovery_id": handle,
+                "attempt": attempt,
+            }
+        return {
+            "ok": success,
+            "outcome": result.outcome,
+            "recovery_id": handle,
+            "attempt": attempt,
+            "idempotency_key": commit.idempotency_key,
+            "result": {
+                "reply": result.reply,
+                "tool_calls": result.tool_calls,
+                "failure": result.failure,
+                "recovery": result.recovery,
+            },
+        }
 
     async def resume_recovery_handle(
         self,
@@ -319,7 +677,12 @@ class StepExecutor:
         turn_id: str,
         failed_step_id: str,
     ) -> dict[str, Any]:
-        """Consume an opaque handle and resume only its failed-step closure."""
+        """Consume an opaque handle and resume only its failed-step closure.
+
+        Local handles use the in-memory capability graph.  If that graph is
+        absent after a restart, the method falls through to the durable
+        read-only path; both paths preserve scope checks and single-use claims.
+        """
         self._prune_recovery_state()
         record = self._take_recovery_handle(
             handle,
@@ -329,7 +692,13 @@ class StepExecutor:
             failed_step_id=failed_step_id,
         )
         if record is None:
-            return {"ok": False, "error": "invalid_or_expired_recovery_handle"}
+            return await self._resume_durable_recovery_handle(
+                handle,
+                workspace_id=workspace_id,
+                session_id=session_id,
+                turn_id=turn_id,
+                failed_step_id=failed_step_id,
+            )
         try:
             result = await self.resume_immediate_steps(
                 record.context,
@@ -949,6 +1318,7 @@ class StepExecutor:
         )
 
     def preflight_plan(self, ctx: AgentRequestContext, steps: list[PlanStepUnion]) -> _PlanCapability:
+        """Validate the full graph and mint a capability bound to its runtime."""
         if any(isinstance(step, PlanStep) for step in steps):
             raise PlanValidationError("legacy PlanStep requires explicit adapt_legacy_plan")
         validate_plan(
@@ -987,6 +1357,7 @@ class StepExecutor:
         return capability
 
     def _decode_capability(self, ctx: AgentRequestContext, capability: object) -> dict[str, Any]:
+        """Verify the capability seal and all runtime bindings before use."""
         if not isinstance(capability, _PlanCapability):
             raise PlanValidationError("invalid plan capability type")
         expected = hmac.new(
@@ -1014,8 +1385,9 @@ class StepExecutor:
         *,
         capability: _PlanCapability | None,
     ) -> tuple[_PlanCapability, dict[str, Any]]:
+        """Prove that a slice belongs to a validated graph and its ledger."""
         if capability is None:
-            # Standalone public calls validate their submitted graph strictly.
+            # A slice without a full-plan capability has no predecessor proof.
             raise PlanValidationError("validated full-plan capability is required")
         claims = self._decode_capability(ctx, capability)
         step_ids = {step.id for step in steps}
@@ -1407,6 +1779,7 @@ class StepExecutor:
         capability: _PlanCapability,
         lease: _PlanExecutionLease | None,
     ) -> StepResultRecord:
+        """Run one tool under its execution lease and classify its effect."""
         self._validate_execution_lease(capability, step.id, lease)
         self._emit_compatibility_trace(ctx, step, capability)
         payload = step.payload or {}
@@ -1517,6 +1890,7 @@ class StepExecutor:
         capability: _PlanCapability,
         lease: _PlanExecutionLease | None,
     ) -> tuple[dict[str, Any], StepResultRecord]:
+        """Run one model/tool-loop step using only validated prior results."""
         self._validate_execution_lease(capability, step.id, lease)
         tool_registry = ctx.tool_registry
         tool_executor = ctx.tool_executor
@@ -1623,6 +1997,7 @@ class StepExecutor:
         capability: _PlanCapability,
         lease: _PlanExecutionLease | None,
     ) -> StepResultRecord:
+        """Create one scheduler task and return its ledger record."""
         self._validate_execution_lease(capability, step.id, lease)
         condition = self._condition_record(step)
         schedule_step = cast(ScheduleStep, step)
@@ -1691,6 +2066,7 @@ class StepExecutor:
         *,
         validation_capability: _PlanCapability | None = None,
     ) -> list[StepResultRecord]:
+        """Evaluate analysis steps against the already validated plan ledger."""
         capability, _ = self._validate_execution_slice(
             ctx, steps, capability=validation_capability
         )
@@ -1718,6 +2094,7 @@ class StepExecutor:
         *,
         validation_capability: _PlanCapability | None = None,
     ) -> list[StepResultRecord]:
+        """Create scheduled tasks only after predecessor and condition checks."""
         capability, _ = self._validate_execution_slice(
             ctx, steps, capability=validation_capability
         )
@@ -1773,12 +2150,13 @@ class StepExecutor:
         *,
         validation_capability: _PlanCapability | None = None,
     ) -> list[StepResultRecord]:
-        # Validate the complete submitted graph before invoking any tool so a
-        # malformed dependency cannot cause a partial side effect.
-        # This compatibility entry point receives a filtered tool-only view of
-        # a larger planner graph; dependency ids may legitimately refer to
-        # omitted analysis/agent steps. Full-plan callers still use strict
-        # validation before execution.
+        """Execute a validated tool-only slice with bounded automatic retries.
+
+        The capability proves the complete plan was checked before this
+        compatibility entry point receives its filtered tool view.  A missing
+        predecessor proof, permission terminal state, timeout, or unknown
+        effect stops the slice before a later tool is invoked.
+        """
         capability, _ = self._validate_execution_slice(
             ctx, steps, capability=validation_capability
         )
@@ -1917,6 +2295,7 @@ class StepExecutor:
         *,
         validation_capability: _PlanCapability | None = None,
     ) -> dict[str, Any]:
+        """Run the agent step after consuming validated tool results."""
         capability, _ = self._validate_execution_slice(
             ctx, steps, capability=validation_capability
         )
@@ -1967,6 +2346,12 @@ class StepExecutor:
         *,
         validation_capability: _PlanCapability | None = None,
     ) -> dict[str, Any]:
+        """Execute an immediate plan slice and return a renderer-safe summary.
+
+        Callers must pass the capability minted by :meth:`preflight_plan`.
+        Silent mode short-circuits before side effects; if a later step fails,
+        successfully created schedules are rolled back through the same ledger.
+        """
         if validation_capability is None:
             return {
                 "reply": "",
@@ -2222,7 +2607,7 @@ class StepExecutor:
                         completed_step_ids=failure_payload["completed_steps"],
                     )
                     response["resume_token"] = resume_token_value
-                    response["recovery"] = {
+                    response["recovery"] = self._decorate_durable_recovery(ctx, steps, failure, {
                         "available": True,
                         "action": "resume_failed_step",
                         "failed_step_id": failure.step_id,
@@ -2232,7 +2617,7 @@ class StepExecutor:
                         "single_use": True,
                         "ttl_seconds": token_ttl_seconds,
                         "handle": recovery_handle,
-                    }
+                    }, recovery_handle)
         return response
 
     async def resume_immediate_steps(
@@ -2361,6 +2746,13 @@ class StepExecutor:
                 result["resume_token"] = authoritative_token
                 recovery["handle"] = authoritative_handle
                 recovery["ttl_seconds"] = ttl_seconds
+                self._decorate_durable_recovery(
+                    ctx,
+                    steps,
+                    next_failure,
+                    recovery,
+                    authoritative_handle,
+                )
         summary = result.get("execution_summary")
         stopped_reason = summary.get("stopped_reason") if isinstance(summary, dict) else None
         result["execution_summary"] = self._execution_summary(
@@ -2373,7 +2765,12 @@ class StepExecutor:
         ctx: AgentRequestContext,
         steps: list[PlanStepUnion],
     ) -> dict[str, Any]:
-        """Mint one capability for, and execute, a complete typed plan."""
+        """Validate, execute, and compensate one complete typed plan.
+
+        Validation happens before any tool call.  If execution stops after a
+        schedule was created, the ledger is used to drive deterministic
+        compensation before the terminal result is returned.
+        """
         try:
             capability = self.preflight_plan(ctx, steps)
         except PlanValidationError as exc:
@@ -2427,6 +2824,12 @@ class StepExecutor:
         *,
         validation_capability: _PlanCapability | None = None,
     ) -> list[StepResultRecord]:
+        """Compensate successfully created schedules after a failed plan.
+
+        Each rollback is independently ledger-attested and fenced by the plan
+        capability, so a caller cannot remove an unverified or already settled
+        task accidentally.
+        """
         if validation_capability is None:
             raise PlanValidationError("validated full-plan capability is required for rollback")
         capability, _ = self._validate_execution_slice(

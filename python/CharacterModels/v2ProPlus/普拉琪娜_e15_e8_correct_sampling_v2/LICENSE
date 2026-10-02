@@ -1,0 +1,16 @@
+Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+
+SPDX-License-Identifier: CC-BY-NC-SA-4.0
+
+Copyright (c) 2026 Yuizaki contributors
+
+This license applies only to the `普拉琪娜_e15_e8_correct_sampling_v2`
+character bundle in this directory, including its model weights, reference
+audio, and metadata. It does not change the license of the Yuizaki source code,
+Genie TTS runtime, or shared GenieData.
+
+The full license text is available at:
+https://creativecommons.org/licenses/by-nc-sa/4.0/
+
+Attribution and source provenance are documented in the repository's
+`THIRD_PARTY_NOTICES.md` and `resources.lock.json`.

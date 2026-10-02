@@ -9,7 +9,10 @@ const assetDir = resolve(rendererDir, 'assets')
 const mainEntryBytes = readdirSync(assetDir)
   .filter((name) => /^main-[^~].*\.js$/i.test(name))
   .reduce((total, name) => total + statSync(resolve(assetDir, name)).size, 0)
-const mainEntryBudgetBytes = 450 * 1024
+// The control panel entry grew after adding the settings and navigation
+// surfaces. Keep a bounded budget with enough room for the current app while
+// still failing on an accidental large dependency pull-in.
+const mainEntryBudgetBytes = 480 * 1024
 if (mainEntryBytes > mainEntryBudgetBytes) {
   throw new Error(`Control panel main entry exceeds ${mainEntryBudgetBytes} bytes: ${mainEntryBytes}`)
 }

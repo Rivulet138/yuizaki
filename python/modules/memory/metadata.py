@@ -8,6 +8,14 @@ from .expiry import is_memory_expired
 MEMORY_METADATA_SCHEMA_VERSION = 1
 MEMORY_VERSION_HISTORY_LIMIT = 50
 NON_RECALLABLE_REVIEW_STATUSES = frozenset({"pending", "rejected", "deleted", "superseded"})
+# Runtime generated relationship signals are context evidence, not user
+# authored permissions or sensitive facts. Older records may still have a
+# pending status from before automatic admission was enabled.
+AUTO_ADMITTED_EVENT_KINDS = frozenset({
+    "gratitude", "preference_confirmed", "support_request", "comfort_event",
+    "task_completed", "reflection", "adjustment", "strategy_update",
+    "state_snapshot", "mood_shift", "trust_shift", "care_signal",
+})
 PROVENANCE_FIELDS = ("source_kind", "source_id", "source_ids", "turn_id", "evidence")
 
 
@@ -104,6 +112,13 @@ def normalize_memory_validity(metadata: Mapping[str, Any] | None) -> dict[str, A
     return normalized
 
 
+def is_auto_admitted_candidate(metadata: Mapping[str, Any] | None) -> bool:
+    data = metadata or {}
+    if not data.get("candidate") or str(data.get("sensitive_category") or data.get("sensitivity") or "none").strip().lower() != "none":
+        return False
+    return str(data.get("source_kind") or data.get("event_kind") or "").strip().lower() in AUTO_ADMITTED_EVENT_KINDS
+
+
 def memory_state(metadata: Mapping[str, Any] | None, *, now: datetime | None = None) -> str:
     data = metadata or {}
     if bool(data.get("candidate_deleted")):
@@ -111,7 +126,7 @@ def memory_state(metadata: Mapping[str, Any] | None, *, now: datetime | None = N
     if bool(data.get("soft_forgotten")):
         return "forgotten"
     review_status = str(data.get("review_status") or "").strip().lower()
-    if bool(data.get("candidate")) and review_status in {"", "unreviewed", "pending", "review"}:
+    if bool(data.get("candidate")) and review_status in {"", "unreviewed", "pending", "review"} and not is_auto_admitted_candidate(data):
         return "pending_review"
     if review_status in NON_RECALLABLE_REVIEW_STATUSES:
         return review_status

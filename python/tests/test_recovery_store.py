@@ -47,10 +47,39 @@ def test_store_claim_is_atomic_and_survives_restart(tmp_path) -> None:
         assert db.execute("SELECT status, attempts FROM step_recoveries WHERE recovery_id='r1'").fetchone() == ("succeeded", 1)
 
 
+def test_store_persists_scope_metadata_and_reaps_expired_markers(tmp_path) -> None:
+    path = tmp_path / "recovery.sqlite3"
+    store = SQLiteStepRecoveryStore(path)
+    store.put(
+        "scoped",
+        _step(),
+        next_attempt_at=10,
+        expires_at=20,
+        workspace_id="workspace-a",
+        session_id="session-a",
+        turn_id="turn-a",
+        failed_step_id="s1",
+        plan_hash="hash-a",
+    )
+    with sqlite3.connect(path) as db:
+        row = db.execute(
+            "SELECT workspace_id,session_id,turn_id,failed_step_id,plan_hash FROM step_recoveries WHERE recovery_id='scoped'"
+        ).fetchone()
+    assert row == ("workspace-a", "session-a", "turn-a", "s1", "hash-a")
+    assert store.reap_expired(now=20) == 1
+    assert store.get("scoped") is None
+
+
 def test_store_never_persists_untyped_or_malformed_step(tmp_path) -> None:
     store = SQLiteStepRecoveryStore(tmp_path / "recovery.sqlite3")
     with pytest.raises(RecoverySerializationError):
         store.put("bad", ToolStep(id="x", title="x", tool_name="x", plan_version=1, payload={"tool_name": "x"}))
+
+
+def test_store_rejects_unsupported_future_plan_version(tmp_path) -> None:
+    store = SQLiteStepRecoveryStore(tmp_path / "recovery.sqlite3")
+    with pytest.raises(RecoverySerializationError, match="typed_plan"):
+        store.put("future", ToolStep(id="x", title="x", tool_name="x", plan_version=3))
 
 
 def test_store_rejects_steps_that_need_upstream_state(tmp_path) -> None:
@@ -87,3 +116,38 @@ def test_finish_requires_the_current_fencing_token(tmp_path) -> None:
         store.finish("r1", success=True, owner="worker")  # fencing token is mandatory
     assert store.finish("r1", success=True, owner="worker", fencing_token="wrong") is False
     assert store.finish("r1", success=True, owner="worker", fencing_token=claimed[2]) is True
+
+
+def test_recovery_attempts_are_bounded_after_expired_leases(tmp_path) -> None:
+    store = SQLiteStepRecoveryStore(tmp_path / "recovery.sqlite3")
+    store.put("bounded", _step(), next_attempt_at=0)
+    claims = []
+    for now in (0, 61, 122):
+        claim = store.claim_due(f"worker-{now}", now=now)
+        assert claim is not None
+        claims.append(claim)
+    assert store.claim_due("worker-183", now=183) is None
+
+
+def test_durable_context_result_and_scoped_claim_are_bounded_and_fenced(tmp_path) -> None:
+    store = SQLiteStepRecoveryStore(tmp_path / "recovery.sqlite3")
+    store.put(
+        "durable", _step(), workspace_id="w", session_id="s", turn_id="t",
+        failed_step_id="s1", plan_hash="p", context_snapshot={"input": "safe"},
+    )
+    assert store.claim_recovery("durable", "worker", workspace_id="wrong") is None
+    assert store.claim_recovery("durable", "worker", workspace_id="w", session_id="s", turn_id="t") is None
+    claim = store.claim_recovery("durable", "worker", workspace_id="w", session_id="s", turn_id="t", failed_step_id="s1", now=1)
+    assert claim is not None and claim["record"]["context_snapshot"] == {"input": "safe"}
+    assert store.finish("durable", success=True, owner="worker", fencing_token=claim["fencing_token"], result={"ok": True})
+    record = store.get_recovery("durable")
+    assert record is not None and record["status"] == "succeeded" and record["result"] == {"ok": True}
+
+
+@pytest.mark.parametrize("field", ["context_snapshot", "result"])
+def test_durable_snapshots_reject_secrets_and_oversize(tmp_path, field) -> None:
+    store = SQLiteStepRecoveryStore(tmp_path / "recovery.sqlite3")
+    with pytest.raises(RecoverySerializationError, match="secret"):
+        store.put("secret", _step(), **{field: {"api_key": "hidden"}})
+    with pytest.raises(RecoverySerializationError, match="too_large"):
+        store.put("large", _step(), **{field: {"value": "x" * (256 * 1024)}})

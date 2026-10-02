@@ -575,20 +575,24 @@ export class Live2DWindow {
     return this.clickThrough
   }
 
-  setMousePassthrough(ignore: boolean, forward = true): void {
+  setMousePassthrough(ignore: boolean, forward = true, force = false): void {
     this.requestedMousePassthrough = Boolean(ignore)
-    this.applyEffectiveMousePassthrough(forward)
+    this.applyEffectiveMousePassthrough(forward, force)
   }
 
-  private applyEffectiveMousePassthrough(forward = true): void {
+  private applyEffectiveMousePassthrough(forward = true, force = false): void {
     if (!this.win || this.win.isDestroyed()) {
       return
     }
 
     const shouldIgnore = this.clickThrough || this.requestedMousePassthrough
-    const shouldForward = shouldIgnore ? Boolean(forward) : false
+    // Forwarding exists so the renderer still sees the cursor while the window
+    // ignores mouse events (hover/drag handoff). Pure click-through mode drops
+    // every mouse event in the renderer, so forwarding would only add per-move
+    // hit testing for a work-area sized transparent window.
+    const shouldForward = shouldIgnore && Boolean(forward) && !this.clickThrough
 
-    if (this.ignoreMouseEvents === shouldIgnore && this.ignoreMouseEventsForward === shouldForward) {
+    if (!force && this.ignoreMouseEvents === shouldIgnore && this.ignoreMouseEventsForward === shouldForward) {
       return
     }
 

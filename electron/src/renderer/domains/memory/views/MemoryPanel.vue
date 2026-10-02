@@ -1,23 +1,24 @@
 
 <template>
   <PanelShell title="长期记忆" tone="companion" density="compact">
-    <template #status><span class="local-status" role="status">本机保存 · {{ scopeLabel(currentMemoryScope) }} · 索引 {{ indexStatusLabel }}</span></template>
+    <template #status><span class="local-status" role="status">对话自动整理</span></template>
     <template #actions>
-      <label class="scope-control"><span>当前范围</span><el-select :model-value="currentMemoryScope" size="small" :disabled="workspaceScopeSaving" aria-label="当前记忆范围" @change="updateDefaultMemoryScope"><el-option v-for="scope in memoryScopeOptions" :key="scope.value" :label="scope.label" :value="scope.value" :disabled="scope.value === 'session' && !sessionStore.activeSession" /></el-select></label>
-      <el-button data-testid="memory-advanced-tools-toggle" circle plain :icon="Tools" :type="advancedToolsVisible ? 'primary' : 'default'" title="高级工具" aria-label="打开高级工具" :aria-expanded="advancedToolsVisible" @click="advancedToolsVisible = true" />
-      <el-button data-testid="memory-export" circle plain :icon="Download" title="导出当前范围" aria-label="导出当前范围" :loading="exportLoading" @click="exportMemory" />
-      <el-button data-testid="memory-import" circle plain :icon="Upload" title="导入记忆备份" aria-label="导入记忆备份" :loading="importLoading" @click="memoryImportInput?.click()" />
+      <label class="scope-control"><span>使用范围</span><el-select :model-value="currentMemoryScope" size="small" :disabled="workspaceScopeSaving" aria-label="记忆使用范围" @change="updateDefaultMemoryScope"><el-option v-for="scope in memoryScopeOptions" :key="scope.value" :label="scope.label" :value="scope.value" :disabled="scope.value === 'session' && !sessionStore.activeSession" /></el-select></label>
+      <el-dropdown trigger="click" @command="handleAdvancedToolCommand">
+        <el-button data-testid="memory-advanced-tools-toggle" plain :icon="Tools" :type="advancedToolsVisible ? 'primary' : 'default'" aria-label="打开高级工具" :aria-expanded="advancedToolsVisible">高级工具</el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="open-index">索引与检索工具</el-dropdown-item>
+            <el-dropdown-item command="export" :disabled="exportLoading">导出当前范围</el-dropdown-item>
+            <el-dropdown-item command="import" :disabled="importLoading">导入记忆备份</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
       <input ref="memoryImportInput" class="memory-import-input" type="file" accept="application/json,.json" aria-label="选择记忆备份文件" @change="handleMemoryImportFile" />
       <el-button data-testid="memory-refresh" circle plain :icon="Refresh" title="刷新记忆" aria-label="刷新记忆" :loading="docsRequest.loading" @click="refreshMemoryState" />
     </template>
 
     <div class="memory-panel">
-      <section class="memory-welcome" aria-label="记忆状态">
-        <div class="memory-health">
-          <div class="health-stat"><strong>{{ overview?.recallable ?? docs.length }}</strong><span>可召回</span></div>
-          <div class="health-stat" :class="{ attention: reviewDocs.length > 0 }"><strong>{{ reviewDocs.length }}</strong><span>待确认</span></div>
-        </div>
-      </section>
       <section v-if="importReport" class="memory-import-report" aria-live="polite">
         <div class="import-report-head">
           <strong>最近一次导入结果</strong>
@@ -26,7 +27,7 @@
         <div class="import-report-grid">
           <span>写入 <strong>{{ importReport.imported_count }}</strong> 条</span>
           <span>跳过 <strong>{{ importReport.skipped_count }}</strong> 条</span>
-          <span>恢复停止召回 <strong>{{ importReport.restored_soft_forgotten_count ?? 0 }}</strong> 条</span>
+          <span>重新启用暂停内容 <strong>{{ importReport.restored_soft_forgotten_count ?? 0 }}</strong> 条</span>
           <span>索引状态 <strong>{{ importReport.effects?.index === 'rebuild_required' ? '需要重建' : '未变化' }}</strong></span>
         </div>
         <div v-if="importReport.skipped_count" class="import-report-reasons">
@@ -36,12 +37,11 @@
           <summary>查看跳过记录（{{ importReport.skipped.length }}）</summary>
           <ul>
             <li v-for="(item, index) in importReport.skipped.slice(0, 50)" :key="`${item.id || 'unknown'}-${index}`">
-              <strong>{{ item.id || '无 ID' }}</strong><span>{{ importReasonLabel(item.reason) }}</span><small v-if="item.detail">{{ compactText(String(item.detail), 120) }}</small>
+              <strong>{{ item.id || '此条记录' }}</strong><span>{{ importReasonLabel(item.reason) }}</span><small v-if="item.detail">{{ compactText(String(item.detail), 120) }}</small>
             </li>
           </ul>
           <p v-if="importReport.skipped.length > 50">仅显示前 50 条，共 {{ importReport.skipped.length }} 条。</p>
         </details>
-        <p class="import-report-note">权威库：{{ importReport.effects?.authority_store === 'updated' ? '已更新' : '未变化' }}；聊天引用：已保留。</p>
       </section>
       <nav class="memory-tabs" role="tablist" aria-label="记忆视图">
         <button v-for="(tab, index) in memoryTabs" :id="`memory-tab-${tab.value}`" :key="tab.value" type="button" role="tab" :tabindex="activeTab === tab.value ? 0 : -1" :aria-selected="activeTab === tab.value" :aria-controls="`memory-panel-${tab.value}`" @click="activeTab = tab.value" @keydown="onMemoryTabKeydown($event, index)">
@@ -49,12 +49,11 @@
         </button>
       </nav>
       <div v-show="activeTab === 'library'" id="memory-panel-library" role="tabpanel" aria-labelledby="memory-tab-library" class="tab-panel">
-        <MemoryQuickCapture :form="form" :layers="layers" :type-options="memoryTypePresets" :source-options="memorySourceOptions" :duplicate-candidates="duplicateCandidates" :loading="addRequest.loading" @update-form="Object.assign(form, $event)" @submit="submitMemory" />
         <MemoryLibrary
           :visible-docs="visibleDocs" :filtered-count="filteredDocs.length" :remaining-count="remainingFilteredDocCount" :selected-doc="selectedDoc"
           :view-mode="docViewMode" :sort-mode="docSortMode" :filter-layer="filterLayer" :search-text="searchText" :view-options="docViewOptions"
           :layers="layers" :source-options="memorySourceOptions" :loading="docsRequest.loading" :error="docsRequest.error"
-          :has-filters="hasDocFilters" :batch-action-hint="batchActionHint" :batch-delete-label="batchDeleteLabel"
+          :has-filters="hasDocFilters" :batch-delete-label="batchDeleteLabel"
           :batch-action-loading="batchActionLoading" :batch-action-disabled="batchActionDisabled" :inspector-draft="inspectorDraft"
           :inspector-draft-dirty="inspectorDraftDirty" :inspector-draft-saving="inspectorDraftSaving" :forgetting-doc-ids="forgettingDocIds" :removing-doc-ids="removingDocIds"
           :doc-view-count="docViewCount" :is-query-hit="isQueryHit" :layer-tag-type="layerTagType" :format-score="formatScore"
@@ -96,13 +95,13 @@
       />
     </el-drawer>
 
-    <el-dialog v-model="editDialogVisible" title="编辑记忆" width="min(640px, 92vw)">
+    <el-dialog v-model="editDialogVisible" title="编辑记忆内容" width="min(640px, 92vw)">
       <el-form label-position="top" @submit.prevent>
-        <el-form-item label="记忆内容"><el-input v-model="editForm.text" type="textarea" :rows="5" /></el-form-item>
-        <div class="dialog-grid"><el-form-item label="记忆层级"><el-select v-model="editForm.layer"><el-option v-for="layer in layers" :key="layer.value" :label="layer.label" :value="layer.value" /></el-select></el-form-item><el-form-item label="数据类型"><el-input v-model="editForm.type" /></el-form-item></div>
-        <div class="dialog-grid"><el-form-item :label="`重要度：${editForm.importance.toFixed(2)}`"><el-slider v-model="editForm.importance" :min="0" :max="1" :step="0.05" /></el-form-item><el-form-item :label="`置信度：${editForm.confidence.toFixed(2)}`"><el-slider v-model="editForm.confidence" :min="0" :max="1" :step="0.05" /></el-form-item></div>
-        <el-form-item label="来源"><el-select v-model="editForm.source"><el-option v-for="source in memorySourceOptions" :key="source.value" :label="source.label" :value="source.value" /></el-select></el-form-item>
-        <details><summary>元数据 JSON</summary><el-input v-model="editForm.metadataJson" type="textarea" :rows="4" /></details>
+        <el-form-item label="记住的内容"><el-input v-model="editForm.text" type="textarea" :rows="5" /></el-form-item>
+        <div class="dialog-grid"><el-form-item label="归类"><el-select v-model="editForm.layer"><el-option v-for="layer in layers" :key="layer.value" :label="layer.label" :value="layer.value" /></el-select></el-form-item><el-form-item label="内容类型"><el-input v-model="editForm.type" /></el-form-item></div>
+        <div class="dialog-grid"><el-form-item :label="`长期保留优先级：${scorePercent(editForm.importance)}`"><el-slider v-model="editForm.importance" :min="0" :max="1" :step="0.05" /></el-form-item><el-form-item :label="`准确把握：${scorePercent(editForm.confidence)}`"><el-slider v-model="editForm.confidence" :min="0" :max="1" :step="0.05" /></el-form-item></div>
+        <el-form-item label="记录来源"><el-select v-model="editForm.source"><el-option v-for="source in memorySourceOptions" :key="source.value" :label="source.label" :value="source.value" /></el-select></el-form-item>
+        <details><summary>元数据</summary><el-input v-model="editForm.metadataJson" type="textarea" :rows="4" /></details>
       </el-form>
       <template #footer><el-button @click="editDialogVisible = false">取消</el-button><el-button type="primary" :loading="updateRequest.loading" :disabled="!editForm.text.trim()" @click="submitEditDoc">保存修改</el-button></template>
     </el-dialog>
@@ -113,8 +112,9 @@
 <script setup lang="ts">
 import { ElIcon } from 'element-plus'
 import 'element-plus/es/components/icon/style/css'
-import { ElButton } from 'element-plus'
+import { ElButton, ElDropdown, ElDropdownItem, ElDropdownMenu } from 'element-plus'
 import 'element-plus/es/components/button/style/css'
+import 'element-plus/es/components/dropdown/style/css'
 import { ElSlider } from 'element-plus'
 import 'element-plus/es/components/slider/style/css'
 import { ElOption, ElSelect } from 'element-plus'
@@ -127,20 +127,19 @@ import 'element-plus/es/components/drawer/style/css'
 import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/form-item/style/css'
 import 'element-plus/es/components/input/style/css'
-import { Collection, DataAnalysis, Download, Refresh, Tools, Upload, User } from '@element-plus/icons-vue'
+import { Collection, DataAnalysis, Refresh, Tools, User } from '@element-plus/icons-vue'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import MemoryAdvancedTools from '../components/MemoryAdvancedTools.vue'
 import MemoryLibrary from '../components/MemoryLibrary.vue'
 import MemoryOverview from '../components/MemoryOverview.vue'
-import MemoryQuickCapture from '../components/MemoryQuickCapture.vue'
 import MemoryReviewQueue from '../components/MemoryReviewQueue.vue'
-import { normalizeDuplicateCandidates, useMemoryDomain } from '../composables/useMemoryDomain'
+import { useMemoryDomain } from '../composables/useMemoryDomain'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { memoryClient } from '@/api/clients/memory-client'
 import type { MemoryDeletePreview, MemoryImportResult, MemoryIndexRebuildJob, MemoryIndexStatus, MemoryMaintenancePolicyPayload, MemoryMaintenancePreview } from '@/api/clients/memory-client'
 import { getMemoryIndexUiStatus } from '../memory-index-status'
-import type { MemoryDoc, MemoryDuplicateCandidate } from '../composables/useMemoryDomain'
+import type { MemoryDoc } from '../composables/useMemoryDomain'
 import { memoryInspectorActionsKey } from '../components/memory-panel-types'
 
 type TagType = 'success' | 'warning' | 'danger' | 'info' | 'primary'
@@ -151,8 +150,8 @@ type MemoryTab = 'library' | 'review' | 'overview'
 
 const {
   docs, operations, forgottenDocs, reviewCandidates, overview, queryResult,
-  docsRequest, forgottenDocsRequest, overviewRequest, candidatesRequest, addRequest, updateRequest, queryRequest, operationsRequest,
-  loadDocs, loadForgottenDocs, loadCandidates, loadOperations, loadOverview, addMemory, updateDoc, softForgetDoc, restoreDoc, reviewCandidate, queryMemory, recordRecallFeedback,
+  docsRequest, forgottenDocsRequest, overviewRequest, candidatesRequest, updateRequest, queryRequest, operationsRequest,
+  loadDocs, loadForgottenDocs, loadCandidates, loadOperations, loadOverview, updateDoc, softForgetDoc, restoreDoc, reviewCandidate, queryMemory, recordRecallFeedback,
 } = useMemoryDomain()
 const sessionStore = useSessionStore()
 const workspaceStore = useWorkspaceStore()
@@ -171,12 +170,10 @@ const reviewProcessingId = ref('')
 const activeTab = ref<MemoryTab>('library')
 const searchText = ref('')
 const filterLayer = ref('')
-const duplicateCandidates = ref<MemoryDuplicateCandidate[]>([])
 const docViewMode = ref<DocViewMode>('all')
 const docSortMode = ref<DocSortMode>('updated')
 const selectedDocId = ref('')
 const selectedQueryLayers = ref<string[]>([])
-const form = reactive({ text: '', type: 'chat', layer: 'working', importance: 0.6, confidence: 0.86, source: 'manual' })
 const queryForm = reactive({ query: '', scope: currentMemoryScope.value, top_k: 5, expand_relations: true, relation_limit: 20, relation_depth: 1 })
 const editDialogVisible = ref(false)
 const editForm = reactive({ id: '', text: '', type: 'fact', layer: 'semantic', importance: 0.5, confidence: 0.72, source: 'manual', metadataJson: '' })
@@ -223,43 +220,33 @@ const DOC_RENDER_BATCH_SIZE = 80
 const visibleDocLimit = ref(DOC_RENDER_BATCH_SIZE)
 
 const layers = [
-  { value: 'profile', label: '偏好与称呼', desc: '稳定偏好', color: 'purple' },
-  { value: 'working', label: '当下任务', desc: '当前上下文', color: 'blue' },
-  { value: 'episodic', label: '最近事件', desc: '具体事件', color: 'amber' },
-  { value: 'relationship', label: '关系线索', desc: '陪伴线索', color: 'pink' },
-  { value: 'reflective', label: '她的反思', desc: '反思总结', color: 'emerald' },
-  { value: 'semantic', label: '长期事实', desc: '全局知识', color: 'slate' },
-]
-
-const memoryTypePresets = [
-  { value: 'fact', label: '事实' },
-  { value: 'preference', label: '偏好' },
-  { value: 'event', label: '事件' },
-  { value: 'promise', label: '承诺' },
-  { value: 'taboo', label: '禁忌' },
-  { value: 'summary', label: '摘要' },
+  { value: 'profile', label: '偏好与称呼', desc: '喜欢什么、希望怎样称呼你', color: 'purple' },
+  { value: 'working', label: '当前事项', desc: '正在推进的项目或短期目标', color: 'blue' },
+  { value: 'episodic', label: '发生过的事', desc: '具体事件、约定或经历', color: 'amber' },
+  { value: 'relationship', label: '相处方式', desc: '互动边界和重要关系事件', color: 'pink' },
+  { value: 'reflective', label: '经验总结', desc: '系统整理的复盘内容', color: 'emerald' },
+  { value: 'semantic', label: '稳定事实', desc: '长期成立的背景信息', color: 'slate' },
 ]
 
 const memoryScopeOptions: Array<{ value: MemoryScope; label: string }> = [
-  { value: 'global', label: '全局' },
-  { value: 'workspace', label: '工作区' },
-  { value: 'session', label: '会话' },
+  { value: 'global', label: '所有对话' },
+  { value: 'workspace', label: '当前工作区' },
+  { value: 'session', label: '当前会话' },
 ]
-
 const memorySourceOptions = [
   { value: 'manual', label: '手动录入' },
   { value: 'session', label: '对话片段' },
-  { value: 'relationship', label: '关系观察' },
-  { value: 'reflection', label: '反思总结' },
+  { value: 'relationship', label: '互动记录' },
+  { value: 'reflection', label: '系统总结' },
   { value: 'import', label: '资料导入' },
-  { value: 'profile', label: '画像资料' },
+  { value: 'profile', label: '用户资料' },
 ]
 
 const docViewOptions: Array<{ value: DocViewMode; label: string }> = [
   { value: 'all', label: '全部' },
-  { value: 'recallable', label: '可召回' },
-  { value: 'review', label: '待复核' },
-  { value: 'important', label: '高重要度' },
+  { value: 'recallable', label: '可用于对话' },
+  { value: 'review', label: '待确认' },
+  { value: 'important', label: '优先保留' },
   { value: 'hits', label: '本次命中' },
 ]
 
@@ -302,11 +289,11 @@ const docSessionId = (doc: MemoryDoc) => stringMeta(doc, 'session_id') || (docSc
 
 const scopeLabel = (scope?: string | null) => {
   const map: Record<string, string> = {
-    global: '全局',
-    workspace: '工作区',
-    session: '会话',
+    global: '所有工作区',
+    workspace: '当前工作区',
+    session: '当前会话',
   }
-  return map[String(scope || '')] || String(scope || '工作区')
+  return map[String(scope || '')] || String(scope || '当前工作区')
 }
 
 const maintenancePayload = (): MemoryMaintenancePolicyPayload => ({
@@ -325,8 +312,8 @@ const maintenancePreviewMatchesPolicy = computed(() => Boolean(
 ))
 
 const maintenanceReasonLabel = (reasons: string[]) => reasons.map((reason) => ({
-  stale_working: '超过工作记忆期限',
-  low_quality: '质量低于阈值',
+  stale_working: '超过当前事项保留期限',
+  low_quality: '可靠程度低于设定值',
   exact_duplicate: '与保留项完全重复',
 }[reason] || reason)).join('、')
 
@@ -375,9 +362,9 @@ const applyMemoryMaintenance = async () => {
   }
   try {
     await ElMessageBox.confirm(
-      `将永久清理 ${maintenancePreview.value?.summary.delete_count ?? 0} 条记忆，操作不可恢复。`,
-      '永久清理记忆',
-      { confirmButtonText: '永久清理', cancelButtonText: '取消', type: 'warning' },
+      `将永久删除 ${maintenancePreview.value?.summary.delete_count ?? 0} 条记忆，操作不可恢复。`,
+      '永久删除记忆',
+      { confirmButtonText: '永久删除', cancelButtonText: '取消', type: 'warning' },
     )
   } catch {
     return
@@ -389,7 +376,7 @@ const applyMemoryMaintenance = async () => {
       preview_token: previewToken,
       confirmation: 'PERMANENT_DELETE',
     })
-    ElMessage.success(`已永久清理 ${result.changed_count} 条记忆`)
+    ElMessage.success(`已永久删除 ${result.changed_count} 条记忆`)
     await refreshMemoryState()
     try {
       maintenancePreview.value = await memoryClient.previewMaintenance(maintenancePayload())
@@ -440,9 +427,9 @@ const reviewDocs = computed(() => reviewCandidates.value.slice().sort((left, rig
   return leftScore - rightScore
 }))
 const memoryTabs = computed(() => [
-  { value: 'library' as const, label: '记忆库', count: docs.value.length, icon: Collection, description: '搜索、添加和修正她当前可以使用的记忆。' },
-  { value: 'review' as const, label: '待确认', count: reviewDocs.value.length, icon: User, description: '检查低置信度或质量较低的内容，避免错误延续。' },
-  { value: 'overview' as const, label: '概览', icon: DataAnalysis, description: '查看范围、分层、活动和已停止召回的内容。' },
+  { value: 'library' as const, label: '记忆库', count: docs.value.length, icon: Collection },
+  { value: 'review' as const, label: '需要检查', count: reviewDocs.value.length, icon: User },
+  { value: 'overview' as const, label: '使用情况', icon: DataAnalysis },
 ])
 
 
@@ -571,11 +558,6 @@ const hasDocFilters = computed(() => docViewMode.value !== 'all' || docSortMode.
 const batchTargetDocs = computed(() => hasDocFilters.value ? filteredDocs.value : [])
 const batchTargetCount = computed(() => batchTargetDocs.value.length)
 const batchActionDisabled = computed(() => batchActionLoading.value || !hasDocFilters.value || batchTargetCount.value === 0)
-const batchActionHint = computed(() => {
-  if (!hasDocFilters.value) return '请先选择视图、层级或输入搜索词，再批量处理'
-  if (batchTargetCount.value === 0) return '当前筛选结果为空'
-  return `将处理当前筛选结果中的 ${batchTargetCount.value} 条记忆`
-})
 const batchDeleteLabel = computed(() => {
   if (batchDeleteProgress.active) return `删除中 ${batchDeleteProgress.done}/${batchDeleteProgress.total}`
   if (!hasDocFilters.value) return '先筛选再删除'
@@ -688,6 +670,12 @@ const refreshMemoryState = async () => {
   } catch (error) {
     console.debug('[MemoryPanel] failed to refresh index status:', error)
   }
+}
+
+const handleAdvancedToolCommand = (command: string) => {
+  if (command === 'open-index') advancedToolsVisible.value = true
+  if (command === 'export') void exportMemory()
+  if (command === 'import') memoryImportInput.value?.click()
 }
 
 const exportMemory = async () => {
@@ -864,30 +852,6 @@ const cancelMemoryIndexRebuild = async () => {
   }
 }
 
-const submitMemory = async () => {
-  if (!form.text.trim()) return
-  duplicateCandidates.value = []
-  const result = await addMemory({
-    text: form.text.trim(),
-    type: form.type || 'chat',
-    layer: form.layer,
-    importance: form.importance,
-    confidence: form.confidence,
-    confidence_source: form.source,
-    metadata: {
-      source: form.source,
-    },
-    scope: currentMemoryScope.value,
-    session_id: currentMemoryScope.value === 'session' ? sessionStore.activeSession?.id : undefined,
-  })
-  if (result?.skipped) {
-    duplicateCandidates.value = normalizeDuplicateCandidates(result.duplicate_candidates)
-    ElMessage.warning(result.reason === 'low_importance' ? '重要度低于阈值，后端已跳过写入' : result.reason || '记忆写入已跳过')
-    return
-  }
-  if (result?.status === 'ok') { ElMessage.success('记忆块已注入'); form.text = ''; void refreshMemoryState() }
-}
-
 const parseJsonObject = (rawValue: string, label: string) => {
   const raw = rawValue.trim()
   if (!raw) return {}
@@ -917,7 +881,7 @@ const handleRecallFeedback = async (payload: { id: string; feedback: 'helpful' |
   try {
     const doc = queryResult.value?.results.find(item => item.id === payload.id)
     await recordRecallFeedback(payload.id, payload.feedback, doc ? docSessionId(doc) : scopedDocOptions().sessionId)
-    ElMessage.success(payload.feedback === 'helpful' ? '已记录，这条记忆会继续优先保留' : '已记录，你可以随时在记忆库中修正或停止召回')
+    ElMessage.success(payload.feedback === 'helpful' ? '已记录，这条记忆会继续优先保留' : '已记录，你可以随时在记忆库中修正或暂停使用')
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '记录召回反馈失败')
   }
@@ -1026,7 +990,7 @@ const batchUpdateVisibleDocs = async (
   const targets = batchTargetDocs.value.slice()
   if (batchActionLoading.value) return
   if (!hasDocFilters.value) {
-    ElMessage.info('请先选择视图、层级或搜索词，再批量处理')
+    ElMessage.info('请先选择视图、类别或搜索词，再批量处理')
     return
   }
   if (!targets.length) return
@@ -1067,7 +1031,7 @@ const batchDeleteVisibleDocs = async () => {
   const targets = batchTargetDocs.value.slice()
   if (batchActionLoading.value) return
   if (!hasDocFilters.value) {
-    ElMessage.info('请先选择视图、层级或搜索词，再批量删除')
+    ElMessage.info('请先选择视图、类别或搜索词，再批量删除')
     return
   }
   if (!targets.length) return
@@ -1200,9 +1164,9 @@ const forgetDoc = async (id: string) => {
   if (forgettingDocIds.value.has(id)) return
   try {
     await ElMessageBox.confirm(
-      '停止召回后，这条记忆不会再参与回答；你仍可在概览中恢复。',
-      '停止召回这条记忆',
-      { confirmButtonText: '停止召回', cancelButtonText: '取消', type: 'warning' },
+      '停止使用后，这条记忆不会再影响对话；内容仍会保留，你可以在“使用情况”中重新启用。',
+      '停止使用这条记忆',
+      { confirmButtonText: '停止使用', cancelButtonText: '取消', type: 'warning' },
     )
   } catch {
     return
@@ -1214,10 +1178,10 @@ const forgetDoc = async (id: string) => {
     const doc = docs.value.find(item => item.id === id)
     await softForgetDoc(id, { reason: 'user_soft_forget', session_id: doc ? docSessionId(doc) : scopedDocOptions().sessionId })
     if (selectedDocId.value === id) selectedDocId.value = fallbackId
-    ElMessage.success('已停止召回这条记忆')
+    ElMessage.success('这条记忆已暂停使用')
     await refreshMemoryState()
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '停止召回失败')
+    ElMessage.error(error instanceof Error ? error.message : '暂停使用失败')
   } finally {
     setPendingDocId(forgettingDocIds, id, false)
   }
@@ -1229,10 +1193,10 @@ const restoreForgottenDoc = async (id: string) => {
   try {
     const doc = forgottenDocs.value.find(item => item.id === id) || docs.value.find(item => item.id === id)
     await restoreDoc(id, { reason: 'user_restore', session_id: doc ? docSessionId(doc) : scopedDocOptions().sessionId })
-    ElMessage.success('这条记忆已恢复召回')
+    ElMessage.success('这条记忆已重新启用')
     await refreshMemoryState()
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '恢复召回失败')
+    ElMessage.error(error instanceof Error ? error.message : '重新启用失败')
   } finally {
     setPendingDocId(restoringDocIds, id, false)
   }
@@ -1254,10 +1218,10 @@ const docSourceLabel = (doc: MemoryDoc) => {
   const labels: Record<string, string> = {
     manual: '手动',
     session: '会话',
-    relationship: '关系',
-    reflection: '反思',
+    relationship: '互动记录',
+    reflection: '系统总结',
     import: '导入',
-    profile: '画像',
+    profile: '用户资料',
     default: '默认',
     explicit: '显式',
   }
@@ -1428,9 +1392,9 @@ onMounted(async () => {
 
 
 <style scoped>
-.memory-panel { display: flex; min-height: 0; flex-direction: column; gap: 14px; }
+.memory-panel { display: flex; min-height: 0; flex-direction: column; gap: 16px; }
 .memory-import-input { display: none; }
-.memory-import-report { display: flex; flex-direction: column; gap: 9px; padding: 12px 14px; border: 1px solid var(--yui-border); border-radius: var(--yui-radius-card); background: var(--yui-surface-muted); }
+.memory-import-report { display: flex; flex-direction: column; gap: 9px; padding: 13px 15px; border: 1px solid var(--yui-border); border-radius: var(--yui-radius-card); background: var(--yui-surface-raised); box-shadow: var(--yui-shadow-card); }
 .import-report-head, .import-report-grid, .import-report-reasons { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .import-report-head { justify-content: space-between; }
 .import-report-grid span, .import-report-reasons span, .import-report-note { color: var(--yui-muted); font-size: 11px; }
@@ -1444,24 +1408,21 @@ onMounted(async () => {
 .local-status { color: var(--yui-muted); font-size: 11px; }
 .scope-control { display: flex; align-items: center; gap: 7px; color: var(--yui-muted); font-size: 11px; }
 .scope-control :deep(.el-select) { width: 108px; }
-.memory-welcome { display: flex; align-items: center; justify-content: flex-end; min-height: 34px; }
-.memory-health { display: flex; align-items: stretch; gap: 8px; }
-.health-stat { display: flex; min-width: 72px; flex-direction: column; justify-content: center; gap: 3px; padding: 8px 10px; border: 1px solid var(--yui-border); border-radius: var(--yui-radius-control); background: color-mix(in srgb, var(--yui-surface) 80%, transparent); }
-.health-stat span { color: var(--yui-muted); font-size: 10px; }
-.health-stat strong { color: var(--yui-text); font-size: 13px; }
-.health-stat.attention { border-color: color-mix(in srgb, #d97706 42%, var(--yui-border)); background: var(--yui-warning-soft); }
-.memory-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--yui-border); }
+.scope-option { display: flex; min-width: 180px; flex-direction: column; gap: 2px; line-height: 1.25; }
+.scope-option strong { color: var(--yui-text); font-size: 12px; font-weight: 600; }
+.scope-option small { color: var(--yui-muted); font-size: 10px; }
+.memory-tabs { display: flex; gap: 4px; padding: 4px 8px 0; border: 1px solid var(--yui-border); border-radius: var(--yui-radius-card) var(--yui-radius-card) 0 0; background: var(--yui-surface-raised); box-shadow: var(--yui-shadow-card); }
 .memory-tabs button { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 8px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--yui-muted); font: inherit; font-size: 13px; cursor: pointer; }
 .memory-tabs button[aria-selected="true"] { border-bottom-color: var(--yui-accent); color: var(--yui-text); font-weight: 700; }
 .memory-tabs button .tab-count { display: inline-grid; min-width: 18px; min-height: 18px; margin-left: 2px; place-items: center; border-radius: 9px; background: var(--yui-surface-muted); font-size: 10px; }
 .memory-tabs button[aria-selected="true"] .tab-count { background: var(--yui-accent-soft); color: var(--yui-accent); }
 .memory-tabs button:focus-visible { outline: 2px solid var(--yui-accent); outline-offset: -2px; }
-.tab-panel { min-width: 0; }
+.tab-panel { min-width: 0; padding: 16px; border: 1px solid var(--yui-border); border-top: 0; border-radius: 0 0 var(--yui-radius-card) var(--yui-radius-card); background: var(--yui-surface-raised); box-shadow: var(--yui-shadow-card); }
 .tab-panel > :deep(* + *) { margin-top: 18px; }
 .dialog-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .dialog-grid :deep(.el-select), :deep(.el-dialog .el-select) { width: 100%; }
 details summary { margin-bottom: 10px; color: var(--yui-muted); cursor: pointer; font-size: 12px; }
-@media (max-width: 760px) { .scope-control span { display: none; }.memory-health { width: 100%; }.health-stat { flex: 1; }.memory-tabs { position: sticky; top: 0; z-index: 2; background: var(--yui-panel-surface, var(--yui-surface)); }.memory-tabs button { flex: 1; justify-content: center; padding-inline: 8px; }.dialog-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .scope-control span { display: none; }.memory-tabs { position: sticky; top: 0; z-index: 2; background: var(--yui-surface-raised); }.memory-tabs button { flex: 1; justify-content: center; padding-inline: 8px; }.tab-panel { padding: 12px; }.dialog-grid { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .import-report-details li { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }
 </style>

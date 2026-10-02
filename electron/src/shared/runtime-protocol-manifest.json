@@ -32,6 +32,22 @@
       "onboarding_readiness_run": {
         "method": "POST",
         "path": "/api/system/onboarding/readiness/run"
+      },
+      "route_manifest": {
+        "method": "GET",
+        "path": "/api/system/route-manifest"
+      },
+      "ui_capabilities": {
+        "method": "GET",
+        "path": "/api/system/ui-capabilities"
+      },
+      "companions": {
+        "method": "GET",
+        "path": "/api/companions"
+      },
+      "relationship_history": {
+        "method": "GET",
+        "path": "/api/companions/{companion_id}/relationship-history?limit={limit}"
       }
     },
     "socket_events": {

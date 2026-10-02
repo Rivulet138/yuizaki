@@ -9,9 +9,7 @@
     >
       <header class="onboarding-header drag">
         <div class="onboarding-heading">
-          <span class="onboarding-kicker">{{ t('onboarding.kicker') }}</span>
           <h1>{{ t('onboarding.title') }}</h1>
-          <p>{{ t('onboarding.subtitle') }}</p>
         </div>
         <div class="onboarding-header-actions no-drag">
           <el-select
@@ -96,7 +94,6 @@
                 <div class="section-heading">
                   <div>
                     <h2 id="optional-title">{{ t('onboarding.optional.title') }}</h2>
-                    <p>{{ t('onboarding.optional.description') }}</p>
                   </div>
                   <el-button v-if="!optionalSkipped" text @click="optionalSkipped = true">{{ t('onboarding.optional.skip') }}</el-button>
                 </div>
@@ -517,8 +514,7 @@ onBeforeUnmount(() => {
 }
 
 .onboarding-heading { min-width: 0; }
-.onboarding-kicker { color: var(--yui-accent); font-size: 12px; font-weight: 700; }
-.onboarding-heading h1 { margin: 4px 0 0; color: var(--yui-text, #172033); font-size: 22px; line-height: 1.25; }
+.onboarding-heading h1 { margin: 0; color: var(--yui-text, #172033); font-size: 22px; line-height: 1.25; }
 .onboarding-heading p { max-width: 70ch; margin: 6px 0 0; color: var(--yui-muted, #526176); font-size: 13px; line-height: 1.5; }
 .onboarding-header-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
 .language-select { width: 132px; }

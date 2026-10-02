@@ -69,7 +69,7 @@ export interface IpcContext {
     setLocked: (enabled: boolean) => void
     setClickThrough: (enabled: boolean) => void
     toggleInteract: () => boolean
-    setMousePassthrough: (ignore: boolean, forward: boolean) => void
+    setMousePassthrough: (ignore: boolean, forward?: boolean, force?: boolean) => void
     getDisplays: () => PetDisplayInfo[]
     getBounds: () => { x: number; y: number; width: number; height: number } | null
     show: () => void
@@ -986,9 +986,9 @@ function registerPetInteractionHandlers(ctx: IpcContext): void {
 
   ipcMain.on(
     'pet:set-ignore-mouse-events',
-    (event, payload: { ignore?: boolean; forward?: boolean } | undefined) => {
+    (event, payload: { ignore?: boolean; forward?: boolean; force?: boolean } | undefined) => {
       if (!allowTrustedIpcSender(event)) return
-      ctx.live2dWindow.setMousePassthrough(Boolean(payload?.ignore), payload?.forward !== false)
+      ctx.live2dWindow.setMousePassthrough(Boolean(payload?.ignore), payload?.forward !== false, payload?.force === true)
     },
   )
 

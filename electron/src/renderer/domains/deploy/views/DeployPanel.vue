@@ -1,5 +1,5 @@
 <template>
-  <PanelShell title="运行检查" tone="admin">
+  <PanelShell title="启动与就绪" tone="admin">
     <div class="deploy-console">
       <section class="deploy-hero">
         <div class="hero-actions">
@@ -26,13 +26,12 @@
             </div>
           </div>
           <div class="actions">
-            <el-button :loading="startLoading" :disabled="!hasElectronPythonControls || startLoading || stopLoading" :title="pythonControlHint" @click="startPython">启动后端</el-button>
-            <el-button :loading="stopLoading" :disabled="!hasElectronPythonControls || startLoading || stopLoading" :title="pythonControlHint" @click="stopPython">停止后端</el-button>
+            <el-button :loading="startLoading" :disabled="!hasElectronPythonControls || startLoading || stopLoading" @click="startPython">启动后端</el-button>
+            <el-button :loading="stopLoading" :disabled="!hasElectronPythonControls || startLoading || stopLoading" @click="stopPython">停止后端</el-button>
             <el-button
               type="success"
               plain
               :disabled="!health.healthy"
-              :title="health.healthy ? '打开当前后端 /docs' : '后端在线后可打开 /docs'"
               @click="openDocs"
             >
               API 文档
@@ -65,7 +64,7 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>模型与语音运行时</strong>
+                <strong>依赖可用性</strong>
               </div>
               <el-tag :type="providerSummary.requiredHealthy ? 'success' : 'warning'">
                 {{ providerSummary.healthy }}/{{ providerSummary.total }} 正常
@@ -73,7 +72,7 @@
             </div>
           </template>
           <el-alert v-if="providersError" :title="providersError" type="warning" show-icon :closable="false" />
-          <div v-if="providersLoading && !providers.length" class="provider-empty">正在读取 provider 状态...</div>
+          <div v-if="providersLoading && !providers.length" class="provider-empty">正在读取依赖状态...</div>
           <div v-else-if="providers.length" class="provider-grid">
             <article v-for="provider in providers" :key="provider.id" class="provider-item" :class="provider.healthy ? 'ok' : provider.configured ? 'degraded' : 'optional'">
               <div class="provider-item-head">
@@ -82,9 +81,8 @@
                   {{ provider.healthy ? '正常' : provider.configured ? '待处理' : provider.optional ? '未配置' : '必需' }}
                 </el-tag>
               </div>
-              <span>{{ provider.provider || '未选择 provider' }}{{ provider.model ? ` · ${provider.model}` : '' }}</span>
-              <small>{{ provider.message }}</small>
-              <small v-if="provider.capabilities.length">能力：{{ provider.capabilities.join('、') }}</small>
+              <span>{{ provider.provider || '尚未选择服务' }}{{ provider.model ? ` · ${provider.model}` : '' }}</span>
+              <small v-if="!provider.healthy">{{ provider.message }}</small>
               <el-button
                 v-if="provider.retryable"
                 class="provider-retry"
@@ -97,7 +95,7 @@
               >重新检查</el-button>
             </article>
           </div>
-          <div v-else class="provider-empty">后端在线后显示模型、ASR、TTS 和视觉状态</div>
+          <div v-else class="provider-empty">暂无依赖数据</div>
         </el-card>
 
         <el-card class="panel-card command-card" shadow="never">
@@ -152,7 +150,7 @@ const health = reactive({
 const readiness = reactive({
   checked: false,
   ready: false,
-  message: '等待就绪检查',
+  message: '等待运行状态',
 })
 
 const healthLoading = ref(false)
@@ -217,7 +215,7 @@ const checkReadiness = async () => {
     const checks = isRecord(data.checks) ? data.checks : {}
     const llm = isRecord(checks.llm) ? checks.llm : null
     readiness.message = data.ready
-      ? '摘要与 LLM 就绪'
+      ? '运行就绪'
       : typeof llm?.message === 'string'
         ? llm.message
         : '后端服务尚未完全就绪'
@@ -225,7 +223,7 @@ const checkReadiness = async () => {
     if (gen !== refreshGeneration) return
     readiness.checked = true
     readiness.ready = false
-    readiness.message = error instanceof Error ? error.message : '就绪检查失败'
+    readiness.message = error instanceof Error ? error.message : '运行状态读取失败'
   } finally {
     if (gen === refreshGeneration) readinessLoading.value = false
   }
@@ -241,7 +239,7 @@ const checkProviders = async () => {
     providerSummary.healthy = Number(data.summary?.healthy || 0)
     providerSummary.requiredHealthy = data.summary?.requiredHealthy === true
   } catch (error) {
-    providersError.value = error instanceof Error ? error.message : 'provider 状态读取失败'
+    providersError.value = error instanceof Error ? error.message : '服务状态读取失败'
   } finally {
     providersLoading.value = false
   }
@@ -341,7 +339,6 @@ const copyCommand = async (command: string) => {
 
 const hasElectronBridge = computed(() => Boolean(window.petApi?.python?.health))
 const hasElectronPythonControls = computed(() => Boolean(window.petApi?.python?.start && window.petApi?.python?.stop))
-const pythonControlHint = computed(() => hasElectronPythonControls.value ? '通过 Electron 主进程启停后端' : '浏览器模式无法直接启停后端，请使用命令手册')
 const refreshing = computed(() => healthLoading.value || readinessLoading.value)
 const healthIsError = computed(() => !health.healthy && ['error', 'failed', 'unhealthy'].includes(health.status))
 const healthTone = computed<'success' | 'warning' | 'danger' | 'info'>(() => {
@@ -365,10 +362,10 @@ const overallStatusText = computed(() => {
 
 const deploySteps = computed(() => {
   const steps = [
-    { id: 'backend', title: '后端健康接口', status: health.healthy ? 'done' : healthLoading.value ? 'active' : healthIsError.value ? 'blocked' : 'pending' as StepStatus },
-    { id: 'readiness', title: 'AI 就绪检查', status: readiness.ready ? 'done' : health.healthy ? 'active' : 'pending' as StepStatus },
-    { id: 'electron', title: 'Electron 启停桥接', status: hasElectronBridge.value ? 'done' : 'pending' as StepStatus },
-    { id: 'docs', title: 'API 文档入口', status: health.healthy ? 'done' : healthIsError.value ? 'blocked' : 'pending' as StepStatus },
+    { id: 'backend', title: '后端健康', status: health.healthy ? 'done' : healthLoading.value ? 'active' : healthIsError.value ? 'blocked' : 'pending' as StepStatus },
+    { id: 'readiness', title: '服务就绪', status: readiness.ready ? 'done' : health.healthy ? 'active' : 'pending' as StepStatus },
+    { id: 'electron', title: '启停桥接', status: hasElectronBridge.value ? 'done' : 'pending' as StepStatus },
+    { id: 'docs', title: 'API 文档', status: health.healthy ? 'done' : healthIsError.value ? 'blocked' : 'pending' as StepStatus },
   ]
   return steps.map((step, index) => ({ ...step, index: index + 1 }))
 })

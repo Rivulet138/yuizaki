@@ -55,7 +55,6 @@
               </div>
               <div class="connector-footer">
                 <small v-if="connector.experimental">实验性，默认不启用</small>
-                <small v-else>{{ connector.source === 'mcp' ? 'MCP 服务' : 'Agent 插件' }}</small>
                 <el-button
                   v-if="connector.canDisable && connector.state !== 'disabled'"
                   type="danger"
@@ -91,7 +90,7 @@
               </div>
               <template v-if="connectorId === 'qq' || connectorId === 'wechat'">
                 <div class="connector-bridge-box">
-                  <el-alert title="仅支持个人账号兼容桥。桥接程序由用户自行运行，掉线、封号和协议变更风险由用户自行承担。" type="warning" :closable="false" show-icon />
+                  <el-alert title="个人账号桥接，稳定性取决于桥接程序。" type="warning" :closable="false" show-icon />
                   <div class="connector-secret-row">
                     <el-input v-model="connectorDrafts[connectorId].bridgeUrl" placeholder="兼容桥地址，例如 http://127.0.0.1:3000" />
                     <el-input v-model="connectorDrafts[connectorId].bridgeToken" type="password" show-password placeholder="桥接令牌（启用必填）" />
@@ -134,9 +133,12 @@
               </div>
               <div v-if="connectorProbeSnapshot(connectorId)" class="connector-probe-status">
                 <el-tag size="small" :type="connectorProbeTagType(connectorProbeSnapshot(connectorId)!)">{{ connectorProbeStatusLabel(connectorProbeSnapshot(connectorId)!) }}</el-tag>
-                <span v-if="connectorProbeSnapshot(connectorId)?.statusCode">HTTP {{ connectorProbeSnapshot(connectorId)?.statusCode }}</span>
                 <span v-if="connectorProbeSnapshot(connectorId)?.bridgeStatus">桥接状态：{{ connectorProbeSnapshot(connectorId)?.bridgeStatus }}</span>
-                <span v-if="connectorProbeSnapshot(connectorId)?.errorCode" class="connector-probe-error">错误码：{{ connectorProbeSnapshot(connectorId)?.errorCode }}</span>
+                <details v-if="connectorProbeSnapshot(connectorId)?.statusCode || connectorProbeSnapshot(connectorId)?.errorCode" class="inline-diagnostic-details">
+                  <summary>查看连接诊断</summary>
+                  <span v-if="connectorProbeSnapshot(connectorId)?.statusCode">服务响应 {{ connectorProbeSnapshot(connectorId)?.statusCode }}</span>
+                  <span v-if="connectorProbeSnapshot(connectorId)?.errorCode" class="connector-probe-error">错误码：{{ connectorProbeSnapshot(connectorId)?.errorCode }}</span>
+                </details>
               </div>
               <div v-if="connectorRecoverySnapshot(connectorId)" class="connector-recovery-telemetry">
                 <span>恢复扫描 {{ connectorRecoverySnapshot(connectorId)?.runs ?? 0 }} 次</span>
@@ -149,9 +151,13 @@
               <div v-if="connectorDeliveryRows(connectorId).length" class="connector-delivery-list">
                 <div v-for="delivery in connectorDeliveryRows(connectorId).slice(0, 5)" :key="delivery.deliveryKey" class="connector-delivery-item">
                   <div>
-                    <strong>{{ delivery.eventId }}</strong>
-                    <span>{{ connectorDeliveryStatusLabel(delivery.status) }} · 尝试 {{ delivery.attemptCount }} 次</span>
+                    <strong>{{ connectorDeliveryStatusLabel(delivery.status) }}</strong>
+                    <span>尝试 {{ delivery.attemptCount }} 次</span>
                     <small v-if="delivery.lastError">{{ delivery.lastError }}</small>
+                    <details class="inline-diagnostic-details" v-if="delivery.eventId">
+                      <summary>查看事件编号</summary>
+                      <code>{{ delivery.eventId }}</code>
+                    </details>
                   </div>
                   <el-button
                     v-if="delivery.retryable"
@@ -251,7 +257,7 @@
                 <div class="server-inventory">
                   <el-tag size="small" type="success" :title="formatInventoryNames(row.tools)">工具 {{ row.tools_count }}</el-tag>
                   <el-tag size="small" type="info" :title="formatInventoryNames(row.resources)">资源 {{ row.resources_count }}</el-tag>
-                  <el-tag size="small" type="warning" :title="formatInventoryNames(row.prompts)">Prompt {{ row.prompts_count }}</el-tag>
+                  <el-tag size="small" type="warning" :title="formatInventoryNames(row.prompts)">提示模板 {{ row.prompts_count }}</el-tag>
                   <el-tag v-if="row.inventory_error" size="small" type="danger" :title="row.inventory_error">库存异常</el-tag>
                 </div>
                 <div class="server-meta">
@@ -259,8 +265,11 @@
                   <span>调用 {{ row.total_calls ?? 0 }}</span>
                   <span>失败 {{ row.total_failures ?? 0 }}</span>
                   <span>待处理 {{ row.pending_requests ?? 0 }}</span>
-                  <span v-if="row.env_keys?.length">环境变量 {{ row.env_keys.join(', ') }}</span>
-                  <span v-if="row.header_keys?.length">请求头 {{ row.header_keys.join(', ') }}</span>
+                  <details v-if="row.env_keys?.length || row.header_keys?.length" class="inline-diagnostic-details">
+                    <summary>查看连接配置</summary>
+                    <span v-if="row.env_keys?.length">环境变量：{{ row.env_keys.join('、') }}</span>
+                    <span v-if="row.header_keys?.length">请求头：{{ row.header_keys.join('、') }}</span>
+                  </details>
                 </div>
                 <div class="server-footer">
                   <el-switch
@@ -350,13 +359,16 @@
                 <el-option label="流式 HTTP" value="streamable_http" />
               </el-select>
               <el-input v-if="mcpForm.transport !== 'stdio'" v-model="mcpForm.base_url" size="small" class="wide" placeholder="服务地址 URL" />
-              <template v-else>
-                <el-input v-model="mcpForm.command" size="small" placeholder="命令，例如 npx / python" />
-                <el-input v-model="mcpForm.args_text" size="small" placeholder='参数 JSON，例如 ["--config","E:\\My App\\mcp.json"]' />
-              </template>
-              <el-input v-model="mcpForm.env_text" size="small" class="wide" placeholder='环境变量 JSON，例如 {"FIRECRAWL_API_KEY":"{env:FIRECRAWL_API_KEY}"}' />
-              <el-input v-model="mcpForm.headers_text" size="small" class="wide" placeholder='请求头 JSON，例如 {"Authorization":"Bearer {env:TOKEN}"}' />
+              <el-input v-if="mcpForm.transport === 'stdio'" v-model="mcpForm.command" size="small" placeholder="启动命令，例如 npx / python" />
             </div>
+            <details class="advanced-connection-details">
+              <summary>高级连接设置</summary>
+              <div class="advanced-connection-fields">
+                <el-input v-if="mcpForm.transport === 'stdio'" v-model="mcpForm.args_text" size="small" placeholder='启动参数 JSON，例如 ["--config","E:\\My App\\mcp.json"]' />
+                <el-input v-model="mcpForm.env_text" size="small" class="wide" placeholder='环境变量 JSON，例如 {"FIRECRAWL_API_KEY":"{env:FIRECRAWL_API_KEY}"}' />
+                <el-input v-model="mcpForm.headers_text" size="small" class="wide" placeholder='请求头 JSON，例如 {"Authorization":"Bearer {env:TOKEN}"}' />
+              </div>
+            </details>
             <el-alert v-if="addMcpRequest.error" class="panel-alert" :title="addMcpRequest.error" type="error" show-icon :closable="false" />
             <div class="submit-row">
               <el-button type="primary" :disabled="!canSubmitMcp" :loading="addMcpRequest.loading" @click="submitMcp">注册并刷新</el-button>
@@ -414,7 +426,7 @@
             <div class="card-head">
               <div>
                 <strong>扩展宿主</strong>
-                <span>Agent / Electron / MCP</span>
+                <span>智能体 / 桌面应用 / MCP</span>
               </div>
               <el-button plain size="small" :loading="agentPluginsRequest.loading" @click="refreshExtensions">刷新扩展</el-button>
             </div>
@@ -428,12 +440,12 @@
               </article>
             </div>
             <el-alert v-if="agentPluginMutationError" class="panel-alert" :title="agentPluginMutationError" type="error" show-icon :closable="false" />
-            <div v-if="agentPluginRows.length" class="agent-plugin-list" aria-label="Agent 插件运行配置">
+            <div v-if="agentPluginRows.length" class="agent-plugin-list" aria-label="智能体插件运行配置">
               <article v-for="plugin in agentPluginRows" :key="plugin.id" class="agent-plugin-item" :class="{ disabled: !plugin.enabled, broken: plugin.error }">
                 <div class="agent-plugin-main">
                   <div>
                     <strong>{{ plugin.name || plugin.id }}</strong>
-                    <span>{{ plugin.id }}<template v-if="plugin.version"> · {{ plugin.version }}</template></span>
+                    <span v-if="plugin.version">版本 {{ plugin.version }}</span>
                   </div>
                   <div class="action-row">
                     <el-tag size="small" :type="plugin.loaded ? 'success' : plugin.error ? 'danger' : 'info'">{{ plugin.loaded ? '已加载' : plugin.error ? '异常' : '未加载' }}</el-tag>
@@ -458,11 +470,11 @@
                 </div>
               </article>
             </div>
-            <el-empty v-else description="暂无 Agent 插件" :image-size="60" />
+            <el-empty v-else description="暂无智能体插件" :image-size="60" />
             <div class="contribution-matrix">
               <div class="matrix-head">贡献类型</div>
               <div>Electron 插件</div>
-              <div>Agent 插件</div>
+              <div>智能体插件</div>
               <div>MCP</div>
               <template v-for="row in contributionComparisonRows" :key="row.category">
                 <div class="matrix-category">{{ contributionCategoryLabel(row.category) }}</div>
@@ -933,7 +945,7 @@ const governancePostureTagType = computed(() => {
 
 const extensionHosts = computed(() => [
   {
-    label: 'Agent 插件',
+    label: '智能体插件',
     value: agentPluginRows.value.length,
     detail: `${agentPluginRows.value.filter((item) => item.enabled).length} 个已启用`,
     tone: 'blue',
@@ -1749,6 +1761,35 @@ const saveAgentPluginConfig = async (pluginId: string) => {
   color: var(--yui-danger, #dc2626);
 }
 
+.inline-diagnostic-details,
+.advanced-connection-details {
+  color: var(--yui-muted);
+  font-size: 12px;
+}
+
+.inline-diagnostic-details summary,
+.advanced-connection-details summary {
+  cursor: pointer;
+  color: var(--yui-muted);
+}
+
+.inline-diagnostic-details summary:hover,
+.advanced-connection-details summary:hover {
+  color: var(--yui-text);
+}
+
+.inline-diagnostic-details > span,
+.inline-diagnostic-details > code {
+  display: inline-block;
+  margin: 4px 10px 0 0;
+}
+
+.inline-diagnostic-details > code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--yui-muted);
+}
+
 .connector-delivery-list {
   display: flex;
   flex-direction: column;
@@ -2086,6 +2127,16 @@ const saveAgentPluginConfig = async (pluginId: string) => {
 
 .form-grid .wide {
   grid-column: 1 / -1;
+}
+
+.advanced-connection-details {
+  margin-top: 10px;
+}
+
+.advanced-connection-fields {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .submit-row {

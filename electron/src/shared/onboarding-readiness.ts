@@ -18,7 +18,9 @@ export const ONBOARDING_PROBE_IDS = [
 export type OnboardingProbeId = typeof ONBOARDING_PROBE_IDS[number]
 export type OnboardingProbeStatus = 'pending' | 'running' | 'ready' | 'degraded' | 'unavailable' | 'failed' | 'cancelled' | 'needs_user'
 export type OnboardingRuntimeQualification = 'qualified' | 'not_qualified' | 'unsupported'
-export type OnboardingRunState = 'idle' | 'running' | 'ready' | 'blocked' | 'cancelled'
+// `completed` is retained so an older backend snapshot can still be rendered;
+// current desktop and browser paths use `ready` or `blocked`.
+export type OnboardingRunState = 'idle' | 'running' | 'completed' | 'ready' | 'blocked' | 'cancelled'
 export type OnboardingOperation = 'idle' | 'backend_start' | 'probe_scan'
 export const ONBOARDING_PROBE_MESSAGE_KEYS = ['onboarding.interrupted'] as const
 export type OnboardingProbeMessageKey = typeof ONBOARDING_PROBE_MESSAGE_KEYS[number]
@@ -91,14 +93,12 @@ export interface OnboardingRepairRequest {
 }
 
 export const ONBOARDING_REQUIRED_TEXT_PROBES = [
-  'host.runtime',
   'backend.service',
   'llm.provider',
   'llm.model_chat',
 ] as const satisfies readonly OnboardingProbeId[]
 
 export const ONBOARDING_SECTIONS = [
-  'overview',
   'settings',
   'pet',
   'infrastructure',

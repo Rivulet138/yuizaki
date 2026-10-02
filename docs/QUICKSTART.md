@@ -34,7 +34,7 @@ cd ..
 
 `setup` 创建 `python/.env` 并配置 LLM；`--check` 只检查，不启动服务。
 
-默认启动会打开浏览器对话页，Electron 仅作为隐藏的本地宿主运行；需要旧 Electron 控制窗口和桌宠时使用 `.\YuizakiLauncher.exe start --electron-ui`。
+默认启动会打开浏览器对话页，Electron 作为本地宿主运行；需要 Electron 控制面板和桌宠窗口时使用 `.\YuizakiLauncher.exe start --electron-ui`。
 
 Linux 构建与启动：
 
@@ -49,7 +49,7 @@ chmod +x YuizakiLauncher
 ./YuizakiLauncher start
 ```
 
-默认启动会打开浏览器对话页，Electron 仅作为隐藏的本地宿主运行；需要旧 Electron 控制窗口和桌宠时使用 `./YuizakiLauncher start --electron-ui`。
+默认启动会打开浏览器对话页，Electron 作为本地宿主运行；需要 Electron 控制面板和桌宠窗口时使用 `./YuizakiLauncher start --electron-ui`。
 
 平台问题见 [LINUX.md](LINUX.md)。
 
