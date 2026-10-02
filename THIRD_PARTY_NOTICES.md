@@ -55,6 +55,9 @@ bundles. `feibi` follows the Genie upstream MIT license. The root MIT license
 remains the license for Yuizaki source code; it does not license these
 character assets or the shared GenieData runtime resources.
 
+Download the published bundles from the
+[Genie character models release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02).
+
 ## Resource lock review / 资源锁核验
 
 The downloadable resources in `resources.lock.json` have the following release boundary:
