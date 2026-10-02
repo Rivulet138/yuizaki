@@ -2,5 +2,5 @@
 -r requirements-lock-linux.txt
 ruff==0.15.16
 black==26.5.1
-basedpyright==1.39.7
-pyright==1.1.410
+basedpyright==1.40.0
+pyright==1.1.414

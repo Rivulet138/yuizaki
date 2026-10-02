@@ -8,12 +8,12 @@
 # Web/API runtime
 fastapi>=0.136,<1
 pydantic>=2.13.5,<3
-uvicorn[standard]>=0.49,<1
+uvicorn[standard]>=0.52.4,<1
 httpx>=0.28,<1
 aiofiles>=25,<26
 python-multipart>=0.0.32,<1
 python-socketio>=5.16.4,<6
-websocket-client>=1.9,<2
+websocket-client>=1.9.2,<2
 
 # Database
 sqlalchemy>=2.0.52,<3
@@ -27,7 +27,7 @@ Pillow>=12.3,<13
 sherpa-onnx>=1.13.7,<2
 rapidocr-onnxruntime>=1.2.3,<2
 genie-tts==2.0.2
-huggingface-hub>=1.30.0,<2
+huggingface-hub>=1.31.0,<2
 
 # Vector database and embeddings
 qdrant-client>=1.18,<2
