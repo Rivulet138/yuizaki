@@ -60,6 +60,7 @@ chmod +x YuizakiLauncher
 3. 发送文字消息并收到最终响应。
 4. 在 **设置 → 资源** 中下载 Sherpa、Embedding 和 Genie 必需资源；Genie 使用 **Genie TTS 资源 → 预取 Genie 资源**。
    角色模型也可以从 [Genie character models Release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02) 手动下载。
+   Release 中的普拉琪娜压缩包已经更新为 `GPT e15 + SoVITS e8 sampling025`；解压后仍使用目录名 `普拉琪娜_e15_e8_correct_sampling_v2`，可直接覆盖旧角色目录。
 5. 再启用语音、视觉、工具、MCP 或连接器。
 
 ## Launcher 命令

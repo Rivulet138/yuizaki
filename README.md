@@ -12,6 +12,8 @@ Yuizaki 是一个**本地优先的 Windows/Linux AI 桌面伴侣 Agent**。它�
 >
 > [下载 Genie 角色模型 Release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02)（包含 `feibi` 和其他内置角色包）。四个非 `feibi` 角色按目录声明 CC BY-NC-SA 4.0，`feibi` 遵循 Genie 上游 MIT 许可；许可证随每个压缩包提供。
 >
+> `genie-character-pulachina.zip` 已更新为普拉琪娜 `GPT e15 + SoVITS e8 sampling025` 版本。为兼容现有配置，压缩包解压后的目录仍叫 `普拉琪娜_e15_e8_correct_sampling_v2`；覆盖旧目录即可，不需要修改角色路径。
+>
 > 使用应用自动下载时，打开 **设置 → 资源 → Genie TTS 资源 → 预取 Genie 资源**。资源版本和来源由 [`resources.lock.json`](resources.lock.json) 锁定。
 
 ## 能做什么
@@ -73,6 +75,18 @@ Yuizaki 的源码、运行数据和可下载资源分开管理。安装包不默
 - 打包运行的角色目录：`<Electron userData>/python-data/CharacterModels/v2ProPlus/<character>`。
 
 应用会从锁定的 `High-Logic/Genie` revision 下载 Genie TTS 运行时和内置角色资源；Release 中的角色包适合手动保存或离线分发。
+
+### 普拉琪娜模型版本
+
+当前 Release 中的 `genie-character-pulachina.zip` 使用以下配置：
+
+- 训练检查点：GPT `e15`，SoVITS `e8`。
+- 采样处理：T2S 两个解码器移除随机采样路径；VITS 的 `RandomNormalLike` 固定为 `scale=0.25`，与莓华 `sampling025` 处理保持一致。
+- 参考音频：`もうこんなひどいことさせないからね.wav`。
+- 参考文本：`もうこんなひどいことさせないからね`。
+- 兼容路径：解压后仍放在 `python/CharacterModels/v2ProPlus/普拉琪娜_e15_e8_correct_sampling_v2/`，这样现有默认配置和旧安装路径继续有效。
+
+该版本已用 30 条日语短句、长句、数字、字母、片假名和情感句完成本地测试；输出为 32 kHz，测试文件未检测到削波。模型权重和参考音频仍受该角色目录内的独立许可证约束。
 
 ## 技术栈
 
