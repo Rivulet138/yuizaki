@@ -1,18 +1,14 @@
 # Yuizaki / 结崎
 
-[![CI](https://github.com/Rivulet138/yuizaki/actions/workflows/ci.yml/badge.svg)](https://github.com/Rivulet138/yuizaki/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Rivulet138/yuizaki)](https://github.com/Rivulet138/yuizaki/releases/latest)
 [![License](https://img.shields.io/github/license/Rivulet138/yuizaki)](LICENSE)
 
 Yuizaki 是一个**本地优先的 Windows/Linux AI 桌面伴侣 Agent**。它把文字和语音对话、Live2D/VRM 桌宠、长期记忆、按请求视觉感知、工具调用和有限的桌面动作组合在一个本地应用中。
 
-它适合希望把 AI 长时间放在桌面上、又希望掌握模型提供商、对话数据、记忆和本地权限的用户。项目默认面向单用户本机运行，不是经过公网加固的 SaaS，也不应直接暴露到互联网。
+它适合希望把 AI 长时间放在桌面上、又希望掌握模型提供商、对话数据、记忆和本地权限的用户。
 
 > **Genie 角色模型下载入口**
 >
-> [下载 Genie 角色模型 Release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02)（包含 `feibi` 和其他内置角色包）。四个非 `feibi` 角色按目录声明 CC BY-NC-SA 4.0，`feibi` 遵循 Genie 上游 MIT 许可；许可证随每个压缩包提供。
->
-> `genie-character-pulachina.zip` 已更新为普拉琪娜 `GPT e15 + SoVITS e8 sampling025` 版本。为兼容现有配置，压缩包解压后的目录仍叫 `普拉琪娜_e15_e8_correct_sampling_v2`；覆盖旧目录即可，不需要修改角色路径。
+> [下载 Genie 角色模型 Release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02)（包含 `feibi` 和其他内置角色包）。其余四个角色模型按目录声明 CC BY-NC-SA 4.0，`feibi` 遵循 Genie 上游 MIT 许可；许可证随每个压缩包提供。
 >
 > 使用应用自动下载时，打开 **设置 → 资源 → Genie TTS 资源 → 预取 Genie 资源**。资源版本和来源由 [`resources.lock.json`](resources.lock.json) 锁定。
 
@@ -23,7 +19,7 @@ Yuizaki 是一个**本地优先的 Windows/Linux AI 桌面伴侣 Agent**。它�
 - 流式文字对话，会话隔离、历史、分支、取消和恢复入口。
 - 统一的 Agent Turn，支持规划、工具调用、任务、MCP、插件和计划任务。
 - Socket.IO、SSE 和 HTTP 三种本地通信方式。
-- 工具结果区分已验证成功、失败、取消和 `unknown_effect`，不会把无法确认的现实副作用伪装成成功。
+- 工具结果区分已验证成功、失败、取消和 `unknown_effect`。
 
 ### 桌宠与语音
 
@@ -36,8 +32,8 @@ Yuizaki 是一个**本地优先的 Windows/Linux AI 桌面伴侣 Agent**。它�
 
 - 按请求的屏幕捕获、OCR 和视觉模型分析；默认不运行永久录屏循环。
 - SQLite 作为记忆权威存储，支持召回、审核、纠正、软遗忘、永久删除、导入、导出和索引重建。
-- Qdrant 仅作为可重建的语义检索索引，不是记忆权威源。
-- Windows 和明确的 Linux X11 会话支持可见窗口发现、聚焦和优雅关闭；能力默认关闭并需要独立 host token。
+- Qdrant 仅作为可重建的语义检索索引。
+- Windows 和明确的 Linux X11 会话支持可见窗口发现、聚焦；能力默认关闭并需要独立 host token。
 - Telegram、Discord、QQ/微信个人桥连接器已提供实验性入口，默认关闭。
 
 ### 当前边界
@@ -46,7 +42,6 @@ Yuizaki 是一个**本地优先的 Windows/Linux AI 桌面伴侣 Agent**。它�
 - macOS 没有受支持的应用和原生桌面动作适配器。
 - Wayland 下全局输入钩子和宿主级桌面动作可能受合成器限制。
 - 模型权重、语音、角色和字体通常需要首次运行时单独下载或由用户提供。
-- 本地测试和 CI 不能替代目标机器上的音频、GPU、桌面合成器、Provider、连接器和长时间运行验证。
 
 ## 资源类型
 
@@ -76,15 +71,14 @@ Yuizaki 的源码、运行数据和可下载资源分开管理。安装包不默
 
 应用会从锁定的 `High-Logic/Genie` revision 下载 Genie TTS 运行时和内置角色资源；Release 中的角色包适合手动保存或离线分发。
 
-### 普拉琪娜模型版本
+### Genie角色模型
 
-当前 Release 中的 `genie-character-pulachina.zip` 使用以下配置：
+当前 Release 中的角色模型使用以下配置：
 
 - 训练检查点：GPT `e15`，SoVITS `e8`。
-- 采样处理：T2S 两个解码器移除随机采样路径；VITS 的 `RandomNormalLike` 固定为 `scale=0.25`，与莓华 `sampling025` 处理保持一致。
+- 采样处理：T2S 两个解码器移除随机采样路径；VITS 的 `RandomNormalLike` 固定为 `scale=0.25`
 - 参考音频：`もうこんなひどいことさせないからね.wav`。
 - 参考文本：`もうこんなひどいことさせないからね`。
-- 兼容路径：解压后仍放在 `python/CharacterModels/v2ProPlus/普拉琪娜_e15_e8_correct_sampling_v2/`，这样现有默认配置和旧安装路径继续有效。
 
 该版本已用 30 条日语短句、长句、数字、字母、片假名和情感句完成本地测试；输出为 32 kHz，测试文件未检测到削波。模型权重和参考音频仍受该角色目录内的独立许可证约束。
 
@@ -209,23 +203,6 @@ npm run start:check
 
 发行包命令为 `npm run package:win` 和 `npm run package:linux`。发布工作流会生成 Windows NSIS、Linux AppImage 和 deb 构建产物，但当前仓库不会自动创建 GitHub Release；正式发布仍需平台资格、签名、校验和与许可报告。
 
-## 设置
-
-### 配置文件
-
-- `python/.env`：Provider、端口、可选服务和运行时环境变量，不提交到 Git。
-- `python/config/settings.json`：应用持久化设置，由设置页或 Launcher 管理。
-- `resources.lock.json`：模型和资源的 URL、revision、校验和及许可边界。
-
-最小文字配置示例：
-
-```dotenv
-LLM_PROVIDER=custom
-LLM_BASE_URL=http://127.0.0.1:11434/v1
-LLM_API_KEY=local
-LLM_MODEL=your-model
-```
-
 ### 常用设置
 
 | 设置 | 默认或示例 | 说明 |
@@ -244,7 +221,7 @@ LLM_MODEL=your-model
 
 ### 本地数据和隐私
 
-默认服务绑定 loopback。loopback API 是桌面运行时的本地信任边界，不是公网认证方案。原生桌面动作额外要求 Electron 生成的 `YUIZAKI_HOST_DESKTOP_ACTION_TOKEN`；它必须与 `YUIZAKI_BACKEND_API_TOKEN` 分开保存。
+默认服务绑定 loopback。loopback API 是桌面运行时的本地信任边界。
 
 聊天、记忆、设置和缓存默认留在本机；选择云 Provider 时，相应的文字、音频或图像会发送给该 Provider。MCP、插件、浏览器自动化和远程 Provider 可能按配置读取或修改本地数据。启用前请检查权限和工具作用域。详细边界见 [`SECURITY.md`](SECURITY.md)。
 
@@ -260,14 +237,6 @@ LLM_MODEL=your-model
 | [`SECURITY.md`](SECURITY.md) | 安全边界、凭据、MCP、连接器和数据处理 | 安全政策 |
 | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | 依赖、模型、角色、声音和字体许可提醒 | 发布前必读 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献流程和提交边界 | 贡献者文档 |
-
-以下文档是内部评估或过程记录，不是安装和配置指南：
-
-- [`docs/COMPREHENSIVE_REVIEW_2026.md`](docs/COMPREHENSIVE_REVIEW_2026.md)：带日期的产品与技术评估快照。
-- [`docs/IMPROVEMENT_RESEARCH.md`](docs/IMPROVEMENT_RESEARCH.md)：外部研究与同类项目参考。
-- [`docs/IMPROVEMENT_ROADMAP.md`](docs/IMPROVEMENT_ROADMAP.md)：改进路线、验收记录和历史执行日志。
-
-这些文件目前仍有审计和开发参考价值，不应被视为当前产品承诺；修改实现后需要重新核对其中的日期、评分和状态。
 
 ## 验证
 
@@ -286,8 +255,6 @@ npm run test:unit
 npm run build
 npm run start:check
 ```
-
-当前 CI 还覆盖 Python 3.11–3.13、Windows/Linux、Node 22/24、Node MCP 和 Windows Go Launcher。测试通过不等于真实 Provider、声卡、GPU、桌面合成器、连接器或 24 小时运行已经取得发布资格；这些能力需要目标机器验证。
 
 ## 许可与贡献
 
