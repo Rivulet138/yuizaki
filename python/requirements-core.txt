@@ -2,7 +2,7 @@
 # The platform lock files are generated/reviewed against this manifest.
 
 # Web/API runtime
-fastapi>=0.136,<1
+fastapi>=0.142.2,<1
 pydantic>=2.13.5,<3
 uvicorn[standard]>=0.52.4,<1
 httpx>=0.28,<1
