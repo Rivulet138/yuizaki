@@ -1,6 +1,6 @@
 # Yuizaki development lock for Linux / Python 3.11-3.13.
 -r requirements-lock-linux.txt
-ruff==0.15.16
+ruff==0.16.9
 black==26.5.1
 basedpyright==1.40.0
 pyright==1.1.414
