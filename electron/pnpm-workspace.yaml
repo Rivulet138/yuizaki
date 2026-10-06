@@ -1,3 +1,5 @@
 allowBuilds:
   electron-winstaller: set this to true or false
   uiohook-napi: set this to true or false
+overrides:
+  source-map-js: 1.2.2
