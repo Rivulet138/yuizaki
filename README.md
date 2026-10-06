@@ -1,6 +1,5 @@
 # Yuizaki / 结崎
 
-[![CI](https://github.com/Rivulet138/yuizaki/actions/workflows/ci.yml/badge.svg)](https://github.com/Rivulet138/yuizaki/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Rivulet138/yuizaki)](https://github.com/Rivulet138/yuizaki/releases/latest)
 [![License](https://img.shields.io/github/license/Rivulet138/yuizaki)](LICENSE)
 
