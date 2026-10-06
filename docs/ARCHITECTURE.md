@@ -1,4 +1,10 @@
-# Architecture / 架构
+# 架构 / Architecture
+
+## 中文概览
+
+Yuizaki 是本地多进程桌面应用：Go Launcher 负责端口、环境、安装和子进程；Electron 管理窗口、托盘、preload 和宿主能力；Vue 管理界面、音频和 Live2D/VRM；FastAPI 与 Socket.IO 管理 Agent、Provider、工具、记忆、调度和持久化；node-mcp、Qdrant 及远程 Provider 均为可选。
+
+请求依次经过 renderer、HTTP/SSE/Socket.IO、`TurnService`、上下文与记忆检索、规划、LLM/工具执行、投影和持久化。上下文、规划、执行、投影四个阶段保持边界，`pipeline.py` 只作为兼容外观。SQLite 是聊天、Job、投递状态和记忆的权威源；Qdrant 是可重建投影。视觉按请求授权，桌面动作默认关闭并使用独立主机令牌。可选 Provider 失败应降级对应能力而不阻塞文字聊天；取消后的状态变化可能以 `unknown_effect` 结束，不自动重试为成功。
 
 Yuizaki is a local, multi-process desktop application. Electron owns windows and host capabilities; Vue owns the user interface and avatar rendering; Python owns Agent orchestration, providers, tools, memory, and persistence.
 

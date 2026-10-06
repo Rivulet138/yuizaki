@@ -1,4 +1,4 @@
-# Yuizaki / 结崎
+# 结崎 Yuizaki
 
 [![Release](https://img.shields.io/github/v/release/Rivulet138/yuizaki)](https://github.com/Rivulet138/yuizaki/releases/latest)
 [![License](https://img.shields.io/github/license/Rivulet138/yuizaki)](LICENSE)
@@ -176,3 +176,26 @@ npm run start:check
 源码采用 [MIT License](LICENSE)。MIT 不覆盖模型权重、声音、角色、字体、美术资源或外部服务；分发前阅读 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。贡献前阅读 [`CONTRIBUTING.md`](CONTRIBUTING.md)、[`SECURITY.md`](SECURITY.md) 和 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
 当前版本为可用 Alpha；真实设备资格、跨平台体验、第三方扩展沙箱、长期稳定性和发行治理仍在完善中。
+
+---
+
+## English
+
+Yuizaki is a local-first Windows/Linux AI desktop companion Agent with text and voice chat, Live2D/VRM avatars, long-term memory, request-scoped vision, tool calls, and limited desktop actions.
+
+### Genie character models
+
+[Download the Genie character models release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02). In the app, use **Settings → Resources → Genie TTS Assets → Prefetch Genie Assets**. Source checkouts use `python/.cache/GenieData/GenieData` and `python/CharacterModels/v2ProPlus/<character>`; packaged runs use the corresponding Electron `userData/python-data` paths.
+
+### Features and boundaries
+
+- Streaming text chat, isolated sessions, history, branches, cancellation, and recovery.
+- Agent turns, planning, tools, jobs, MCP, plugins, and scheduled tasks.
+- Live2D/VRM expressions, motions, gaze, lip sync, and state projection.
+- Push-to-talk, continuous conversation, VAD, ASR, streaming TTS, and interruption.
+- Request-scoped screen capture, OCR, and vision; no permanent recording loop by default.
+- SQLite-authoritative memory with review, correction, forgetting, deletion, import/export, and index rebuild.
+- Visible-window discovery, focus, and close on Windows and explicit Linux X11 sessions; disabled by default and protected by a separate host token.
+- Experimental Telegram, Discord, QQ, and WeChat personal bridges; disabled by default.
+
+Models, voices, characters, fonts, and artwork have separate licenses. Do not commit secrets, databases, personal conversations, screenshots, audio caches, or model weights. See [Third-party notices](THIRD_PARTY_NOTICES.md), [Quickstart](docs/QUICKSTART.md), [Configuration](docs/CONFIGURATION.md), [Architecture](docs/ARCHITECTURE.md), and [Security](SECURITY.md).

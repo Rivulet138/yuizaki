@@ -1,4 +1,15 @@
-# Configuration / 配置
+# 配置 / Configuration
+
+## 中文概览
+
+本地配置位于 `python/.env` 和 `python/config/settings.json`；启动器根据 `python/.env.example` 创建环境文件，凭据不得提交或写入日志。安装配置分为 `core` 和 `full`，模型权重在首次运行时从锁定来源下载，不嵌入安装包。
+
+- LLM 使用 OpenAI 兼容端点；视觉默认关闭且只处理当前请求的帧。
+- 完整语音链路需要麦克风、ASR、LLM、TTS 和对应模型；Sherpa、Genie、Embedding 等资源按需加载。
+- SQLite 是默认记忆权威源；Qdrant 仅作为可重建语义索引，纠正、遗忘和永久删除应通过 UI/API 完成。
+- 服务默认绑定回环地址。`YUIZAKI_BACKEND_API_TOKEN` 只保护可选非回环访问；桌面动作另用 `YUIZAKI_HOST_DESKTOP_ACTION_TOKEN`，两者必须分离。
+- Telegram、Discord、QQ 个人桥和微信个人桥默认关闭；启用连接器即授权其声明的收发流程，状态接口不会返回密钥。
+- Live2D/VRM、模型权重、声音和缓存默认不进入 Git；分发前阅读 [第三方声明](../THIRD_PARTY_NOTICES.md)。
 
 Yuizaki stores local runtime configuration in `python/.env` and `python/config/settings.json`. The launcher creates `python/.env` from `python/.env.example`; keep credentials out of Git and logs.
 

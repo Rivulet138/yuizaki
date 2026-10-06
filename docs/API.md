@@ -1,4 +1,14 @@
-# Local API / 本地 API
+# 本地 API / Local API
+
+## 中文概览
+
+Yuizaki 为桌面客户端提供本地 HTTP、SSE 和 Socket.IO 契约，不是面向公网的加固 API。默认 Python 服务为 `127.0.0.1:8001`，Electron 控制服务为 `127.0.0.1:38945`；启动器可能选择备用端口，客户端必须读取运行时配置。
+
+- FastAPI 提供 `/openapi.json` 和 `/docs`；运行中的 schema 与路由契约测试是字段定义的权威来源。
+- HTTP 路由覆盖存活/就绪、聊天与 Agent、会话、工作区、伴侣、记忆、设置、运行状态、连接器、存储和资源。
+- `POST /v1/chat/completions` 支持 SSE 流式对话；取消、工具失败、Provider 失败和未知工具效果都必须作为明确终态返回。
+- Socket.IO 负责语音、Agent 增量、打断、权限、工具 Job、追踪、调度、感知和桌宠状态；变更事件名时同时更新 Python/TypeScript 契约和传输测试。
+- Job 信封包含 `jobId`、`runId`、`sessionId`、`kind`、`status`、`progress`、`summary`、`artifact` 和 `error`。感知请求按请求授权、单次使用，不保留连续截图或摄像头历史。
 
 Yuizaki exposes local HTTP, SSE, and Socket.IO contracts for its desktop client. These interfaces are not a hardened public internet API.
 

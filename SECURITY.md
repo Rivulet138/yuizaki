@@ -1,4 +1,16 @@
-# Security and privacy boundary
+# 安全与隐私边界 / Security and privacy boundary
+
+## 中文说明
+
+Yuizaki 是面向本机单用户的 AI 桌宠 Agent，不是经过加固的公共服务。默认服务只绑定回环地址；API 密钥放在 `python/.env` 或本地设置中，禁止提交或写入日志。视觉、剪贴板、桌面操作、外部 URL 和托管文件各有独立能力边界。
+
+MCP、插件、Shell 工具、浏览器自动化和远程模型按配置读取或修改数据；请审查工具权限，并把提示、OCR、截图、网页和 MCP 结果视为不可信证据。聊天、记忆、设置和缓存默认保存在本地，服务运行时不要直接编辑 SQLite。
+
+原生桌面动作默认关闭，仅限可见窗口发现、聚焦和优雅关闭，并使用独立 `YUIZAKI_HOST_DESKTOP_ACTION_TOKEN`、短期租约、撤销和紧急停止。Windows 与明确的 Linux X11 会话支持适配器；Wayland 原生动作和 macOS 动作未实现。
+
+SQLite 是记忆权威数据源，Qdrant 只是可重建检索投影。召回前会应用工作区、会话和生命周期过滤；纠正保留历史，软遗忘、过期、被替代、被拒绝和永久删除的记录不得作为有效记忆返回。
+
+Telegram、Discord、QQ/微信个人账号桥接器默认关闭。用户在治理面板启用即完成授权；凭据只保存为本地配置状态，不通过 API 返回。未经认证、来源策略、限流、密钥、沙箱、工具审批、租户隔离和审计日志审查，不得将后端或控制代理暴露到公网。
 
 Yuizaki is a local, single-user AI desktop pet Agent, not a hardened public service. The default policy favors usable loopback integration over per-request authentication while keeping boundaries around desktop data, native actions, external URLs, and managed files.
 
@@ -95,17 +107,3 @@ Do not expose the backend or Electron control proxy to the public internet witho
 ## Issue reporting
 
 Include the commit, OS, runtime versions, launcher flags, and a redacted log. Never include API keys, backend tokens, personal chat history, or captured screens. Report security-sensitive issues privately to the maintainers.
-
-## 中文说明
-
-Yuizaki 是面向本机单用户的 AI 桌宠 Agent，不是经过加固的公共服务。Electron 控制服务只绑定回环地址，接受本机浏览器来源并拒绝远程、`file:` 和 `null` 来源。本机回环的 Python、Socket.IO 和 Electron 控制请求均不要求逐请求令牌；启动器生成的 Backend API Token 仅作为可选非回环访问边界。API 密钥只能放在 `python/.env` 或本地设置中，禁止提交或写入日志。视觉、剪贴板、桌面操作、外部 URL 和托管文件仍保留各自的能力边界。
-
-MCP、插件、Shell 工具、浏览器自动化和远程模型可能按配置读取或修改数据。请审查工具权限，将敏感目录置于工具作用域之外，并把提示、OCR、截图、网页和 MCP 结果视为不可信证据。聊天、记忆、设置和缓存默认保存在本地；服务运行时不要直接编辑 SQLite。
-
-原生桌面动作仅限可见顶层窗口发现、聚焦和优雅关闭，默认关闭，并使用应用选择、短期租约、撤销和紧急停止边界。`/api/desktop-actions/*` 现在要求 Electron 每次启动生成的独立 `YUIZAKI_HOST_DESKTOP_ACTION_TOKEN`，使用严格 `Bearer` 校验；缺少令牌、令牌错误、令牌与 Backend API Token 相同或未配置时均 fail-closed。普通本机 loopback API 仍使用既有本机信任模型。外部托管 Python 必须显式注入同一 host token，否则桌面动作保持不可用。Windows 与明确的 Linux X11 会话具有适配器；Wayland 原生动作和 macOS 动作未实现。超时后可能已经产生现实影响的操作不会被自动重试为成功。
-
-SQLite 是记忆权威数据源，Qdrant 仅是可重建的检索投影。召回前会应用工作区、会话和生命周期过滤；纠正保留历史，软遗忘、过期、被替代、被拒绝和永久删除的记录不得作为有效记忆返回。
-
- Telegram、Discord、QQ/微信个人账号兼容桥连接器默认关闭。用户在治理面板选择启用即完成授权，不会逐条确认。个人桥风险由用户自行承担。只有精确的 provider webhook 路径不要求 Yuizaki Backend API Token；配置、停用、取消和其他路径仍受原有后端边界保护。连接器 turn 使用本地 SQLite TurnCommitStore 的持久化 claim/commit/replay，Agent 结果和外部平台投递分开记录，投递失败可重试，已确认投递不会重复发送。
-
-未经认证、来源策略、限流、密钥、沙箱、工具审批、租户隔离和审计日志审查，不得将后端或控制代理暴露到公网。报告安全问题时请提供 commit、系统、运行时版本、启动参数和脱敏日志，绝不要附带密钥、令牌、私人聊天记录或截图。
