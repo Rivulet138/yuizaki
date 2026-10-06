@@ -41,7 +41,7 @@
     "axios": "^1.20.0",
     "easy-live2d": "^1.0.0",
     "element-plus": "^2.14.1",
-    "pinia": "^3.0.4",
+    "pinia": "^4.0.3",
     "pixi.js": "^8.19.0",
     "socket.io-client": "^4.8.3",
     "three": "^0.186.1",
