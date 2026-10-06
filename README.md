@@ -9,16 +9,6 @@
 
 [下载 Genie 角色模型 Release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02)
 
-| 角色包 | 许可证 |
-| --- | --- |
-| `genie-character-feibi.zip` | Genie 上游 MIT（许可证见压缩包内 `feibi/LICENSE`） |
-| `genie-character-huiye.zip` | CC BY-NC-SA 4.0 |
-| `genie-character-meihua.zip` | CC BY-NC-SA 4.0 |
-| `genie-character-meikuli.zip` | CC BY-NC-SA 4.0 |
-| `genie-character-pulachina.zip` | CC BY-NC-SA 4.0 |
-
-压缩包内附许可证和 SHA-256；共享的 GenieData 运行时资源不包含在内。角色包仅用于对应角色模型，分发前请阅读 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
-
 应用内下载：**设置 → 资源 → Genie TTS 资源 → 预取 Genie 资源**。版本和来源由 [`resources.lock.json`](resources.lock.json) 锁定。
 
 源码运行路径：
@@ -34,8 +24,6 @@ python/CharacterModels/v2ProPlus/<character>
 <Electron userData>/python-data/.cache/GenieData/GenieData
 <Electron userData>/python-data/CharacterModels/v2ProPlus/<character>
 ```
-
-当前 `genie-character-pulachina.zip` 使用 GPT `e15`、SoVITS `e8` 和 `sampling025` 配置；解压目录保持为 `普拉琪娜_e15_e8_correct_sampling_v2`，可直接覆盖旧目录。
 
 ## 功能
 
@@ -62,7 +50,7 @@ python/CharacterModels/v2ProPlus/<character>
 
 模型、声音、角色、字体和美术素材有独立许可。不要将密钥、数据库、个人对话、截图、音频缓存或模型权重提交到 Git。
 
-支持 Windows 10/11 x64 和 Linux x86_64 图形桌面。macOS 没有受支持的应用和原生桌面动作适配器；Wayland 下全局输入钩子和宿主级桌面动作受合成器限制。真实 Provider、音频、GPU、桌面合成器、连接器和长时间运行需要在目标机器验证。
+支持 Windows 10/11 x64 和 Linux x86_64 图形桌面。macOS 没有受支持的应用和原生桌面动作适配器；Wayland 下全局输入钩子和宿主级桌面动作受合成器限制。
 
 ## 安装与启动
 
@@ -124,15 +112,6 @@ Linux 使用 `.venv/bin/python` 和 `cp .env.example .env`。后端默认监听 
 | `python/.env` | Provider、端口、可选服务和运行时变量，不提交到 Git |
 | `python/config/settings.json` | 应用持久化设置，由设置页或 Launcher 管理 |
 | `resources.lock.json` | 模型/资源 URL、revision、校验和及许可边界 |
-
-最小文字配置：
-
-```dotenv
-LLM_PROVIDER=custom
-LLM_BASE_URL=http://127.0.0.1:11434/v1
-LLM_API_KEY=local
-LLM_MODEL=your-model
-```
 
 | 变量 | 示例/默认值 | 说明 |
 | --- | --- | --- |
