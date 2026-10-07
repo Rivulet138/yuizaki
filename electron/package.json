@@ -73,6 +73,11 @@
     "vue-eslint-parser": "^10.4.1",
     "wait-on": "^9.0.10"
   },
+  "overrides": {
+    "global-agent": "4.1.3",
+    "http-cache-semantics": "4.3.0",
+    "shell-quote": "1.12.0"
+  },
   "build": {
     "appId": "com.yuizaki.desktop",
     "productName": "Yuizaki",
