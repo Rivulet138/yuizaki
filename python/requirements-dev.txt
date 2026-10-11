@@ -9,5 +9,5 @@ ruff>=0.16.9,<1
 black>=26,<27
 
 # Type checking
-basedpyright>=1.40.0,<2
+basedpyright>=1.40.2,<2
 pyright>=1.1.414,<2
