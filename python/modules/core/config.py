@@ -42,11 +42,6 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-def _clean_optional_secret(value: str | None, placeholders: set[str]) -> str:
-    clean = (value or "").strip()
-    return "" if clean.lower() in placeholders else clean
-
-
 class LLMConfig(BaseModel):
     """LLM service configuration."""
     model_config = ConfigDict(arbitrary_types_allowed=True)

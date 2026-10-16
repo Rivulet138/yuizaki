@@ -29,7 +29,7 @@ from .desktop_actions import (
     register_desktop_action_tools,
 )
 from .mcp_manager import MCPManager
-from .context import AgentRequestContext
+from .context import AgentRequestContext, coerce_autonomy_mode
 from .perception import PerceptionProviderRegistry
 from .pipeline import AgentPipeline
 from .policy_engine import PolicyEngine
@@ -205,14 +205,13 @@ def create_agent_runtime(
             model=str(snapshot.get("model") or "") or None,
             max_tokens=max(1, min(262_144, int(snapshot.get("max_tokens") or 8192))),
             permission_scope=str(snapshot.get("permission_scope") or "") or None,
-            autonomy_mode=str(snapshot.get("autonomy_mode") or "companion"),
+            autonomy_mode=coerce_autonomy_mode(snapshot.get("autonomy_mode")),
             messages=[],
             llm_client=runtime_context.llm_client,
             tool_registry=runtime_context.tool_registry or tool_registry,
             tool_executor=runtime_context.tool_executor or tool_executor,
             step_executor=runtime_context.step_executor or step_executor,
             turn_service=runtime_context.turn_service,
-            perception=runtime_context.perception,
             extra={
                 "turn_id": str(snapshot.get("turn_id") or ""),
                 "runtime_revision": runtime_context.revision,

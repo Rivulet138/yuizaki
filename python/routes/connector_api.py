@@ -1111,7 +1111,7 @@ def create_message_connector_router(
                 "event_id": message.event_id,
                 "session_id": message.session_id,
                 "delivery": _public_delivery(
-                    queued_store.connector_delivery(request_id)
+                    queued_store.connector_delivery(request_id) if queued_store is not None else None
                 ),
             })
         try:
@@ -1131,7 +1131,7 @@ def create_message_connector_router(
         interval_seconds=recovery_interval_seconds,
         metrics_path=recovery_metrics_path,
     ) if recovery_interval_seconds is not None and recovery_interval_seconds > 0 else None
-    router.connector_recovery_controller = recovery_controller
+    setattr(router, "connector_recovery_controller", recovery_controller)
     return router
 
 

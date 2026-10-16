@@ -11,13 +11,17 @@ logger = logging.getLogger(__name__)
 class I18nManager:
     """国际化管理器"""
 
-    def __init__(self, locales_dir: str = "./locales"):
+    def __init__(self, locales_dir: str | Path | None = None):
         """初始化 i18n 管理器
 
         Args:
-            locales_dir: 语言文件目录
+            locales_dir: 语言文件目录。未指定时使用本模块旁的 locales 目录，避免依赖当前工作目录。
         """
-        self.locales_dir = Path(locales_dir)
+        self.locales_dir = (
+            Path(locales_dir)
+            if locales_dir is not None
+            else Path(__file__).resolve().parent / "locales"
+        )
         self.messages: Dict[str, Dict[str, Any]] = {}
         self.current_locale = "zh-CN"
         self.supported_locales = ["zh-CN", "en-US", "ja-JP"]

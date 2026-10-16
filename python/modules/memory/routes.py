@@ -980,14 +980,14 @@ def create_memory_router(
     except HTTPException as exc:
       if exc.status_code != 503 or not isinstance(exc.detail, dict):
         raise
-      detail = dict(exc.detail)
-      detail.update({
+      detail: dict[str, Any] = {
+        **dict(exc.detail),
         "error": "memory_dedupe_incomplete",
         "operation": "dedupe",
         "complete": False,
         "backend": getattr(state.store, "backend_name", "unknown"),
         "cause": str(exc.detail.get("error") or MemorySearchIncompleteError.code),
-      })
+      }
       raise HTTPException(status_code=503, detail=detail) from exc
 
   async def _record_operation(
@@ -1000,8 +1000,18 @@ def create_memory_router(
     evidence: Any = None,
     details: Mapping[str, Any] | None = None,
   ) -> None:
-    metadata = document.metadata if document is not None else {}
-    previous_metadata = previous.metadata if previous is not None else {}
+    metadata: Mapping[str, Any] = document.metadata if document is not None else {}
+    previous_metadata: Mapping[str, Any] = previous.metadata if previous is not None else {}
+    def _optional_revision(value: Any) -> int | None:
+      if value is None or isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+      try:
+        return int(value)
+      except (TypeError, ValueError, OverflowError):
+        return None
+
+    before_revision = _optional_revision(previous_metadata.get('revision'))
+    after_revision = _optional_revision(metadata.get('revision'))
     event = new_operation(
       operation=operation,
       document_id=document_id,
@@ -1010,8 +1020,8 @@ def create_memory_router(
       session_id=str(metadata.get('session_id')) if metadata.get('session_id') else None,
       reason=reason,
       evidence=evidence,
-      before_revision=int(previous_metadata.get('revision')) if previous_metadata.get('revision') is not None else None,
-      after_revision=int(metadata.get('revision')) if metadata.get('revision') is not None else None,
+      before_revision=before_revision,
+      after_revision=after_revision,
       details=dict(details or {}),
     )
     recorder = getattr(state.store, 'record_operation', None)

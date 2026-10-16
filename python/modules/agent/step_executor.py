@@ -43,6 +43,9 @@ from .route_policy import system_prompt_for_agent_role
 from .tool_loop import run_tool_loop
 from .tool_result import ToolResultEnvelope, is_known_success
 
+RecoveryRunner = Callable[[AgentRequestContext], Awaitable[AgentPipelineResult]]
+ExecuteRecovery = Callable[[AgentRequestContext, RecoveryRunner], Awaitable[Any]]
+
 
 @dataclass(frozen=True)
 class _PlanCapability:
@@ -626,8 +629,9 @@ class StepExecutor:
             raw = await self.execute_plan(bound_context, [step])
             return self._as_pipeline_result(raw)
 
+        typed_execute_recovery: ExecuteRecovery = cast(ExecuteRecovery, execute_recovery)
         try:
-            commit = await execute_recovery(context, runner)
+            commit = await typed_execute_recovery(context, runner)
         except Exception:  # noqa: BLE001 - TurnService persists unknown effect when runner began.
             return {"ok": False, "error": "recovery_resume_failed", "retryable": True}
         result = commit.result

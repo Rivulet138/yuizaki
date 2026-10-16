@@ -25,7 +25,6 @@ from .runtime_endpoints import (
     build_experience_metrics_endpoint,
     build_health_endpoint,
     build_heartbeat_goal_cancel_endpoint,
-    build_heartbeat_opportunity_accept_endpoint,
     build_heartbeat_status_endpoint,
     build_imported_skills_state_endpoint,
     build_install_mcp_preset_endpoint,
@@ -72,7 +71,6 @@ class RuntimeHandlers:
     heartbeat_status: Callable[..., Any]
     companion_runtime_status: Callable[..., Any]
     companion_opportunity_outcome: Callable[..., Any]
-    heartbeat_opportunity_accept: Callable[..., Any]
     heartbeat_goal_cancel: Callable[..., Any]
     proactive_settings_get: Callable[..., Any]
     proactive_settings_patch: Callable[..., Any]
@@ -321,15 +319,6 @@ def build_runtime_handlers(
         companion_opportunity_outcome=build_companion_opportunity_outcome_endpoint(
             heartbeat_scheduler_provider=heartbeat_scheduler_provider,
         ),
-        heartbeat_opportunity_accept=build_heartbeat_opportunity_accept_endpoint(
-            heartbeat_scheduler_provider=heartbeat_scheduler_provider,
-            turn_service_provider=lambda: sio_server.runtime.turn_service if sio_server.runtime else None,
-            authorization_callback=lambda acceptance, _pending: (
-                sio_server.runtime is not None
-                and sio_server.runtime.turn_service is not None
-                and acceptance.workspace_id == active_workspace_id_provider()
-            ),
-        ),
         heartbeat_goal_cancel=build_heartbeat_goal_cancel_endpoint(heartbeat_scheduler_provider=heartbeat_scheduler_provider),
         proactive_settings_get=activity_endpoints["get_settings"],
         proactive_settings_patch=activity_endpoints["patch_settings"],
@@ -472,7 +461,6 @@ def build_system_router_from_handlers(
         heartbeat_status_handler=handlers.heartbeat_status,
         companion_runtime_handler=handlers.companion_runtime_status,
         companion_opportunity_outcome_handler=handlers.companion_opportunity_outcome,
-        heartbeat_opportunity_accept_handler=handlers.heartbeat_opportunity_accept,
         heartbeat_goal_cancel_handler=handlers.heartbeat_goal_cancel,
         proactive_settings_get_handler=handlers.proactive_settings_get,
         proactive_settings_patch_handler=handlers.proactive_settings_patch,

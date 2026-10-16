@@ -11,9 +11,12 @@ export type SidebarNavigationGroup<T extends SidebarNavigationItem> = {
 
 export const primarySidebarMenuIds = ['chat', 'memory', 'settings'] as const
 
+// Runtime diagnostics remain reachable through direct links, but do not occupy
+// the compact browser sidebar alongside user-facing settings.
+export const hiddenSidebarMenuIds = ['infrastructure', 'deploy'] as const
+
 export const advancedSidebarGroups = [
   { id: 'companion', label: '桌宠', hint: '人格、外观与记录', ids: ['prompt', 'pet', 'persona-memory'] },
-  { id: 'system', label: '运行', hint: '服务与启动', ids: ['infrastructure', 'deploy'] },
   { id: 'tools', label: '工具', hint: '本地能力与插件', ids: ['tool', 'svc', 'plugins'] },
   { id: 'audit', label: '审计', hint: '任务与权限追踪', ids: ['agent-trace', 'agent-governance'] },
   { id: 'settings', label: '设置', hint: '语言与界面', ids: ['i18n'] },
@@ -39,6 +42,7 @@ export const buildSidebarNavigation = <T extends SidebarNavigationItem>(menus: r
     items.forEach((menu) => remaining.delete(menu.id))
     return items.length ? [{ id: group.id, label: group.label, hint: group.hint, items }] : []
   })
+  hiddenSidebarMenuIds.forEach((id) => remaining.delete(id))
   const otherItems = menus.filter((menu) => remaining.has(menu.id))
   if (otherItems.length) advanced.push({ id: 'other', label: '其他', hint: '其他可用模块', items: otherItems })
 

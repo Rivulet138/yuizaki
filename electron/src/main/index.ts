@@ -402,7 +402,7 @@ async function createApp(): Promise<void> {
     },
     readClipboard: async (signal) => {
       signal.throwIfAborted()
-      const text = clipboard.readText('clipboard')
+      const text = clipboard.readText()
       signal.throwIfAborted()
       return text
     },

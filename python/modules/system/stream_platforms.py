@@ -171,7 +171,7 @@ class TwitchHelixSubscriptionProvider:
     def list_subscriptions(self) -> list[Mapping[str, Any]]:
         records = self._records(self._call("GET"))
         self._known_types = {str(item["id"]): str(item["type"]) for item in records}
-        return records
+        return [dict(record) for record in records]
 
     def create_subscription(self, subscription_type: str) -> Mapping[str, Any]:
         if subscription_type not in _EVENTSUB_SUBSCRIPTION_SET:
@@ -666,8 +666,10 @@ class TwitchEventIngress:
                 "queued": False,
                 "externalSideEffects": False,
             }
-        event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
-        subscription = payload.get("subscription") if isinstance(payload.get("subscription"), dict) else {}
+        raw_event = payload.get("event")
+        event: Mapping[str, Any] = raw_event if isinstance(raw_event, Mapping) else {}
+        raw_subscription = payload.get("subscription")
+        subscription: Mapping[str, Any] = raw_subscription if isinstance(raw_subscription, Mapping) else {}
         normalized = self._normalize_event(str(subscription.get("type") or ""), event)
         with self._seen_lock:
             self._last_event_at = datetime.now(timezone.utc).isoformat()

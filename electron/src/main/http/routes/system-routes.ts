@@ -854,7 +854,6 @@ export const isProactivePythonProxyRoute = (method: string, pathname: string): b
   || (method === 'POST' && pathname === '/api/system/proactive/feedback')
   || (method === 'GET' && pathname === '/api/system/proactive/feedback-summary')
   || (method === 'POST' && /^\/api\/system\/companion-runtime\/opportunities\/outcome\/[^/]+$/.test(pathname))
-  || (method === 'POST' && /^\/api\/system\/heartbeat\/opportunities\/[^/]+\/accept$/.test(pathname))
   || (method === 'POST' && /^\/api\/system\/heartbeat\/goals\/[^/]+\/cancel$/.test(pathname))
   || (method === 'GET' && pathname === '/api/system/activity-frames')
   || (method === 'POST' && pathname === '/api/system/activity-frames/rebuild')

@@ -1,5 +1,5 @@
 <template>
-  <div class="browser-pet-stage" :data-model-type="modelType" :aria-label="`${modelLabel} 对话模型`">
+  <div class="browser-pet-stage" :data-model-type="modelType" :aria-label="t('browserPet.modelAriaLabel', { model: modelLabel })">
     <img v-if="!ready && modelType === 'live2d'" class="browser-pet-fallback" src="/live2d/llm-live2d/yumi/yumi-stage.png" alt="" />
     <div
       ref="mountEl"
@@ -8,8 +8,8 @@
       :style="{ '--browser-model-scale': zoomScale }"
       aria-hidden="true"
     ></div>
-    <div v-if="loading" class="browser-pet-status">{{ modelLabel }} 加载中</div>
-    <div v-else-if="error" class="browser-pet-status browser-pet-status--error">{{ modelLabel }} 暂不可用</div>
+    <div v-if="loading" class="browser-pet-status">{{ t('browserPet.loading', { model: modelLabel }) }}</div>
+    <div v-else-if="error" class="browser-pet-status browser-pet-status--error">{{ t('browserPet.unavailable', { model: modelLabel }) }}</div>
   </div>
 </template>
 
@@ -18,6 +18,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import type { PetRenderer as PetRendererInstance } from '@/pet-renderer'
 import { petControl } from '@/utils/petControl'
 import type { PetModelDefinition, PetModelType } from '@/../shared/pet-control'
+import { t } from '@/i18n'
 
 const mountEl = ref<HTMLElement | null>(null)
 const loading = ref(true)
@@ -89,6 +90,8 @@ onMounted(async () => {
     const selectedType = model?.type || 'live2d'
     const selectedPath = modelAssetUrl(model)
 
+    const { ensureCubismCore } = await import('@/pet-renderer-core')
+    await ensureCubismCore()
     const { PetRenderer } = await import('@/pet-renderer')
     renderer = new PetRenderer(mountId)
     await renderer.init()

@@ -57,7 +57,7 @@
           >
             <el-icon class="menu-icon"><component :is="menu.icon" /></el-icon>
             <span class="menu-copy">
-              <span class="menu-label">{{ menu.title }}</span>
+              <span class="menu-label">{{ sidebarMenuLabel(menu) }}</span>
             </span>
           </router-link>
         </section>
@@ -110,6 +110,12 @@ const advancedOpen = ref(false)
 const sidebarNavigation = computed(() => buildSidebarNavigation(props.menus))
 const primaryMenus = computed(() => sidebarNavigation.value.primary)
 const advancedMenuGroups = computed(() => sidebarNavigation.value.advanced)
+
+const sidebarMenuLabel = (menu: SidebarMenu): string => {
+  if (menu.id === 'infrastructure') return t('sidebar.items.services')
+  if (menu.id === 'deploy') return t('sidebar.items.launch')
+  return menu.title
+}
 
 // Workspace IDs can be user-created and may contain spaces or reserved URL
 // characters. Encode the route segment so every sidebar link resolves to the

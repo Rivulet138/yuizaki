@@ -101,7 +101,12 @@ export const primaryNavigationModules = (): NavigationModule[] =>
     })
 
 export const adminNavigationModules = (): NavigationModule[] =>
-  enabledNavigationModules().filter((module) => module.audience === 'admin' || module.slot === 'admin')
+  enabledNavigationModules().filter((module) => {
+    if (!(module.audience === 'admin' || module.slot === 'admin')) return false
+    // SVC is a settings-owned workflow. Keep its route available for legacy
+    // links, but do not expose a second entry in the browser sidebar.
+    return module.id !== 'svc'
+  })
 
 export const isPanelKey = (value: string): value is NavigationModuleId => {
   return staticModuleDefinitions.some((module) => module.id === value)

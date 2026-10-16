@@ -61,7 +61,7 @@ def _install_exception_handlers(app: FastAPI) -> None:
             status_code=exc.status_code,
             details=details,
             request_id=getattr(request.state, "trace_id", None),
-            headers=exc.headers,
+            headers=dict(exc.headers) if exc.headers else None,
             legacy_detail=detail,
         )
 

@@ -14,7 +14,7 @@ from threading import Event, Lock, RLock, Thread, current_thread
 from typing import Any
 
 try:  # websocket-client is optional until Twitch IRC is explicitly enabled.
-    import websocket as _websocket
+    import websocket as _websocket  # pyright: ignore[reportMissingImports]
 except ImportError:  # pragma: no cover - depends on the host installation
     _websocket = None
 
@@ -293,7 +293,10 @@ class TwitchIrcTransport:
         self._stop.clear()
         socket: Any = None
         try:
-            socket = self._websocket_factory(self.endpoint, timeout=self.timeout, enable_multithread=True)
+            factory = self._websocket_factory
+            if factory is None:
+                return False
+            socket = factory(self.endpoint, timeout=self.timeout, enable_multithread=True)
             setter = getattr(socket, "settimeout", None)
             if callable(setter):
                 setter(1.0)
@@ -301,7 +304,8 @@ class TwitchIrcTransport:
                 socket.send(command)
         except Exception:  # noqa: BLE001 - connection failure is surfaced through supervisor state.
             try:
-                socket.close()
+                if socket is not None:
+                    socket.close()
             except Exception as cleanup_error:  # noqa: BLE001 - best effort cleanup.
                 _ = cleanup_error
             return False

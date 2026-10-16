@@ -1,11 +1,18 @@
 <template>
-  <PanelShell :title="t('navigation.svc.title')">
+  <component :is="embedded ? 'div' : PanelShell" :title="t('navigation.svc.title')" :class="{ 'svc-embedded-panel': embedded }">
     <div class="voice-panel">
       <section class="voice-toolbar">
         <div class="toolbar-actions">
           <el-tag :type="selectedFile ? 'success' : 'info'">{{ selectedFile ? selectedFile.name : t('svcPanel.noAudio') }}</el-tag>
-          <el-button :loading="svcCheckState === 'checking'" :disabled="svcCheckState === 'checking'" @click="testService">{{ t('svcPanel.checkService') }}</el-button>
-          <el-button type="primary" plain @click="openSettings">{{ t('svcPanel.openSettings') }}</el-button>
+          <el-button
+            v-if="showCheckButton"
+            :loading="effectiveCheckState === 'checking'"
+            :disabled="effectiveCheckState === 'checking'"
+            @click="testService"
+          >
+            {{ t('svcPanel.checkService') }}
+          </el-button>
+          <el-button v-if="!embedded" type="primary" plain @click="openSettings">{{ t('svcPanel.openSettings') }}</el-button>
         </div>
       </section>
 
@@ -44,7 +51,7 @@
 
       </section>
     </div>
-  </PanelShell>
+  </component>
 </template>
 
 <script setup lang="ts">
@@ -67,6 +74,20 @@ import { API_ORIGIN, requestJson, resolveBackendUrl } from '@/api/clients/http-c
 import { settingsClient, type SettingsResponse } from '@/api/clients/settings-client'
 import { useSettingsStore } from '@/state/settingsStore'
 import { useRoute, useRouter } from 'vue-router'
+
+const props = defineProps<{
+  embedded?: boolean
+  showCheckButton?: boolean
+  config?: SettingsResponse['svc']
+  beforeAction?: () => boolean | Promise<boolean>
+  testLoading?: boolean
+  testResult?: {
+    ok: boolean
+    message?: string
+  } | null
+}>()
+const embedded = computed(() => props.embedded === true)
+const showCheckButton = computed(() => props.showCheckButton !== false)
 
 interface SvcConvertResponse {
   status?: string
@@ -97,28 +118,35 @@ const conversionError = ref('')
 let settingsLoadSequence = 0
 let unmounted = false
 
-const svcModelReady = computed(() => {
-  if (voiceConfig.svc.provider === 'disabled') return false
-  return Boolean(voiceConfig.svc.base_url.trim())
+const activeSvcConfig = computed(() => props.config ?? voiceConfig.svc)
+const effectiveCheckState = computed<'idle' | 'checking' | 'ready' | 'error'>(() => {
+  if (!embedded.value) return svcCheckState.value
+  if (props.testLoading) return 'checking'
+  if (props.testResult) return props.testResult.ok ? 'ready' : 'error'
+  return 'idle'
 })
-const svcProviderLabel = computed(() => voiceConfig.svc.provider === 'disabled' ? t('svcPanel.svcDisabled') : t('settings.svc.providerSoulx'))
+const svcModelReady = computed(() => {
+  if (activeSvcConfig.value.provider === 'disabled') return false
+  return Boolean(activeSvcConfig.value.base_url.trim())
+})
+const svcProviderLabel = computed(() => activeSvcConfig.value.provider === 'disabled' ? t('svcPanel.svcDisabled') : t('settings.svc.providerSoulx'))
 const svcReadinessLabel = computed(() => {
-  if (voiceConfig.svc.provider === 'disabled') return t('svcPanel.svcDisabled')
-  if (!voiceConfig.svc.base_url.trim()) return t('svcPanel.endpointMissing')
-  if (svcCheckState.value === 'ready') return t('svcPanel.serviceReachable')
-  if (svcCheckState.value === 'error') return t('svcPanel.serviceUnavailable')
-  if (svcCheckState.value === 'checking') return t('svcPanel.checkingService')
+  if (activeSvcConfig.value.provider === 'disabled') return t('svcPanel.svcDisabled')
+  if (!activeSvcConfig.value.base_url.trim()) return t('svcPanel.endpointMissing')
+  if (effectiveCheckState.value === 'ready') return t('svcPanel.serviceReachable')
+  if (effectiveCheckState.value === 'error') return t('svcPanel.serviceUnavailable')
+  if (effectiveCheckState.value === 'checking') return t('svcPanel.checkingService')
   return t('svcPanel.serviceConfigured')
 })
 const svcReadinessType = computed(() => {
-  if (voiceConfig.svc.provider === 'disabled') return 'info'
-  if (!voiceConfig.svc.base_url.trim() || svcCheckState.value === 'error') return 'warning'
-  if (svcCheckState.value === 'ready') return 'success'
+  if (activeSvcConfig.value.provider === 'disabled') return 'info'
+  if (!activeSvcConfig.value.base_url.trim() || effectiveCheckState.value === 'error') return 'warning'
+  if (effectiveCheckState.value === 'ready') return 'success'
   return 'info'
 })
 const svcReadinessMessage = computed(() => {
-  if (voiceConfig.svc.provider === 'disabled') return t('svcPanel.enableSvcFirst')
-  if (!voiceConfig.svc.base_url.trim()) return t('svcPanel.configureEndpointFirst')
+  if (activeSvcConfig.value.provider === 'disabled') return t('svcPanel.enableSvcFirst')
+  if (!activeSvcConfig.value.base_url.trim()) return t('svcPanel.configureEndpointFirst')
   return ''
 })
 const canStartConversion = computed(() => {
@@ -127,6 +155,15 @@ const canStartConversion = computed(() => {
 const applySettings = (settings: SettingsResponse) => {
   Object.assign(settingsStore.state.svc, settings.svc)
   Object.assign(voiceConfig.svc, settings.svc)
+}
+
+const runBeforeAction = async () => {
+  if (!props.beforeAction) return true
+  try {
+    return await props.beforeAction()
+  } catch {
+    return false
+  }
 }
 
 const loadSettings = async () => {
@@ -142,10 +179,12 @@ const loadSettings = async () => {
 }
 
 const testService = async () => {
-  if (voiceConfig.svc.provider === 'disabled' || !voiceConfig.svc.base_url.trim()) {
+  const svcSettings = activeSvcConfig.value
+  if (svcSettings.provider === 'disabled' || !svcSettings.base_url.trim()) {
     ElMessage.warning(svcReadinessMessage.value || t('svcPanel.configureEndpointFirst'))
     return
   }
+  if (!(await runBeforeAction())) return
   svcCheckState.value = 'checking'
   try {
     const result = await settingsClient.testSvc()
@@ -195,7 +234,9 @@ const startConversion = async () => {
     ElMessage.warning(t('svcPanel.selectAudioFirst'))
     return
   }
-  if (!svcModelReady.value) {
+  if (!(await runBeforeAction())) return
+  const svcSettings = activeSvcConfig.value
+  if (svcSettings.provider === 'disabled' || !svcSettings.base_url.trim()) {
     ElMessage.warning(svcReadinessMessage.value || t('svcPanel.waitingService'))
     return
   }
@@ -205,7 +246,6 @@ const startConversion = async () => {
   try {
     const formData = new FormData()
     formData.append('file', selectedFile.value)
-    const svcSettings = settingsStore.state.svc
     formData.append('speaker_id', String(svcSettings.speaker_id))
     formData.append('pitch', String(svcSettings.pitch))
     const result = await requestJson<SvcConvertResponse>(`${API_ORIGIN}/svc/convert`, {
@@ -231,6 +271,10 @@ const startConversion = async () => {
 }
 
 onMounted(() => {
+  if (embedded.value) {
+    Object.assign(voiceConfig.svc, settingsStore.state.svc)
+    return
+  }
   void loadSettings()
 })
 
@@ -239,6 +283,20 @@ watch(() => settingsStore.state.svc, (value) => {
   Object.assign(voiceConfig.svc, value)
   svcCheckState.value = 'idle'
 }, { deep: true })
+
+watch(
+  () => [
+    embedded.value,
+    activeSvcConfig.value.provider,
+    activeSvcConfig.value.base_url,
+    activeSvcConfig.value.speaker_id,
+    activeSvcConfig.value.pitch,
+    activeSvcConfig.value.timeout,
+  ],
+  () => {
+    if (!unmounted && embedded.value) svcCheckState.value = 'idle'
+  },
+)
 
 onUnmounted(() => {
   unmounted = true
@@ -251,6 +309,10 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.svc-embedded-panel {
+  display: block;
 }
 
 .voice-toolbar,

@@ -86,7 +86,11 @@
           <el-input :model-value="modelValue.base_url" :placeholder="providerGuide.baseUrl" @change="emitField('base_url', $event)" />
         </el-form-item>
         <el-form-item v-if="usesService" :label="t('settings.asr.apiKey')">
-          <el-input :model-value="modelValue.api_key" type="password" show-password @change="emitField('api_key', $event)" />
+          <el-input :model-value="modelValue.api_key" type="password" show-password @change="emitField('api_key', $event)">
+            <template #append>
+              <el-button v-if="modelValue.api_key || apiKeyStored" text type="danger" :loading="apiKeyDeleting" :disabled="apiKeyDeleting" @click="$emit('clear-api-key')">{{ t('settings.apiKeyClear') }}</el-button>
+            </template>
+          </el-input>
         </el-form-item>
       </div>
 
@@ -206,11 +210,14 @@ const props = defineProps<{
   modelValue: AsrSettings
   discoveryLoading: boolean
   discoveryError?: string | null
+  apiKeyStored?: boolean
+  apiKeyDeleting?: boolean
 }>()
 
 const emit = defineEmits<{
   'update-field': [field: keyof AsrSettings, value: string | number]
   'discover-local': []
+  'clear-api-key': []
 }>()
 
 const usesService = computed(() => ['sensevoice-service', 'funasr-service', 'openai-compatible'].includes(props.modelValue.provider))

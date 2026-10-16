@@ -11,13 +11,6 @@ from fastapi.responses import JSONResponse
 from ..agent.capability_registry import CapabilityRegistry
 from ..agent.orchestration_registry import OrchestrationRegistry
 from .connector_registry import build_connector_registry_snapshot
-from .heartbeat import (
-    HeartbeatOpportunityAcceptance,
-    HeartbeatOpportunityAuthorizationError,
-    HeartbeatOpportunityConflictError,
-    HeartbeatOpportunityTurnBridge,
-    HeartbeatOpportunityUnavailableError,
-)
 from .platform_capabilities import build_platform_capability_snapshot
 from .provider_registry import build_provider_registry_snapshot
 
@@ -40,7 +33,6 @@ __all__ = [
     "build_experience_metrics_endpoint",
     "build_health_endpoint",
     "build_heartbeat_goal_cancel_endpoint",
-    "build_heartbeat_opportunity_accept_endpoint",
     "build_heartbeat_status_endpoint",
     "build_imported_skills_state_endpoint",
     "build_install_mcp_preset_endpoint",
@@ -153,54 +145,6 @@ def build_companion_opportunity_outcome_endpoint(
         if not accepted:
             return JSONResponse({"error": "opportunity_not_active"}, status_code=409)
         return {"ok": True, "job_id": job_id, "request_id": request_id, "outcome": outcome}
-
-    return _endpoint
-
-
-def build_heartbeat_opportunity_accept_endpoint(
-    *,
-    heartbeat_scheduler_provider: Callable[[], Any],
-    turn_service_provider: Callable[[], Any],
-    authorization_callback: Callable[..., Any] | None,
-) -> Callable[[str, dict[str, Any]], Coroutine[Any, Any, JSONResponse | dict[str, Any]]]:
-    bridge_state: dict[str, Any] = {}
-
-    async def _endpoint(job_id: str, payload: dict[str, Any]) -> JSONResponse | dict[str, Any]:
-        scheduler = heartbeat_scheduler_provider()
-        turn_service = turn_service_provider()
-        if scheduler is None or turn_service is None:
-            return JSONResponse(
-                {"error": "heartbeat_turn_service_not_initialized"},
-                status_code=503,
-            )
-        if authorization_callback is None:
-            return JSONResponse(
-                {"error": "heartbeat_acceptance_authorization_not_initialized"},
-                status_code=503,
-            )
-        try:
-            acceptance = HeartbeatOpportunityAcceptance.from_mapping(job_id, payload)
-        except ValueError as exc:
-            return JSONResponse({"error": "invalid_heartbeat_acceptance", "detail": str(exc)}, status_code=422)
-
-        runtime_identity = (id(scheduler), id(turn_service), id(authorization_callback))
-        if bridge_state.get("identity") != runtime_identity:
-            bridge_state["identity"] = runtime_identity
-            bridge_state["bridge"] = HeartbeatOpportunityTurnBridge(
-                scheduler=scheduler,
-                turn_service=turn_service,
-                authorizer=authorization_callback,
-            )
-        bridge = bridge_state["bridge"]
-        try:
-            accepted = await bridge.accept(acceptance)
-        except HeartbeatOpportunityAuthorizationError as exc:
-            return JSONResponse({"error": "heartbeat_acceptance_denied", "detail": str(exc)}, status_code=403)
-        except HeartbeatOpportunityConflictError as exc:
-            return JSONResponse({"error": "heartbeat_opportunity_not_active", "detail": str(exc)}, status_code=409)
-        except HeartbeatOpportunityUnavailableError as exc:
-            return JSONResponse({"error": "heartbeat_acceptance_unavailable", "detail": str(exc)}, status_code=503)
-        return accepted.response()
 
     return _endpoint
 
@@ -409,9 +353,11 @@ def build_voice_diagnostics_endpoint(
                         recovery_summary["successes"] = successes
                     if isinstance(success_rate, (int, float)) and not isinstance(success_rate, bool) and math.isfinite(float(success_rate)) and 0 <= float(success_rate) <= 1:
                         recovery_summary["success_rate"] = float(success_rate)
+                raw_sample_count = raw_qualification.get("sample_count")
+                sample_count = raw_sample_count if isinstance(raw_sample_count, int) and not isinstance(raw_sample_count, bool) and raw_sample_count >= 0 else 0
                 projected["qualification"] = {
                     "status": raw_qualification.get("status") if raw_qualification.get("status") in {"qualified", "not_qualified"} else "not_qualified",
-                    "sample_count": raw_qualification.get("sample_count") if isinstance(raw_qualification.get("sample_count"), int) and raw_qualification.get("sample_count") >= 0 else 0,
+                    "sample_count": sample_count,
                     "required_stages": [str(stage)[:96] for stage in raw_qualification.get("required_stages", [])[:32]] if isinstance(raw_qualification.get("required_stages"), list) else [],
                     "recovery_quality": recovery_summary,
                     "gaps": gaps,

@@ -72,6 +72,22 @@ const SECRET_FIELD_NAMES = new Set([
 ])
 const PROVIDER_CREDENTIAL_SECTIONS = new Set(['llm', 'tts', 'asr', 'svc', 'memory'])
 
+// LLM profile credentials are UI-only profile metadata. The backend accepts
+// only the top-level provider credential contract, so never persist these
+// nested values in the provider vault or forward them to Python.
+const isNestedLlmProfileCredentialPath = (fieldPath: string): boolean =>
+  /^llm\.profiles\.[^.]+\.api_key$/.test(fieldPath)
+
+const clearLegacyLlmProfileCredentials = (values: Record<string, string>): number => {
+  let changed = 0
+  for (const fieldPath of Object.keys(values)) {
+    if (!isNestedLlmProfileCredentialPath(fieldPath)) continue
+    delete values[fieldPath]
+    changed += 1
+  }
+  return changed
+}
+
 const isProviderCredentialPath = (fieldPath: string): boolean => {
   const [section = '', field = '', ...rest] = fieldPath.split('.')
   return rest.length === 0
@@ -240,6 +256,13 @@ export class ProviderCredentialStore {
   captureSettingsPayload(payload: unknown): number {
     let changed = 0
     visitSecretFields(payload, (fieldPath, value) => {
+      if (isNestedLlmProfileCredentialPath(fieldPath)) {
+        if (fieldPath in this.values) {
+          delete this.values[fieldPath]
+          changed += 1
+        }
+        return
+      }
       if (value === SETTINGS_SECRET_MASK) return
       const clean = value.trim()
       if (clean) {
@@ -256,6 +279,7 @@ export class ProviderCredentialStore {
   }
 
   captureSettingValue(fieldPath: string, value: unknown): boolean {
+    if (isNestedLlmProfileCredentialPath(fieldPath)) return false
     const fieldParts = fieldPath.split('.')
     const fieldName = fieldParts[fieldParts.length - 1] ?? ''
     if (!SECRET_FIELD_NAMES.has(fieldName) || typeof value !== 'string' || value === SETTINGS_SECRET_MASK) {
@@ -274,8 +298,15 @@ export class ProviderCredentialStore {
   }
 
   delete(fieldPath: string): boolean {
-    if (!(fieldPath in this.values)) return false
-    delete this.values[fieldPath]
+    let changed = false
+    if (fieldPath in this.values) {
+      delete this.values[fieldPath]
+      changed = true
+    }
+    if (fieldPath === 'llm.api_key' && clearLegacyLlmProfileCredentials(this.values) > 0) {
+      changed = true
+    }
+    if (!changed) return false
     this.save()
     return true
   }
@@ -286,6 +317,15 @@ export class ProviderCredentialStore {
     let migrated = 0
     let scrubbed = false
     visitSecretFields(payload, (fieldPath, value, owner, key) => {
+      if (isNestedLlmProfileCredentialPath(fieldPath)) {
+        if (fieldPath in this.values) {
+          delete this.values[fieldPath]
+          migrated += 1
+        }
+        owner[key] = ''
+        scrubbed = true
+        return
+      }
       const clean = value.trim()
       if (clean && clean !== SETTINGS_SECRET_MASK) {
         if (this.values[fieldPath] !== clean) {

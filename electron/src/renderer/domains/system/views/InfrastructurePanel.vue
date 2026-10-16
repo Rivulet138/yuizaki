@@ -1,16 +1,16 @@
 <template>
-  <PanelShell title="服务与资源" tone="admin">
+  <PanelShell :title="t('infrastructure.title')" tone="admin">
     <div class="infra-console">
       <section class="infra-hero">
           <div class="hero-copy">
-          <strong>服务与资源</strong>
+          <strong>{{ t('infrastructure.title') }}</strong>
           <span>{{ serviceStatusLabel }}，{{ envStatusLabel }}</span>
         </div>
         <div class="hero-actions">
-          <el-button type="primary" :loading="refreshing" @click="refreshAll">刷新状态</el-button>
+          <el-button type="primary" :loading="refreshing" @click="refreshAll">{{ t('infrastructure.refresh') }}</el-button>
           <el-button plain :loading="runtimeDiagnosticExporting" @click="downloadRuntimeDiagnostic">
             <el-icon><Download /></el-icon>
-            导出运行诊断
+            {{ t('infrastructure.exportDiagnostic') }}
           </el-button>
         </div>
       </section>
@@ -20,7 +20,7 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>服务状态</strong>
+                <strong>{{ t('infrastructure.status') }}</strong>
               </div>
               <el-tag :type="serviceStatusTagType">{{ serviceStatusLabel }}</el-tag>
             </div>
@@ -33,10 +33,10 @@
                   <strong>{{ item.label }}</strong>
                   <span>{{ item.detail }}</span>
                 </div>
-                <el-tag size="small" :type="item.ok ? 'success' : 'danger'">{{ item.ok ? '正常' : '异常' }}</el-tag>
+                <el-tag size="small" :type="item.ok ? 'success' : 'danger'">{{ item.ok ? t('infrastructure.normal') : t('infrastructure.error') }}</el-tag>
               </article>
             </div>
-            <el-empty v-else description="暂无诊断快照" :image-size="64" />
+            <el-empty v-else :description="t('infrastructure.noSnapshot')" :image-size="64" />
           </AsyncState>
         </el-card>
 
@@ -44,7 +44,7 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>环境依赖</strong>
+                <strong>{{ t('infrastructure.dependencies') }}</strong>
               </div>
             </div>
           </template>
@@ -53,10 +53,10 @@
               <div v-for="item in envChecks" :key="item.label" class="env-item">
                 <span>{{ item.label }}</span>
                 <strong>{{ item.value }}</strong>
-                <el-tag size="small" :type="item.ok ? 'success' : 'danger'">{{ item.ok ? '存在' : '缺失' }}</el-tag>
+                <el-tag size="small" :type="item.ok ? 'success' : 'danger'">{{ item.ok ? t('infrastructure.exists') : t('infrastructure.missing') }}</el-tag>
               </div>
             </div>
-            <el-empty v-if="!diagnostics" description="等待诊断快照" :image-size="64" />
+            <el-empty v-if="!diagnostics" :description="t('infrastructure.waitingSnapshot')" :image-size="64" />
           </AsyncState>
         </el-card>
 
@@ -64,49 +64,49 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>运行时资源</strong>
+                <strong>{{ t('infrastructure.runtime') }}</strong>
               </div>
               <div class="action-row">
-                <el-button plain size="small" :loading="runtimeLoading" :disabled="!runtimeAvailable" @click="loadRuntimeSnapshot">刷新采样</el-button>
-                <el-button type="primary" plain size="small" :loading="runtimeClearing" :disabled="!runtimeAvailable" @click="clearRuntimeCache">清理 HTTP 缓存</el-button>
+                <el-button plain size="small" :loading="runtimeLoading" :disabled="!runtimeAvailable" @click="loadRuntimeSnapshot">{{ t('infrastructure.refreshSample') }}</el-button>
+                <el-button type="primary" plain size="small" :loading="runtimeClearing" :disabled="!runtimeAvailable" @click="clearRuntimeCache">{{ t('infrastructure.clearCache') }}</el-button>
               </div>
             </div>
           </template>
           <el-alert v-if="runtimeError" class="runtime-alert" :title="runtimeError" type="error" show-icon :closable="false" />
           <div v-if="runtimeSnapshot" class="runtime-overview">
-            <div><span>进程私有内存</span><strong>{{ formatBytes(runtimeSnapshot.totalPrivateKb * 1024) }}</strong></div>
-            <div><span>HTTP 缓存</span><strong>{{ formatBytes(runtimeSnapshot.cacheBytes) }}</strong></div>
-            <div><span>进程数量</span><strong>{{ runtimeSnapshot.processes.length }}</strong></div>
+            <div><span>{{ t('infrastructure.privateMemory') }}</span><strong>{{ formatBytes(runtimeSnapshot.totalPrivateKb * 1024) }}</strong></div>
+            <div><span>{{ t('infrastructure.httpCache') }}</span><strong>{{ formatBytes(runtimeSnapshot.cacheBytes) }}</strong></div>
+            <div><span>{{ t('infrastructure.processCount') }}</span><strong>{{ runtimeSnapshot.processes.length }}</strong></div>
           </div>
           <details v-if="runtimeSnapshot?.processes.length" class="runtime-process-details">
-            <summary>查看进程资源</summary>
+            <summary>{{ t('infrastructure.viewProcesses') }}</summary>
             <div class="runtime-processes">
               <article v-for="item in runtimeProcesses" :key="`${item.pid}-${item.type}`">
-                <div><strong>{{ runtimeProcessLabel(item.type) }}</strong><span>进程 {{ item.pid }}</span></div>
+                <div><strong>{{ runtimeProcessLabel(item.type) }}</strong><span>{{ t('infrastructure.process', { pid: item.pid }) }}</span></div>
                 <span>{{ formatBytes(item.privateKb * 1024) }}</span>
               </article>
             </div>
           </details>
-          <el-empty v-else-if="!runtimeAvailable" description="浏览器模式无法读取 Electron 进程资源" :image-size="56" />
-          <el-empty v-else-if="!runtimeLoading" description="等待运行时资源采样" :image-size="56" />
+          <el-empty v-else-if="!runtimeAvailable" :description="t('infrastructure.browserNoProcesses')" :image-size="56" />
+          <el-empty v-else-if="!runtimeLoading" :description="t('infrastructure.waitingRuntime')" :image-size="56" />
         </el-card>
 
         <el-card class="panel-card api-gap-card" shadow="never">
           <template #header>
             <div class="card-head">
               <div>
-                <strong>高级诊断数据</strong>
+                <strong>{{ t('infrastructure.advanced') }}</strong>
               </div>
               <div class="action-row">
-                <el-button plain size="small" :loading="apiGapLoading" @click="loadApiGaps">读取快照</el-button>
-                <el-button plain size="small" :loading="apiGapLoading" @click="updateStats">更新统计</el-button>
+                <el-button plain size="small" :loading="apiGapLoading" @click="loadApiGaps">{{ t('infrastructure.readSnapshot') }}</el-button>
+                <el-button plain size="small" :loading="apiGapLoading" @click="updateStats">{{ t('infrastructure.updateStats') }}</el-button>
               </div>
             </div>
           </template>
           <el-alert v-if="apiGapError" :title="apiGapError" type="error" show-icon :closable="false" />
           <el-skeleton v-if="apiGapLoading" :rows="4" animated />
           <el-collapse v-else-if="apiGapLoaded" v-model="apiCollapseNames" class="api-collapse">
-            <el-collapse-item title="详细数据" name="api-snapshots">
+            <el-collapse-item :title="t('infrastructure.details')" name="api-snapshots">
               <div class="api-grid">
                 <article>
                   <strong>system/status</strong>
@@ -131,10 +131,10 @@
               </div>
             </el-collapse-item>
           </el-collapse>
-          <el-empty v-else description="暂无接口快照" :image-size="56" />
+          <el-empty v-else :description="t('infrastructure.noApiSnapshot')" :image-size="56" />
           <div class="action-row">
-            <el-button type="primary" plain :loading="exportingKind === 'json'" @click="downloadExport('json')">导出运行数据</el-button>
-            <el-button type="primary" plain :loading="exportingKind === 'csv'" @click="downloadExport('csv')">导出表格</el-button>
+            <el-button type="primary" plain :loading="exportingKind === 'json'" @click="downloadExport('json')">{{ t('infrastructure.exportData') }}</el-button>
+            <el-button type="primary" plain :loading="exportingKind === 'csv'" @click="downloadExport('csv')">{{ t('infrastructure.exportTable') }}</el-button>
           </div>
         </el-card>
       </section>
@@ -144,10 +144,10 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>备份与恢复 · {{ backupTargets.length }} 个目标</strong>
+                <strong>{{ t('infrastructure.backupRestore', { count: backupTargets.length }) }}</strong>
               </div>
               <div class="action-row">
-                <el-button size="small" type="primary" :loading="createBackupRequest.loading" @click="createAndSelectBackup">创建备份</el-button>
+                <el-button size="small" type="primary" :loading="createBackupRequest.loading" @click="createAndSelectBackup">{{ t('infrastructure.createBackup') }}</el-button>
               </div>
             </div>
           </template>
@@ -161,18 +161,18 @@
           />
           <AsyncState :loading="backupTargetsRequest.loading" :error="backupTargetsRequest.error" :show-retry="false">
             <div v-if="backupResult" class="backup-success">
-              <strong>备份清单已创建</strong>
+              <strong>{{ t('infrastructure.backupCreated') }}</strong>
               <span>{{ backupResult }}</span>
             </div>
             <div class="restore-panel">
               <div class="restore-fields">
-                <el-input v-model="restoreBackupDir" size="small" placeholder="选择或粘贴 backups 目录下的备份路径" />
-                <el-button size="small" plain :disabled="!restoreBackupDir.trim() || restoreMode === 'apply'" :loading="restoreMode === 'preview'" @click="previewRestore">预览恢复</el-button>
-                <el-button size="small" type="danger" plain :disabled="!canConfirmRestore || restoreMode === 'preview'" :loading="restoreMode === 'apply'" @click="confirmRestore">确认恢复</el-button>
+                <el-input v-model="restoreBackupDir" size="small" :placeholder="t('infrastructure.backupPathPlaceholder')" />
+                <el-button size="small" plain :disabled="!restoreBackupDir.trim() || restoreMode === 'apply'" :loading="restoreMode === 'preview'" @click="previewRestore">{{ t('infrastructure.previewRestore') }}</el-button>
+                <el-button size="small" type="danger" plain :disabled="!canConfirmRestore || restoreMode === 'preview'" :loading="restoreMode === 'apply'" @click="confirmRestore">{{ t('infrastructure.confirmRestore') }}</el-button>
               </div>
               <el-alert
                 class="restore-warning"
-                title="恢复会覆盖数据库、配置、音频缓存、桌宠状态和插件目录。请先预览，并确认当前已有可回退备份。"
+                :title="t('infrastructure.restoreWarning')"
                 type="warning"
                 show-icon
                 :closable="false"
@@ -180,18 +180,18 @@
               <el-alert v-if="restoreBackupRequest.error" class="backup-error" :title="restoreBackupRequest.error" type="error" show-icon :closable="false" />
               <div v-if="restorePreview" class="restore-summary">
                 <div class="restore-summary-head">
-                  <strong>{{ restorePreview.dryRun ? '恢复预览' : '恢复结果' }}</strong>
-                  <el-tag size="small" :type="restorePreview.dryRun ? 'warning' : 'success'">{{ restorePreview.dryRun ? '尚未写入' : '已执行' }}</el-tag>
+                  <strong>{{ restorePreview.dryRun ? t('infrastructure.restorePreview') : t('infrastructure.restoreResult') }}</strong>
+                  <el-tag size="small" :type="restorePreview.dryRun ? 'warning' : 'success'">{{ restorePreview.dryRun ? t('infrastructure.notWritten') : t('infrastructure.executed') }}</el-tag>
                 </div>
                 <div v-if="restorePreview.summary" class="restore-impact-grid">
-                  <div><span>目标</span><strong>{{ restorePreview.summary.totalTargets }}</strong></div>
-                  <div><span>{{ restorePreview.dryRun ? '将恢复' : '已恢复' }}</span><strong>{{ restorePreview.summary.restoreCount }}</strong></div>
-                  <div><span>{{ restorePreview.dryRun ? '将覆盖' : '已覆盖' }}</span><strong>{{ restorePreview.summary.overwriteCount }}</strong></div>
-                  <div><span>跳过</span><strong>{{ restorePreview.summary.skippedCount }}</strong></div>
-                  <div><span>当前缺失</span><strong>{{ restorePreview.summary.missingCurrentCount }}</strong></div>
+                  <div><span>{{ t('infrastructure.targets') }}</span><strong>{{ restorePreview.summary.totalTargets }}</strong></div>
+                  <div><span>{{ restorePreview.dryRun ? t('infrastructure.willRestore') : t('infrastructure.restored') }}</span><strong>{{ restorePreview.summary.restoreCount }}</strong></div>
+                  <div><span>{{ restorePreview.dryRun ? t('infrastructure.willOverwrite') : t('infrastructure.overwritten') }}</span><strong>{{ restorePreview.summary.overwriteCount }}</strong></div>
+                  <div><span>{{ t('infrastructure.skipped') }}</span><strong>{{ restorePreview.summary.skippedCount }}</strong></div>
+                  <div><span>{{ t('infrastructure.currentMissing') }}</span><strong>{{ restorePreview.summary.missingCurrentCount }}</strong></div>
                 </div>
                 <div v-if="restoreEffectEntries.length" class="restore-effects">
-                  <div class="restore-effects-title">子系统影响</div>
+                  <div class="restore-effects-title">{{ t('infrastructure.subsystemEffects') }}</div>
                   <div class="restore-effects-list">
                     <div v-for="effect in restoreEffectEntries" :key="effect.key" class="restore-effect-item">
                       <span>{{ effect.label }}</span>
@@ -216,10 +216,10 @@
                   <strong>{{ targetLabel(target.path) }}</strong>
                   <span :title="target.path">{{ target.path }}</span>
                 </div>
-                <el-tag size="small" :type="target.exists ? 'success' : 'warning'">{{ target.exists ? targetTypeLabel(target.type) : '未生成' }}</el-tag>
+                <el-tag size="small" :type="target.exists ? 'success' : 'warning'">{{ target.exists ? targetTypeLabel(target.type) : t('infrastructure.notGenerated') }}</el-tag>
               </div>
             </div>
-            <el-empty v-else description="暂无备份目标" :image-size="64" />
+            <el-empty v-else :description="t('infrastructure.noBackupTargets')" :image-size="64" />
           </AsyncState>
         </el-card>
 
@@ -227,7 +227,7 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>运行异常 · {{ exceptionStatusLabel }}</strong>
+                <strong>{{ t('infrastructure.runtimeException', { status: exceptionStatusLabel }) }}</strong>
               </div>
               <el-tag :type="exceptionTagType">{{ exceptionTagLabel }}</el-tag>
             </div>
@@ -242,21 +242,21 @@
                 <p>{{ item.detail }}</p>
               </article>
             </div>
-            <el-empty v-else-if="diagnostics" description="当前没有运行时异常" :image-size="64" />
-            <el-empty v-else description="等待诊断快照" :image-size="64" />
+            <el-empty v-else-if="diagnostics" :description="t('infrastructure.noRuntimeException')" :image-size="64" />
+            <el-empty v-else :description="t('infrastructure.waitingSnapshot')" :image-size="64" />
           </AsyncState>
         </el-card>
       </section>
 
       <details class="logs-disclosure" @toggle="handleLogsToggle">
-<summary>按需查看日志追踪</summary>
+        <summary>{{ t('infrastructure.logsDisclosure') }}</summary>
         <el-card class="panel-card logs-card" shadow="never">
           <template #header>
             <div class="card-head">
               <div>
-                <strong>日志追踪</strong>
+                <strong>{{ t('infrastructure.logs') }}</strong>
               </div>
-              <el-button plain :loading="logsRequest.loading" @click="refreshLogs">刷新日志</el-button>
+              <el-button plain :loading="logsRequest.loading" @click="refreshLogs">{{ t('infrastructure.refreshLogs') }}</el-button>
             </div>
           </template>
           <AsyncState :loading="logsRequest.loading" :error="logsRequest.error" :show-retry="false">
@@ -267,15 +267,24 @@
                     <strong>{{ channel.label }}</strong>
                     <span>{{ channel.description }}</span>
                   </div>
-                  <el-tag size="small" :type="channel.content ? 'success' : 'info'">{{ channel.content ? '有日志' : '暂无' }}</el-tag>
+                  <el-tag size="small" :type="channel.content ? 'success' : 'info'">{{ channel.content ? t('infrastructure.hasLogs') : t('infrastructure.none') }}</el-tag>
                 </div>
-                <pre>{{ channel.content || '暂无日志输出' }}</pre>
+                <pre>{{ channel.content || t('infrastructure.noLogOutput') }}</pre>
               </article>
             </div>
           </AsyncState>
         </el-card>
       </details>
     </div>
+    <section class="merged-deploy-section" aria-labelledby="merged-deploy-title">
+      <div class="merged-deploy-heading">
+        <div>
+          <strong id="merged-deploy-title">{{ t('navigation.deploy.title') }}</strong>
+          <span>{{ t('navigation.deploy.desc') }}</span>
+        </div>
+      </div>
+      <DeployPanel embedded />
+    </section>
   </PanelShell>
 </template>
 
@@ -308,8 +317,10 @@ import {
   serializeRedactedDiagnosticBundle,
 } from '@/app/runtime/companionDiagnosticExport'
 import { createRuntimeDiagnosticReport } from '@/app/runtime/runtimeDiagnosticReport'
+import { t } from '@/i18n'
 import { useSystemDomain } from '../composables/useSystemDomain'
 import type { BackupRestoreEffectStatus, BackupRestorePlanItem, BackupRestoreResponse, BackupTarget } from '../../../../shared/agent'
+import DeployPanel from '@/domains/deploy/views/DeployPanel.vue'
 
 interface RuntimeResourceSnapshot {
   measuredAt: string
@@ -426,7 +437,7 @@ const downloadRuntimeDiagnostic = async () => {
     })
     const redacted = createRedactedDiagnosticBundle({ data: report.report })
     const serialized = serializeRedactedDiagnosticBundle(redacted)
-    if (!serialized.ok) throw new Error('运行诊断报告未通过本地脱敏检查')
+    if (!serialized.ok) throw new Error(t('infrastructure.reportSanitizeFailed'))
     const url = URL.createObjectURL(new Blob([serialized.json], { type: 'application/json' }))
     const anchor = document.createElement('a')
     anchor.href = url
@@ -435,9 +446,9 @@ const downloadRuntimeDiagnostic = async () => {
     anchor.click()
     anchor.remove()
     URL.revokeObjectURL(url)
-    ElMessage.success(`运行诊断已导出（${successfulSources}/${sources.length} 个来源可用）`)
+    ElMessage.success(t('infrastructure.exportedDiagnostic', { ok: successfulSources, total: sources.length }))
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '运行诊断导出失败')
+    ElMessage.error(error instanceof Error ? error.message : t('infrastructure.exportFailed'))
   } finally {
     runtimeDiagnosticExporting.value = false
   }
@@ -450,33 +461,33 @@ const restoreEffectEntries = computed(() => {
   const effects = restorePreview.value?.effects
   if (!effects) return []
   return [
-    { key: 'database', label: '聊天数据库', status: effects.database },
-    { key: 'memoryIndex', label: '记忆索引', status: effects.memoryIndex },
-    { key: 'settings', label: '运行配置', status: effects.settings },
-    { key: 'governance', label: '治理状态', status: effects.governance },
-    { key: 'audioCache', label: '音频缓存', status: effects.audioCache },
-    { key: 'petState', label: '桌宠状态', status: effects.petState },
-    { key: 'plugins', label: '插件目录', status: effects.plugins },
+    { key: 'database', label: t('infrastructure.chatDatabase'), status: effects.database },
+    { key: 'memoryIndex', label: t('infrastructure.memoryIndex'), status: effects.memoryIndex },
+    { key: 'settings', label: t('infrastructure.settings'), status: effects.settings },
+    { key: 'governance', label: t('infrastructure.governance'), status: effects.governance },
+    { key: 'audioCache', label: t('infrastructure.audioCache'), status: effects.audioCache },
+    { key: 'petState', label: t('infrastructure.petState'), status: effects.petState },
+    { key: 'plugins', label: t('infrastructure.pluginDir'), status: effects.plugins },
   ]
 })
 const envChecks = computed(() => {
   const env = diagnostics.value?.envCheck
   if (!env) return []
   return [
-    { label: 'Python 应用', value: 'python/app.py', ok: env.pythonAppExists },
-    { label: 'Python 虚拟环境', value: env.pythonVenvPath, ok: env.pythonVenvExists },
-    { label: '渲染产物', value: 'dist/renderer/index.html', ok: env.rendererDistExists },
-    { label: '插件目录', value: 'electron/plugins', ok: env.pluginDirExists },
-    { label: '备份目录', value: '../backups', ok: env.backupDirExists },
+    { label: t('infrastructure.pythonApp'), value: 'python/app.py', ok: env.pythonAppExists },
+    { label: t('infrastructure.pythonVenv'), value: env.pythonVenvPath, ok: env.pythonVenvExists },
+    { label: t('infrastructure.rendererDist'), value: 'dist/renderer/index.html', ok: env.rendererDistExists },
+    { label: t('infrastructure.pluginDir'), value: 'electron/plugins', ok: env.pluginDirExists },
+    { label: t('infrastructure.backupDir'), value: '../backups', ok: env.backupDirExists },
   ]
 })
 
 const envPassedCount = computed(() => envChecks.value.filter((item) => item.ok).length)
 const envStatusLabel = computed(() => {
-  if (diagnosticsRequest.loading) return '诊断刷新中'
-  if (diagnosticsRequest.error) return '诊断失败'
-  if (!diagnostics.value) return '等待诊断快照'
-  return `${envPassedCount.value} / ${envChecks.value.length} 项通过`
+  if (diagnosticsRequest.loading) return t('infrastructure.diagnosticRefreshing')
+  if (diagnosticsRequest.error) return t('infrastructure.diagnosticFailed')
+  if (!diagnostics.value) return t('infrastructure.waitingSnapshot')
+  return t('infrastructure.itemsPassed', { passed: envPassedCount.value, total: envChecks.value.length })
 })
 
 const isElectronPanel = computed(() => Boolean(window.petApi?.window))
@@ -486,28 +497,28 @@ const serviceCards = computed(() => {
   if (!snapshot) return []
   return [
     {
-      label: '控制服务',
-      detail: snapshot.status === 'ok' ? '本地 HTTP 控制服务已响应' : `状态：${snapshot.status}`,
+      label: t('infrastructure.controlService'),
+      detail: snapshot.status === 'ok' ? t('infrastructure.controlResponded') : t('infrastructure.statusValue', { status: snapshot.status }),
       ok: snapshot.status === 'ok',
       tone: 'emerald',
     },
     {
-      label: '桌宠窗口',
+      label: t('infrastructure.petWindow'),
       detail: isElectronPanel.value
-        ? (snapshot.petWindowVisible ? '桌宠主窗口可见' : '桌宠主窗口未显示')
-        : '当前为浏览器模式，不存在独立桌宠主窗口',
+        ? (snapshot.petWindowVisible ? t('infrastructure.petWindowVisible') : t('infrastructure.petWindowHidden'))
+        : t('infrastructure.browserNoPetWindow'),
       ok: !isElectronPanel.value || snapshot.petWindowVisible,
       tone: 'blue',
     },
     {
-      label: 'Live2D 覆盖层',
-      detail: snapshot.petOverlayVisible ? '渲染覆盖层可见' : '渲染覆盖层未显示',
+      label: t('infrastructure.live2dOverlay'),
+      detail: snapshot.petOverlayVisible ? t('infrastructure.overlayVisible') : t('infrastructure.overlayHidden'),
       ok: snapshot.petOverlayVisible,
       tone: 'violet',
     },
     {
-      label: '插件运行时',
-      detail: `${snapshot.pluginCount} 个插件 · ${snapshot.activePluginExecutions} 个活动执行`,
+      label: t('infrastructure.pluginRuntime'),
+      detail: t('infrastructure.pluginSummary', { count: snapshot.pluginCount, active: snapshot.activePluginExecutions }),
       ok: snapshot.pluginErrorCount === 0,
       tone: snapshot.pluginErrorCount === 0 ? 'emerald' : 'rose',
     },
@@ -526,10 +537,10 @@ const overallHealthy = computed(() => {
 })
 
 const serviceStatusLabel = computed(() => {
-  if (diagnosticsRequest.loading) return '检查中'
-  if (diagnosticsRequest.error) return '诊断失败'
-  if (!diagnostics.value) return '等待诊断'
-  return overallHealthy.value ? '全部可用' : '需要处理'
+  if (diagnosticsRequest.loading) return t('infrastructure.checking')
+  if (diagnosticsRequest.error) return t('infrastructure.diagnosticFailed')
+  if (!diagnostics.value) return t('infrastructure.waitingDiagnostics')
+  return overallHealthy.value ? t('infrastructure.allAvailable') : t('infrastructure.needsAttention')
 })
 
 const serviceStatusTagType = computed(() => {
@@ -538,17 +549,17 @@ const serviceStatusTagType = computed(() => {
 })
 
 const exceptionStatusLabel = computed(() => {
-  if (diagnosticsRequest.loading) return '诊断刷新中'
-  if (diagnosticsRequest.error) return '诊断失败'
-  if (!diagnostics.value) return '等待诊断快照'
-  return `${runtimeExceptions.value.length} 条记录`
+  if (diagnosticsRequest.loading) return t('infrastructure.diagnosticRefreshing')
+  if (diagnosticsRequest.error) return t('infrastructure.diagnosticFailed')
+  if (!diagnostics.value) return t('infrastructure.waitingSnapshot')
+  return t('infrastructure.exceptionCount', { count: runtimeExceptions.value.length })
 })
 
 const exceptionTagLabel = computed(() => {
-  if (diagnosticsRequest.loading) return '检查中'
-  if (diagnosticsRequest.error) return '诊断失败'
-  if (!diagnostics.value) return '等待诊断'
-  return runtimeExceptions.value.length ? '有异常' : '干净'
+  if (diagnosticsRequest.loading) return t('infrastructure.checking')
+  if (diagnosticsRequest.error) return t('infrastructure.diagnosticFailed')
+  if (!diagnostics.value) return t('infrastructure.waitingDiagnostics')
+  return runtimeExceptions.value.length ? t('infrastructure.hasException') : t('infrastructure.clean')
 })
 
 const exceptionTagType = computed(() => {
@@ -565,10 +576,10 @@ const formatBytes = (bytes: number) => {
 }
 
 const runtimeProcessLabel = (type: string) => ({
-  Browser: '主进程',
-  Tab: '渲染进程',
-  GPU: 'GPU 进程',
-  Utility: '工具进程',
+  Browser: t('infrastructure.mainProcess'),
+  Tab: t('infrastructure.rendererProcess'),
+  GPU: t('infrastructure.gpuProcess'),
+  Utility: t('infrastructure.utilityProcess'),
 }[type] || type)
 
 const loadRuntimeSnapshot = async () => {
@@ -578,7 +589,7 @@ const loadRuntimeSnapshot = async () => {
   try {
     runtimeSnapshot.value = await window.petApi.runtime.getResourceSnapshot()
   } catch (error) {
-    runtimeError.value = error instanceof Error ? error.message : '无法读取运行时资源'
+    runtimeError.value = error instanceof Error ? error.message : t('infrastructure.runtimeUnavailable')
   } finally {
     runtimeLoading.value = false
   }
@@ -590,10 +601,10 @@ const clearRuntimeCache = async () => {
   runtimeError.value = ''
   try {
     const result = await window.petApi.runtime.clearSessionCache()
-    ElMessage.success(`已清理 ${formatBytes(result.clearedBytes)} HTTP 缓存`)
+    ElMessage.success(`${t('infrastructure.clearCache')}: ${formatBytes(result.clearedBytes)}`)
     await loadRuntimeSnapshot()
   } catch (error) {
-    runtimeError.value = error instanceof Error ? error.message : 'HTTP 缓存清理失败'
+    runtimeError.value = error instanceof Error ? error.message : t('infrastructure.cacheClearFailed')
     ElMessage.error(runtimeError.value)
   } finally {
     runtimeClearing.value = false
@@ -603,22 +614,22 @@ const clearRuntimeCache = async () => {
 const logChannels = computed(() => [
   {
     key: 'renderer',
-    label: '渲染层日志',
-    description: 'Live2D / 前端运行输出',
+    label: t('infrastructure.rendererLogs'),
+    description: t('infrastructure.rendererLogsDesc'),
     content: logs.value?.renderer ?? '',
     tone: 'green',
   },
   {
     key: 'python',
-    label: 'Python 后端日志',
-    description: 'FastAPI 与 AI 服务输出',
+    label: t('infrastructure.pythonLogs'),
+    description: t('infrastructure.pythonLogsDesc'),
     content: logs.value?.python ?? '',
     tone: 'blue',
   },
   {
     key: 'electron',
-    label: 'Electron 主进程日志',
-    description: '窗口、托盘与控制服务输出',
+    label: t('infrastructure.electronLogs'),
+    description: t('infrastructure.electronLogsDesc'),
     content: logs.value?.electron ?? '',
     tone: 'amber',
   },
@@ -662,7 +673,7 @@ const downloadExport = async (kind: 'json' | 'csv') => {
     anchor.download = `yuizaki-export.${kind}`
     anchor.click()
     URL.revokeObjectURL(url)
-    ElMessage.success(`已导出 ${kind.toUpperCase()} 文件`)
+    ElMessage.success(t('infrastructure.exportedFile', { kind: kind.toUpperCase() }))
   } catch (error) {
     apiGapError.value = error instanceof Error ? error.message : String(error)
     ElMessage.error(apiGapError.value)
@@ -678,7 +689,7 @@ const updateStats = async () => {
   try {
     await systemClient.updateStatistics()
     await loadApiGaps()
-    ElMessage.success('统计快照已更新')
+    ElMessage.success(t('infrastructure.statsUpdated'))
   } catch (error) {
     apiGapError.value = error instanceof Error ? error.message : String(error)
     ElMessage.error(apiGapError.value)
@@ -719,7 +730,7 @@ const previewRestore = async () => {
     const result = await restoreBackup(backupDir, true)
     if (result) {
       restorePreview.value = result
-      ElMessage.success('恢复预览已生成，尚未写入文件')
+      ElMessage.success(t('infrastructure.restorePreviewCreated'))
     }
   } finally {
     restoreMode.value = null
@@ -730,9 +741,9 @@ const confirmRestore = async () => {
   const backupDir = restoreBackupDir.value.trim()
   if (!backupDir || !canConfirmRestore.value || restoreMode.value) return
   try {
-    await ElMessageBox.confirm('确认恢复后会覆盖当前本地数据。建议确认刚刚的预览结果和备份目录无误。', '确认恢复备份', {
-      confirmButtonText: '恢复备份',
-      cancelButtonText: '取消',
+    await ElMessageBox.confirm(t('infrastructure.restoreConfirmText'), t('infrastructure.restoreConfirmTitle'), {
+      confirmButtonText: t('infrastructure.restoreBackup'),
+      cancelButtonText: t('common.cancel'),
       type: 'warning',
     })
   } catch {
@@ -743,7 +754,7 @@ const confirmRestore = async () => {
     const result = await restoreBackup(backupDir, false)
     if (result) {
       restorePreview.value = result
-      ElMessage.success('备份已恢复')
+      ElMessage.success(t('infrastructure.backupRestored'))
     }
   } finally {
     restoreMode.value = null
@@ -756,13 +767,13 @@ const targetLabel = (targetPath: string) => {
   return name || targetPath
 }
 
-const targetTypeLabel = (type: BackupTarget['type']) => (type === 'directory' ? '目录' : '文件')
+const targetTypeLabel = (type: BackupTarget['type']) => (type === 'directory' ? t('infrastructure.directory') : t('infrastructure.file'))
 
 const restorePlanLabel = (item: BackupRestorePlanItem) => {
-  if (item.restored) return '已恢复'
+  if (item.restored) return t('infrastructure.restored')
   if (item.skippedReason) return item.skippedReason
-  if (!item.backedUpAtSnapshot) return '快照缺失'
-  return '将恢复'
+  if (!item.backedUpAtSnapshot) return t('infrastructure.snapshotMissing')
+  return t('infrastructure.willRestore')
 }
 
 const restorePlanTagType = (item: BackupRestorePlanItem): 'success' | 'warning' | 'info' => {
@@ -773,11 +784,11 @@ const restorePlanTagType = (item: BackupRestorePlanItem): 'success' | 'warning' 
 
 const restoreEffectLabel = (status: BackupRestoreEffectStatus) => {
   const labels: Record<BackupRestoreEffectStatus, string> = {
-    will_restore: '将恢复',
-    restored: '已恢复',
-    rebuild_required: '需重建',
-    unchanged: '不变',
-    skipped: '已跳过',
+    will_restore: t('infrastructure.willRestore'),
+    restored: t('infrastructure.restored'),
+    rebuild_required: t('infrastructure.rebuildRequired'),
+    unchanged: t('infrastructure.unchanged'),
+    skipped: t('infrastructure.alreadySkipped'),
   }
   return labels[status]
 }
@@ -799,6 +810,37 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.merged-deploy-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--yui-border);
+}
+
+.merged-deploy-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.merged-deploy-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.merged-deploy-heading strong {
+  color: var(--yui-text);
+  font-size: 16px;
+}
+
+.merged-deploy-heading span {
+  color: var(--yui-muted);
+  font-size: 12px;
 }
 
 .infra-hero {

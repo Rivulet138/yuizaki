@@ -29,7 +29,6 @@ def create_system_router(
     heartbeat_status_handler: Callable[[], Any] | None = None,
     companion_runtime_handler: Callable[[int], Any] | None = None,
     companion_opportunity_outcome_handler: Callable[[str, dict[str, Any]], Any] | None = None,
-    heartbeat_opportunity_accept_handler: Callable[[str, dict[str, Any]], Any] | None = None,
     heartbeat_goal_cancel_handler: Callable[[str, dict[str, Any]], Any] | None = None,
     proactive_settings_get_handler: Callable[[], Any] | None = None,
     proactive_settings_patch_handler: Callable[[dict[str, Any]], Any] | None = None,
@@ -318,11 +317,6 @@ def create_system_router(
         @router.post("/api/system/companion-runtime/opportunities/outcome/{job_id:path}")
         async def companion_opportunity_outcome(job_id: str, payload: dict[str, Any]):
             return await _call_handler(companion_opportunity_outcome_handler, job_id, payload, offload=True)
-
-    if heartbeat_opportunity_accept_handler is not None:
-        @router.post("/api/system/heartbeat/opportunities/{job_id:path}/accept")
-        async def heartbeat_opportunity_accept(job_id: str, payload: dict[str, Any]):
-            return await _call_handler(heartbeat_opportunity_accept_handler, job_id, payload)
 
     if heartbeat_goal_cancel_handler is not None:
         @router.post("/api/system/heartbeat/goals/{goal_id:path}/cancel")

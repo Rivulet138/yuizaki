@@ -12,7 +12,7 @@ from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 VoiceStage = Literal[
     "capture",
@@ -517,10 +517,12 @@ class VoiceDiagnostics:
             return None
         if not isinstance(recorded_at, (int, float)) or isinstance(recorded_at, bool):
             return None
+        typed_signal = cast(VoiceComfortSignalName, signal)
+        typed_source = cast(VoiceComfortSignalSource, source)
         try:
             return VoiceComfortSignalSample(
-                signal=signal,
-                source=source,
+                signal=typed_signal,
+                source=typed_source,
                 confidence=float(confidence),
                 duration_ms=float(duration_ms) if duration_ms is not None else None,
                 run_id=current_run_id,
@@ -579,6 +581,7 @@ class VoiceDiagnostics:
         path = self._persistence_path
         if path is None:
             return
+        temporary: Path | None = None
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
@@ -588,10 +591,11 @@ class VoiceDiagnostics:
             )
             os.replace(temporary, path)
         except (OSError, TypeError, ValueError):
-            try:
-                temporary.unlink()
-            except (OSError, UnboundLocalError):
-                pass
+            if temporary is not None:
+                try:
+                    temporary.unlink()
+                except OSError:
+                    pass
 
     def _load_persisted(self) -> None:
         path = self._persistence_path
@@ -608,19 +612,22 @@ class VoiceDiagnostics:
             self._run_id = persisted_run_id
         raw_samples = payload.get("samples")
         if isinstance(raw_samples, list):
-            for raw_sample in raw_samples[-self._samples.maxlen :]:
+            maxlen = self._samples.maxlen or len(raw_samples)
+            for raw_sample in raw_samples[-maxlen:]:
                 sample = self._sample_from_snapshot(raw_sample, self._run_id)
                 if sample is not None:
                     self._samples.append(sample)
         raw_comfort = payload.get("comfort_samples")
         if isinstance(raw_comfort, list):
-            for raw_sample in raw_comfort[-self._comfort_samples.maxlen :]:
+            maxlen = self._comfort_samples.maxlen or len(raw_comfort)
+            for raw_sample in raw_comfort[-maxlen:]:
                 sample = self._comfort_from_snapshot(raw_sample, self._run_id)
                 if sample is not None:
                     self._comfort_samples.append(sample)
         raw_signals = payload.get("comfort_signal_samples")
         if isinstance(raw_signals, list):
-            for raw_sample in raw_signals[-self._comfort_signal_samples.maxlen :]:
+            maxlen = self._comfort_signal_samples.maxlen or len(raw_signals)
+            for raw_sample in raw_signals[-maxlen:]:
                 sample = self._comfort_signal_from_snapshot(raw_sample, self._run_id)
                 if sample is not None:
                     self._comfort_signal_samples.append(sample)
@@ -851,8 +858,8 @@ class VoiceDiagnostics:
         """
         selected_run_id = self._resolve_run_id(run_id=run_id, handle=handle)
         sample = VoiceComfortSignalSample(
-            signal=str(signal).strip(),
-            source=str(source).strip(),
+            signal=cast(VoiceComfortSignalName, str(signal).strip()),
+            source=cast(VoiceComfortSignalSource, str(source).strip()),
             confidence=float(confidence),
             duration_ms=(float(duration_ms) if duration_ms is not None else None),
             run_id=selected_run_id,

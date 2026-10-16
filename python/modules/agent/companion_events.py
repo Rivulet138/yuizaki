@@ -76,10 +76,10 @@ def _sanitize_job_data(value: Any, *, depth: int = 0) -> Any:
             result["__truncatedItems"] = len(entries) - _JOB_DATA_MAX_ITEMS
         return result
     if isinstance(value, (list, tuple)):
-        result = [_sanitize_job_data(item, depth=depth + 1) for item in value[:_JOB_DATA_MAX_LIST_ITEMS]]
+        list_result: list[Any] = [_sanitize_job_data(item, depth=depth + 1) for item in value[:_JOB_DATA_MAX_LIST_ITEMS]]
         if len(value) > _JOB_DATA_MAX_LIST_ITEMS:
-            result.append(f"[TRUNCATED {len(value) - _JOB_DATA_MAX_LIST_ITEMS} ITEMS]")
-        return result
+            list_result.append(f"[TRUNCATED {len(value) - _JOB_DATA_MAX_LIST_ITEMS} ITEMS]")
+        return list_result
     if isinstance(value, (bool, int, float)) or value is None:
         return value
     return _sanitize_job_data(str(value), depth=depth)

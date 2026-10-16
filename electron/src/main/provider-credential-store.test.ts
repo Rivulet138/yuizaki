@@ -72,4 +72,59 @@ describe('ProviderCredentialStore', () => {
 
     expect(JSON.parse(store.getPythonEnvironment()[PROVIDER_CREDENTIALS_ENV]!)).toEqual({ 'llm.api_key': 'sk-valid' })
   })
+
+  it('does not persist nested LLM profile credentials', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yuizaki-provider-credentials-'))
+    roots.push(root)
+    const store = new ProviderCredentialStore(root, adapter)
+
+    expect(store.captureSettingsPayload({
+      llm: {
+        api_key: 'top-level-secret',
+        profiles: { openai: { api_key: 'profile-secret' } },
+      },
+    })).toBe(1)
+
+    expect(store.getAll()).toEqual({ 'llm.api_key': 'top-level-secret' })
+    expect(store.captureSettingValue('llm.profiles.openai.api_key', 'another-secret')).toBe(false)
+    expect(JSON.parse(store.getPythonEnvironment()[PROVIDER_CREDENTIALS_ENV]!)).toEqual({ 'llm.api_key': 'top-level-secret' })
+  })
+
+  it('scrubs nested LLM profile credentials during plaintext migration', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yuizaki-provider-credentials-'))
+    roots.push(root)
+    const settingsPath = path.join(root, 'settings.json')
+    fs.writeFileSync(settingsPath, JSON.stringify({
+      llm: { profiles: { openai: { api_key: 'profile-secret' } } },
+    }))
+    const store = new ProviderCredentialStore(root, adapter)
+
+    expect(store.migratePlaintextSettings(settingsPath)).toEqual({ migrated: 0, scrubbed: true })
+    expect(JSON.parse(fs.readFileSync(settingsPath, 'utf8'))).toEqual({
+      llm: { profiles: { openai: { api_key: '' } } },
+    })
+    expect(store.getAll()).toEqual({})
+  })
+
+  it('clears legacy nested LLM profile credentials with the top-level key', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yuizaki-provider-credentials-'))
+    roots.push(root)
+    const encrypt = (value: string) => Buffer.from(value, 'utf8').reverse().toString('base64')
+    fs.writeFileSync(path.join(root, 'provider-credentials.json'), JSON.stringify({
+      version: 1,
+      values: {
+        'llm.api_key': encrypt('top-level-secret'),
+        'llm.profiles.openai.api_key': encrypt('legacy-secret'),
+      },
+    }))
+
+    const store = new ProviderCredentialStore(root, adapter)
+    expect(store.getAll()).toEqual({
+      'llm.api_key': 'top-level-secret',
+      'llm.profiles.openai.api_key': 'legacy-secret',
+    })
+    expect(store.delete('llm.api_key')).toBe(true)
+    expect(store.getAll()).toEqual({})
+    expect(new ProviderCredentialStore(root, adapter).getAll()).toEqual({})
+  })
 })

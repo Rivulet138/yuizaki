@@ -501,7 +501,12 @@ class SettingsAPI:
         except Exception as exc:
             logger.error("Provider credential runtime reload failed: %s", type(exc).__name__)
             raise RuntimeError("provider credential runtime reload failed") from exc
-        return int(changed)
+        if isinstance(changed, bool) or not isinstance(changed, (int, float, str)):
+            return 0
+        try:
+            return int(changed)
+        except (TypeError, ValueError, OverflowError):
+            return 0
 
     def init_api(self) -> None:
         global _settings_api
@@ -789,7 +794,8 @@ class SettingsAPI:
             return {"ok": False, "message": "SVC Base URL must be an HTTP(S) URL"}
 
         try:
-            configured_timeout = float(svc_settings.get("timeout", 120))
+            raw_timeout = svc_settings.get("timeout", 120)
+            configured_timeout = float(raw_timeout) if isinstance(raw_timeout, (int, float, str)) and not isinstance(raw_timeout, bool) else 120.0
         except (TypeError, ValueError):
             configured_timeout = 120.0
         probe_timeout = max(1.0, min(configured_timeout, 10.0))

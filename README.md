@@ -129,7 +129,7 @@ Linux 使用 `.venv/bin/python` 和 `cp .env.example .env`。后端默认监听 
 
 ## 技术栈与结构
 
-Electron 42、Vue 3、TypeScript、Vite、Pinia、Element Plus、PixiJS、Three.js、Python 3.11–3.13、FastAPI、Socket.IO、SQLite、可选 Qdrant、Sherpa-ONNX、Genie TTS、RapidOCR、Go Launcher。
+Electron 44、Vue 3、TypeScript、Vite、Pinia、Element Plus、PixiJS、Three.js、Python 3.11–3.13、FastAPI、Socket.IO、SQLite、可选 Qdrant、Sherpa-ONNX、Genie TTS、RapidOCR、Go Launcher。
 
 ```text
 electron/                 Electron、preload、Vue renderer 和构建脚本

@@ -8,10 +8,6 @@
           </el-tag>
         </template>
         <template #actions>
-          <el-button plain @click="$emit('open-converter')">
-            <el-icon><Headset /></el-icon>
-            {{ t('settings.svc.openConverter') }}
-          </el-button>
           <el-button
             plain
             :loading="testLoading"
@@ -77,6 +73,22 @@
         </el-form-item>
       </div>
     </el-form>
+
+    <div class="service-links" role="navigation" :aria-label="t('settings.svc.service')">
+      <span class="service-links-label">{{ t('settings.groups.connection') }}</span>
+      <el-button text @click="$emit('open-service', 'llm')">{{ t('settings.tabs.llm') }}</el-button>
+      <el-button text @click="$emit('open-service', 'voice')">{{ t('settings.tabs.tts') }}</el-button>
+      <el-button text @click="$emit('open-service', 'asr')">{{ t('settings.tabs.asr') }}</el-button>
+    </div>
+
+    <SVCPanel
+      embedded
+      :show-check-button="false"
+      :config="modelValue"
+      :before-action="beforeAction"
+      :test-loading="testLoading"
+      :test-result="testResult"
+    />
   </el-card>
 </template>
 
@@ -100,10 +112,11 @@ import { ElForm, ElFormItem } from 'element-plus'
 import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/form-item/style/css'
 import { computed } from 'vue'
-import { Connection, Headset, RefreshLeft } from '@element-plus/icons-vue'
+import { Connection, RefreshLeft } from '@element-plus/icons-vue'
 
 import { t } from '@/i18n'
 import SettingsSectionHeader from './SettingsSectionHeader.vue'
+import SVCPanel from '@/domains/tools/views/SVCPanel.vue'
 
 export type SvcSettings = {
   provider: string
@@ -118,6 +131,7 @@ const props = defineProps<{
   discoveryLoading: boolean
   discoveryError?: string | null
   testLoading: boolean
+  beforeAction?: () => boolean | Promise<boolean>
   testResult?: {
     ok: boolean
     message?: string
@@ -127,7 +141,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update-field': [field: keyof SvcSettings, value: string | number]
   'discover-local': []
-  'open-converter': []
+  'open-service': [section: 'llm' | 'voice' | 'asr']
   'test-service': []
   reset: []
 }>()
@@ -181,6 +195,23 @@ const emitField = (field: keyof SvcSettings, value: unknown) => {
 }
 
 .full-width { width: 100%; }
+
+.service-links {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--yui-border);
+}
+
+.service-links-label {
+  margin-right: 4px;
+  color: var(--yui-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
 
 @media (max-width: 900px) {
   .form-grid { grid-template-columns: minmax(0, 1fr); }

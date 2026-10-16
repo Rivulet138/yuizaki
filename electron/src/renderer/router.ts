@@ -5,6 +5,21 @@ const routes: RouteRecordRaw[] = enabledNavigationModules().map((module) => {
   const path = `/w/:workspaceId/${module.id}/:sessionId?`
   const meta = { title: module.title, desc: module.desc }
 
+  if (module.id === 'deploy') {
+    return {
+      path,
+      name: module.id,
+      redirect: (to) => {
+        const workspaceId = encodeURIComponent(String(to.params.workspaceId || 'default'))
+        const sessionId = to.params.sessionId
+        return sessionId
+          ? `/w/${workspaceId}/infrastructure/${encodeURIComponent(String(sessionId))}`
+          : `/w/${workspaceId}/infrastructure`
+      },
+      meta,
+    }
+  }
+
   return {
     path,
     name: module.id,

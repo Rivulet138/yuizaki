@@ -10,13 +10,27 @@
           :closable="false"
         />
         <el-alert
-          v-if="saveBusy || updateRequest.error || lastSavedAt"
+          v-if="(saveBusy || updateRequest.error || lastSavedAt) && !failedSavePatch"
           :title="saveStatusLabel"
           :description="saveStatusDetail"
           :type="saveStatusType"
           show-icon
           :closable="false"
         />
+        <el-alert
+          v-if="failedSavePatch"
+          :title="t('settings.status.saveFailed')"
+          :description="t('settings.status.retrySaveDetail')"
+          type="error"
+          show-icon
+          :closable="false"
+        >
+          <template #default>
+            <el-button type="danger" plain size="small" :loading="saveBusy" @click="retryFailedSave">
+              {{ t('settings.status.retrySave') }}
+            </el-button>
+          </template>
+        </el-alert>
 
         <div class="settings-workspace">
           <nav
@@ -156,7 +170,7 @@
                           @keyup.enter="scheduleLlmModelDiscovery"
                         >
                           <template #append>
-                            <el-button v-if="llmApiKeyStored" text type="danger" @click="clearLlmApiKey">{{ t('settings.llm.apiKeyClear') }}</el-button>
+                            <el-button v-if="llmApiKeyStored" text type="danger" :loading="isSensitiveDeleting('llm.api_key')" :disabled="isSensitiveDeleting('llm.api_key')" @click="clearLlmApiKey">{{ t('settings.llm.apiKeyClear') }}</el-button>
                           </template>
                         </el-input>
                       </el-form-item>
@@ -381,7 +395,11 @@
                         <el-input v-model="form.tts.base_url" @input="saveTtsField('base_url', $event)" @change="flushTtsSave" />
                       </el-form-item>
                       <el-form-item :label="t('settings.tts.apiKey')">
-                        <el-input v-model="form.tts.api_key" type="password" show-password autocomplete="off" @input="saveTtsField('api_key', $event)" @change="flushTtsSave" />
+                        <el-input v-model="form.tts.api_key" type="password" show-password autocomplete="off" @input="saveTtsField('api_key', $event)" @change="flushTtsSave">
+                          <template #append>
+                            <el-button v-if="form.tts.api_key || ttsApiKeyStored" text type="danger" :loading="isSensitiveDeleting('tts.api_key')" :disabled="isSensitiveDeleting('tts.api_key')" @click="clearTtsApiKey">{{ t('settings.apiKeyClear') }}</el-button>
+                          </template>
+                        </el-input>
                       </el-form-item>
                       <el-form-item :label="t('settings.tts.model')">
                         <el-input v-model="form.tts.model" @input="saveTtsField('model', $event)" @change="flushTtsSave" />
@@ -477,22 +495,28 @@
           <el-tab-pane :label="t('settings.tabs.asr')" name="asr" lazy>
             <SettingsAsrSection
               :model-value="form.asr"
+              :api-key-stored="asrApiKeyStored"
+              :api-key-deleting="isSensitiveDeleting('asr.api_key')"
               :discovery-loading="localDiscoveryRequest.loading"
               :discovery-error="localDiscoveryRequest.error"
               @discover-local="applyLocalAsrDiscovery"
               @update-field="saveAsrField"
+              @clear-api-key="clearAsrApiKey"
             />
           </el-tab-pane>
 
           <el-tab-pane :label="t('settings.tabs.memory')" name="memory" lazy>
             <SettingsMemorySection
               :model-value="form.memory"
+              :api-key-stored="memoryApiKeyStored"
+              :api-key-deleting="isSensitiveDeleting('memory.qdrant_api_key')"
               :discovery-loading="localDiscoveryRequest.loading"
               :rebuild-loading="memoryRebuildRequest.loading"
               :default-embedding-model="DEFAULT_EMBEDDING_MODEL"
               :default-qdrant-docker-image="DEFAULT_QDRANT_DOCKER_IMAGE"
               @change-backend="handleMemoryBackendChange"
               @update-field="saveMemoryField"
+              @clear-api-key="clearMemoryApiKey"
               @discover-local="applyLocalMemoryDiscovery"
               @rebuild="handleRebuildMemoryIndex"
             />
@@ -508,9 +532,10 @@
               :discovery-loading="localDiscoveryRequest.loading"
               :discovery-error="localDiscoveryRequest.error"
               :test-loading="testSvcRequest.loading"
+              :before-action="flushPendingSave"
               :test-result="svcTestResult"
               @discover-local="applyLocalSvcDiscovery"
-              @open-converter="openSvcConverter"
+              @open-service="openServiceSettings"
               @test-service="handleTestSvc"
               @reset="resetSvcSettings"
               @update-field="saveSvcField"
@@ -643,7 +668,7 @@ import { ElCard } from 'element-plus'
 import 'element-plus/es/components/card/style/css'
 import 'element-plus/es/components/tag/style/css'
 import { computed, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { ElCollapse, ElCollapseItem, ElForm, ElFormItem, ElMessage, ElMessageBox, ElOption, ElSelect, ElTabPane, ElTable, ElTableColumn, ElTabs } from 'element-plus'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
@@ -790,7 +815,6 @@ const genieCharactersRequest = useDomainRequest<GenieCharacterResourcesResponse>
 
 const settingsStore = useSettingsStore()
 const route = useRoute()
-const router = useRouter()
 const inputBindingsStore = useInputBindingsStore()
 const inputBindingState = inputBindingsStore.state
 
@@ -946,6 +970,7 @@ let scheduledLlmModelDiscoveryKey: string | null = null
 let suppressModelDiscovery = false
 const pendingSavePatch = ref<SettingsPatch | null>(null)
 const failedSavePatch = ref<SettingsPatch | null>(null)
+const deletingSensitiveKeys = ref(new Set<string>())
 const saveInFlight = ref(false)
 let saveFailureCount = 0
 let unmounted = false
@@ -970,6 +995,9 @@ const svcTestResult = ref<{ ok: boolean; message?: string } | null>(null)
 const llmProviderPreset = ref<LlmProviderPreset>('custom')
 const llmProfiles = reactive<LlmProfiles>({})
 const llmApiKeyStored = ref(false)
+const ttsApiKeyStored = ref(false)
+const asrApiKeyStored = ref(false)
+const memoryApiKeyStored = ref(false)
 const llmImportInput = ref<HTMLInputElement | null>(null)
 const llmImporting = ref(false)
 const llmExporting = ref(false)
@@ -1025,6 +1053,85 @@ const saveAsrField = (field: keyof AsrSettings, value: string | number) => {
   Object.assign(form.asr, { [field]: value })
   debouncedSave({ asr: { [field]: value } })
 }
+
+const clearSettingValue = (target: unknown, key: string) => {
+  const [section, field] = key.split('.', 2)
+  if (!section || !field || !target || typeof target !== 'object') return
+  const sectionValue = (target as Record<string, unknown>)[section]
+  if (sectionValue && typeof sectionValue === 'object') {
+    ;(sectionValue as Record<string, unknown>)[field] = ''
+  }
+}
+
+const stripPatchPath = (patch: SettingsPatch | null, fieldPath: string, prefix = ''): SettingsPatch | null => {
+  if (!patch) return null
+  const next: SettingsPatch = {}
+  for (const [key, value] of Object.entries(patch)) {
+    const path = prefix ? `${prefix}.${key}` : key
+    if (path === fieldPath) continue
+    if (isPlainRecord(value)) {
+      const child = stripPatchPath(value, fieldPath, path)
+      if (child && Object.keys(child).length) next[key] = child
+      continue
+    }
+    next[key] = value
+  }
+  return Object.keys(next).length ? next : null
+}
+
+const stripDeletingSensitiveKeys = (patch: SettingsPatch | null): SettingsPatch | null => {
+  let next = patch
+  for (const key of deletingSensitiveKeys.value) {
+    next = stripPatchPath(next, key)
+  }
+  return next
+}
+
+const setSensitiveDeleting = (key: string, deleting: boolean) => {
+  const next = new Set(deletingSensitiveKeys.value)
+  if (deleting) next.add(key)
+  else next.delete(key)
+  deletingSensitiveKeys.value = next
+}
+
+const isSensitiveDeleting = (key: string) => deletingSensitiveKeys.value.has(key)
+
+const clearSensitiveSetting = async (key: string, clearLocal: () => void) => {
+  if (deletingSensitiveKeys.value.has(key)) return
+  setSensitiveDeleting(key, true)
+  pendingSavePatch.value = stripPatchPath(pendingSavePatch.value, key)
+  failedSavePatch.value = stripPatchPath(failedSavePatch.value, key)
+  try {
+    if (!(await flushPendingSave())) return
+    await settingsClient.deleteSetting(key)
+    clearLocal()
+    clearSettingValue(settingsStore.state, key)
+    clearSettingValue(settings.value, key)
+    pendingSavePatch.value = stripPatchPath(pendingSavePatch.value, key)
+    failedSavePatch.value = stripPatchPath(failedSavePatch.value, key)
+    ElMessage.success(t('settings.apiKeyCleared'))
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : t('common.error.unknown'))
+  } finally {
+    setSensitiveDeleting(key, false)
+  }
+}
+
+const clearTtsApiKey = () => clearSensitiveSetting('tts.api_key', () => {
+  form.tts.api_key = ''
+  ttsApiKeyStored.value = false
+})
+
+const clearAsrApiKey = () => clearSensitiveSetting('asr.api_key', () => {
+  form.asr.api_key = ''
+  asrApiKeyStored.value = false
+})
+
+const clearMemoryApiKey = () => clearSensitiveSetting('memory.qdrant_api_key', () => {
+  form.memory.qdrant_api_key = ''
+  memoryApiKeyStored.value = false
+})
+
 const saveMemoryField = (field: keyof MemorySettings, value: MemorySettings[keyof MemorySettings]) => {
   Object.assign(form.memory, { [field]: value })
   debouncedSave({ memory: { [field]: value } })
@@ -1249,7 +1356,9 @@ const cloneLlmProfilesPayload = (activeProfile?: LlmProfile): Record<string, Llm
   }
   for (const [key, profile] of Object.entries(llmProfiles)) {
     const provider = normalizeLlmProviderValue(key, profile?.base_url || '')
-    payload[provider] = sanitizeLlmProfile(provider, profile)
+    // LLM credentials have one canonical top-level owner. Profile payloads
+    // carry configuration only, so nested keys cannot diverge from the vault.
+    payload[provider] = { ...sanitizeLlmProfile(provider, profile), api_key: '' }
   }
   return payload
 }
@@ -1274,14 +1383,38 @@ const handleLlmApiKeyFocus = () => {
 }
 
 const clearLlmApiKey = async () => {
+  const key = 'llm.api_key'
+  if (deletingSensitiveKeys.value.has(key)) return
+  setSensitiveDeleting(key, true)
+  pendingSavePatch.value = stripPatchPath(pendingSavePatch.value, key)
+  failedSavePatch.value = stripPatchPath(failedSavePatch.value, key)
   try {
-    await settingsClient.deleteSetting('llm.api_key')
+    if (!(await flushPendingSave())) return
+    await settingsClient.deleteSetting(key)
     form.llm.api_key = ''
     llmApiKeyStored.value = false
-    llmProfiles[llmProviderPreset.value] = snapshotLlmProfile()
+    for (const profile of Object.values(llmProfiles)) profile.api_key = ''
+    clearSettingValue(settingsStore.state, key)
+    clearSettingValue(settings.value, key)
+    pendingSavePatch.value = stripPatchPath(pendingSavePatch.value, key)
+    failedSavePatch.value = stripPatchPath(failedSavePatch.value, key)
+    // The DELETE endpoint removes the vault value, but the backend settings
+    // document may still contain legacy nested profile keys. Persist the
+    // scrubbed profile payload immediately so a later reload cannot restore it.
+    debouncedSave({
+      llm: {
+        api_key: '',
+        profiles: cloneLlmProfilesPayload(),
+      },
+    })
+    if (!(await flushPendingSave())) {
+      throw new Error(t('settings.messages.saveFailed'))
+    }
     ElMessage.success(t('settings.llm.apiKeyCleared'))
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : t('common.error.unknown'))
+  } finally {
+    setSensitiveDeleting(key, false)
   }
 }
 
@@ -1511,6 +1644,7 @@ const saveBusy = computed(() => updateRequest.loading || saveInFlight.value || B
 
 const saveStatusType = computed<AlertType>(() => {
   if (saveBusy.value) return 'warning'
+  if (failedSavePatch.value) return 'error'
   if (updateRequest.error) return 'error'
   if (lastSavedAt.value) return 'success'
   return 'info'
@@ -1518,6 +1652,7 @@ const saveStatusType = computed<AlertType>(() => {
 
 const saveStatusLabel = computed(() => {
   if (saveBusy.value) return t('settings.status.saving')
+  if (failedSavePatch.value) return t('settings.status.saveFailed')
   if (updateRequest.error) return t('settings.status.saveFailed')
   if (lastSavedAt.value) return t('settings.status.saved')
   return ''
@@ -1525,6 +1660,7 @@ const saveStatusLabel = computed(() => {
 
 const saveStatusDetail = computed(() => {
   if (saveBusy.value) return t('settings.status.savingShort')
+  if (failedSavePatch.value) return t('settings.status.retrySaveDetail')
   if (updateRequest.error) return updateRequest.error
   if (lastApplied.value.length) return t('settings.status.applied', { items: lastApplied.value.join(' / ') })
   if (lastSavedAt.value) return t('settings.status.recent', { time: lastSavedAt.value })
@@ -1609,7 +1745,10 @@ const promoteFailedSavePatch = () => {
 }
 
 const queueSavePatch = (patch: SettingsPatch) => {
+  patch = stripDeletingSensitiveKeys(patch) || {}
+  if (!Object.keys(patch).length) return
   promoteFailedSavePatch()
+  pendingSavePatch.value = stripDeletingSensitiveKeys(pendingSavePatch.value)
   pendingSavePatch.value = pendingSavePatch.value
     ? mergePatch(pendingSavePatch.value, patch)
     : patch
@@ -1689,6 +1828,12 @@ const debouncedSave = (patch: SettingsPatch) => {
     saveTimeout = null
     void drainSaveQueue()
   }, 1000)
+}
+
+const retryFailedSave = () => {
+  if (!failedSavePatch.value || saveBusy.value) return
+  promoteFailedSavePatch()
+  void drainSaveQueue()
 }
 
 const applyLlmVisionPatch = (patch: LlmVisionPatch) => {
@@ -1970,10 +2115,9 @@ const resetSvcSettings = () => {
   debouncedSave({ svc: defaults })
 }
 
-const openSvcConverter = async () => {
+const openServiceSettings = async (section: 'llm' | 'voice' | 'asr') => {
   if (!(await flushPendingSave())) return
-  const workspaceId = String(route.params.workspaceId || 'default')
-  void router.push(`/w/${encodeURIComponent(workspaceId)}/svc`)
+  activeSection.value = section
 }
 
 const applyLocalSvcDiscovery = async () => {
@@ -2981,6 +3125,9 @@ const hydrateForm = () => {
   }
 
   if (s.tts) {
+    const ttsApiKey = s.tts.api_key || ''
+    const ttsMasked = ttsApiKey === SETTINGS_SECRET_MASK
+    ttsApiKeyStored.value = ttsMasked || Boolean(ttsApiKey.trim())
     const activeProfile = sanitizeTtsProfile({
       genie_character: s.tts.genie_character ?? '',
       genie_model_dir: s.tts.genie_model_dir || '',
@@ -2994,7 +3141,7 @@ const hydrateForm = () => {
       save_mode: s.tts.save_mode || '禁用自动保存',
       provider: s.tts.provider === 'openai-compatible' ? 'openai-compatible' : TTS_PROVIDER,
       base_url: s.tts.base_url || '',
-      api_key: s.tts.api_key || '',
+      api_key: ttsMasked ? '' : ttsApiKey,
       model: s.tts.model || 'tts-1',
       voice: s.tts.voice || 'alloy',
       timeout: s.tts.timeout ?? 60,
@@ -3003,9 +3150,11 @@ const hydrateForm = () => {
   }
 
   if (s.asr) {
+    const asrApiKey = s.asr.api_key || ''
+    asrApiKeyStored.value = asrApiKey === SETTINGS_SECRET_MASK || Boolean(asrApiKey.trim())
     form.asr.provider = s.asr.provider || 'sherpa-onnx'
     form.asr.base_url = s.asr.base_url ?? ''
-    form.asr.api_key = s.asr.api_key || ''
+    form.asr.api_key = asrApiKey === SETTINGS_SECRET_MASK ? '' : asrApiKey
     form.asr.timeout = s.asr.timeout ?? 60
     form.asr.sensevoice_model = s.asr.sensevoice_model || 'iic/SenseVoiceSmall'
     form.asr.sensevoice_device = s.asr.sensevoice_device || 'cpu'
@@ -3041,7 +3190,9 @@ const hydrateForm = () => {
     form.memory.backend = s.memory.backend ?? 'sqlite'
     form.memory.sqlite_path = s.memory.sqlite_path ?? ''
     form.memory.qdrant_url = s.memory.qdrant_url ?? ''
-    form.memory.qdrant_api_key = s.memory.qdrant_api_key ?? ''
+    const memoryApiKey = s.memory.qdrant_api_key ?? ''
+    memoryApiKeyStored.value = memoryApiKey === SETTINGS_SECRET_MASK || Boolean(memoryApiKey.trim())
+    form.memory.qdrant_api_key = memoryApiKey === SETTINGS_SECRET_MASK ? '' : memoryApiKey
     form.memory.qdrant_collection = s.memory.qdrant_collection ?? 'memories'
     form.memory.qdrant_timeout = s.memory.qdrant_timeout ?? 10
     form.memory.qdrant_auto_start = s.memory.qdrant_auto_start ?? false

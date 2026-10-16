@@ -84,10 +84,11 @@ if (!petWindow.live2dApi) {
 	petWindow.live2dApi = fallbackApi;
 }
 
+// Cubism Core is loaded synchronously by pet-window.html before this module.
 // The renderer registers IPC listeners during init. Expose the preload API first
 // so a slow or failed preload cannot leave an apparently live but disconnected pet.
 const renderer = new PetRenderer("pet-canvas");
 petWindow.petRenderer = renderer;
 renderer.init().catch((error) => {
-	logger.error("[PetRenderer] init failed:", error);
+	logger.error("[PetRenderer] bootstrap failed:", error);
 });

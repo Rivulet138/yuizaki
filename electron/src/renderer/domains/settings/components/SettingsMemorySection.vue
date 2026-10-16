@@ -36,8 +36,8 @@
         <el-form-item :label="t('settings.memory.backend')">
           <el-radio-group class="backend-selector" :model-value="modelValue.backend" @change="$emit('change-backend', String($event))">
             <el-radio-button value="sqlite">SQLite</el-radio-button>
-            <el-radio-button value="inmemory">仅本次运行</el-radio-button>
-            <el-radio-button value="qdrant">SQLite + 向量检索</el-radio-button>
+            <el-radio-button value="inmemory">{{ t('settings.memory.backendInMemory') }}</el-radio-button>
+            <el-radio-button value="qdrant">{{ t('settings.memory.backendQdrant') }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item v-if="modelValue.backend === 'sqlite'" :label="t('settings.memory.sqlitePath')">
@@ -95,7 +95,11 @@
             <el-input :model-value="modelValue.qdrant_url" @change="emitField('qdrant_url', $event)" />
           </el-form-item>
           <el-form-item :label="t('settings.memory.qdrantApiKey')">
-            <el-input :model-value="modelValue.qdrant_api_key" type="password" show-password @change="emitField('qdrant_api_key', $event)" />
+            <el-input :model-value="modelValue.qdrant_api_key" type="password" show-password @change="emitField('qdrant_api_key', $event)">
+              <template #append>
+              <el-button v-if="modelValue.qdrant_api_key || apiKeyStored" text type="danger" :loading="apiKeyDeleting" :disabled="apiKeyDeleting" @click="$emit('clear-api-key')">{{ t('settings.apiKeyClear') }}</el-button>
+              </template>
+            </el-input>
           </el-form-item>
           <el-form-item :label="t('settings.memory.collection')">
             <el-input :model-value="modelValue.qdrant_collection" placeholder="memories" @change="emitField('qdrant_collection', $event)" />
@@ -175,6 +179,8 @@ const props = defineProps<{
   rebuildLoading: boolean
   defaultEmbeddingModel?: string
   defaultQdrantDockerImage?: string
+  apiKeyStored?: boolean
+  apiKeyDeleting?: boolean
 }>()
 
 const backendLabel = computed(() => ({
@@ -187,6 +193,7 @@ const emit = defineEmits<{
   'update-field': [field: keyof MemorySettings, value: MemorySettingValue]
   'change-backend': [backend: string]
   'discover-local': []
+  'clear-api-key': []
   rebuild: []
 }>()
 

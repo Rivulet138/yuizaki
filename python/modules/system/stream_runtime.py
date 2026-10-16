@@ -15,7 +15,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
@@ -30,7 +30,7 @@ from .stream_platforms import (
 from .twitch_connection import TwitchConnectionSupervisor, TwitchIrcTransport
 
 try:  # websocket-client is optional until an OBS adapter is configured.
-    import websocket as _websocket
+    import websocket as _websocket  # pyright: ignore[reportMissingImports]
 except ImportError:  # pragma: no cover - depends on the host installation
     _websocket = None
 
@@ -142,7 +142,9 @@ class ObsWebSocketAdapter:
             if hello.get("op") != 0:
                 return {"status": "protocol_error", "code": "obs_hello_missing", "adapter": "obs-websocket", "readOnly": True}
             identify: dict[str, Any] = {"op": 1, "d": {"rpcVersion": 1}}
-            auth = self._authentication(self._password, hello.get("d") or {})
+            hello_data_raw = hello.get("d")
+            hello_data = dict(hello_data_raw) if isinstance(hello_data_raw, Mapping) else {}
+            auth = self._authentication(self._password, cast(Mapping[str, Any], hello_data))
             if auth:
                 identify["d"]["authentication"] = auth
             socket.send(_encode_json(identify))
@@ -154,7 +156,8 @@ class ObsWebSocketAdapter:
             response = _decode_json(socket.recv())
             if response.get("op") != 7:
                 raise RuntimeError("OBS request response was not received")
-            data = response.get("d") if isinstance(response.get("d"), Mapping) else {}
+            response_data = response.get("d")
+            data = dict(response_data) if isinstance(response_data, Mapping) else {}
             return {
                 "status": "reachable",
                 "adapter": "obs-websocket",
@@ -191,7 +194,9 @@ class ObsWebSocketAdapter:
             if hello.get("op") != 0:
                 raise RuntimeError("OBS hello was not received")
             identify: dict[str, Any] = {"op": 1, "d": {"rpcVersion": 1}}
-            auth = self._authentication(self._password, hello.get("d") or {})
+            hello_data_raw = hello.get("d")
+            hello_data = dict(hello_data_raw) if isinstance(hello_data_raw, Mapping) else {}
+            auth = self._authentication(self._password, cast(Mapping[str, Any], hello_data))
             if auth:
                 identify["d"]["authentication"] = auth
             socket.send(_encode_json(identify))
@@ -202,13 +207,16 @@ class ObsWebSocketAdapter:
             response = _decode_json(socket.recv())
             if response.get("op") != 7:
                 raise RuntimeError("OBS response frame was not received")
-            data = response.get("d") if isinstance(response.get("d"), Mapping) else {}
+            response_data = response.get("d")
+            data = dict(response_data) if isinstance(response_data, Mapping) else {}
             if data.get("requestId") not in {None, request_id}:
                 raise RuntimeError("OBS response requestId did not match")
-            status = data.get("requestStatus") if isinstance(data.get("requestStatus"), Mapping) else {}
+            request_status = data.get("requestStatus")
+            status = dict(request_status) if isinstance(request_status, Mapping) else {}
             if not status.get("result", False):
                 raise RuntimeError(str(status.get("comment") or "OBS request failed"))
-            return dict(data.get("responseData") or {})
+            response_data = data.get("responseData")
+            return dict(response_data) if isinstance(response_data, Mapping) else {}
         finally:
             if socket is not None:
                 try:
@@ -785,6 +793,7 @@ class StreamRuntime:
         params = body.get("params", {})
         if not isinstance(params, Mapping):
             raise TypeError("params must be an object")
+        moderation: Any = None
         if action == "stream.chat_send":
             text = params.get("text")
             if not isinstance(text, str) or not text.strip():
@@ -1052,6 +1061,10 @@ class StreamRuntime:
                 raise RuntimeError("Twitch subscription provider is not configured")
         elif action not in {"stream.caption_draft"} and (adapter is None or not adapter.configured):
             raise RuntimeError("OBS adapter is not configured")
+        if action not in {"stream.caption_draft", "stream.chat_send", "stream.twitch_subscriptions_sync"}:
+            if adapter is None:
+                raise RuntimeError("OBS adapter is not configured")
+        obs_adapter = cast(ObsWebSocketAdapter, adapter)
         scene_name: str | None = None
         profile_name: str | None = None
         if action == "stream.scene_switch":
@@ -1127,31 +1140,31 @@ class StreamRuntime:
                 response = self._twitch_ingress.sync_subscription_plan()
                 verification_status = "provider_acknowledged" if response.get("subscriptionPlan", {}).get("status") == "synced" else "unknown_effect"
             elif action == "stream.status":
-                response = adapter.get_stream_status()
+                response = obs_adapter.get_stream_status()
                 verification_status = "provider_acknowledged"
             elif action == "stream.scene_preview":
-                response = adapter.get_scene_list()
+                response = obs_adapter.get_scene_list()
                 verification_status = "provider_acknowledged"
             elif action == "stream.scene_switch":
                 assert scene_name is not None
-                response = adapter.set_current_program_scene(scene_name.strip())
-                verification = adapter.get_current_program_scene()
+                response = obs_adapter.set_current_program_scene(scene_name.strip())
+                verification = obs_adapter.get_current_program_scene()
                 verification_status = "provider_acknowledged" if verification.get("currentProgramSceneName") == scene_name.strip() else "unknown_effect"
             elif action == "stream.profile_preview":
-                response = adapter.get_profile_list()
+                response = obs_adapter.get_profile_list()
                 verification_status = "provider_acknowledged"
             elif action == "stream.profile_switch":
                 assert profile_name is not None
-                response = adapter.set_current_profile(profile_name.strip())
-                verification = adapter.get_current_profile()
+                response = obs_adapter.set_current_profile(profile_name.strip())
+                verification = obs_adapter.get_current_profile()
                 verification_status = "provider_acknowledged" if verification.get("currentProfileName") == profile_name.strip() else "unknown_effect"
             elif action == "stream.broadcast_start":
-                response = adapter.start_stream()
-                verification = adapter.get_stream_status()
+                response = obs_adapter.start_stream()
+                verification = obs_adapter.get_stream_status()
                 verification_status = "provider_acknowledged" if verification.get("outputActive") is True else "unknown_effect"
             elif action == "stream.broadcast_stop":
-                response = adapter.stop_stream()
-                verification = adapter.get_stream_status()
+                response = obs_adapter.stop_stream()
+                verification = obs_adapter.get_stream_status()
                 verification_status = "provider_acknowledged" if verification.get("outputActive") is False else "unknown_effect"
             else:
                 raise ValueError(f"action cannot be executed: {action}")

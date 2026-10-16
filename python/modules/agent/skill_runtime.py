@@ -50,7 +50,12 @@ def _sanitize_audit_item(item: Any) -> dict[str, Any] | None:
     tool_name = item.get("toolName")
     status = item.get("status")
     timestamp = item.get("timestamp")
-    if not all(isinstance(value, str) for value in (event_id, skill_id, tool_name, status)):
+    if not (
+        isinstance(event_id, str)
+        and isinstance(skill_id, str)
+        and isinstance(tool_name, str)
+        and isinstance(status, str)
+    ):
         return None
     if not event_id or len(event_id) > 160 or not skill_id or len(skill_id) > 160 or len(tool_name) > 160:
         return None

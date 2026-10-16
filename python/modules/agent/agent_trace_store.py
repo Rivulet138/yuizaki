@@ -62,10 +62,10 @@ def _sanitize_trace_value(value: Any, *, depth: int = 0) -> Any:
             result["__truncatedItems"] = len(entries) - _TRACE_MAX_ITEMS
         return result
     if isinstance(value, (list, tuple)):
-        result = [_sanitize_trace_value(item, depth=depth + 1) for item in value[:_TRACE_MAX_LIST_ITEMS]]
+        list_result: list[Any] = [_sanitize_trace_value(item, depth=depth + 1) for item in value[:_TRACE_MAX_LIST_ITEMS]]
         if len(value) > _TRACE_MAX_LIST_ITEMS:
-            result.append(f"[TRUNCATED {len(value) - _TRACE_MAX_LIST_ITEMS} ITEMS]")
-        return result
+            list_result.append(f"[TRUNCATED {len(value) - _TRACE_MAX_LIST_ITEMS} ITEMS]")
+        return list_result
     if isinstance(value, (bool, int, float)) or value is None:
         return value
     return _sanitize_trace_value(str(value), depth=depth)

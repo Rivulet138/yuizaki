@@ -107,13 +107,13 @@ def _terminal_payload(call: ToolCallData, outcome: object, *, error: str | None 
     if verification_projection:
         payload.update(verification_projection)
         payload["data"] = {
-            **(payload.get("data") or {}),
+            **_as_json_dict(payload.get("data")),
             **verification_projection,
         }
     if isinstance(data.get("verificationEvidence"), list):
         bounded_evidence = [str(item)[:360] for item in data["verificationEvidence"][:6]]
         payload["verificationEvidence"] = bounded_evidence
-        payload["data"] = {**(payload.get("data") or {}), "verificationEvidence": bounded_evidence}
+        payload["data"] = {**_as_json_dict(payload.get("data")), "verificationEvidence": bounded_evidence}
     if data.get("recheckError") is not None:
         payload["recheckError"] = str(data["recheckError"])[:160]
     if data.get("resultSummary") is not None:

@@ -23,6 +23,8 @@ DEFAULT_MAX_MESSAGES_PER_MINUTE = 30
 def _finite_number(value: object, *, name: str) -> float:
     if isinstance(value, bool):
         raise TypeError(f"{name} must be a number")
+    if not isinstance(value, (int, float, str)):
+        raise TypeError(f"{name} must be a number")
     try:
         number = float(value)
     except (TypeError, ValueError) as exc:
@@ -110,26 +112,35 @@ class StreamModerationPolicy:
     @classmethod
     def from_mapping(cls, value: Mapping[str, object] | None) -> StreamModerationPolicy:
         payload = dict(value or {})
+        enabled = payload.get("enabled", True)
+        blocked_terms = payload.get("blockedTerms", payload.get("blocked_terms", ()))
+        slow_mode_seconds = payload.get("slowModeSeconds", payload.get("slow_mode_seconds", 0.0))
+        max_messages_per_minute = payload.get(
+            "maxMessagesPerMinute",
+            payload.get("max_messages_per_minute", DEFAULT_MAX_MESSAGES_PER_MINUTE),
+        )
+        if not isinstance(enabled, bool):
+            raise TypeError("enabled must be a boolean")
+        if isinstance(blocked_terms, (str, bytes)) or not isinstance(blocked_terms, Iterable):
+            raise TypeError("blockedTerms must be an array")
+        if not isinstance(slow_mode_seconds, (int, float, str)) or isinstance(slow_mode_seconds, bool):
+            raise TypeError("slowModeSeconds must be a number")
+        if not isinstance(max_messages_per_minute, int) or isinstance(max_messages_per_minute, bool):
+            raise TypeError("maxMessagesPerMinute must be an integer")
         return cls(
-            enabled=payload.get("enabled", True),
-            blocked_terms=payload.get("blockedTerms", payload.get("blocked_terms", ())),
-            slow_mode_seconds=payload.get("slowModeSeconds", payload.get("slow_mode_seconds", 0.0)),
-            max_messages_per_minute=payload.get(
-                "maxMessagesPerMinute",
-                payload.get("max_messages_per_minute", DEFAULT_MAX_MESSAGES_PER_MINUTE),
-            ),
+            enabled=enabled,
+            blocked_terms=blocked_terms,
+            slow_mode_seconds=float(slow_mode_seconds),
+            max_messages_per_minute=max_messages_per_minute,
         )
 
     def with_patch(self, value: Mapping[str, object]) -> StreamModerationPolicy:
         unknown = set(value) - {"enabled", "blockedTerms", "slowModeSeconds", "maxMessagesPerMinute"}
         if unknown:
             raise ValueError(f"unknown moderation fields: {', '.join(sorted(str(item) for item in unknown))}")
-        return StreamModerationPolicy(
-            enabled=value.get("enabled", self.enabled),
-            blocked_terms=value.get("blockedTerms", self.blocked_terms),
-            slow_mode_seconds=value.get("slowModeSeconds", self.slow_mode_seconds),
-            max_messages_per_minute=value.get("maxMessagesPerMinute", self.max_messages_per_minute),
-        )
+        merged = self.snapshot()
+        merged.update(value)
+        return StreamModerationPolicy.from_mapping(merged)
 
     def snapshot(self) -> dict[str, object]:
         return {

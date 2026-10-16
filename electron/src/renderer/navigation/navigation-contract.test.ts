@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { staticNavigationModuleRecords } from '../../shared/navigation'
 import { buildSidebarNavigation, buildSidebarRoute } from './sidebarNavigation'
+import { adminNavigationModules } from './modules'
 
 describe('navigation contract', () => {
   it('keeps every enabled destination unique', () => {
@@ -37,12 +38,21 @@ describe('navigation contract', () => {
       items: group.items.map((module) => module.id),
     }))).toEqual([
       { id: 'companion', items: ['prompt', 'pet', 'persona-memory'] },
-      { id: 'system', items: ['infrastructure', 'deploy'] },
       { id: 'tools', items: ['tool', 'svc', 'plugins'] },
       { id: 'audit', items: ['agent-trace', 'agent-governance'] },
       { id: 'settings', items: ['i18n'] },
     ])
-    expect(new Set([...primaryIds, ...advancedIds])).toEqual(new Set(enabledMenus.map((module) => module.id)))
+    expect(new Set([...primaryIds, ...advancedIds])).toEqual(new Set(
+      enabledMenus
+        .filter((module) => !['infrastructure', 'deploy'].includes(module.id))
+        .map((module) => module.id),
+    ))
+    expect(advancedIds).not.toContain('infrastructure')
+    expect(advancedIds).not.toContain('deploy')
+  })
+
+  it('keeps SVC out of the browser sidebar while retaining the settings-owned route', () => {
+    expect(adminNavigationModules().some((module) => module.id === 'svc')).toBe(false)
   })
 
   it('encodes workspace and menu IDs used by sidebar links', () => {

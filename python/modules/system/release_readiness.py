@@ -252,7 +252,10 @@ def build_release_readiness_snapshot(
         "status": "qualified",
         "targetPlatform": target,
         "platformCapabilities": row,
-        "platformQualification": _qualification_summary(platform_qualification, target),
+        "platformQualification": _qualification_summary(
+            platform_qualification if isinstance(platform_qualification, Mapping) else {},
+            target,
+        ),
         "soak": soak,
         "evidence": evidence,
         "reasons": [],

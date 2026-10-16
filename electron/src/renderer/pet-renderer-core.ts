@@ -59,7 +59,6 @@ export const resolveRendererAsset = (relativePath: string): string => {
 
 const CUBISM_CORE_SOURCES = [
   resolveRendererAsset('./live2d/live2dcubismcore.min.js'),
-  'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js',
 ]
 
 export const createPixiApp = async (options: Record<string, unknown>): Promise<CompatiblePixiApp> => {
@@ -90,7 +89,7 @@ export const getReadableError = (error: unknown): string => {
   const message = error instanceof Error ? error.message : String(error)
 
   if (/Failed to load Cubism Core/i.test(message)) {
-    return 'Failed to load the Live2D runtime. Check network access or local Cubism Core file.'
+    return 'Failed to load the Live2D runtime. Check the local Cubism Core file.'
   }
 
   if (/live2dcubismcore\.min\.js|Cubism 4 runtime|Cubism Core/i.test(message)) {

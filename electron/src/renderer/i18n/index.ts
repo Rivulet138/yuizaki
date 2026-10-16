@@ -5,6 +5,8 @@ import { onboardingMessages } from './onboardingMessages'
 import { productMetricsMessages } from './productMetricsMessages'
 import { proactiveMessages } from './proactiveMessages'
 import { chatMessages } from './chatMessages'
+import { deployMessages } from './deployMessages'
+import { infrastructureMessages } from './infrastructureMessages'
 
 export type Locale = 'zh-CN' | 'en-US' | 'ja-JP'
 
@@ -14,6 +16,8 @@ const STORAGE_KEY = 'yuizaki.locale'
 
 const messages = {
   'zh-CN': {
+    ...deployMessages['zh-CN'],
+    ...infrastructureMessages['zh-CN'],
     ...chatMessages['zh-CN'],
     ...onboardingMessages['zh-CN'],
     ...productMetricsMessages['zh-CN'],
@@ -44,6 +48,8 @@ const messages = {
     'common.auto': '自动',
     'common.cancel': '取消',
     'common.clear': '清除',
+    'settings.apiKeyClear': '清除',
+    'settings.apiKeyCleared': 'API Key 已清除',
     'common.close': '关闭',
     'common.configured': '已配置',
     'common.custom': '自定义',
@@ -72,6 +78,9 @@ const messages = {
     'language.zh': '简体中文',
 
     'workspaceDrawer.title': '当前工作区',
+    'browserPet.modelAriaLabel': '{model} 对话模型',
+    'browserPet.loading': '{model} 加载中',
+    'browserPet.unavailable': '{model} 暂不可用',
     'workspaceDrawer.scene.title': '工作区信息',
     'workspaceDrawer.scene.name': '场景名称',
     'workspaceDrawer.scene.namePlaceholder': '例如：日常陪伴、学习陪伴',
@@ -225,6 +234,8 @@ const messages = {
     'sidebar.groups.audit': '审计',
     'sidebar.groups.debug': '调试',
     'sidebar.groups.other': '其他',
+    'sidebar.items.services': '服务',
+    'sidebar.items.launch': '启动',
     'shell.notifications.empty': '暂无通知',
     'shell.notifications.title': '通知',
     'shell.offline': '后端未连接',
@@ -578,6 +589,8 @@ const messages = {
     'settings.llm.topP': 'Top P：{value}',
     'settings.llm.topPName': '候选范围（Top P）',
     'settings.memory.backend': '记忆后端',
+    'settings.memory.backendInMemory': '仅本次运行',
+    'settings.memory.backendQdrant': 'SQLite + 向量检索',
     'settings.memory.collection': 'Collection',
     'settings.memory.qdrantAutoStart': '启动时自动拉起本地 Qdrant',
     'settings.memory.qdrantDockerContainer': 'Qdrant 容器名',
@@ -667,6 +680,8 @@ const messages = {
     'settings.resource.vrmRoot': 'VRM 根目录',
     'settings.status.saved': '设置已保存',
     'settings.status.saveFailed': '设置保存失败',
+    'settings.status.retrySave': '重试保存',
+    'settings.status.retrySaveDetail': '上次保存失败，修改仍在本地队列中。',
     'settings.status.saving': '正在保存设置',
     'settings.status.savingShort': '保存中',
     'settings.status.applied': '已应用：{items}',
@@ -829,6 +844,8 @@ const messages = {
     'settings.tts.warmup': '预热语音引擎',
   },
   'en-US': {
+    ...deployMessages['en-US'],
+    ...infrastructureMessages['en-US'],
     ...chatMessages['en-US'],
     ...onboardingMessages['en-US'],
     ...productMetricsMessages['en-US'],
@@ -859,6 +876,8 @@ const messages = {
     'common.auto': 'Auto',
     'common.cancel': 'Cancel',
     'common.clear': 'Clear',
+    'settings.apiKeyClear': 'Clear',
+    'settings.apiKeyCleared': 'API key cleared',
     'common.close': 'Close',
     'common.configured': 'Configured',
     'common.custom': 'Custom',
@@ -1040,6 +1059,8 @@ const messages = {
     'sidebar.groups.audit': 'Audit',
     'sidebar.groups.debug': 'Diagnostics',
     'sidebar.groups.other': 'Other',
+    'sidebar.items.services': 'Services',
+    'sidebar.items.launch': 'Launch',
     'shell.notifications.empty': 'No notifications',
     'shell.notifications.title': 'Notifications',
     'shell.offline': 'Backend disconnected',
@@ -1391,7 +1412,12 @@ const messages = {
     'settings.llm.topKName': 'Candidate count (Top K)',
     'settings.llm.topP': 'Top P: {value}',
     'settings.llm.topPName': 'Candidate range (Top P)',
+    'browserPet.modelAriaLabel': '{model} chat model',
+    'browserPet.loading': 'Loading {model}',
+    'browserPet.unavailable': '{model} unavailable',
     'settings.memory.backend': 'Memory Backend',
+    'settings.memory.backendInMemory': 'This session only',
+    'settings.memory.backendQdrant': 'SQLite + vector search',
     'settings.memory.collection': 'Collection',
     'settings.memory.qdrantAutoStart': 'Auto-start local Qdrant on launch',
     'settings.memory.qdrantDockerContainer': 'Qdrant Container',
@@ -1486,6 +1512,8 @@ const messages = {
     'settings.resource.vrmRoot': 'VRM root',
     'settings.status.saved': 'Settings saved',
     'settings.status.saveFailed': 'Settings save failed',
+    'settings.status.retrySave': 'Retry save',
+    'settings.status.retrySaveDetail': 'The last save failed. Your changes are still queued locally.',
     'settings.status.saving': 'Saving settings',
     'settings.status.savingShort': 'Saving',
     'settings.status.applied': 'Applied: {items}',
@@ -1648,6 +1676,8 @@ const messages = {
     'settings.tts.warmup': 'Warm up voice engine',
   },
   'ja-JP': {
+    ...deployMessages['ja-JP'],
+    ...infrastructureMessages['ja-JP'],
     ...chatMessages['ja-JP'],
     ...onboardingMessages['ja-JP'],
     ...productMetricsMessages['ja-JP'],
@@ -1656,6 +1686,8 @@ const messages = {
     'common.auto': '自動',
     'common.cancel': 'キャンセル',
     'common.clear': 'クリア',
+    'settings.apiKeyClear': 'クリア',
+    'settings.apiKeyCleared': 'API キーをクリアしました',
     'common.close': '閉じる',
     'common.configured': '設定済み',
     'common.custom': 'カスタム',
@@ -1992,6 +2024,8 @@ const messages = {
     'settings.resource.vrmRoot': 'VRM root',
     'settings.status.saved': 'Settings saved',
     'settings.status.saveFailed': 'Settings save failed',
+    'settings.status.retrySave': 'Retry save',
+    'settings.status.retrySaveDetail': '前回の保存に失敗しました。変更はローカルのキューに残っています。',
     'settings.status.saving': 'Saving settings',
     'settings.status.savingShort': 'Saving',
     'settings.status.applied': 'Applied: {items}',
