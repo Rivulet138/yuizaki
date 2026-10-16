@@ -57,7 +57,7 @@
     "@types/yauzl": "^3.4.0",
     "@vitejs/plugin-vue": "^6.0.7",
     "autoprefixer": "^10.5.0",
-    "concurrently": "^10.0.4",
+    "concurrently": "^10.0.6",
     "electron": "^44.8.0",
     "electron-builder": "^26.15.3",
     "eslint": "^10.4.1",
