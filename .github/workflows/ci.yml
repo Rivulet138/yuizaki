@@ -111,7 +111,7 @@ jobs:
       - uses: actions/setup-go@v6
         if: runner.os == 'Windows'
         with:
-          go-version: '1.22.x'
+          go-version: '1.27.x'
           cache: false
       - name: Test Windows launcher
         if: runner.os == 'Windows'

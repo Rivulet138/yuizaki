@@ -19,7 +19,7 @@ jobs:
           cache-dependency-path: electron/package-lock.json
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.22.x'
+          go-version: '1.27.x'
           cache: false
       - working-directory: electron
         run: npm ci
@@ -47,7 +47,7 @@ jobs:
           cache-dependency-path: electron/package-lock.json
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.22.x'
+          go-version: '1.27.x'
           cache: false
       - name: Install Linux packaging tools
         run: |
