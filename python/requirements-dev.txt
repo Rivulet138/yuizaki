@@ -5,7 +5,7 @@
 -r requirements.txt
 
 # Code quality
-ruff>=0.16.9,<1
+ruff>=0.17.0,<1
 black>=26,<27
 
 # Type checking
