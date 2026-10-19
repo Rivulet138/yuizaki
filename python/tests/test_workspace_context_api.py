@@ -104,3 +104,58 @@ def test_workspace_context_null_clears_existing_context(tmp_path) -> None:
     assert response.status_code == 200
     assert response.json()["context"] is None
     assert store.get("default") is None
+
+
+def test_workspace_context_revision_conflict_returns_409(tmp_path) -> None:
+    client, _, _ = _client(tmp_path)
+    first = client.patch("/api/workspaces/default", json={"context": {"theme": "dark"}})
+    assert first.json()["contextRevision"] == 1
+
+    stale = client.patch("/api/workspaces/default", json={
+        "context": {"theme": "light"},
+        "contextRevision": 0,
+    })
+
+    assert stale.status_code == 409
+    body = stale.json()
+    assert body["error"] == "context_revision_conflict"
+    assert body["contextRevision"] == 1
+    assert body["context"] == {"theme": "dark"}
+
+
+def test_workspace_context_revision_accepts_matching_write(tmp_path) -> None:
+    client, _, _ = _client(tmp_path)
+    client.patch("/api/workspaces/default", json={"context": {"theme": "dark"}})
+
+    response = client.patch("/api/workspaces/default", json={
+        "context": {"theme": "light"},
+        "contextRevision": 1,
+    })
+
+    assert response.status_code == 200
+    assert response.json()["contextRevision"] == 2
+
+
+def test_stale_context_conflict_does_not_apply_unrelated_db_fields(tmp_path) -> None:
+    client, repo, _ = _client(tmp_path)
+    client.patch("/api/workspaces/default", json={"context": {"theme": "dark"}})
+
+    response = client.patch("/api/workspaces/default", json={
+        "name": "must-not-apply",
+        "context": {"theme": "light"},
+        "contextRevision": 0,
+    })
+
+    assert response.status_code == 409
+    assert repo.workspaces["default"]["name"] == "Default"
+
+
+def test_delete_conflict_does_not_delete_workspace_or_context(tmp_path) -> None:
+    client, repo, store = _client(tmp_path)
+    client.patch("/api/workspaces/default", json={"context": {"theme": "dark"}})
+
+    response = client.delete("/api/workspaces/default?contextRevision=0")
+
+    assert response.status_code == 409
+    assert "default" in repo.workspaces
+    assert store.get("default") == {"theme": "dark"}

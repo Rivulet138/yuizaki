@@ -15,6 +15,7 @@ const requiredFiles = [
   'python/requirements-lock-windows.txt',
   'python/requirements-lock-linux.txt',
   'python/migration_check.py',
+  'python/modules/llm/model-capabilities.registry.json',
   'python/socket_compositions/__init__.py',
   'python/socket_handlers/__init__.py',
   'python/scripts/download_sherpa_sensevoice.py',

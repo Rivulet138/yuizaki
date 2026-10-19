@@ -71,6 +71,7 @@ type launcherConfig struct {
 	token             string
 	autoInstall       bool
 	env               map[string]string
+	mcpVaultURLPinned bool
 	runtimeService    string
 	runtimeVersion    string
 	runtimeInstance   string
@@ -286,27 +287,28 @@ func newConfig() (*launcherConfig, error) {
 	loadDotEnv(filepath.Join(rootDir, "python", ".env"), env)
 	stateDir := launcherStateDir(rootDir)
 	cfg := &launcherConfig{
-		rootDir:          rootDir,
-		pythonDir:        filepath.Join(rootDir, "python"),
-		electronDir:      filepath.Join(rootDir, "electron"),
-		nodeMCPDir:       filepath.Join(rootDir, "node-mcp"),
-		scriptsDir:       filepath.Join(rootDir, "scripts"),
-		logDir:           filepath.Join(rootDir, "logs", "dev"),
-		stateDir:         stateDir,
-		statePath:        filepath.Join(stateDir, "supervisor.json"),
-		withMCP:          mcpEnabled(env),
-		devRenderer:      envOrMap(env, "YUIZAKI_USE_VITE", "0") == "1",
-		noQdrant:         !qdrantAutoStartEnabled(env),
-		serverHost:       envOrMap(env, "SERVER_HOST", "127.0.0.1"),
-		serverPort:       envOrMap(env, "SERVER_PORT", defaultBackendPort),
-		serverFallbacks:  envOrMap(env, "SERVER_PORT_FALLBACKS", "8011,8012,8013,8014,8015,8021,8022"),
-		controlPort:      envOrMap(env, "CONTROL_SERVER_PORT", defaultControlPort),
-		controlFallbacks: envOrMap(env, "CONTROL_SERVER_PORT_FALLBACKS", "38946,38947,38948,38949"),
-		rendererPort:     envOrMap(env, "RENDERER_PORT", defaultRendererPort),
-		renderFallbacks:  envOrMap(env, "RENDERER_PORT_FALLBACKS", "5174,5175,5176,5177"),
-		mcpPort:          envOrMap(env, "MCP_PORT", defaultMCPPort),
-		autoInstall:      true,
-		env:              env,
+		rootDir:           rootDir,
+		pythonDir:         filepath.Join(rootDir, "python"),
+		electronDir:       filepath.Join(rootDir, "electron"),
+		nodeMCPDir:        filepath.Join(rootDir, "node-mcp"),
+		scriptsDir:        filepath.Join(rootDir, "scripts"),
+		logDir:            filepath.Join(rootDir, "logs", "dev"),
+		stateDir:          stateDir,
+		statePath:         filepath.Join(stateDir, "supervisor.json"),
+		withMCP:           mcpEnabled(env),
+		devRenderer:       envOrMap(env, "YUIZAKI_USE_VITE", "0") == "1",
+		noQdrant:          !qdrantAutoStartEnabled(env),
+		serverHost:        envOrMap(env, "SERVER_HOST", "127.0.0.1"),
+		serverPort:        envOrMap(env, "SERVER_PORT", defaultBackendPort),
+		serverFallbacks:   envOrMap(env, "SERVER_PORT_FALLBACKS", "8011,8012,8013,8014,8015,8021,8022"),
+		controlPort:       envOrMap(env, "CONTROL_SERVER_PORT", defaultControlPort),
+		controlFallbacks:  envOrMap(env, "CONTROL_SERVER_PORT_FALLBACKS", "38946,38947,38948,38949"),
+		rendererPort:      envOrMap(env, "RENDERER_PORT", defaultRendererPort),
+		renderFallbacks:   envOrMap(env, "RENDERER_PORT_FALLBACKS", "5174,5175,5176,5177"),
+		mcpPort:           envOrMap(env, "MCP_PORT", defaultMCPPort),
+		autoInstall:       true,
+		env:               env,
+		mcpVaultURLPinned: strings.TrimSpace(env["YUIZAKI_MCP_VAULT_URL"]) != "",
 	}
 
 	flagSet := flag.NewFlagSet(filepath.Base(os.Args[0]), flag.ExitOnError)
@@ -370,6 +372,19 @@ func newConfig() (*launcherConfig, error) {
 			return nil, err
 		}
 		cfg.env["YUIZAKI_HOST_DESKTOP_ACTION_TOKEN"] = hostToken
+	}
+	// The MCP secret vault lives in the Electron control server. Both sides
+	// must agree on one secret and namespace, otherwise a supervised Python
+	// falls back to its own plaintext store and the two runtimes diverge.
+	if strings.TrimSpace(cfg.env["YUIZAKI_MCP_VAULT_TOKEN"]) == "" {
+		vaultToken, err := generateToken()
+		if err != nil {
+			return nil, err
+		}
+		cfg.env["YUIZAKI_MCP_VAULT_TOKEN"] = vaultToken
+	}
+	if strings.TrimSpace(cfg.env["YUIZAKI_MCP_VAULT_NAMESPACE"]) == "" {
+		cfg.env["YUIZAKI_MCP_VAULT_NAMESPACE"] = mcpVaultNamespace(rootDir, cfg.env["YUIZAKI_DATA_DIR"])
 	}
 	// Every supervised launch gets a fresh identity. This prevents a stale
 	// process left on the preferred port from being mistaken for our backend.
@@ -1362,6 +1377,9 @@ func (cfg *launcherConfig) refreshURLs() {
 	cfg.env["VITE_YUIZAKI_CONTROL_ORIGIN"] = cfg.controlURL
 	cfg.env["RENDERER_ORIGIN"] = cfg.rendererOrigin
 	cfg.env["PANEL_URL"] = cfg.controlURL + "/"
+	if !cfg.mcpVaultURLPinned {
+		cfg.env["YUIZAKI_MCP_VAULT_URL"] = cfg.controlURL + "/api/internal/mcp-config-vault"
+	}
 	if _, ok := cfg.env["YUIZAKI_ALLOWED_ORIGINS"]; !ok {
 		cfg.env["YUIZAKI_ALLOWED_ORIGINS"] = fmt.Sprintf("http://127.0.0.1:%s,http://localhost:%s,http://127.0.0.1:%s,http://localhost:%s", cfg.controlPort, cfg.controlPort, cfg.rendererPort, cfg.rendererPort)
 	}
@@ -1431,6 +1449,25 @@ func randomHex(size int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buf), nil
+}
+
+// mcpVaultNamespace derives one stable namespace for the shared MCP vault.
+// It mirrors the Python fallback (sha256 of the store path, first 32 hex
+// characters) so an explicitly supervised Python and Electron address the
+// same vault bucket even when their data directories differ.
+func mcpVaultNamespace(rootDir, configuredDataDir string) string {
+	dataDir := strings.TrimSpace(configuredDataDir)
+	if dataDir == "" {
+		dataDir = filepath.Join(rootDir, "python", "data")
+	} else if !filepath.IsAbs(dataDir) {
+		dataDir = filepath.Join(rootDir, "python", dataDir)
+	}
+	storePath, err := filepath.Abs(filepath.Join(dataDir, "mcp_servers.json"))
+	if err != nil {
+		storePath = filepath.Join(dataDir, "mcp_servers.json")
+	}
+	sum := sha256.Sum256([]byte(storePath))
+	return hex.EncodeToString(sum[:])[:32]
 }
 
 func envMap() map[string]string {

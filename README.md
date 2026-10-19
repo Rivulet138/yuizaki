@@ -111,7 +111,9 @@ Linux 使用 `.venv/bin/python` 和 `cp .env.example .env`。后端默认监听 
 | --- | --- |
 | `python/.env` | Provider、端口、可选服务和运行时变量，不提交到 Git |
 | `python/config/settings.json` | 应用持久化设置，由设置页或 Launcher 管理 |
-| `python/data/workspace_contexts.json` | 工作区提示词、角色卡、世界书与记忆策略的持久化副本，运行时生成 |
+| `python/data/workspace_contexts.json` | 工作区提示词、角色卡、世界书与记忆策略的持久化副本（含 revision），运行时生成 |
+| `python/data/settings_history.json` | 设置历史快照，重启后仍可回滚；凭据字段写入前会被清空 |
+| `python/modules/llm/model-capabilities.registry.json` | 显式模型上下文/输出上限与视觉能力；未列出的模型不施加任何限制 |
 | `resources.lock.json` | 模型/资源 URL、revision、校验和及许可边界 |
 
 | 变量 | 示例/默认值 | 说明 |
@@ -174,6 +176,8 @@ npm run test:unit
 npm run build
 npm run start:check
 ```
+
+`npm run type-check` 现在同时检查 main/preload/shared 和带 `.vue` 的 renderer 工程（`vue-tsc` + [`electron/tsconfig.renderer.json`](electron/tsconfig.renderer.json)）。renderer 的类型基线记录在 [`electron/renderer-types-baseline.json`](electron/renderer-types-baseline.json)：新增类型错误会直接失败，修好后用 `node electron/scripts/check-renderer-types.mjs --update` 收紧基线。
 
 ## 许可与贡献
 

@@ -13,6 +13,7 @@ export interface WorkspaceApiRecord {
   memory_scope?: string | null
   mcp_preset_id?: string | null
   context?: Record<string, unknown> | null
+  contextRevision?: number | null
   created_at: string | null
   updated_at: string | null
 }
@@ -26,7 +27,8 @@ export type WorkspacePatchPayload = Partial<Pick<WorkspaceApiRecord,
   'system_prompt' |
   'tool_preset' |
   'mcp_preset_id' |
-  'context'
+  'context' |
+  'contextRevision'
 >>
 
 export const workspaceClient = {

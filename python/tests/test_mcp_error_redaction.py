@@ -281,6 +281,70 @@ def test_vault_outage_does_not_overwrite_pointer(tmp_path, monkeypatch):
     assert store.read_text() == before
 
 
+def test_pending_vault_store_recovers_when_the_vault_comes_up(tmp_path, monkeypatch):
+    import modules.agent.mcp_manager as mcp_manager_module
+
+    shared_namespace = "a" * 32
+    monkeypatch.setenv("YUIZAKI_MCP_VAULT_URL", "http://127.0.0.1:9876/api/internal/mcp-config-vault")
+    monkeypatch.setenv("YUIZAKI_MCP_VAULT_TOKEN", "shared-token")
+    monkeypatch.setenv("YUIZAKI_MCP_VAULT_NAMESPACE", shared_namespace)
+    monkeypatch.setattr(mcp_manager_module, "MCP_STORE_RETRY_SECONDS", 0.0)
+    store = tmp_path / "mcp.json"
+    store.write_text(json.dumps({
+        "version": 1,
+        "vault_ref": {"namespace": shared_namespace, "reference": "ref-1"},
+    }))
+
+    class Down:
+        def __init__(self, *args, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): return None
+        def post(self, *args, **kwargs): raise OSError("offline")
+
+    monkeypatch.setattr("modules.agent.mcp_manager.httpx.Client", Down)
+    manager = MCPManager(store)
+    assert manager._vault_namespace == shared_namespace
+    assert manager._store_pending is True
+    assert manager.servers == {}
+    with pytest.raises(MCPToolError):
+        manager._save_store()
+
+    stored = json.dumps({
+        "version": 1,
+        "servers": {"restored": {"name": "restored", "base_url": "http://127.0.0.1:9999", "transport": "http", "enabled": True}},
+    })
+
+    class FakeResponse:
+        status_code = 200
+        def __init__(self, payload): self._payload = payload
+        def json(self): return self._payload
+
+    class Up:
+        def __init__(self, *args, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): return None
+        def post(self, *args, **kwargs):
+            operation = kwargs.get("json", {}).get("operation")
+            if operation == "store":
+                return FakeResponse({"ok": True, "reference": "ref-2"})
+            if operation == "prune":
+                return FakeResponse({"ok": True})
+            return FakeResponse({"ok": True, "document": stored})
+
+    monkeypatch.setattr("modules.agent.mcp_manager.httpx.Client", Up)
+    manager._ensure_store_ready()
+
+    assert manager._store_pending is False
+    assert "restored" in manager.servers
+
+
+def test_vault_namespace_env_overrides_the_store_path_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("YUIZAKI_MCP_VAULT_NAMESPACE", "shared-namespace")
+    manager = MCPManager(tmp_path / "mcp.json")
+
+    assert manager._vault_namespace == "shared-namespace"
+
+
 def test_vault_endpoint_rejects_query_and_userinfo(tmp_path, monkeypatch):
     monkeypatch.setenv("YUIZAKI_MCP_VAULT_TOKEN", "test-vault-token")
     monkeypatch.setenv("YUIZAKI_MCP_VAULT_URL", "http://user:secret@127.0.0.1:9876/vault?token=leak")

@@ -14,6 +14,7 @@ import type {
   PetControlConfigPatch,
   PetEmotionPreset,
   PetExpressionMixPayload,
+  PetLipSyncViseme,
   PetParameterOverrideItem,
   PetRendererStatePayload,
   PetResolvedEmotionTrigger,

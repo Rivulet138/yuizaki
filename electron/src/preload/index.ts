@@ -281,3 +281,5 @@ declare global {
     petApi: typeof api
   }
 }
+
+export type PetApi = typeof api

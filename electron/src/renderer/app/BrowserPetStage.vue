@@ -182,10 +182,10 @@ const handleLlmControl = (event: Event): void => {
   renderer.applyPetControlDirective(directive)
 }
 
+const shouldDriveEmbeddedLipSync = (): boolean => false
+
 const handleTtsPlayUrl = (event: Event): void => {
-  // Electron already drives the dedicated pet window through petControl; the
-  // embedded stage only needs local URL lip sync in browser mode.
-  if (!renderer || window.petApi?.live2d) return
+  if (!renderer || shouldDriveEmbeddedLipSync()) return
   const detail = (event as CustomEvent<{
     audio_url?: unknown
     petLinkEnabled?: unknown
@@ -216,14 +216,14 @@ const handleAudioEnded = (): void => {
 }
 
 const handleLipSyncLevel = (event: Event): void => {
-  if (!renderer || window.petApi?.live2d) return
+  if (!renderer || shouldDriveEmbeddedLipSync()) return
   const detail = (event as CustomEvent<PetLipSyncLevelPayload>).detail
   if (!detail || typeof detail !== 'object') return
   renderer.setExternalLipSync(detail)
 }
 
 const handleLipSyncViseme = (event: Event): void => {
-  if (!renderer || window.petApi?.live2d) return
+  if (!renderer || shouldDriveEmbeddedLipSync()) return
   const detail = (event as CustomEvent<PetLipSyncVisemePayload>).detail
   if (!detail || typeof detail !== 'object') return
   renderer.setExternalViseme(detail)
@@ -278,6 +278,9 @@ onMounted(async () => {
       modelType: selectedType,
       modelId: model?.id || 'yumi',
       modelPath: selectedPath,
+      // The backend signs avatar commands with a capability revision that
+      // includes emotion presets; without them every command is rejected.
+      emotionPresets: model?.emotions ?? [],
       scale: selectedType === 'vrm' ? 0.96 : 0.9,
       clickThrough: false,
       locked: browserLocked.value,
@@ -300,7 +303,7 @@ onMounted(async () => {
         modelType.value = nextType
         modelLabel.value = nextType === 'vrm' ? 'VRM' : 'Live2D'
         ready.value = false
-        await renderer.applyBrowserConfig({ modelType: nextType, modelId: nextModel?.id || 'yumi', modelPath: nextPath, scale: nextType === 'vrm' ? 0.96 : 0.9, clickThrough: false, locked: false, opacity: 1, placement: 'center' })
+        await renderer.applyBrowserConfig({ modelType: nextType, modelId: nextModel?.id || 'yumi', modelPath: nextPath, emotionPresets: nextModel?.emotions ?? [], scale: nextType === 'vrm' ? 0.96 : 0.9, clickThrough: false, locked: false, opacity: 1, placement: 'center' })
         ready.value = true
       } catch (cause) {
         console.warn('[BrowserPetStage] model refresh failed', cause)

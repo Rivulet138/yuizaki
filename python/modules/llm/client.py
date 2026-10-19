@@ -27,7 +27,7 @@ from .providers import (
     normalize_llm_base_url,
     normalize_llm_provider,
 )
-from .context_window import build_and_truncate_layered_context, message_content_to_text
+from .context_window import TokenEstimator, build_and_truncate_layered_context, message_content_to_text
 from .capabilities import get_model_limits
 from ..pet_control import (
     build_pet_control_response_format,
@@ -1566,7 +1566,6 @@ class LLMClient:
         body: dict[str, Any] = {
             "model": self.model,
             "stream": False,
-            "messages": merge_messages_with_pet_control_prompt(messages, pet_control_context),
         }
         _apply_config_generation_defaults(body)
         _apply_generation_options(
@@ -1597,6 +1596,57 @@ class LLMClient:
         if request_tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
+
+        # Apply the same context governance as the streaming lane. Without
+        # this, a non-streaming turn could exceed the model window and fail
+        # the request outright instead of degrading gracefully.
+        context_max_tokens = _effective_model_budget(
+            selected_model,
+            None,
+            int(config.llm.context_max_tokens),
+            "context_window_tokens",
+            provider=self.provider,
+        )
+        estimator = TokenEstimator()
+        tool_schema_tokens = 0
+        if request_tools:
+            try:
+                tool_schema_tokens = estimator.count_text(
+                    json.dumps(tools, ensure_ascii=False, separators=(",", ":"))
+                )
+            except (TypeError, ValueError):
+                tool_schema_tokens = 0
+        pet_prompt_tokens = 0
+        if pet_control_context:
+            try:
+                pet_prompt_tokens = estimator.count_text(
+                    json.dumps(
+                        merge_messages_with_pet_control_prompt([], pet_control_context),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                )
+            except (TypeError, ValueError):
+                pet_prompt_tokens = 0
+        # Tool schemas cannot be truncated. If they leave no usable dialog
+        # budget, degrade to a text-only turn instead of sending a guaranteed
+        # over-window request.
+        if request_tools and context_max_tokens - effective_output_tokens - pet_prompt_tokens - tool_schema_tokens < 256:
+            logger.warning(
+                "Dropping %d tool schema(s): they do not fit the %d token context window",
+                len(tools or []),
+                context_max_tokens,
+            )
+            request_tools = False
+            tool_schema_tokens = 0
+            body.pop("tools", None)
+            body.pop("tool_choice", None)
+        windowed_messages, _stats = build_and_truncate_layered_context(
+            messages=messages,
+            max_context_tokens=context_max_tokens,
+            reserved_output_tokens=effective_output_tokens + tool_schema_tokens + pet_prompt_tokens,
+        )
+        body["messages"] = merge_messages_with_pet_control_prompt(windowed_messages, pet_control_context)
 
         url = llm_request_url(self.base_url, self.provider, model=str(body.get("model") or self.model))
         sent_body: dict[str, Any] = body

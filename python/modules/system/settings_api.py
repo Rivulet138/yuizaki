@@ -46,6 +46,7 @@ from .settings_schema import (
     validation_errors_to_detail,
 )
 from .settings_store import SETTINGS_SECRET_MASK
+from .settings_history_store import SettingsHistoryStore, SettingsHistoryStoreCorrupt
 
 logger = logging.getLogger(__name__)
 
@@ -322,6 +323,7 @@ class SettingsAPI:
         reload_runtime_services: ReloadRuntimeServices | None = None,
         llm_client_provider: ClientProvider | None = None,
         tts_client_provider: ClientProvider | None = None,
+        settings_history_store: SettingsHistoryStore | None = None,
     ):
         self.settings_store: SettingsStoreProtocol = settings_store
         self.dynamic_config: DynamicConfigProtocol = dynamic_config
@@ -329,10 +331,14 @@ class SettingsAPI:
         self.reload_runtime_services: ReloadRuntimeServices | None = reload_runtime_services
         self.llm_client_provider: ClientProvider | None = llm_client_provider
         self.tts_client_provider: ClientProvider | None = tts_client_provider
-        self._settings_snapshots: list[dict[str, object]] = []
+        # Snapshots survive restarts so rollback keeps working after a reload.
+        self._settings_history = (
+            settings_history_store if settings_history_store is not None else SettingsHistoryStore()
+        )
         self._pending_runtime_reload: set[str] = set()
         self._runtime_reload_task: asyncio.Task[None] | None = None
         self._store_lock = asyncio.Lock()
+        self._commit_lock = asyncio.Lock()
 
     def _validated_settings_dump(self) -> dict[str, object]:
         return validate_persisted_settings(self.settings_store.get_all()).model_dump()
@@ -442,6 +448,12 @@ class SettingsAPI:
             apply_runtime_config(cast(RuntimeConfig, self.config), runtime_updates)
 
     async def _commit_settings(self, next_settings: dict[str, object], runtime_updates: dict[str, object]) -> RuntimeApplyResult:
+        # Serialize commits so the persisted snapshot order matches the order in
+        # which settings were actually stored; rollback(steps) relies on it.
+        async with self._commit_lock:
+            return await self._commit_settings_locked(next_settings, runtime_updates)
+
+    async def _commit_settings_locked(self, next_settings: dict[str, object], runtime_updates: dict[str, object]) -> RuntimeApplyResult:
         async with self._store_lock:
             previous_settings = await asyncio.to_thread(self._validated_settings_dump)
             try:
@@ -454,7 +466,7 @@ class SettingsAPI:
         try:
             _ = await self.dynamic_config.update_batch(runtime_updates)
             runtime_result = await self._apply_runtime(effective_runtime_updates)
-            self._settings_snapshots.append(previous_settings)
+            await asyncio.to_thread(self._settings_history.append, previous_settings)
         except Exception:
             async with self._store_lock:
                 await asyncio.to_thread(self._replace_and_save_settings, previous_settings)
@@ -643,19 +655,33 @@ class SettingsAPI:
     async def rollback_changes(self, steps: int = 1) -> SettingsRollbackResponse:
         if steps <= 0:
             raise HTTPException(status_code=400, detail="Rollback steps must be positive")
-        if steps <= len(self._settings_snapshots):
+        # Serialize rollback against settings commits and history clear.
+        async with self._commit_lock:
+            return await self._rollback_changes_locked(steps)
+
+    async def _rollback_changes_locked(self, steps: int) -> SettingsRollbackResponse:
+        try:
+            history_length = await asyncio.to_thread(len, self._settings_history)
+        except SettingsHistoryStoreCorrupt as exc:
+            raise HTTPException(status_code=503, detail="settings_history_store_corrupt") from exc
+        if steps <= history_length:
             previous_settings = cast(dict[str, object], await self._run_store_call(self.settings_store.get_all))
+            snapshot = await asyncio.to_thread(self._settings_history.peek, steps)
+            if snapshot is None:
+                raise HTTPException(status_code=400, detail=f"Cannot rollback {steps} steps")
             target = cast(
                 dict[str, object],
-                _preserve_current_secrets(self._settings_snapshots[-steps], previous_settings),
+                _preserve_current_secrets(snapshot, previous_settings),
             )
-            del self._settings_snapshots[-steps:]
             previous_dynamic = deepcopy(self.dynamic_config.config)
             try:
                 runtime_updates = self._validated_runtime_updates(target)
                 await self._run_store_call(lambda: self._replace_and_save_settings(target))
                 self.dynamic_config.config = deepcopy(runtime_updates)
                 _ = await self._apply_runtime(runtime_updates)
+                # Drop the applied snapshot(s) only after the rollback commits,
+                # so a failed write keeps the history intact.
+                await asyncio.to_thread(self._settings_history.pop, steps)
                 return SettingsRollbackResponse(steps=steps, status="rolled_back")
             except Exception:
                 await self._run_store_call(lambda: self._replace_and_save_settings(previous_settings))
@@ -681,7 +707,9 @@ class SettingsAPI:
         raise HTTPException(status_code=400, detail=f"Cannot rollback {steps} steps")
 
     async def clear_history(self) -> SettingsMutationResponse:
-        self.dynamic_config.clear_history()
+        async with self._commit_lock:
+            self.dynamic_config.clear_history()
+            await asyncio.to_thread(self._settings_history.clear)
         return SettingsMutationResponse(status="history_cleared")
 
     async def test_llm_connection(self) -> dict[str, object]:

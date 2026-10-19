@@ -2,7 +2,7 @@ import { logger } from '@/logger'
 import { watch, type WatchStopHandle } from 'vue'
 import type { PetCompanionIdleProfile } from '@/../shared/pet-control'
 import { legacyDirectiveToAvatarCommand } from '@/../shared/avatar-command'
-import { resolveCompanionEmbodimentDelivery } from '@/../shared/companion-embodiment'
+import { resolveCompanionEmbodimentDelivery, type CompanionEmbodimentIntent } from '@/../shared/companion-embodiment'
 import { useChatStore } from '@/stores/chatStore'
 import { useCompanionStore } from '@/stores/companionStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
@@ -61,7 +61,7 @@ export function useCompanionRuntimeBridge() {
     })
   }
   const runtimeSinks = {
-    embodiment: (intent: Parameters<typeof resolveCompanionEmbodiment>[0]) => {
+    embodiment: (intent: CompanionEmbodimentIntent) => {
       const resolved = resolveCompanionEmbodimentDelivery(intent)
       // Keep semantic waiting visible, but never forward an active animation
       // state when the platform/user requested reduced motion.

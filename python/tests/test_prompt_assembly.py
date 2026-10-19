@@ -61,13 +61,57 @@ def test_world_book_rejects_unsafe_nested_quantifier_regex() -> None:
 
 
 def test_world_book_rejects_exponential_alternation_regex() -> None:
-    haystack = "a" * 20_000 + "!"
+    # Keep the haystack below the 20k truncation bound so the failing match is
+    # actually attempted and the timeout guard is what stops it.
+    haystack = "a" * 5_000 + "!"
     assert _entry_key_matches(
         haystack,
         "/(a|aa)+$/",
         case_sensitive=False,
         whole_words=False,
     ) is False
+
+
+def test_world_book_disables_regex_keys_without_a_bounded_engine(monkeypatch) -> None:
+    monkeypatch.setattr("modules.agent.prompt_assembly._safe_regex_engine", None)
+    assert _entry_key_matches(
+        "hello world",
+        "/hello/i",
+        case_sensitive=False,
+        whole_words=False,
+    ) is False
+    # Literal keys are unaffected.
+    assert _entry_key_matches(
+        "hello world",
+        "hello",
+        case_sensitive=False,
+        whole_words=False,
+    ) is True
+
+
+def test_world_book_caps_compared_keys_per_entry() -> None:
+    from modules.agent.prompt_assembly import _MAX_WORLD_BOOK_KEYS_PER_ENTRY, _world_entry_matches
+
+    entry = {
+        "enabled": True,
+        "content": "x",
+        "keys": [f"never-{index}" for index in range(_MAX_WORLD_BOOK_KEYS_PER_ENTRY)] + ["hit"],
+    }
+
+    # The key beyond the cap must not be scanned.
+    assert _world_entry_matches(entry, "hit") is False
+    entry["keys"] = ["hit"] + entry["keys"]
+    assert _world_entry_matches(entry, "hit") is True
+
+
+def test_world_book_allows_plain_alternation() -> None:
+    # Alternation without a repeated group is linear and stays supported.
+    assert _entry_key_matches(
+        "a cat sat",
+        "/(cat|dog)/",
+        case_sensitive=False,
+        whole_words=False,
+    ) is True
 
 
 def test_world_book_still_supports_safe_slash_regex() -> None:

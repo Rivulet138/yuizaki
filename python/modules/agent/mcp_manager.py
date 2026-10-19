@@ -6,11 +6,12 @@ import json
 import logging
 import os
 import re
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from time import perf_counter
+from time import monotonic, perf_counter
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -42,6 +43,7 @@ MCP_STDIO_INHERITED_ENV_KEYS = frozenset({
     "TEMP", "TMP", "USERPROFILE", "WINDIR",
 })
 MCP_VAULT_REF_VERSION = 1
+MCP_STORE_RETRY_SECONDS = 2.0
 MCP_SECRET_QUERY_KEYS = re.compile(r"(?:token|secret|password|passwd|api[_-]?key|auth|credential|signature|sig)", re.IGNORECASE)
 
 
@@ -140,6 +142,9 @@ class MCPManager:
         self._vault_namespace = configured_namespace or hashlib.sha256(str(self._store_file.resolve()).encode("utf-8")).hexdigest()[:32]
         self._vault_reference: str | None = None
         self._vault_error: str | None = None
+        self._store_pending = False
+        self._store_retry_at = 0.0
+        self._store_retry_lock = threading.Lock()
         self.servers: dict[str, MCPServerConfig] = {}
         self.status: dict[str, dict[str, Any]] = {}
         self._stdio_sessions: dict[str, dict[str, Any]] = {}
@@ -334,7 +339,7 @@ class MCPManager:
         return self._custom_stdio_enabled() or self._matches_stdio_preset(server)
 
     def _preset_definitions(self) -> list[MCPServerPreset]:
-        data_dir = self._python_root() / "data"
+        data_dir = data_dir_from_env()
         chat_db = data_dir / "chat.db"
         return [
             MCPServerPreset(
@@ -730,15 +735,80 @@ class MCPManager:
         server.enabled = bool(browser_mcp_url)
         return True
 
+    def _ensure_store_ready(self) -> None:
+        """Retry a vault-backed store load once the secret vault is reachable.
+
+        A supervised launch starts Python before the Electron control server
+        that hosts the MCP vault. The first load then fails closed; retrying on
+        first use keeps one shared vault instead of silently falling back to a
+        second, divergent plaintext store.
+        """
+        if not self._store_pending:
+            return
+        now = monotonic()
+        with self._store_retry_lock:
+            if not self._store_pending or now < self._store_retry_at:
+                return
+            self._store_retry_at = now + MCP_STORE_RETRY_SECONDS
+            self._load_store()
+        if not self._store_pending and self._registry is not None:
+            # Recovery happens after register_tools ran with an empty server
+            # view; re-sync so already-connected servers expose their tools.
+            for name in list(self.servers):
+                try:
+                    self._sync_server_tools(name)
+                except Exception:
+                    logger.warning("MCP tool re-sync failed for %s after store recovery", name, exc_info=True)
+
+    def _quarantine_store_pointer(self, exc: BaseException) -> bool:
+        """Move an unreadable pointer file aside so recovery can proceed."""
+        backup = self._store_file.with_name(
+            f"{self._store_file.name}.corrupt-{datetime.now().strftime('%Y%m%dT%H%M%S')}"
+        )
+        try:
+            os.replace(self._store_file, backup)
+            logger.warning(
+                "Quarantined corrupt MCP vault pointer at %s (%s); the store will be re-initialized",
+                backup,
+                _safe_exception_code(exc),
+            )
+            return True
+        except OSError:
+            logger.warning("Could not quarantine corrupt MCP vault pointer at %s", self._store_file)
+            return False
+
     def _load_store(self) -> None:
         default_servers = self._builtin_server_configs()
         self.servers = default_servers
+        # This attempt owns the pending state; _save_store must be allowed to
+        # run once the vault document has been read successfully.
+        self._store_pending = False
         try:
             if not self._store_file.exists():
+                if self._vault_configured():
+                    # Do not overwrite an existing encrypted vault when only
+                    # the local pointer is missing. Keep MCP pending until an
+                    # explicit setup/reset recreates the pointer.
+                    self._store_pending = True
+                    self._vault_error = "mcp_error:vault_pointer_missing"
+                    self.servers = {}
+                    self._store_retry_at = monotonic() + MCP_STORE_RETRY_SECONDS
+                    return
                 self._store_metadata["builtin_preset_version"] = MCP_BUILTIN_PRESET_STORE_VERSION
                 self._save_store()
                 return
-            raw_data = json.loads(self._store_file.read_text(encoding="utf-8"))
+            try:
+                raw_data = json.loads(self._store_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                # Keep a corrupt pointer for manual recovery; never replace it
+                # with built-in defaults while a vault is configured.
+                if self._vault_configured():
+                    self._vault_error = _safe_exception_code(exc)
+                    self._store_pending = True
+                    self.servers = {}
+                    self._store_retry_at = monotonic() + MCP_STORE_RETRY_SECONDS
+                    return
+                raise
             if not isinstance(raw_data, dict):
                 raise ValueError("invalid_store")
             data = raw_data
@@ -776,16 +846,23 @@ class MCPManager:
                 self._save_store()
             elif store_changed:
                 self._save_store()
+            self._store_pending = False
         except Exception as exc:
             self._vault_error = _safe_exception_code(exc)
             logger.warning("MCP server store load failed (%s)", self._vault_error)
             if self._vault_configured():
+                # Keep an empty view until the vault answers; saving defaults
+                # over a vault-backed store would destroy the shared config.
                 self.servers = {}
+                self._store_pending = True
+                self._store_retry_at = monotonic() + MCP_STORE_RETRY_SECONDS
             else:
                 self.servers = default_servers
                 self._store_metadata["builtin_preset_version"] = MCP_BUILTIN_PRESET_STORE_VERSION
 
     def _save_store(self) -> None:
+        if self._store_pending:
+            raise MCPToolError("mcp_error:store_pending")
         document = json.dumps(self._canonical_store_payload(), ensure_ascii=False, separators=(",", ":"))
         if self._vault_configured():
             old_reference = self._vault_reference
@@ -835,6 +912,7 @@ class MCPManager:
             return name, self._timeout_status(server, timeout_seconds or MCP_STATUS_REFRESH_TIMEOUT_SECONDS)
 
     async def refresh_status(self, timeout_seconds: float | None = None) -> None:
+        await asyncio.to_thread(self._ensure_store_ready)
         results = await asyncio.gather(*[
             self._refresh_server_status(name, server, timeout_seconds)
             for name, server in self.servers.items()
@@ -844,6 +922,7 @@ class MCPManager:
             self._sync_server_tools(name)
 
     def snapshot(self) -> dict[str, Any]:
+        self._ensure_store_ready()
         capability_items = self._capability_contribution_items()
         contribution_summary = [
             {
@@ -915,6 +994,7 @@ class MCPManager:
         return payload
 
     def set_enabled(self, name: str, enabled: bool) -> dict[str, Any] | None:
+        self._ensure_store_ready()
         server = self.servers.get(name)
         if server is None:
             return None
@@ -952,11 +1032,16 @@ class MCPManager:
         env: dict[str, str] | None = None,
         headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        self._ensure_store_ready()
         server = MCPServerConfig(name=name, base_url=base_url, transport=transport, enabled=enabled, command=command, args=args, env=env, headers=headers)
         if server.transport == "stdio" and not self._stdio_launch_allowed(server):
             raise MCPToolError("Custom stdio MCP registration is disabled; install a preset or set YUIZAKI_ALLOW_CUSTOM_MCP_STDIO=true")
         if self._server_requires_vault(server) and not self._vault_configured():
             raise MCPToolError("mcp_error:credential_storage_unavailable")
+        if self._store_pending:
+            self.servers = self._builtin_server_configs()
+            self._store_pending = False
+            self._store_metadata["builtin_preset_version"] = MCP_BUILTIN_PRESET_STORE_VERSION
         previous_server = self.servers.get(name)
         self.servers[name] = server
         try:
@@ -971,10 +1056,15 @@ class MCPManager:
         return self._server_public_payload(server)
 
     def install_preset(self, preset_id: str) -> dict[str, Any] | None:
+        self._ensure_store_ready()
         preset = next((item for item in self._preset_definitions() if item.id == preset_id), None)
         if preset is None:
             return None
         server = preset.to_server_config()
+        if self._store_pending:
+            self.servers = self._builtin_server_configs()
+            self._store_pending = False
+            self._store_metadata["builtin_preset_version"] = MCP_BUILTIN_PRESET_STORE_VERSION
         previous_server = self.servers.get(server.name)
         self.servers[server.name] = server
         try:
@@ -989,8 +1079,13 @@ class MCPManager:
         return self._server_public_payload(server)
 
     def remove_server(self, name: str) -> bool:
+        self._ensure_store_ready()
         if name not in self.servers:
             return False
+        if self._store_pending:
+            self.servers = self._builtin_server_configs()
+            self._store_pending = False
+            self._store_metadata["builtin_preset_version"] = MCP_BUILTIN_PRESET_STORE_VERSION
         removed_server = self.servers[name]
         removed_status = self.status.get(name)
         self.servers.pop(name, None)
@@ -1024,6 +1119,7 @@ class MCPManager:
         self._streamable_http_sessions.clear()
 
     async def refresh_one(self, name: str, timeout_seconds: float | None = None) -> dict[str, Any] | None:
+        await asyncio.to_thread(self._ensure_store_ready)
         server = self.servers.get(name)
         if server is None:
             return None
@@ -1033,6 +1129,7 @@ class MCPManager:
         return self.status[name]
 
     async def call_tool(self, server_name: str, tool_name: str, args: dict[str, Any]) -> str:
+        await asyncio.to_thread(self._ensure_store_ready)
         server = self.servers.get(server_name)
         if server is None:
             raise MCPToolError(f"Unknown MCP server: {server_name}")
@@ -1921,6 +2018,7 @@ class MCPManager:
 
     def register_tools(self, registry: ToolRegistry) -> None:
         self._registry = registry
+        self._ensure_store_ready()
 
         async def _browser_open_page(args: dict[str, Any]) -> ToolResultEnvelope:
             output = await self.call_tool("playwright", "browser.open_page", args)

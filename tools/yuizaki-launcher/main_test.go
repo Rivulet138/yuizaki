@@ -279,3 +279,61 @@ func mustChtimes(t *testing.T, path string, timestamp time.Time) {
 		t.Fatal(err)
 	}
 }
+
+func TestMCPVaultNamespaceIsStableAndBounded(t *testing.T) {
+	first := mcpVaultNamespace(`E:\yuizaki`, "")
+	second := mcpVaultNamespace(`E:\yuizaki`, "")
+	if first != second {
+		t.Fatalf("namespace must be stable: %q != %q", first, second)
+	}
+	if len(first) != 32 {
+		t.Fatalf("namespace must be 32 hex characters, got %d", len(first))
+	}
+	for _, char := range first {
+		if !strings.ContainsRune("0123456789abcdef", char) {
+			t.Fatalf("namespace must be lowercase hex, got %q", first)
+		}
+	}
+	custom := mcpVaultNamespace(`E:\yuizaki`, filepath.Join(`E:\yuizaki`, "custom-data"))
+	if custom == first {
+		t.Fatal("configured data directory must derive a separate namespace")
+	}
+}
+
+func TestRefreshURLsSharesTheMCPVaultCoordinates(t *testing.T) {
+	cfg := &launcherConfig{
+		env:          map[string]string{},
+		serverHost:   "127.0.0.1",
+		serverPort:   "8001",
+		controlPort:  "38945",
+		rendererPort: "5173",
+		mcpPort:      "7777",
+	}
+	cfg.refreshURLs()
+	if got := cfg.env["YUIZAKI_MCP_VAULT_URL"]; got != "http://127.0.0.1:38945/api/internal/mcp-config-vault" {
+		t.Fatalf("unexpected vault url: %q", got)
+	}
+
+	// A fallback control port must move the vault url with it.
+	cfg.controlPort = "38946"
+	cfg.refreshURLs()
+	if got := cfg.env["YUIZAKI_MCP_VAULT_URL"]; got != "http://127.0.0.1:38946/api/internal/mcp-config-vault" {
+		t.Fatalf("vault url did not follow the selected port: %q", got)
+	}
+}
+
+func TestPinnedMCPVaultURLIsNotOverwritten(t *testing.T) {
+	cfg := &launcherConfig{
+		env:               map[string]string{"YUIZAKI_MCP_VAULT_URL": "http://127.0.0.1:9999/custom"},
+		serverHost:        "127.0.0.1",
+		serverPort:        "8001",
+		controlPort:       "38945",
+		rendererPort:      "5173",
+		mcpPort:           "7777",
+		mcpVaultURLPinned: true,
+	}
+	cfg.refreshURLs()
+	if got := cfg.env["YUIZAKI_MCP_VAULT_URL"]; got != "http://127.0.0.1:9999/custom" {
+		t.Fatalf("pinned vault url was overwritten: %q", got)
+	}
+}

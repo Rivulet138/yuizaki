@@ -1,0 +1,132 @@
+{
+  "_comment": "Explicit, conservative model limits. Python clamps configured budgets only for keys listed here; a missing key keeps existing behavior. Keys are '<provider>:<model>' after lowercasing and stripping a 'models/' prefix. Providers come from python/modules/llm/providers.py. Update values only from the vendor's published limits.",
+  "_capturedAt": "2026-10-19",
+  "deepseek:deepseek-flash": {
+    "vision": false,
+    "metadata": {
+      "contextWindowTokens": 1048576,
+      "maxOutputTokens": 393216
+    },
+    "source": "https://api-docs.deepseek.com/quick_start/pricing"
+  },
+  "deepseek:deepseek-v4-pro": {
+    "vision": false,
+    "metadata": {
+      "contextWindowTokens": 1048576,
+      "maxOutputTokens": 393216
+    },
+    "source": "https://api-docs.deepseek.com/quick_start/pricing"
+  },
+  "deepseek:deepseek-chat": {
+    "vision": false,
+    "metadata": {
+      "contextWindowTokens": 131072,
+      "maxOutputTokens": 8192
+    },
+    "source": "https://api-docs.deepseek.com/quick_start/pricing"
+  },
+  "deepseek:deepseek-reasoner": {
+    "vision": false,
+    "metadata": {
+      "contextWindowTokens": 131072,
+      "maxOutputTokens": 8192
+    },
+    "source": "https://api-docs.deepseek.com/guides/reasoning_model"
+  },
+  "chatgpt:gpt-4o": {
+    "vision": true,
+    "metadata": {
+      "contextWindowTokens": 128000,
+      "maxOutputTokens": 16384
+    },
+    "source": "https://platform.openai.com/docs/models/gpt-4o"
+  },
+  "chatgpt:gpt-4o-mini": {
+    "vision": true,
+    "metadata": {
+      "contextWindowTokens": 128000,
+      "maxOutputTokens": 16384
+    },
+    "source": "https://platform.openai.com/docs/models/gpt-4o-mini"
+  },
+  "chatgpt:gpt-4.1": {
+    "vision": true,
+    "metadata": {
+      "contextWindowTokens": 1047576,
+      "maxOutputTokens": 32768
+    },
+    "source": "https://platform.openai.com/docs/models/gpt-4.1"
+  },
+  "chatgpt:gpt-4.1-mini": {
+    "vision": true,
+    "metadata": {
+      "contextWindowTokens": 1047576,
+      "maxOutputTokens": 32768
+    },
+    "source": "https://platform.openai.com/docs/models/gpt-4.1-mini"
+  },
+  "claude:claude-3-5-sonnet-20241022": {
+    "vision": true,
+    "metadata": {
+      "contextWindowTokens": 200000,
+      "maxOutputTokens": 8192
+    },
+    "source": "https://docs.anthropic.com/en/docs/about-claude/models"
+  },
+  "claude:claude-3-5-haiku-20241022": {
+    "vision": true,
+    "metadata": {
+      "contextWindowTokens": 200000,
+      "maxOutputTokens": 8192
+    },
+    "source": "https://docs.anthropic.com/en/docs/about-claude/models"
+  },
+  "claude:claude-sonnet-4-20250514": {
+    "vision": true,
+    "metadata": {
+      "contextWindowTokens": 200000,
+      "maxOutputTokens": 64000
+    },
+    "source": "https://docs.anthropic.com/en/docs/about-claude/models"
+  },
+  "gemini:gemini-2.0-flash": {
+    "vision": true,
+    "metadata": {
+      "contextWindowTokens": 1048576,
+      "maxOutputTokens": 8192
+    },
+    "source": "https://ai.google.dev/gemini-api/docs/models"
+  },
+  "gemini:gemini-2.5-flash": {
+    "vision": true,
+    "metadata": {
+      "contextWindowTokens": 1048576,
+      "maxOutputTokens": 65535
+    },
+    "source": "https://ai.google.dev/gemini-api/docs/models"
+  },
+  "gemini:gemini-2.5-pro": {
+    "vision": true,
+    "metadata": {
+      "contextWindowTokens": 1048576,
+      "maxOutputTokens": 65535
+    },
+    "source": "https://ai.google.dev/gemini-api/docs/models"
+  },
+  "qwen:qwen-plus": {
+    "vision": false,
+    "metadata": {
+      "contextWindowTokens": 131072,
+      "maxOutputTokens": 8192
+    },
+    "source": "https://help.aliyun.com/zh/model-studio/models"
+  },
+  "qwen:qwen-max": {
+    "vision": false,
+    "metadata": {
+      "contextWindowTokens": 32768,
+      "maxOutputTokens": 8192
+    },
+    "source": "https://help.aliyun.com/zh/model-studio/models"
+  }
+}

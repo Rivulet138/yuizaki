@@ -1,20 +1,40 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 from html import escape
 from typing import Any
 
-try:  # Optional bounded-regex backend; the stdlib fallback stays conservative.
-    import regex as _safe_regex_engine
-except ImportError:  # pragma: no cover - exercised only in minimal installs.
-    _safe_regex_engine = None
-
 from ..llm.context_window import message_content_to_text
 from ..pet_control import build_pet_control_prompt
 from ..system.relationship_policy import summarize_relationship_events
 from .interpret import InterpretResult
+
+logger = logging.getLogger(__name__)
+
+try:  # Optional bounded-regex backend; without it regex keys are disabled.
+    import regex as _regex_module
+except ImportError:  # pragma: no cover - exercised only in minimal installs.
+    _regex_module = None
+
+
+def _regex_supports_timeout(module: Any) -> bool:
+    """Probe the timeout keyword so an older release never runs unbounded."""
+    if module is None:
+        return False
+    try:
+        module.search("a", "a", 0, timeout=0.01)
+        return True
+    except TypeError:  # pragma: no cover - depends on the installed version
+        return False
+    except Exception:
+        # Any other failure means the keyword was accepted and the pattern ran.
+        return True
+
+
+_safe_regex_engine = _regex_module if _regex_supports_timeout(_regex_module) else None
 
 PromptProfile = dict[str, Any]
 _PROMPT_MARKER_PATTERN = re.compile(r"\[(END_)?PROMPT_BLOCK\b", re.IGNORECASE)
@@ -211,17 +231,25 @@ _UNSAFE_NESTED_QUANTIFIER = re.compile(
 
 
 def _safe_world_book_regex(pattern: str) -> bool:
-    """Bound user-supplied regexes so one world-book entry cannot stall a turn."""
+    """Bound user-supplied regexes so one world-book entry cannot stall a turn.
+
+    Groups and alternation are legitimate world-book syntax. They are only
+    allowed while the bounded ``regex`` engine is available, because that
+    engine enforces a hard match timeout. Without it, the stdlib ``re`` module
+    cannot bound a pathological pattern, so the conservative form is kept.
+    """
     if len(pattern) > _MAX_WORLD_BOOK_REGEX_LENGTH:
         return False
     if re.search(r"\\[1-9]", pattern):
         return False
-    # Alternation/grouping is the main source of exponential backtracking
-    # (e.g. ``(a|aa)+$``). World-book keys can use literals, character
-    # classes, anchors, dot and quantifiers without groups.
-    if any(token in pattern for token in ("(", ")", "|")):
+    if _UNSAFE_NESTED_QUANTIFIER.search(pattern) is not None:
         return False
-    return _UNSAFE_NESTED_QUANTIFIER.search(pattern) is None
+    if _safe_regex_engine is None:
+        # Without a bounded engine the stdlib backtracker cannot be given a
+        # deadline, so regex keys are refused outright instead of risking a
+        # multi-minute hang. Literal keys keep working.
+        return False
+    return True
 
 
 def _entry_key_matches(haystack: str, key: str, *, case_sensitive: bool, whole_words: bool) -> bool:
@@ -241,25 +269,22 @@ def _entry_key_matches(haystack: str, key: str, *, case_sensitive: bool, whole_w
         if "s" in flag_text:
             flags |= re.DOTALL
         bounded_haystack = haystack[:_MAX_WORLD_BOOK_REGEX_HAYSTACK]
-        if _safe_regex_engine is not None:
-            try:
-                return _safe_regex_engine.search(
-                    pattern,
-                    bounded_haystack,
-                    flags,
-                    timeout=_WORLD_BOOK_REGEX_TIMEOUT_SECONDS,
-                ) is not None
-            except TimeoutError:
-                return False
-            except _safe_regex_engine.error:
-                return False
-            except (TypeError, ValueError):
-                # Older regex releases may not accept ``timeout``; the
-                # conservative static filter above still protects this path.
-                pass
+        if _safe_regex_engine is None:
+            return False
         try:
-            return re.search(pattern, bounded_haystack, flags) is not None
-        except re.error:
+            return _safe_regex_engine.search(
+                pattern,
+                bounded_haystack,
+                flags,
+                timeout=_WORLD_BOOK_REGEX_TIMEOUT_SECONDS,
+            ) is not None
+        except TimeoutError:
+            return False
+        except _safe_regex_engine.error:
+            return False
+        except (TypeError, ValueError):
+            # Fail closed: never fall back to the unbounded stdlib engine.
+            logger.warning("World-book regex engine rejected a bounded search; entry skipped")
             return False
     text = haystack if case_sensitive else haystack.lower()
     needle = needle if case_sensitive else needle.lower()
@@ -281,18 +306,36 @@ def _entry_probability_allows(entry: dict[str, Any], haystack: str) -> bool:
     return roll <= probability
 
 
+_MAX_WORLD_BOOK_ENTRIES = 200
+_MAX_WORLD_BOOK_KEYS_PER_ENTRY = 32
+
+
+def _bounded_world_book_keys(entry: dict[str, Any], field: str) -> list[str]:
+    keys = [str(item).strip() for item in _as_list(entry.get(field)) if str(item).strip()]
+    if len(keys) > _MAX_WORLD_BOOK_KEYS_PER_ENTRY:
+        logger.warning(
+            "World-book entry '%s' declares %d %s keys; only the first %d are scanned",
+            entry.get("title") or entry.get("id") or "?",
+            len(keys),
+            field,
+            _MAX_WORLD_BOOK_KEYS_PER_ENTRY,
+        )
+        return keys[:_MAX_WORLD_BOOK_KEYS_PER_ENTRY]
+    return keys
+
+
 def _world_entry_matches(entry: dict[str, Any], haystack: str) -> bool:
     if entry.get("constant") is True:
         return _entry_probability_allows(entry, haystack)
     case_sensitive = entry.get("caseSensitive") is True
     whole_words = entry.get("matchWholeWords") is True
-    keys = [str(item).strip() for item in _as_list(entry.get("keys")) if str(item).strip()]
+    keys = _bounded_world_book_keys(entry, "keys")
     if not keys:
         return _entry_probability_allows(entry, haystack)
     primary_match = any(_entry_key_matches(haystack, key, case_sensitive=case_sensitive, whole_words=whole_words) for key in keys)
     if not primary_match:
         return False
-    secondary_keys = [str(item).strip() for item in _as_list(entry.get("secondaryKeys")) if str(item).strip()]
+    secondary_keys = _bounded_world_book_keys(entry, "secondaryKeys")
     if entry.get("selective") is True and secondary_keys:
         secondary_match = any(_entry_key_matches(haystack, key, case_sensitive=case_sensitive, whole_words=whole_words) for key in secondary_keys)
         if not secondary_match:
@@ -310,11 +353,19 @@ def _world_book_prompt(profile: PromptProfile | None, messages: list[dict[str, A
     budget_tokens = _as_int(world_book.get("budgetTokens"), 1200, 128, 32000)
     recent_text = "\n".join(message_content_to_text(message.get("content")) for message in messages[-scan_depth:])
     entries: list[dict[str, Any]] = []
+    scanned_entries = 0
     for raw_entry in _as_list(world_book.get("entries")):
+        if scanned_entries >= _MAX_WORLD_BOOK_ENTRIES:
+            logger.warning(
+                "World book declares more than %d entries; the remainder is ignored",
+                _MAX_WORLD_BOOK_ENTRIES,
+            )
+            break
         entry = _as_dict(raw_entry)
         content = _clean_text(entry.get("content"))
         if entry.get("enabled") is False or not content:
             continue
+        scanned_entries += 1
         if _world_entry_matches(entry, recent_text):
             entries.append(entry)
 

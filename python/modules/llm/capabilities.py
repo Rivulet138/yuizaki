@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -22,23 +23,41 @@ def _positive_int(value: Any) -> int | None:
         return None
     return parsed if parsed > 0 else None
 
-_REGISTRY_PATH = Path(__file__).resolve().parents[3] / "electron" / "src" / "shared" / "model-capabilities.registry.json"
+
+_MODULE_DIR = Path(__file__).resolve().parent
+# Canonical registry ships with the Python package so packaged runtimes keep it.
+# The Electron shared path is kept as a legacy override for older checkouts.
+_REGISTRY_CANDIDATES = (
+    _MODULE_DIR / "model-capabilities.registry.json",
+    _MODULE_DIR.parents[2] / "electron" / "src" / "shared" / "model-capabilities.registry.json",
+)
+
+
+def _registry_path() -> Path:
+    override = os.getenv("YUIZAKI_MODEL_CAPABILITIES_REGISTRY", "").strip()
+    if override:
+        return Path(override)
+    for candidate in _REGISTRY_CANDIDATES:
+        if candidate.exists():
+            return candidate
+    return _REGISTRY_CANDIDATES[0]
 
 
 @lru_cache(maxsize=1)
 def load_model_capability_registry() -> dict[str, dict[str, Any]]:
+    path = _registry_path()
     try:
-        payload = json.loads(_REGISTRY_PATH.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning(
             "Model capability registry unavailable at %s; model limits and vision "
             "support fall back to unknown: %s",
-            _REGISTRY_PATH,
+            path,
             exc,
         )
         return {}
     if not isinstance(payload, dict):
-        logger.warning("Model capability registry at %s is not a JSON object", _REGISTRY_PATH)
+        logger.warning("Model capability registry at %s is not a JSON object", path)
         return {}
     return {
         str(key).lower(): value

@@ -226,7 +226,9 @@ async function createApp(): Promise<void> {
     process.env,
     () => randomBytes(32).toString('base64url'),
   )
-  const mcpVaultToken = randomBytes(32).toString('base64url')
+  // A supervisor that manages Python itself shares one MCP vault token; only
+  // an unmanaged launch generates a fresh one.
+  const mcpVaultToken = process.env['YUIZAKI_MCP_VAULT_TOKEN']?.trim() || randomBytes(32).toString('base64url')
   petWindow = new PetWindow()
   live2dWindow = new Live2DWindow()
   petTray = new PetTray()

@@ -213,18 +213,39 @@ const createDefaultWorkspace = (): WorkspaceRecord => {
   }
 }
 
+const mergeWorkspaceContext = (
+  base: WorkspaceContext,
+  patch: Partial<WorkspaceContext>,
+): WorkspaceContext => {
+  const merge = (left: unknown, right: unknown): unknown => {
+    if (!right || typeof right !== 'object' || Array.isArray(right)) return right
+    if (!left || typeof left !== 'object' || Array.isArray(left)) return right
+    const result: Record<string, unknown> = { ...(left as Record<string, unknown>) }
+    for (const [key, value] of Object.entries(right as Record<string, unknown>)) {
+      result[key] = merge(result[key], value)
+    }
+    return result
+  }
+  return merge(base, patch) as WorkspaceContext
+}
+
 const isDefaultWorkspaceContext = (context: WorkspaceContext): boolean => (
   JSON.stringify(context) === JSON.stringify(createDefaultWorkspaceContext())
 )
 
-const readStoredContexts = (): Map<string, WorkspaceContext> => {
+interface StoredContextEntry {
+  context: WorkspaceContext
+  revision: number
+}
+
+const readStoredContexts = (): Map<string, StoredContextEntry> => {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     if (!raw) return new Map()
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return new Map()
     const entries = parsed
-      .filter((item): item is { id: string; context: Partial<WorkspaceContext> } => (
+      .filter((item): item is { id: string; context: Partial<WorkspaceContext>; contextRevision?: unknown } => (
         Boolean(item)
         && typeof item === 'object'
         && typeof item.id === 'string'
@@ -232,10 +253,16 @@ const readStoredContexts = (): Map<string, WorkspaceContext> => {
         && typeof item.context === 'object'
         && !Array.isArray(item.context)
       ))
-      .map((item): [string, WorkspaceContext] => [item.id, normalizeWorkspaceContext(item.context)])
+      .map((item): [string, StoredContextEntry] => [
+        item.id,
+        {
+          context: normalizeWorkspaceContext(item.context),
+          revision: typeof item.contextRevision === 'number' ? item.contextRevision : -1,
+        },
+      ])
     // Normalized defaults are not user-authored context; never let them
     // overwrite a server-side configuration after a rollback or fresh start.
-    return new Map(entries.filter(([, context]) => !isDefaultWorkspaceContext(context)))
+    return new Map(entries.filter(([, entry]) => !isDefaultWorkspaceContext(entry.context)))
   } catch {
     return new Map()
   }
@@ -278,7 +305,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const contextSaveTimers = new Map<string, number>()
-  const queueContextSave = (workspaceId: string) => {
+  const queueContextSave = (
+    workspaceId: string,
+    patch?: Partial<WorkspaceContext>,
+    retried = false,
+  ) => {
     if (typeof window === 'undefined') return
     const pending = contextSaveTimers.get(workspaceId)
     if (pending !== undefined) window.clearTimeout(pending)
@@ -288,7 +319,37 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (!workspace) return
       void workspaceClient.update(workspaceId, {
         context: workspace.context as unknown as Record<string, unknown>,
-      }).catch((error) => {
+        contextRevision: workspace.contextRevision ?? 0,
+      }).then((updated) => {
+        const current = state.value.workspaces.find((item) => item.id === workspaceId)
+        if (!current || typeof updated.contextRevision !== 'number') return
+        current.contextRevision = updated.contextRevision
+        persist()
+      }).catch((error: unknown) => {
+        // A stale revision means another client wrote first. Rebase this edit
+        // on the server value instead of discarding it, then retry once.
+        const conflict = error as {
+          status?: number
+          payload?: { context?: unknown; contextRevision?: unknown }
+        }
+        if (conflict?.status === 409 && conflict.payload) {
+          const current = state.value.workspaces.find((item) => item.id === workspaceId)
+          const serverContext = asContextRecord(conflict.payload.context)
+          if (current) {
+            const base = serverContext
+              ? normalizeWorkspaceContext(serverContext)
+              : createDefaultWorkspaceContext()
+            current.context = patch ? mergeWorkspaceContext(base, patch) : base
+            if (typeof conflict.payload.contextRevision === 'number') {
+              current.contextRevision = conflict.payload.contextRevision
+            }
+            persist()
+            if (patch && !retried) {
+              queueContextSave(workspaceId, patch, true)
+              return
+            }
+          }
+        }
         console.debug('[WorkspaceStore] failed to persist workspace context:', error)
       })
     }, 600)
@@ -352,9 +413,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const localContextMap = readStoredContexts()
       const contextsToBackfill: string[] = []
       const backendWorkspaces = payload.workspaces.map((workspace) => {
-        const localContext = localContextMap.get(workspace.id)
+        const local = localContextMap.get(workspace.id)
         const serverContext = asContextRecord(workspace.context)
-        if (localContext) contextsToBackfill.push(workspace.id)
+        const serverRevision = typeof workspace.contextRevision === 'number' ? workspace.contextRevision : 0
+        // Never pair a stale local document with the server's newer revision:
+        // that write would be accepted and silently overwrite the server.
+        const localIsCurrent = Boolean(local) && local!.revision === serverRevision
+        const localIsLegacy = Boolean(local) && local!.revision < 0
+        const localIsNewer = Boolean(local) && local!.revision > serverRevision
+        const useLocal = Boolean(local) && (
+          localIsCurrent
+          || (serverContext === undefined && (localIsNewer || localIsLegacy))
+        )
+        if (useLocal && serverContext === undefined) contextsToBackfill.push(workspace.id)
         return {
           id: workspace.id,
           name: workspace.name,
@@ -369,7 +440,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           mcp_preset_id: workspace.mcp_preset_id,
           createdAt: workspace.created_at || new Date().toISOString(),
           updatedAt: workspace.updated_at || new Date().toISOString(),
-          context: normalizeWorkspaceContext(localContext ?? serverContext),
+          context: normalizeWorkspaceContext(useLocal ? local!.context : serverContext),
+          contextRevision: serverRevision,
         }
       })
 
@@ -379,8 +451,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           state.value.activeWorkspaceId = backendWorkspaces[0]?.id || 'default'
         }
         persist()
-        // Local state remains the source of truth for a local-first desktop
-        // app; backfill it so a cleared localStorage can restore it later.
+        // Restore from localStorage only when the server has no context yet.
         for (const workspaceId of contextsToBackfill) {
           queueContextSave(workspaceId)
         }
@@ -415,6 +486,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       createdAt: created.created_at || now,
       updatedAt: created.updated_at || now,
       context: { ...activeWorkspace.value.context },
+      contextRevision: typeof created.contextRevision === 'number' ? created.contextRevision : 0,
     }
     state.value.workspaces.push(workspace)
     state.value.activeWorkspaceId = workspace.id
@@ -444,6 +516,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (updated.tool_preset !== undefined) responsePatch.tool_preset = updated.tool_preset
     if (updated.memory_scope !== undefined) responsePatch.memory_scope = updated.memory_scope
     if (updated.mcp_preset_id !== undefined) responsePatch.mcp_preset_id = updated.mcp_preset_id
+    if (typeof updated.contextRevision === 'number') responsePatch.contextRevision = updated.contextRevision
+    // Only merge context when this request carried one; otherwise the response
+    // contains the server's older document and would clobber local edits.
+    if ('context' in patch && updated.context && typeof updated.context === 'object' && !Array.isArray(updated.context)) {
+      responsePatch.context = normalizeWorkspaceContext(asContextRecord(updated.context))
+    }
     state.value.workspaces = state.value.workspaces.map((workspace) =>
       workspace.id === workspaceId
         ? {
@@ -479,7 +557,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       workspace.context = { ...workspace.context, ...patch }
       workspace.updatedAt = new Date().toISOString()
       persist()
-      queueContextSave(workspaceId)
+      queueContextSave(workspaceId, patch)
     }
   }
 

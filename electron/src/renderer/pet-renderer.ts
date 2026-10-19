@@ -13,6 +13,7 @@ import {
 	type PetControlConfigPatch,
 	type PetControlDirective,
 	type PetExpressionMixPayload,
+	type PetInteractionBoundsPayload,
 	type PetLipSyncLevelPayload,
 	type PetLipSyncLevelSource,
 	type PetLipSyncProfile,

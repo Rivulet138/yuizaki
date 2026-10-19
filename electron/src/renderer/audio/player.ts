@@ -431,10 +431,16 @@ export class AudioPlayer {
 
   private finishCurrentSegment(): void {
     const hasNext = this.queue.length > 0
-    this.finishPlayback(false, {}, !hasNext)
     if (hasNext) {
+      // Keep the mouth active across queued PCM segments; the next segment
+      // immediately replaces the envelope on the same audio clock.
+      this.detachSegmentListeners()
+      this.isPlaying.value = false
+      this.releaseCurrentObjectUrl()
       void this.playNextQueued()
+      return
     }
+    this.finishPlayback(false, {}, true)
   }
 
   private finishPlayback(force = false, options: TtsStopDetail = {}, emitEnded = true): void {

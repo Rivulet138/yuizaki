@@ -5,6 +5,11 @@ Workspace records live in SQLite, but the renderer-owned prompt context
 nested JSON document. Keeping it in a small sidecar file avoids a schema
 migration while still making it survive browser storage resets and workspace
 switches.
+
+Each entry carries a monotonically increasing revision so two clients can
+detect a lost update instead of silently overwriting each other. File writes
+are serialized with an OS file lock, so a second backend process doing a
+read-modify-write of the same file cannot drop the other process's entry.
 """
 
 from __future__ import annotations
@@ -14,17 +19,62 @@ import logging
 import os
 import tempfile
 import threading
+import time
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from ..core.paths import data_dir_from_env
 
 logger = logging.getLogger(__name__)
 
 MAX_CONTEXT_BYTES = 2 * 1024 * 1024
-_STORE_VERSION = 1
+_STORE_VERSION = 2
+
+
+class WorkspaceContextConflict(RuntimeError):
+    """Raised when a write is based on a stale context revision."""
+
+    def __init__(self, workspace_id: str, expected: int, current: int) -> None:
+        super().__init__(
+            f"workspace context revision conflict for {workspace_id}: expected {expected}, current {current}"
+        )
+        self.workspace_id = workspace_id
+        self.expected = expected
+        self.current = current
+
+
+@contextmanager
+def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
+    """Serialize read-modify-write across processes on Windows and POSIX."""
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(lock_path, "a+b")  # noqa: SIM115 - closed in the finally block
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            # Locking a byte range beyond EOF is supported, so the lock file
+            # never needs to be written. Writing here would race with another
+            # process that already holds the same byte locked.
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        handle.close()
 
 
 class WorkspaceContextStore:
@@ -34,77 +84,102 @@ class WorkspaceContextStore:
             if storage_path is not None
             else data_dir_from_env() / "workspace_contexts.json"
         )
+        self.lock_path = self.storage_path.with_name(f"{self.storage_path.name}.lock")
         self._lock = threading.RLock()
-        self._contexts: dict[str, dict[str, Any]] = self._load()
+        self._entries: dict[str, dict[str, Any]] = self._load()
+
+    # -- serialization -----------------------------------------------------
 
     def _load(self) -> dict[str, dict[str, Any]]:
         if not self.storage_path.exists():
             return {}
+        # Read under the same lock. On Windows an open reader makes
+        # os.replace fail, so an unlocked load can break a concurrent writer.
+        with _exclusive_file_lock(self.lock_path):
+            for attempt in range(3):
+                parsed = self._parse(self.storage_path, quarantine=True)
+                if parsed is not None:
+                    return parsed
+                if not self.storage_path.exists():
+                    return {}
+                # Another process may be replacing the file right now; a short
+                # retry avoids treating a transient read error as corruption.
+                if attempt < 2:
+                    time.sleep(0.02)
+            return {}
+
+    def _parse(self, path: Path, *, quarantine: bool) -> dict[str, dict[str, Any]] | None:
+        """Return parsed entries, or ``None`` when the file cannot be trusted."""
         try:
-            payload = json.loads(self.storage_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning(
-                "Workspace context store unreadable at %s: %s",
-                self.storage_path,
-                exc,
-            )
-            self._quarantine_corrupt_store()
-            return {}
-        if not isinstance(payload, dict):
-            logger.warning("Workspace context store at %s is not a JSON object", self.storage_path)
-            self._quarantine_corrupt_store()
-            return {}
-        raw_contexts = payload.get("workspaces")
-        if not isinstance(raw_contexts, dict):
-            self._quarantine_corrupt_store()
-            return {}
-        contexts: dict[str, dict[str, Any]] = {}
-        for workspace_id, context in raw_contexts.items():
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            # Transient: the file may be mid-replace by another process.
+            logger.warning("Workspace context store unreadable at %s: %s", path, exc)
+            return None
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError as exc:
+            logger.warning("Workspace context store is not valid JSON at %s: %s", path, exc)
+            if quarantine:
+                self._quarantine_corrupt_store()
+            return None
+        if not isinstance(payload, dict) or not isinstance(payload.get("workspaces"), dict):
+            logger.warning("Workspace context store at %s has an unsupported shape", path)
+            if quarantine:
+                self._quarantine_corrupt_store()
+            return None
+        raw_contexts = payload["workspaces"]
+        entries: dict[str, dict[str, Any]] = {}
+        for workspace_id, value in raw_contexts.items():
             if not isinstance(workspace_id, str) or not workspace_id.strip():
                 continue
-            if not isinstance(context, dict):
+            if not isinstance(value, dict):
                 continue
-            contexts[workspace_id] = deepcopy(context)
-        return contexts
+            # Version 1 stored the context object directly.
+            if isinstance(value.get("context"), dict):
+                context = value["context"]
+                revision = value.get("revision")
+                updated_at = value.get("updatedAt")
+            else:
+                context = value
+                revision = 0
+                updated_at = None
+            entries[workspace_id] = {
+                "context": deepcopy(context),
+                "revision": int(revision) if isinstance(revision, int) and revision >= 0 else 0,
+                "updatedAt": updated_at if isinstance(updated_at, str) else None,
+            }
+        return entries
 
-    def get(self, workspace_id: str) -> dict[str, Any] | None:
-        normalized = str(workspace_id or "").strip()
-        if not normalized:
-            return None
-        with self._lock:
-            context = self._contexts.get(normalized)
-            return deepcopy(context) if context is not None else None
-
-    def validate(self, context: dict[str, Any]) -> None:
-        if not isinstance(context, dict):
-            raise ValueError("workspace context must be a JSON object")
-        serialized = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
-        if len(serialized.encode("utf-8")) > MAX_CONTEXT_BYTES:
-            raise ValueError("workspace context is too large")
-
-    def put(self, workspace_id: str, context: dict[str, Any]) -> dict[str, Any]:
-        normalized = str(workspace_id or "").strip()
-        if not normalized:
-            raise ValueError("workspace_id is required")
-        self.validate(context)
-        with self._lock:
-            next_contexts = dict(self._contexts)
-            next_contexts[normalized] = deepcopy(context)
-            self._write(next_contexts)
-            self._contexts = next_contexts
-        return deepcopy(context)
-
-    def delete(self, workspace_id: str) -> None:
-        normalized = str(workspace_id or "").strip()
-        if not normalized:
-            return
-        with self._lock:
-            if normalized not in self._contexts:
-                return
-            next_contexts = dict(self._contexts)
-            next_contexts.pop(normalized, None)
-            self._write(next_contexts)
-            self._contexts = next_contexts
+    def _write(self, entries: dict[str, dict[str, Any]]) -> None:
+        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"version": _STORE_VERSION, "workspaces": entries}
+        fd, temporary_name = tempfile.mkstemp(
+            dir=self.storage_path.parent,
+            prefix=".workspace-contexts.",
+            suffix=".tmp",
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
+                handle.flush()
+                os.fsync(handle.fileno())
+            for attempt in range(5):
+                try:
+                    os.replace(temporary_name, self.storage_path)
+                    break
+                except PermissionError:
+                    # Windows denies replace while another handle briefly holds
+                    # the target; retry instead of failing the write.
+                    if attempt == 4:
+                        raise
+                    time.sleep(0.02)
+        except Exception:
+            try:
+                os.unlink(temporary_name)
+            except OSError:
+                pass
+            raise
 
     def _quarantine_corrupt_store(self) -> None:
         """Keep the damaged file instead of silently overwriting user contexts."""
@@ -120,26 +195,101 @@ class WorkspaceContextStore:
                 exc,
             )
 
-    def _write(self, contexts: dict[str, dict[str, Any]]) -> None:
-        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"version": _STORE_VERSION, "workspaces": contexts}
-        fd, temporary_name = tempfile.mkstemp(
-            dir=self.storage_path.parent,
-            prefix=".workspace-contexts.",
-            suffix=".tmp",
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary_name, self.storage_path)
-        except Exception:
-            try:
-                os.unlink(temporary_name)
-            except OSError:
-                pass
-            raise
+    # -- public API --------------------------------------------------------
+
+    def validate(self, context: dict[str, Any]) -> None:
+        if not isinstance(context, dict):
+            raise ValueError("workspace context must be a JSON object")
+        serialized = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
+        if len(serialized.encode("utf-8")) > MAX_CONTEXT_BYTES:
+            raise ValueError("workspace context is too large")
+
+    def get(self, workspace_id: str) -> dict[str, Any] | None:
+        entry = self.get_entry(workspace_id)
+        return entry["context"] if entry is not None else None
+
+    def get_entry(self, workspace_id: str) -> dict[str, Any] | None:
+        normalized = str(workspace_id or "").strip()
+        if not normalized:
+            return None
+        with self._lock, _exclusive_file_lock(self.lock_path):
+            if self.storage_path.exists():
+                parsed = self._parse(self.storage_path, quarantine=False)
+                if parsed is None:
+                    raise RuntimeError("workspace_context_store_unreadable")
+                self._entries = parsed
+            entry = self._entries.get(normalized)
+            return deepcopy(entry) if entry is not None else None
+
+    def put(
+        self,
+        workspace_id: str,
+        context: dict[str, Any],
+        *,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
+        normalized = str(workspace_id or "").strip()
+        if not normalized:
+            raise ValueError("workspace_id is required")
+        self.validate(context)
+        return self._mutate(normalized, context, expected_revision=expected_revision)
+
+    def _mutate(
+        self,
+        workspace_id: str,
+        context: dict[str, Any] | None,
+        *,
+        expected_revision: int | None,
+    ) -> dict[str, Any]:
+        with self._lock, _exclusive_file_lock(self.lock_path):
+            # Re-read under the OS lock: another process may have written since
+            # this instance loaded the file. A damaged file is quarantined
+            # before being replaced, so its content is never silently dropped.
+            if self.storage_path.exists():
+                parsed = self._parse(self.storage_path, quarantine=True)
+                if parsed is None:
+                    # Never replace a file we could not read: that would drop
+                    # every other workspace entry. The caller surfaces an error.
+                    raise RuntimeError("workspace_context_store_unreadable")
+                entries = parsed
+            else:
+                entries = {}
+            current = entries.get(workspace_id)
+            current_revision = int(current["revision"]) if current else 0
+            if expected_revision is not None and expected_revision != current_revision:
+                self._entries = entries
+                raise WorkspaceContextConflict(workspace_id, expected_revision, current_revision)
+            if context is None:
+                if current is None:
+                    self._entries = entries
+                    return {"context": None, "revision": current_revision, "updatedAt": None}
+                entries.pop(workspace_id, None)
+                self._write(entries)
+                self._entries = entries
+                return {"context": None, "revision": current_revision + 1, "updatedAt": None}
+            next_entry = {
+                "context": deepcopy(context),
+                "revision": current_revision + 1,
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+            entries[workspace_id] = next_entry
+            self._write(entries)
+            self._entries = entries
+            return deepcopy(next_entry)
+
+    def current_revision(self, workspace_id: str) -> int:
+        entry = self.get_entry(workspace_id)
+        return int(entry["revision"]) if entry is not None else 0
+
+    def delete(self, workspace_id: str, *, expected_revision: int | None = None) -> dict[str, Any]:
+        normalized = str(workspace_id or "").strip()
+        if not normalized:
+            return {"context": None, "revision": 0, "updatedAt": None}
+        return self._mutate(normalized, None, expected_revision=expected_revision)
 
 
-__all__ = ["MAX_CONTEXT_BYTES", "WorkspaceContextStore"]
+__all__ = [
+    "MAX_CONTEXT_BYTES",
+    "WorkspaceContextConflict",
+    "WorkspaceContextStore",
+]

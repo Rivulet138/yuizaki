@@ -16,6 +16,7 @@ USER_SIGNAL_KIND_SOURCE_MAP: dict[str, str] = {
     "support_request": "relationship",
     "comfort_event": "relationship",
     "explicit_memory": "profile",
+    "auto_fact": "profile",
 }
 
 EventWriteRule = dict[str, str | float]
@@ -35,7 +36,12 @@ EVENT_WRITE_RULES: dict[str, EventWriteRule] = {
     "trust_shift": {"source": "relationship", "default_importance": 0.85},
     "care_signal": {"source": "relationship", "default_importance": 0.85},
     "explicit_memory": {"source": "profile", "default_importance": 0.92},
+    "auto_fact": {"source": "profile", "default_importance": 0.78},
 }
+
+# Profile statements are user facts, not relationship events. They never feed
+# relationship milestones or the relationship prompt.
+PROFILE_FACT_EVENT_KINDS = frozenset({"explicit_memory", "auto_fact"})
 
 SENSITIVE_CATEGORIES = frozenset({
     "none",
@@ -211,18 +217,23 @@ def candidate_id(*, kind: str, source_id: str | None, turn_id: str | None, text:
 
 _EXPLICIT_MEMORY_PATTERNS = (
     re.compile(
-        r"(?:^|[\n。！？!?])\s*(?:请|帮我|麻烦)?记住\s*[:：]?\s*(?P<fact>.+)$",
-        re.DOTALL,
+        r"(?:^|[\n。！？!?])\s*(?:请|帮我|麻烦)?记住\s*[:：]?\s*(?P<fact>[^。！？!?\n]{2,300})",
     ),
     re.compile(
-        r"^\s*(?:please\s+)?remember(?:\s+that)?\s*[:：]?\s*(?P<fact>.+)$",
-        re.IGNORECASE | re.DOTALL,
+        r"^\s*(?:please\s+)?remember(?:\s+that)?\s*[:：]?\s*(?P<fact>[^.!?\n]{2,300})",
+        re.IGNORECASE,
     ),
+)
+# "记住要带伞" and "remember to call mom" are follow-up requests, not lasting
+# facts about the user; only fact-shaped payloads are stored.
+_EXPLICIT_MEMORY_REMINDER = re.compile(
+    r"^\s*(?:要|记得|to\b|you\s+(?:should|must)\b)",
+    re.IGNORECASE,
 )
 
 
 def extract_explicit_memory_fact(text: str) -> str | None:
-    """Return an explicit ``记住：...`` payload, not incidental mentions."""
+    """Return an explicit ``记住：...`` fact, not a reminder or a stray mention."""
     value = str(text or "").strip()
     if not value:
         return None
@@ -231,8 +242,66 @@ def extract_explicit_memory_fact(text: str) -> str | None:
         if match is None:
             continue
         fact = str(match.group("fact") or "").strip()
+        if fact and _EXPLICIT_MEMORY_REMINDER.search(fact):
+            return None
         if len(fact) >= 2:
-            return fact[:1000]
+            return fact[:300]
+    return None
+
+
+_AUTO_FACT_SENTENCE = re.compile(r"[^。！？!?\n]{2,200}")
+_AUTO_FACT_TRIGGERS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"我叫|我的名字是",
+        r"我住在|我来自|我老家在",
+        r"我的生日(?:是|在)",
+        r"我在[^。！？!?\n]{1,30}(?:工作|上班|上学|读书|实习)",
+        r"我养了|我有一只",
+        r"我对[^。！？!?\n]{1,20}过敏",
+        r"\bI live in\b",
+        r"\bI(?:'m| am) from\b",
+        r"\bmy birthday is\b",
+        r"\bI work (?:as|at)\b",
+        r"\bI(?:'m| am) allergic to\b",
+        r"\bI have a (?:cat|dog|pet|rabbit|hamster)\b",
+    )
+)
+_AUTO_FACT_QUESTION = re.compile(
+    r"[?？]"
+    r"|\b(?:do|does|did|are|is|can|could|would|will|should) (?:you|i)\b"
+    r"|要不要|是否|该不该|是不是|什么|哪里|哪儿|怎么|为什么|多少|吗|呢"
+    r"|考虑|打算|想要|我想",
+    re.IGNORECASE,
+)
+
+
+def extract_auto_fact(text: str) -> str | None:
+    """Return one high-precision self-disclosure sentence, or ``None``.
+
+    Ordinary conversation is much noisier than an explicit "记住" request, so
+    this only keeps complete first-person statements that match a narrow
+    identity/location/occupation/pet/allergy pattern. Everything else stays
+    out of long-term memory.
+    """
+    value = str(text or "").strip()
+    if not value or len(value) > 2000:
+        return None
+    for match in _AUTO_FACT_SENTENCE.finditer(value):
+        sentence = match.group(0).strip()
+        if len(sentence) < 4 or _AUTO_FACT_QUESTION.search(sentence):
+            continue
+        for trigger in _AUTO_FACT_TRIGGERS:
+            found = trigger.search(sentence)
+            if found is None:
+                continue
+            # Keep the clause that starts at the trigger so a lead-in like
+            # "顺便说一下，" is not stored as part of the fact.
+            fact = sentence[found.start():].strip()
+            if len(fact) < 4 or _AUTO_FACT_QUESTION.search(fact):
+                # "我叫什么来着" / "我在考虑要不要辞掉工作" are not facts.
+                continue
+            return fact[:200]
     return None
 
 
@@ -240,6 +309,8 @@ def classify_user_signal_kind(text: str) -> tuple[str | None, str | None]:
     lowered = (text or "").lower()
     if extract_explicit_memory_fact(text) is not None:
         return "explicit_memory", USER_SIGNAL_KIND_SOURCE_MAP["explicit_memory"]
+    if extract_auto_fact(text) is not None:
+        return "auto_fact", USER_SIGNAL_KIND_SOURCE_MAP["auto_fact"]
     if any(token in lowered for token in ["谢谢", "thank", "thanks", "辛苦", "多亏你"]):
         return "gratitude", USER_SIGNAL_KIND_SOURCE_MAP["gratitude"]
     if any(token in lowered for token in ["我喜欢", "我更喜欢", "prefer", "更偏好", "下次请"]):
@@ -260,13 +331,18 @@ def build_user_signal_event(
     kind, source = classify_user_signal_kind(text)
     if not kind or not source:
         return None
-    if kind == "explicit_memory":
-        fact = extract_explicit_memory_fact(text)
-        if fact is None:
+    if kind in PROFILE_FACT_EVENT_KINDS:
+        if kind == "explicit_memory":
+            fact = extract_explicit_memory_fact(text)
+            fact_text = f"用户明确要求记住：{fact}" if fact else None
+        else:
+            fact = extract_auto_fact(text)
+            fact_text = f"用户陈述的自身事实：{fact}" if fact else None
+        if fact is None or fact_text is None:
             return None
         return {
             "kind": kind,
-            "text": f"用户明确要求记住：{fact}",
+            "text": fact_text,
             "type": "fact",
             "layer": "profile",
             "importance": float(cast(float, EVENT_WRITE_RULES[kind]["default_importance"])),
@@ -326,6 +402,29 @@ def build_task_completed_event(*, task_name: str, task_id: str, task_mode: str |
     }
 
 
+def _redact_tool_evidence(value: Any, *, depth: int = 0) -> Any:
+    """Keep review provenance useful without persisting raw secrets/arguments."""
+    if depth > 2:
+        return "[truncated]"
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        secret_tokens = ("key", "token", "secret", "password", "credential", "authorization")
+        for raw_key, raw_value in list(value.items())[:32]:
+            key = str(raw_key)
+            if any(token in key.lower() for token in secret_tokens):
+                result[key] = "[redacted]"
+            else:
+                result[key] = _redact_tool_evidence(raw_value, depth=depth + 1)
+        return result
+    if isinstance(value, (list, tuple)):
+        return [_redact_tool_evidence(item, depth=depth + 1) for item in list(value)[:32]]
+    if isinstance(value, str):
+        return value[:500]
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return str(value)[:500]
+
+
 def build_tool_success_event(
     *,
     tool_name: str,
@@ -342,12 +441,13 @@ def build_tool_success_event(
 ) -> dict[str, Any]:
     normalized_tool_source = str(tool_source or "builtin").strip().lower()
     source_kind = classify_tool_source_kind(tool_name, normalized_tool_source)
+    safe_evidence = _redact_tool_evidence(args)
     return {
-        "text": text,
+        "text": text[:2000],
         "kind": "tool_success",
         "tool_name": tool_name,
         "tool_source": normalized_tool_source,
-        "args": args,
+        "args": {"summary": "redacted; see evidence"},
         "importance": importance,
         "metadata": {
             "source": cast(str, EVENT_WRITE_RULES["tool_success"]["source"]),
@@ -359,7 +459,7 @@ def build_tool_success_event(
                 source_kind=source_kind,
                 source_id=tool_name,
                 turn_id=turn_id,
-                evidence=args,
+                evidence=safe_evidence,
                 sensitive_category=sensitivity,
                 trust_level=trust_level,
                 allow_low_risk_admission=allow_low_risk_admission,
@@ -414,12 +514,12 @@ def normalize_relationship_memory_payload(
         tool_name = str(payload.get("tool_name") or "")
         text = f"結崎关系事件：kind={event_kind}" + (f", tool={tool_name}" if tool_name else "")
 
-    if event_kind == "explicit_memory":
+    if event_kind in PROFILE_FACT_EVENT_KINDS:
         # A user fact is not a relationship event. Keeping it out of
         # relationship_state prevents reviewed facts from feeding milestone
         # counts, relationship stage and relationship-history prompts.
         relationship_event: dict[str, Any] = {}
-        event_type = "explicit_memory"
+        event_type = event_kind
     else:
         existing_relationship_event = metadata_payload.get("relationship_event")
         relationship_event = (

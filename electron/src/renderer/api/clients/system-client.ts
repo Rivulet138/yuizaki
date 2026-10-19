@@ -7,6 +7,7 @@ import type {
   PlatformCapabilitySnapshot,
   VoiceDiagnosticsSnapshot,
   ConnectorDeliverySnapshot,
+  ConnectorDeliveryItem,
   ConnectorAccountSnapshot,
   MessageConnectorConfigSnapshot,
   MessageConnectorConfigUpdate,

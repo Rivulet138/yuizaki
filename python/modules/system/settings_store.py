@@ -74,6 +74,15 @@ def _scrub_sensitive_settings(value: Any) -> Any:
     return result
 
 
+def scrub_sensitive_settings(value: Any) -> Any:
+    """Return a copy with provider credential values replaced by an empty string.
+
+    Snapshots that survive a restart must never carry vault-sourced secrets;
+    rollback restores the current secrets afterwards.
+    """
+    return _scrub_sensitive_settings(value)
+
+
 class SettingsStore:
     """Persistent settings storage using JSON."""
 

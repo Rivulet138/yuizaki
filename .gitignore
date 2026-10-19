@@ -97,4 +97,6 @@ electron/.vite/
 *.tsbuildinfo
 /YuizakiLauncher.exe
 /YuizakiLauncher
+/tools/yuizaki-launcher/yuizaki-launcher
+/tools/yuizaki-launcher/yuizaki-launcher.exe
 /release/

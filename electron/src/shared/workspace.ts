@@ -96,6 +96,8 @@ export interface WorkspaceRecord {
   createdAt: string
   updatedAt: string
   context: WorkspaceContext
+  /** Server-side context revision last observed; used for conflict detection. */
+  contextRevision?: number
 }
 
 export interface WorkspaceStatePayload {

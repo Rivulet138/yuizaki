@@ -27,13 +27,14 @@
     "install:runtime": "node -e \"require('electron')\"",
     "start": "node scripts/run-electron.mjs",
     "start:check": "node scripts/run-electron.mjs --check",
-    "type-check": "tsc --noEmit",
+    "type-check": "tsc --noEmit && npm run type-check:renderer",
     "lint": "eslint src",
     "test:unit": "vitest run --root .",
     "format": "prettier --write \"src/**/*.{ts,tsx,vue,js,json}\"",
     "package:win": "npm run prepare:launcher:win && npm run prepare:runtime && npm run build && electron-builder --win nsis",
     "package:linux": "npm run prepare:launcher:linux && npm run prepare:runtime && npm run build && electron-builder --linux AppImage deb",
-    "package": "npm run prepare:launcher && npm run prepare:runtime && npm run build && electron-builder"
+    "package": "npm run prepare:launcher && npm run prepare:runtime && npm run build && electron-builder",
+    "type-check:renderer": "node scripts/check-renderer-types.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
@@ -71,6 +72,7 @@
     "vite": "^8.3.4",
     "vitest": "^5.0.3",
     "vue-eslint-parser": "^10.4.1",
+    "vue-tsc": "^3.3.13",
     "wait-on": "^9.0.10"
   },
   "overrides": {
