@@ -456,23 +456,36 @@ class SettingsAPI:
     async def _commit_settings_locked(self, next_settings: dict[str, object], runtime_updates: dict[str, object]) -> RuntimeApplyResult:
         async with self._store_lock:
             previous_settings = await asyncio.to_thread(self._validated_settings_dump)
+            # Persist the undo snapshot before the change it protects. A crash
+            # between the two writes then leaves a redundant snapshot (a no-op
+            # rollback) instead of an unprotected settings change that can no
+            # longer be rolled back after a restart.
+            await asyncio.to_thread(self._settings_history.append, previous_settings)
             try:
                 await asyncio.to_thread(self._replace_and_save_settings, next_settings)
             except Exception:
                 await asyncio.to_thread(self.settings_store.replace, previous_settings)
+                await self._discard_pending_snapshot()
                 raise
         effective_runtime_updates = _changed_runtime_updates(previous_settings, runtime_updates)
         previous_dynamic = deepcopy(self.dynamic_config.config)
         try:
             _ = await self.dynamic_config.update_batch(runtime_updates)
             runtime_result = await self._apply_runtime(effective_runtime_updates)
-            await asyncio.to_thread(self._settings_history.append, previous_settings)
         except Exception:
             async with self._store_lock:
                 await asyncio.to_thread(self._replace_and_save_settings, previous_settings)
             self.dynamic_config.config = previous_dynamic
+            await self._discard_pending_snapshot()
             raise
         return runtime_result
+
+    async def _discard_pending_snapshot(self) -> None:
+        """Drop the snapshot appended for a commit that did not take effect."""
+        try:
+            await asyncio.to_thread(self._settings_history.pop, 1)
+        except Exception as exc:  # noqa: BLE001 - must not mask the original failure
+            logger.warning("Could not discard pending settings snapshot: %s", exc)
 
     def set_client_providers(self, llm_provider: ClientProvider, tts_provider: ClientProvider) -> None:
         self.llm_client_provider = llm_provider

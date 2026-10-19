@@ -99,3 +99,51 @@ async def test_clear_history_also_clears_persisted_rollback_entries(tmp_path) ->
     with pytest.raises(HTTPException) as error:
         await restarted.rollback_changes(1)
     assert error.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_snapshot_is_persisted_before_settings_are_written(tmp_path) -> None:
+    settings_path = tmp_path / "settings.json"
+    history_path = tmp_path / "settings_history.json"
+    api = SettingsAPI(
+        SettingsStore(settings_path),
+        DynamicConfigManager(),
+        settings_history_store=SettingsHistoryStore(history_path),
+    )
+
+    observed: list[int] = []
+    original = api._replace_and_save_settings
+
+    def _observe(next_settings: dict[str, object]) -> None:
+        # The undo snapshot must already be on disk when the change is written,
+        # otherwise a crash in between loses the ability to roll back.
+        observed.append(len(SettingsHistoryStore(history_path)))
+        original(next_settings)
+
+    api._replace_and_save_settings = _observe  # type: ignore[method-assign]
+
+    await api.set_setting("llm.model", "first-model")
+
+    assert observed == [1]
+
+
+@pytest.mark.asyncio
+async def test_failed_settings_write_discards_the_pending_snapshot(tmp_path) -> None:
+    settings_path = tmp_path / "settings.json"
+    history_path = tmp_path / "settings_history.json"
+    api = SettingsAPI(
+        SettingsStore(settings_path),
+        DynamicConfigManager(),
+        settings_history_store=SettingsHistoryStore(history_path),
+    )
+
+    def _fail(_next_settings: dict[str, object]) -> None:
+        raise RuntimeError("disk full")
+
+    api._replace_and_save_settings = _fail  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="disk full"):
+        await api.set_setting("llm.model", "first-model")
+
+    assert len(SettingsHistoryStore(history_path)) == 0
+    assert SettingsStore(settings_path).get("llm.model") != "first-model"

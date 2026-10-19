@@ -3,8 +3,10 @@
 import json
 import logging
 import os
+import tempfile
+import time
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -83,6 +85,58 @@ def scrub_sensitive_settings(value: Any) -> Any:
     return _scrub_sensitive_settings(value)
 
 
+def _fsync_directory(directory: Path) -> None:
+    """Best-effort durability for the rename itself (POSIX only)."""
+    if os.name == "nt":
+        return
+    try:
+        descriptor = os.open(str(directory), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
+
+
+def _atomic_write_text(target: Path, payload: str) -> None:
+    """Replace ``target`` with ``payload`` without exposing a partial file.
+
+    Settings used to be truncated in place, so a crash or a full disk mid-write
+    left an unparsable file that silently reset every preference on next start.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=str(target.parent),
+        prefix=f".{target.name}.",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        for attempt in range(5):
+            try:
+                os.replace(temporary_name, target)
+                break
+            except PermissionError:
+                # Windows denies the replace while another handle briefly holds
+                # the target; retry instead of losing the write.
+                if attempt == 4:
+                    raise
+                time.sleep(0.02)
+    except BaseException:
+        try:
+            os.unlink(temporary_name)
+        except OSError:
+            pass
+        raise
+    _fsync_directory(target.parent)
+
+
 class SettingsStore:
     """Persistent settings storage using JSON."""
 
@@ -108,15 +162,23 @@ class SettingsStore:
         return target
 
     def _load_settings(self) -> Dict[str, Any]:
-        """Load settings from file."""
+        """Load settings from file, quarantining an unparsable payload."""
         settings: Dict[str, Any] = {}
         if self.storage_path.exists():
             try:
                 with open(self.storage_path, "r", encoding="utf-8") as f:
-                    settings = json.load(f)
+                    loaded = json.load(f)
+                if not isinstance(loaded, dict):
+                    raise ValueError("settings payload must be a JSON object")
+                settings = loaded
                 logger.info(f"Loaded settings from {self.storage_path}")
-            except Exception as e:
-                logger.warning(f"Failed to load settings: {e}. Using defaults.")
+            except OSError as e:
+                logger.warning(f"Failed to read settings: {e}. Using defaults.")
+                settings = {}
+            except (ValueError, RecursionError) as e:
+                # Keep the damaged file instead of letting the next save erase
+                # whatever the user had configured.
+                self._quarantine_corrupt_settings(e)
                 settings = {}
         for field_path, secret in _credential_environment().items():
             _set_path(settings, field_path, secret)
@@ -213,12 +275,25 @@ class SettingsStore:
             return True
         return False
 
+    def _quarantine_corrupt_settings(self, error: Exception) -> None:
+        """Move an unreadable settings file aside so it is not overwritten."""
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        backup = self.storage_path.with_name(f"{self.storage_path.name}.corrupt-{timestamp}")
+        try:
+            os.replace(self.storage_path, backup)
+            logger.warning("Quarantined unreadable settings file at %s: %s", backup, error)
+        except OSError as exc:
+            logger.warning(
+                "Could not quarantine unreadable settings file at %s: %s",
+                self.storage_path,
+                exc,
+            )
+
     def save(self) -> None:
-        """Save settings to file."""
+        """Save settings to file atomically."""
         try:
             persisted = _scrub_sensitive_settings(self.settings)
-            with open(self.storage_path, "w", encoding="utf-8") as f:
-                json.dump(persisted, f, indent=2, ensure_ascii=True)
+            _atomic_write_text(self.storage_path, json.dumps(persisted, indent=2, ensure_ascii=True))
             logger.info(f"Saved settings to {self.storage_path}")
         except Exception as e:
             logger.error(f"Failed to save settings: {e}")
