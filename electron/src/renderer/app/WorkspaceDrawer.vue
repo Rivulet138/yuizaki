@@ -159,13 +159,56 @@ const toolSummary = computed(() => {
 </script>
 
 <style scoped>
-.workspace-drawer :deep(.el-drawer__header) {
+:global(.el-drawer.workspace-drawer),
+:global(.el-drawer.workspace-drawer .el-drawer__header),
+:global(.el-drawer.workspace-drawer .el-drawer__body) {
+  background: #fff !important;
+  color: #000 !important;
+}
+
+:global(.el-drawer.workspace-drawer .el-drawer__header),
+:global(.el-drawer.workspace-drawer .el-drawer__body),
+:global(.el-drawer.workspace-drawer .el-drawer__body *) {
+  color: #000;
+}
+
+:global(.el-drawer.workspace-drawer .el-input__wrapper),
+:global(.el-drawer.workspace-drawer .el-textarea__inner),
+:global(.el-drawer.workspace-drawer .el-select__wrapper) {
+  background: #fff !important;
+  color: #000 !important;
+}
+
+/* The drawer is teleported to body, so the light defaults above must be
+   explicitly reversed for the global dark theme. Keep the whole selector
+   inside :global(); otherwise Vue scoped CSS emits a bare :root rule. */
+:global(:root[data-theme='dark'] .el-drawer.workspace-drawer),
+:global(:root[data-theme='dark'] .el-drawer.workspace-drawer .el-drawer__header),
+:global(:root[data-theme='dark'] .el-drawer.workspace-drawer .el-drawer__body) {
+  background: #0f172a !important;
+  color: #e5e7eb !important;
+}
+
+:global(:root[data-theme='dark'] .el-drawer.workspace-drawer .el-drawer__header),
+:global(:root[data-theme='dark'] .el-drawer.workspace-drawer .el-drawer__body),
+:global(:root[data-theme='dark'] .el-drawer.workspace-drawer .el-drawer__body *) {
+  color: #e5e7eb;
+}
+
+:global(:root[data-theme='dark'] .el-drawer.workspace-drawer .el-input__wrapper),
+:global(:root[data-theme='dark'] .el-drawer.workspace-drawer .el-textarea__inner),
+:global(:root[data-theme='dark'] .el-drawer.workspace-drawer .el-select__wrapper) {
+  background: #111827 !important;
+  color: #e5e7eb !important;
+}
+
+:global(.el-drawer.workspace-drawer .el-drawer__header) {
   margin-bottom: 0;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--yui-border);
 }
 
-.workspace-drawer :deep(.el-drawer__body) {
+:global(.el-drawer.workspace-drawer .el-drawer__body) {
   padding: 20px;
 }
 

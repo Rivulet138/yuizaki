@@ -37,10 +37,7 @@
             :key="compactStage ? 'compact' : 'desktop'"
             @zoom-change="modelZoom = $event"
           />
-        </section>
-
-        <aside v-if="chatOpen" class="stage-window stage-chat-window">
-          <div class="stage-window-zoom-controls" role="group" :aria-label="t('chat.stage.modelZoom')">
+          <div class="stage-display-zoom-controls" role="group" :aria-label="t('chat.stage.modelZoom')">
             <button
               class="stage-window-zoom-button"
               type="button"
@@ -71,6 +68,9 @@
               <el-icon><ZoomIn /></el-icon>
             </button>
           </div>
+        </section>
+
+        <aside v-if="chatOpen" class="stage-window stage-chat-window">
           <header class="stage-window-header">
             <div>
               <strong>{{ t('chat.title') }}</strong>
@@ -194,7 +194,7 @@ onBeforeUnmount(() => {
   --stage-window-surface: rgba(255, 255, 255, .92);
 }
 
-:global(:root[data-theme='dark']) .browser-stage {
+:global(:root[data-theme='dark'] .browser-stage) {
   --stage-border: rgba(173, 207, 233, .48);
   --stage-chrome-surface: rgba(15, 23, 42, .68);
   --stage-frame: rgba(30, 41, 59, .92);
@@ -288,7 +288,7 @@ onBeforeUnmount(() => {
 .stage-window-header span { color: var(--yui-muted); font-size: 10px; }
 .stage-window-body { position: relative; z-index: 1; flex: 1; min-height: 0; overflow: hidden; background: var(--yui-chat-surface); }
 .stage-route-component { width: 100%; height: 100%; }
-.stage-window-zoom-controls { position: absolute; top: 78px; left: 14px; z-index: 4; display: inline-flex; align-items: center; gap: 6px; padding: 5px; border: 1px solid rgba(255, 255, 255, .72); border-radius: 10px; background: rgba(255, 255, 255, .62); box-shadow: 0 8px 18px rgba(15, 23, 42, .14); backdrop-filter: blur(5px); }
+.stage-display-zoom-controls { position: absolute; top: 14px; left: 14px; z-index: 4; display: inline-flex; align-items: center; gap: 6px; padding: 5px; border: 1px solid rgba(255, 255, 255, .72); border-radius: 10px; background: rgba(255, 255, 255, .62); box-shadow: 0 8px 18px rgba(15, 23, 42, .14); backdrop-filter: blur(5px); }
 .stage-window-zoom-button { display: inline-grid; width: 30px; height: 30px; padding: 0; place-items: center; border: 1px solid rgba(148, 163, 184, .42); border-radius: 7px; color: #334155; background: rgba(255, 255, 255, .72); cursor: pointer; transition: background .16s ease, border-color .16s ease, color .16s ease, opacity .16s ease; }
 .stage-window-zoom-button:hover:not(:disabled) { border-color: rgba(71, 85, 105, .58); color: #0f172a; background: #fff; }
 .stage-window-zoom-button:focus-visible { outline: 2px solid rgba(59, 130, 246, .72); outline-offset: 2px; }
@@ -307,27 +307,27 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, .2);
 }
 
-:global(:root[data-theme='dark']) .stage-window-header,
-:global(:root[data-theme='dark']) .stage-window-body :deep(.session-rail-pane) {
+:global(:root[data-theme='dark'] .stage-window-header),
+:global(:root[data-theme='dark'] .stage-window-body .session-rail-pane) {
   background: rgba(15, 23, 42, .76);
 }
 
-:global(:root[data-theme='dark']) .stage-window {
+:global(:root[data-theme='dark'] .stage-window) {
   background: var(--stage-window-surface);
 }
 
-:global(:root[data-theme='dark']) .stage-window-zoom-controls {
+:global(:root[data-theme='dark'] .stage-display-zoom-controls) {
   border-color: rgba(148, 163, 184, .42);
   background: rgba(15, 23, 42, .72);
 }
 
-:global(:root[data-theme='dark']) .stage-window-zoom-button {
+:global(:root[data-theme='dark'] .stage-window-zoom-button) {
   border-color: rgba(148, 163, 184, .44);
   color: #dbeafe;
   background: rgba(30, 41, 59, .82);
 }
 
-:global(:root[data-theme='dark']) .stage-window-body { background: var(--yui-chat-surface); }
+:global(:root[data-theme='dark'] .stage-window-body) { background: var(--yui-chat-surface); }
 
 @media (max-width: 860px) {
   .stage-sidebar { flex-basis: 68px; width: 68px; }

@@ -20,6 +20,8 @@ LOCK_MATRIX = {
     "requirements-lock-linux.txt": "requirements.txt",
     "requirements-dev-lock-windows.txt": "requirements-dev.txt",
     "requirements-dev-lock-linux.txt": "requirements-dev.txt",
+    "requirements-test-lock-windows.txt": "requirements-test.txt",
+    "requirements-test-lock-linux.txt": "requirements-test.txt",
 }
 LOCKS = tuple(ROOT / name for name in LOCK_MATRIX)
 _NAME_RE = re.compile(r"^([A-Za-z0-9_.-]+)(?:\[[^]]+\])?\s*(.*)$")

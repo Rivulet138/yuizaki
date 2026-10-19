@@ -15,6 +15,13 @@ if (!/MocVersion_53/.test(cubismCore) || !/getRenderOrders/.test(cubismCore)) {
 const mainEntryBytes = readdirSync(assetDir)
   .filter((name) => /^main-[^~].*\.js$/i.test(name))
   .reduce((total, name) => total + statSync(resolve(assetDir, name)).size, 0)
+// Keep the control-panel entry bounded so it cannot silently absorb a large
+// dependency. The current entry is ~479 KiB; 512 KiB leaves room for small UI
+// changes while still failing on a meaningful dependency regression.
+const mainEntryBudgetBytes = 512 * 1024
+if (mainEntryBytes > mainEntryBudgetBytes) {
+  throw new Error(`Control panel main entry exceeds ${mainEntryBudgetBytes} bytes: ${mainEntryBytes}`)
+}
 
 const panelHeavyRuntimePattern = /modulepreload[^>]+(?:live2d|pixi|three)-vendor/i
 if (panelHeavyRuntimePattern.test(panelHtml)) {
@@ -27,13 +34,22 @@ if (!/modulepreload[^>]+live2d-vendor/i.test(petHtml)) {
 const iconChunkBytes = readdirSync(assetDir)
   .filter((name) => /^element-icons~main.*\.js$/i.test(name))
   .reduce((total, name) => total + statSync(resolve(assetDir, name)).size, 0)
+if (iconChunkBytes > 80 * 1024) {
+  throw new Error(`Control panel icon chunks exceed ${80 * 1024} bytes: ${iconChunkBytes}`)
+}
 
 const elementPlusChunkBytes = readdirSync(assetDir)
   .filter((name) => /^element-plus~main.*\.js$/i.test(name))
   .reduce((total, name) => total + statSync(resolve(assetDir, name)).size, 0)
+if (elementPlusChunkBytes > 400 * 1024) {
+  throw new Error(`Control panel Element Plus chunks exceed ${400 * 1024} bytes: ${elementPlusChunkBytes}`)
+}
 
 const elementPlusCssBytes = readdirSync(assetDir)
   .filter((name) => /^element-plus~main.*\.css$/i.test(name))
   .reduce((total, name) => total + statSync(resolve(assetDir, name)).size, 0)
+if (elementPlusCssBytes > 220 * 1024) {
+  throw new Error(`Control panel Element Plus CSS exceeds ${220 * 1024} bytes: ${elementPlusCssBytes}`)
+}
 
 console.log(`Renderer bundle audit passed: main ${mainEntryBytes} bytes; icon ${iconChunkBytes} bytes; Element Plus JS ${elementPlusChunkBytes} bytes; CSS ${elementPlusCssBytes} bytes`)

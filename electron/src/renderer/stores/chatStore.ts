@@ -997,7 +997,11 @@ export const useChatStore = defineStore('chat', () => {
       })
       window.dispatchEvent(
         new CustomEvent('pet:llm-control', {
-          detail: { ...payload, ...controlEnvelope },
+          detail: {
+            ...payload,
+            ...controlEnvelope,
+            petLinkEnabled: isPetLinkEnabled(),
+          },
         }),
       )
     })

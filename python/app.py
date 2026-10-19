@@ -29,6 +29,7 @@ from modules.system import (
     SlidingWindowRateLimiter,
 )
 from modules.system.settings_api import SettingsAPI
+from modules.system.workspace_context_store import WorkspaceContextStore
 import modules.system.runtime_config as system_runtime_config
 from modules.system.active_workspace_state import ActiveWorkspaceState
 from modules.system.active_application import read_active_application
@@ -657,11 +658,13 @@ router_registry.include(
     )
 )
 router_registry.include(create_database_router(lambda: db_repo, get_active_workspace_id=_get_active_workspace_id), name="database")
+_workspace_context_store = WorkspaceContextStore()
 router_registry.include(
     create_workspace_router(
         lambda: db_repo,
         lambda: sio_server.runtime.mcp_manager if sio_server and sio_server.runtime else None,
         get_active_workspace_id=_get_active_workspace_id,
+        context_store=_workspace_context_store,
     )
 )
 router_registry.include(cast(Callable[..., Any], create_companion_router)(lambda: db_repo, relationship_history_handler=_companion_relationship_history), name="companion")

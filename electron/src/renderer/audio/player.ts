@@ -522,7 +522,13 @@ export class AudioPlayer {
     )
     if (frameIndex !== this.lastPcmLipSyncFrame) {
       this.lastPcmLipSyncFrame = frameIndex
-      window.petApi?.pet?.setTtsLipSync?.(this.pcmLipSyncEnvelope.levels[frameIndex] ?? 0, true)
+      const level = this.pcmLipSyncEnvelope.levels[frameIndex] ?? 0
+      window.petApi?.pet?.setTtsLipSync?.(level, true)
+      // The browser stage has no preload bridge; drive it from the same
+      // audioElement.currentTime clock used for the Electron pet window.
+      window.dispatchEvent(new CustomEvent('pet:lipsync-level', {
+        detail: { level, active: true, source: 'tts-pcm' },
+      }))
     }
     this.reportPcmViseme(this.audioElement.currentTime * 1_000)
   }
@@ -539,8 +545,14 @@ export class AudioPlayer {
     this.lastPcmVisemeKey = null
     if (reportInactive) {
       window.petApi?.pet?.setTtsLipSync?.(0, false)
+      window.dispatchEvent(new CustomEvent('pet:lipsync-level', {
+        detail: { level: 0, active: false, source: 'tts-pcm' },
+      }))
       if (hadVisemeTimeline) {
         window.petApi?.pet?.setTtsViseme?.('sil', 0, false)
+        window.dispatchEvent(new CustomEvent('pet:lipsync-viseme', {
+          detail: { viseme: 'sil', weight: 0, active: false, source: 'tts-pcm' },
+        }))
       }
     }
   }
@@ -560,6 +572,9 @@ export class AudioPlayer {
     if (key === this.lastPcmVisemeKey) return
     this.lastPcmVisemeKey = key
     window.petApi?.pet?.setTtsViseme?.(viseme, weight, true)
+    window.dispatchEvent(new CustomEvent('pet:lipsync-viseme', {
+      detail: { viseme, weight, active: true, source: 'tts-pcm' },
+    }))
   }
 }
 

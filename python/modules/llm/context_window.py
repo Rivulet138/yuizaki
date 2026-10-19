@@ -64,17 +64,12 @@ def build_layered_context(
     system_messages = [m for m in normalized if m.get("role") == "system"]
     non_system = [m for m in normalized if m.get("role") != "system"]
 
+    # Keep dialogue in its original order. Moving messages that happen to
+    # mention "长期记忆" or memory markers ahead of the latest user turn used to
+    # make the sliding window select an older user message as the current
+    # request. Memory evidence is already injected as explicit system blocks.
     rag_messages: list[ChatMessage] = []
-    recent_messages: list[ChatMessage] = []
-
-    for m in non_system:
-        content = message_content_to_text(m.get("content", ""))
-        if m.get("role") == "system":
-            continue
-        if "长期记忆" in content or "[fact]" in content or "[preference]" in content or "[event]" in content:
-            rag_messages.append(m)
-        else:
-            recent_messages.append(m)
+    recent_messages = non_system
 
     summary_message: ChatMessage | None = None
     summary_text = (summary_text or "").strip()
@@ -206,54 +201,107 @@ def apply_sliding_window(
     reserved_output_tokens: int,
     estimator: TokenEstimator | None = None,
 ) -> tuple[list[ChatMessage], TruncationStats]:
-    """Keep system messages + latest non-system turns within input budget."""
+    """Keep system messages and the latest user turn within input budget.
+
+    The latest user message is the primary request and must never be dropped in
+    favour of system context. Authority-ordered system blocks are therefore
+    trimmed before the latest user turn, and older dialogue is added only with
+    the budget that remains.
+    """
     est = estimator or TokenEstimator()
     normalized = normalize_messages(messages)
 
     input_budget = max(256, int(max_context_tokens) - int(reserved_output_tokens))
     system_msgs = [m for m in normalized if m.get("role") == "system"]
     dialog_msgs = [m for m in normalized if m.get("role") != "system"]
+    latest_user_original = next(
+        (m for m in reversed(dialog_msgs) if m.get("role") == "user"),
+        None,
+    )
 
+    # Keep a small core-policy reserve even when the latest user message is
+    # itself oversized. The user turn remains the priority, but a huge paste
+    # should not silently erase every system constraint.
+    min_system_tokens = min(256, max(0, input_budget // 2)) if system_msgs else 0
+    reserved_user_tokens = 0
+    if latest_user_original is not None:
+        reserved_user_tokens = min(
+            est.count_message(latest_user_original),
+            max(0, input_budget - min_system_tokens),
+        )
+
+    # The first system blocks carry the immutable core policy. Later blocks are
+    # optional context and are the first thing to drop when the prompt is too
+    # large for the model budget.
+    system_budget = max(0, input_budget - reserved_user_tokens)
+    kept_system: list[ChatMessage] = []
+    used_system_tokens = 0
+    for message in system_msgs:
+        message_tokens = est.count_message(message)
+        if used_system_tokens + message_tokens <= system_budget:
+            kept_system.append(message)
+            used_system_tokens += message_tokens
+            continue
+        if not kept_system and system_budget > 0:
+            truncated = truncate_message_to_budget(message, system_budget, est)
+            if message_content_to_text(truncated.get("content", "")).strip():
+                kept_system.append(truncated)
+                used_system_tokens = est.count_message(truncated)
+        break
+
+    remaining = max(0, input_budget - used_system_tokens)
     selected_dialog: list[ChatMessage] = []
-    running_tokens = est.count_messages(system_msgs)
+    latest_user = latest_user_original
+    if latest_user is not None:
+        if est.count_message(latest_user) > remaining:
+            latest_user = truncate_message_to_budget(latest_user, max(1, remaining), est)
+        selected_dialog.append(latest_user)
+        remaining = max(0, remaining - est.count_message(latest_user))
 
-    # Sliding window from the latest message backwards.
-    for m in reversed(dialog_msgs):
-        t = est.count_message(m)
-        if running_tokens + t > input_budget and selected_dialog:
+    # Keep only messages that precede the latest user turn; anything after it
+    # belongs to an older/aborted continuation and must not be reordered ahead
+    # of the current request.
+    if latest_user_original is not None:
+        latest_index = next(
+            index for index, message in enumerate(dialog_msgs)
+            if message is latest_user_original
+        )
+        older_dialog = dialog_msgs[:latest_index]
+    else:
+        older_dialog = dialog_msgs
+
+    selected_older_reversed: list[ChatMessage] = []
+    for message in reversed(older_dialog):
+        message_tokens = est.count_message(message)
+        if message_tokens > remaining:
             break
-        if running_tokens + t > input_budget and not selected_dialog:
-            # Always keep at least the latest dialog message, even if the
-            # current system prompt set pushes us temporarily over budget.
-            # We will trim system prompts in the next step if needed.
-            selected_dialog.append(m)
-            running_tokens += t
-            break
-        if running_tokens + t <= input_budget:
-            selected_dialog.append(m)
-            running_tokens += t
-
-    selected_dialog.reverse()
-    selected = system_msgs + selected_dialog
-
-    # Prompt assembly is authority ordered: the earliest system blocks contain
-    # the immutable core policy, while later blocks are lower-authority context.
-    if est.count_messages(selected) > input_budget and system_msgs:
-        kept_system: list[ChatMessage] = []
-        running = 0
-        for m in system_msgs:
-            t = est.count_message(m)
-            if running + t > input_budget and kept_system:
-                break
-            if running + t <= input_budget or not kept_system:
-                kept_system.append(m)
-                running += t
-        selected = kept_system
+        selected_older_reversed.append(message)
+        remaining -= message_tokens
+    selected_older = list(reversed(selected_older_reversed))
+    selected = [*kept_system, *selected_older, *selected_dialog]
 
     final_tokens = est.count_messages(selected)
-
     if final_tokens > input_budget and selected:
-        selected[-1] = truncate_message_to_budget(selected[-1], input_budget, est)
+        # Prefer trimming dialogue over the authority-ordered system blocks.
+        # This branch only runs when a single message still exceeds the budget
+        # after system context has been reduced above.
+        target_index = next(
+            (
+                index
+                for index in range(len(selected) - 1, -1, -1)
+                if selected[index].get("role") != "system"
+            ),
+            len(selected) - 1,
+        )
+        other_tokens = est.count_messages(
+            selected[:target_index] + selected[target_index + 1:]
+        )
+        available = max(1, input_budget - other_tokens)
+        selected[target_index] = truncate_message_to_budget(
+            selected[target_index],
+            available,
+            est,
+        )
         final_tokens = est.count_messages(selected)
 
     dropped = max(0, len(normalized) - len(selected))

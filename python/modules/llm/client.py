@@ -641,8 +641,12 @@ async def fetch_available_models(base_url: str, api_key: str = "", timeout: floa
     endpoint = normalize_llm_base_url(base_url, provider)
     if not endpoint:
         raise ValueError("LLM Base URL is required")
+    # Validate the credential before constructing the HTTP client. Building a
+    # client can read proxy environment variables and raise an unrelated URL
+    # error, which previously masked the intended credential error.
+    headers = build_llm_auth_headers(api_key, provider)
     async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.get(llm_models_url(endpoint, provider), headers=build_llm_auth_headers(api_key, provider))
+        resp = await client.get(llm_models_url(endpoint, provider), headers=headers)
         resp.raise_for_status()
         return extract_model_ids(resp.json())
 

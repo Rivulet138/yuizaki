@@ -12,6 +12,7 @@ export interface WorkspaceApiRecord {
   tool_preset?: string | null
   memory_scope?: string | null
   mcp_preset_id?: string | null
+  context?: Record<string, unknown> | null
   created_at: string | null
   updated_at: string | null
 }
@@ -24,12 +25,13 @@ export type WorkspacePatchPayload = Partial<Pick<WorkspaceApiRecord,
   'default_model' |
   'system_prompt' |
   'tool_preset' |
-  'mcp_preset_id'
+  'mcp_preset_id' |
+  'context'
 >>
 
 export const workspaceClient = {
   list: async () => requestJson<{ workspaces: WorkspaceApiRecord[] }>(`${CONTROL_ORIGIN}/api/workspaces`),
-  create: async (payload: { id?: string; name: string; description?: string; companion_profile_id?: string }) =>
+  create: async (payload: { id?: string; name: string; description?: string; companion_profile_id?: string; context?: Record<string, unknown> }) =>
     requestJson<WorkspaceApiRecord>(`${CONTROL_ORIGIN}/api/workspaces`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

@@ -5,6 +5,7 @@ import asyncio
 from modules.agent.companion_events import CompanionJobEventLog
 from modules.agent.policy_engine import PolicyEngine
 from modules.agent.tool_executor import ToolExecutor
+from modules.agent.tool_loop import _bounded_tool_result_text
 from modules.agent.tool_registry import ToolDefinition, ToolRegistry
 from modules.agent.tool_result import ToolResultEnvelope
 
@@ -38,3 +39,10 @@ def test_state_changing_tool_without_probe_reports_unverified_status(tmp_path) -
     completed = [event for event in events if event["status"] == "completed"][-1]
     assert completed["data"]["verificationStatus"] == "unverified"
     assert completed["data"]["unknownEffect"] is False
+
+
+def test_tool_result_text_is_bounded_before_reinjection() -> None:
+    bounded = _bounded_tool_result_text("x" * 20_000)
+
+    assert len(bounded) < 20_000
+    assert bounded.endswith("…[tool result truncated]")

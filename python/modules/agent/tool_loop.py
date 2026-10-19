@@ -19,6 +19,14 @@ from .tool_registry import ToolDefinition, ToolRegistry, tool_may_change_state
 from .tool_result import is_known_success
 
 logger = logging.getLogger(__name__)
+_MAX_TOOL_RESULT_CHARS = 12_000
+
+
+def _bounded_tool_result_text(value: Any) -> str:
+    text = str(value or "")
+    if len(text) <= _MAX_TOOL_RESULT_CHARS:
+        return text
+    return text[:_MAX_TOOL_RESULT_CHARS] + "\n…[tool result truncated]"
 
 
 def _outcome_succeeded(outcome: Any) -> bool:
@@ -684,7 +692,7 @@ async def run_tool_loop(
                 "instruction_authority": "none",
                 "success": _outcome_succeeded(outcome),
                 "outcome": outcome.outcome,
-                "content": outcome.error or outcome.content,
+                "content": _bounded_tool_result_text(outcome.error or outcome.content),
             }, ensure_ascii=False)
             working_messages.append({
                 "role": "tool",

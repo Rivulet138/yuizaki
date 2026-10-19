@@ -1,0 +1,8 @@
+# Test-only dependencies. Install from python/:
+#   python -m pip install -r requirements-test.txt
+# CI and release gates use the platform-specific test lock files.
+-r requirements-core.txt
+
+pytest>=9.0,<10
+pytest-asyncio>=1.4,<2
+pytest-cov>=7,<8

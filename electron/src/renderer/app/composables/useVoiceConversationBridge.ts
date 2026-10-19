@@ -535,7 +535,12 @@ export function useVoiceConversationBridge() {
     realtimeEventBridge.listen('agent-result', ({ petControl, ...scope }) => {
       if (!isCurrentRealtimeScope(scope)) return
       if (!petControl || typeof petControl !== 'object') return
-      window.dispatchEvent(new CustomEvent('pet:llm-control', { detail: petControl }))
+      window.dispatchEvent(new CustomEvent('pet:llm-control', {
+        detail: {
+          ...petControl,
+          petLinkEnabled: chatStore.chatOptions.pet_link_enabled !== false,
+        },
+      }))
     })
     watch(
       () => [chatState.currentWorkspaceId, chatState.currentSessionId] as const,

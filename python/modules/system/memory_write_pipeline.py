@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import re
 from datetime import datetime
 from typing import Any, Callable, cast
-import hashlib
 
 from ..memory.routes import route_memory_write
 from ..memory.expiry import normalize_memory_expiry
@@ -14,6 +15,7 @@ USER_SIGNAL_KIND_SOURCE_MAP: dict[str, str] = {
     "preference_confirmed": "profile",
     "support_request": "relationship",
     "comfort_event": "relationship",
+    "explicit_memory": "profile",
 }
 
 EventWriteRule = dict[str, str | float]
@@ -32,6 +34,7 @@ EVENT_WRITE_RULES: dict[str, EventWriteRule] = {
     "mood_shift": {"source": "relationship", "default_importance": 0.85},
     "trust_shift": {"source": "relationship", "default_importance": 0.85},
     "care_signal": {"source": "relationship", "default_importance": 0.85},
+    "explicit_memory": {"source": "profile", "default_importance": 0.92},
 }
 
 SENSITIVE_CATEGORIES = frozenset({
@@ -206,8 +209,37 @@ def candidate_id(*, kind: str, source_id: str | None, turn_id: str | None, text:
     return "candidate_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:40]
 
 
+_EXPLICIT_MEMORY_PATTERNS = (
+    re.compile(
+        r"(?:^|[\n。！？!?])\s*(?:请|帮我|麻烦)?记住\s*[:：]?\s*(?P<fact>.+)$",
+        re.DOTALL,
+    ),
+    re.compile(
+        r"^\s*(?:please\s+)?remember(?:\s+that)?\s*[:：]?\s*(?P<fact>.+)$",
+        re.IGNORECASE | re.DOTALL,
+    ),
+)
+
+
+def extract_explicit_memory_fact(text: str) -> str | None:
+    """Return an explicit ``记住：...`` payload, not incidental mentions."""
+    value = str(text or "").strip()
+    if not value:
+        return None
+    for pattern in _EXPLICIT_MEMORY_PATTERNS:
+        match = pattern.search(value)
+        if match is None:
+            continue
+        fact = str(match.group("fact") or "").strip()
+        if len(fact) >= 2:
+            return fact[:1000]
+    return None
+
+
 def classify_user_signal_kind(text: str) -> tuple[str | None, str | None]:
     lowered = (text or "").lower()
+    if extract_explicit_memory_fact(text) is not None:
+        return "explicit_memory", USER_SIGNAL_KIND_SOURCE_MAP["explicit_memory"]
     if any(token in lowered for token in ["谢谢", "thank", "thanks", "辛苦", "多亏你"]):
         return "gratitude", USER_SIGNAL_KIND_SOURCE_MAP["gratitude"]
     if any(token in lowered for token in ["我喜欢", "我更喜欢", "prefer", "更偏好", "下次请"]):
@@ -228,6 +260,30 @@ def build_user_signal_event(
     kind, source = classify_user_signal_kind(text)
     if not kind or not source:
         return None
+    if kind == "explicit_memory":
+        fact = extract_explicit_memory_fact(text)
+        if fact is None:
+            return None
+        return {
+            "kind": kind,
+            "text": f"用户明确要求记住：{fact}",
+            "type": "fact",
+            "layer": "profile",
+            "importance": float(cast(float, EVENT_WRITE_RULES[kind]["default_importance"])),
+            "workspace_id": workspace_id,
+            "turn_id": turn_id,
+            "metadata": {
+                "source": source,
+                "workspace_id": workspace_id,
+                "memory_role": "user_fact",
+                **_candidate_provenance(
+                    kind=kind,
+                    source_id=None,
+                    turn_id=turn_id,
+                    evidence=text,
+                ),
+            },
+        }
     label_map = {
         "gratitude": "用户表达了感谢",
         "preference_confirmed": "用户表达了偏好",
@@ -358,16 +414,24 @@ def normalize_relationship_memory_payload(
         tool_name = str(payload.get("tool_name") or "")
         text = f"結崎关系事件：kind={event_kind}" + (f", tool={tool_name}" if tool_name else "")
 
-    existing_relationship_event = metadata_payload.get("relationship_event")
-    relationship_event = (
-        dict(existing_relationship_event)
-        if isinstance(existing_relationship_event, dict)
-        else {}
-    )
-    relationship_event.update({
-        "kind": event_kind,
-        **{k: v for k, v in payload.items() if k not in {"text", "type", "layer", "importance", "session_id", "workspace_id", "metadata"}},
-    })
+    if event_kind == "explicit_memory":
+        # A user fact is not a relationship event. Keeping it out of
+        # relationship_state prevents reviewed facts from feeding milestone
+        # counts, relationship stage and relationship-history prompts.
+        relationship_event: dict[str, Any] = {}
+        event_type = "explicit_memory"
+    else:
+        existing_relationship_event = metadata_payload.get("relationship_event")
+        relationship_event = (
+            dict(existing_relationship_event)
+            if isinstance(existing_relationship_event, dict)
+            else {}
+        )
+        relationship_event.update({
+            "kind": event_kind,
+            **{k: v for k, v in payload.items() if k not in {"text", "type", "layer", "importance", "session_id", "workspace_id", "metadata"}},
+        })
+        event_type = "relationship_state"
     metadata = normalize_memory_expiry({
         **routing["metadata"],
         "scope": scope,
@@ -376,7 +440,7 @@ def normalize_relationship_memory_payload(
         "timestamp": datetime.now().isoformat(),
         "workspace_id": authoritative_workspace_id,
         "companion_id": companion_id,
-        "event_type": "relationship_state",
+        "event_type": event_type,
         "relationship_event": relationship_event,
     }, reject_expired=True)
     provenance_source_id = str(

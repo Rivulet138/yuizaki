@@ -25,6 +25,7 @@ import type { Live2DAttentionTarget, Live2DBehaviorState } from './live2d-behavi
 import type { Live2DCoreModel } from './live2d-core-model'
 import { isObjectRecord, resolveLive2DCoreModel } from './live2d-core-model'
 import { Live2DLipSyncController } from './live2d-lipsync-controller'
+import { resolveLive2DMotionGroups } from './live2d-motion-groups'
 import type { PetRuntimeAdapter } from './pet-runtime-adapter'
 
 interface ExpressionParameterList {
@@ -615,8 +616,11 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
     if (!model) {
       return
     }
-    const groups = ['Idle', 'Tap', 'Tap@Body', 'Flick', 'Flick@Body']
+    const groups = resolveLive2DMotionGroups(this.host.config.modelManifest)
     const group = groups[Math.floor(Math.random() * groups.length)]
+    if (!group) {
+      return
+    }
     this.playMotionWithTransition({
       kind: 'random',
       group,

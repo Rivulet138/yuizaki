@@ -111,6 +111,7 @@ Linux 使用 `.venv/bin/python` 和 `cp .env.example .env`。后端默认监听 
 | --- | --- |
 | `python/.env` | Provider、端口、可选服务和运行时变量，不提交到 Git |
 | `python/config/settings.json` | 应用持久化设置，由设置页或 Launcher 管理 |
+| `python/data/workspace_contexts.json` | 工作区提示词、角色卡、世界书与记忆策略的持久化副本，运行时生成 |
 | `resources.lock.json` | 模型/资源 URL、revision、校验和及许可边界 |
 
 | 变量 | 示例/默认值 | 说明 |
@@ -158,7 +159,10 @@ docs/                     快速开始、配置、API、架构和平台文档
 ## 验证
 
 ```powershell
+cd python
+python -m pip install -r requirements-test.txt
 python -m pytest -q
+cd ..
 python scripts/check_docs.py
 python scripts/check_resources.py
 cd python

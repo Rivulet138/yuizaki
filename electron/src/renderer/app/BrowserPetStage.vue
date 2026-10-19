@@ -17,7 +17,15 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import type { PetRenderer as PetRendererInstance } from '@/pet-renderer'
 import { petControl } from '@/utils/petControl'
-import type { PetModelDefinition, PetModelType } from '@/../shared/pet-control'
+import type {
+  PetControlDirective,
+  PetLipSyncLevelPayload,
+  PetLipSyncVisemePayload,
+  PetModelDefinition,
+  PetModelType,
+} from '@/../shared/pet-control'
+import type { AvatarCommand } from '@/../shared/avatar-command'
+import { resolveBackendUrl } from '@/api/clients/http-client'
 import { t } from '@/i18n'
 
 const mountEl = ref<HTMLElement | null>(null)
@@ -35,6 +43,7 @@ let renderer: PetRendererInstance | null = null
 let resizeObserver: ResizeObserver | null = null
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 let currentModelKey = ''
+let ttsPlaybackToken = 0
 
 const modelAssetUrl = (model: PetModelDefinition | undefined): string => {
   if (!model?.assetPath) return '/live2d/llm-live2d/yumi/yumi.model3.json'
@@ -65,11 +74,172 @@ const handleInputAction = (event: Event): void => {
   })
 }
 
+interface BrowserPetControlPayload {
+  avatar_command?: unknown
+  petLinkEnabled?: boolean
+  expression_name?: string
+  expression_mix?: Array<{ expression?: unknown; weight?: unknown }>
+  expressionMix?: Array<{ expression?: unknown; weight?: unknown }>
+  parameter_overrides?: Array<{ id?: unknown; value?: unknown; weight?: unknown }>
+  parameterOverrides?: Array<{ id?: unknown; value?: unknown; weight?: unknown }>
+  motion?: { group?: unknown; index?: unknown }
+  motion_group?: string
+  motion_index?: number
+  intensity?: number
+  duration_ms?: number
+  durationMs?: number
+}
+
+const normalizeExpressionMix = (payload: BrowserPetControlPayload) => {
+  const raw = Array.isArray(payload.expression_mix)
+    ? payload.expression_mix
+    : Array.isArray(payload.expressionMix)
+      ? payload.expressionMix
+      : []
+  const items = raw.flatMap((item) => (
+    typeof item?.expression === 'string' && item.expression.trim()
+      ? [{
+          expression: item.expression.trim(),
+          weight: typeof item.weight === 'number' && Number.isFinite(item.weight)
+            ? item.weight
+            : 1,
+        }]
+      : []
+  ))
+  if (
+    items.length === 0
+    && typeof payload.expression_name === 'string'
+    && payload.expression_name.trim()
+  ) {
+    items.push({
+      expression: payload.expression_name.trim(),
+      weight: typeof payload.intensity === 'number' && Number.isFinite(payload.intensity)
+        ? payload.intensity
+        : 1,
+    })
+  }
+  return items
+}
+
+const normalizeParameterOverrides = (payload: BrowserPetControlPayload) => {
+  const raw = Array.isArray(payload.parameter_overrides)
+    ? payload.parameter_overrides
+    : Array.isArray(payload.parameterOverrides)
+      ? payload.parameterOverrides
+      : []
+  return raw.flatMap((item) => (
+    typeof item?.id === 'string'
+    && item.id.trim()
+    && typeof item.value === 'number'
+    && Number.isFinite(item.value)
+      ? [{
+          id: item.id.trim(),
+          value: item.value,
+          ...(typeof item.weight === 'number' && Number.isFinite(item.weight)
+            ? { weight: item.weight }
+            : {}),
+        }]
+      : []
+  ))
+}
+
+const handleLlmControl = (event: Event): void => {
+  if (!renderer) return
+  const payload = (event as CustomEvent<BrowserPetControlPayload>).detail
+  if (!payload || typeof payload !== 'object' || payload.petLinkEnabled === false) return
+
+  if (payload.avatar_command && typeof payload.avatar_command === 'object') {
+    renderer.applyAvatarCommand(payload.avatar_command as AvatarCommand)
+    return
+  }
+
+  const expressionMix = normalizeExpressionMix(payload)
+  const parameterOverrides = normalizeParameterOverrides(payload)
+  const motionGroup = typeof payload.motion?.group === 'string'
+    ? payload.motion.group.trim()
+    : typeof payload.motion_group === 'string'
+      ? payload.motion_group.trim()
+      : ''
+  const rawMotionIndex = payload.motion?.index ?? payload.motion_index
+  const motionIndex = typeof rawMotionIndex === 'number' && Number.isFinite(rawMotionIndex)
+    ? rawMotionIndex
+    : 0
+  if (expressionMix.length === 0 && parameterOverrides.length === 0 && !motionGroup) return
+
+  const directive: PetControlDirective = {
+    expressionMix,
+    parameterOverrides,
+    ...(motionGroup ? { motion: { group: motionGroup, index: motionIndex } } : {}),
+    intensity: typeof payload.intensity === 'number' && Number.isFinite(payload.intensity)
+      ? payload.intensity
+      : 1,
+    durationMs: typeof payload.duration_ms === 'number' && Number.isFinite(payload.duration_ms)
+      ? payload.duration_ms
+      : typeof payload.durationMs === 'number' && Number.isFinite(payload.durationMs)
+        ? payload.durationMs
+        : 1800,
+  }
+  renderer.applyPetControlDirective(directive)
+}
+
+const handleTtsPlayUrl = (event: Event): void => {
+  // Electron already drives the dedicated pet window through petControl; the
+  // embedded stage only needs local URL lip sync in browser mode.
+  if (!renderer || window.petApi?.live2d) return
+  const detail = (event as CustomEvent<{
+    audio_url?: unknown
+    petLinkEnabled?: unknown
+  }>).detail
+  if (detail?.petLinkEnabled === false) return
+  const audioUrl = typeof detail?.audio_url === 'string' ? detail.audio_url.trim() : ''
+  if (!audioUrl) return
+  const token = ++ttsPlaybackToken
+  void resolveBackendUrl(audioUrl)
+    .then((resolvedUrl) => {
+      if (!renderer || token !== ttsPlaybackToken) return
+      return renderer.startLipSync(resolvedUrl)
+    })
+    .catch((error: unknown) => {
+      console.debug('[BrowserPetStage] failed to start lip sync:', error)
+    })
+}
+
+const handleTtsStop = (event: Event): void => {
+  ttsPlaybackToken += 1
+  const detail = (event as CustomEvent<{ interrupted?: unknown }>).detail
+  renderer?.stopLipSync({ interrupted: detail?.interrupted === true })
+}
+
+const handleAudioEnded = (): void => {
+  ttsPlaybackToken += 1
+  renderer?.stopLipSync()
+}
+
+const handleLipSyncLevel = (event: Event): void => {
+  if (!renderer || window.petApi?.live2d) return
+  const detail = (event as CustomEvent<PetLipSyncLevelPayload>).detail
+  if (!detail || typeof detail !== 'object') return
+  renderer.setExternalLipSync(detail)
+}
+
+const handleLipSyncViseme = (event: Event): void => {
+  if (!renderer || window.petApi?.live2d) return
+  const detail = (event as CustomEvent<PetLipSyncVisemePayload>).detail
+  if (!detail || typeof detail !== 'object') return
+  renderer.setExternalViseme(detail)
+}
+
 defineExpose({ adjustZoom, resetZoom, zoomScale, zoomBounds })
 
 onMounted(async () => {
   if (!mountEl.value) return
   window.addEventListener('yuizaki:input-action', handleInputAction)
+  window.addEventListener('pet:llm-control', handleLlmControl)
+  window.addEventListener('pet:tts-play-url', handleTtsPlayUrl)
+  window.addEventListener('pet:tts-stop', handleTtsStop)
+  window.addEventListener('pet:audio-ended', handleAudioEnded)
+  window.addEventListener('pet:lipsync-level', handleLipSyncLevel)
+  window.addEventListener('pet:lipsync-viseme', handleLipSyncViseme)
   emit('zoom-change', zoomScale.value)
   const mountId = `browser-pet-stage-${Math.random().toString(36).slice(2)}`
   mountEl.value.id = mountId
@@ -146,6 +316,12 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('yuizaki:input-action', handleInputAction)
+  window.removeEventListener('pet:llm-control', handleLlmControl)
+  window.removeEventListener('pet:tts-play-url', handleTtsPlayUrl)
+  window.removeEventListener('pet:tts-stop', handleTtsStop)
+  window.removeEventListener('pet:audio-ended', handleAudioEnded)
+  window.removeEventListener('pet:lipsync-level', handleLipSyncLevel)
+  window.removeEventListener('pet:lipsync-viseme', handleLipSyncViseme)
   resizeObserver?.disconnect()
   resizeObserver = null
   if (refreshTimer) clearInterval(refreshTimer)

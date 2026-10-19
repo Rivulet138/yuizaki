@@ -103,6 +103,7 @@ import type {
 	Live2DBehaviorState,
 } from "./runtime/live2d-behavior-controller";
 import { Live2DRuntimeAdapter } from "./runtime/live2d-runtime-adapter";
+import { resolveLive2DMotionGroups } from "./runtime/live2d-motion-groups";
 import type { VrmRuntimeAdapter as VrmRuntimeAdapterType } from "./runtime/vrm-runtime-adapter";
 import type { PetRuntimeAdapter } from "./runtime/pet-runtime-adapter";
 
@@ -985,8 +986,8 @@ class PetRenderer {
 		}
 
 		this.live2dRuntime?.triggerRandomMotion?.();
-		const groups = ["Idle", "Tap", "Tap@Body", "Flick", "Flick@Body"];
-		const group = groups[Math.floor(Math.random() * groups.length)];
+		const groups = resolveLive2DMotionGroups(this.config.modelManifest);
+		const group = groups[Math.floor(Math.random() * groups.length)] ?? "Idle";
 		this.markActivity(`motion:${group}`);
 	}
 
@@ -1033,6 +1034,11 @@ class PetRenderer {
 		};
 		this.live2dRuntime?.triggerExpressionMix?.(normalizedPayload);
 		this.markActivity("pet-control-directive");
+	}
+
+	/** Apply an already-normalized Agent avatar command in browser mode. */
+	applyAvatarCommand(command: AvatarCommand): void {
+		this.executeAvatarCommand(command);
 	}
 
 	private normalizePetControlDirective(

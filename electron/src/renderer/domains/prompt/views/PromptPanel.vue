@@ -36,12 +36,16 @@
         />
       </section>
 
-      <section class="prompt-editor-block">
-        <header class="prompt-card-header prompt-editor-header">
-          <h3>高级提示词</h3>
-        </header>
+      <details class="prompt-editor-block">
+        <summary class="prompt-card-header prompt-editor-header">
+          <span>
+            <strong>高级提示词</strong>
+            <small>模式、角色卡与世界书</small>
+          </span>
+          <span class="prompt-editor-chevron" aria-hidden="true">⌄</span>
+        </summary>
         <WorkspacePromptEditor />
-      </section>
+      </details>
     </div>
   </PanelShell>
 </template>
@@ -136,7 +140,7 @@ onMounted(() => {
 <style scoped>
 .prompt-panel {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
 }
 
@@ -158,11 +162,53 @@ onMounted(() => {
   min-width: 0;
   flex-direction: column;
   gap: 12px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-card);
+  background: var(--yui-surface-raised);
+  box-shadow: var(--yui-shadow-card);
+  overflow: hidden;
 }
 
 .prompt-editor-header {
-  border-bottom: 1px solid var(--yui-border);
-  padding-bottom: 10px;
+  padding: 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.prompt-editor-header::-webkit-details-marker {
+  display: none;
+}
+
+.prompt-editor-header > span:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.prompt-editor-header strong {
+  color: var(--yui-text);
+  font-size: 14px;
+  font-weight: 820;
+}
+
+.prompt-editor-header small {
+  color: var(--yui-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.prompt-editor-chevron {
+  color: var(--yui-muted);
+  font-size: 18px;
+  line-height: 1;
+  transition: transform 160ms ease;
+}
+
+.prompt-editor-block[open] .prompt-editor-chevron {
+  transform: rotate(180deg);
+}
+
+.prompt-editor-block > :deep(.workspace-prompt-editor) {
+  padding: 0 14px 14px;
 }
 
 .prompt-card-header {
@@ -198,7 +244,6 @@ onMounted(() => {
   .prompt-panel {
     grid-template-columns: 1fr;
   }
-
 }
 
 @media (max-width: 640px) {

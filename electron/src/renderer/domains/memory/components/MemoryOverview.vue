@@ -19,18 +19,18 @@
       <div><dt>暂停使用</dt><dd>{{ forgottenCount }}</dd></div>
     </dl>
 
-    <section class="overview-section" aria-labelledby="memory-layer-title">
-        <div class="section-heading"><div><h4 id="memory-layer-title">按内容类别</h4></div></div>
+    <details class="overview-section overview-disclosure" open aria-labelledby="memory-layer-title">
+      <summary class="section-heading"><h4 id="memory-layer-title">按内容类别</h4><span>点击类别查看</span></summary>
       <div class="layer-list">
         <button v-for="layer in layers" :key="layer.value" type="button" :aria-pressed="selectedLayer === layer.value" @click="emit('select-layer', layer.value)">
           <strong>{{ layer.label }}</strong><span>{{ layer.desc }}</span><b>{{ layer.count ?? 0 }}</b>
         </button>
       </div>
-    </section>
+    </details>
 
     <div class="overview-columns">
-      <section class="overview-section" aria-labelledby="memory-activity-title">
-        <div class="section-heading"><h4 id="memory-activity-title">最近活动</h4><span>{{ overview?.latest_activity.length ?? 0 }} 条</span></div>
+      <details class="overview-section overview-disclosure" open aria-labelledby="memory-activity-title">
+        <summary class="section-heading"><h4 id="memory-activity-title">最近活动</h4><span>{{ overview?.latest_activity.length ?? 0 }} 条</span></summary>
         <ul v-if="overview?.latest_activity.length" class="activity-list">
           <li v-for="item in overview.latest_activity" :key="`${item.id}-${item.updated_at || item.action || ''}`">
             <div>
@@ -42,10 +42,10 @@
           </li>
         </ul>
         <p v-else class="empty-copy">暂无最近活动。</p>
-      </section>
+      </details>
 
-      <section class="overview-section" aria-labelledby="memory-forgotten-title">
-        <div class="section-heading"><div><h4 id="memory-forgotten-title">暂停使用的记忆</h4></div><span>{{ forgottenDocs.length }} 条</span></div>
+      <details class="overview-section overview-disclosure" aria-labelledby="memory-forgotten-title">
+        <summary class="section-heading"><h4 id="memory-forgotten-title">暂停使用的记忆</h4><span>{{ forgottenDocs.length }} 条</span></summary>
         <ul v-if="forgottenDocs.length" class="forgotten-list">
           <li v-for="doc in forgottenDocs" :key="doc.id">
             <div><strong>{{ compactText(doc.text) }}</strong><span>{{ layerLabel(doc.layer) }} · {{ docTypeLabel(doc.type) }}</span></div>
@@ -57,7 +57,7 @@
           </li>
         </ul>
         <p v-else class="empty-copy">目前没有暂停使用的记忆。</p>
-      </section>
+      </details>
     </div>
   </section>
 </template>
@@ -130,6 +130,12 @@ const activityMeta = (item: ActivityItem) => {
 <style scoped>
 .overview,.overview-section { display: flex; min-width: 0; flex-direction: column; gap: 14px; }
 .overview { gap: 20px; }
+.overview-disclosure { padding: 12px; border: 1px solid var(--yui-border); border-radius: var(--yui-radius-card); background: var(--yui-surface-muted); }
+.overview-disclosure > summary { cursor: pointer; list-style: none; }
+.overview-disclosure > summary::-webkit-details-marker { display: none; }
+.overview-disclosure > summary::after { content: '＋'; color: var(--yui-muted); font-size: 14px; }
+.overview-disclosure[open] > summary::after { content: '−'; }
+.overview-disclosure > .layer-list,.overview-disclosure > .activity-list,.overview-disclosure > .forgotten-list { margin-top: 2px; }
 .overview-heading,.section-heading,.activity-list li,.forgotten-list li { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .overview-error { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid rgba(239,68,68,.28); border-radius: var(--yui-radius-card); background: var(--yui-danger-soft); color: #991b1b; font-size: 12px; }
 h3,h4 { margin: 0; color: var(--yui-text); }

@@ -4,17 +4,20 @@
       <div><h3 id="memory-library-title">记忆库</h3><span class="count-label" role="status" aria-live="polite">{{ filteredCount }} 条</span></div>
 <el-input :model-value="searchText" clearable placeholder="搜索记忆内容" class="search-input" aria-label="搜索记忆内容" @update:model-value="emit('update:searchText', String($event))" />
     </div>
-    <div class="filter-toolbar" aria-label="记忆筛选">
-      <div class="view-tabs" role="group" aria-label="记忆视图">
-        <button v-for="option in viewOptions" :key="option.value" type="button" :aria-pressed="viewMode === option.value" @click="emit('update:viewMode', option.value)">{{ option.label }} <span>{{ docViewCount(option.value) }}</span></button>
+    <details class="filter-disclosure" :open="filterDisclosureOpen" @toggle="syncFilterDisclosure">
+      <summary>筛选与排序 <span v-if="hasFilters">已启用</span></summary>
+      <div class="filter-toolbar" aria-label="记忆筛选">
+        <div class="view-tabs" role="group" aria-label="记忆视图">
+          <button v-for="option in viewOptions" :key="option.value" type="button" :aria-pressed="viewMode === option.value" @click="emit('update:viewMode', option.value)">{{ option.label }} <span>{{ docViewCount(option.value) }}</span></button>
+        </div>
+        <el-select :model-value="filterLayer" size="small" clearable placeholder="全部类别" aria-label="按类别筛选" @update:model-value="emit('update:filterLayer', String($event || ''))">
+          <el-option v-for="layer in layers" :key="layer.value" :label="layer.label" :value="layer.value" />
+        </el-select>
+        <el-select :model-value="sortMode" size="small" aria-label="排序方式" @update:model-value="emit('update:sortMode', $event as DocSortMode)">
+          <el-option label="最近更新" value="updated" /><el-option label="长期保留优先级" value="importance" /><el-option label="可靠程度" value="quality" /><el-option label="准确把握" value="confidence" />
+        </el-select>
       </div>
-      <el-select :model-value="filterLayer" size="small" clearable placeholder="全部类别" aria-label="按类别筛选" @update:model-value="emit('update:filterLayer', String($event || ''))">
-        <el-option v-for="layer in layers" :key="layer.value" :label="layer.label" :value="layer.value" />
-      </el-select>
-      <el-select :model-value="sortMode" size="small" aria-label="排序方式" @update:model-value="emit('update:sortMode', $event as DocSortMode)">
-        <el-option label="最近更新" value="updated" /><el-option label="长期保留优先级" value="importance" /><el-option label="可靠程度" value="quality" /><el-option label="准确把握" value="confidence" />
-      </el-select>
-    </div>
+    </details>
       <div v-if="hasFilters" class="batch-toolbar" role="toolbar" aria-label="批量操作">
       <div class="batch-actions"><el-button size="small" plain @click="emit('reset-filters')">清空筛选</el-button><el-button size="small" plain :loading="batchActionLoading" :disabled="batchActionDisabled" @click="emit('batch-boost')">提高重要度</el-button><el-button size="small" type="danger" plain :loading="batchActionLoading" :disabled="batchActionDisabled" @click="emit('batch-delete')">{{ batchDeleteLabel }}</el-button></div>
     </div>
@@ -50,6 +53,7 @@ import { ElButton, ElInput, ElOption, ElSelect, ElTag } from 'element-plus'
 import 'element-plus/es/components/input/style/css'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import MemoryInspector from './MemoryInspector.vue'
+import { ref, watch } from 'vue'
 import type { MemoryOperation } from '@/api/clients/memory-client'
 import type { DocSortMode, DocViewMode, MemoryDoc, MemoryInspectorDraft, MemoryLayer, MemoryOption, TagType } from './memory-panel-types'
 
@@ -66,6 +70,14 @@ const props = defineProps<{
   docAuditEntries: (doc: MemoryDoc) => Array<Record<string, unknown>>; auditActionLabel: (value: unknown) => string; auditEntrySummary: (entry: Record<string, unknown>) => string
   operations: MemoryOperation[]; operationsLoading: boolean; operationsError?: string | null
 }>()
+
+const filterDisclosureOpen = ref(props.hasFilters)
+watch(() => props.hasFilters, (active) => {
+  if (active) filterDisclosureOpen.value = true
+})
+const syncFilterDisclosure = (event: Event) => {
+  filterDisclosureOpen.value = (event.currentTarget as HTMLDetailsElement).open
+}
 
 const emit = defineEmits<{
   'update:viewMode': [value: DocViewMode]; 'update:sortMode': [value: DocSortMode]; 'update:filterLayer': [value: string]; 'update:searchText': [value: string]
@@ -88,7 +100,7 @@ const stateTagType = (state?: string): TagType => {
 </script>
 
 <style scoped>
-.library { display: flex; min-height: 0; flex-direction: column; gap: 14px; }.library-heading,.filter-toolbar,.batch-toolbar,.doc-title,.doc-meta { display: flex; align-items: center; gap: 10px; }.library-heading,.batch-toolbar { justify-content: space-between; }.library-heading h3 { margin: 0; color: var(--yui-text); font-size: 15px; }.count-label { color: var(--yui-muted); font-size: 12px; }.search-input { width: min(360px, 48%); }.filter-toolbar { flex-wrap: wrap; }.view-tabs { display: flex; flex: 1; gap: 4px; flex-wrap: wrap; }.view-tabs button { min-height: 32px; padding: 5px 10px; border: 1px solid transparent; border-radius: var(--yui-radius-control); background: transparent; color: var(--yui-muted); cursor: pointer; }.view-tabs button[aria-pressed="true"] { border-color: var(--yui-border-strong); background: var(--yui-surface-muted); color: var(--yui-text); }.view-tabs span { font-size: 11px; }.batch-toolbar { align-items: center; justify-content: flex-end; padding: 9px 10px; background: var(--yui-warning-soft); border-radius: var(--yui-radius-card); }.batch-actions { display: flex; flex-wrap: wrap; gap: 6px; }.master-detail { display: grid; grid-template-columns: minmax(280px, .9fr) minmax(360px, 1.1fr); min-height: 430px; border-top: 1px solid var(--yui-border); }.memory-list { min-width: 0; max-height: 620px; padding: 6px; overflow-y: auto; border-right: 1px solid var(--yui-border); background: var(--yui-surface-muted); }.memory-list > button { display: flex; width: 100%; flex-direction: column; gap: 7px; margin-bottom: 6px; padding: 12px; border: 1px solid var(--yui-border); border-radius: var(--yui-radius-card); background: var(--yui-surface); color: var(--yui-text); text-align: left; cursor: pointer; }.memory-list > button:hover,.memory-list > button[aria-selected="true"] { background: var(--yui-surface-muted); }.memory-list > button[aria-selected="true"] { border-color: var(--yui-accent); box-shadow: inset 3px 0 0 var(--yui-accent); }.memory-list > button.hit { background: var(--yui-success-soft); }.doc-title { justify-content: space-between; }.memory-list p { display: -webkit-box; margin: 0; overflow: hidden; font-size: 13px; line-height: 1.5; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }.doc-meta { flex-wrap: wrap; color: var(--yui-muted); font-size: 10px; }.show-more { align-items: center !important; margin-bottom: 0 !important; border: 0 !important; background: transparent !important; color: var(--yui-accent) !important; }.memory-list button:focus-visible,.view-tabs button:focus-visible { outline: 2px solid var(--yui-accent); outline-offset: -2px; }
+.library { display: flex; min-height: 0; flex-direction: column; gap: 14px; }.library-heading,.filter-toolbar,.batch-toolbar,.doc-title,.doc-meta { display: flex; align-items: center; gap: 10px; }.library-heading,.batch-toolbar { justify-content: space-between; }.library-heading h3 { margin: 0; color: var(--yui-text); font-size: 15px; }.count-label { color: var(--yui-muted); font-size: 12px; }.search-input { width: min(360px, 48%); }.filter-disclosure { border: 1px solid var(--yui-border); border-radius: var(--yui-radius-card); background: var(--yui-surface-muted); }.filter-disclosure summary { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; color: var(--yui-text); font-size: 12px; font-weight: 700; cursor: pointer; }.filter-disclosure summary span { color: var(--yui-accent); font-weight: 600; }.filter-toolbar { flex-wrap: wrap; padding: 0 12px 12px; }.view-tabs { display: flex; flex: 1; gap: 4px; flex-wrap: wrap; }.view-tabs button { min-height: 32px; padding: 5px 10px; border: 1px solid transparent; border-radius: var(--yui-radius-control); background: transparent; color: var(--yui-muted); cursor: pointer; }.view-tabs button[aria-pressed="true"] { border-color: var(--yui-border-strong); background: var(--yui-surface); color: var(--yui-text); }.view-tabs span { font-size: 11px; }.batch-toolbar { align-items: center; justify-content: flex-end; padding: 9px 10px; background: var(--yui-warning-soft); border-radius: var(--yui-radius-card); }.batch-actions { display: flex; flex-wrap: wrap; gap: 6px; }.master-detail { display: grid; grid-template-columns: minmax(280px, .9fr) minmax(360px, 1.1fr); min-height: 430px; border-top: 1px solid var(--yui-border); }.memory-list { min-width: 0; max-height: 620px; padding: 6px; overflow-y: auto; border-right: 1px solid var(--yui-border); background: var(--yui-surface-muted); }.memory-list > button { display: flex; width: 100%; flex-direction: column; gap: 7px; margin-bottom: 6px; padding: 12px; border: 1px solid var(--yui-border); border-radius: var(--yui-radius-card); background: var(--yui-surface); color: var(--yui-text); text-align: left; cursor: pointer; }.memory-list > button:hover,.memory-list > button[aria-selected="true"] { background: var(--yui-surface-muted); }.memory-list > button[aria-selected="true"] { border-color: var(--yui-accent); box-shadow: inset 3px 0 0 var(--yui-accent); }.memory-list > button.hit { background: var(--yui-success-soft); }.doc-title { justify-content: space-between; }.memory-list p { display: -webkit-box; margin: 0; overflow: hidden; font-size: 13px; line-height: 1.5; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }.doc-meta { flex-wrap: wrap; color: var(--yui-muted); font-size: 10px; }.show-more { align-items: center !important; margin-bottom: 0 !important; border: 0 !important; background: transparent !important; color: var(--yui-accent) !important; }.memory-list button:focus-visible,.view-tabs button:focus-visible,.filter-disclosure summary:focus-visible { outline: 2px solid var(--yui-accent); outline-offset: -2px; }
 @media (max-width: 900px) { .master-detail { grid-template-columns: 1fr; }.memory-list { max-height: 380px; border-right: 0; border-bottom: 1px solid var(--yui-border); }.search-input { width: 100%; }.library-heading { align-items: stretch; flex-direction: column; } }
 @media (max-width: 620px) { .batch-toolbar { align-items: flex-start; flex-direction: column; }.batch-actions { width: 100%; }.batch-actions :deep(.el-button) { flex: 1; }.filter-toolbar :deep(.el-select) { width: calc(50% - 5px); }.view-tabs { flex-basis: 100%; } }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition-duration: 0.01ms !important; } }

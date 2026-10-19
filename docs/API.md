@@ -27,7 +27,7 @@ FastAPI publishes the live HTTP schema at `/openapi.json` and the interactive lo
 | Liveness and readiness | `/api/ping`, `/health`, `/api/readiness`, `/api/system/onboarding/readiness` | `python/routes/system_api.py`, `python/app.py` |
 | Chat and Agent turns | `/v1/models`, `/v1/chat/completions`, `/api/chat/translate`, `/api/agent/recovery/resume` | `python/routes/ai_api.py` |
 | Sessions and history | `/api/sessions`, `/api/history/{session_id}`, message mutations and exports | `python/routes/database_api.py` |
-| Workspaces | `/api/workspaces`, workspace sessions, branches, and effective presets | `python/routes/workspace_api.py` |
+| Workspaces | `/api/workspaces`, workspace sessions, branches, effective presets, and persisted prompt context | `python/routes/workspace_api.py` |
 | Companions | `/api/companions` and relationship history | `python/routes/companion_api.py` |
 | Memory | `/memory/docs`, `/memory/overview`, import/export, correction, forgetting, rollback, query, and index rebuild | `python/modules/memory/routes.py` |
 | Settings | `/api/settings`, provider tests, model discovery, history, import/export, and rollback | `python/modules/system/settings_api.py` |
@@ -36,6 +36,8 @@ FastAPI publishes the live HTTP schema at `/openapi.json` and the interactive lo
 | Storage and resources | storage status, cleanup, backup/restore, models, avatars, and local host routes | `python/routes/storage_api.py`, `electron/src/main/http/routes` |
 
 `/api/ping` is the lightweight liveness probe. For an Electron-managed Python child it also returns process identity fields used by Electron to reject a stale service on the configured port. `/health` reports component state. Readiness and diagnostics report configuration and observed runtime state; they do not qualify a real provider or device.
+
+Workspace `PATCH` accepts an optional `context` object for role card, world book, prompt engineering, vision, and memory policy. `context: null` clears the persisted context for that workspace; `GET /api/workspaces` returns `context: null` when none is stored.
 
 ## Streaming turns / 流式轮次
 

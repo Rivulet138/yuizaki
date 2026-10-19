@@ -362,6 +362,15 @@ func newConfig() (*launcherConfig, error) {
 		cfg.token = token
 	}
 	cfg.env["YUIZAKI_BACKEND_API_TOKEN"] = cfg.token
+	// Electron and Python share the same host token so desktop-action routes
+	// remain authorized when the launcher supervises Python externally.
+	if strings.TrimSpace(cfg.env["YUIZAKI_HOST_DESKTOP_ACTION_TOKEN"]) == "" {
+		hostToken, err := generateToken()
+		if err != nil {
+			return nil, err
+		}
+		cfg.env["YUIZAKI_HOST_DESKTOP_ACTION_TOKEN"] = hostToken
+	}
 	// Every supervised launch gets a fresh identity. This prevents a stale
 	// process left on the preferred port from being mistaken for our backend.
 	cfg.runtimeService = "yuizaki-python-backend"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable
 
 from fastapi import APIRouter
@@ -9,13 +10,29 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 from database.repository import DatabaseError, NotFoundError
 
+logger = logging.getLogger(__name__)
+
 
 def create_workspace_router(
     get_db_repo: Callable[[], Any],
     get_mcp_manager: Callable[[], Any] | None = None,
     get_active_workspace_id: Callable[[], str] | None = None,
+    context_store: Any | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["workspace"])
+
+    def _workspace_context(workspace_id: str) -> dict[str, Any] | None:
+        if context_store is None:
+            return None
+        return context_store.get(workspace_id)
+
+    def _with_context(workspace: Any) -> Any:
+        if not isinstance(workspace, dict) or context_store is None:
+            return workspace
+        workspace_id = str(workspace.get("id") or "").strip()
+        if not workspace_id:
+            return workspace
+        return {**workspace, "context": _workspace_context(workspace_id)}
 
     def _active_workspace_id() -> str | None:
         if get_active_workspace_id is None:
@@ -52,7 +69,13 @@ def create_workspace_router(
         db_repo = get_db_repo()
         if not db_repo:
             return JSONResponse({"error": "Database not initialized"}, status_code=503)
-        return {"workspaces": await run_in_threadpool(db_repo.list_workspaces)}
+        workspaces = await run_in_threadpool(db_repo.list_workspaces)
+        return {
+            "workspaces": [
+                _with_context(workspace)
+                for workspace in (workspaces if isinstance(workspaces, list) else [])
+            ]
+        }
 
     @router.post("/api/workspaces")
     async def create_workspace(payload: dict[str, Any]):
@@ -60,7 +83,12 @@ def create_workspace_router(
         if not db_repo:
             return JSONResponse({"error": "Database not initialized"}, status_code=503)
         workspace_id = str(payload.get("id") or f"ws_{payload.get('name', 'workspace')}").strip()
+        context = payload.get("context")
+        if context is not None and not isinstance(context, dict):
+            return JSONResponse({"error": "context_must_be_a_json_object"}, status_code=400)
         try:
+            if context is not None and context_store is not None:
+                await run_in_threadpool(context_store.validate, context)
             workspace = await run_in_threadpool(
                 db_repo.create_workspace,
                 workspace_id=workspace_id,
@@ -69,7 +97,21 @@ def create_workspace_router(
             )
             if payload.get("companion_profile_id"):
                 workspace = await run_in_threadpool(db_repo.update_workspace, workspace_id, {"companion_profile_id": payload.get("companion_profile_id")})
-            return workspace
+            if context is not None and context_store is not None:
+                try:
+                    await run_in_threadpool(context_store.put, workspace_id, context)
+                except Exception:
+                    # Keep a failed create from leaving an empty workspace
+                    # behind when the context sidecar cannot be written.
+                    if workspace_id != "default":
+                        try:
+                            await run_in_threadpool(db_repo.delete_workspace, workspace_id)
+                        except Exception:
+                            logger.exception("Failed to roll back workspace %s after context write failure", workspace_id)
+                    raise
+            return _with_context(workspace)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
         except NotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         except DatabaseError as exc:
@@ -80,8 +122,23 @@ def create_workspace_router(
         db_repo = get_db_repo()
         if not db_repo:
             return JSONResponse({"error": "Database not initialized"}, status_code=503)
+        updates = dict(payload)
+        context_supplied = "context" in updates
+        context = updates.pop("context", None)
+        if context is not None and not isinstance(context, dict):
+            return JSONResponse({"error": "context_must_be_a_json_object"}, status_code=400)
         try:
-            return await run_in_threadpool(db_repo.update_workspace, workspace_id, payload)
+            if context is not None and context_store is not None:
+                await run_in_threadpool(context_store.validate, context)
+            workspace = await run_in_threadpool(db_repo.update_workspace, workspace_id, updates)
+            if context_supplied and context_store is not None:
+                if context is None:
+                    await run_in_threadpool(context_store.delete, workspace_id)
+                else:
+                    await run_in_threadpool(context_store.put, workspace_id, context)
+            return _with_context(workspace)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
         except NotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         except DatabaseError as exc:
@@ -93,6 +150,8 @@ def create_workspace_router(
         if not db_repo:
             return JSONResponse({"error": "Database not initialized"}, status_code=503)
         await run_in_threadpool(db_repo.delete_workspace, workspace_id)
+        if context_store is not None:
+            await run_in_threadpool(context_store.delete, workspace_id)
         return {"status": "deleted"}
 
     @router.get("/api/workspaces/{workspace_id:path}/sessions")

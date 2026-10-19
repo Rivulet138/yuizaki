@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,8 @@ from typing import Literal
 
 VisionSupport = Literal["supported", "unsupported", "unknown"]
 CapabilitySupport = Literal["supported", "unsupported", "unknown"]
+
+logger = logging.getLogger(__name__)
 
 
 def _positive_int(value: Any) -> int | None:
@@ -26,9 +29,16 @@ _REGISTRY_PATH = Path(__file__).resolve().parents[3] / "electron" / "src" / "sha
 def load_model_capability_registry() -> dict[str, dict[str, Any]]:
     try:
         payload = json.loads(_REGISTRY_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning(
+            "Model capability registry unavailable at %s; model limits and vision "
+            "support fall back to unknown: %s",
+            _REGISTRY_PATH,
+            exc,
+        )
         return {}
     if not isinstance(payload, dict):
+        logger.warning("Model capability registry at %s is not a JSON object", _REGISTRY_PATH)
         return {}
     return {
         str(key).lower(): value

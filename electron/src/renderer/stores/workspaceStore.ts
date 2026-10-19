@@ -174,6 +174,11 @@ const normalizeWorldBook = (value: Partial<WorkspaceWorldBook> | undefined): Wor
     : [],
 })
 
+const asContextRecord = (value: unknown): Partial<WorkspaceContext> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  return value as Partial<WorkspaceContext>
+}
+
 const normalizeWorkspaceContext = (context: Partial<WorkspaceContext> | undefined): WorkspaceContext => {
   const normalized: WorkspaceContext = {
     ...createDefaultWorkspaceContext(),
@@ -205,6 +210,34 @@ const createDefaultWorkspace = (): WorkspaceRecord => {
     createdAt: now,
     updatedAt: now,
     context: createDefaultWorkspaceContext(),
+  }
+}
+
+const isDefaultWorkspaceContext = (context: WorkspaceContext): boolean => (
+  JSON.stringify(context) === JSON.stringify(createDefaultWorkspaceContext())
+)
+
+const readStoredContexts = (): Map<string, WorkspaceContext> => {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (!raw) return new Map()
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return new Map()
+    const entries = parsed
+      .filter((item): item is { id: string; context: Partial<WorkspaceContext> } => (
+        Boolean(item)
+        && typeof item === 'object'
+        && typeof item.id === 'string'
+        && Boolean(item.context)
+        && typeof item.context === 'object'
+        && !Array.isArray(item.context)
+      ))
+      .map((item): [string, WorkspaceContext] => [item.id, normalizeWorkspaceContext(item.context)])
+    // Normalized defaults are not user-authored context; never let them
+    // overwrite a server-side configuration after a rollback or fresh start.
+    return new Map(entries.filter(([, context]) => !isDefaultWorkspaceContext(context)))
+  } catch {
+    return new Map()
   }
 }
 
@@ -242,6 +275,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const persist = () => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state.value.workspaces))
     window.localStorage.setItem(ACTIVE_KEY, state.value.activeWorkspaceId)
+  }
+
+  const contextSaveTimers = new Map<string, number>()
+  const queueContextSave = (workspaceId: string) => {
+    if (typeof window === 'undefined') return
+    const pending = contextSaveTimers.get(workspaceId)
+    if (pending !== undefined) window.clearTimeout(pending)
+    const timer = window.setTimeout(() => {
+      contextSaveTimers.delete(workspaceId)
+      const workspace = state.value.workspaces.find((item) => item.id === workspaceId)
+      if (!workspace) return
+      void workspaceClient.update(workspaceId, {
+        context: workspace.context as unknown as Record<string, unknown>,
+      }).catch((error) => {
+        console.debug('[WorkspaceStore] failed to persist workspace context:', error)
+      })
+    }, 600)
+    contextSaveTimers.set(workspaceId, timer)
   }
 
   const activeWorkspace = computed(() => {
@@ -298,23 +349,29 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const syncFromBackend = async () => {
     try {
       const payload = await workspaceClient.list()
-      const localContextMap = new Map(state.value.workspaces.map((item) => [item.id, item.context]))
-      const backendWorkspaces = payload.workspaces.map((workspace) => ({
-        id: workspace.id,
-        name: workspace.name,
-        description: workspace.description,
-        icon: workspace.icon,
-        color: workspace.color,
-        companion_profile_id: workspace.companion_profile_id,
-        default_model: workspace.default_model,
-        system_prompt: workspace.system_prompt,
-        tool_preset: workspace.tool_preset,
-        memory_scope: workspace.memory_scope,
-        mcp_preset_id: workspace.mcp_preset_id,
-        createdAt: workspace.created_at || new Date().toISOString(),
-        updatedAt: workspace.updated_at || new Date().toISOString(),
-        context: localContextMap.get(workspace.id) ?? createDefaultWorkspace().context,
-      }))
+      const localContextMap = readStoredContexts()
+      const contextsToBackfill: string[] = []
+      const backendWorkspaces = payload.workspaces.map((workspace) => {
+        const localContext = localContextMap.get(workspace.id)
+        const serverContext = asContextRecord(workspace.context)
+        if (localContext) contextsToBackfill.push(workspace.id)
+        return {
+          id: workspace.id,
+          name: workspace.name,
+          description: workspace.description,
+          icon: workspace.icon,
+          color: workspace.color,
+          companion_profile_id: workspace.companion_profile_id,
+          default_model: workspace.default_model,
+          system_prompt: workspace.system_prompt,
+          tool_preset: workspace.tool_preset,
+          memory_scope: workspace.memory_scope,
+          mcp_preset_id: workspace.mcp_preset_id,
+          createdAt: workspace.created_at || new Date().toISOString(),
+          updatedAt: workspace.updated_at || new Date().toISOString(),
+          context: normalizeWorkspaceContext(localContext ?? serverContext),
+        }
+      })
 
       if (backendWorkspaces.length > 0) {
         state.value.workspaces = backendWorkspaces
@@ -322,6 +379,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           state.value.activeWorkspaceId = backendWorkspaces[0]?.id || 'default'
         }
         persist()
+        // Local state remains the source of truth for a local-first desktop
+        // app; backfill it so a cleared localStorage can restore it later.
+        for (const workspaceId of contextsToBackfill) {
+          queueContextSave(workspaceId)
+        }
       }
     } catch {
       // fallback to local-only state
@@ -331,7 +393,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const createWorkspaceRemote = async (name?: string) => {
     const activeCompanionId = activeWorkspace.value.companion_profile_id || companionStore.activeCompanionId || undefined
-    const created = await workspaceClient.create({ name: name?.trim() || `场景 ${state.value.workspaces.length + 1}`, companion_profile_id: activeCompanionId })
+    const context = { ...activeWorkspace.value.context }
+    const created = await workspaceClient.create({
+      name: name?.trim() || `场景 ${state.value.workspaces.length + 1}`,
+      companion_profile_id: activeCompanionId,
+      context: context as unknown as Record<string, unknown>,
+    })
     const now = new Date().toISOString()
     const workspace: WorkspaceRecord = {
       id: created.id,
@@ -392,6 +459,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const deleteWorkspaceRemote = async (workspaceId: string) => {
     await workspaceClient.remove(workspaceId)
+    const pendingContextSave = contextSaveTimers.get(workspaceId)
+    if (pendingContextSave !== undefined) {
+      window.clearTimeout(pendingContextSave)
+      contextSaveTimers.delete(workspaceId)
+    }
     state.value.workspaces = state.value.workspaces.filter((workspace) => workspace.id !== workspaceId)
     if (state.value.activeWorkspaceId === workspaceId) {
       state.value.activeWorkspaceId = state.value.workspaces[0]?.id || 'default'
@@ -407,6 +479,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       workspace.context = { ...workspace.context, ...patch }
       workspace.updatedAt = new Date().toISOString()
       persist()
+      queueContextSave(workspaceId)
     }
   }
 
