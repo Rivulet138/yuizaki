@@ -21,7 +21,7 @@ from typing import Any
 from ..core.paths import data_dir_from_env
 from .settings_store import scrub_sensitive_settings
 from .settings_schema import PersistedSettingsSchema
-from .workspace_context_store import _exclusive_file_lock
+from ..core.file_lock import exclusive_file_lock
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ class SettingsHistoryStore:
     def _load(self) -> list[SettingsSnapshot]:
         if not self.storage_path.exists():
             return []
-        with _exclusive_file_lock(self.lock_path):
+        with exclusive_file_lock(self.lock_path):
             return self._read()
 
     def _read(self) -> list[SettingsSnapshot]:
@@ -124,20 +124,20 @@ class SettingsHistoryStore:
         if not isinstance(snapshot, dict):
             raise ValueError("settings snapshot must be a JSON object")
         sanitized = deepcopy(scrub_sensitive_settings(snapshot))
-        with self._lock, _exclusive_file_lock(self.lock_path):
+        with self._lock, exclusive_file_lock(self.lock_path):
             current = self._read()
             next_snapshots = [*current, sanitized][-MAX_SETTINGS_SNAPSHOTS:]
             self._write(next_snapshots)
             self._snapshots = next_snapshots
 
     def __len__(self) -> int:
-        with self._lock, _exclusive_file_lock(self.lock_path):
+        with self._lock, exclusive_file_lock(self.lock_path):
             return len(self._read())
 
     def peek(self, steps: int) -> SettingsSnapshot | None:
         if steps <= 0:
             return None
-        with self._lock, _exclusive_file_lock(self.lock_path):
+        with self._lock, exclusive_file_lock(self.lock_path):
             snapshots = self._read()
             if steps > len(snapshots):
                 return None
@@ -147,7 +147,7 @@ class SettingsHistoryStore:
         """Return the target snapshot and drop it plus newer entries."""
         if steps <= 0:
             return None
-        with self._lock, _exclusive_file_lock(self.lock_path):
+        with self._lock, exclusive_file_lock(self.lock_path):
             snapshots = self._read()
             if steps > len(snapshots):
                 return None
@@ -158,7 +158,7 @@ class SettingsHistoryStore:
             return target
 
     def clear(self) -> None:
-        with self._lock, _exclusive_file_lock(self.lock_path):
+        with self._lock, exclusive_file_lock(self.lock_path):
             self._write([])
             self._snapshots = []
 

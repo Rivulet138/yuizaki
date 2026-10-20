@@ -21,12 +21,12 @@ import os
 import tempfile
 import threading
 import time
-from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
+from ..core.file_lock import exclusive_file_lock
 from ..core.paths import data_dir_from_env
 
 logger = logging.getLogger(__name__)
@@ -60,37 +60,6 @@ def validate_context_payload(context: Any) -> None:
         raise ValueError("workspace context is too large")
 
 
-@contextmanager
-def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
-    """Serialize read-modify-write across processes on Windows and POSIX."""
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    handle = open(lock_path, "a+b")  # noqa: SIM115 - closed in the finally block
-    try:
-        if os.name == "nt":
-            import msvcrt
-
-            # Locking a byte range beyond EOF is supported, so the lock file
-            # never needs to be written. Writing here would race with another
-            # process that already holds the same byte locked.
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-            try:
-                yield
-            finally:
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    finally:
-        handle.close()
-
-
 class WorkspaceContextStore:
     def __init__(self, storage_path: str | Path | None = None) -> None:
         self.storage_path = (
@@ -109,7 +78,7 @@ class WorkspaceContextStore:
             return {}
         # Read under the same lock. On Windows an open reader makes
         # os.replace fail, so an unlocked load can break a concurrent writer.
-        with _exclusive_file_lock(self.lock_path):
+        with exclusive_file_lock(self.lock_path):
             for attempt in range(3):
                 parsed = self._parse(self.storage_path, quarantine=True)
                 if parsed is not None:
@@ -222,7 +191,7 @@ class WorkspaceContextStore:
         normalized = str(workspace_id or "").strip()
         if not normalized:
             return None
-        with self._lock, _exclusive_file_lock(self.lock_path):
+        with self._lock, exclusive_file_lock(self.lock_path):
             if self.storage_path.exists():
                 parsed = self._parse(self.storage_path, quarantine=False)
                 if parsed is None:
@@ -233,7 +202,7 @@ class WorkspaceContextStore:
 
     def entries(self) -> dict[str, dict[str, Any]]:
         """Return every stored entry, used by the one-time database migration."""
-        with self._lock, _exclusive_file_lock(self.lock_path):
+        with self._lock, exclusive_file_lock(self.lock_path):
             if not self.storage_path.exists():
                 return {}
             parsed = self._parse(self.storage_path, quarantine=False)
@@ -262,7 +231,7 @@ class WorkspaceContextStore:
         *,
         expected_revision: int | None,
     ) -> dict[str, Any]:
-        with self._lock, _exclusive_file_lock(self.lock_path):
+        with self._lock, exclusive_file_lock(self.lock_path):
             # Re-read under the OS lock: another process may have written since
             # this instance loaded the file. A damaged file is quarantined
             # before being replaced, so its content is never silently dropped.

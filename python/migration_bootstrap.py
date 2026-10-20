@@ -95,3 +95,23 @@ def bootstrap_database() -> tuple[bool, str]:
         ok, message = check_database_at_head()
         return (True, f"database upgraded to baseline {head}") if ok else (False, message)
     return check_database_at_head()
+
+
+def main() -> int:
+    """Run the migration step the launcher invokes before starting the backend.
+
+    ``tools/yuizaki-launcher`` calls this module as a script and aborts startup
+    when it fails, so the exit code has to reflect the real outcome: a database
+    that cannot be brought to the Alembic head must stop the launch rather than
+    let the backend serve traffic against a stale schema.
+    """
+    ok, message = bootstrap_database()
+    if ok:
+        print(f"[OK] {message}")
+        return 0
+    print(f"[ERROR] {message}")
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

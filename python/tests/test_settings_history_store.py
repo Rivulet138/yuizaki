@@ -202,3 +202,16 @@ async def test_corrupt_history_blocks_the_change_instead_of_dropping_rollback(tm
         await api.set_setting("llm.model", "must-not-apply")
 
     assert SettingsStore(settings_path).get("llm.model") == "kept-model"
+
+
+def test_all_json_stores_share_one_lock_primitive() -> None:
+    """One implementation means one set of Windows/POSIX semantics to reason about."""
+    from modules.agent import mcp_manager
+    from modules.core.file_lock import exclusive_file_lock
+    from modules.system import settings_history_store, workspace_context_store
+
+    assert workspace_context_store.exclusive_file_lock is exclusive_file_lock
+    assert settings_history_store.exclusive_file_lock is exclusive_file_lock
+    assert mcp_manager.exclusive_file_lock is exclusive_file_lock
+    # The old private copy must be gone, not merely shadowed.
+    assert not hasattr(workspace_context_store, "_exclusive_file_lock")
