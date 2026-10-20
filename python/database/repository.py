@@ -44,6 +44,34 @@ class DatabaseError(RepositoryError):
     pass
 
 
+class ContextRevisionConflict(Exception):
+    """Optimistic-concurrency failure for a workspace context write.
+
+    Deliberately not a ``RepositoryError``: an out-of-date revision is a normal
+    client-side race, and the route maps it to 409 instead of a database error.
+    """
+
+    def __init__(
+        self,
+        workspace_id: str,
+        expected: int,
+        current: int,
+        context: dict[str, Any] | None,
+    ) -> None:
+        super().__init__(
+            f"context_revision_conflict: {workspace_id} expected {expected} current {current}"
+        )
+        self.workspace_id = workspace_id
+        self.expected = expected
+        self.current = current
+        self.context = context
+
+
+# Distinguishes "leave the stored context untouched" from an explicit null,
+# which means "clear the stored context".
+_CONTEXT_UNSET: Any = object()
+
+
 class DatabaseRepository:
     """数据库操作类"""
 
@@ -908,32 +936,45 @@ class DatabaseRepository:
             session.close()
 
     # Workspace APIs
+    @staticmethod
+    def _context_payload(value: Any) -> dict[str, Any] | None:
+        return json.loads(json.dumps(value)) if isinstance(value, dict) else None
+
+    def _workspace_to_record(self, workspace: Workspace) -> dict[str, Any]:
+        return {
+            "id": workspace.id,
+            "name": workspace.name,
+            "description": workspace.description,
+            "icon": workspace.icon,
+            "color": workspace.color,
+            "companion_profile_id": workspace.companion_profile_id,
+            "default_model": workspace.default_model,
+            "system_prompt": workspace.system_prompt,
+            "tool_preset": workspace.tool_preset,
+            "memory_scope": workspace.memory_scope,
+            "mcp_preset_id": workspace.mcp_preset_id,
+            "context": self._context_payload(workspace.context),
+            "contextRevision": int(workspace.context_revision or 0),
+            "created_at": _isoformat_or_none(workspace.created_at),
+            "updated_at": _isoformat_or_none(workspace.updated_at),
+        }
+
     def list_workspaces(self) -> list[dict[str, Any]]:
         session = self.SessionLocal()
         try:
             workspaces = session.query(Workspace).order_by(Workspace.updated_at.desc()).all()
-            return [
-                {
-                    "id": w.id,
-                    "name": w.name,
-                    "description": w.description,
-                    "icon": w.icon,
-                    "color": w.color,
-                    "companion_profile_id": w.companion_profile_id,
-                    "default_model": w.default_model,
-                    "system_prompt": w.system_prompt,
-                    "tool_preset": w.tool_preset,
-                    "memory_scope": w.memory_scope,
-                    "mcp_preset_id": w.mcp_preset_id,
-                    "created_at": _isoformat_or_none(w.created_at),
-                    "updated_at": _isoformat_or_none(w.updated_at),
-                }
-                for w in workspaces
-            ]
+            return [self._workspace_to_record(workspace) for workspace in workspaces]
         finally:
             session.close()
 
-    def create_workspace(self, workspace_id: str, name: str, description: str | None = None) -> dict[str, Any]:
+    def create_workspace(
+        self,
+        workspace_id: str,
+        name: str,
+        description: str | None = None,
+        *,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         session = self.SessionLocal()
         try:
             workspace = Workspace(
@@ -941,36 +982,42 @@ class DatabaseRepository:
                 name=name,
                 description=description,
                 memory_scope="workspace",
+                context=context,
+                context_revision=1 if context is not None else 0,
             )
             session.add(workspace)
             session.commit()
-            return {
-                "id": workspace.id,
-                "name": workspace.name,
-                "description": workspace.description,
-                "icon": workspace.icon,
-                "color": workspace.color,
-                "companion_profile_id": workspace.companion_profile_id,
-                "default_model": workspace.default_model,
-                "system_prompt": workspace.system_prompt,
-                "tool_preset": workspace.tool_preset,
-                "memory_scope": workspace.memory_scope,
-                "mcp_preset_id": workspace.mcp_preset_id,
-                "created_at": _isoformat_or_none(workspace.created_at),
-                "updated_at": _isoformat_or_none(workspace.updated_at),
-            }
+            return self._workspace_to_record(workspace)
         except Exception as exc:
             session.rollback()
             raise DatabaseError(f"failed_to_create_workspace: {exc}") from exc
         finally:
             session.close()
 
-    def update_workspace(self, workspace_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+    def update_workspace(
+        self,
+        workspace_id: str,
+        updates: dict[str, Any],
+        *,
+        context: Any = _CONTEXT_UNSET,
+        expected_context_revision: int | None = None,
+    ) -> dict[str, Any]:
         session = self.SessionLocal()
         try:
             workspace = session.query(Workspace).filter_by(id=workspace_id).first()
             if not workspace:
                 raise NotFoundError(f"workspace_not_found: {workspace_id}")
+            current_revision = int(workspace.context_revision or 0)
+            if (
+                expected_context_revision is not None
+                and expected_context_revision != current_revision
+            ):
+                raise ContextRevisionConflict(
+                    workspace_id,
+                    expected_context_revision,
+                    current_revision,
+                    self._context_payload(workspace.context),
+                )
             if "companion_profile_id" in updates:
                 requested_companion_id = str(updates.get("companion_profile_id") or "default").strip() or "default"
                 companion = session.query(Companion).filter_by(id=requested_companion_id).first()
@@ -1003,30 +1050,43 @@ class DatabaseRepository:
                     if memory_scope not in {"global", "workspace", "session"}:
                         raise DatabaseError(f"invalid_memory_scope: {memory_scope}")
                     updates["memory_scope"] = memory_scope
+            if context is not _CONTEXT_UNSET:
+                # Metadata and context share this transaction, so a failure
+                # leaves both untouched instead of half applied.
+                workspace.context = context
+                workspace.context_revision = current_revision + 1
             for key in ["name", "description", "icon", "color", "companion_profile_id", "default_model", "system_prompt", "tool_preset", "memory_scope", "mcp_preset_id"]:
                 if key in updates:
                     setattr(workspace, key, updates[key])
             workspace.updated_at = datetime.now(timezone.utc)
             session.commit()
-            return {
-                "id": workspace.id,
-                "name": workspace.name,
-                "description": workspace.description,
-                "icon": workspace.icon,
-                "color": workspace.color,
-                "companion_profile_id": workspace.companion_profile_id,
-                "default_model": workspace.default_model,
-                "system_prompt": workspace.system_prompt,
-                "tool_preset": workspace.tool_preset,
-                "memory_scope": workspace.memory_scope,
-                "mcp_preset_id": workspace.mcp_preset_id,
-                "created_at": workspace.created_at.isoformat() if workspace.created_at else None,
-                "updated_at": workspace.updated_at.isoformat() if workspace.updated_at else None,
-            }
+            return self._workspace_to_record(workspace)
+        except ContextRevisionConflict:
+            session.rollback()
+            raise
         finally:
             session.close()
 
-    def delete_workspace(self, workspace_id: str) -> None:
+    def import_workspace_context(self, workspace_id: str, context: dict[str, Any], revision: int) -> bool:
+        """Seed context from the legacy sidecar without overwriting newer data."""
+        session = self.SessionLocal()
+        try:
+            workspace = session.query(Workspace).filter_by(id=workspace_id).first()
+            if workspace is None:
+                return False
+            if workspace.context is not None or int(workspace.context_revision or 0) > 0:
+                return False
+            workspace.context = context
+            workspace.context_revision = max(int(revision), 1)
+            session.commit()
+            return True
+        except Exception as exc:
+            session.rollback()
+            raise DatabaseError(f"failed_to_import_workspace_context: {exc}") from exc
+        finally:
+            session.close()
+
+    def delete_workspace(self, workspace_id: str, *, expected_context_revision: int | None = None) -> None:
         session = self.SessionLocal()
         try:
             if workspace_id == "default":
@@ -1034,9 +1094,23 @@ class DatabaseRepository:
             target = session.query(Workspace).filter_by(id=workspace_id).first()
             if not target:
                 raise NotFoundError(f"workspace_not_found: {workspace_id}")
+            current_revision = int(target.context_revision or 0)
+            if (
+                expected_context_revision is not None
+                and expected_context_revision != current_revision
+            ):
+                raise ContextRevisionConflict(
+                    workspace_id,
+                    expected_context_revision,
+                    current_revision,
+                    self._context_payload(target.context),
+                )
             session.query(ChatSession).filter_by(workspace_id=workspace_id).update({"workspace_id": "default"})
             session.delete(target)
             session.commit()
+        except ContextRevisionConflict:
+            session.rollback()
+            raise
         except Exception as exc:
             session.rollback()
             raise DatabaseError(f"failed_to_delete_workspace: {exc}") from exc

@@ -37,7 +37,7 @@ FastAPI publishes the live HTTP schema at `/openapi.json` and the interactive lo
 
 `/api/ping` is the lightweight liveness probe. For an Electron-managed Python child it also returns process identity fields used by Electron to reject a stale service on the configured port. `/health` reports component state. Readiness and diagnostics report configuration and observed runtime state; they do not qualify a real provider or device.
 
-Workspace `PATCH` accepts an optional `context` object for role card, world book, prompt engineering, vision, and memory policy. `context: null` clears the persisted context for that workspace; `GET /api/workspaces` returns `context: null` and `contextRevision: 0` when none is stored. Every write bumps `contextRevision`; sending a stale `contextRevision` returns `409 context_revision_conflict` with the current context so the caller can rebase.
+Workspace `PATCH` accepts an optional `context` object for role card, world book, prompt engineering, vision, and memory policy. The context is stored on the workspace row, so it commits in the same transaction as the rest of the workspace metadata. `context: null` clears the stored context for that workspace; `GET /api/workspaces` returns `context: null` and `contextRevision: 0` for a workspace that never stored one. Every context write (including a clear) bumps `contextRevision`, which only resets when the workspace row is deleted; sending a stale `contextRevision` returns `409 context_revision_conflict` with the current context so the caller can rebase.
 
 ## Streaming turns / 流式轮次
 

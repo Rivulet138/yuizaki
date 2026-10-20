@@ -46,6 +46,19 @@ class WorkspaceContextConflict(RuntimeError):
         self.current = current
 
 
+def validate_context_payload(context: Any) -> None:
+    """Reject a context payload that cannot be stored safely.
+
+    Shared by the API (database-backed context) and the legacy sidecar store so
+    both enforce the same shape and size limits.
+    """
+    if not isinstance(context, dict):
+        raise ValueError("workspace context must be a JSON object")
+    serialized = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
+    if len(serialized.encode("utf-8")) > MAX_CONTEXT_BYTES:
+        raise ValueError("workspace context is too large")
+
+
 @contextmanager
 def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
     """Serialize read-modify-write across processes on Windows and POSIX."""
@@ -198,11 +211,7 @@ class WorkspaceContextStore:
     # -- public API --------------------------------------------------------
 
     def validate(self, context: dict[str, Any]) -> None:
-        if not isinstance(context, dict):
-            raise ValueError("workspace context must be a JSON object")
-        serialized = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
-        if len(serialized.encode("utf-8")) > MAX_CONTEXT_BYTES:
-            raise ValueError("workspace context is too large")
+        validate_context_payload(context)
 
     def get(self, workspace_id: str) -> dict[str, Any] | None:
         entry = self.get_entry(workspace_id)
@@ -220,6 +229,17 @@ class WorkspaceContextStore:
                 self._entries = parsed
             entry = self._entries.get(normalized)
             return deepcopy(entry) if entry is not None else None
+
+    def entries(self) -> dict[str, dict[str, Any]]:
+        """Return every stored entry, used by the one-time database migration."""
+        with self._lock, _exclusive_file_lock(self.lock_path):
+            if not self.storage_path.exists():
+                return {}
+            parsed = self._parse(self.storage_path, quarantine=False)
+            if parsed is None:
+                raise RuntimeError("workspace_context_store_unreadable")
+            self._entries = parsed
+            return deepcopy(parsed)
 
     def put(
         self,
@@ -292,4 +312,5 @@ __all__ = [
     "MAX_CONTEXT_BYTES",
     "WorkspaceContextConflict",
     "WorkspaceContextStore",
+    "validate_context_payload",
 ]

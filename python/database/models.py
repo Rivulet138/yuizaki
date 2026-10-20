@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -77,6 +77,11 @@ class Workspace(Base):
     tool_preset: Mapped[str | None] = mapped_column(Text)
     memory_scope: Mapped[str | None] = mapped_column(String(32), default="workspace")
     mcp_preset_id: Mapped[str | None] = mapped_column(String(50))
+    # Workspace ambient context lives in the row so it commits atomically with
+    # the rest of the workspace metadata. context_revision is a monotonic CAS
+    # token for optimistic concurrency between renderer and backend.
+    context: Mapped[dict | None] = mapped_column(JSON)
+    context_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 

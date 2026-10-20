@@ -2,42 +2,38 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Callable
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
-from database.repository import DatabaseError, NotFoundError
-from modules.system.workspace_context_store import WorkspaceContextConflict
-
-logger = logging.getLogger(__name__)
+from database.repository import ContextRevisionConflict, DatabaseError, NotFoundError
+from modules.system.workspace_context_store import validate_context_payload
 
 
 def create_workspace_router(
     get_db_repo: Callable[[], Any],
     get_mcp_manager: Callable[[], Any] | None = None,
     get_active_workspace_id: Callable[[], str] | None = None,
-    context_store: Any | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["workspace"])
 
-    def _workspace_context_entry(workspace_id: str) -> dict[str, Any] | None:
-        if context_store is None:
-            return None
-        return context_store.get_entry(workspace_id)
-
     def _with_context(workspace: Any) -> Any:
-        if not isinstance(workspace, dict) or context_store is None:
+        """Normalize the context fields the repository ships with each row.
+
+        Context lives on the workspace row, so reading it back never needs a
+        second store; a repo that does not model it yields the empty shape.
+        """
+        if not isinstance(workspace, dict):
             return workspace
-        workspace_id = str(workspace.get("id") or "").strip()
-        if not workspace_id:
-            return workspace
-        entry = _workspace_context_entry(workspace_id)
+        context = workspace.get("context")
+        revision = workspace.get("contextRevision")
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+            revision = 0
         return {
             **workspace,
-            "context": entry["context"] if entry is not None else None,
-            "contextRevision": int(entry["revision"]) if entry is not None else 0,
+            "context": context if isinstance(context, dict) else None,
+            "contextRevision": revision,
         }
 
     def _active_workspace_id() -> str | None:
@@ -93,28 +89,18 @@ def create_workspace_router(
         if context is not None and not isinstance(context, dict):
             return JSONResponse({"error": "context_must_be_a_json_object"}, status_code=400)
         try:
-            if context is not None and context_store is not None:
-                await run_in_threadpool(context_store.validate, context)
-            workspace = await run_in_threadpool(
-                db_repo.create_workspace,
-                workspace_id=workspace_id,
-                name=str(payload.get("name") or "新场景"),
-                description=payload.get("description"),
-            )
+            if context is not None:
+                validate_context_payload(context)
+            create_kwargs: dict[str, Any] = {
+                "workspace_id": workspace_id,
+                "name": str(payload.get("name") or "新场景"),
+                "description": payload.get("description"),
+            }
+            if context is not None:
+                create_kwargs["context"] = context
+            workspace = await run_in_threadpool(db_repo.create_workspace, **create_kwargs)
             if payload.get("companion_profile_id"):
                 workspace = await run_in_threadpool(db_repo.update_workspace, workspace_id, {"companion_profile_id": payload.get("companion_profile_id")})
-            if context is not None and context_store is not None:
-                try:
-                    await run_in_threadpool(context_store.put, workspace_id, context)
-                except Exception:
-                    # Keep a failed create from leaving an empty workspace
-                    # behind when the context sidecar cannot be written.
-                    if workspace_id != "default":
-                        try:
-                            await run_in_threadpool(db_repo.delete_workspace, workspace_id)
-                        except Exception:
-                            logger.exception("Failed to roll back workspace %s after context write failure", workspace_id)
-                    raise
             return _with_context(workspace)
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
@@ -138,27 +124,22 @@ def create_workspace_router(
         if context is not None and not isinstance(context, dict):
             return JSONResponse({"error": "context_must_be_a_json_object"}, status_code=400)
         try:
-            context_entry_before = await run_in_threadpool(context_store.get_entry, workspace_id) if context_store is not None else None
-            context_revision_before = int(context_entry_before["revision"]) if context_entry_before else 0
-            if context_supplied and context_store is not None:
-                if expected_revision is not None and context_revision_before != expected_revision:
-                    raise WorkspaceContextConflict(workspace_id, expected_revision, context_revision_before)
+            context_kwargs: dict[str, Any] = {}
+            if context_supplied:
                 if context is not None:
-                    await run_in_threadpool(context_store.validate, context)
-                if context is None:
-                    await run_in_threadpool(context_store.delete, workspace_id, expected_revision=expected_revision)
-                else:
-                    await run_in_threadpool(context_store.put, workspace_id, context, expected_revision=expected_revision)
-            try:
-                workspace = await run_in_threadpool(db_repo.update_workspace, workspace_id, updates)
-            except Exception:
-                if context_supplied and context_store is not None and context_entry_before is not None:
-                    current_revision = await run_in_threadpool(context_store.current_revision, workspace_id)
-                    await run_in_threadpool(context_store.put, workspace_id, context_entry_before["context"], expected_revision=current_revision)
-                raise
+                    validate_context_payload(context)
+                # One transaction writes the context and the metadata it
+                # belongs to, so neither can be observed half applied.
+                context_kwargs["context"] = context
+                context_kwargs["expected_context_revision"] = expected_revision
+            workspace = await run_in_threadpool(
+                db_repo.update_workspace,
+                workspace_id,
+                updates,
+                **context_kwargs,
+            )
             return _with_context(workspace)
-        except WorkspaceContextConflict as exc:
-            entry = _workspace_context_entry(workspace_id)
+        except ContextRevisionConflict as exc:
             return JSONResponse(
                 {
                     "error": "context_revision_conflict",
@@ -166,15 +147,12 @@ def create_workspace_router(
                     "workspace_id": workspace_id,
                     "expectedRevision": exc.expected,
                     "contextRevision": exc.current,
-                    "context": entry["context"] if entry is not None else None,
+                    "context": exc.context,
                 },
                 status_code=409,
             )
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
-        except RuntimeError as exc:
-            # Surface an unreadable sidecar as retryable unavailability, not 500.
-            return JSONResponse({"error": str(exc)}, status_code=503)
         except NotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         except DatabaseError as exc:
@@ -185,41 +163,23 @@ def create_workspace_router(
         db_repo = get_db_repo()
         if not db_repo:
             return JSONResponse({"error": "Database not initialized"}, status_code=503)
+        if contextRevision is not None and contextRevision < 0:
+            return JSONResponse({"error": "contextRevision_must_be_a_non_negative_integer"}, status_code=400)
         try:
-            if context_store is not None and contextRevision is not None:
-                current_revision = await run_in_threadpool(context_store.current_revision, workspace_id)
-                if current_revision != contextRevision:
-                    raise WorkspaceContextConflict(workspace_id, contextRevision, current_revision)
-            context_entry = await run_in_threadpool(context_store.get_entry, workspace_id) if context_store is not None else None
-            if context_store is not None:
-                await run_in_threadpool(
-                    context_store.delete,
-                    workspace_id,
-                    expected_revision=contextRevision,
-                )
-            try:
-                await run_in_threadpool(db_repo.delete_workspace, workspace_id)
-            except Exception:
-                # Restore the sidecar before exposing the database failure.
-                if context_store is not None and context_entry is not None:
-                    current_revision = await run_in_threadpool(context_store.current_revision, workspace_id)
-                    await run_in_threadpool(
-                        context_store.put,
-                        workspace_id,
-                        context_entry["context"],
-                        expected_revision=current_revision,
-                    )
-                raise
+            await run_in_threadpool(
+                db_repo.delete_workspace,
+                workspace_id,
+                expected_context_revision=contextRevision,
+            )
             return {"status": "deleted"}
-        except WorkspaceContextConflict as exc:
-            entry = _workspace_context_entry(workspace_id)
+        except ContextRevisionConflict as exc:
             return JSONResponse(
                 {
                     "error": "context_revision_conflict",
                     "workspace_id": workspace_id,
                     "expectedRevision": exc.expected,
                     "contextRevision": exc.current,
-                    "context": entry["context"] if entry is not None else None,
+                    "context": exc.context,
                 },
                 status_code=409,
             )

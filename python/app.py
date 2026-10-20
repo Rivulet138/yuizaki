@@ -30,6 +30,7 @@ from modules.system import (
 )
 from modules.system.settings_api import SettingsAPI
 from modules.system.workspace_context_store import WorkspaceContextStore
+from modules.system.workspace_context_migration import import_legacy_workspace_contexts
 import modules.system.runtime_config as system_runtime_config
 from modules.system.active_workspace_state import ActiveWorkspaceState
 from modules.system.active_application import read_active_application
@@ -392,6 +393,21 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
         logger.error("Failed to start all services")
         raise RuntimeError("Service startup failed")
 
+    if db_repo is not None:
+        # One-time upgrade path: workspace context used to live in a JSON
+        # sidecar. Move it onto the workspace row so the two can never
+        # disagree again, keeping an archived copy of the sidecar.
+        try:
+            legacy_context_summary = await asyncio.to_thread(
+                import_legacy_workspace_contexts,
+                db_repo,
+                _workspace_context_store,
+            )
+            if any(legacy_context_summary.values()):
+                logger.info("Legacy workspace context import: %s", legacy_context_summary)
+        except Exception:
+            logger.exception("Legacy workspace context import failed")
+
     _governance_alert_store.load()
     _heartbeat_scheduler = HeartbeatScheduler(
         interval_seconds=DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
@@ -664,7 +680,6 @@ router_registry.include(
         lambda: db_repo,
         lambda: sio_server.runtime.mcp_manager if sio_server and sio_server.runtime else None,
         get_active_workspace_id=_get_active_workspace_id,
-        context_store=_workspace_context_store,
     )
 )
 router_registry.include(cast(Callable[..., Any], create_companion_router)(lambda: db_repo, relationship_history_handler=_companion_relationship_history), name="companion")

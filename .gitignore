@@ -100,3 +100,6 @@ electron/.vite/
 /tools/yuizaki-launcher/yuizaki-launcher
 /tools/yuizaki-launcher/yuizaki-launcher.exe
 /release/
+
+# Editor tooling scratch files (atomic-edit lock files)
+.dsh-ops-update-*.lock
