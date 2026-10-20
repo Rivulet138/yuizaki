@@ -8,15 +8,17 @@ import os
 import re
 import threading
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from time import monotonic, perf_counter
-from typing import Any
+from typing import Any, Iterator
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
+from ..core.file_lock import exclusive_file_lock
 from ..core.paths import data_dir_from_env
 from ..tools.mcp_bridge import MCPToolError, call_http_mcp_tool
 from .models import (
@@ -30,6 +32,15 @@ from .tool_registry import ToolDefinition, ToolRegistry
 from .tool_result import ToolResultEnvelope
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_pointer_generation(value: Any) -> int:
+    """Read the pointer CAS token; a missing or malformed value means 0."""
+    try:
+        generation = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(generation, 0)
 
 SSE_READY_TIMEOUT_SECONDS = 10.0
 SSE_TOOL_TIMEOUT_SECONDS = 60.0
@@ -145,6 +156,13 @@ class MCPManager:
         self._store_pending = False
         self._store_retry_at = 0.0
         self._store_retry_lock = threading.Lock()
+        # Serialize load/mutate/save in-process and across processes: the
+        # pointer file and the vault document it references must move
+        # together, or two backends silently overwrite each other's servers.
+        self._store_lock = threading.RLock()
+        self._store_transaction_depth = 0
+        self._pointer_lock_path = self._store_file.with_name(f"{self._store_file.name}.lock")
+        self._pointer_generation = 0
         self.servers: dict[str, MCPServerConfig] = {}
         self.status: dict[str, dict[str, Any]] = {}
         self._stdio_sessions: dict[str, dict[str, Any]] = {}
@@ -292,11 +310,40 @@ class MCPManager:
             "servers": {name: server.__dict__ for name, server in self.servers.items()},
         }
 
-    def _write_local_store(self, payload: dict[str, Any]) -> None:
+    def _current_pointer_generation(self) -> int | None:
+        try:
+            raw = json.loads(self._store_file.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return 0
+        except (OSError, json.JSONDecodeError):
+            # Unreadable pointer: fail closed instead of overwriting a file
+            # another process may be repairing right now.
+            return None
+        if not isinstance(raw, dict):
+            return None
+        return _coerce_pointer_generation(raw.get("generation"))
+
+    def _write_pointer_locked(self, payload: dict[str, Any]) -> None:
+        """Write the pointer only if nobody else advanced it since we loaded.
+
+        Two supervised backends (or a backend plus a maintenance script) can
+        share one pointer file. A writer that lost that race must not replace
+        the document the winner already published.
+        """
+        current_generation = self._current_pointer_generation()
+        if current_generation != self._pointer_generation:
+            if self._vault_configured():
+                # Force a reload on the next access so the loser rebases onto
+                # whatever the winner stored.
+                self._store_pending = True
+                self._vault_error = "mcp_error:vault_pointer_conflict"
+            raise MCPToolError("mcp_error:vault_pointer_conflict")
+        next_generation = self._pointer_generation + 1
+        body = {**payload, "generation": next_generation}
         self._store_file.parent.mkdir(parents=True, exist_ok=True)
         temporary = self._store_file.with_name(f"{self._store_file.name}.{os.getpid()}.tmp")
         try:
-            temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            temporary.write_text(json.dumps(body, ensure_ascii=False, indent=2), encoding="utf-8")
             os.replace(temporary, self._store_file)
         except Exception:
             try:
@@ -304,6 +351,7 @@ class MCPManager:
             except OSError:
                 pass
             raise
+        self._pointer_generation = next_generation
 
     def _server_requires_vault(self, server: MCPServerConfig) -> bool:
         try:
@@ -735,6 +783,24 @@ class MCPManager:
         server.enabled = bool(browser_mcp_url)
         return True
 
+    @contextmanager
+    def _store_transaction(self) -> Iterator[None]:
+        """Hold the in-process and cross-process store lock for one cycle."""
+        with self._store_lock:
+            if self._store_transaction_depth == 0:
+                with exclusive_file_lock(self._pointer_lock_path):
+                    self._store_transaction_depth += 1
+                    try:
+                        yield
+                    finally:
+                        self._store_transaction_depth -= 1
+                return
+            self._store_transaction_depth += 1
+            try:
+                yield
+            finally:
+                self._store_transaction_depth -= 1
+
     def _ensure_store_ready(self) -> None:
         """Retry a vault-backed store load once the secret vault is reachable.
 
@@ -778,6 +844,10 @@ class MCPManager:
             return False
 
     def _load_store(self) -> None:
+        with self._store_transaction():
+            self._load_store_locked()
+
+    def _load_store_locked(self) -> None:
         default_servers = self._builtin_server_configs()
         self.servers = default_servers
         # This attempt owns the pending state; _save_store must be allowed to
@@ -795,7 +865,7 @@ class MCPManager:
                     self._store_retry_at = monotonic() + MCP_STORE_RETRY_SECONDS
                     return
                 self._store_metadata["builtin_preset_version"] = MCP_BUILTIN_PRESET_STORE_VERSION
-                self._save_store()
+                self._save_store_locked()
                 return
             try:
                 raw_data = json.loads(self._store_file.read_text(encoding="utf-8"))
@@ -812,6 +882,7 @@ class MCPManager:
             if not isinstance(raw_data, dict):
                 raise ValueError("invalid_store")
             data = raw_data
+            self._pointer_generation = _coerce_pointer_generation(raw_data.get("generation"))
             vault_ref = raw_data.get("vault_ref")
             if vault_ref is not None:
                 if not self._vault_configured() or not isinstance(vault_ref, dict):
@@ -825,6 +896,9 @@ class MCPManager:
             if not isinstance(data, dict):
                 raise ValueError("invalid_store")
             self._store_metadata = {key: value for key, value in data.items() if key != "servers"}
+            # The generation belongs to the local pointer, never to the shared
+            # vault document.
+            self._store_metadata.pop("generation", None)
             servers = data.get("servers") or {}
             if not isinstance(servers, dict):
                 raise ValueError("invalid_servers")
@@ -843,9 +917,9 @@ class MCPManager:
                 self._store_metadata["builtin_preset_version"] = MCP_BUILTIN_PRESET_STORE_VERSION
                 store_changed = store_changed or changed or stored_builtin_version != MCP_BUILTIN_PRESET_STORE_VERSION
             if self._vault_configured() and self._vault_reference is None:
-                self._save_store()
+                self._save_store_locked()
             elif store_changed:
-                self._save_store()
+                self._save_store_locked()
             self._store_pending = False
         except Exception as exc:
             self._vault_error = _safe_exception_code(exc)
@@ -861,6 +935,10 @@ class MCPManager:
                 self._store_metadata["builtin_preset_version"] = MCP_BUILTIN_PRESET_STORE_VERSION
 
     def _save_store(self) -> None:
+        with self._store_transaction():
+            self._save_store_locked()
+
+    def _save_store_locked(self) -> None:
         if self._store_pending:
             raise MCPToolError("mcp_error:store_pending")
         document = json.dumps(self._canonical_store_payload(), ensure_ascii=False, separators=(",", ":"))
@@ -870,11 +948,20 @@ class MCPManager:
             new_reference = result.get("reference")
             if not isinstance(new_reference, str):
                 raise MCPToolError("mcp_error:vault_corrupt")
-            self._write_local_store({
-                "version": MCP_VAULT_REF_VERSION,
-                "builtin_preset_version": self._store_metadata.get("builtin_preset_version", MCP_BUILTIN_PRESET_STORE_VERSION),
-                "vault_ref": {"namespace": self._vault_namespace, "reference": new_reference},
-            })
+            try:
+                self._write_pointer_locked({
+                    "version": MCP_VAULT_REF_VERSION,
+                    "builtin_preset_version": self._store_metadata.get("builtin_preset_version", MCP_BUILTIN_PRESET_STORE_VERSION),
+                    "vault_ref": {"namespace": self._vault_namespace, "reference": new_reference},
+                })
+            except MCPToolError:
+                # Another process advanced the pointer first; drop the
+                # document we just stored so the vault keeps one owner.
+                try:
+                    self._vault_request("prune", reference=new_reference)
+                except MCPToolError:
+                    logger.warning("MCP vault unreferenced document cleanup failed")
+                raise
             self._vault_reference = new_reference
             self._vault_error = None
             if old_reference and old_reference != new_reference:
@@ -883,7 +970,7 @@ class MCPManager:
                 except MCPToolError:
                     logger.warning("MCP vault old reference cleanup failed")
             return
-        self._write_local_store(self._canonical_store_payload())
+        self._write_pointer_locked(self._canonical_store_payload())
 
     def _disabled_status(self, server: MCPServerConfig) -> dict[str, Any]:
         telemetry = self._ensure_telemetry(server.name)

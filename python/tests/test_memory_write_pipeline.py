@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from types import SimpleNamespace
 
 from modules.system.memory_write_pipeline import (
@@ -154,3 +156,44 @@ def test_tool_success_evidence_redacts_secret_arguments() -> None:
     assert evidence["nested"]["token"] == "[redacted]"
     assert "sk-secret" not in repr(event)
     assert "C:/private/file.txt" in repr(event)
+
+
+AUTO_FACT_POSITIVES = [
+    ("我叫小林", "我叫小林"),
+    ("顺便说一下，我住在杭州。", "我住在杭州"),
+    ("我来自成都，最近刚搬过来", "我来自成都"),
+    ("我的生日是三月五号", "我的生日是三月五号"),
+    ("我在字节跳动上班", "我在字节跳动上班"),
+    ("我养了一只橘猫", "我养了一只橘猫"),
+    ("我对花生过敏", "我对花生过敏"),
+    ("I live in Shenzhen", "I live in Shenzhen"),
+    ("my birthday is March 5", "my birthday is March 5"),
+    ("I work as a designer", "I work as a designer"),
+    ("I'm allergic to peanuts", "I'm allergic to peanuts"),
+    ("I have a cat named Mochi", "I have a cat named Mochi"),
+]
+
+AUTO_FACT_NEGATIVES = [
+    "我叫什么来着？",
+    "我住在哪里呢",
+    "我在找工作",
+    "我在考虑要不要辞掉工作",
+    "我想去杭州住一段时间",
+    "你住在哪里",
+    "我朋友住在上海",
+    "我家住在上海",
+    "I have a pet project",
+    "do you know where I live in",
+    "今天天气不错",
+    "",
+]
+
+
+@pytest.mark.parametrize(("text", "expected"), AUTO_FACT_POSITIVES)
+def test_auto_fact_extracts_high_precision_self_disclosure(text: str, expected: str) -> None:
+    assert extract_auto_fact(text) == expected
+
+
+@pytest.mark.parametrize("text", AUTO_FACT_NEGATIVES)
+def test_auto_fact_ignores_questions_intentions_and_third_parties(text: str) -> None:
+    assert extract_auto_fact(text) is None

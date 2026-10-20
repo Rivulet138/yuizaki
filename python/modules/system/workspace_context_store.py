@@ -1,15 +1,16 @@
-"""Durable workspace prompt/context storage.
+"""Legacy workspace context sidecar, kept for one-way upgrade.
 
-Workspace records live in SQLite, but the renderer-owned prompt context
-(role card, world book, prompt engineering, vision and memory policy) is a
-nested JSON document. Keeping it in a small sidecar file avoids a schema
-migration while still making it survive browser storage resets and workspace
-switches.
+Workspace prompt context (role card, world book, prompt engineering, vision
+and memory policy) now lives on the workspace row in SQLite, so it commits in
+the same transaction as the rest of the workspace metadata. This module
+remains for three reasons: it holds the shared payload validator, it lets the
+startup migration read an existing ``workspace_contexts.json`` exactly once,
+and it keeps the file-lock primitive available to the other JSON stores.
 
-Each entry carries a monotonically increasing revision so two clients can
-detect a lost update instead of silently overwriting each other. File writes
-are serialized with an OS file lock, so a second backend process doing a
-read-modify-write of the same file cannot drop the other process's entry.
+Each entry carries a monotonically increasing revision so two clients could
+detect a lost update. File writes are serialized with an OS file lock, so two
+processes doing a read-modify-write of the same file cannot drop one another's
+entry.
 """
 
 from __future__ import annotations

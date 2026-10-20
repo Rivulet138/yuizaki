@@ -7,6 +7,11 @@
  * backlog visible and ratchets it down: a run fails only when an error that is
  * not in the committed baseline appears. Fixing errors is always allowed and
  * `--update` records the improvement.
+ *
+ * `--changed[=ref]` (default ref: HEAD) additionally requires every renderer
+ * file you touched to be completely type-clean, so new code never lands inside
+ * a file that keeps carrying legacy errors. On a clean checkout the changed set
+ * is empty and the extra check is a no-op, which is why it is safe to run in CI.
  */
 
 import { spawnSync } from 'node:child_process'
@@ -20,21 +25,54 @@ const projectPath = path.join(electronRoot, 'tsconfig.renderer.json')
 const vueTscEntry = path.join(electronRoot, 'node_modules', 'vue-tsc', 'bin', 'vue-tsc.js')
 
 const updateBaseline = process.argv.includes('--update')
+const changedArg = process.argv.find((arg) => arg === '--changed' || arg.startsWith('--changed='))
+const changedBase = changedArg === undefined
+  ? null
+  : (changedArg.includes('=') ? changedArg.slice('--changed='.length) : 'HEAD')
 
 const ERROR_LINE = /^(?<file>[^\s(][^(]*)\((?<line>\d+),(?<column>\d+)\): error (?<code>TS\d+): (?<message>.*)$/
 
 const normalizeMessage = (message) => message.replace(/\s+/g, ' ').trim()
+
+const normalizePath = (file) => file.replaceAll('\\', '/').replace(/^\.\//, '')
 
 const parseErrors = (output) => {
   const errors = new Map()
   for (const rawLine of output.split(/\r?\n/)) {
     const match = ERROR_LINE.exec(rawLine)
     if (!match?.groups) continue
-    const file = match.groups.file.replaceAll('\\', '/').replace(/^\.\//, '')
+    const file = normalizePath(match.groups.file)
     const key = `${file}:${match.groups.code}:${normalizeMessage(match.groups.message)}`
     errors.set(key, (errors.get(key) ?? 0) + 1)
   }
   return errors
+}
+
+const gitOutput = (args) => {
+  const run = spawnSync('git', args, { cwd: electronRoot, encoding: 'utf8', shell: false })
+  if (run.error || run.status !== 0) {
+    const detail = `${run.stderr ?? ''}${run.error?.message ?? ''}`.trim()
+    console.error(`[ERROR] --changed requires a git checkout: ${detail || 'git failed'}`)
+    process.exit(2)
+  }
+  return String(run.stdout ?? '')
+}
+
+/**
+ * Renderer files modified against `base`, including untracked ones. Paths are
+ * normalized exactly like diagnostic paths so the two sets compare.
+ */
+const changedRendererFiles = (base) => {
+  // --relative keeps paths comparable to vue-tsc diagnostics, which are
+  // relative to electron/ rather than to the repository root.
+  const tracked = gitOutput(['diff', '--name-only', '--diff-filter=ACMR', '--relative', base, '--', 'src'])
+  const untracked = gitOutput(['ls-files', '--others', '--exclude-standard', '--', 'src'])
+  return new Set(
+    `${tracked}\n${untracked}`
+      .split(/\r?\n/)
+      .map((line) => normalizePath(line.trim()))
+      .filter((line) => /\.(ts|tsx|vue)$/.test(line)),
+  )
 }
 
 const readBaseline = () => {
@@ -129,6 +167,17 @@ if (resolved.length > 0) {
 }
 console.log(`Renderer types: ${totalCount} known error(s) in ${currentFileCounts.size} file(s); new message(s) ${regressions.length}; files over baseline ${grownFiles.length}.`)
 
+let dirtyChangedFiles = []
+if (changedBase !== null) {
+  const changedFiles = changedRendererFiles(changedBase)
+  dirtyChangedFiles = [...currentFileCounts]
+    .filter(([file]) => changedFiles.has(file))
+    .map(([file, count]) => ({ file, count }))
+  console.log(
+    `Renderer types: ${changedFiles.size} changed renderer file(s) against ${changedBase}; ${dirtyChangedFiles.length} still have errors.`,
+  )
+}
+
 if (regressions.length > 0 || grownFiles.length > 0) {
   if (regressions.length > 0) {
     console.error('\n[ERROR] New renderer type errors are not allowed:')
@@ -142,6 +191,16 @@ if (regressions.length > 0 || grownFiles.length > 0) {
     }
   }
   console.error('\nFix the error, or rerun with --update only when the new error is an accepted, tracked baseline item.')
+  process.exit(1)
+}
+
+if (dirtyChangedFiles.length > 0) {
+  console.error('\n[ERROR] A renderer file you changed must be type-clean, even if its errors are baselined:')
+  for (const entry of dirtyChangedFiles.slice(0, 40)) {
+    console.error(`  - ${entry.file}: ${entry.count} error(s)`)
+  }
+  if (dirtyChangedFiles.length > 40) console.error(`  ... and ${dirtyChangedFiles.length - 40} more files`)
+  console.error('\nFix the errors in the files you touched; the baseline only protects files you did not change.')
   process.exit(1)
 }
 

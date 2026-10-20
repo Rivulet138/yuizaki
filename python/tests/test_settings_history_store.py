@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -147,3 +148,57 @@ async def test_failed_settings_write_discards_the_pending_snapshot(tmp_path) -> 
 
     assert len(SettingsHistoryStore(history_path)) == 0
     assert SettingsStore(settings_path).get("llm.model") != "first-model"
+
+
+@pytest.mark.asyncio
+async def test_snapshot_written_before_a_failed_settings_write_is_a_noop_rollback(tmp_path) -> None:
+    """A crash between the two writes must not corrupt the next rollback.
+
+    The snapshot is persisted first, so the worst case is a redundant entry that
+    describes the state the settings file still holds. Rolling it back is a
+    no-op rather than a corruption.
+    """
+    settings_path = tmp_path / "settings.json"
+    history_path = tmp_path / "settings_history.json"
+    settings_store = SettingsStore(settings_path)
+    api = SettingsAPI(
+        settings_store,
+        DynamicConfigManager(),
+        settings_history_store=SettingsHistoryStore(history_path),
+    )
+    await api.set_setting("llm.model", "chosen-model")
+    snapshot_of_chosen = settings_store.get_all()
+
+    # Simulate a crash after the snapshot append but before the settings write.
+    await asyncio.to_thread(
+        SettingsHistoryStore(history_path).append,
+        snapshot_of_chosen,
+    )
+
+    restarted = SettingsAPI(
+        SettingsStore(settings_path),
+        DynamicConfigManager(),
+        settings_history_store=SettingsHistoryStore(history_path),
+    )
+    response = await restarted.rollback_changes(1)
+
+    assert response.status == "rolled_back"
+    assert SettingsStore(settings_path).get("llm.model") == "chosen-model"
+
+
+@pytest.mark.asyncio
+async def test_corrupt_history_blocks_the_change_instead_of_dropping_rollback(tmp_path) -> None:
+    settings_path = tmp_path / "settings.json"
+    history_path = tmp_path / "settings_history.json"
+    api = SettingsAPI(
+        SettingsStore(settings_path),
+        DynamicConfigManager(),
+        settings_history_store=SettingsHistoryStore(history_path),
+    )
+    await api.set_setting("llm.model", "kept-model")
+    history_path.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(Exception, match="settings_history_store_corrupt"):
+        await api.set_setting("llm.model", "must-not-apply")
+
+    assert SettingsStore(settings_path).get("llm.model") == "kept-model"

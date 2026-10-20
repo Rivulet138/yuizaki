@@ -249,14 +249,18 @@ def extract_explicit_memory_fact(text: str) -> str | None:
     return None
 
 
-_AUTO_FACT_SENTENCE = re.compile(r"[^。！？!?\n]{2,200}")
+# Clauses are split on commas too: a profile fact should be the disclosure
+# itself, not the whole run-on sentence that happens to contain it.
+_AUTO_FACT_SENTENCE = re.compile(r"[^。！？!?\n，,]{2,200}")
 _AUTO_FACT_TRIGGERS = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
         r"我叫|我的名字是",
         r"我住在|我来自|我老家在",
         r"我的生日(?:是|在)",
-        r"我在[^。！？!?\n]{1,30}(?:工作|上班|上学|读书|实习)",
+        # "我在找工作" / "我在考虑换工作" are intentions, not occupations, so the
+        # intent verbs are rejected before a workplace can match.
+        r"我在(?!(?:想|考虑|打算|准备|找|换|辞))[^。！？!?\n]{1,30}(?:上班|工作|上学|读书|实习)",
         r"我养了|我有一只",
         r"我对[^。！？!?\n]{1,20}过敏",
         r"\bI live in\b",
@@ -264,7 +268,8 @@ _AUTO_FACT_TRIGGERS = tuple(
         r"\bmy birthday is\b",
         r"\bI work (?:as|at)\b",
         r"\bI(?:'m| am) allergic to\b",
-        r"\bI have a (?:cat|dog|pet|rabbit|hamster)\b",
+        # "I have a pet project" is not a pet, so a bare "pet" is not enough.
+        r"\bI have a (?:cat|dog|rabbit|hamster|pet (?:cat|dog|rabbit|hamster))\b",
     )
 )
 _AUTO_FACT_QUESTION = re.compile(
