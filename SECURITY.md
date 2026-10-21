@@ -17,14 +17,15 @@ Yuizaki is a local, single-user AI desktop pet Agent, not a hardened public serv
 ## Defaults
 
 - Backend and Electron control services bind to loopback by default.
-- The Electron control service accepts loopback API requests and rejects remote, `file:`, and `null` browser origins.
-- Loopback Python, Socket.IO, and Electron control requests do not require per-request tokens. The launcher still creates one backend token for optional non-loopback Python and Socket.IO access.
+- The Electron control service rejects remote, `file:`, and `null` browser origins. Health and approved pet-asset GET paths are public; other routed control requests require the control token in a Bearer authorization header or `x-yuizaki-backend-token`.
+- The control-token query bootstrap is accepted only for a loopback GET without an `Origin` header. It is not accepted for cross-origin or mutating requests. Python loopback and Socket.IO traffic retain their local trust model; optional non-loopback clients require the backend token.
 - Native desktop-action control routes are the exception: they require a separate Electron-issued host token even on loopback.
 - API keys belong in `python/.env` or local settings and must never be committed or logged.
 - Microphone capture requires explicit voice mode and desktop permission.
 - Vision is disabled until enabled and requested by an Agent turn.
 - MCP starts by default for a full local Agent run; use `--no-mcp` for a reduced run.
 - Enabling an MCP server or Agent plugin is the user authorization decision for its declared tools; enabled MCP/plugin tools do not prompt on every call. Disable the service or plugin to revoke that selection.
+- Plugin shutdown closes execution admission before closing the listener. Admitted executions are cancelled and awaited through request parsing, broker calls, sandbox workers, and process-tree cleanup; Windows `taskkill` completion is awaited before shutdown returns.
 
 ## Connector boundary
 

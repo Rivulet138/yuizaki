@@ -1,6 +1,7 @@
 import http, { type IncomingMessage, type ServerResponse } from 'http'
 import path from 'path'
 import fs, { createReadStream } from 'fs'
+import { timingSafeEqual } from 'node:crypto'
 import { type AddressInfo } from 'net'
 import { Live2DWindow } from './live2d-window'
 import { PetWindow } from './window'
@@ -32,7 +33,9 @@ const parseLocalPort = (value: string | undefined, fallback: number): number => 
 const DEFAULT_PORT = parseLocalPort(process.env['CONTROL_SERVER_PORT'], 38945)
 const TRUSTED_PACKAGED_RENDERER_ORIGIN = 'yuizaki-app://renderer'
 const CONTROL_CORS_METHODS = 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
-const CONTROL_CORS_HEADERS = 'Content-Type, Authorization, x-trace-id'
+const CONTROL_CORS_HEADERS = 'Content-Type, Authorization, x-trace-id, x-yuizaki-backend-token'
+const CONTROL_TOKEN_QUERY_PARAM = 'control_token'
+const CONTROL_TOKEN_HEADER = 'x-yuizaki-backend-token'
 
 const MIME_TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
@@ -64,6 +67,47 @@ const injectRuntimeMetadata = (
     ? html.replace('</head>', `${meta}</head>`)
     : `${meta}${html}`
 }
+
+const isLoopbackAddress = (address: string | undefined): boolean =>
+  address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
+
+const constantTimeTokenEqual = (provided: string, expected: string): boolean => {
+  if (!provided || !expected) return false
+  const providedBytes = Buffer.from(provided)
+  const expectedBytes = Buffer.from(expected)
+  return providedBytes.length === expectedBytes.length && timingSafeEqual(providedBytes, expectedBytes)
+}
+
+const readBearerToken = (value: string | string[] | undefined): string => {
+  if (typeof value !== 'string') return ''
+  const match = /^Bearer\s+(\S+)$/i.exec(value.trim())
+  return match?.[1] || ''
+}
+
+/**
+ * Control-server API authentication. Query bootstrap is accepted only for a
+ * local, no-Origin GET, keeping the existing panel URL bootstrap useful while
+ * avoiding token-bearing URLs for cross-origin or mutating requests.
+ */
+export const isControlRequestAuthorized = (
+  req: Pick<IncomingMessage, 'headers' | 'socket' | 'method'>,
+  url: URL,
+  expectedToken: string,
+): boolean => {
+  const authorizationToken = readBearerToken(req.headers.authorization)
+  const headerToken = typeof req.headers[CONTROL_TOKEN_HEADER] === 'string'
+    ? req.headers[CONTROL_TOKEN_HEADER].trim()
+    : ''
+  const hasOrigin = Boolean(String(req.headers.origin || '').trim())
+  const queryToken = !hasOrigin && req.method === 'GET' && isLoopbackAddress(req.socket.remoteAddress)
+    ? (url.searchParams.get(CONTROL_TOKEN_QUERY_PARAM)?.trim() || '')
+    : ''
+  return constantTimeTokenEqual(authorizationToken || headerToken || queryToken, expectedToken)
+}
+
+export const isPublicControlPath = (method: string, pathname: string, isPetAssetPath: boolean): boolean =>
+  (method === 'GET' && (pathname === '/health' || pathname === '/api/health')) ||
+  (method === 'GET' && isPetAssetPath)
 
 export class ControlServer {
   private server: http.Server | null = null
@@ -176,27 +220,32 @@ export class ControlServer {
       throw error
     }
 
+    this.pluginRegistry.resumeExecutions()
+
     logger.info(`[ControlServer] listening at ${this.panelUrl}`)
   }
 
   async stop(): Promise<void> {
-    if (!this.server) {
-      return
-    }
-
+    this.pluginRegistry.beginShutdown()
     const activeServer = this.server
     this.server = null
+    this.pluginRegistry.cancelAllExecutions()
+    const serverClose = activeServer
+      ? new Promise<void>((resolve, reject) => {
+          activeServer.close((error) => {
+            if (error) {
+              reject(error)
+              return
+            }
+            resolve()
+          })
+        })
+      : Promise.resolve()
 
-    await new Promise<void>((resolve, reject) => {
-      activeServer.close((error) => {
-        if (error) {
-          reject(error)
-          return
-        }
-
-        resolve()
-      })
-    })
+    await Promise.all([
+      serverClose,
+      this.pluginRegistry.waitForExecutionsToSettle(),
+    ])
   }
 
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -251,6 +300,12 @@ export class ControlServer {
           res.setHeader('Access-Control-Allow-Headers', CONTROL_CORS_HEADERS)
           res.setHeader('Access-Control-Allow-Methods', CONTROL_CORS_METHODS)
           res.setHeader('Vary', 'Origin')
+        }
+        if (!isPublicControlPath(method, url.pathname, isPetAssetPath) && !isControlRequestAuthorized(req, url, this.getControlToken())) {
+          res.setHeader('Cache-Control', 'no-store')
+          res.setHeader('WWW-Authenticate', 'Bearer')
+          sendJson(res, 401, { error: 'Unauthorized' })
+          return
         }
         await this.handleApiRequest(req, res, method, url)
         return

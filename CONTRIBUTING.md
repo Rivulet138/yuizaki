@@ -55,9 +55,13 @@ Linux 使用 `python scripts/check_docs.py` 以及对应的 npm 命令。
 
 对 Socket.IO 事件、Job 信封、取消、认证、存储删除、恢复或资源权限的修改必须进行针对性人工验证。依赖硬件或 provider 的行为必须明确真实设备限制。
 
+修改控制服务、插件生命周期或迁移 bootstrap 时，还应覆盖关闭期间的新请求、请求体解析取消、Windows 进程树等待、空库创建、可信旧 revision 升级和无 revision 数据库拒绝启动。测试应从迁移目录动态读取当前 head，不要硬编码日期型 revision。
+
 Linux uses `python scripts/check_docs.py` and the equivalent npm commands.
 
 Changes to Socket.IO events, Job envelopes, cancellation, authentication, storage deletion, restore, or resource permissions require targeted manual verification. Hardware- or provider-dependent behavior must include a clear real-device limitation.
+
+Changes to the control service, plugin lifecycle, or migration bootstrap should also cover admission during shutdown, cancellation while parsing a request body, Windows process-tree wait behavior, empty-database creation, trusted old-revision upgrades, and rejection of databases without a revision. Tests should discover the current head from the migration directory instead of hard-coding date-based revision IDs.
 
 ## 拉取请求 / Pull requests
 

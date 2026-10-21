@@ -91,6 +91,8 @@ chmod +x YuizakiLauncher
 
 默认启动浏览器对话页；需要 Electron 控制面板和桌宠时加 `--electron-ui`。可用参数包括 `--check`、`--smoke`、`--no-mcp`、`--with-qdrant`、`--no-install`、`--no-open`、`--no-show-pet` 和 `--dev-renderer`。
 
+启动器在后端接收流量前运行数据库 bootstrap：空库从当前 Alembic head 创建，带有可信 revision 的旧库自动升级到当前 head 并校验 schema。head 从迁移目录动态读取，不应在客户端、测试或文档中写死 revision 字符串；有表但没有可信 Alembic revision 的数据库会拒绝启动，需要先完成明确的迁移处理。
+
 命令和故障处理见 [`docs/QUICKSTART.md`](docs/QUICKSTART.md)。
 
 ### 后端开发模式
@@ -129,6 +131,8 @@ Linux 使用 `.venv/bin/python` 和 `cp .env.example .env`。后端默认监听 
 | `YUIZAKI_INSTALL_PROFILE` | `core` / `full` | 基础或完整 Python 依赖 |
 
 完整配置见 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)。默认服务绑定 loopback；云 Provider、MCP、插件、浏览器自动化和远程 Provider 可能按配置访问外部服务或本地数据。安全边界见 [`SECURITY.md`](SECURITY.md)。
+
+Electron 控制服务的 `/health`、`/api/health` 和允许的桌宠资源 GET 路径可公开访问；其他 routed control API 需要 `Authorization: Bearer <control-token>` 或 `x-yuizaki-backend-token`。仅限 loopback、无 `Origin` 的 GET bootstrap 请求可使用 `control_token` query 参数，不能将其用于跨源或写请求。插件关闭时先停止新的 execution admission，再取消并等待请求体解析、broker 调用和 sandbox 进程树结束。
 
 ## 技术栈与结构
 

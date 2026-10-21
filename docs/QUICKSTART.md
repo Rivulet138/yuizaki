@@ -42,6 +42,10 @@ cd ..
 
 `setup` creates `python/.env` and configures the LLM; `--check` validates without starting services. The default opens the browser chat; add `--electron-ui` for the Electron control panel and pet window.
 
+启动前 Launcher 会执行数据库 bootstrap。空库会创建到当前 Alembic head，旧库会从可信 revision 升级并校验 schema；无法确认 revision 的已有数据库会阻止启动，而不会猜测迁移路径。迁移 head 会从仓库动态读取，因此升级后不需要手动修改日期或 revision 配置。
+
+Before backend traffic starts, the launcher runs the database bootstrap. Empty databases are created at the current Alembic head; databases with a trusted revision are upgraded and checked. Existing databases without a trusted revision stop startup instead of being guessed. The head is discovered from the repository, so upgrades do not require manually changing a date or revision setting.
+
 Linux： / Linux:
 
 ```bash
@@ -85,6 +89,7 @@ Common flags: `--check`, `--smoke`, `--no-mcp`, `--no-install`, `--dev-renderer`
 - 虚拟环境缺失：重新执行 `setup`，不要使用 `--no-install`。 / Missing virtual environment: run `setup` again without `--no-install`.
 - LLM 无响应：检查 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`。 / No LLM response: check `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`.
 - 端口冲突：修改 `.env` 中的端口变量。 / Port conflict: change the port variables in `.env`.
+- 数据库迁移失败：保存错误日志，确认数据库不是被其他进程占用；不要手动删除或修改 `alembic_version`。已有表但没有可信 revision 时，需要根据数据来源完成一次明确迁移。 / Migration failure: keep the error log and make sure another process is not holding the database; do not edit `alembic_version` manually. An existing schema without a trusted revision requires an explicit migration based on its data source.
 - 桌宠空白或无声音：检查模型路径、设备、权限和 Electron 日志。 / Blank pet or no audio: check asset paths, devices, permissions, and Electron logs.
 - Wayland 桌面动作受限：使用 X11 或保留应用内窗口交互。 / Restricted Wayland actions: use X11 or keep interactions inside the app window.
 

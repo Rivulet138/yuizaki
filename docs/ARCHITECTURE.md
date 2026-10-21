@@ -62,6 +62,7 @@ user input
 - Socket.IO carries realtime voice, Agent deltas, interruption, permissions, tool jobs, traces, and avatar commands.
 - Electron preload and IPC expose selected host capabilities to the renderer.
 - The Electron control service proxies local browser-facing operations and binds to loopback.
+- Routed Electron control requests use a control token; only health and approved pet-asset GET paths are public. The browser bootstrap query token is limited to loopback, no-Origin GET requests. The host desktop-action token remains a separate capability boundary.
 
 Socket handlers are divided by responsibility under `python/socket_handlers`. Event names originate in `python/socket_events.py`; shared renderer contracts live under `electron/src/shared` and renderer runtime adapters. Session, turn, request, generation, and interruption identities prevent stale asynchronous results from replacing newer state.
 
@@ -94,6 +95,8 @@ Native desktop actions are a narrow host capability: visible top-level window di
 - Optional provider failures degrade their capability without blocking text chat.
 - Cancellation carries a terminal outcome. A dispatched state-changing tool may end as `unknown_effect` rather than being retried automatically.
 - Electron verifies the identity of the Python child it starts so a stale process on the same port cannot satisfy startup health.
+- Plugin shutdown closes execution admission before closing the control listener, cancels admitted executions, and waits for request parsing, broker calls, sandbox workers, and process descendants to settle. Windows process-tree termination waits for the `taskkill` operation to complete.
+- The launcher runs the migration bootstrap before backend traffic. It reads the current Alembic head dynamically, creates empty databases at that head, upgrades databases with a trusted revision, and rejects existing schemas without a trusted revision.
 - Connector Agent completion and external message delivery are separate durable states.
 - Avatar and voice failures return to visible idle, stopped, or degraded states instead of leaving an active indicator indefinitely.
 

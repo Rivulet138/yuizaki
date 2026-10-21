@@ -20,6 +20,12 @@ The default Python origin is `http://127.0.0.1:8001`; the default Electron contr
 
 FastAPI publishes the live HTTP schema at `/openapi.json` and the interactive local reference at `/docs`. The running schema and route contract tests are authoritative for exact request and response fields.
 
+### Electron control HTTP / Electron 控制 HTTP
+
+The Electron control service exposes `/health`, `/api/health`, and approved pet-asset GET paths without a control token. Other routed control requests require `Authorization: Bearer <control-token>` or `x-yuizaki-backend-token: <control-token>`. For the local browser bootstrap only, a loopback GET with no `Origin` header may use `?control_token=<control-token>`; query authentication is rejected for cross-origin requests and mutating methods. Unauthorized requests return `401` with `WWW-Authenticate: Bearer`; disallowed browser origins return `403`.
+
+The control token is distinct from the host desktop-action token. Do not put either token in logs, source control, or reusable URLs.
+
 ## HTTP areas / HTTP 资源组
 
 | Area | Main routes | Source |
@@ -151,8 +157,8 @@ The deterministic memory evaluator accepts `expected_memory_roles` and `forbidde
 ## Authentication and trust / 认证与信任
 
 - Python, Socket.IO, and Electron control services bind to loopback by default.
-- Loopback clients are trusted by the desktop application and do not use per-request Bearer authentication.
-- Optional non-loopback Python or Socket.IO clients require `YUIZAKI_BACKEND_API_TOKEN`.
+- Python loopback traffic follows the local desktop trust model; optional non-loopback Python or Socket.IO clients require `YUIZAKI_BACKEND_API_TOKEN`.
+- Electron routed control APIs require the control Bearer/header token described above, except for health and approved pet-asset GET paths. The loopback query bootstrap is restricted to no-Origin GET requests.
 - Native desktop actions use a separate host-only token and are not authorized by the normal backend token.
 - Connector webhook routes apply provider-specific verification. Configuration and management routes remain inside the normal backend boundary.
 - In the production app, Telegram and personal bridge webhooks are acknowledged only after the inbound envelope is persisted in `connector_deliveries`; the response may contain `queued: true` while Agent execution continues. `processing`/`failed` rows are recoverable via the delivery retry route, and `sending` is treated as an unknown external effect rather than auto-retried.
@@ -160,6 +166,10 @@ The deterministic memory evaluator accepts `expected_memory_roles` and `forbidde
 - Prompt text, OCR, screenshots, web pages, tool output, MCP output, and plugin output are untrusted data.
 
 Do not expose these services to a public network without a separate authentication, origin, rate-limit, secret, sandbox, tenancy, and audit design. See [Security and privacy](../SECURITY.md).
+
+## Plugin execution lifecycle / 插件执行生命周期
+
+Plugin routes are admitted through a registry. During Electron shutdown, admission closes before the HTTP server is closed, so a request that races with shutdown receives `503` instead of registering a new execution. Already registered executions are cancelled and shutdown waits until request-body parsing, broker work, sandbox handlers, and descendant processes settle. Cancellation returns `499`; timeout returns `504`. A dispatched external side effect can still have an unknown outcome and must not be retried automatically.
 
 ## Compatibility / 兼容性
 

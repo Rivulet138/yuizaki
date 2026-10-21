@@ -11,12 +11,16 @@ import type {
   PluginRouteCommandResponse,
   PluginRouteHttpRequest,
   PluginRouteHttpResponse,
-  PluginRouteResponse,
 } from '../../../shared/plugin-route'
 import { logger } from '../../logger'
+import { PluginExecutionAdmissionError, type PluginRegistry } from '../../plugin-registry'
 import { resolvePythonApiOrigin } from '../python-origin'
 import { getPluginPolicyContext, isPluginCommandAllowed, isPluginHostAllowed, isPluginPathAllowed } from '../../plugin-policy'
-import { executePluginRouteInSandbox, type PluginSandboxExecution } from '../../plugin-sandbox'
+import {
+  executePluginRouteInSandbox,
+  terminateProcessTree,
+  type PluginSandboxExecution,
+} from '../../plugin-sandbox'
 
 const createTraceId = (): string => `trace_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 const createRequestId = (): string => `req_plugin_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -28,6 +32,7 @@ const MAX_BROKER_COMMAND_OUTPUT_BYTES = 128 * 1024
 const MAX_BROKER_LIST_ENTRIES = 200
 const MAX_BROKER_ARGS = 32
 const MAX_BROKER_REDIRECTS = 5
+const ABORT_ERROR_MESSAGE = 'Plugin operation cancelled'
 
 type PluginBrokerResult =
   | PluginRouteHttpResponse
@@ -157,7 +162,16 @@ export const handlePluginRoutes: HttpRouteHandler = async (req, res, method, url
     return true
   }
 
-  const execution = ctx.pluginRegistry.startExecution(pluginId, routeId, plugin.execution.maxExecutionTimeMs)
+  let execution: ReturnType<PluginRegistry['startExecution']>
+  try {
+    execution = ctx.pluginRegistry.startExecution(pluginId, routeId, plugin.execution.maxExecutionTimeMs)
+  } catch (error) {
+    if (error instanceof PluginExecutionAdmissionError) {
+      sendJson(res, 503, { error: 'Plugin execution admission is closed' })
+      return true
+    }
+    throw error
+  }
   const traceId = createTraceId()
   const brokerAbortController = new AbortController()
   let executionFinished = false
@@ -382,26 +396,35 @@ export const handlePluginRoutes: HttpRouteHandler = async (req, res, method, url
       const child = spawn(command, args, {
         shell: false,
         windowsHide: true,
+        detached: process.platform !== 'win32',
         env: commandEnvironment,
       })
       let stdout = ''
       let stderr = ''
       let settled = false
-      const timer = setTimeout(() => {
+      const timer: NodeJS.Timeout = setTimeout(() => {
+        finish(() => reject(new Error('Plugin command execution timeout')))
+      }, timeoutMs)
+      const terminate = (): Promise<void> => terminateProcessTree(child)
+      const finish = (callback: () => void): void => {
         if (settled) return
         settled = true
-        child.kill()
-        reject(new Error('Plugin command execution timeout'))
-      }, timeoutMs)
+        clearTimeout(timer)
+        brokerAbortController.signal.removeEventListener('abort', abortHandler)
+        void terminate().then(callback, callback)
+      }
+      const abortHandler = (): void => {
+        finish(() => reject(new Error(ABORT_ERROR_MESSAGE)))
+      }
+      if (brokerAbortController.signal.aborted) {
+        abortHandler()
+        return
+      }
+      brokerAbortController.signal.addEventListener('abort', abortHandler, { once: true })
       const append = (kind: 'stdout' | 'stderr', chunk: Buffer): void => {
         const next = chunk.toString('utf8')
         if (textByteLength(stdout) + textByteLength(stderr) + textByteLength(next) > MAX_BROKER_COMMAND_OUTPUT_BYTES) {
-          if (!settled) {
-            settled = true
-            clearTimeout(timer)
-            child.kill()
-            reject(new Error('Plugin command output exceeds size limit'))
-          }
+          finish(() => reject(new Error('Plugin command output exceeds size limit')))
           return
         }
         if (kind === 'stdout') {
@@ -414,21 +437,18 @@ export const handlePluginRoutes: HttpRouteHandler = async (req, res, method, url
       child.stdout.on('data', (chunk: Buffer) => append('stdout', chunk))
       child.stderr.on('data', (chunk: Buffer) => append('stderr', chunk))
       child.once('error', (error) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        reject(error)
+        finish(() => reject(error))
       })
       child.once('close', (exitCode) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        resolve({ exitCode, stdout, stderr })
+        finish(() => resolve({ exitCode, stdout, stderr }))
       })
     })
   }
 
   const brokerCall = async (kind: string, payload: unknown): Promise<PluginBrokerResult> => {
+    if (brokerAbortController.signal.aborted) {
+      throw new Error(ABORT_ERROR_MESSAGE)
+    }
     switch (kind) {
       case 'net:httpRequest':
         return await httpRequest(payload as PluginRouteHttpRequest)
@@ -449,9 +469,13 @@ export const handlePluginRoutes: HttpRouteHandler = async (req, res, method, url
   }
 
   let handlerExecution: PluginSandboxExecution | null = null
-  let handlerPromise: Promise<PluginRouteResponse> | null = null
   try {
-    const body = method === 'GET' ? undefined : await parseRequestBody<unknown>(req)
+    const body = method === 'GET'
+      ? undefined
+      : await Promise.race([
+          parseRequestBody<unknown>(req),
+          execution.cancellationPromise,
+        ])
     const query = Object.fromEntries(url.searchParams.entries())
     const startedAt = Date.now()
     logger.structured({
@@ -466,6 +490,7 @@ export const handlePluginRoutes: HttpRouteHandler = async (req, res, method, url
     handlerExecution = executePluginRouteInSandbox({
       handlerPath: route.handler,
       timeoutMs: plugin.execution.maxExecutionTimeMs,
+      signal: execution.cancellationSignal,
       runAgent,
       brokerCall,
       request: {
@@ -487,8 +512,7 @@ export const handlePluginRoutes: HttpRouteHandler = async (req, res, method, url
         },
       },
     })
-    handlerPromise = handlerExecution.promise
-    void handlerPromise.then(finishExecutionOnce, finishExecutionOnce)
+    const handlerPromise = handlerExecution.promise
 
     const result = await withTimeout(
       Promise.race([
@@ -521,7 +545,6 @@ export const handlePluginRoutes: HttpRouteHandler = async (req, res, method, url
       invocationId: execution.invocationId,
       detail: { durationMs: Date.now() - startedAt },
     })
-    finishExecutionOnce()
     sendJson(res, result.status ?? 200, {
       ...(result.body && typeof result.body === 'object' ? result.body : { ok: true }),
       invocationId: execution.invocationId,
@@ -530,8 +553,15 @@ export const handlePluginRoutes: HttpRouteHandler = async (req, res, method, url
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
     const isPermissionDenied = error instanceof PluginPermissionDeniedError || /^Plugin .* permission denied$/.test(detail)
-    const isTimeout = detail.includes('timeout')
-    const isCancelled = detail.includes('cancelled')
+    const isTimeout = detail.toLowerCase().includes('timeout')
+    const isCancelled = detail.toLowerCase().includes('cancelled') || brokerAbortController.signal.aborted
+    const clientDetail = isPermissionDenied
+      ? 'The plugin is not permitted to perform this operation'
+      : isCancelled
+        ? 'The plugin operation was cancelled'
+        : isTimeout
+          ? 'The plugin operation timed out'
+          : 'The plugin operation failed'
 
     ctx.pluginRegistry.recordAudit({
       timestamp: new Date().toISOString(),
@@ -550,13 +580,6 @@ export const handlePluginRoutes: HttpRouteHandler = async (req, res, method, url
       invocationId: execution.invocationId,
       detail,
     })
-    if (handlerPromise === null || (!isTimeout && !isCancelled)) {
-      finishExecutionOnce()
-    }
-    if (isTimeout || isCancelled) {
-      handlerExecution?.terminate()
-      finishExecutionOnce()
-    }
     sendJson(res, isPermissionDenied ? 403 : isCancelled ? 499 : isTimeout ? 504 : 500, {
       error: isPermissionDenied
         ? 'Plugin route permission denied'
@@ -565,10 +588,15 @@ export const handlePluginRoutes: HttpRouteHandler = async (req, res, method, url
         : isTimeout
           ? 'Plugin route execution timeout'
           : 'Plugin route execution failed',
-      detail,
+      detail: clientDetail,
       invocationId: execution.invocationId,
       traceId,
     })
+  } finally {
+    if (handlerExecution) {
+      await handlerExecution.terminate()
+    }
+    finishExecutionOnce()
   }
 
   return true

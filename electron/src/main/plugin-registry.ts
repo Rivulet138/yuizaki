@@ -23,7 +23,17 @@ interface ExecutionController {
     aborted: boolean
     reason?: 'cancelled' | 'timeout'
   }
+  cancellationController: AbortController
   cancel: (reason: 'cancelled' | 'timeout') => void
+}
+
+export class PluginExecutionAdmissionError extends Error {
+  readonly code = 'PLUGIN_EXECUTION_ADMISSION_CLOSED'
+
+  constructor() {
+    super('Plugin execution admission is closed')
+    this.name = 'PluginExecutionAdmissionError'
+  }
 }
 
 const createEmptyStats = () => ({
@@ -111,6 +121,8 @@ export class PluginRegistry {
   private readonly loadFailures: PluginLoadFailure[] = []
   private readonly runtimeStates = new Map<string, PluginRuntimeState>()
   private readonly activeExecutions = new Map<string, Map<string, ExecutionController>>()
+  private readonly executionSettleWaiters = new Set<() => void>()
+  private acceptingExecutions = true
 
   register(plugin: DesktopPetPlugin, validationIssues: PluginManifestValidationIssue[] = []): void {
     if (this.plugins.some((item) => item.id === plugin.id)) {
@@ -259,18 +271,35 @@ export class PluginRegistry {
     return this.activeExecutions.get(pluginId)?.size ?? 0
   }
 
+  beginShutdown(): void {
+    this.acceptingExecutions = false
+  }
+
+  resumeExecutions(): void {
+    this.acceptingExecutions = true
+  }
+
   startExecution(pluginId: string, routeId: string, timeoutMs: number): {
     invocationId: string
     cancellationToken: { aborted: boolean; reason?: 'cancelled' | 'timeout' }
+    cancellationSignal: AbortSignal
     cancellationPromise: Promise<never>
   } {
+    if (!this.acceptingExecutions) {
+      throw new PluginExecutionAdmissionError()
+    }
     const invocationId = `${pluginId}:${routeId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
+    const cancellationController = new AbortController()
     let cancel!: (reason: 'cancelled' | 'timeout') => void
     const token: { aborted: boolean; reason?: 'cancelled' | 'timeout' } = { aborted: false }
     const cancellationPromise = new Promise<never>((_, reject) => {
       cancel = (reason) => {
+        if (token.aborted) {
+          return
+        }
         token.aborted = true
         token.reason = reason
+        cancellationController.abort(reason)
         reject(new Error(reason === 'timeout' ? 'Plugin route execution timeout' : 'Plugin route execution cancelled'))
       }
     })
@@ -282,6 +311,7 @@ export class PluginRegistry {
       startedAt: new Date().toISOString(),
       timeoutMs,
       token,
+      cancellationController,
       cancel,
     }
 
@@ -297,6 +327,7 @@ export class PluginRegistry {
     return {
       invocationId,
       cancellationToken: token,
+      cancellationSignal: cancellationController.signal,
       cancellationPromise,
     }
   }
@@ -316,6 +347,23 @@ export class PluginRegistry {
     return true
   }
 
+  cancelAllExecutions(reason: 'cancelled' | 'timeout' = 'cancelled'): void {
+    for (const [pluginId, executions] of this.activeExecutions) {
+      for (const invocationId of executions.keys()) {
+        this.cancelExecution(pluginId, invocationId, reason)
+      }
+    }
+  }
+
+  async waitForExecutionsToSettle(): Promise<void> {
+    if (this.activeExecutions.size === 0) {
+      return
+    }
+    await new Promise<void>((resolve) => {
+      this.executionSettleWaiters.add(resolve)
+    })
+  }
+
   finishExecution(pluginId: string, invocationId: string): void {
     const executions = this.activeExecutions.get(pluginId)
     if (!executions) {
@@ -330,6 +378,12 @@ export class PluginRegistry {
     const state = this.runtimeStates.get(pluginId)
     if (state) {
       state.activeExecutions = [...(this.activeExecutions.get(pluginId)?.values() ?? [])].map(toActiveExecution)
+    }
+    if (this.activeExecutions.size === 0) {
+      for (const resolve of this.executionSettleWaiters) {
+        resolve()
+      }
+      this.executionSettleWaiters.clear()
     }
   }
 }

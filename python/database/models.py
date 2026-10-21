@@ -32,6 +32,7 @@ class ChatMessage(Base):
         Index('idx_session_timestamp', 'session_id', 'timestamp'),
         Index(
             'uq_chat_message_turn_role',
+            'session_id',
             'turn_idempotency_key',
             'role',
             unique=True,

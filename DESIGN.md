@@ -10,7 +10,7 @@
 - **交互原则**：桌宠优先、渐进披露、低频且可暂停的主动行为；错误必须说明影响和下一步；破坏性操作需要范围预览和明确确认。
 - **视觉与无障碍**：复用现有 Yuizaki 令牌和 Element Plus 组件，保持 8px 间距节奏、清晰焦点和 4.5:1 文本对比度；状态不能只靠颜色表达，动画遵循减少动态效果偏好。
 - **响应式行为**：支持 760px 起的 Electron 窗口；窄窗口将检查器移到列表下方、堆叠工具栏并将表格转为列表行，操作不依赖悬停。
-- **实现约束**：保持现有 `/memory` 契约和 Vue 3/FastAPI/SQLite 架构；索引可重建，资源按需加载，终态 Job 事件不得丢失；跨层变更必须通过类型检查、构建和桌面/紧凑窗口验证。
+- **实现约束**：保持现有 `/memory` 契约和 Vue 3/FastAPI/SQLite 架构；索引可重建，资源按需加载，终态 Job 事件不得丢失；Electron 控制 API 使用明确的 token/origin 边界，插件 shutdown 必须先关闭 admission 并等待已登记执行结束，数据库 bootstrap 必须动态读取 Alembic head；跨层变更必须通过类型检查、构建和桌面/紧凑窗口验证。
 
 ## English design specification
 
@@ -167,6 +167,7 @@
   - Permanent deletion clears chat references and all configured index projections.
 - Performance constraints: list rendering stays bounded; index rebuild is explicit; embedding models load lazily; terminal Job events are never dropped.
 - Compatibility constraints: preserve existing `/memory` contracts while introducing a single canonical frontend client surface; Qdrant remains optional.
+- Boundary constraints: Electron control authentication must distinguish public health/assets, control-token routes, and the separate host desktop-action token. Plugin shutdown must drain admitted work, including sandbox descendants. Migration bootstrap must discover the current Alembic head and reject unversioned existing schemas.
 - Verification expectations: typecheck/build plus desktop and compact viewport checks with no overlap or blank states.
 
 ## Open questions / 待确认

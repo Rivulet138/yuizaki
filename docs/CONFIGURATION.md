@@ -115,9 +115,20 @@ Use `--with-qdrant` on Windows to request the configured Docker service. Memory 
 
 The launcher may select a fallback port when a default is occupied and passes the chosen origins to the application. Do not hard-code these defaults in clients.
 
-The default services bind to loopback. Loopback HTTP and Socket.IO clients are trusted by the desktop runtime. `YUIZAKI_BACKEND_API_TOKEN` protects optional non-loopback access; it does not turn Yuizaki into a hardened public service.
+The default services bind to loopback. Python loopback HTTP and Socket.IO traffic follows the desktop trust model. Electron routed control APIs require the control token in `Authorization: Bearer ...` or `x-yuizaki-backend-token`; health and approved pet-asset GET paths are public. A `control_token` query parameter is accepted only for a loopback GET without an `Origin` header, for the browser bootstrap. `YUIZAKI_BACKEND_API_TOKEN` protects optional non-loopback Python and Socket.IO access; it does not turn Yuizaki into a hardened public service.
 
 Desktop action controls are a narrower capability than the general loopback API. Electron generates `YUIZAKI_HOST_DESKTOP_ACTION_TOKEN` at startup and sends it only to the managed Python child and desktop-action bridge. `/api/desktop-actions/*` rejects missing, malformed, incorrect, or backend-token-reused credentials. When Python is managed externally, set the same sufficiently random value in the Electron and Python environments; otherwise desktop actions remain unavailable by design. Keep this token separate from `YUIZAKI_BACKEND_API_TOKEN` and never put either value in logs or source control.
+
+## Database bootstrap and migrations / 数据库启动迁移
+
+The launcher runs `python/migration_bootstrap.py` before starting backend traffic. The script reads the current Alembic head from `python/alembic/versions` at runtime rather than embedding a date-based revision in application code or tests.
+
+- An empty database is created at the current head.
+- A database with a trusted Alembic revision is upgraded to the current head and its schema is checked.
+- An existing database with tables but no trusted revision is rejected instead of being guessed or silently rebuilt.
+- The turn idempotency index is scoped by `session_id`, `turn_idempotency_key`, and `role`; databases at the previous migration are upgraded to this shape.
+
+Run the launcher setup or the bootstrap script again after installing a new version. Do not edit the SQLite schema while the backend is running.
 
 ## Connectors / 消息连接器
 

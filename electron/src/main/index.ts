@@ -89,6 +89,9 @@ let inputBindingStatus: InputBindingRegistrationStatus = {
 }
 let ipcReady = false
 let isQuitting = false
+let quitCleanupStarted = false
+let quitCleanupCompleted = false
+let quitCleanupPromise: Promise<void> | null = null
 const browserOnly = process.env['YUIZAKI_BROWSER_ONLY'] === '1'
 
 const togglePetLock = () => {
@@ -736,18 +739,31 @@ app.on('browser-window-blur', () => {
   petShortcuts?.releasePushToTalk()
 })
 
-app.on('before-quit', async () => {
+app.on('before-quit', (event) => {
+  if (quitCleanupCompleted) return
+  event.preventDefault()
   isQuitting = true
-  cancelAllModelResourceTasks()
-  computerUseBridge?.dispose()
-  desktopActionBridge?.dispose()
-  perceptionBridge?.dispose()
-  petShortcuts?.unregister()
-  petTray?.destroy()
-  live2dWindow?.close()
-  petWindow?.close()
-  await controlServer?.stop()
-  await pythonService?.stop()
+  if (quitCleanupStarted) return
+  quitCleanupStarted = true
+  quitCleanupPromise = (async () => {
+    cancelAllModelResourceTasks()
+    computerUseBridge?.dispose()
+    desktopActionBridge?.dispose()
+    perceptionBridge?.dispose()
+    petShortcuts?.unregister()
+    petTray?.destroy()
+    live2dWindow?.close()
+    petWindow?.close()
+    await controlServer?.stop()
+    await pythonService?.stop()
+    quitCleanupCompleted = true
+    app.quit()
+  })()
+  void quitCleanupPromise.catch((error) => {
+    recordRuntimeException('quitCleanup', error)
+    quitCleanupCompleted = true
+    app.quit()
+  })
 })
 
 app.on('activate', () => {

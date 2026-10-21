@@ -41,6 +41,7 @@ interface SandboxExecutionOptions {
   timeoutMs: number
   runAgent: BrokerRunAgent
   brokerCall: BrokerCall
+  signal: AbortSignal
 }
 
 interface SandboxRunAgentMessage {
@@ -81,7 +82,81 @@ type SandboxWorkerMessage =
 
 export interface PluginSandboxExecution {
   promise: Promise<PluginRouteResponse>
-  terminate: () => void
+  terminate: () => Promise<void>
+}
+
+const processTerminationPromises = new WeakMap<ChildProcess, Promise<void>>()
+
+const waitForChildClose = (child: ChildProcess): Promise<void> => {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve()
+  }
+
+  return new Promise<void>((resolve) => {
+    let settled = false
+    const finish = (): void => {
+      if (settled) return
+      settled = true
+      child.removeListener('close', finish)
+      child.removeListener('error', finish)
+      resolve()
+    }
+    child.once('close', finish)
+    child.once('error', finish)
+    if (child.exitCode !== null || child.signalCode !== null) {
+      finish()
+    }
+  })
+}
+
+/** Terminate a worker and any descendants it may have spawned. */
+export const terminateProcessTree = (child: ChildProcess | null): Promise<void> => {
+  if (!child?.pid) return Promise.resolve()
+  const pid = child.pid
+
+  const existing = processTerminationPromises.get(child)
+  if (existing) return existing
+
+  const termination = (async (): Promise<void> => {
+    const childClose = waitForChildClose(child)
+    if (process.platform === 'win32') {
+      const taskkillExitCode = await new Promise<number | null>((resolve) => {
+        let settled = false
+        const finish = (code: number | null): void => {
+          if (settled) return
+          settled = true
+          resolve(code)
+        }
+        const killer = spawn('taskkill', ['/pid', String(pid), '/t', '/f'], {
+          windowsHide: true,
+          stdio: 'ignore',
+        })
+        killer.once('close', finish)
+        killer.once('error', () => finish(null))
+      })
+      if (taskkillExitCode !== 0) {
+        try {
+          child.kill('SIGKILL')
+        } catch {
+          // The child may already have exited between taskkill and fallback.
+        }
+      }
+    } else {
+      try {
+        process.kill(-pid, 'SIGKILL')
+      } catch {
+        try {
+          child.kill('SIGKILL')
+        } catch {
+          // The child may already have exited.
+        }
+      }
+    }
+    await childClose
+  })()
+
+  processTerminationPromises.set(child, termination)
+  return termination
 }
 
 const SANDBOX_PROCESS_SOURCE = String.raw`
@@ -298,6 +373,12 @@ export const buildPluginSandboxProcessArgs = (
 ]
 
 export const executePluginRouteInSandbox = (options: SandboxExecutionOptions): PluginSandboxExecution => {
+  if (options.signal.aborted) {
+    return {
+      promise: Promise.reject(new Error('Plugin route execution cancelled')),
+      terminate: async () => undefined,
+    }
+  }
   const resolvedHandlerPath = path.resolve(options.handlerPath)
   const childEnvironment: NodeJS.ProcessEnv = {
     ELECTRON_RUN_AS_NODE: '1',
@@ -310,6 +391,7 @@ export const executePluginRouteInSandbox = (options: SandboxExecutionOptions): P
   let worker: ChildProcess | null = spawn(process.execPath, buildPluginSandboxProcessArgs(resolvedHandlerPath), {
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     windowsHide: true,
+    detached: process.platform !== 'win32',
     env: childEnvironment,
   })
   worker.send?.({
@@ -323,25 +405,37 @@ export const executePluginRouteInSandbox = (options: SandboxExecutionOptions): P
 
   let settled = false
 
-  const terminate = (): void => {
+  let terminationPromise: Promise<void> | null = null
+  const terminate = (): Promise<void> => {
+    if (terminationPromise) return terminationPromise
     const activeWorker = worker
     worker = null
-    if (activeWorker) {
-      activeWorker.kill()
-    }
+    terminationPromise = terminateProcessTree(activeWorker)
+    return terminationPromise
   }
 
   const promise = new Promise<PluginRouteResponse>((resolve, reject) => {
+    let onAbort: () => void = () => undefined
     const settle = (callback: () => void): void => {
       if (settled) {
         return
       }
       settled = true
-      callback()
-      terminate()
+      options.signal.removeEventListener('abort', onAbort)
+      void terminate().then(callback, callback)
+    }
+
+    onAbort = () => {
+      settle(() => reject(new Error('Plugin route execution cancelled')))
+    }
+    options.signal.addEventListener('abort', onAbort, { once: true })
+    if (options.signal.aborted) {
+      onAbort()
+      return
     }
 
     worker?.on('message', (message: SandboxWorkerMessage) => {
+      if (settled) return
       if (!message || typeof message !== 'object') {
         return
       }
