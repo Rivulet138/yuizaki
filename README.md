@@ -33,6 +33,8 @@ python/CharacterModels/v2ProPlus/<character>
 - 按键说话、连续对话、VAD、ASR、流式 TTS 和打断。
 - 按请求的屏幕捕获、OCR 和视觉模型分析；默认不运行永久录屏。
 - SQLite 记忆权威存储，支持召回、审核、纠正、软遗忘、永久删除、导入、导出和索引重建。
+- 工作区隔离：会话、历史、消息编辑、统计与提示词上下文按工作区归属，跨工作区请求会被拒绝。
+- 设置快照历史与回滚（最多 20 个快照，凭据在写入磁盘前被清除）；工作区上下文存入 SQLite 工作区行。
 - Windows 和明确的 Linux X11 会话支持可见窗口发现、聚焦和关闭；能力默认关闭并需要独立 host token。
 - Telegram、Discord、QQ/微信个人桥提供实验性入口，默认关闭。
 
@@ -41,7 +43,7 @@ python/CharacterModels/v2ProPlus/<character>
 | 资源 | 用途 | 来源/位置 | 要求 |
 | --- | --- | --- | --- |
 | LLM Provider | 文字 Agent、规划、工具调用 | 用户配置的 OpenAI-compatible 端点 | 文字对话必需 |
-| Sherpa SenseVoice / Zipformer2 | ASR | `resources.lock.json` | 启用本地语音时必需，约 188 MiB |
+| Sherpa SenseVoice / Zipformer2 | ASR | `resources.lock.json` | 启用本地语音时必需，约 178 MiB（187 MB） |
 | Qwen3 Embedding 0.6B | 语义记忆检索 | 锁定的 Hugging Face revision | 使用语义记忆时必需，约 1.12 GiB |
 | Genie TTS | 本地语音合成 | 锁定的 `High-Logic/Genie` revision | 使用本地 TTS 时必需，约 391 MiB |
 | SoulX Singer | 音色转换 | `resources.lock.json` | 可选 |
@@ -59,8 +61,8 @@ python/CharacterModels/v2ProPlus/<character>
 - Windows 10/11 x64 或 Linux x86_64 图形桌面
 - Python 3.11–3.13
 - Node.js >= 22.13、npm
-- Go 1.22+（从源码构建 Launcher）
-- Docker（自动启动 Qdrant 时需要）
+- Go 1.27+（从源码构建 Launcher；`tools/yuizaki-launcher/go.mod` 与 CI 使用该版本）
+- Docker（Windows 自动启动 Qdrant 时需要；Linux 需自行启动容器）
 
 ### Go Launcher
 
@@ -89,7 +91,7 @@ chmod +x YuizakiLauncher
 ./YuizakiLauncher start
 ```
 
-默认启动浏览器对话页；需要 Electron 控制面板和桌宠时加 `--electron-ui`。可用参数包括 `--check`、`--smoke`、`--no-mcp`、`--with-qdrant`、`--no-install`、`--no-open`、`--no-show-pet` 和 `--dev-renderer`。
+默认启动浏览器对话页；需要 Electron 控制面板和桌宠时加 `--electron-ui`。MCP 是可选能力，默认不启动；需要浏览器自动化工具时加 `--with-mcp`（或设置 `YUIZAKI_WITH_MCP=1`），`--no-mcp` 显式保持关闭。其他参数包括 `--check`、`--smoke`、`--with-qdrant`/`--no-qdrant`、`--no-install`、`--no-open`、`--no-show-pet`、`--dev-renderer`/`--no-dev-renderer` 和 `--browser-only`。Qdrant 的 Docker 自动启动由 Windows Launcher 管理，Linux 需自行启动配置的 Docker 服务。
 
 启动器在后端接收流量前运行数据库 bootstrap：空库从当前 Alembic head 创建，带有可信 revision 的旧库自动升级到当前 head 并校验 schema。head 从迁移目录动态读取，不应在客户端、测试或文档中写死 revision 字符串；有表但没有可信 Alembic revision 的数据库会拒绝启动，需要先完成明确的迁移处理。
 
@@ -112,9 +114,10 @@ Linux 使用 `.venv/bin/python` 和 `cp .env.example .env`。后端默认监听 
 | 文件 | 用途 |
 | --- | --- |
 | `python/.env` | Provider、端口、可选服务和运行时变量，不提交到 Git |
-| `python/config/settings.json` | 应用持久化设置，由设置页或 Launcher 管理 |
-| `python/data/workspace_contexts.json` | 工作区提示词、角色卡、世界书与记忆策略的持久化副本（含 revision），运行时生成 |
-| `python/data/settings_history.json` | 设置历史快照，重启后仍可回滚；凭据字段写入前会被清空 |
+| `python/config/settings.json` | 应用持久化设置，由设置页或 Launcher 管理；`YUIZAKI_SETTINGS_PATH` 可覆盖 |
+| `python/data/chat.db` | 聊天、会话、工作区上下文与投递状态的 SQLite 权威库；`DATABASE_URL` 可覆盖 |
+| `python/data/workspace_contexts.json`（旧版，通常不存在） | 旧版工作区提示词、角色卡、世界书与记忆策略侧车文件；启动迁移读取一次后归档，现行数据存入 SQLite 工作区行 |
+| `python/data/settings_history.json` | 设置历史快照（最多 20 个），重启后仍可回滚；凭据字段写入前会被清空 |
 | `python/modules/llm/model-capabilities.registry.json` | 显式模型上下文/输出上限与视觉能力；未列出的模型不施加任何限制 |
 | `resources.lock.json` | 模型/资源 URL、revision、校验和及许可边界 |
 
@@ -123,12 +126,14 @@ Linux 使用 `.venv/bin/python` 和 `cp .env.example .env`。后端默认监听 
 | `SERVER_PORT` | `8001` | Python HTTP 和 Socket.IO |
 | `CONTROL_SERVER_PORT` | `38945` | Electron control server |
 | `RENDERER_PORT` | `5173` | Vite 开发服务器 |
-| `MCP_PORT` | `7777` | Node MCP 服务 |
+| `MCP_PORT` | `7777` | Node MCP 服务（仅启用 MCP 时使用） |
 | `VISION_LLM_ENABLED` | `0` | 视觉默认关闭 |
 | `MEMORY_BACKEND` | `sqlite` | SQLite 为记忆权威源 |
 | `QDRANT_AUTO_START` | `0` | 是否自动启动 Qdrant |
 | `ASR_STARTUP_MODE` / `TTS_STARTUP_MODE` | `lazy` | 延迟加载语音资源 |
 | `YUIZAKI_INSTALL_PROFILE` | `core` / `full` | 基础或完整 Python 依赖 |
+| `YUIZAKI_DATA_DIR` | `python/data` | 运行时数据根目录；设置数据库与历史文件的位置 |
+| `YUIZAKI_WITH_MCP` | `0` | 等价于 Launcher 的 `--with-mcp` |
 
 完整配置见 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)。默认服务绑定 loopback；云 Provider、MCP、插件、浏览器自动化和远程 Provider 可能按配置访问外部服务或本地数据。安全边界见 [`SECURITY.md`](SECURITY.md)。
 
@@ -141,7 +146,7 @@ Electron 44、Vue 3、TypeScript、Vite、Pinia、Element Plus、PixiJS、Three.
 ```text
 electron/                 Electron、preload、Vue renderer 和构建脚本
 python/                   FastAPI、Agent、记忆、调度器和测试
-node-mcp/                 Playwright MCP 服务
+node-mcp/                 可选 Playwright MCP 服务（默认不启动）
 tools/yuizaki-launcher/   Go Launcher
 scripts/                  文档、资源和锁文件检查
 services/                 可选外部服务
@@ -154,10 +159,12 @@ docs/                     快速开始、配置、API、架构和平台文档
 | 文档 | 内容 |
 | --- | --- |
 | [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | 启动、首次验收、Launcher 命令和故障处理 |
-| [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) | 环境变量、Provider、语音、视觉、记忆和打包 |
+| [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) | 环境变量、Provider、语音、SVC、MCP、视觉、记忆和打包 |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 进程边界、Agent 阶段、数据流和权限 |
 | [`docs/API.md`](docs/API.md) | HTTP、SSE、Socket.IO、Job、记忆和认证契约 |
 | [`docs/LINUX.md`](docs/LINUX.md) | Linux、X11、Wayland、音频、GPU 和桌面限制 |
+| [`PRODUCT.md`](PRODUCT.md) | 用户、产品目标、设计原则和无障碍边界 |
+| [`DESIGN.md`](DESIGN.md) | 桌宠、聊天、语音、记忆和 Agent 作业的设计规范 |
 | [`SECURITY.md`](SECURITY.md) | 安全边界、凭据、MCP、连接器和数据处理 |
 | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | 依赖、模型、角色、声音和字体许可 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献流程和提交边界 |
@@ -168,20 +175,27 @@ docs/                     快速开始、配置、API、架构和平台文档
 cd python
 python -m pip install -r requirements-test.txt
 python -m pytest -q
+python -m compileall -q modules routes socket_handlers tests app.py socket_server.py
 cd ..
 python scripts/check_docs.py
 python scripts/check_resources.py
 cd python
 python scripts/check_requirements_lock.py
 cd ..\electron
+npm audit --audit-level=low
 npm run type-check
 npm run lint
 npm run test:unit
 npm run build
 npm run start:check
+cd ..\node-mcp
+npm ci
+npm test
+cd ..\tools\yuizaki-launcher
+go test ./...
 ```
 
-`npm run type-check` 现在同时检查 main/preload/shared 和带 `.vue` 的 renderer 工程（`vue-tsc` + [`electron/tsconfig.renderer.json`](electron/tsconfig.renderer.json)）。renderer 的类型基线记录在 [`electron/renderer-types-baseline.json`](electron/renderer-types-baseline.json)：新增类型错误会直接失败，修好后用 `node electron/scripts/check-renderer-types.mjs --update` 收紧基线。
+`npm run type-check` 现在同时检查 main/preload/shared 和带 `.vue` 的 renderer 工程（`vue-tsc` + [`electron/tsconfig.renderer.json`](electron/tsconfig.renderer.json)）。renderer 的类型基线记录在 [`electron/renderer-types-baseline.json`](electron/renderer-types-baseline.json)：新增类型错误会直接失败，修好后用 `node electron/scripts/check-renderer-types.mjs --update` 收紧基线；对改动文件做严格检查时另跑 `npm run type-check:renderer:changed`。
 
 ## 许可与贡献
 
@@ -207,7 +221,11 @@ Yuizaki is a local-first Windows/Linux AI desktop companion Agent with text and 
 - Push-to-talk, continuous conversation, VAD, ASR, streaming TTS, and interruption.
 - Request-scoped screen capture, OCR, and vision; no permanent recording loop by default.
 - SQLite-authoritative memory with review, correction, forgetting, deletion, import/export, and index rebuild.
+- Workspace isolation: sessions, history, message edits, statistics, and prompt context belong to a workspace, and cross-workspace requests are rejected.
+- Settings snapshot history with rollback (at most 20 snapshots; credentials are scrubbed before they reach disk); workspace context is stored on the SQLite workspace row.
 - Visible-window discovery, focus, and close on Windows and explicit Linux X11 sessions; disabled by default and protected by a separate host token.
 - Experimental Telegram, Discord, QQ, and WeChat personal bridges; disabled by default.
+
+MCP is optional and starts disabled; add `--with-mcp` (or `YUIZAKI_WITH_MCP=1`) to enable browser automation tools. Launcher builds require Go 1.27+.
 
 Models, voices, characters, fonts, and artwork have separate licenses. Do not commit secrets, databases, personal conversations, screenshots, audio caches, or model weights. See [Third-party notices](THIRD_PARTY_NOTICES.md), [Quickstart](docs/QUICKSTART.md), [Configuration](docs/CONFIGURATION.md), [Architecture](docs/ARCHITECTURE.md), and [Security](SECURITY.md).
