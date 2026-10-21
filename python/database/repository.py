@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from sqlalchemy import create_engine, func
+from sqlalchemy import create_engine, func, update
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -247,24 +248,34 @@ class DatabaseRepository:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Persist one user/assistant turn atomically and in conversation order."""
         session = self.SessionLocal()
+        normalized_workspace_id = self._normalize_workspace_id(workspace_id)
+
+        def load_existing_pair() -> tuple[dict[str, Any], dict[str, Any]] | None:
+            existing = session.query(ChatMessage) \
+                .join(ChatSession, ChatSession.id == ChatMessage.session_id) \
+                .filter(
+                    ChatMessage.turn_idempotency_key == normalized_turn_key,
+                    ChatSession.workspace_id == normalized_workspace_id,
+                ) \
+                .order_by(ChatMessage.id.asc()) \
+                .all()
+            by_role = {message.role: message for message in existing}
+            if "user" in by_role and "assistant" in by_role:
+                return (
+                    self._message_to_record(by_role["user"]),
+                    self._message_to_record(by_role["assistant"]),
+                )
+            if existing:
+                raise DatabaseError("incomplete_turn_message_pair: existing idempotent turn is partial")
+            return None
+
         try:
-            normalized_workspace_id = self._require_workspace(session, workspace_id)
+            normalized_workspace_id = self._require_workspace(session, normalized_workspace_id)
             normalized_turn_key = str(turn_idempotency_key or "").strip() or None
             if normalized_turn_key is not None:
-                existing = session.query(ChatMessage)\
-                    .filter(ChatMessage.turn_idempotency_key == normalized_turn_key)\
-                    .order_by(ChatMessage.id.asc())\
-                    .all()
-                by_role = {message.role: message for message in existing}
-                if "user" in by_role and "assistant" in by_role:
-                    return (
-                        self._message_to_record(by_role["user"]),
-                        self._message_to_record(by_role["assistant"]),
-                    )
-                if existing:
-                    raise DatabaseError(
-                        "incomplete_turn_message_pair: existing idempotent turn is partial"
-                    )
+                existing_pair = load_existing_pair()
+                if existing_pair is not None:
+                    return existing_pair
             chat_session = session.query(ChatSession).filter_by(id=session_id).first()
             if not chat_session:
                 chat_session = ChatSession(
@@ -313,6 +324,18 @@ class DatabaseRepository:
             session.commit()
             logger.debug("Message pair saved: %s", session_id)
             return records
+        except IntegrityError as exc:
+            session.rollback()
+            if normalized_turn_key is not None:
+                try:
+                    existing_pair = load_existing_pair()
+                except DatabaseError:
+                    raise
+                if existing_pair is not None:
+                    logger.info("Message pair already committed for turn key: %s", normalized_turn_key)
+                    return existing_pair
+            logger.exception("Failed to save message pair due to integrity error: %s", exc)
+            raise DatabaseError(f"failed_to_save_message_pair: {exc}") from exc
         except Exception as exc:
             logger.exception("Failed to save message pair: %s", exc)
             session.rollback()
@@ -360,7 +383,12 @@ class DatabaseRepository:
         finally:
             session.close()
 
-    def get_chat_history(self, session_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    def get_chat_history(
+        self,
+        session_id: str,
+        limit: int = 100,
+        workspace_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         """获取聊天历史
 
         Args:
@@ -375,11 +403,14 @@ class DatabaseRepository:
         """
         session = self.SessionLocal()
         try:
-            messages = session.query(ChatMessage)\
-                .filter_by(session_id=session_id)\
-                .order_by(ChatMessage.timestamp.asc())\
-                .limit(limit)\
-                .all()
+            normalized_limit = min(max(int(limit), 1), 1000)
+            query = session.query(ChatMessage).filter(ChatMessage.session_id == session_id)
+            if workspace_id is not None:
+                normalized_workspace_id = self._normalize_workspace_id(workspace_id)
+                query = query.join(ChatSession, ChatSession.id == ChatMessage.session_id).filter(
+                    ChatSession.workspace_id == normalized_workspace_id
+                )
+            messages = query.order_by(ChatMessage.timestamp.asc()).limit(normalized_limit).all()
 
             records: list[dict[str, Any]] = []
             for message in messages:
@@ -488,7 +519,7 @@ class DatabaseRepository:
         finally:
             session.close()
 
-    def get_all_sessions(self) -> list[dict[str, Any]]:
+    def get_all_sessions(self, workspace_id: str | None = None) -> list[dict[str, Any]]:
         """获取所有会话
 
         Returns:
@@ -499,9 +530,10 @@ class DatabaseRepository:
         """
         session = self.SessionLocal()
         try:
-            sessions = session.query(ChatSession)\
-                .order_by(ChatSession.updated_at.desc())\
-                .all()
+            query = session.query(ChatSession)
+            if workspace_id is not None:
+                query = query.filter_by(workspace_id=self._normalize_workspace_id(workspace_id))
+            sessions = query.order_by(ChatSession.updated_at.desc()).all()
 
             return [self._session_to_record(chat_session) for chat_session in sessions]
         except Exception as exc:
@@ -542,11 +574,16 @@ class DatabaseRepository:
         finally:
             session.close()
 
-    def delete_message(self, message_id: int) -> dict[str, Any]:
+    def delete_message(self, message_id: int, workspace_id: str | None = None) -> dict[str, Any]:
         """Delete one persisted message and update its parent session counters."""
         session = self.SessionLocal()
         try:
-            message = session.query(ChatMessage).filter_by(id=message_id).first()
+            query = session.query(ChatMessage).filter_by(id=message_id)
+            if workspace_id is not None:
+                query = query.join(ChatSession, ChatSession.id == ChatMessage.session_id).filter(
+                    ChatSession.workspace_id == self._normalize_workspace_id(workspace_id)
+                )
+            message = query.first()
             if not message:
                 raise NotFoundError(f"message_not_found: {message_id}")
 
@@ -571,11 +608,16 @@ class DatabaseRepository:
         finally:
             session.close()
 
-    def update_message(self, message_id: int, content: str) -> dict[str, Any]:
+    def update_message(self, message_id: int, content: str, workspace_id: str | None = None) -> dict[str, Any]:
         """Update one persisted message body."""
         session = self.SessionLocal()
         try:
-            message = session.query(ChatMessage).filter_by(id=message_id).first()
+            query = session.query(ChatMessage).filter_by(id=message_id)
+            if workspace_id is not None:
+                query = query.join(ChatSession, ChatSession.id == ChatMessage.session_id).filter(
+                    ChatSession.workspace_id == self._normalize_workspace_id(workspace_id)
+                )
+            message = query.first()
             if not message:
                 raise NotFoundError(f"message_not_found: {message_id}")
 
@@ -597,18 +639,29 @@ class DatabaseRepository:
         finally:
             session.close()
 
-    def delete_messages_after(self, message_id: int) -> dict[str, Any]:
+    def delete_messages_after(self, message_id: int, workspace_id: str | None = None) -> dict[str, Any]:
         """Delete persisted messages after one message in the same session."""
         session = self.SessionLocal()
         try:
-            message = session.query(ChatMessage).filter_by(id=message_id).first()
+            query = session.query(ChatMessage).filter_by(id=message_id)
+            if workspace_id is not None:
+                query = query.join(ChatSession, ChatSession.id == ChatMessage.session_id).filter(
+                    ChatSession.workspace_id == self._normalize_workspace_id(workspace_id)
+                )
+            message = query.first()
             if not message:
                 raise NotFoundError(f"message_not_found: {message_id}")
 
             session_id = str(message.session_id)
-            trailing_messages = session.query(ChatMessage)\
-                .filter(ChatMessage.session_id == session_id, ChatMessage.id > message_id)\
-                .all()
+            trailing_query = session.query(ChatMessage).filter(
+                ChatMessage.session_id == session_id,
+                ChatMessage.id > message_id,
+            )
+            if workspace_id is not None:
+                trailing_query = trailing_query.join(ChatSession, ChatSession.id == ChatMessage.session_id).filter(
+                    ChatSession.workspace_id == self._normalize_workspace_id(workspace_id)
+                )
+            trailing_messages = trailing_query.all()
             deleted_count = len(trailing_messages)
             removed_tokens = sum(int(item.tokens_used or 0) for item in trailing_messages)
             for item in trailing_messages:
@@ -632,11 +685,14 @@ class DatabaseRepository:
         finally:
             session.close()
 
-    def clear_session_messages(self, session_id: str) -> dict[str, Any]:
+    def clear_session_messages(self, session_id: str, workspace_id: str | None = None) -> dict[str, Any]:
         """Delete all messages from a session while keeping the session record."""
         session = self.SessionLocal()
         try:
-            chat_session = session.query(ChatSession).filter_by(id=session_id).first()
+            session_query = session.query(ChatSession).filter_by(id=session_id)
+            if workspace_id is not None:
+                session_query = session_query.filter_by(workspace_id=self._normalize_workspace_id(workspace_id))
+            chat_session = session_query.first()
             if not chat_session:
                 raise NotFoundError(f"session_not_found: {session_id}")
 
@@ -657,7 +713,7 @@ class DatabaseRepository:
         finally:
             session.close()
 
-    def delete_session(self, session_id: str) -> None:
+    def delete_session(self, session_id: str, workspace_id: str | None = None) -> None:
         """删除会话及其所有消息
 
         Args:
@@ -668,14 +724,20 @@ class DatabaseRepository:
         """
         session = self.SessionLocal()
         try:
-            # 删除消息
+            session_query = session.query(ChatSession).filter_by(id=session_id)
+            if workspace_id is not None:
+                session_query = session_query.filter_by(workspace_id=self._normalize_workspace_id(workspace_id))
+            chat_session = session_query.first()
+            if not chat_session:
+                raise NotFoundError(f"session_not_found: {session_id}")
             session.query(ChatMessage).filter_by(session_id=session_id).delete()
-
-            # 删除会话
-            session.query(ChatSession).filter_by(id=session_id).delete()
+            session.delete(chat_session)
 
             session.commit()
             logger.info(f"Session deleted: {session_id}")
+        except NotFoundError:
+            session.rollback()
+            raise
         except Exception as exc:
             logger.exception(f"Failed to delete session: {exc}")
             session.rollback()
@@ -683,7 +745,11 @@ class DatabaseRepository:
         finally:
             session.close()
 
-    def get_statistics(self, days: int = 7) -> list[dict[str, Any]]:
+    def get_statistics(
+        self,
+        days: int = 7,
+        workspace_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         """获取统计数据
 
         Args:
@@ -697,9 +763,37 @@ class DatabaseRepository:
         """
         session = self.SessionLocal()
         try:
+            normalized_days = min(max(int(days), 1), 3650)
+            if workspace_id is not None:
+                normalized_workspace_id = self._require_workspace(session, workspace_id)
+                rows = session.query(
+                    func.date(ChatMessage.timestamp).label("date"),
+                    func.count(ChatMessage.id).label("messages"),
+                    func.coalesce(func.sum(ChatMessage.tokens_used), 0).label("tokens"),
+                ).join(
+                    ChatSession, ChatSession.id == ChatMessage.session_id
+                ).filter(
+                    ChatSession.workspace_id == normalized_workspace_id
+                ).group_by(
+                    func.date(ChatMessage.timestamp)
+                ).order_by(
+                    func.date(ChatMessage.timestamp).desc()
+                ).limit(normalized_days).all()
+                return [
+                    {
+                        "date": row.date,
+                        "messages": int(row.messages or 0),
+                        "tokens": int(row.tokens or 0),
+                        "avg_response_time": 0.0,
+                        "ocr_count": 0,
+                        "svc_count": 0,
+                    }
+                    for row in reversed(rows)
+                ]
+
             stats = session.query(UserStatistics)\
                 .order_by(UserStatistics.date.desc())\
-                .limit(days)\
+                .limit(normalized_days)\
                 .all()
 
             return [
@@ -765,7 +859,11 @@ class DatabaseRepository:
         finally:
             session.close()
 
-    def export_to_json(self, session_id: str | None = None) -> str:
+    def export_to_json(
+        self,
+        session_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> str:
         """导出为 JSON 格式
 
         Args:
@@ -776,12 +874,15 @@ class DatabaseRepository:
         """
         session = self.SessionLocal()
         try:
+            query = session.query(ChatMessage)
             if session_id:
-                messages = session.query(ChatMessage)\
-                    .filter_by(session_id=session_id)\
-                    .all()
-            else:
-                messages = session.query(ChatMessage).all()
+                query = query.filter(ChatMessage.session_id == session_id)
+            if workspace_id is not None:
+                normalized_workspace_id = self._normalize_workspace_id(workspace_id)
+                query = query.join(ChatSession, ChatSession.id == ChatMessage.session_id).filter(
+                    ChatSession.workspace_id == normalized_workspace_id
+                )
+            messages = query.order_by(ChatMessage.timestamp.asc(), ChatMessage.id.asc()).all()
 
             data = [
                 {
@@ -802,7 +903,11 @@ class DatabaseRepository:
         finally:
             session.close()
 
-    def export_to_csv(self, session_id: str | None = None) -> str:
+    def export_to_csv(
+        self,
+        session_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> str:
         """导出为 CSV 格式
 
         Args:
@@ -813,12 +918,15 @@ class DatabaseRepository:
         """
         session = self.SessionLocal()
         try:
+            query = session.query(ChatMessage)
             if session_id:
-                messages = session.query(ChatMessage)\
-                    .filter_by(session_id=session_id)\
-                    .all()
-            else:
-                messages = session.query(ChatMessage).all()
+                query = query.filter(ChatMessage.session_id == session_id)
+            if workspace_id is not None:
+                normalized_workspace_id = self._normalize_workspace_id(workspace_id)
+                query = query.join(ChatSession, ChatSession.id == ChatMessage.session_id).filter(
+                    ChatSession.workspace_id == normalized_workspace_id
+                )
+            messages = query.order_by(ChatMessage.timestamp.asc(), ChatMessage.id.asc()).all()
 
             output = StringIO()
             writer = csv.writer(output)
@@ -1007,63 +1115,66 @@ class DatabaseRepository:
             workspace = session.query(Workspace).filter_by(id=workspace_id).first()
             if not workspace:
                 raise NotFoundError(f"workspace_not_found: {workspace_id}")
-            current_revision = int(workspace.context_revision or 0)
-            if (
-                expected_context_revision is not None
-                and expected_context_revision != current_revision
-            ):
-                raise ContextRevisionConflict(
-                    workspace_id,
-                    expected_context_revision,
-                    current_revision,
-                    self._context_payload(workspace.context),
-                )
-            if "companion_profile_id" in updates:
-                requested_companion_id = str(updates.get("companion_profile_id") or "default").strip() or "default"
-                companion = session.query(Companion).filter_by(id=requested_companion_id).first()
-                if not companion:
+            normalized_updates = dict(updates)
+            if "companion_profile_id" in normalized_updates:
+                requested_companion_id = str(normalized_updates.get("companion_profile_id") or "default").strip() or "default"
+                if session.query(Companion).filter_by(id=requested_companion_id).first() is None:
                     raise DatabaseError(f"invalid_companion_binding: {requested_companion_id}")
-                updates["companion_profile_id"] = requested_companion_id
-            if "tool_preset" in updates:
-                raw_preset = updates["tool_preset"]
+                normalized_updates["companion_profile_id"] = requested_companion_id
+            if "tool_preset" in normalized_updates:
+                raw_preset = normalized_updates["tool_preset"]
                 if raw_preset is not None:
                     raw_preset = str(raw_preset).strip()
                     if raw_preset:
                         try:
                             parsed = json.loads(raw_preset)
-                            if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
-                                raise DatabaseError("tool_preset must be a JSON array of tool name strings")
                         except json.JSONDecodeError as exc:
                             raise DatabaseError(f"tool_preset is not valid JSON: {exc}") from exc
+                        if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+                            raise DatabaseError("tool_preset must be a JSON array of tool name strings")
                     else:
-                        updates["tool_preset"] = None
-            if "mcp_preset_id" in updates:
-                raw_mcp = updates["mcp_preset_id"]
-                if raw_mcp is not None:
-                    raw_mcp = str(raw_mcp).strip()
-                    if not raw_mcp:
-                        updates["mcp_preset_id"] = None
-            if "memory_scope" in updates:
-                raw_scope = updates["memory_scope"]
-                if raw_scope is not None:
-                    memory_scope = str(raw_scope).strip()
-                    if memory_scope not in {"global", "workspace", "session"}:
-                        raise DatabaseError(f"invalid_memory_scope: {memory_scope}")
-                    updates["memory_scope"] = memory_scope
+                        normalized_updates["tool_preset"] = None
+            if "mcp_preset_id" in normalized_updates and normalized_updates["mcp_preset_id"] is not None:
+                normalized_updates["mcp_preset_id"] = str(normalized_updates["mcp_preset_id"]).strip() or None
+            if "memory_scope" in normalized_updates and normalized_updates["memory_scope"] is not None:
+                memory_scope = str(normalized_updates["memory_scope"]).strip()
+                if memory_scope not in {"global", "workspace", "session"}:
+                    raise DatabaseError(f"invalid_memory_scope: {memory_scope}")
+                normalized_updates["memory_scope"] = memory_scope
+
+            values = {
+                key: normalized_updates[key]
+                for key in ["name", "description", "icon", "color", "companion_profile_id", "default_model", "system_prompt", "tool_preset", "memory_scope", "mcp_preset_id"]
+                if key in normalized_updates
+            }
             if context is not _CONTEXT_UNSET:
-                # Metadata and context share this transaction, so a failure
-                # leaves both untouched instead of half applied.
-                workspace.context = context
-                workspace.context_revision = current_revision + 1
-            for key in ["name", "description", "icon", "color", "companion_profile_id", "default_model", "system_prompt", "tool_preset", "memory_scope", "mcp_preset_id"]:
-                if key in updates:
-                    setattr(workspace, key, updates[key])
-            workspace.updated_at = datetime.now(timezone.utc)
+                values["context"] = context
+                values["context_revision"] = int(workspace.context_revision or 0) + 1
+            values["updated_at"] = datetime.now(timezone.utc)
+            query = update(Workspace).where(Workspace.id == workspace_id)
+            if expected_context_revision is not None:
+                query = query.where(Workspace.context_revision == expected_context_revision)
+            result = session.execute(query.values(**values))
+            if not result.rowcount:
+                session.rollback()
+                current = session.query(Workspace).filter_by(id=workspace_id).first()
+                if current is None:
+                    raise NotFoundError(f"workspace_not_found: {workspace_id}")
+                raise ContextRevisionConflict(
+                    workspace_id,
+                    expected_context_revision,
+                    int(current.context_revision or 0),
+                    self._context_payload(current.context),
+                )
             session.commit()
-            return self._workspace_to_record(workspace)
+            updated = session.query(Workspace).filter_by(id=workspace_id).first()
+            return self._workspace_to_record(updated)
         except ContextRevisionConflict:
             session.rollback()
             raise
+        except Exception as exc:
+            session.rollback()
+            raise DatabaseError(f"failed_to_update_workspace: {exc}") from exc
         finally:
             session.close()
 
@@ -1131,7 +1242,7 @@ class DatabaseRepository:
         session = self.SessionLocal()
         try:
             normalized_workspace_id = self._require_workspace(session, workspace_id)
-            session_id = f"sess_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+            session_id = f"sess_{uuid4().hex[:20]}"
             chat_session = ChatSession(
                 id=session_id,
                 workspace_id=normalized_workspace_id,
@@ -1150,10 +1261,13 @@ class DatabaseRepository:
         finally:
             session.close()
 
-    def update_chat_session(self, session_id: str, *, summary: str | None = None, pinned: bool | None = None, title: str | None = None, archived: bool | None = None) -> dict[str, Any]:
+    def update_chat_session(self, session_id: str, *, summary: str | None = None, pinned: bool | None = None, title: str | None = None, archived: bool | None = None, workspace_id: str | None = None) -> dict[str, Any]:
         session = self.SessionLocal()
         try:
-            chat_session = session.query(ChatSession).filter_by(id=session_id).first()
+            query = session.query(ChatSession).filter_by(id=session_id)
+            if workspace_id is not None:
+                query = query.filter_by(workspace_id=self._normalize_workspace_id(workspace_id))
+            chat_session = query.first()
             if not chat_session:
                 raise NotFoundError(f"session_not_found: {session_id}")
             if summary is not None:

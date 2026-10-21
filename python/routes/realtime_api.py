@@ -327,12 +327,24 @@ def create_realtime_router(
         if workspace_error is not None:
             return workspace_error
         async with transcript_lock:
-            if payload.turn_id in persisted_turns:
+            turn_cache_key = f"{workspace_id}:{payload.turn_id}"
+            if turn_cache_key in persisted_turns:
                 return {"status": "duplicate", "turn_id": payload.turn_id}
 
             db_repo = get_db_repo()
             if db_repo is None:
                 return JSONResponse({"error": "database_not_initialized"}, status_code=503)
+
+            session_id = str(payload.session_id or "").strip()
+            try:
+                session_workspace_id = await run_in_threadpool(db_repo.get_session_workspace_id, session_id)
+            except Exception as exc:
+                return JSONResponse({"error": str(exc)}, status_code=400)
+            if session_workspace_id != workspace_id:
+                return JSONResponse(
+                    {"error": "workspace_mismatch", "active_workspace_id": workspace_id, "session_workspace_id": session_workspace_id},
+                    status_code=403,
+                )
 
             user_text = payload.user_text.strip()
             assistant_text = payload.assistant_text.strip()
@@ -343,19 +355,20 @@ def create_realtime_router(
             try:
                 user_message, assistant_message = await run_in_threadpool(
                     db_repo.save_message_pair,
-                    payload.session_id,
+                    session_id,
                     user_text,
                     assistant_text,
                     model=model,
                     workspace_id=workspace_id,
                     tool_trace=payload.tool_trace,
                     memory_trace=payload.memory_trace,
+                    turn_idempotency_key=payload.turn_id,
                 )
             except DatabaseError as exc:
                 return JSONResponse({"error": str(exc)}, status_code=400)
 
-            persisted_turns.add(payload.turn_id)
-            persisted_turn_order.append(payload.turn_id)
+            persisted_turns.add(turn_cache_key)
+            persisted_turn_order.append(turn_cache_key)
             while len(persisted_turn_order) > 256:
                 persisted_turns.discard(persisted_turn_order.popleft())
 

@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from socket_events import SVCEvents
+from socket_events import SOCKET_PROTOCOL_VERSION, SVCEvents, protocol_version_status
 
 JsonDict = dict[str, object]
+MAX_SVC_AUDIO_BYTES = 6 * 1024 * 1024
+MAX_SVC_AUDIO_B64_LENGTH = ((MAX_SVC_AUDIO_BYTES + 2) // 3) * 4
 
 
 def _as_text(value: object, default: str = "") -> str:
@@ -34,6 +38,38 @@ def build_svc_convert_handler(
     log = logger or logging.getLogger("socket-server.voice")
 
     async def on_svc_convert(sid: str, data: JsonDict) -> None:
+        _version, version_supported = protocol_version_status(data.get("version"))
+        if not version_supported:
+            await sio.emit(SVCEvents.DONE, {
+                "status": "failed", "error": "UNSUPPORTED_PROTOCOL_VERSION",
+                "message": "unsupported socket protocol version",
+                "version": SOCKET_PROTOCOL_VERSION,
+            }, to=sid)
+            return
+        audio = _as_text(data.get("audio"))
+        if not audio or len(audio) > MAX_SVC_AUDIO_B64_LENGTH:
+            await sio.emit(SVCEvents.DONE, {
+                "status": "failed", "error": "INVALID_SVC_AUDIO",
+                "message": "SVC audio payload is missing or too large",
+                "version": SOCKET_PROTOCOL_VERSION,
+            }, to=sid)
+            return
+        try:
+            decoded_audio = base64.b64decode(audio, validate=True)
+        except (ValueError, TypeError, binascii.Error):
+            await sio.emit(SVCEvents.DONE, {
+                "status": "failed", "error": "INVALID_SVC_AUDIO",
+                "message": "SVC audio payload is not valid base64",
+                "version": SOCKET_PROTOCOL_VERSION,
+            }, to=sid)
+            return
+        if not decoded_audio or len(decoded_audio) > MAX_SVC_AUDIO_BYTES:
+            await sio.emit(SVCEvents.DONE, {
+                "status": "failed", "error": "INVALID_SVC_AUDIO",
+                "message": "SVC audio payload is missing or too large",
+                "version": SOCKET_PROTOCOL_VERSION,
+            }, to=sid)
+            return
         svc_client = svc_client_provider()
         if svc_client is None:
             await sio.emit(SVCEvents.DONE, {
@@ -45,7 +81,7 @@ def build_svc_convert_handler(
         try:
             result = await svc_client.convert(
                 f"svc_{uuid.uuid4().hex[:10]}",
-                _as_text(data.get("audio")),
+                audio,
                 speaker_id=_optional_int(data.get("speaker_id")),
                 pitch=_optional_int(data.get("transpose")),
             )

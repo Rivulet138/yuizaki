@@ -332,6 +332,15 @@ async def _init_database():
     )
     runtime_container.set("database", db_repo)
 
+async def _attempt_shutdown(label: str, cleanup: Callable[[], Awaitable[None]]) -> None:
+    try:
+        await cleanup()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Backend shutdown step failed: %s", label)
+
+
 @asynccontextmanager
 async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
     global _llm_client, _vision_llm_client, _tts_client, _asr_manager, _svc_client, _ocr_client, _generation_mgr, _janitor_task, db_repo, settings_api, settings_manager, _retrieval_pipeline, _heartbeat_scheduler, _connector_recovery_controller
@@ -457,23 +466,28 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
 
     logger.info("Shutting down Yuizaki backend...")
     if _heartbeat_scheduler:
-        await _heartbeat_scheduler.stop()
+        await _attempt_shutdown("heartbeat scheduler", _heartbeat_scheduler.stop)
     if sio_server.runtime.turn_outbox_worker is not None:
-        await sio_server.runtime.turn_outbox_worker.stop()
+        await _attempt_shutdown("turn outbox worker", sio_server.runtime.turn_outbox_worker.stop)
     if _connector_recovery_controller is not None:
-        await _connector_recovery_controller.stop()
-    await runtime_handlers.stream_draft_consumer_stop()
-    _stream_runtime.shutdown()
+        await _attempt_shutdown("connector recovery", _connector_recovery_controller.stop)
+    await _attempt_shutdown("stream draft consumer", runtime_handlers.stream_draft_consumer_stop)
+    await _attempt_shutdown("stream runtime", lambda: asyncio.to_thread(_stream_runtime.shutdown))
     if _janitor_task:
         _janitor_task.cancel()
         try:
             await _janitor_task
         except asyncio.CancelledError:
             pass
-    await sio_server.mcp_manager.shutdown()
-    await service_manager.stop_all()
+        except Exception:
+            logger.exception("Backend shutdown step failed: audio cache janitor")
+    await _attempt_shutdown("MCP manager", sio_server.mcp_manager.shutdown)
+    await _attempt_shutdown("service manager", service_manager.stop_all)
     if db_repo:
-        db_repo.close()
+        try:
+            db_repo.close()
+        except Exception:
+            logger.exception("Backend shutdown step failed: database")
     logger.info("Backend shutdown complete")
 
 app = create_app(runtime_container, lifespan=with_runtime_container(app_lifespan, runtime_container))

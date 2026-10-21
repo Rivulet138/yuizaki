@@ -6,6 +6,9 @@
   "description": "Node-based Playwright MCP server for Yuizaki",
   "type": "module",
   "main": "server.mjs",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test"

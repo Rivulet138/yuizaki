@@ -74,21 +74,20 @@ def create_database_router(
         guard = await _enforce_active_session_workspace(db_repo, session_id, workspace_id)
         if guard is not None:
             return guard
-        return {"history": await run_in_threadpool(db_repo.get_chat_history, session_id, limit)}
+        bounded_limit = min(max(limit, 1), 1000)
+        active_workspace_id = workspace_id or _active_workspace_id()
+        return {"history": await run_in_threadpool(db_repo.get_chat_history, session_id, bounded_limit, active_workspace_id)}
 
     @router.get("/api/sessions")
     async def get_all_sessions(scope: str = "active"):
         db_repo = get_db_repo()
         if not db_repo:
             return JSONResponse({"error": "Database not initialized"}, status_code=503)
-        sessions = await run_in_threadpool(db_repo.get_all_sessions)
         active_workspace_id = _active_workspace_id()
         if active_workspace_id is not None and str(scope or "active").lower() not in {"all", "global"}:
-            sessions = [
-                session
-                for session in sessions
-                if _session_record_workspace_id(session) == active_workspace_id
-            ]
+            sessions = await run_in_threadpool(db_repo.get_all_sessions, active_workspace_id)
+        else:
+            sessions = await run_in_threadpool(db_repo.get_all_sessions)
         return {"sessions": sessions}
 
     @router.delete("/api/sessions/{session_id:path}/messages")
@@ -99,8 +98,9 @@ def create_database_router(
         guard = await _enforce_active_session_workspace(db_repo, session_id, workspace_id)
         if guard is not None:
             return guard
+        active_workspace_id = workspace_id or _active_workspace_id()
         try:
-            result = await run_in_threadpool(db_repo.clear_session_messages, session_id)
+            result = await run_in_threadpool(db_repo.clear_session_messages, session_id, active_workspace_id)
         except NotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         return {"status": "deleted", **result}
@@ -113,7 +113,11 @@ def create_database_router(
         guard = await _enforce_active_session_workspace(db_repo, session_id, workspace_id)
         if guard is not None:
             return guard
-        await run_in_threadpool(db_repo.delete_session, session_id)
+        active_workspace_id = workspace_id or _active_workspace_id()
+        try:
+            await run_in_threadpool(db_repo.delete_session, session_id, active_workspace_id)
+        except NotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
         return {"status": "deleted"}
 
     @router.delete("/api/messages/{message_id}")
@@ -124,8 +128,9 @@ def create_database_router(
         session_id, guard = await _enforce_active_message_workspace(db_repo, message_id, workspace_id)
         if guard is not None:
             return guard
+        active_workspace_id = workspace_id or _active_workspace_id()
         try:
-            result = await run_in_threadpool(db_repo.delete_message, message_id)
+            result = await run_in_threadpool(db_repo.delete_message, message_id, active_workspace_id)
         except NotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         return {"status": "deleted", "session_id": session_id, **result}
@@ -141,8 +146,9 @@ def create_database_router(
         session_id, guard = await _enforce_active_message_workspace(db_repo, message_id, workspace_id)
         if guard is not None:
             return guard
+        active_workspace_id = workspace_id or _active_workspace_id()
         try:
-            result = await run_in_threadpool(db_repo.update_message, message_id, content)
+            result = await run_in_threadpool(db_repo.update_message, message_id, content, active_workspace_id)
         except NotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         return {"status": "updated", "session_id": session_id, "message": result}
@@ -155,18 +161,20 @@ def create_database_router(
         session_id, guard = await _enforce_active_message_workspace(db_repo, message_id, workspace_id)
         if guard is not None:
             return guard
+        active_workspace_id = workspace_id or _active_workspace_id()
         try:
-            result = await run_in_threadpool(db_repo.delete_messages_after, message_id)
+            result = await run_in_threadpool(db_repo.delete_messages_after, message_id, active_workspace_id)
         except NotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         return {"status": "deleted", "session_id": session_id, **result}
 
     @router.get("/api/statistics")
-    async def get_statistics(days: int = 7):
+    async def get_statistics(days: int = 7, workspace_id: str | None = None):
         db_repo = get_db_repo()
         if not db_repo:
             return JSONResponse({"error": "Database not initialized"}, status_code=503)
-        return {"statistics": await run_in_threadpool(db_repo.get_statistics, days)}
+        bounded_days = min(max(days, 1), 3650)
+        return {"statistics": await run_in_threadpool(db_repo.get_statistics, bounded_days, workspace_id or _active_workspace_id())}
 
     @router.post("/api/statistics/update")
     async def update_statistics():
@@ -192,7 +200,7 @@ def create_database_router(
             guard = await _enforce_active_session_workspace(db_repo, session_id, workspace_id)
             if guard is not None:
                 return guard
-        content = await run_in_threadpool(db_repo.export_to_json, session_id)
+        content = await run_in_threadpool(db_repo.export_to_json, session_id, workspace_id or _active_workspace_id())
         return StreamingResponse(
             iter([content]),
             media_type="application/json",
@@ -208,7 +216,7 @@ def create_database_router(
             guard = await _enforce_active_session_workspace(db_repo, session_id, workspace_id)
             if guard is not None:
                 return guard
-        content = await run_in_threadpool(db_repo.export_to_csv, session_id)
+        content = await run_in_threadpool(db_repo.export_to_csv, session_id, workspace_id or _active_workspace_id())
         return StreamingResponse(
             iter([content]),
             media_type="text/csv",

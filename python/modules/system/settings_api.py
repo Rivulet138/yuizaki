@@ -6,11 +6,13 @@ import asyncio
 import json
 import logging
 import os
+import socket
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from pathlib import Path
 from typing import Annotated, Protocol, TypeGuard, cast
-from urllib.parse import urlsplit
+from ipaddress import ip_address
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
@@ -49,6 +51,37 @@ from .settings_store import SETTINGS_SECRET_MASK
 from .settings_history_store import SettingsHistoryStore, SettingsHistoryStoreCorrupt
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_probe_url(value: str) -> str:
+    parsed = urlsplit(value if "://" in value else f"http://{value}")
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("SVC Base URL must be an HTTP(S) URL")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("SVC Base URL has an invalid port") from exc
+    if port is not None and not 1 <= port <= 65535:
+        raise ValueError("SVC Base URL has an invalid port")
+    host = parsed.hostname.rstrip(".")
+    try:
+        addresses = {ip_address(host)}
+    except ValueError:
+        try:
+            addresses = {ip_address(item[4][0]) for item in socket.getaddrinfo(host, port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)}
+        except OSError as exc:
+            raise ValueError("SVC Base URL host could not be resolved") from exc
+    # Local development services are legitimate, but every resolved address
+    # must be loopback when the hostname itself is local.
+    local_hostname = host in {"localhost", "localhost.localdomain"}
+    if local_hostname:
+        if not addresses or not all(address.is_loopback for address in addresses):
+            raise ValueError("SVC Base URL localhost resolution is unsafe")
+    elif any(not address.is_global for address in addresses):
+        raise ValueError("SVC Base URL must not target a private or local address")
+    normalized = parsed._replace(fragment="").geturl()
+    return normalized
+
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 _settings_api: SettingsAPI | None = None
@@ -830,9 +863,10 @@ class SettingsAPI:
         base_url = str(svc_settings.get("base_url", "")).strip().rstrip("/")
         if not base_url:
             return {"ok": False, "message": "SVC Base URL is required"}
-        parsed_url = urlsplit(base_url if "://" in base_url else f"http://{base_url}")
-        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-            return {"ok": False, "message": "SVC Base URL must be an HTTP(S) URL"}
+        try:
+            base_url = _safe_probe_url(base_url)
+        except ValueError as exc:
+            return {"ok": False, "message": str(exc)}
 
         try:
             raw_timeout = svc_settings.get("timeout", 120)
@@ -841,9 +875,18 @@ class SettingsAPI:
             configured_timeout = 120.0
         probe_timeout = max(1.0, min(configured_timeout, 10.0))
         try:
-            async with httpx.AsyncClient(timeout=probe_timeout, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=probe_timeout, follow_redirects=False) as client:
                 response = await client.get(base_url)
-        except httpx.RequestError as exc:
+                for _ in range(3):
+                    if response.status_code not in {301, 302, 303, 307, 308}:
+                        break
+                    location = response.headers.get("location")
+                    if not location:
+                        break
+                    next_url = urljoin(str(response.url), location)
+                    _safe_probe_url(next_url)
+                    response = await client.get(next_url)
+        except (httpx.RequestError, ValueError) as exc:
             return {"ok": False, "message": f"SVC service unreachable: {exc}"}
 
         if response.status_code >= 500:

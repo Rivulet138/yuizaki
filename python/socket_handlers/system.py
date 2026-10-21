@@ -105,16 +105,32 @@ def register_system_handlers(
                 to=sid,
             )
             return
+        tool_name = permission_request_tool_map.get(request_id)
+        permission_scope = permission_request_scope_map.get(request_id)
+        try:
+            resolved = tool_executor.policy_engine.resolve_pending(
+                request_id,
+                allowed,
+                remember,
+                tool_name,
+                permission_scope,
+            )
+        except Exception:  # noqa: BLE001 - keep policy provider details out of the protocol
+            log.exception("Failed to resolve permission request %s", request_id)
+            await sio.emit(SystemEvents.ERROR, {
+                "code": "PERMISSION_RESOLUTION_FAILED",
+                "message": "Permission response could not be applied",
+            }, to=sid)
+            return
+        if resolved is False:
+            await sio.emit(SystemEvents.ERROR, {
+                "code": "PERMISSION_REQUEST_UNKNOWN",
+                "message": "Permission response did not match a pending request",
+            }, to=sid)
+            return
         permission_request_sid_map.pop(request_id, None)
-        tool_name = permission_request_tool_map.pop(request_id, None)
-        permission_scope = permission_request_scope_map.pop(request_id, None)
-        tool_executor.policy_engine.resolve_pending(
-            request_id,
-            allowed,
-            remember,
-            tool_name,
-            permission_scope,
-        )
+        permission_request_tool_map.pop(request_id, None)
+        permission_request_scope_map.pop(request_id, None)
 
     sio.on(SystemEvents.PERMISSION_RESPONSE, handler=on_permission_response)
 

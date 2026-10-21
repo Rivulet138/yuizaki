@@ -116,6 +116,10 @@ _EMPTY_LLM_RESPONSE_MESSAGE = "模型没有返回可朗读内容，请重试，�
 _TRUSTED_PACKAGED_SOCKET_ORIGIN = "yuizaki-app://renderer"
 
 
+class ChatPersistenceError(RuntimeError):
+    """Raised when a legacy socket turn cannot be durably stored."""
+
+
 def _parse_port(value: str | None, fallback: int) -> int:
     try:
         port = int(str(value or "").strip())
@@ -472,6 +476,8 @@ def _socket_auth_allowed(auth: object, backend_api_token: str, environ: object |
 def _chat_task_error_message(exc: BaseException) -> str:
     if isinstance(exc, TurnIdentityConflictError):
         return "本次对话请求身份已被占用，请重新发送消息"
+    if isinstance(exc, ChatPersistenceError):
+        return "对话已生成，但保存失败，请检查数据库或后端日志后重试"
     message = str(exc).strip()
     if message.startswith("LLM API "):
         return message
@@ -1040,10 +1046,11 @@ class DesktopPetSocketServer:
         messages: list[dict[str, str]],
         assistant_text: str,
         model: str | None = None,
+        turn_id: str | None = None,
     ) -> dict[str, int | None]:
         db_repo = self.runtime_context.db_repo
         if db_repo is None:
-            return {"user_message_id": None, "assistant_message_id": None}
+            raise ChatPersistenceError("database repository is unavailable")
 
         user_text = ""
         for item in reversed(messages):
@@ -1054,23 +1061,33 @@ class DesktopPetSocketServer:
         try:
             user_record: dict[str, Any] | None = None
             assistant_record: dict[str, Any] | None = None
-            if user_text:
-                user_record = db_repo.save_message(session_id, "user", user_text, workspace_id=workspace_id or "default")
-            if assistant_text.strip():
-                assistant_record = db_repo.save_message(
+            if user_text and assistant_text.strip() and callable(getattr(db_repo, "save_message_pair", None)):
+                user_record, assistant_record = db_repo.save_message_pair(
                     session_id,
-                    "assistant",
+                    user_text,
                     assistant_text,
                     model=model or "",
                     workspace_id=workspace_id or "default",
+                    turn_idempotency_key=turn_id,
                 )
+            else:
+                if user_text:
+                    user_record = db_repo.save_message(session_id, "user", user_text, workspace_id=workspace_id or "default")
+                if assistant_text.strip():
+                    assistant_record = db_repo.save_message(
+                        session_id,
+                        "assistant",
+                        assistant_text,
+                        model=model or "",
+                        workspace_id=workspace_id or "default",
+                    )
             return {
                 "user_message_id": _optional_int(user_record.get("id") if user_record else None),
                 "assistant_message_id": _optional_int(assistant_record.get("id") if assistant_record else None),
             }
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed to persist chat exchange for session %s", session_id)
-            return {"user_message_id": None, "assistant_message_id": None}
+            raise ChatPersistenceError("chat exchange persistence failed") from exc
 
     def _resolve_turn_message_ids(
         self,
@@ -2158,7 +2175,12 @@ class DesktopPetSocketServer:
                 return
             except Exception as exc:
                 logger.error("[SIO] chat task failed: %s", exc, exc_info=True)
-                error_code = "AGENT_TURN_IDENTITY_CONFLICT" if isinstance(exc, TurnIdentityConflictError) else code
+                if isinstance(exc, TurnIdentityConflictError):
+                    error_code = "AGENT_TURN_IDENTITY_CONFLICT"
+                elif isinstance(exc, ChatPersistenceError):
+                    error_code = "CHAT_PERSISTENCE_FAILED"
+                else:
+                    error_code = code
                 asyncio.create_task(self.sio.emit(SystemEvents.ERROR, {
                     "code": error_code,
                     "message": _chat_task_error_message(exc),
@@ -3295,19 +3317,29 @@ class DesktopPetSocketServer:
                     raise
                 if not self._generation_is_current(gen):
                     return
-                if turn_service is not None:
-                    message_ids = await run_in_threadpool(self._resolve_turn_message_ids, ctx)
-                elif terminal_replayed:
-                    message_ids = {"user_message_id": None, "assistant_message_id": None}
-                else:
-                    message_ids = await run_in_threadpool(
-                        self._persist_chat_exchange,
-                        session_id=session_id,
-                        workspace_id=workspace_id,
-                        messages=original_messages,
-                        assistant_text=pipeline_result.reply,
-                        model=model,
-                    )
+                try:
+                    if turn_service is not None:
+                        message_ids = await run_in_threadpool(self._resolve_turn_message_ids, ctx)
+                    elif terminal_replayed:
+                        message_ids = {"user_message_id": None, "assistant_message_id": None}
+                    else:
+                        message_ids = await run_in_threadpool(
+                            self._persist_chat_exchange,
+                            session_id=session_id,
+                            workspace_id=workspace_id,
+                            messages=original_messages,
+                            assistant_text=pipeline_result.reply,
+                            model=model,
+                            turn_id=ctx.turn_id if ctx is not None else None,
+                        )
+                except Exception:
+                    if tts_worker is not None and not tts_worker.done():
+                        tts_worker.cancel()
+                        try:
+                            await tts_worker
+                        except asyncio.CancelledError:
+                            pass
+                    raise
                 persisted_assistant_message_id = message_ids["assistant_message_id"]
                 if tts_queue is not None and not tts_stream_closed:
                     for segment in sentence_buffer.flush():

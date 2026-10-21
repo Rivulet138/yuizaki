@@ -113,8 +113,8 @@ class HttpProductEventTransport:
         timeout_seconds: float = 10.0,
         max_payload_bytes: int = 1_000_000,
         max_attempts: int = 3,
-        require_batch_receipt: bool = False,
-        require_deletion_receipt: bool = False,
+        require_batch_receipt: bool = True,
+        require_deletion_receipt: bool = True,
         client: httpx.Client | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:

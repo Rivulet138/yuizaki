@@ -5,19 +5,35 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
 
 jobs:
+  release-qualification:
+    name: Release qualification gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require configured release qualification
+        env:
+          RELEASE_QUALIFIED: ${{ vars.RELEASE_QUALIFIED }}
+          RELEASE_SIGNING_READY: ${{ vars.RELEASE_SIGNING_READY }}
+        run: |
+          test "$RELEASE_QUALIFIED" = "true"
+          test "$RELEASE_SIGNING_READY" = "true"
+          echo "Release qualification and signing readiness are configured."
+
   windows-installer:
     name: Windows NSIS installer
+    needs: release-qualification
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22.13'
           cache: npm
           cache-dependency-path: electron/package-lock.json
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: '1.27.x'
           cache: false
@@ -26,26 +42,45 @@ jobs:
       - name: Build Windows installer
         working-directory: electron
         run: npm run package:win
-      - name: Upload current Windows installer
-        uses: actions/upload-artifact@v7
+      - name: Create Windows checksums
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem -Path release -File | Where-Object { $_.Extension -in @('.exe', '.blockmap') })
+          if ($files.Count -eq 0) { throw 'No Windows release artifacts found' }
+          $lines = $files | ForEach-Object {
+            $relative = $_.FullName.Substring((Resolve-Path .).Path.Length + 1).Replace('\\', '/')
+            "{0}  {1}" -f (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant(), $relative
+          }
+          $lines | Set-Content -Path release/SHA256SUMS.txt -Encoding utf8NoBOM
+      - name: Upload current Windows installer and checksums
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: yuizaki-windows-installer
           path: |
             release/*.exe
             release/*.blockmap
+            release/SHA256SUMS.txt
           if-no-files-found: error
+      - name: Attest Windows release provenance
+        uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
+        with:
+          subject-path: |
+            release/*.exe
+            release/*.blockmap
+            release/SHA256SUMS.txt
 
   linux-packages:
     name: Linux AppImage and deb
+    needs: release-qualification
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22.13'
           cache: npm
           cache-dependency-path: electron/package-lock.json
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: '1.27.x'
           cache: false
@@ -58,10 +93,22 @@ jobs:
         run: npm ci
       - working-directory: electron
         run: npm run package:linux
-      - uses: actions/upload-artifact@v7
+      - name: Create Linux checksums
+        run: |
+          sha256sum YuizakiLauncher release/*.AppImage release/*.deb > release/SHA256SUMS.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: yuizaki-linux-packages
           path: |
             YuizakiLauncher
             release/*.AppImage
             release/*.deb
+            release/SHA256SUMS.txt
+      - name: Attest Linux release provenance
+        uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
+        with:
+          subject-path: |
+            YuizakiLauncher
+            release/*.AppImage
+            release/*.deb
+            release/SHA256SUMS.txt

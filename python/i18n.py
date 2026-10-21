@@ -1,5 +1,6 @@
 """后端多语言支持 - 国际化管理"""
 
+import contextvars
 import json
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -23,7 +24,8 @@ class I18nManager:
             else Path(__file__).resolve().parent / "locales"
         )
         self.messages: Dict[str, Dict[str, Any]] = {}
-        self.current_locale = "zh-CN"
+        self._default_locale = "zh-CN"
+        self._locale = contextvars.ContextVar("yuizaki_locale", default=self._default_locale)
         self.supported_locales = ["zh-CN", "en-US", "ja-JP"]
         self._load_locales()
 
@@ -53,7 +55,7 @@ class I18nManager:
             是否设置成功
         """
         if locale in self.supported_locales:
-            self.current_locale = locale
+            self._locale.set(locale)
             logger.info(f"Locale set to: {locale}")
             return True
         else:
@@ -71,7 +73,7 @@ class I18nManager:
         Returns:
             翻译文本
         """
-        locale = locale or self.current_locale
+        locale = locale or self.get_current_locale()
         keys = key.split('.')
         value = self.messages.get(locale, {})
 
@@ -94,7 +96,7 @@ class I18nManager:
         Returns:
             翻译字典
         """
-        locale = locale or self.current_locale
+        locale = locale or self.get_current_locale()
         return self.messages.get(locale, {})
 
     def get_supported_locales(self) -> list[str]:
@@ -103,7 +105,7 @@ class I18nManager:
         Returns:
             语言代码列表
         """
-        return self.supported_locales
+        return list(self.supported_locales)
 
     def get_current_locale(self) -> str:
         """获取当前语言
@@ -111,7 +113,7 @@ class I18nManager:
         Returns:
             当前语言代码
         """
-        return self.current_locale
+        return self._locale.get()
 
     def translate_error(self, error_key: str, locale: Optional[str] = None) -> str:
         """翻译错误消息

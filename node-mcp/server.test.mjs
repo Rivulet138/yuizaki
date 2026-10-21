@@ -82,6 +82,18 @@ test('unknown tools return a structured error and request id', async () => {
   assert.match(payload.error, /Unknown browser tool/);
 });
 
+test('browser tools reject private and metadata destinations before launching a browser', async () => {
+  for (const url of ['http://127.0.0.1/', 'http://169.254.169.254/latest/meta-data/']) {
+    const response = await fetch(`${baseUrl}/tools`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'browser.open_page', args: { url } }),
+    });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /private or local/);
+  }
+});
+
 test('browser tools reject non-http URLs before launching a browser', async () => {
   const response = await fetch(`${baseUrl}/tools`, {
     method: 'POST',
@@ -123,4 +135,61 @@ test('events endpoint sends an SSE ready frame', async () => {
   const { value } = await reader.read();
   await reader.cancel();
   assert.match(new TextDecoder().decode(value), /event: ready\ndata: \{"ok":true\}/);
+});
+
+
+test('tools endpoint rejects invalid requestId values before invoking a browser', async () => {
+  for (const requestId of ['', 'x'.repeat(129), { nested: true }]) {
+    const response = await fetch(`${baseUrl}/tools`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'browser.not_real', requestId }),
+    });
+    assert.equal(response.status, 400);
+    const payload = await response.json();
+    assert.match(payload.error, /requestId/);
+    assert.equal(payload.requestId, null);
+  }
+});
+
+test('tools endpoint returns sanitized JSON errors for malformed and oversized bodies', async () => {
+  const malformed = await fetch(`${baseUrl}/tools`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{not-json',
+  });
+  assert.equal(malformed.status, 400);
+  assert.deepEqual(await malformed.json(), { ok: false, error: 'Invalid JSON request body', requestId: null });
+
+  const oversized = await fetch(`${baseUrl}/tools`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: 'x'.repeat(70 * 1024),
+  });
+  assert.equal(oversized.status, 400);
+  assert.deepEqual(await oversized.json(), { ok: false, error: 'Invalid JSON request body', requestId: null });
+});
+
+test('stdio processes an EOF-terminated line and rejects oversized lines', async () => {
+  const child = spawn(process.execPath, ['server.mjs', '--stdio'], {
+    cwd: new URL('.', import.meta.url),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const chunks = [];
+  child.stdout.on('data', (chunk) => chunks.push(chunk));
+  child.stdin.end(JSON.stringify({ name: 'browser.not_real' }));
+  const [code] = await once(child, 'exit');
+  assert.equal(code, 0);
+  assert.match(Buffer.concat(chunks).toString(), /Unknown browser tool/);
+
+  const oversizedChild = spawn(process.execPath, ['server.mjs', '--stdio'], {
+    cwd: new URL('.', import.meta.url),
+    stdio: ['pipe', 'pipe', 'ignore'],
+  });
+  const oversizedChunks = [];
+  oversizedChild.stdout.on('data', (chunk) => oversizedChunks.push(chunk));
+  oversizedChild.stdin.end('x'.repeat(70 * 1024));
+  const [oversizedCode] = await once(oversizedChild, 'exit');
+  assert.equal(oversizedCode, 0);
+  assert.match(Buffer.concat(oversizedChunks).toString(), /stdio input line exceeded limit/);
 });

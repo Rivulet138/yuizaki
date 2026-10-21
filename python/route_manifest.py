@@ -23,7 +23,11 @@ def build_route_manifest(
         if not isinstance(route, APIRoute):
             continue
         path = str(route.path)
-        if not path.startswith(prefixes):
+        if not any(
+            path == prefix.rstrip("/")
+            or path.startswith(prefix if prefix.endswith("/") else prefix + "/")
+            for prefix in prefixes
+        ):
             continue
         methods = sorted(str(method).upper() for method in (route.methods or set()))
         routes.append({

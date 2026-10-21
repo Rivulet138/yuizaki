@@ -2,20 +2,26 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hmac
+import ipaddress
+import logging
 import os
 import random
 import re
 import shutil
 import sys
+import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
 
+
+logger = logging.getLogger("soulx-svc")
 
 SOULX_ROOT = Path(os.getenv("SOULX_ROOT", "/opt/SoulX-Singer")).resolve()
 MODEL_DIR = Path(os.getenv("SOULX_MODEL_DIR", "/models/SoulX-Singer")).resolve()
@@ -34,7 +40,25 @@ MAX_UPLOAD_BYTES = max(1, int(os.getenv("SOULX_MAX_UPLOAD_BYTES", str(50 * 1024 
 MAX_STEPS = max(1, int(os.getenv("SOULX_MAX_STEPS", "128")))
 MAX_CFG = max(1.0, float(os.getenv("SOULX_MAX_CFG", "20")))
 MAX_PITCH = max(1, int(os.getenv("SOULX_MAX_PITCH", "24")))
+MAX_OUTPUT_BYTES = max(1, int(os.getenv("SOULX_MAX_OUTPUT_BYTES", str(100 * 1024 * 1024))))
+SOULX_HOST = os.getenv("SOULX_HOST", "127.0.0.1").strip() or "127.0.0.1"
+SOULX_AUTH_TOKEN = os.getenv("SOULX_AUTH_TOKEN", "").strip()
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+def _is_loopback_host(host: str) -> bool:
+    normalized = host.strip().lower().strip("[]")
+    if normalized in {"localhost", "ip6-localhost"}:
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+AUTH_REQUIRED = bool(SOULX_AUTH_TOKEN) or not _is_loopback_host(SOULX_HOST)
+if AUTH_REQUIRED and not SOULX_AUTH_TOKEN:
+    logger.warning("SOULX_HOST=%s is not loopback; configure SOULX_AUTH_TOKEN before exposing the service", SOULX_HOST)
 SPEAKER_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 
 
@@ -90,6 +114,13 @@ def _bool_form(value: str | bool | None, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _validated_audio_suffix(filename: str | None) -> str:
+    suffix = Path(filename or "input.wav").suffix.lower() or ".wav"
+    if len(suffix) > 16 or not re.fullmatch(r"\.[a-z0-9]+", suffix):
+        raise HTTPException(status_code=400, detail="invalid audio filename")
+    return suffix
+
+
 @dataclass(frozen=True)
 class ReferenceAudio:
     audio_path: Path
@@ -124,6 +155,7 @@ class SoulXSvcRuntime:
             device=self.device,
             use_fp16=self.use_fp16,
         )
+        self._preprocess_lock = threading.RLock()
         self.preprocess_pipeline = PreprocessPipeline(
             device=self.device,
             language=os.getenv("SOULX_LANGUAGE", "Mandarin"),
@@ -158,13 +190,14 @@ class SoulXSvcRuntime:
         raise HTTPException(status_code=404, detail=f"reference audio not found for speaker_id={speaker_id}")
 
     def preprocess(self, audio_path: Path, save_dir: Path, vocal_sep: bool) -> tuple[Path, Path]:
-        self.preprocess_pipeline.save_dir = str(save_dir)
-        self.preprocess_pipeline.run(
-            audio_path=str(audio_path),
-            vocal_sep=vocal_sep,
-            max_merge_duration=60000,
-            language=os.getenv("SOULX_LANGUAGE", "Mandarin"),
-        )
+        with self._preprocess_lock:
+            self.preprocess_pipeline.save_dir = str(save_dir)
+            self.preprocess_pipeline.run(
+                audio_path=str(audio_path),
+                vocal_sep=vocal_sep,
+                max_merge_duration=60000,
+                language=os.getenv("SOULX_LANGUAGE", "Mandarin"),
+            )
         vocal_wav = save_dir / "vocal.wav"
         vocal_f0 = save_dir / "vocal_f0.npy"
         if not vocal_wav.exists() or not vocal_f0.exists():
@@ -265,7 +298,12 @@ async def convert(
     cfg: Annotated[float, Form()] = DEFAULT_CFG,
     seed: Annotated[int, Form()] = DEFAULT_SEED,
     response_format: Annotated[str, Form()] = "wav",
+    authorization: Annotated[str | None, Header()] = None,
 ) -> Response:
+    if AUTH_REQUIRED:
+        expected = f"Bearer {SOULX_AUTH_TOKEN}"
+        if not SOULX_AUTH_TOKEN or not authorization or not hmac.compare_digest(authorization.strip(), expected):
+            raise HTTPException(status_code=401, detail="authentication required")
     if runtime is None:
         raise HTTPException(status_code=503, detail="SoulX runtime is not initialized")
 
@@ -284,9 +322,9 @@ async def convert(
     session_dir = (request_root / request_id).resolve()
     if not session_dir.is_relative_to(request_root):
         raise HTTPException(status_code=400, detail="invalid generation_id")
+    suffix = _validated_audio_suffix(file.filename)
     request_root.mkdir(parents=True, exist_ok=True)
     session_dir.mkdir(parents=True, exist_ok=True)
-    suffix = Path(file.filename or "input.wav").suffix or ".wav"
     target_audio = session_dir / f"target{suffix}"
     content_length = file.headers.get("content-length")
     try:
@@ -324,12 +362,16 @@ async def convert(
                 seed=seed,
                 session_dir=session_dir,
             )
+        if generated.stat().st_size > MAX_OUTPUT_BYTES:
+            raise HTTPException(status_code=502, detail="generated audio exceeds the configured response limit")
         audio_bytes = generated.read_bytes()
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.exception("SoulX conversion failed request_id=%s", request_id)
+        raise HTTPException(status_code=500, detail="SoulX conversion failed") from exc
     finally:
+        await file.close()
         if session_dir.exists() and session_dir.is_relative_to(request_root):
             shutil.rmtree(session_dir, ignore_errors=True)
 
@@ -347,4 +389,6 @@ async def convert(
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host=os.getenv("SOULX_HOST", "127.0.0.1"), port=int(os.getenv("SOULX_PORT", "7861")))
+    if AUTH_REQUIRED and not SOULX_AUTH_TOKEN:
+        raise RuntimeError("SOULX_AUTH_TOKEN is required when SOULX_HOST is not loopback")
+    uvicorn.run(app, host=SOULX_HOST, port=int(os.getenv("SOULX_PORT", "7861")))

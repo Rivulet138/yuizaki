@@ -108,7 +108,16 @@ def build_memory_query_handler(
             relation_limit=payload.relation_limit,
             relation_depth=payload.relation_depth,
         )
-        result = await run_in_threadpool(memory_pipeline.recall, request)
+        try:
+            result = await run_in_threadpool(memory_pipeline.recall, request)
+        except Exception:  # noqa: BLE001 - keep provider details out of the protocol
+            log.exception("[SIO] memory recall failed")
+            await sio.emit(MemoryEvents.RESULT, {
+                "docs": [],
+                "error": "MEMORY_RECALL_FAILED",
+                "message": "memory recall failed",
+            }, to=sid)
+            return
         await sio.emit(MemoryEvents.RESULT, result, to=sid)
 
     return on_rag_query

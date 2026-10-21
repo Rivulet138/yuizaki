@@ -14,3 +14,12 @@ def test_default_locale_directory_is_independent_of_current_working_directory(
     assert manager.get("common.save", "zh-CN")
     assert manager.get("common.save", "en-US")
     assert manager.get("common.save", "ja-JP")
+
+
+def test_supported_locales_result_cannot_mutate_manager() -> None:
+    manager = I18nManager()
+
+    locales = manager.get_supported_locales()
+    locales.clear()
+
+    assert manager.get_supported_locales() == ["zh-CN", "en-US", "ja-JP"]

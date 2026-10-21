@@ -15,8 +15,10 @@ from __future__ import annotations
 import os
 import json
 import re
+import secrets
 import subprocess
 import sys
+import tempfile
 import webbrowser
 from html import unescape
 from ipaddress import ip_address
@@ -286,12 +288,35 @@ def write_file(path: str, content: str) -> str:
     """
 
     p = _resolve_local_file_path(path)
+    if _is_sensitive_local_file(p):
+        raise LocalToolError("Writing this sensitive local file is not allowed")
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
+        parent = p.parent.resolve()
+        if not any(_is_path_inside(parent, root) for root in _allowed_file_roots()):
+            raise LocalToolError("File parent is outside allowed local tool roots")
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{p.name}.{secrets.token_hex(8)}.",
+            dir=str(parent),
+            text=True,
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as temporary:
+                temporary.write(content)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.replace(temporary_name, p)
+        except BaseException:
+            try:
+                os.unlink(temporary_name)
+            except OSError:
+                pass
+            raise
         return f"Wrote {len(content)} characters to {p}"
+    except LocalToolError:
+        raise
     except OSError as exc:
-        raise LocalToolError(str(exc))
+        raise LocalToolError(str(exc)) from exc
 
 
 def dispatch_tool(name: str, args: Dict[str, Any]) -> str:
@@ -309,6 +334,10 @@ def dispatch_tool(name: str, args: Dict[str, Any]) -> str:
     if name == "write_file":
         return write_file(str(args.get("path", "")), str(args.get("content", "")))
     if name == "web_search":
-        return web_search(str(args.get("query", "")), int(args.get("limit", 5) or 5))
+        try:
+            limit = int(args.get("limit", 5) or 5)
+        except (TypeError, ValueError) as exc:
+            raise LocalToolError("Search result limit must be an integer") from exc
+        return web_search(str(args.get("query", "")), limit)
 
     raise LocalToolError(f"Unknown tool: {name}")

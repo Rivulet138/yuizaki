@@ -22,6 +22,8 @@ from socket_events import (
 
 JsonDict = dict[str, object]
 EmitLatency = Callable[[str, Mapping[str, object]], Awaitable[None]]
+MAX_AUDIO_CHUNK_BYTES = 2 * 1024 * 1024
+MAX_AUDIO_CHUNK_B64_LENGTH = ((MAX_AUDIO_CHUNK_BYTES + 2) // 3) * 4
 
 
 def _as_text(value: object, default: str = "") -> str:
@@ -69,6 +71,13 @@ def build_audio_chunk_handler(
             return
         chunk_b64 = _as_text(data.get("chunk"))
         is_final = bool(data.get("is_final", False))
+        if len(chunk_b64) > MAX_AUDIO_CHUNK_B64_LENGTH:
+            await sio.emit(SystemEvents.ERROR, {
+                "code": "AUDIO_CHUNK_TOO_LARGE",
+                "message": "audio chunk exceeds maximum size",
+                "version": SOCKET_PROTOCOL_VERSION,
+            }, to=sid)
+            return
         log.debug("[SIO] audio:chunk from %s, len=%d, final=%s", sid, len(chunk_b64), is_final)
 
         asr_manager = asr_manager_provider()
@@ -84,6 +93,18 @@ def build_audio_chunk_handler(
             pcm16_bytes = base64.b64decode(chunk_b64, validate=True) if chunk_b64 else b""
         except (ValueError, TypeError, binascii.Error) as exc:
             log.warning("[SIO] failed to decode audio chunk: %s", exc)
+            await sio.emit(SystemEvents.ERROR, {
+                "code": "INVALID_AUDIO_CHUNK",
+                "message": "audio chunk is not valid base64",
+                "version": SOCKET_PROTOCOL_VERSION,
+            }, to=sid)
+            return
+        if len(pcm16_bytes) > MAX_AUDIO_CHUNK_BYTES:
+            await sio.emit(SystemEvents.ERROR, {
+                "code": "AUDIO_CHUNK_TOO_LARGE",
+                "message": "audio chunk exceeds maximum size",
+                "version": SOCKET_PROTOCOL_VERSION,
+            }, to=sid)
             return
 
         if not is_final and pcm16_bytes and sid not in voice_prepared_sessions:

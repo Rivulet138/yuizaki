@@ -256,6 +256,7 @@ def create_workspace_router(
             return await run_in_threadpool(
                 db_repo.update_chat_session,
                 session_id,
+                workspace_id=workspace_id or _active_workspace_id(),
                 **updates,
             )
         except NotFoundError as exc:
