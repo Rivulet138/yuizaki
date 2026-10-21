@@ -34,8 +34,8 @@
     "package:win": "npm run prepare:launcher:win && npm run prepare:runtime && npm run build && electron-builder --win nsis",
     "package:linux": "npm run prepare:launcher:linux && npm run prepare:runtime && npm run build && electron-builder --linux AppImage deb",
     "package": "npm run prepare:launcher && npm run prepare:runtime && npm run build && electron-builder",
-    "type-check:renderer": "node scripts/check-renderer-types.mjs --changed",
-    "type-check:renderer:baseline": "node scripts/check-renderer-types.mjs",
+    "type-check:renderer": "node scripts/check-renderer-types.mjs",
+    "type-check:renderer:changed": "node scripts/check-renderer-types.mjs --changed",
     "type-check:renderer:update": "node scripts/check-renderer-types.mjs --update"
   },
   "dependencies": {

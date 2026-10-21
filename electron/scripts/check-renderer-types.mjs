@@ -8,10 +8,11 @@
  * not in the committed baseline appears. Fixing errors is always allowed and
  * `--update` records the improvement.
  *
- * `--changed[=ref]` (default ref: HEAD) additionally requires every renderer
- * file you touched to be completely type-clean, so new code never lands inside
- * a file that keeps carrying legacy errors. On a clean checkout the changed set
- * is empty and the extra check is a no-op, which is why it is safe to run in CI.
+ * `--changed[=ref]` (default ref: HEAD) is an opt-in, stricter mode: it also
+ * requires every renderer file changed against `ref` (untracked included) to be
+ * completely type-clean. It is NOT part of `npm run type-check`, because it
+ * blocks any edit to a file that still carries legacy errors; run it explicitly
+ * via `npm run type-check:renderer:changed` when paying that backlog down.
  */
 
 import { spawnSync } from 'node:child_process'
