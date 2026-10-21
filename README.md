@@ -115,7 +115,8 @@ Linux 使用 `.venv/bin/python` 和 `cp .env.example .env`。后端默认监听 
 | --- | --- |
 | `python/.env` | Provider、端口、可选服务和运行时变量，不提交到 Git |
 | `python/config/settings.json` | 应用持久化设置，由设置页或 Launcher 管理；`YUIZAKI_SETTINGS_PATH` 可覆盖 |
-| `python/data/chat.db` | 聊天、会话、工作区上下文与投递状态的 SQLite 权威库；`DATABASE_URL` 可覆盖 |
+| `python/data/chat.db` | 聊天、会话、工作区上下文与伴侣数据的 SQLite 权威库；`DATABASE_URL` 可覆盖 |
+| `python/data/turn_commits.sqlite3` | 回合提交、outbox 与连接器投递状态的独立 SQLite 文件 |
 | `python/data/workspace_contexts.json`（旧版，通常不存在） | 旧版工作区提示词、角色卡、世界书与记忆策略侧车文件；启动迁移读取一次后归档，现行数据存入 SQLite 工作区行 |
 | `python/data/settings_history.json` | 设置历史快照（最多 20 个），重启后仍可回滚；凭据字段写入前会被清空 |
 | `python/modules/llm/model-capabilities.registry.json` | 显式模型上下文/输出上限与视觉能力；未列出的模型不施加任何限制 |
