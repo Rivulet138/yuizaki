@@ -18,6 +18,10 @@ MAINTAINED_DOCS = {
     "README.md",
     "SECURITY.md",
     "THIRD_PARTY_NOTICES.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    "DESIGN.md",
+    "PRODUCT.md",
     "services/soulx-svc/README.md",
 }
 FORBIDDEN_TEXT = {

@@ -14,12 +14,22 @@
 
 ## English design specification
 
+This document defines the design boundary for the Yuizaki desktop companion, chat, voice, long-term memory, Agent jobs, and Live2D/VRM embodiment. Implementation claims must be checked against current source, tests, and target-device evidence.
+
+- Product goal: keep an inspectable long-term relationship across sessions; separate raw events, derived memory, core profile, and rebuildable indexes; let users inspect sources, correct, protect, forget, and permanently delete memory.
+- Navigation: chat and memory are the primary surfaces; index, backend, and maintenance operations live in settings or advanced areas. Memory offers overview, library, review queue, and a recall lab.
+- Trust: show evidence, provenance, confidence, and current state first; corrections append history instead of overwriting sources; SQLite is authoritative and Qdrant/embeddings are rebuildable projections.
+- Interaction: companion first, progressive disclosure, low-frequency pausable proactive behavior; errors state impact and next step; destructive actions require scope preview and explicit confirmation.
+- Visual and accessibility: reuse existing Yuizaki tokens and Element Plus components, an 8px rhythm, visible focus, 4.5:1 text contrast, never color-only state, and reduced-motion support.
+- Responsive behavior: Electron windows from 760px; narrow windows move the inspector below the list, stack toolbars, and turn tables into list rows without hover-only actions.
+- Boundary constraints: keep the `/memory` contract and the Vue 3/FastAPI/SQLite architecture; resources load lazily; terminal Job events are never dropped; Electron control API uses explicit token/origin boundaries; plugin shutdown closes admission before draining admitted work; database bootstrap discovers the Alembic head dynamically; cross-layer changes pass type-check, build, and desktop/compact-window verification.
+
 ## Source of truth / 信息源
 
 - Status: Active
-- Last refreshed: 2026-08-17
+- Last refreshed: 2026-10-21
 - Primary product surfaces: desktop companion, chat, long-term memory, Agent jobs, settings, Live2D/VRM pet
-- Code evidence reviewed: `electron/src/renderer/app`, `electron/src/renderer/domains`, `electron/src/renderer/runtime`, `electron/src/renderer/audio`, `electron/src/main`, `python/modules/agent`, `python/modules/memory`, and `python/routes`
+- Code evidence reviewed: `electron/src/renderer/app`, `electron/src/renderer/domains`, `electron/src/renderer/runtime`, `electron/src/renderer/audio`, `electron/src/main`, `electron/src/main/http`, `python/modules/agent`, `python/modules/memory`, `python/routes`, and `python/modules/system`
 - Documentation boundary: README and design documents describe intent; implementation claims must be rechecked against source paths before release
 - External material may inform design decisions, but only current code, tests, and target-device evidence establish a local capability.
 
@@ -120,8 +130,7 @@
   - `MemoryLibrary`
   - `MemoryInspector`
   - `MemoryReviewQueue`
-  - `MemoryRecallLab`
-  - `MemoryMaintenancePanel`
+  - `MemoryAdvancedTools` (recall lab, index status and maintenance preview/apply)
 - Variants and states: loading skeleton, empty guidance, stale preview, unavailable index, partial recall, dirty draft, conflict, protected, forgotten, expired, superseded.
 - Token/component ownership: memory-specific layout lives under `domains/memory`; shared primitives remain generic and are not forked for this feature.
 

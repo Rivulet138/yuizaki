@@ -7,6 +7,7 @@
 - LLM 使用 OpenAI 兼容端点；视觉默认关闭且只处理当前请求的帧。
 - 完整语音链路需要麦克风、ASR、LLM、TTS 和对应模型；Sherpa、Genie、Embedding 等资源按需加载。
 - SQLite 是默认记忆权威源；Qdrant 仅作为可重建语义索引，纠正、遗忘和永久删除应通过 UI/API 完成。
+- MCP 浏览器自动化默认关闭，需要 `--with-mcp`；SoulX 变声服务是可选组件，不影响文字、ASR 和默认 TTS 路径。
 - 服务默认绑定回环地址。`YUIZAKI_BACKEND_API_TOKEN` 只保护可选非回环访问；桌面动作另用 `YUIZAKI_HOST_DESKTOP_ACTION_TOKEN`，两者必须分离。
 - Telegram、Discord、QQ 个人桥和微信个人桥默认关闭；启用连接器即授权其声明的收发流程，状态接口不会返回密钥。
 - Live2D/VRM、模型权重、声音和缓存默认不进入 Git；分发前阅读 [第三方声明](../THIRD_PARTY_NOTICES.md)。
@@ -22,7 +23,9 @@ Yuizaki 将本地运行配置保存在 `python/.env` 和 `python/config/settings
 | `core` | Backend, SQLite, OCR foundations, Electron, and required runtime packages |
 | `full` | Core plus Sherpa ASR, Genie TTS, embeddings, Qdrant, and model helpers |
 
-The launcher selects the platform lock file under `python/`, installs Electron and node-mcp with `npm ci`, creates `python/.venv`, and validates the installed packages. Use `YUIZAKI_INSTALL_PROFILE=full` before setup so the local ASR/TTS/embedding dependencies are installed. The model weights themselves remain first-run downloads in Settings > Resources and are not embedded in the installer. Native model compatibility still depends on the operating system, CPU, GPU, and model files.
+The launcher selects the platform lock file under `python/`, installs Electron with `npm ci`, creates `python/.venv`, and validates the installed packages. Electron and node-mcp are installed with `npm ci`; the node-mcp install runs only when MCP is enabled for that launch. Use `YUIZAKI_INSTALL_PROFILE=full` before setup so the local ASR/TTS/embedding dependencies are installed. The model weights themselves remain first-run downloads in Settings > Resources and are not embedded in the installer. Native model compatibility still depends on the operating system, CPU, GPU, and model files.
+
+Launcher builds require Go 1.27+ (`tools/yuizaki-launcher/go.mod`); the release workflows pin the same version.
 
 ## LLM / 大语言模型
 
@@ -85,6 +88,38 @@ TTS_WARMUP_ENABLED=0
 
 Runtime diagnostics can show configuration and recorded timing evidence, but repository fixtures do not qualify a real microphone, speaker, provider, or model combination.
 
+## MCP and browser automation / MCP 与浏览器自动化
+
+`node-mcp` is an optional Playwright service that exposes `browser.open_page` and `browser.click`. The launcher leaves it stopped by default. Start it with `--with-mcp` or `YUIZAKI_WITH_MCP=1`; `--no-mcp` forces it off even when the environment enables it. The service listens on `127.0.0.1:${MCP_PORT}` (default `7777`) and offers `POST /tools`, `GET /events` (SSE) and a `--stdio` line mode for a supervised process.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `MCP_PORT` | `7777` | Loopback HTTP port |
+| `MCP_BROWSER_TIMEOUT_MS` | `30000` | Per-operation and queue timeout, capped at `120000` |
+| `MCP_MAX_CONCURRENT_BROWSERS` | `2` | Concurrent browser limit, capped at `16` |
+
+MCP is disabled by default because it launches a real browser that can reach public sites and consume memory. Its tools accept only HTTP(S) URLs without embedded credentials, resolve the hostname, and reject loopback, private, link-local, and cloud-metadata destinations for each request; JSON bodies are capped at 64 KiB, SSE clients at 64, `requestId` at 128 characters, URL at 2048 characters, and selector at 1024 characters; errors are sanitized. In `--stdio` mode each input line is capped at 64 KiB with a 128 KiB total buffer. This is a request-target filter, not a network sandbox. See [Security](../SECURITY.md) for the boundary.
+
+If `node-mcp` is not installed because MCP was disabled during setup, enabling it later installs the dependencies on the next launcher start.
+
+## SVC and SoulX / 变声与 SoulX
+
+The optional SoulX Singer service converts a generated voice clip. It is not required for text chat, ASR, or the default TTS path.
+
+```dotenv
+SVC_PROVIDER=soulx-service
+SVC_BASE_URL=http://127.0.0.1:7861
+SVC_SPEAKER_ID=0
+SVC_PITCH=0
+SVC_TIMEOUT=120
+```
+
+Use `SVC_PROVIDER=disabled` to turn voice conversion off; the available providers are `soulx-service` and `disabled`.
+
+The service side uses `SOULX_ROOT`, `SOULX_MODEL_DIR`, `SOULX_PREPROCESS_DIR`, `SOULX_HOST` (default `127.0.0.1`), `SOULX_PORT` (default `7861`), `SOULX_AUTH_TOKEN`, upload/step/output limits, and the optional CUDA/FP16 switches documented in [`services/soulx-svc/README.md`](../services/soulx-svc/README.md). It binds to loopback by default; a non-loopback `SOULX_HOST` requires `SOULX_AUTH_TOKEN` and the process refuses to start without it.
+
+`POST /api/settings/test/svc` probes the configured base URL. For safety it accepts only public hostnames or `localhost` that resolves to loopback, re-validates every redirect (at most three), and rejects literal loopback or private IP addresses. That means the default `SVC_BASE_URL=http://127.0.0.1:7861` cannot be probed from that button; use `http://localhost:7861` for a local probe or treat the probe as a remote-endpoint check.
+
 ## Memory and Qdrant / 记忆与 Qdrant
 
 SQLite is the default memory authority:
@@ -111,7 +146,7 @@ Use `--with-qdrant` on Windows to request the configured Docker service. Memory 
 | `SERVER_PORT` | `8001` | Python HTTP and Socket.IO backend |
 | `CONTROL_SERVER_PORT` | `38945` | Electron control service |
 | `RENDERER_PORT` | `5173` | Vite renderer in development |
-| `MCP_PORT` | `7777` | Default node-mcp service |
+| `MCP_PORT` | `7777` | Default node-mcp service; used only when MCP is enabled |
 
 The launcher may select a fallback port when a default is occupied and passes the chosen origins to the application. Do not hard-code these defaults in clients.
 
@@ -126,7 +161,7 @@ The launcher runs `python/migration_bootstrap.py` before starting backend traffi
 - An empty database is created at the current head.
 - A database with a trusted Alembic revision is upgraded to the current head and its schema is checked.
 - An existing database with tables but no trusted revision is rejected instead of being guessed or silently rebuilt.
-- The turn idempotency index is scoped by `session_id`, `turn_idempotency_key`, and `role`; databases at the previous migration are upgraded to this shape.
+- The turn idempotency index is scoped by `session_id`, `turn_idempotency_key`, and `role`; an existing idempotent turn is reused only when it belongs to the same workspace. Databases at the previous migration are upgraded to this shape.
 
 Run the launcher setup or the bootstrap script again after installing a new version. Do not edit the SQLite schema while the backend is running.
 
@@ -154,6 +189,8 @@ Default local data includes:
 - `python/audio_cache/` for generated audio;
 - provider-specific model and cache directories.
 
+`YUIZAKI_DATA_DIR` relocates the data root and, unless `YUIZAKI_SETTINGS_PATH` is set, also moves `settings.json` beside it. `DATABASE_URL` overrides only the chat database, `MEMORY_SQLITE_PATH` only the memory database, and `YUIZAKI_ALLOWED_ORIGINS` lists the allowed browser origins for Python and the Electron control service. Explicit documented overrides affect only their own target.
+
 Use application cleanup and backup flows while services are running. Review [Third-party notices](../THIRD_PARTY_NOTICES.md) before distributing any model, voice, font, artwork, or avatar.
 
 ## Packaging / 打包
@@ -170,4 +207,4 @@ cd electron
 npm run package:linux
 ```
 
-The manually dispatched release workflow uploads Windows NSIS and Linux AppImage/deb artifacts to GitHub Actions. It does not create a GitHub Release automatically.
+The manually dispatched release workflow is gated by repository variables `RELEASE_QUALIFIED` and `RELEASE_SIGNING_READY`; each package job fails until both are `true`. It builds Windows NSIS and Linux AppImage/deb artifacts, writes `SHA256SUMS.txt`, uploads the artifacts, and attests build provenance with `actions/attest-build-provenance`. It does not create a GitHub Release automatically. Workflow actions are pinned to commit SHAs.

@@ -9,7 +9,7 @@ Start Yuizaki from source. Verify text chat first, then enable voice, vision, Qd
 - Windows 10/11 x64 或 x86_64 Linux 图形桌面 / Windows 10/11 x64 or x86_64 Linux desktop
 - Python 3.11-3.13
 - Node.js 22.13+、npm / Node.js 22.13+ and npm
-- Go 1.22+
+- Go 1.27+（构建 Launcher / for launcher builds）
 
 Launcher 会创建并管理 `python/.venv`。
 
@@ -40,7 +40,11 @@ cd ..
 
 `setup` 创建 `python/.env` 并配置 LLM；`--check` 只检查，不启动服务。默认打开浏览器对话页；需要 Electron 控制面板和桌宠时加 `--electron-ui`。
 
+MCP 默认不启动。需要浏览器自动化工具时加 `--with-mcp`（或设置 `YUIZAKI_WITH_MCP=1`），`--no-mcp` 显式保持关闭。
+
 `setup` creates `python/.env` and configures the LLM; `--check` validates without starting services. The default opens the browser chat; add `--electron-ui` for the Electron control panel and pet window.
+
+MCP starts disabled. Add `--with-mcp` (or set `YUIZAKI_WITH_MCP=1`) for browser-automation tools; `--no-mcp` keeps it off explicitly.
 
 启动前 Launcher 会执行数据库 bootstrap。空库会创建到当前 Alembic head，旧库会从可信 revision 升级并校验 schema；无法确认 revision 的已有数据库会阻止启动，而不会猜测迁移路径。迁移 head 会从仓库动态读取，因此升级后不需要手动修改日期或 revision 配置。
 
@@ -79,9 +83,9 @@ chmod +x YuizakiLauncher
 | `install-desktop` | 安装桌面快捷方式 / Install desktop shortcuts |
 | `remove-desktop` | 删除桌面快捷方式 / Remove desktop shortcuts |
 
-常用参数：`--check`、`--smoke`、`--no-mcp`、`--no-install`、`--dev-renderer`、`--no-open`、`--no-show-pet`、`--electron-ui`。Windows 支持 `--with-qdrant`。
+常用参数：`--check`、`--smoke`、`--with-mcp`/`--no-mcp`、`--with-qdrant`/`--no-qdrant`、`--no-install`、`--dev-renderer`/`--no-dev-renderer`、`--browser-only`、`--no-open`、`--no-show-pet`、`--electron-ui`。Qdrant 的 Docker 自动启动由 Windows Launcher 管理；Linux 需要自行启动配置的 Docker 服务。
 
-Common flags: `--check`, `--smoke`, `--no-mcp`, `--no-install`, `--dev-renderer`, `--no-open`, `--no-show-pet`, and `--electron-ui`. Windows also supports `--with-qdrant`.
+Common flags: `--check`, `--smoke`, `--with-mcp`/`--no-mcp`, `--with-qdrant`/`--no-qdrant`, `--no-install`, `--dev-renderer`/`--no-dev-renderer`, `--browser-only`, `--no-open`, `--no-show-pet`, and `--electron-ui`. Docker auto-start for Qdrant is managed by the Windows launcher; on Linux start the configured Docker service yourself.
 
 ## 故障处理 / Troubleshooting
 

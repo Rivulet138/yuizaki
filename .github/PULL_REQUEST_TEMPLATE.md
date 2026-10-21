@@ -20,6 +20,7 @@ List exact commands and meaningful results. -->
 - [ ] 文档检查 / `python scripts/check_docs.py`
 - [ ] 按需执行 Electron 类型检查、lint、测试和构建 / Electron type-check/lint/tests/build as applicable
 - [ ] 按需执行 Python 测试、类型检查和编译检查 / Python tests/type-check/compile checks as applicable
+- [ ] 涉及 MCP 或 Launcher 时执行对应测试 / `cd node-mcp && npm test` and `go test ./...` when MCP or the launcher changes
 - [ ] 相关时描述服务商、音频、GPU 或虚拟形象的手动验证 / Manual provider, audio, GPU, or avatar validation described when relevant
 
 ## 风险与发布说明 / Risk and release notes

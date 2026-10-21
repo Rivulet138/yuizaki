@@ -25,9 +25,9 @@ chmod +x YuizakiLauncher
 ./YuizakiLauncher start
 ```
 
-可选 MCP 默认关闭；需要扩展工具时使用 `--with-mcp`，可用 `--no-mcp` 显式保持关闭，`--dev-renderer` 通过 Vite 提供渲染器服务。
+可选 MCP 默认关闭；需要扩展工具时使用 `--with-mcp`，可用 `--no-mcp` 显式保持关闭，`--dev-renderer` 通过 Vite 提供渲染器服务。Qdrant 的 Docker 自动启动不由 Linux 启动器管理；`--with-qdrant` 只表示允许使用已配置的服务，需要先自行启动 Docker 容器。
 
-Optional MCP is disabled by default. Use `--with-mcp` when extension tools are needed, `--no-mcp` to keep it disabled explicitly, and `--dev-renderer` to serve the renderer through Vite.
+Optional MCP is disabled by default. Use `--with-mcp` when extension tools are needed, `--no-mcp` to keep it disabled explicitly, and `--dev-renderer` to serve the renderer through Vite. The Linux launcher does not manage Qdrant Docker auto-start; `--with-qdrant` only permits the configured service, which you must start yourself.
 
 ## 音频与输入 / Audio and input
 

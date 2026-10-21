@@ -23,7 +23,7 @@ Yuizaki is a local, single-user AI desktop pet Agent, not a hardened public serv
 - API keys belong in `python/.env` or local settings and must never be committed or logged.
 - Microphone capture requires explicit voice mode and desktop permission.
 - Vision is disabled until enabled and requested by an Agent turn.
-- MCP starts by default for a full local Agent run; use `--no-mcp` for a reduced run.
+- MCP is opt-in: the launcher leaves it stopped unless started with `--with-mcp` or `YUIZAKI_WITH_MCP=1`. `--no-mcp` forces it off.
 - Enabling an MCP server or Agent plugin is the user authorization decision for its declared tools; enabled MCP/plugin tools do not prompt on every call. Disable the service or plugin to revoke that selection.
 - Plugin shutdown closes execution admission before closing the listener. Admitted executions are cancelled and awaited through request parsing, broker calls, sandbox workers, and process-tree cleanup; Windows `taskkill` completion is awaited before shutdown returns.
 
@@ -67,9 +67,23 @@ Prompt content, OCR output, screenshots, web pages, and MCP results are untruste
 
 When the Electron host is running, MCP configuration is stored as an encrypted `safeStorage` document and `mcp_servers.json` contains only a namespace/reference pointer. Legacy plaintext stores migrate only after the vault write succeeds; vault outage, corruption, or invalid schema fails closed without overwriting the previous pointer. Standalone Python mode without the host vault still supports environment references such as `{env:TOKEN}` or `Bearer {env:TOKEN}`, while rejecting new literal secrets. Public endpoint projections remove URL userinfo and mask query values. Real Windows/Linux encryption-backend coverage and multi-process compare-and-swap semantics remain release evidence items.
 
-The built-in node-mcp browser tools accept only HTTP(S) URLs and reject embedded URL credentials before starting Playwright. Localhost and private-network HTTP(S) targets remain reachable by design; this validation is not a network sandbox or a public proxy boundary.
+The built-in node-mcp browser tools accept only HTTP(S) URLs without embedded credentials and reject private, loopback, link-local, and metadata destinations. Before a browser starts, the hostname is resolved and every resolved address is checked; each request made by the browser is re-checked and blocked when it targets a blocked range. Concurrency, request size, SSE clients, and operation time are bounded (`MCP_MAX_CONCURRENT_BROWSERS`, `MCP_BROWSER_TIMEOUT_MS`); tool errors are sanitized and request IDs are validated. This is a request-target filter, not a general network sandbox or a proxy for untrusted content: an allowed public site can still be malicious, and DNS rebinding between resolution and connection is not fully mitigated.
 
 The Electron perception bridge masks active-application metadata for common password-manager, finance/payment, and medical applications before renderer projection. Deployments may add a main-process matcher for organization-specific sensitive windows. This is a privacy filter, not an authorization grant; request consent, scope, expiry, interruption, and emergency-stop checks remain mandatory.
+
+### Local file tools / 本地文件工具
+
+The built-in `write_file` tool refuses sensitive filenames and suffixes (`.env*`, credentials, keys, databases) and sensitive directories such as `.ssh`, `.aws`, and `userdata`; it requires the resolved parent to stay inside `YUIZAKI_LOCAL_TOOL_ROOTS` (default: the repository root) and writes through a unique temporary file plus `os.replace` so a failed write cannot truncate the original. `YUIZAKI_LOCAL_TOOL_ROOTS` replaces the default rather than extending it, so set every root the Agent may use. This reduces accidental corruption and path escape risk; it is not a filesystem sandbox, so keep sensitive directories outside local-tool scope.
+
+### Bounded inbound data / 入站数据上限
+
+Realtime payloads are bounded before decoding: audio chunks may not exceed 2 MiB of PCM (base64 length checked first), SVC audio may not exceed 6 MiB, and invalid or oversized chunks end that request with an explicit error instead of being buffered. The node-mcp HTTP endpoint accepts JSON bodies up to 64 KiB and caps concurrent browsers and SSE clients.
+
+### SoulX SVC service / SoulX 变声服务
+
+The optional SoulX service binds to `127.0.0.1` by default. `/convert` requires `SOULX_AUTH_TOKEN` as a Bearer credential whenever `SOULX_HOST` is not loopback, and the process refuses to start non-loopback without one. `/health` stays unauthenticated on every bind and exposes only device/FP16 flags, so it is not a capability endpoint. Uploads are size-bounded, the audio filename suffix is validated, generated audio is capped by `SOULX_MAX_OUTPUT_BYTES`, and internal errors are logged rather than returned to the caller. Run it as a separate process with its own filesystem and GPU limits.
+
+The settings "test connection" probe for the SVC base URL accepts only public hostnames or `localhost` resolving to loopback; it rejects literal loopback and private addresses, and follows at most three redirects, each re-validated. A default `SVC_BASE_URL` of `http://127.0.0.1:7861` therefore cannot be probed through that button; use `http://localhost:7861` for local probing, or treat the probe as a remote-endpoint check.
 
 ## Native desktop actions
 
@@ -93,6 +107,8 @@ automatically retried as success.
 ## Data handling
 
 Chat, memory, settings, and caches are local files. A cloud provider receives the text, audio, or image payload required by the selected feature. Vision frames are request-scoped and not persisted by default. Use the memory API or UI to correct or forget records; do not edit SQLite files while the service is running.
+
+Session and message operations resolve the requesting or active workspace before touching SQLite. A session that belongs to another workspace is rejected with `403 workspace_mismatch`, and realtime transcript deduplication keys are scoped by workspace and turn rather than being global. Exports and statistics use the same scope.
 
 SQLite is the authority for memory. Qdrant, when configured, is a rebuildable
 search projection. Workspace and session scope plus lifecycle filters are

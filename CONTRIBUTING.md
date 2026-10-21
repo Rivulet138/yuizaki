@@ -43,13 +43,44 @@ Run the smallest relevant checks first, then the full checks for cross-layer cha
 
 ```powershell
 python scripts/check_docs.py
-cd electron
+python scripts/check_resources.py
+basedpyright --pythonversion 3.12
+cd python
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe scripts/check_requirements_lock.py
+.\.venv\Scripts\python.exe -m compileall -q modules routes socket_handlers tests app.py socket_server.py
+cd ..\electron
+npm audit --audit-level=low
 npm run type-check
 npm run lint
+npm run test:unit
 npm run build
-cd ..\python
-.\.venv\Scripts\python.exe -m compileall -q modules app.py socket_server.py
+npm run start:check
+cd ..\node-mcp
+npm ci
+npm test
+cd ..\tools\yuizaki-launcher
+go test ./...
 ```
+
+When the change touches memory, streaming, connectors, or voice, run the same replay gates CI uses (plus the fail-closed `platform_release_check.py` contract for release CLI changes):
+
+```powershell
+python scripts/memory_retrieval_check.py
+python scripts/stream_staging_check.py
+python scripts/connector_staging_check.py
+python scripts/voice_comfort_check.py
+```
+
+以上命令假定 `python` 已指向项目环境；在 `python/` 目录内请使用 `.\.venv\Scripts\python.exe`。
+
+These commands assume `python` already resolves to the project environment; inside `python/` use `.\.venv\Scripts\python.exe`.
+
+文档变更也受契约检查约束：`scripts/check_docs.py` 校验维护文档集合、本地链接和禁止文本（明文凭据、未锁定镜像等）。修改默认值、端口、Launcher 参数、工作区行为或安全边界时，同步更新 `README.md`、`docs/` 与 `SECURITY.md`，不要只改其中一处。
+
+Documentation changes are also contract-checked: `scripts/check_docs.py` validates the maintained document set, local links, and forbidden text such as plaintext credentials or unpinned images. When you change a default, port, launcher flag, workspace behavior, or security boundary, update `README.md`, `docs/`, and `SECURITY.md` together instead of only one of them.
+
+CI also runs the documentation contract, the memory/streaming/connector/voice replay gates, basedpyright on Python 3.11-3.13, Electron validation on Windows and Linux, and the node-mcp contract tests. The release workflow additionally requires the `RELEASE_QUALIFIED` and `RELEASE_SIGNING_READY` repository variables and build attestations, so do not claim a release is qualified from local checks alone.
 
 Linux 使用 `python scripts/check_docs.py` 以及对应的 npm 命令。
 

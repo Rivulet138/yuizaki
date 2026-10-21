@@ -4,7 +4,7 @@
 
 Yuizaki 是本地多进程桌面应用：Go Launcher 负责端口、环境、安装和子进程；Electron 管理窗口、托盘、preload 和宿主能力；Vue 管理界面、音频和 Live2D/VRM；FastAPI 与 Socket.IO 管理 Agent、Provider、工具、记忆、调度和持久化；node-mcp、Qdrant 及远程 Provider 均为可选。
 
-请求依次经过 renderer、HTTP/SSE/Socket.IO、`TurnService`、上下文与记忆检索、规划、LLM/工具执行、投影和持久化。上下文、规划、执行、投影四个阶段保持边界，`pipeline.py` 只作为兼容外观。SQLite 是聊天、Job、投递状态和记忆的权威源；Qdrant 是可重建投影。视觉按请求授权，桌面动作默认关闭并使用独立主机令牌。可选 Provider 失败应降级对应能力而不阻塞文字聊天；取消后的状态变化可能以 `unknown_effect` 结束，不自动重试为成功。
+请求依次经过 renderer、HTTP/SSE/Socket.IO、`TurnService`、上下文与记忆检索、规划、LLM/工具执行、投影和持久化。上下文、规划、执行、投影四个阶段保持边界，`pipeline.py` 只作为兼容外观。SQLite 是聊天、工作区、伴侣、回合提交/投递状态和记忆的权威源；Qdrant 是可重建投影；任务事件是内存中的有界投影，不替代持久化记录。视觉按请求授权，桌面动作默认关闭并使用独立主机令牌。MCP 浏览器自动化默认关闭，并对每次浏览器目标做私有地址过滤。可选 Provider 失败应降级对应能力而不阻塞文字聊天；取消后的状态变化可能以 `unknown_effect` 结束，聊天落库失败则以 `CHAT_PERSISTENCE_FAILED` 失败，不自动重试为成功。
 
 Yuizaki is a local, multi-process desktop application. Electron owns windows and host capabilities; Vue owns the user interface and avatar rendering; Python owns Agent orchestration, providers, tools, memory, and persistence.
 
@@ -59,7 +59,7 @@ user input
 
 - FastAPI routes serve local configuration, history, memory, diagnostics, and non-realtime operations.
 - SSE serves streaming HTTP Agent turns.
-- Socket.IO carries realtime voice, Agent deltas, interruption, permissions, tool jobs, traces, and avatar commands.
+- Socket.IO carries realtime voice, Agent deltas, interruption, permissions, tool execution, traces, and avatar commands. Scheduler runs execute with a synthetic `scheduler` session; their state and traces are read through HTTP projections such as `/api/system/schedules` and `/api/system/agent-trace` rather than pushed to a live socket.
 - Electron preload and IPC expose selected host capabilities to the renderer.
 - The Electron control service proxies local browser-facing operations and binds to loopback.
 - Routed Electron control requests use a control token; only health and approved pet-asset GET paths are public. The browser bootstrap query token is limited to loopback, no-Origin GET requests. The host desktop-action token remains a separate capability boundary.
@@ -78,7 +78,9 @@ Vision is request-scoped. Electron obtains the authorized frame through the perc
 
 ## Persistence and memory / 持久化与记忆
 
-SQLite is authoritative for chat, turn commits, runtime delivery state, and memory. `YUIZAKI_DATA_DIR` can relocate runtime data; explicit database or settings paths override only their documented targets.
+SQLite is authoritative for chat, turn commits, workspaces, companions, connector delivery state, and memory; turn commits and deliveries live in their own `turn_commits.sqlite3` file. `YUIZAKI_DATA_DIR` can relocate runtime data; explicit database or settings paths override only their documented targets. Workspace prompt context, role cards, and world books live on the workspace row so they commit with the rest of the workspace metadata; an older `workspace_contexts.json` sidecar is read once at startup and archived after migration. Companion job events are a bounded in-memory projection for the renderer, not a durable job table.
+
+A chat turn commits its user/assistant pair in one transaction. Turn idempotency is unique per session and turn key (`session_id`, `turn_idempotency_key`, `role`), and reuse is additionally constrained to the same workspace; a unique-key race resolves to the already committed pair instead of duplicating messages. If persistence fails after the model produced text, the turn ends as a failure rather than a delivered turn with missing message ids. Session, message, statistics, and export operations resolve the workspace first and reject a cross-workspace target.
 
 Memory retrieval applies workspace/session scope and lifecycle filters before returning evidence. Corrections preserve version history. Soft-forgotten, expired, superseded, rejected, and permanently deleted records must not cross the final recall boundary.
 
@@ -88,12 +90,17 @@ Qdrant is an optional rebuildable projection. When the projection is unavailable
 
 Built-in tools, MCP services, plugins, browser automation, desktop actions, and message connectors enter through explicit registries or adapters. Tool output, OCR, web content, plugin output, and MCP output are untrusted data, not authorization.
 
+The built-in browser tools run in `node-mcp`, which the launcher starts only when MCP is enabled. Every browser target is resolved and checked against private, loopback, link-local, and metadata ranges before launch and again per request; concurrency, timeouts, body size, and SSE clients are bounded. Local file tools resolve the target under `YUIZAKI_LOCAL_TOOL_ROOTS` (default: the repository root), reject sensitive filenames, suffixes, and directories, and replace files atomically through a temporary sibling. These are hardening measures inside the local trust model, not a sandbox or an authorization grant.
+
 Native desktop actions are a narrow host capability: visible top-level window discovery, focus, and graceful close. Windows and explicit Linux X11 sessions have adapters. Native Wayland and macOS actions are not implemented. The feature starts disabled and uses a separate Electron-issued host Bearer token, host-side permission, lease, revocation, and emergency-stop boundaries; the ordinary loopback trust model does not authorize these routes by itself.
 
 ## Failure boundaries / 故障边界
 
 - Optional provider failures degrade their capability without blocking text chat.
 - Cancellation carries a terminal outcome. A dispatched state-changing tool may end as `unknown_effect` rather than being retried automatically.
+- A chat reply that cannot be stored ends the turn as `CHAT_PERSISTENCE_FAILED` instead of being presented as a delivered turn.
+- Backend shutdown runs each cleanup step in isolation: one failing scheduler, worker, MCP manager, or service stop is logged and the remaining steps still run.
+- Realtime audio chunks, SVC payloads, MCP request bodies, and browser concurrency are size- and count-bounded before work is scheduled, so an oversized payload fails that request instead of consuming unbounded memory.
 - Electron verifies the identity of the Python child it starts so a stale process on the same port cannot satisfy startup health.
 - Plugin shutdown closes execution admission before closing the control listener, cancels admitted executions, and waits for request parsing, broker calls, sandbox workers, and process descendants to settle. Windows process-tree termination waits for the `taskkill` operation to complete.
 - The launcher runs the migration bootstrap before backend traffic. It reads the current Alembic head dynamically, creates empty databases at that head, upgrades databases with a trusted revision, and rejects existing schemas without a trusted revision.

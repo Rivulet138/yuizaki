@@ -5,10 +5,11 @@
 Yuizaki 为桌面客户端提供本地 HTTP、SSE 和 Socket.IO 契约，不是面向公网的加固 API。默认 Python 服务为 `127.0.0.1:8001`，Electron 控制服务为 `127.0.0.1:38945`；启动器可能选择备用端口，客户端必须读取运行时配置。
 
 - FastAPI 提供 `/openapi.json` 和 `/docs`；运行中的 schema 与路由契约测试是字段定义的权威来源。
-- HTTP 路由覆盖存活/就绪、聊天与 Agent、会话、工作区、伴侣、记忆、设置、运行状态、连接器、存储和资源。
+- HTTP 路由覆盖存活/就绪、聊天与 Agent、会话、工作区、伴侣、记忆、设置、运行状态、连接器、存储和资源；`/api/realtime/*` 提供 OpenAI Realtime 语音桥的客户端密钥与转写落库。
 - `POST /v1/chat/completions` 支持 SSE 流式对话；取消、工具失败、Provider 失败和未知工具效果都必须作为明确终态返回。
-- Socket.IO 负责语音、Agent 增量、打断、权限、工具 Job、追踪、调度、感知和桌宠状态；变更事件名时同时更新 Python/TypeScript 契约和传输测试。
-- Job 信封包含 `jobId`、`runId`、`sessionId`、`kind`、`status`、`progress`、`summary`、`artifact` 和 `error`。感知请求按请求授权、单次使用，不保留连续截图或摄像头历史。
+- 会话、历史、消息编辑、统计和导出按工作区校验；跨工作区请求返回 `403 workspace_mismatch`。
+- Socket.IO 负责语音、Agent 增量、打断、权限、工具执行、追踪和桌宠状态；调度与聚合状态通过 HTTP 投影读取；变更事件名时同时更新 Python/TypeScript 契约和传输测试。
+- 任务事件是有界的版本化信封（`version`、`type`、`jobId`、`status`、`revision`、`timestamp`、`data` 等），终态为 `completed`/`failed`/`cancelled`/`interrupted`/`unknown_effect`。感知请求按请求授权、单次使用，不保留连续截图或摄像头历史。
 
 Yuizaki exposes local HTTP, SSE, and Socket.IO contracts for its desktop client. These interfaces are not a hardened public internet API.
 
@@ -19,6 +20,8 @@ Yuizaki 为桌面客户端提供本地 HTTP、SSE 和 Socket.IO 接口。这些�
 The default Python origin is `http://127.0.0.1:8001`; the default Electron control origin is `http://127.0.0.1:38945`. The launcher can select fallback ports and passes the selected origins to the renderer. Clients must use the runtime configuration instead of assuming a fixed port.
 
 FastAPI publishes the live HTTP schema at `/openapi.json` and the interactive local reference at `/docs`. The running schema and route contract tests are authoritative for exact request and response fields.
+
+`GET /api/system/route-manifest` returns `schema_version: 1`, the proxy prefixes and the advertised routes; it covers paths under `/api/`, `/memory/`, `/system/`, `/health`, and `/v1/`. The Electron control proxy validates the manifest and keeps its own explicit allowlist, so the manifest is a contract check rather than a permission to proxy every advertised path.
 
 ### Electron control HTTP / Electron 控制 HTTP
 
@@ -32,12 +35,17 @@ The control token is distinct from the host desktop-action token. Do not put eit
 | --- | --- | --- |
 | Liveness and readiness | `/api/ping`, `/health`, `/api/readiness`, `/api/system/onboarding/readiness` | `python/routes/system_api.py`, `python/app.py` |
 | Chat and Agent turns | `/v1/models`, `/v1/chat/completions`, `/api/chat/translate`, `/api/agent/recovery/resume` | `python/routes/ai_api.py` |
-| Sessions and history | `/api/sessions`, `/api/history/{session_id}`, message mutations and exports | `python/routes/database_api.py` |
+| Sessions and history | `/api/sessions`, `/api/history/{session_id}`, message mutations and exports; workspace-scoped and limit-bounded | `python/routes/database_api.py` |
+| Realtime voice | `/api/realtime/client-secret`, `/api/realtime/transcript` | `python/routes/realtime_api.py` |
 | Workspaces | `/api/workspaces`, workspace sessions, branches, effective presets, and persisted prompt context | `python/routes/workspace_api.py` |
 | Companions | `/api/companions` and relationship history | `python/routes/companion_api.py` |
 | Memory | `/memory/docs`, `/memory/overview`, import/export, correction, forgetting, rollback, query, and index rebuild | `python/modules/memory/routes.py` |
 | Settings | `/api/settings`, provider tests, model discovery, history, import/export, and rollback | `python/modules/system/settings_api.py` |
 | Runtime status | `/api/system/providers`, `/api/system/voice-diagnostics`, `/api/system/voice-diagnostics/sample`, `/api/system/voice-diagnostics/comfort`, `/api/system/voice-diagnostics/comfort-signal`, `/api/system/platforms`, permissions, schedules, trace, and metrics | `python/routes/system_api.py` |
+| Summaries | `/api/summary`, `/api/summary/audit`, alert ack/snooze/clear, JSON/CSV reports, per-session summary and rewrite | `python/routes/summary_api.py` |
+| Internationalization | `/api/i18n/locales`, `/api/i18n/messages` | `python/i18n.py` |
+| Host computer use | `/api/computer-use/*` | `python/modules/agent/host_control.py` |
+| Desktop actions | `/api/desktop-actions/*`; requires the separate host token | `python/modules/agent/host_control.py`, `python/modules/agent/desktop_actions.py` |
 | Connectors | `/api/system/connectors` plus connector config, account, event, retry, cancel, and webhook routes | `python/routes/system_api.py`, `python/routes/connector_api.py` |
 | Storage and resources | storage status, cleanup, backup/restore, models, avatars, and local host routes | `python/routes/storage_api.py`, `electron/src/main/http/routes` |
 
@@ -45,11 +53,23 @@ The control token is distinct from the host desktop-action token. Do not put eit
 
 Workspace `PATCH` accepts an optional `context` object for role card, world book, prompt engineering, vision, and memory policy. The context is stored on the workspace row, so it commits in the same transaction as the rest of the workspace metadata. `context: null` clears the stored context for that workspace; `GET /api/workspaces` returns `context: null` and `contextRevision: 0` for a workspace that never stored one. Every context write (including a clear) bumps `contextRevision`, which only resets when the workspace row is deleted; sending a stale `contextRevision` returns `409 context_revision_conflict` with the current context so the caller can rebase.
 
+### Workspace-scoped persistence / 工作区限定的持久化
+
+Session, history, message-mutation, statistics, and export routes accept an optional `workspace_id`. When neither the request nor the active workspace supplies one, the route behaves as before; when a workspace is known, the target session or message must belong to it. A mismatch returns `403` with `error: "workspace_mismatch"` plus `active_workspace_id`, `requested_workspace_id`, and `session_workspace_id`. Missing sessions return `404`, and other database errors return `400`.
+
+`GET /api/history/{session_id}` bounds `limit` to `1..1000` (default `100`) and filters by workspace in SQL. `GET /api/statistics` bounds `days` to `1..3650` and aggregates only the scoped workspace's messages when a workspace is supplied. Deleting a session that does not exist returns `404` instead of silently succeeding. `POST /api/realtime/transcript` additionally requires the transcript's `session_id` to belong to the resolved workspace, and its in-memory deduplication key is `workspace_id:turn_id` rather than the bare turn id.
+
 ## Streaming turns / 流式轮次
 
 `POST /v1/chat/completions` supports the local text-turn path. Streaming HTTP responses use server-sent events and converge on one terminal result. Cancellation, tool failures, provider failures, and unknown tool effects remain explicit outcomes rather than being reported as successful completion.
 
 The renderer normally uses its typed API clients under `electron/src/renderer/api` and chat domain modules instead of constructing raw requests.
+
+### Realtime voice bridge / 实时语音桥
+
+`POST /api/realtime/client-secret` mints a short-lived OpenAI Realtime client secret for the resolved workspace and session. It is rate-limited to 8 requests per 60 seconds per client address and workspace (`429` with `Retry-After`), returns `409 realtime_not_configured` when no Realtime-capable key is configured, `502 realtime_upstream_error` for an upstream status, and `503 realtime_unavailable` for transport or validation failures. A successful response includes `client_secret`, `expires_at`, `model`, `voice`, `agent_model`, `workspace_id`, and `session_id`; the long-lived provider key never reaches the renderer.
+
+`POST /api/realtime/transcript` persists the finished turn as an atomic user/assistant pair. It returns `{status: "saved", turn_id, user_message, assistant_message}`, or `{status: "duplicate", turn_id}` when the same `workspace_id:turn_id` was already recorded; blank text returns `422 transcript_text_required`, a cross-workspace session returns `403 workspace_mismatch`, and an unavailable database returns `503`. The transcript also emits the bounded relationship signal through the same writer used by chat turns.
 
 ## Realtime events / 实时事件
 
@@ -59,11 +79,28 @@ Socket.IO is used for:
 - audio chunks, ASR partial/final results, and voice activity;
 - LLM request, delta, final, and error events;
 - TTS chunks, playback completion, and timing;
-- tool execution, permissions, jobs, traces, and scheduler updates;
+- tool execution and permissions;
 - screenshot/OCR/vision request flow;
 - avatar and companion state projection.
 
+Scheduler runs execute in a synthetic `scheduler` session. Their state, traces, and metrics are exposed through HTTP projections such as `/api/system/schedules`, `/api/system/agent-trace`, `/api/system/companion-runtime`, and `/api/system/experience-metrics`, not as live Socket.IO updates.
+
 Canonical Python event names are defined in `python/socket_events.py`. Handler modules live under `python/socket_handlers`, with remaining registration and shared state in `python/socket_server.py`. TypeScript contracts are under `electron/src/shared`; renderer adapters reject stale session, turn, request, generation, or interruption identities.
+
+Inbound realtime payloads are validated before decoding. `audio:chunk` accepts at most 2 MiB of PCM16 data (the base64 length is checked first) and `svc:convert` at most 6 MiB; violations end that request with a scoped error event instead of being buffered. Realtime error codes currently include:
+
+| Code | Where | Meaning |
+| --- | --- | --- |
+| `AUDIO_CHUNK_TOO_LARGE` | `audio:chunk` | Chunk or decoded PCM exceeds the limit |
+| `INVALID_AUDIO_CHUNK` | `audio:chunk` | Chunk is not valid base64 |
+| `INVALID_SVC_AUDIO` | `svc:convert` | Audio payload is missing, too large, or not valid base64 |
+| `UNSUPPORTED_PROTOCOL_VERSION` | `svc:convert` | Socket protocol version mismatch (current version is `1`) |
+| `MEMORY_RECALL_FAILED` | `rag:query` → `rag:result` | Recall failed; the result carries empty `docs` and no provider detail |
+| `PERMISSION_RESOLUTION_FAILED` | `permission:response` | The response could not be applied; the request stays pending |
+| `PERMISSION_REQUEST_UNKNOWN` | `permission:response` | No pending permission matched the request id |
+| `CHAT_PERSISTENCE_FAILED` | chat turn failure | The reply was generated but the exchange could not be durably stored |
+
+A chat turn that cannot persist its exchange ends as a failure with `CHAT_PERSISTENCE_FAILED`; it is not reported as a delivered turn with missing message ids.
 
 Event changes must update both Python and TypeScript contracts and their transport tests.
 
@@ -80,25 +117,31 @@ inferred from missing turns.
 
 Perception is request-scoped and single-use. `active_application` returns bounded metadata; common password-manager, finance/payment, and medical application names/titles are replaced with `[SENSITIVE_APPLICATION]`/`[REDACTED]` in the Electron main process. No continuous screenshot, camera, or active-window history is retained.
 
-## Job envelope / 任务信封
+## Job events / 任务事件
 
-Tools, scheduler operations, memory maintenance, connectors, and perception use durable or projected job states. A typical projection contains:
+Companion job events are an in-memory, bounded, replayable projection for the renderer runtime snapshot. They are not the durable record of the work: turn commits, schedules, and connector deliveries are persisted separately in SQLite, and a backend restart clears in-flight job events.
 
 ```json
 {
-  "jobId": "job_...",
-  "runId": "run_...",
+  "version": 1,
+  "type": "AgentJobProgress",
+  "workspaceId": "workspace_...",
   "sessionId": "session_...",
-  "kind": "tool",
-  "status": "running",
-  "progress": 0.5,
-  "summary": "Running",
-  "artifact": null,
-  "error": null
+  "turnId": "turn_...",
+  "jobId": "job_...",
+  "requestId": "request_...",
+  "revision": 2,
+  "interruptionEpoch": 0,
+  "source": "tool",
+  "timestamp": 1760000000000,
+  "status": "progress",
+  "data": {}
 }
 ```
 
-Consumers must handle terminal states such as `completed`, `failed`, `cancelled`, `interrupted`, `discarded`, and `unknown_effect`. Progress events may be coalesced; terminal events and failure receipts must be retained.
+Optional fields are `conversationId`, `operationId`, `stepIndex`, `runId`, and `data`. `type` is the presentation name for `status` (`AgentJobCreated`, `AgentJobRunning`, `AgentJobProgress`, `AgentJobCompleted`, `AgentJobFailed`, `AgentJobCancelled`, `AgentJobInterrupted`, `AgentJobUnknownEffect`). `revision` increases monotonically per job and the presentation projection rejects gaps, stale revisions, and conflicting duplicates.
+
+Terminal statuses are `completed`, `failed`, `cancelled`, `interrupted`, and `unknown_effect`. Progress events may be coalesced to at most one per 100 ms per job; a terminal event cannot be followed by another transition except a recheck completing it. The log holds at most 256 jobs with 64 events per job and fails closed with a capacity error instead of silently dropping a job. `GET /api/system/companion-runtime` exposes the snapshot with secret redaction and bounded truncation.
 
 ### Result verification / 结果验证
 
@@ -140,7 +183,7 @@ Behavioral feedback is retained for at most 90 days per workspace; the learner u
 
 ### Imported skill catalog / 导入技能目录
 
-`GET /api/system/skills/imported` returns a versioned catalog snapshot. Imported entries expose `runtimeBinding: "catalog_only"` and `executionReady: false` until a trusted executor is explicitly integrated; catalog presence must not be presented as an executable tool. Legacy `installed`, `status`, and `ready` fields remain for client compatibility.
+`GET /api/system/skills/imported` returns a versioned catalog snapshot. Catalog entries are untrusted metadata: they default to `runtimeBinding: "catalog_only"` and `executionReady: false`. A live runtime may set `runtimeBinding: "tool"`, `executionReady: true`, `runtimeTarget`, and bounded `runtimeScopes` only through `bind_verified_tool`, which checks manifest identity and signature; the binding is ephemeral and resets to `catalog_only` on restart. Do not present catalog presence as an executable tool. Legacy `installed`, `status`, and `ready` fields remain for client compatibility.
 
 ## Memory lifecycle / 记忆生命周期
 
@@ -153,6 +196,8 @@ Memory writes may include `memory_role` with one of `user_fact`, `relationship_e
 `POST /memory/docs/delete-preview` and `POST /memory/docs/batch-delete` return `memory_role_counts`. `tool_permission` records are automatically marked `review_required`, `candidate`, `review_status=pending`, and therefore remain outside normal recall until explicitly reviewed.
 
 The deterministic memory evaluator accepts `expected_memory_roles` and `forbidden_memory_roles` in golden cases and reports `memory_role_accuracy`, mismatch counts, and sensitive-role leakage separately from ordinary recall. The repository keeps these cases in `python/tests/fixtures/memory_role_golden_cases.json`.
+
+A failed recall emits `rag:result` with `error: "MEMORY_RECALL_FAILED"` and empty `docs`; it does not return provider details and must not be presented as an empty memory store.
 
 ## Authentication and trust / 认证与信任
 
