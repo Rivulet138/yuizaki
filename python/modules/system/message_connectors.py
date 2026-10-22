@@ -17,7 +17,7 @@ import json
 import os
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -143,6 +143,7 @@ class ConnectorMessage:
     conversation_id: str
     text: str
     reply_target: Mapping[str, str]
+    metadata: Mapping[str, Any] = dataclass_field(default_factory=dict)
 
 
 # Minimal RFC 8032 Ed25519 verifier.  The adapter is optional and should not
@@ -242,6 +243,31 @@ class MessageConnectorError(RuntimeError):
         self.status_code = status_code
 
 
+def _normalize_qq_config(payload: Mapping[str, Any], *, strict: bool = False) -> dict[str, Any]:
+    defaults: dict[str, Any] = {
+        "mentionRequired": True,
+        "prefixes": [],
+        "allowedUsers": [],
+        "allowedGroups": [],
+        "ratePerMinute": 10,
+        "maxConcurrent": 2,
+    }
+    normalized: dict[str, Any] = {}
+    for key, default in defaults.items():
+        value = payload.get(key, default)
+        if isinstance(default, list):
+            valid = isinstance(value, list) and all(isinstance(item, str) and item.strip() for item in value)
+            value = list(dict.fromkeys(item.strip() for item in value)) if valid else []
+        elif isinstance(default, bool):
+            valid = isinstance(value, bool)
+        else:
+            valid = isinstance(value, int) and not isinstance(value, bool) and value > 0
+        if not valid and strict:
+            raise MessageConnectorError("invalid_qq_config", f"Invalid QQ connector setting: {key}", status_code=422)
+        normalized[key] = value if valid else default
+    return normalized
+
+
 class MessageConnectorRegistry:
     """Own adapter configuration and transient webhook health state."""
 
@@ -297,6 +323,10 @@ class MessageConnectorRegistry:
                             "accountName": _bounded_text(item.get("accountName"), 256),
                             "loginState": _bounded_text(item.get("loginState"), 32) or "signed_out",
                         })
+                        if connector_id == "qq":
+                            normalized.update(_normalize_qq_config(item))
+                        else:
+                            normalized["bridgeProtocol"] = "generic"
                     else:
                         normalized.update({
                             "botToken": _bounded_text(item.get("botToken"), 512),
@@ -341,6 +371,8 @@ class MessageConnectorRegistry:
         return configured or self._env.get(f"YUIZAKI_{connector_id.upper()}_BRIDGE_URL", "").strip()
 
     def _bridge_protocol(self, connector_id: str) -> str:
+        if connector_id == "wechat":
+            return "generic"
         configured = _text(self._config.get(connector_id, {}).get("bridgeProtocol"))
         return configured or self._env.get(f"YUIZAKI_{connector_id.upper()}_BRIDGE_PROTOCOL", "generic").strip().lower()
 
@@ -521,6 +553,8 @@ class MessageConnectorRegistry:
                 "bridgeTokenConfigured": bool(self._bridge_token(connector_id)),
                 "bridgeProtocol": self._bridge_protocol(connector_id),
             })
+            if connector_id == "qq":
+                snapshot.update(_normalize_qq_config(self._config.get(connector_id, {})))
         else:
             snapshot.update({
                 "botTokenConfigured": bool(self._token(connector_id)),
@@ -747,6 +781,8 @@ class MessageConnectorRegistry:
         if connector_id not in self._CONNECTOR_ORDER:
             return None
         existing = dict(self._config.get(connector_id, {}))
+        if connector_id == "qq":
+            existing.update(_normalize_qq_config({**existing, **payload}, strict=True))
         if connector_id in {"qq", "wechat"} and _REMOVED_OFFICIAL_FIELDS.intersection(payload):
             raise MessageConnectorError("official_connector_removed", "QQ/微信仅支持个人账号兼容桥，官方连接器已移除", status_code=422)
         for field, limit in (("botToken", 512), ("webhookSecret", 256), ("publicKey", 64), ("bridgeUrl", 512), ("bridgeProtocol", 32), ("bridgeToken", 512)):
@@ -768,7 +804,10 @@ class MessageConnectorRegistry:
             if requested_mode and requested_mode != "personal_bridge":
                 raise MessageConnectorError("personal_bridge_only", "QQ/微信仅支持个人账号兼容桥模式", status_code=422)
             existing["accountMode"] = "personal_bridge"
-            existing["bridgeProtocol"] = (_text(existing.get("bridgeProtocol")) or "generic").lower()
+            existing["bridgeProtocol"] = (
+                (_text(existing.get("bridgeProtocol")) or "generic").lower()
+                if connector_id == "qq" else "generic"
+            )
         if connector_id == "discord" and existing.get("publicKey"):
             key = _text(existing["publicKey"]).lower()
             try:
@@ -866,16 +905,69 @@ class MessageConnectorRegistry:
         event_id = _text(payload.get("id") or payload.get("event_id") or payload.get("message_id") or payload.get("time"))
         raw_sender = payload.get("sender")
         sender: Mapping[str, Any] = raw_sender if isinstance(raw_sender, Mapping) else {}
+        self_id = _text(payload.get("self_id"))
+        if connector_id == "qq":
+            if "post_type" in payload and payload["post_type"] not in ("message", "message_sent"):
+                return None
+            if self_id and self_id in {_text(payload.get("user_id")), _text(sender.get("user_id"))}:
+                return None
         user_id = _text(payload.get("user_id") or payload.get("openid") or payload.get("from_user") or sender.get("user_id"))
         group_id = _text(payload.get("group_id") or payload.get("channel_id") or payload.get("conversation_id"))
         raw_message = payload.get("message") or payload.get("text") or payload.get("content")
-        if isinstance(raw_message, list):
+        metadata: dict[str, Any] = {}
+        mentioned = False
+        if connector_id == "qq" and isinstance(raw_message, list):
+            parts: list[str] = []
+            media = {"image": "[图片]", "record": "[语音]", "voice": "[语音]", "file": "[文件]"}
+            for segment in raw_message:
+                if not isinstance(segment, Mapping):
+                    continue
+                data = segment.get("data")
+                if not isinstance(data, Mapping):
+                    continue
+                kind = segment.get("type")
+                if kind == "at":
+                    mentioned = mentioned or bool(self_id and _text(data.get("qq")) == self_id)
+                elif kind == "reply":
+                    reply_id = _text(data.get("id"))
+                    if reply_id:
+                        metadata["reply_id"] = reply_id
+                elif kind == "text":
+                    parts.append(str(data.get("text") or ""))
+                elif isinstance(kind, str) and kind in media:
+                    parts.append(media[kind])
+            raw_message = "".join(parts)
+        elif isinstance(raw_message, list):
             raw_message = "".join(_text(item.get("data", {}).get("text")) if isinstance(item, Mapping) and isinstance(item.get("data"), Mapping) else _text(item) for item in raw_message)
         text = _bounded_text(raw_message, 4000)
+        if connector_id == "qq":
+            config = _normalize_qq_config(self._config.get("qq", {}))
+            if group_id and config["mentionRequired"] and not mentioned:
+                return None
+            # Nonempty prefixes are an additional trigger in both private and
+            # group chats, not an alternative to a required group mention.
+            # Strip the longest matching prefix before creating the turn.
+            prefixes = config["prefixes"]
+            if prefixes:
+                prefix = next((item for item in sorted(prefixes, key=len, reverse=True) if text.startswith(item)), None)
+                if prefix is None:
+                    return None
+                text = text[len(prefix):].strip()
         conversation_id = group_id or user_id
         if not event_id or not text or not conversation_id:
             return None
-        return ConnectorMessage(connector_id=connector_id, event_id=event_id, session_id=f"connector:{connector_id}:{'group' if group_id else 'user'}:{conversation_id}", external_user_id=user_id or "unknown", conversation_id=conversation_id, text=text, reply_target={"user_id": user_id, "group_id": group_id, "conversation_id": conversation_id})
+        return ConnectorMessage(connector_id=connector_id, event_id=event_id, session_id=f"connector:{connector_id}:{'group' if group_id else 'user'}:{conversation_id}", external_user_id=user_id or "unknown", conversation_id=conversation_id, text=text, reply_target={"user_id": user_id, "group_id": group_id, "conversation_id": conversation_id}, metadata=metadata)
+
+    def is_allowlisted(self, message: ConnectorMessage) -> bool:
+        if message.connector_id != "qq":
+            return True
+        config = _normalize_qq_config(self._config.get("qq", {}))
+        users = config["allowedUsers"]
+        groups = config["allowedGroups"]
+        group_id = message.reply_target.get("group_id")
+        return (not users or message.external_user_id in users) and (
+            not group_id or not groups or group_id in groups
+        )
 
     def _parse_telegram(self, payload: Mapping[str, Any]) -> ConnectorMessage | None:
         message = payload.get("message") or payload.get("edited_message")

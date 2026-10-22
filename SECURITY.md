@@ -48,6 +48,10 @@ and validates it on every inbound request. Discord requires a Public Key and ver
 including endpoint `PING`. QQ and WeChat require a Bridge Token before enablement and validate it on every bridge callback.
 QQ and WeChat use a user-selected local personal-account bridge. This is not an official platform API; lockout,
  privacy, disconnect, and protocol-change risks are explicitly accepted by the local user.
+Personal-account protocols can lead to an account ban; use a secondary account for QQ testing.
+QQ ignores self/non-message events, requires group mentions by default, supports sender/group
+allowlists, and bounds per-session admission and active turns. Rejected events return a 2xx
+acknowledgement without creating a delivery; this is not an authentication substitute.
 
 ### DSH delegation boundary
 

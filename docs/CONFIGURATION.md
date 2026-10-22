@@ -209,6 +209,25 @@ Telegram, Discord, QQ personal bridge, and WeChat personal bridge adapters are e
 
 Enabling a connector authorizes its declared inbound message and outbound reply flow without per-message approval. Stored secrets are not returned by status APIs. QQ and WeChat personal bridges are not official platform APIs and require separate local compatibility testing.
 
+QQ personal-account protocols carry an account-ban risk; use a secondary account for testing.
+`onebot11` / `onebot12` parsing applies to QQ only; WeChat remains a generic bridge.
+QQ admission settings are editable through `PUT /api/system/connectors/qq/config`:
+
+| Key | Type / default | Meaning |
+| --- | --- | --- |
+| `mentionRequired` | boolean / `true` | Group messages must mention the bot; private messages are exempt |
+| `prefixes` | string array / `[]` | When nonempty, private and group messages must start with a listed prefix; the longest match is removed |
+| `allowedUsers` | string array / `[]` | Sender allowlist; empty allows all senders |
+| `allowedGroups` | string array / `[]` | Group allowlist; empty allows all groups, without restricting private chats |
+| `ratePerMinute` | integer / `10` | Sliding 60-second admission budget per connector session |
+| `maxConcurrent` | integer / `2` | Maximum concurrent Agent turns admitted through the QQ webhook |
+
+Bot-originated events and non-message OneBot events are ignored. Group mentions are detected from
+`at` segments addressed to `self_id`; media segments become `[图片]`, `[语音]`, or `[文件]` rather
+than disappearing. A prefix does not bypass a required group mention. Denied allowlist or admission checks return HTTP 200 with `accepted: false`
+and `reason: "not_allowlisted"` or `"rate_limited"`, before creating a turn/delivery. The limits
+are process-local admission controls, not durable quotas or a substitute for webhook authentication.
+
 ## Avatars, models, and caches / 角色、模型与缓存
 
 Live2D/VRM assets, model weights, voices, and generated caches stay outside Git unless their exact licenses allow redistribution. Sherpa, Embedding, and Genie are marked `requiredOnFirstRun` in `resources.lock.json`; Genie is marked `mode: builtin`, so its package and fixed character assets are prepared locally from the pinned official source. The settings resource panel preselects missing entries and downloads them through the locked source/revision path. Startup restores saved avatar references when the files still exist; missing assets are reported in the application.

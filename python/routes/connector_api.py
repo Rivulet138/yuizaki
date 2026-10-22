@@ -217,6 +217,7 @@ def _message_snapshot(
         "conversation_id": message.conversation_id,
         "text": message.text,
         "reply_target": dict(message.reply_target),
+        "metadata": dict(message.metadata),
     }
     if workspace_id:
         snapshot["workspace_id"] = workspace_id
@@ -225,6 +226,7 @@ def _message_snapshot(
 
 def _message_from_snapshot(payload: Mapping[str, Any]) -> ConnectorMessage:
     target = payload.get("reply_target")
+    metadata = payload.get("metadata")
     if not isinstance(target, Mapping):
         raise TypeError("delivery message snapshot is missing reply_target")
     return ConnectorMessage(
@@ -235,6 +237,7 @@ def _message_from_snapshot(payload: Mapping[str, Any]) -> ConnectorMessage:
         conversation_id=str(payload.get("conversation_id") or "").strip(),
         text=str(payload.get("text") or "").strip(),
         reply_target={str(key): str(value) for key, value in target.items() if value is not None},
+        metadata=dict(metadata) if isinstance(metadata, Mapping) else {},
     )
 
 
@@ -277,6 +280,7 @@ def _turn_request(message: ConnectorMessage, workspace_id: str) -> SemanticTurnR
             "source_id": message.event_id,
             "invocation_source": f"{message.connector_id}_webhook",
             "conversation_id": message.conversation_id,
+            "connector_metadata": dict(message.metadata),
             "owner_agent_id": f"connector.{message.connector_id}",
             "owner_agent_role": "external_connector",
             "route_reason": "Experimental external message connector",
@@ -304,6 +308,8 @@ def create_message_connector_router(
     active_tasks: dict[str, asyncio.Task[JSONResponse]] = {}
     active_phases: dict[str, str] = {}
     active_event_ids: dict[str, str] = {}
+    qq_recent_events: dict[str, tuple[str, float]] = {}
+    qq_inflight: set[str] = set()
     current_time = wall_clock or time.time
 
     @router.get("/api/system/connectors/{connector_id}/config")
@@ -327,6 +333,11 @@ def create_message_connector_router(
             "clearBotToken", "clearWebhookSecret", "clearPublicKey",
             "clearBridgeUrl", "clearBridgeProtocol", "clearBridgeToken",
         }
+        if connector_id.strip().lower() == "qq":
+            allowed.update({
+                "mentionRequired", "prefixes", "allowedUsers", "allowedGroups",
+                "ratePerMinute", "maxConcurrent",
+            })
         if set(payload) - allowed:
             return JSONResponse({"ok": False, "error": "unknown_fields"}, status_code=422)
         if "enabled" in payload and not isinstance(payload["enabled"], bool):
@@ -746,6 +757,8 @@ def create_message_connector_router(
             return JSONResponse({"ok": False, "error": exc.code, "message": str(exc)}, status_code=exc.status_code)
         if message is None:
             return JSONResponse({"ok": True, "accepted": False, "reason": "unsupported_event"})
+        if not registry.is_allowlisted(message):
+            return JSONResponse({"ok": True, "accepted": False, "reason": "not_allowlisted"})
         request_id = f"connector:{connector_id}:{message.event_id}"
         task_key = f"{connector_id}:{message.event_id}"
         canonical_task = active_tasks.get(task_key)
@@ -829,6 +842,23 @@ def create_message_connector_router(
                     "session_id": message.session_id,
                     "delivery": _public_delivery(existing_delivery),
                 })
+        qq_rate_reserved = False
+        qq_replayed_event = False
+        admission_time = registry.current_time()
+        if connector_id == "qq":
+            # Replay/active-task checks above retain their original semantics.
+            # Admission through task registration below has no await, so this
+            # check-and-reserve is atomic within the router's event loop.
+            for key, (_session_id, timestamp) in tuple(qq_recent_events.items()):
+                if timestamp <= admission_time - 60:
+                    qq_recent_events.pop(key, None)
+            qq_config = registry.config_snapshot("qq") or {}
+            qq_replayed_event = existing_delivery is not None or task_key in qq_recent_events
+            session_count = sum(session_id == message.session_id for session_id, _ in qq_recent_events.values())
+            if len(qq_inflight) >= qq_config["maxConcurrent"] or (
+                not qq_replayed_event and session_count >= qq_config["ratePerMinute"]
+            ):
+                return JSONResponse({"ok": True, "accepted": False, "reason": "rate_limited"})
         try:
             turn_service = turn_service_provider()
             if turn_service is None:
@@ -863,7 +893,12 @@ def create_message_connector_router(
                 {"ok": False, "error": "connector_setup_failed", "message": "连接器暂时不可用，请稍后重试"},
                 status_code=503,
             )
-        queued_store = delivery_store_provider() if delivery_store_provider is not None else None
+        if connector_id == "qq":
+            qq_inflight.add(task_key)
+            if not qq_replayed_event:
+                qq_recent_events[task_key] = (message.session_id, admission_time)
+                qq_rate_reserved = True
+        queued_store = delivery_store
         queued_owner: str | None = None
         queued_pending_created = False
         if (connector_id in fast_ack or connector_id == "discord") and queued_store is not None:
@@ -881,6 +916,9 @@ def create_message_connector_router(
                     message=_message_snapshot(message, workspace_id=workspace_id),
                 )
             except Exception:
+                qq_inflight.discard(task_key)
+                if qq_rate_reserved:
+                    qq_recent_events.pop(task_key, None)
                 LOGGER.exception(
                     "connector durable enqueue failed connector=%s event_id=%s",
                     connector_id,
@@ -924,6 +962,8 @@ def create_message_connector_router(
                     )
                 commit = await turn_service.execute("http", turn_request)
                 replayed = bool(getattr(commit, "replayed", False))
+                if replayed and qq_rate_reserved:
+                    qq_recent_events.pop(task_key, None)
                 result = getattr(commit, "result", None)
                 turn_outcome = str(getattr(result, "outcome", "") or "").strip().lower()
                 if turn_outcome == "cancelled":
@@ -1088,9 +1128,18 @@ def create_message_connector_router(
                 await _converge_discord("failed")
                 return JSONResponse({"ok": False, "error": "connector_turn_failed", "message": "连接器处理失败，请查看治理面板"}, status_code=502)
 
+        async def _run_admitted_connector() -> JSONResponse:
+            try:
+                return await _run_connector()
+            finally:
+                qq_inflight.discard(task_key)
+
         active_phases[task_key] = "processing"
         active_event_ids[task_key] = message.event_id
-        task = asyncio.create_task(_run_connector())
+        task = asyncio.create_task(_run_admitted_connector())
+        if connector_id == "qq":
+            # Also release if a task is cancelled before its coroutine starts.
+            task.add_done_callback(lambda _completed: qq_inflight.discard(task_key))
         active_tasks[task_key] = task
         if connector_id == "discord" or (connector_id in fast_ack and queued_store is not None):
             def _cleanup(completed: asyncio.Task[JSONResponse]) -> None:

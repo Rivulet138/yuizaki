@@ -215,6 +215,25 @@ sanitized. Failure after launch can leave file changes; do not automatically rep
 The existing `CompanionJobEventLog` records queued/running/terminal tool states, visible through
 `GET /api/system/companion-runtime`, without a separate DSH job store.
 
+## QQ webhook admission / QQ 回调准入
+
+`PUT /api/system/connectors/qq/config` accepts `mentionRequired`, `prefixes`, `allowedUsers`,
+`allowedGroups`, `ratePerMinute`, and `maxConcurrent`; see [Configuration](CONFIGURATION.md)
+for defaults. Both nonempty allowlists must match when applicable. Self messages and explicit
+non-message `post_type` values are ignored; group messages require an `at` segment targeting
+`self_id` when `mentionRequired` is enabled. Images, recordings/voice, and files are preserved as
+text placeholders; reply segments retain their referenced message ID as metadata.
+
+Rejected callbacks are acknowledged without creating delivery records:
+
+```json
+{"ok": true, "accepted": false, "reason": "rate_limited"}
+```
+
+The response is HTTP 200, not 429, to avoid bridge redelivery storms. Allowlist rejection uses
+`not_allowlisted`; unsupported/self/untriggered events use `unsupported_event`. Existing accepted
+event IDs retain their delivery idempotency and fast-ack behavior. Authentication remains mandatory.
+
 ## Authentication and trust / 认证与信任
 
 - Python, Socket.IO, and Electron control services bind to loopback by default.
@@ -222,7 +241,7 @@ The existing `CompanionJobEventLog` records queued/running/terminal tool states,
 - Electron routed control APIs require the control Bearer/header token described above, except for health and approved pet-asset GET paths. The loopback query bootstrap is restricted to no-Origin GET requests.
 - Native desktop actions use a separate host-only token and are not authorized by the normal backend token.
 - Connector webhook routes apply provider-specific verification. Configuration and management routes remain inside the normal backend boundary.
-- In the production app, Telegram and personal bridge webhooks are acknowledged only after the inbound envelope is persisted in `connector_deliveries`; the response may contain `queued: true` while Agent execution continues. `processing`/`failed` rows are recoverable via the delivery retry route, and `sending` is treated as an unknown external effect rather than auto-retried.
+- In the production app, accepted Telegram and personal bridge webhooks are acknowledged only after the inbound envelope is persisted in `connector_deliveries`; filtered or rate-limited events are acknowledged without a delivery. The response may contain `queued: true` while Agent execution continues. `processing`/`failed` rows are recoverable via the delivery retry route, and `sending` is treated as an unknown external effect rather than auto-retried.
 - Delivery list responses include bounded `recovery` telemetry (`yuizaki.connector-recovery.v1`) with scan/recovery/failure counters and the last scan timestamp; it contains no message body or credentials.
 - Prompt text, OCR, screenshots, web pages, tool output, MCP output, and plugin output are untrusted data.
 
