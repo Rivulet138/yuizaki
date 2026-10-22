@@ -92,8 +92,12 @@ class PolicyEngine:
 
     @staticmethod
     def _is_selected_external_tool(tool: ToolDefinition) -> bool:
-        """MCP/plugin enablement is the authorization decision for that tool."""
-        return tool.source in {"mcp", "plugin"} and not tool.require_confirm
+        """Enablement authorizes ordinary external tools, not high-risk writes."""
+        return (
+            tool.source in {"mcp", "plugin"}
+            and not tool.require_confirm
+            and tool.risk_level not in {"high", "critical"}
+        )
 
     def get_audit_log(self, limit: int = 100) -> list[dict[str, object]]:
         take = max(1, min(int(limit), self._audit_max_entries))
@@ -140,7 +144,7 @@ class PolicyEngine:
         """Return the current policy outcome without creating control-plane state."""
 
         del request_id, parameters
-        if self._is_selected_external_tool(tool):
+        if not force_confirm and self._is_selected_external_tool(tool):
             return PolicyDecision(allowed=True)
         scope_key = self._build_scope_key(tool.name, permission_scope)
         remembered = self._remembered.get(scope_key)
@@ -173,7 +177,7 @@ class PolicyEngine:
         permission_request_id = f"perm_{uuid.uuid4().hex[:12]}"
         capability_call_id = f"call_{uuid.uuid4().hex[:12]}"
 
-        if self._is_selected_external_tool(tool):
+        if not force_confirm and self._is_selected_external_tool(tool):
             return PolicyDecision(allowed=True)
 
         def receipt(decision: PermissionDecision, reason_code: str, *, retryable: bool) -> PermissionReceipt:

@@ -2222,6 +2222,21 @@ class DesktopPetSocketServer:
         except Exception:
             logger.exception("[SIO] socket tool bridge refresh task failed")
 
+    async def ensure_plugins_loaded(self) -> None:
+        """Load agent plugins once, regardless of transport or client presence.
+
+        The socket bridge refresh used to be the only trigger, so HTTP-only
+        callers (``/v1/chat/completions``) ran without plugin tools and a
+        headless client could never reach them. Loading here keeps the plugin
+        set identical for every transport. It is idempotent, and it leaves MCP
+        status refresh and scheduler start-up to their original owners.
+        """
+        async with self._plugin_init_lock:
+            if self._plugins_initialized:
+                return
+            await self.plugin_manager.discover_and_load(self.tool_registry)
+            self._plugins_initialized = True
+
     async def _refresh_socket_tool_bridge(self) -> None:
         async with self._plugin_init_lock:
             try:
@@ -2231,11 +2246,12 @@ class DesktopPetSocketServer:
             except Exception as exc:
                 logger.debug("[SIO] plugin tool bridge refresh failed: %s", exc)
 
-            if self._plugins_initialized:
-                return
-            await self.plugin_manager.discover_and_load(self.tool_registry)
+            if not self._plugins_initialized:
+                await self.plugin_manager.discover_and_load(self.tool_registry)
+                self._plugins_initialized = True
+            # The scheduler is idempotent and must start even when plugins were
+            # already loaded during startup.
             await self.scheduler.start()
-            self._plugins_initialized = True
 
     async def _dispatch_plugin_proactive_message(
         self,

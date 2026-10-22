@@ -26,6 +26,7 @@ FastAPI + Socket.IO backend
   turns, providers, tools, memory, scheduler, connectors
         |
 optional node-mcp, Qdrant, local or remote providers
+  optional DSH CLI via ask_dsh (outbound delegate, whitelisted environment)
 ```
 
 Primary composition points are `tools/yuizaki-launcher`, `electron/src/main`, `electron/src/renderer`, `python/app.py`, and `python/socket_server.py`. Optional services must not become prerequisites for the text-chat path.
@@ -89,6 +90,12 @@ Qdrant is an optional rebuildable projection. When the projection is unavailable
 ## Tools and external services / 工具与外部服务
 
 Built-in tools, MCP services, plugins, browser automation, desktop actions, and message connectors enter through explicit registries or adapters. Tool output, OCR, web content, plugin output, and MCP output are untrusted data, not authorization.
+
+The optional `ask_dsh` plugin delegates explicitly requested coding work to a local headless DSH
+process after high-risk policy approval. A single-process semaphore, bounded queue/runtime/output,
+and the MCP stdio environment whitelist plus explicit DSH provider keys isolate this process boundary; no `YUIZAKI_*` variables
+are inherited. ToolExecutor owns its existing companion job lifecycle projection. DSH is not a
+text-chat prerequisite and does not inherit Yuizaki's file-tool sandbox or provider credentials.
 
 The built-in browser tools run in `node-mcp`, which the launcher starts only when MCP is enabled. Every browser target is resolved and checked against private, loopback, link-local, and metadata ranges before launch and again per request; concurrency, timeouts, body size, and SSE clients are bounded. Local file tools resolve the target under `YUIZAKI_LOCAL_TOOL_ROOTS` (default: the repository root), reject sensitive filenames, suffixes, and directories, and replace files atomically through a temporary sibling. These are hardening measures inside the local trust model, not a sandbox or an authorization grant.
 

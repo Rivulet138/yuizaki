@@ -455,6 +455,12 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
         relationship_summary_provider=_relationship_evolution_summary,
         active_workspace_provider=_get_active_workspace_id,
     )
+    # Load agent plugins before any transport serves a turn. Socket.IO used to be
+    # the only trigger, which left HTTP-only clients without plugin tools.
+    try:
+        await sio_server.ensure_plugins_loaded()
+    except Exception:
+        logger.exception("Agent plugin load failed during startup")
     if sio_server.runtime.turn_outbox_worker is not None:
         await sio_server.runtime.turn_outbox_worker.start()
     if _connector_recovery_controller is not None:

@@ -29,6 +29,7 @@ python/CharacterModels/v2ProPlus/<character>
 
 - 流式文字对话、会话隔离、历史、分支、取消与恢复。
 - Agent Turn、规划、工具调用、任务、MCP、插件和计划任务。
+- 可选 `ask_dsh`：经高风险权限确认，把明确要求的编码、测试或仓库分析委托给本机 DSH；不用于日常闲聊。
 - Live2D/VRM 角色、表情、动作、注视、口型和状态投影。
 - 按键说话、连续对话、VAD、ASR、流式 TTS 和打断。
 - 按请求的屏幕捕获、OCR 和视觉模型分析；默认不运行永久录屏。
@@ -218,6 +219,7 @@ Yuizaki is a local-first Windows/Linux AI desktop companion Agent with text and 
 
 - Streaming text chat, isolated sessions, history, branches, cancellation, and recovery.
 - Agent turns, planning, tools, jobs, MCP, plugins, and scheduled tasks.
+- Optional `ask_dsh`: delegate explicitly requested coding, tests, or repository analysis to local DSH after high-risk policy approval.
 - Live2D/VRM expressions, motions, gaze, lip sync, and state projection.
 - Push-to-talk, continuous conversation, VAD, ASR, streaming TTS, and interruption.
 - Request-scoped screen capture, OCR, and vision; no permanent recording loop by default.

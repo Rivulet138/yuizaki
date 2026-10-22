@@ -24,7 +24,7 @@ Yuizaki is a local, single-user AI desktop pet Agent, not a hardened public serv
 - Microphone capture requires explicit voice mode and desktop permission.
 - Vision is disabled until enabled and requested by an Agent turn.
 - MCP is opt-in: the launcher leaves it stopped unless started with `--with-mcp` or `YUIZAKI_WITH_MCP=1`. `--no-mcp` forces it off.
-- Enabling an MCP server or Agent plugin is the user authorization decision for its declared tools; enabled MCP/plugin tools do not prompt on every call. Disable the service or plugin to revoke that selection.
+- Enabling an MCP server or Agent plugin authorizes its ordinary declared tools. High/critical-risk tools, explicitly confirmation-required tools, and forced confirmation still use the policy approval flow; remembered grants remain scoped. Disable the service or plugin to revoke that selection.
 - Plugin shutdown closes execution admission before closing the listener. Admitted executions are cancelled and awaited through request parsing, broker calls, sandbox workers, and process-tree cleanup; Windows `taskkill` completion is awaited before shutdown returns.
 
 ## Connector boundary
@@ -48,6 +48,17 @@ and validates it on every inbound request. Discord requires a Public Key and ver
 including endpoint `PING`. QQ and WeChat require a Bridge Token before enablement and validate it on every bridge callback.
 QQ and WeChat use a user-selected local personal-account bridge. This is not an official platform API; lockout,
  privacy, disconnect, and protocol-change risks are explicitly accepted by the local user.
+
+### DSH delegation boundary
+
+`ask_dsh` starts an external coding agent with real filesystem permissions, not a sandboxed
+read-only helper. It is high-risk and may edit files after approval. Only explicitly requested
+coding/file/repository tasks should be delegated. It uses argv without a shell, a single-process
+concurrency limit, bounded output, and timeout/cancellation cleanup. The child receives only the
+MCP stdio inherited-environment whitelist plus explicitly allowed DSH provider keys, and no `YUIZAKI_*` variables. DSH uses its own profile
+credentials; keep Yuizaki provider credentials in `YUIZAKI_PROVIDER_CREDENTIALS_JSON`, not in task
+text or committed settings. Timeout or failed execution does not roll back file changes and must
+not cause an automatic retry. DSH session data persists under `~/.dsh/sessions`.
 
 Discord interactions are durably recorded before the deferred acknowledgement, then Agent work runs in the background; terminal delivery
 edits the original response, uses the interaction token only within its local 15-minute deadline, and disables mention parsing.

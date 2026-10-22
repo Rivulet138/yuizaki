@@ -34,6 +34,34 @@ class _ReloadAPI:
         return self.settings_store.reload_provider_credentials(credentials)
 
 
+@pytest.mark.asyncio
+async def test_openlux_settings_use_runtime_credentials_only(monkeypatch, tmp_path) -> None:
+    configured = {
+        "provider": "custom",
+        "base_url": "https://api.openlux.ai/v1",
+        "model": "deepseek-v4.1-flash",
+        "api_key": "",
+    }
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({"llm": configured}), encoding="utf-8")
+    monkeypatch.setenv(PROVIDER_CREDENTIALS_ENV, json.dumps({"llm.api_key": "test-runtime-only"}))
+
+    store = SettingsStore(settings_path)
+    assert store.get("llm.api_key") == "test-runtime-only"
+    store.save()
+    assert "test-runtime-only" not in settings_path.read_text(encoding="utf-8")
+    assert store.get("llm.model") == "deepseek-v4.1-flash"
+    persisted = json.loads(settings_path.read_text(encoding="utf-8"))["llm"]
+    assert persisted["provider"] == "custom"
+    assert persisted["base_url"] == "https://api.openlux.ai/v1"
+    assert persisted["api_key"] == ""
+    api = SettingsAPI(store, DynamicConfigManager())
+    snapshot = (await api.get_all_settings()).model_dump()
+    assert snapshot["llm"]["model"] == "deepseek-v4.1-flash"
+    assert snapshot["llm"]["api_key"] != "test-runtime-only"
+    assert (await api.get_setting("llm.api_key")).value != "test-runtime-only"
+
+
 def test_settings_store_reloads_provider_credentials_without_persisting_plaintext(monkeypatch) -> None:
     with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
         settings_path = Path(temp_dir) / "settings.json"

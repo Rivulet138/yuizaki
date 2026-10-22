@@ -41,6 +41,13 @@ LLM_TIMEOUT=60
 
 Remote providers normally require a real key. The configured endpoint must implement the OpenAI-compatible chat contract used by the adapter.
 
+For OpenLux, select `provider=custom`, `base_url=https://api.openlux.ai/v1`, and
+`model=deepseek-v4.1-flash`. Keep `api_key` empty in settings. Supply the key to the backend
+through `YUIZAKI_PROVIDER_CREDENTIALS_JSON`, a JSON object whose `llm.api_key` entry is injected
+into memory (for example, `{"llm.api_key":"<provider-key>"}`). Credential values are scrubbed
+before settings/history persistence and are not returned by settings snapshots. Named provider
+profiles remain independent of this active selection.
+
 Vision is separate and disabled by default:
 
 ```dotenv
@@ -52,6 +59,30 @@ VISION_LLM_MODEL=
 ```
 
 Enabling vision does not create a permanent capture loop. Frames remain request-scoped and require the relevant application flow.
+
+## DSH delegation / DSH 任务委托
+
+The optional DSH Agent plugin exposes `ask_dsh` for explicitly requested coding,
+file-editing, test, and repository-analysis tasks, not ordinary companion chat. Install DSH separately
+and configure its `headless` profile using DSH's own credential storage. Yuizaki does not copy its
+provider key into DSH or modify DSH profiles.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `YUIZAKI_DSH_COMMAND` | Auto-discovered local DSH | JSON argv array for the executable and fixed arguments, without the task or profile arguments; not a shell command |
+| `YUIZAKI_DSH_TIMEOUT_S` | `180` | Maximum subprocess runtime in seconds |
+| `YUIZAKI_DSH_MAX_OUTPUT_CHARS` | `8000` | Maximum returned output, retaining the beginning and end |
+
+On Windows the command is Node plus the JS entry, never a directly spawned `dsh.cmd`. An explicit
+override looks like `["node","C:/Users/<user>/AppData/Roaming/npm/node_modules/@deepseek-ai/dsh/lib/bin.js"]`.
+The bridge appends `--profile`, `headless`, and the task as separate argv entries, without a shell.
+Tasks must be nonempty, at most 4000 characters, and must not begin with `--`.
+The child inherits the MCP stdio environment whitelist plus explicitly allowed DSH provider keys
+(`DEEPSEEK_API_KEY`, `OP_API_KEY`, `ROAI_API_KEY`, `OPENLUX_API_KEY`); no `YUIZAKI_*` variable is
+forwarded. One DSH process runs at a time; a queue wait longer than 30 seconds returns `dsh_busy`.
+Timeout and cancellation kill and await the child. A failed or interrupted delegation may already
+have changed files: inspect the result before trying again. Each invocation may consume provider
+tokens and create a persistent session under `~/.dsh/sessions`; manage those sessions with DSH.
 
 ## Voice / 语音
 

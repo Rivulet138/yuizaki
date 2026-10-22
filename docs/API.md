@@ -199,6 +199,22 @@ The deterministic memory evaluator accepts `expected_memory_roles` and `forbidde
 
 A failed recall emits `rag:result` with `error: "MEMORY_RECALL_FAILED"` and empty `docs`; it does not return provider details and must not be presented as an empty memory store.
 
+## DSH delegation / DSH 联动
+
+`ask_dsh` is an optional Agent plugin tool, not a standalone HTTP endpoint. Its required `task`
+and optional `context` describe a self-contained coding or repository task. The headless DSH
+process can read and change local files, so the tool is `risk_level=high`, `effect_kind=write`
+and enters the normal policy confirmation flow before execution. Plugin enablement alone must
+not bypass high/critical-risk confirmation. Remembered permissions follow the tool's scoped policy.
+
+The subprocess uses separated argv and a minimal inherited environment, never a shell command.
+Tasks starting with `--` or exceeding 4000 characters are rejected. Execution is serialized;
+`dsh_busy`, `dsh_not_found`, `dsh_timeout`, `dsh_nonzero_exit`, and `dsh_output_too_large`
+identify queue, setup, execution, and bounded-output failures. Returned output is bounded and
+sanitized. Failure after launch can leave file changes; do not automatically repeat a delegation.
+The existing `CompanionJobEventLog` records queued/running/terminal tool states, visible through
+`GET /api/system/companion-runtime`, without a separate DSH job store.
+
 ## Authentication and trust / 认证与信任
 
 - Python, Socket.IO, and Electron control services bind to loopback by default.
