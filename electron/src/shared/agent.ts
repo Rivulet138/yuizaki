@@ -207,6 +207,8 @@ export interface QqBridgeSnapshot {
   lastError: string | null
   installDir: string
   loginHint: string
+  accountId: string | null
+  accountName: string | null
 }
 
 export interface ConnectorDeliveryItem {

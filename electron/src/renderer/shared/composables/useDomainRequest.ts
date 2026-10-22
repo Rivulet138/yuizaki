@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import type { HttpClientError } from '@/api/clients/http-client'
+import { describeError } from '@/shared/errors/describe-error'
 
 export interface DomainRequestState<T> {
   data: T | null
@@ -39,7 +40,9 @@ export function useDomainRequest<T>(): DomainRequestState<T> {
       const requestLabel = httpError.requestPath ? ` ${httpError.requestPath}` : ''
       console.error(`[DomainRequest Error]${requestLabel}:`, err)
       if (requestId === requestSequence) {
-        error.value = httpError.message || '请求失败，请稍后重试'
+        // Every panel that renders async state goes through here, so translating
+        // once keeps machine codes out of the UI everywhere.
+        error.value = describeError(err)
       }
       return null
     } finally {

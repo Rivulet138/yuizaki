@@ -214,6 +214,28 @@ def test_status_reports_connected_when_onebot_api_answers(tmp_path: Path, monkey
     assert "扫码完成" in status["loginHint"]
 
 
+def test_status_exposes_the_logged_in_account(tmp_path: Path, monkeypatch) -> None:
+    """After the scan the card should show who signed in, not just "connected"."""
+    supervisor = _supervisor(
+        tmp_path,
+        health=lambda: {"user_id": 10086, "nickname": "小号"},
+    )
+    _install_without_network(supervisor, tmp_path, monkeypatch)
+    status = supervisor.start()
+    assert status["state"] == "connected"
+    assert status["accountId"] == "10086"
+    assert status["accountName"] == "小号"
+
+
+def test_status_has_no_account_before_login(tmp_path: Path, monkeypatch) -> None:
+    supervisor = _supervisor(tmp_path, health=lambda: False)
+    _install_without_network(supervisor, tmp_path, monkeypatch)
+    status = supervisor.start()
+    assert status["state"] == "awaiting_scan"
+    assert status["accountId"] is None
+    assert status["accountName"] is None
+
+
 def test_status_returns_to_stopped_when_process_exits(tmp_path: Path, monkeypatch) -> None:
     process = FakeProcess()
     supervisor = _supervisor(tmp_path, spawn=lambda *a, **k: process)

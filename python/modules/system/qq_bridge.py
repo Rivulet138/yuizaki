@@ -225,10 +225,19 @@ class QqBridgeSupervisor:
     def status(self) -> dict[str, Any]:
         running = self._process_alive()
         state = self._state
+        account: dict[str, Any] = {}
         if not self.installed:
             state = "not_installed"
         elif running:
-            state = CONNECTED if self._api_healthy() else PENDING
+            info = self._login_info()
+            if info is not None:
+                state = CONNECTED
+                account = {
+                    "accountId": str(info.get("user_id") or "") or None,
+                    "accountName": str(info.get("nickname") or "") or None,
+                }
+            else:
+                state = PENDING
         elif state in {CONNECTED, PENDING, "starting"}:
             state = "stopped"
         return {
@@ -244,6 +253,8 @@ class QqBridgeSupervisor:
             "startedAt": self._started_at,
             "lastError": self._last_error,
             "installDir": str(self.root) if self.installed else "",
+            "accountId": account.get("accountId"),
+            "accountName": account.get("accountName"),
             "loginHint": (
                 "桥进程已在独立窗口启动：请用手机 QQ 扫描该窗口中的二维码。"
                 if state == PENDING
@@ -409,11 +420,20 @@ class QqBridgeSupervisor:
             return True
         return poll() is None
 
-    def _api_healthy(self) -> bool:
+    def _login_info(self) -> dict[str, Any] | None:
+        """Return the logged-in account, or ``None`` while the API is not ready.
+
+        ``get_login_info`` only answers after a successful login, so it doubles as
+        the readiness probe and as the source of the account identity shown in the
+        UI.
+        """
         if self._health_probe is not None:
-            return bool(self._health_probe())
+            probed = self._health_probe()
+            if isinstance(probed, dict):
+                return probed
+            return {} if probed else None
         if self._config is None:
-            return False
+            return None
         url = f"{self._config.bridge_url}/get_login_info"
         request = urllib.request.Request(
             url,
@@ -424,8 +444,14 @@ class QqBridgeSupervisor:
             with _LOOPBACK_OPENER.open(request, timeout=2) as response:  # noqa: S310 - loopback only
                 payload = json.loads(response.read().decode("utf-8", "replace") or "{}")
         except (urllib.error.URLError, OSError, ValueError):
-            return False
-        return str(payload.get("status")) == "ok" or payload.get("retcode") == 0
+            return None
+        if str(payload.get("status")) != "ok" and payload.get("retcode") != 0:
+            return None
+        data = payload.get("data")
+        return dict(data) if isinstance(data, dict) else {}
+
+    def _api_healthy(self) -> bool:
+        return self._login_info() is not None
 
 
 def _random_token() -> str:

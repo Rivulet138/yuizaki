@@ -95,6 +95,9 @@
                     <el-tag size="small" :type="qqBridgeTagType">{{ qqBridgeStateLabel }}</el-tag>
                     <el-tag v-if="qqBridge?.installed" size="small" type="info">版本 {{ qqBridge?.version }}</el-tag>
                     <el-tag v-if="qqBridge?.apiPort" size="small" type="info">端口 {{ qqBridge?.apiPort }}</el-tag>
+                    <el-tag v-if="qqBridge?.accountName || qqBridge?.accountId" size="small" type="success">
+                      {{ qqBridge?.accountName || '账号' }}<template v-if="qqBridge?.accountId">（{{ qqBridge?.accountId }}）</template>
+                    </el-tag>
                   </div>
                   <p v-if="qqBridge?.loginHint" class="connector-hint">{{ qqBridge?.loginHint }}</p>
                   <p v-if="qqBridge?.lastError" class="connector-hint connector-hint-error">{{ qqBridge?.lastError }}</p>
@@ -119,20 +122,28 @@
                 </div>
                 <div class="connector-bridge-box">
                   <el-alert title="个人账号桥接，稳定性取决于桥接程序。" type="warning" :closable="false" show-icon />
-                  <div class="connector-secret-row">
+                  <div v-if="!(connectorId === 'qq' && qqBridge?.installed)" class="connector-secret-row">
                     <el-input v-model="connectorDrafts[connectorId].bridgeUrl" placeholder="兼容桥地址，例如 http://127.0.0.1:3000" />
                     <el-input v-model="connectorDrafts[connectorId].bridgeToken" type="password" show-password placeholder="桥接令牌（启用必填）" />
                   </div>
+                  <p v-if="connectorId === 'qq' && qqBridge?.installed" class="connector-hint">
+                    桥地址与令牌由内置桥自动写入（{{ qqBridge?.bridgeUrl || '启动后生成' }}），无需手工填写。
+                  </p>
                   <div class="connector-config-actions">
                     <el-select v-model="connectorDrafts[connectorId].bridgeProtocol" size="small" placeholder="桥协议">
                       <el-option label="通用桥 API" value="generic" />
                       <el-option v-if="connectorId === 'qq'" label="OneBot 11" value="onebot11" />
                       <el-option v-if="connectorId === 'qq'" label="OneBot 12" value="onebot12" />
                     </el-select>
-                    <el-button type="primary" size="small" :loading="accountBusyIds.has(connectorId)" @click="loginPersonalAccount(connectorId)">开始登录</el-button>
-                    <el-button plain size="small" :loading="accountBusyIds.has(connectorId)" @click="refreshPersonalAccount(connectorId)">刷新状态</el-button>
-                    <el-button type="danger" plain size="small" :disabled="accountBusyIds.has(connectorId)" @click="logoutPersonalAccount(connectorId)">退出账号</el-button>
-                    <el-button type="danger" link size="small" :disabled="accountBusyIds.has(connectorId)" @click="unbindPersonalAccount(connectorId)">清除桥接配置</el-button>
+                    <template v-if="connectorId === 'qq' && qqBridge?.installed">
+                      <span class="connector-hint">账号登录由上方「内置桥」统一管理。</span>
+                    </template>
+                    <template v-else>
+                      <el-button type="primary" size="small" :loading="accountBusyIds.has(connectorId)" @click="loginPersonalAccount(connectorId)">开始登录</el-button>
+                      <el-button plain size="small" :loading="accountBusyIds.has(connectorId)" @click="refreshPersonalAccount(connectorId)">刷新状态</el-button>
+                      <el-button type="danger" plain size="small" :disabled="accountBusyIds.has(connectorId)" @click="logoutPersonalAccount(connectorId)">退出账号</el-button>
+                      <el-button type="danger" link size="small" :disabled="accountBusyIds.has(connectorId)" @click="unbindPersonalAccount(connectorId)">清除桥接配置</el-button>
+                    </template>
                   </div>
                   <div v-if="connectorAccounts[connectorId]" class="connector-account-status">
                     <span>状态：{{ accountStateLabel(connectorAccounts[connectorId].loginState) }}</span>
@@ -558,7 +569,8 @@ import { ElTag } from 'element-plus'
 import { ElCard } from 'element-plus'
 import 'element-plus/es/components/card/style/css'
 import 'element-plus/es/components/tag/style/css'
-import { onMounted, reactive, computed, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, computed, ref, watch } from 'vue'
+import { describeError } from '@/shared/errors/describe-error'
 import { ElMessage, ElMessageBox, ElTabPane, ElTabs } from 'element-plus'
 import 'element-plus/es/components/tabs/style/css'
 import 'element-plus/es/components/tab-pane/style/css'
@@ -896,7 +908,7 @@ const cancelConnectorEventItem = async (connectorId: MessageConnectorId, eventId
     if (result?.cancelled) ElMessage.success('事件处理已取消')
     else ElMessage.warning(cancelConnectorEventRequest.error || '取消过晚；回复可能已经发送')
   } catch (error) {
-    ElMessage.warning(error instanceof Error ? error.message : '取消状态未知；请刷新后检查')
+    ElMessage.warning(error instanceof Error ? describeError(error) : '取消状态未知；请刷新后检查')
   } finally {
     removePending(cancellingEventIds, eventId)
     await refreshConnectorState(connectorId).catch(() => undefined)
@@ -909,7 +921,7 @@ const retryDeliveryItem = async (connectorId: MessageConnectorId, deliveryKey: s
     const result = await retryConnectorDelivery(connectorId, deliveryKey)
     if (result?.ok) ElMessage.success(result.alreadySent ? '该事件已送达' : '回复已重新投递')
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '重新投递失败')
+    ElMessage.error(error instanceof Error ? describeError(error) : '重新投递失败')
   } finally {
     removePending(retryingDeliveryKeys, deliveryKey)
     await refreshConnectorState(connectorId).catch(() => undefined)
@@ -945,7 +957,7 @@ const resolveConnectorEventItem = async (
       ElMessage.warning(resolveConnectorEventRequest.error || '状态未能收敛，请刷新后重试')
     }
   } catch (error) {
-    ElMessage.warning(error instanceof Error ? error.message : '状态未能收敛，请刷新后重试')
+    ElMessage.warning(error instanceof Error ? describeError(error) : '状态未能收敛，请刷新后重试')
   } finally {
     removePending(resolvingEventIds, eventId)
     await refreshConnectorState(connectorId).catch(() => undefined)
@@ -1338,7 +1350,7 @@ const loadConnectorConfig = async (connectorId: MessageConnectorId) => {
     if (connectorId === 'qq' || connectorId === 'wechat') await loadConnectorAccount(connectorId)
     return result
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : `${connectorId} 配置读取失败`)
+    ElMessage.error(error instanceof Error ? describeError(error) : `${connectorId} 配置读取失败`)
     return null
   } finally {
     removePending(loadingConnectorConfigIds, connectorId)
@@ -1404,7 +1416,7 @@ const saveConnectorConfig = async (connectorId: MessageConnectorId) => {
     else if (probe) ElMessage.warning(`${connectorDisplayName(connectorId)} 设置已保存，但${connectorProbeStatusLabel(probe)}`)
     else ElMessage.success(`${connectorDisplayName(connectorId)} 设置已保存，连接状态待检查`)
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '连接器设置保存失败')
+    ElMessage.error(error instanceof Error ? describeError(error) : '连接器设置保存失败')
   } finally {
     removePending(savingConnectorIds, connectorId)
   }
@@ -1440,7 +1452,7 @@ const withBridgeBusy = async (action: () => Promise<unknown>, success?: string) 
     await action()
     if (success) ElMessage.success(success)
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '内置桥操作失败')
+    ElMessage.error(error instanceof Error ? describeError(error) : '内置桥操作失败')
   } finally {
     bridgeBusy.value = false
     await loadConnectors().catch(() => undefined)
@@ -1470,9 +1482,29 @@ onMounted(() => {
   void loadQqBridge().catch(() => undefined)
 })
 
+// While the bridge waits for a QR scan the state only changes on the backend,
+// so poll gently instead of making the user press "刷新状态".
+let bridgePollTimer: ReturnType<typeof setInterval> | null = null
+const stopBridgePolling = () => {
+  if (bridgePollTimer) {
+    clearInterval(bridgePollTimer)
+    bridgePollTimer = null
+  }
+}
+const syncBridgePolling = (state: string | undefined) => {
+  const pending = state === 'awaiting_scan' || state === 'starting'
+  if (pending && !bridgePollTimer) {
+    bridgePollTimer = setInterval(() => { void loadQqBridge().catch(() => undefined) }, 5000)
+  } else if (!pending) {
+    stopBridgePolling()
+  }
+}
+watch(() => qqBridge.value?.state, (state) => syncBridgePolling(state), { immediate: true })
+onBeforeUnmount(stopBridgePolling)
+
 const loginPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
   addPending(accountBusyIds, connectorId)
-  try { const account = await loginConnectorAccount(connectorId); if (account) ElMessage.success(account.loginUrl ? '登录请求已创建，请打开登录页' : `连接状态：${accountStateLabel(account.loginState)}`) } catch (error) { ElMessage.error(error instanceof Error ? error.message : '登录请求失败') } finally { removePending(accountBusyIds, connectorId); await loadConnectors().catch(() => undefined) }
+  try { const account = await loginConnectorAccount(connectorId); if (account) ElMessage.success(account.loginUrl ? '登录请求已创建，请打开登录页' : `连接状态：${accountStateLabel(account.loginState)}`) } catch (error) { ElMessage.error(error instanceof Error ? describeError(error) : '登录请求失败') } finally { removePending(accountBusyIds, connectorId); await loadConnectors().catch(() => undefined) }
 }
 const refreshPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
   addPending(accountBusyIds, connectorId)
@@ -1509,7 +1541,7 @@ const unbindPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
     await loadConnectors()
     ElMessage.success('桥接配置已清除')
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '桥接配置清除失败')
+    ElMessage.error(error instanceof Error ? describeError(error) : '桥接配置清除失败')
   } finally {
     removePending(accountBusyIds, connectorId)
   }
