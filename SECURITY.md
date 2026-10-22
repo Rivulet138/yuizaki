@@ -54,6 +54,11 @@ only after an explicit risk acknowledgement, verifies the archive against a pinn
 only the executable. The upstream repository ships no LICENSE file, so this component carries unresolved
 licensing and is never redistributed with this project; it runs with its own console window and the
 generated OneBot token, not with Yuizaki credentials.
+A configured sign server is a third-party service that participates in the login handshake, so the
+bridge will only sign in through an endpoint you set yourself; Yuizaki stores the URL in the bridge
+config, never ships a default, and refuses to pretend a login succeeded when signing fails. Capturing
+the login QR (`qrText`) keeps the credential visible only inside the loopback UI and does not persist it.
+Inline capture uses the optional `pywinpty` package; when it is absent the QR stays in the bridge window.
 QQ ignores self/non-message events, requires group mentions by default, supports sender/group
 allowlists, and bounds per-session admission and active turns. Rejected events return a 2xx
 acknowledgement without creating a delivery; this is not an authentication substitute.

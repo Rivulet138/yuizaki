@@ -460,6 +460,20 @@ def create_message_connector_router(
         except QqBridgeError as exc:
             return _bridge_error(exc)
 
+    @router.put("/api/system/connectors/qq/bridge/sign-server")
+    async def qq_bridge_sign_server(request: Request) -> JSONResponse:
+        """Set the sign server this QQ protocol version requires to log in."""
+        try:
+            payload = await request.json()
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            payload = {}
+        try:
+            bridge = _bridge()
+            status = await asyncio.to_thread(bridge.set_sign_server, str((payload or {}).get("url") or ""))
+            return JSONResponse({"ok": True, "bridge": status})
+        except QqBridgeError as exc:
+            return _bridge_error(exc)
+
     @router.post("/api/system/connectors/qq/bridge/start")
     async def qq_bridge_start() -> JSONResponse:
         try:

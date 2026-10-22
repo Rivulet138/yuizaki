@@ -244,10 +244,14 @@ Yuizaki can own the bridge process itself, so a personal account can be connecte
 | Install | Downloads the pinned archive from `resources.lock.json` (`qq_bridge`), verifies SHA256, unpacks only the executable into `python/data/qq-bridge/<version>/` |
 | Start | Generates `appsettings.json` with `Account.Uin = 0` (QR login), `Message.IgnoreSelf`, plain-text QR, and two OneBot 11 implementations: `HttpPost` pushing to this backend's webhook and `Http` serving `send_private_msg` on a free loopback port |
 | Wire | Writes `bridgeUrl`/`bridgeProtocol=onebot11`/`bridgeToken` into the QQ connector and enables it |
-| Scan | The bridge is spawned with its own console window; the QR is drawn there. Yuizaki reports `awaiting_scan` until `get_login_info` answers, then `connected` |
+| Sign | `PUT /api/system/connectors/qq/bridge/sign-server` stores `SignServerUrl` in the generated config. The pinned build cannot complete a login without a signing service; with none configured it fails immediately with `qq_bridge_signer_unavailable` |
+| Scan | The bridge is spawned with its own console window. When `pywinpty` is importable Yuizaki captures that console through ConPTY, decodes the QR block and returns it as `qrText`, so the code is shown inside the QQ tab (`captureMode: "pty"`); otherwise the QR stays in the bridge window only (`captureMode: "console"`) |
+| Connect | Yuizaki reports `awaiting_scan` until `get_login_info` answers, then `connected` |
 | Logout | Stops the process, deletes the generated config and the bridge session directory, clears the connector's bridge URL and token |
 
 `GET /api/system/connectors/qq/bridge` reports one of `not_installed`, `installed`, `starting`, `awaiting_scan`, `connected`, `failed`, `stopped`. The generated access token is stored in `python/data/qq_bridge_state.json` so a restart keeps the connector and the bridge in sync.
+
+Inline capture needs the optional `pywinpty` package inside the Python runtime. It is not a hard dependency: without it the bridge still starts and the QR is readable in the bridge window, and `captureMode` says so.
 
 This project does not redistribute the bridge binary: it is fetched from the upstream author's release at the user's explicit request (`acceptRisk`), and the upstream repository currently ships **no LICENSE file**, so treat the download as a third-party component with unresolved licensing. The release is pinned by hash, and the moving upstream tag means the pin will eventually need a deliberate refresh.
 

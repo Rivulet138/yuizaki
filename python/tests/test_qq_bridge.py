@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import zipfile
 from pathlib import Path
 
@@ -57,8 +58,10 @@ def _supervisor(tmp_path: Path, *, spawn=None, env=None, health=None) -> QqBridg
         resource=RESOURCE,
         env=env or {"SERVER_PORT": "8001"},
         spawn=spawn or (lambda *a, **k: FakeProcess()),
-        # Tests never touch a real port; one case flips this to exercise CONNECTED.
+        # Tests never touch a real port or a real pseudo console; the capture
+        # cases inject a fake pty explicitly.
         health_probe=health or (lambda: False),
+        capture=False,
     )
 
 
@@ -246,6 +249,105 @@ def test_status_returns_to_stopped_when_process_exits(tmp_path: Path, monkeypatc
     status = supervisor.status()
     assert status["running"] is False
     assert status["state"] == "stopped"
+
+
+class FakePty:
+    """Stand-in for winpty.PtyProcess that replays canned console output."""
+
+    def __init__(self, chunks: list[str]) -> None:
+        self._chunks = list(chunks)
+        self.terminated = False
+
+    def read(self, _size: int) -> str:
+        return self._chunks.pop(0) if self._chunks else ""
+
+    def isalive(self) -> bool:
+        return not self.terminated
+
+    def terminate(self, force: bool = False) -> None:
+        self.terminated = True
+
+
+class FakePtyFactory:
+    def __init__(self, chunks: list[str]) -> None:
+        self._chunks = chunks
+        self.spawned: list[tuple[str, str]] = []
+
+    def spawn(self, command: str, cwd: str = ".") -> FakePty:
+        self.spawned.append((command, cwd))
+        return FakePty(self._chunks)
+
+
+def _capturing_supervisor(tmp_path: Path, chunks: list[str]) -> tuple[QqBridgeSupervisor, FakePtyFactory]:
+    factory = FakePtyFactory(chunks)
+    supervisor = QqBridgeSupervisor(
+        data_dir=tmp_path,
+        resource=RESOURCE,
+        env={"SERVER_PORT": "8001"},
+        spawn=lambda *a, **k: FakeProcess(),
+        health_probe=lambda: False,
+        pty_factory=factory,
+    )
+    return supervisor, factory
+
+
+def test_pty_capture_exposes_the_qr_and_switches_mode(tmp_path: Path, monkeypatch) -> None:
+    rows = chr(10).join(["██  ████ ██"] * 12)
+    supervisor, factory = _capturing_supervisor(tmp_path, [f"info: waiting" + chr(10) + rows + chr(10)])
+    _install_without_network(supervisor, tmp_path, monkeypatch)
+
+    status = supervisor.start()
+    time.sleep(0.2)  # let the reader thread drain the fake stream
+    status = supervisor.status()
+
+    assert factory.spawned, "the bridge must run inside the pseudo console"
+    assert status["captureMode"] == "pty"
+    assert status["qrText"] and "██" in status["qrText"]
+    assert status["state"] == "awaiting_scan"
+
+
+def test_captured_signer_failure_becomes_a_failed_state(tmp_path: Path, monkeypatch) -> None:
+    supervisor, _ = _capturing_supervisor(
+        tmp_path,
+        ["info: connecting" + chr(10), "System.Exception: Signer server returned a NotFound" + chr(10)],
+    )
+    _install_without_network(supervisor, tmp_path, monkeypatch)
+    supervisor.start()
+    time.sleep(0.2)
+
+    status = supervisor.status()
+    assert status["state"] == "failed"
+    assert status["lastError"] == "qq_bridge_signer_unavailable"
+
+
+def test_sign_server_is_generated_into_the_config_and_persisted(tmp_path: Path, monkeypatch) -> None:
+    supervisor = _supervisor(tmp_path)
+    _install_without_network(supervisor, tmp_path, monkeypatch)
+    supervisor.set_sign_server("https://sign.example.org/api/sign")
+    status = supervisor.start()
+
+    config = json.loads((supervisor.root / "appsettings.json").read_text(encoding="utf-8"))
+    assert config["SignServerUrl"] == "https://sign.example.org/api/sign"
+    assert status["signServerConfigured"] is True
+
+    reopened = _supervisor(tmp_path)
+    assert reopened.status()["signServerUrl"] == "https://sign.example.org/api/sign"
+
+
+def test_sign_server_rejects_a_bare_host(tmp_path: Path) -> None:
+    supervisor = _supervisor(tmp_path)
+    with pytest.raises(QqBridgeError) as excinfo:
+        supervisor.set_sign_server("sign.example.org")
+    assert excinfo.value.code == "qq_bridge_invalid_sign_server"
+
+
+def test_stop_terminates_the_captured_process(tmp_path: Path, monkeypatch) -> None:
+    supervisor, factory = _capturing_supervisor(tmp_path, ["info: idle" + chr(10)])
+    _install_without_network(supervisor, tmp_path, monkeypatch)
+    supervisor.start()
+    supervisor.stop()
+    assert supervisor.status()["running"] is False
+    assert supervisor.status()["captureMode"] == "console"
 
 
 def test_load_bridge_resource_reads_lock(tmp_path: Path) -> None:

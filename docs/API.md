@@ -238,15 +238,18 @@ Rejected callbacks are acknowledged without creating delivery records:
 
 ### Managed QQ bridge / 内置桥
 
-Five endpoints manage the local bridge process; none of them enables the connector implicitly except `start`.
+Six endpoints manage the local bridge process; none of them enables the connector implicitly except `start`.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/system/connectors/qq/bridge` | Bridge state, version, PID, API port, derived `bridgeUrl`, last error, login hint |
+| `GET /api/system/connectors/qq/bridge` | Bridge state, version, PID, API port, derived `bridgeUrl`, last error, login hint, `qrText`, `signServerUrl`, `signServerConfigured`, `captureMode` |
 | `POST .../bridge/install` | `{"acceptRisk": true}` required; downloads the pinned archive, verifies SHA256, unpacks only the executable. `422 qq_bridge_risk_not_accepted`, `502 qq_bridge_hash_mismatch` |
+| `PUT .../bridge/sign-server` | `{"signServerUrl": "…"}` (empty clears) persists the signing endpoint into the generated config; required by the pinned bridge build before login can start |
 | `POST .../bridge/start` | Writes the OneBot config, spawns the bridge with its own console, and wires + enables the QQ connector |
 | `POST .../bridge/stop` | Stops the process and disables the connector |
 | `POST .../bridge/logout` | Stops, removes the generated config and session data, clears bridge URL and token |
+
+`GET` reports the login surface honestly: `qrText` carries the decoded QR block when the bridge prints one, `captureMode` is `pty` when the console output is captured through ConPTY and `console` when only the spawned window shows it, and `signServerConfigured` tells the UI whether a sign server is on file. Login failures are surfaced as `qq_bridge_signer_unavailable` (signer answered with an error), `qq_bridge_login_failed` (the bridge gave up), or `qq_bridge_port_in_use` (the configured API port is taken) instead of a bare `failed`.
 
 Webhook authentication accepts the OneBot `access_token` query parameter for the personal-bridge connectors in addition to the `Authorization: Bearer` header, because OneBot 11 bridges commonly push events with the token in the query string.
 
