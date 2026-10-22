@@ -265,6 +265,7 @@ export const jaJPOverrides = {
   'companion.home.empty': '利用可能なペットプロフィールがありません',
   'companion.home.enabled': 'オン',
   'companion.home.interrupt': '現在の動作を停止',
+  'companion.home.interactionTitle': 'デスクトップペットと現在の会話を直接操作',
   'companion.home.loadError': 'ペットプロフィールを読み込めませんでした',
   'companion.home.authorizationRequired': 'ブラウザプレビューを使うには、先に Electron の制御ページで認証してください。',
   'companion.home.loading': 'ペットプロフィールを読み込み中',

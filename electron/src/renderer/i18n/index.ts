@@ -1068,6 +1068,7 @@ const messages = {
     'shell.shortcuts.dragMode': 'Toggle drag mode',
     'shell.shortcuts.lockMode': 'Toggle lock mode',
     'shell.shortcuts.openPanel': 'Open companion panel',
+    'shell.shortcuts.toggleVision': 'Pause or resume vision',
     'shell.shortcuts.toggle': 'Show or hide shortcuts',
     'shell.shortcuts.title': 'Shortcuts',
     'shell.shortcuts.voice': 'Hold to talk',
@@ -1729,6 +1730,7 @@ const messages = {
     'shell.shortcuts.dragMode': 'Toggle drag mode',
     'shell.shortcuts.lockMode': 'Toggle lock mode',
     'shell.shortcuts.openPanel': 'Open companion panel',
+    'shell.shortcuts.toggleVision': 'Pause or resume vision',
     'shell.shortcuts.toggle': 'Show or hide shortcuts',
     'shell.shortcuts.title': 'Shortcuts',
     'shell.shortcuts.voice': 'Hold to talk',
@@ -2223,13 +2225,21 @@ export const hasMessage = (key: string, locale: Locale = localeState.locale): ke
   return Object.prototype.hasOwnProperty.call(resolvedMessages[locale], key)
 }
 
+/**
+ * Read a message out of one locale table.
+ *
+ * `resolvedMessages` keeps literal types so `MessageKey` can be derived from it,
+ * which means indexing it with a `Locale` union requires the key to exist in
+ * *every* locale. The locales are deliberately partial (ja-JP ships far fewer
+ * strings than zh-CN and relies on the zh fallback), so the table is widened for
+ * the lookup itself: the runtime behaviour is unchanged, and a partial locale
+ * stops being a type error.
+ */
+const messageTable = (locale: Locale): Record<string, string> => resolvedMessages[locale]
+
 export const t = (key: string, params?: MessageParams): string => {
   const locale = localeState.locale
-  const message = hasMessage(key, locale)
-    ? resolvedMessages[locale][key]
-    : hasMessage(key, 'zh-CN')
-      ? resolvedMessages['zh-CN'][key]
-      : key
+  const message = messageTable(locale)[key] ?? messageTable('zh-CN')[key] ?? key
 
   if (!params) return message
 
