@@ -75,6 +75,7 @@ import { ElMessage } from 'element-plus'
 import { setLocale as setFrontendLocale, useI18n } from '@/i18n'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import { i18nClient } from '@/api/client'
+import { describeFailure } from '@/shared/errors/describe-error'
 
 const loading = ref(false)
 const locales = ref<string[]>([])
@@ -111,7 +112,7 @@ const loadAll = async () => {
     messages.value = messageData.messages
   } catch (error) {
     if (requestId !== loadSequence) return
-    loadError.value = error instanceof Error ? error.message : '后端翻译诊断加载失败'
+    loadError.value = describeFailure(error, '后端翻译诊断加载失败')
     console.warn('加载后端翻译诊断失败', error)
   } finally {
     if (requestId === loadSequence) loading.value = false
@@ -153,7 +154,7 @@ const applyBackendLocale = async () => {
     await loadAll()
   } catch (error) {
     if (requestId !== backendLocaleSequence) return
-    const message = error instanceof Error ? error.message : '切换后端语言失败'
+    const message = describeFailure(error, '切换后端语言失败')
     loadError.value = message
     ElMessage.error(message)
   } finally {
@@ -167,7 +168,7 @@ const lookupMessage = async () => {
     const result = await i18nClient.message(messageKey.value.trim(), selectedLocale.value || undefined)
     lastLookup.value = result.message
   } catch (error) {
-    const message = error instanceof Error ? error.message : '查询翻译消息失败'
+    const message = describeFailure(error, '查询翻译消息失败')
     lastLookup.value = message
     ElMessage.error(message)
   }
@@ -179,7 +180,7 @@ const lookupError = async () => {
     const result = await i18nClient.errorMessage(messageKey.value.trim(), selectedLocale.value || undefined)
     lastLookup.value = result.message
   } catch (error) {
-    const message = error instanceof Error ? error.message : '查询错误消息失败'
+    const message = describeFailure(error, '查询错误消息失败')
     lastLookup.value = message
     ElMessage.error(message)
   }

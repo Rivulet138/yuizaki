@@ -94,6 +94,7 @@ import { getSocketClient } from '@/net/socketClient'
 import { publishCompanionRuntimeEvent } from '../../runtime/companionRuntime'
 import { useChatStore } from '@/stores/chatStore'
 import { useI18n } from '@/i18n'
+import { describeFailure } from '@/shared/errors/describe-error'
 
 const dialogStore = useDialogStore()
 const workspaceStore = useWorkspaceStore()
@@ -110,7 +111,7 @@ const rememberPermissionDecision = ref(false)
 const permissionDenyButton = ref<HTMLElement | { $el?: HTMLElement } | null>(null)
 const respondingPermissionIds = new Set<string>()
 
-const errorMessage = (error: unknown) => error instanceof Error ? error.message : t('common.error.unknown')
+const errorMessage = (error: unknown) => describeFailure(error, t('common.error.unknown'))
 
 const focusPermissionDeny = () => {
   void nextTick(() => {

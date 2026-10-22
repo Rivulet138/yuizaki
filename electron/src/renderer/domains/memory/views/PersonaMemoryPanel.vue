@@ -97,6 +97,7 @@ import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import { petControlClient, systemClient } from '@/api/client'
 import { useChatStore } from '@/stores/chatStore'
 import type { HeartbeatSnapshot } from '@/../shared/agent'
+import { describeFailure } from '@/shared/errors/describe-error'
 
 const heartbeat = ref<HeartbeatSnapshot | null>(null)
 const behaviorSuggestions = ref<string[]>([])
@@ -168,7 +169,7 @@ const loadHeartbeat = async () => {
     behaviorSuggestions.value = Array.isArray(events) ? events.slice(-5).map((item) => item.message).filter(Boolean) : []
   } catch (error) {
     if (requestId !== heartbeatLoadSequence) return
-    loadError.value = error instanceof Error ? error.message : '无法读取桌宠状态'
+    loadError.value = describeFailure(error, '无法读取桌宠状态')
     console.warn('加载 Heartbeat 状态失败', error)
   } finally {
     if (requestId === heartbeatLoadSequence) loading.value = false

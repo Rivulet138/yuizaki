@@ -17,6 +17,7 @@ import type {
   PetControlContextPayload,
 } from '../../shared/types'
 import { SocketEvents } from '../net/socketClient'
+import { describeFailure } from '@/shared/errors/describe-error'
 import { normalizeSentenceEmotionCues } from '../pet-sentence-emotion-scheduler'
 import { useWorkspaceStore } from './workspaceStore'
 import {
@@ -1120,7 +1121,10 @@ export const useChatStore = defineStore('chat', () => {
       const isActiveSession = !runtime || runtime.sessionId === state.currentSessionId
       const ownedRuntimeError = code.startsWith('LLM') || code.startsWith('GEN') || code.startsWith('AGENT') || code.startsWith('TTS') || code === 'chat_error'
       if (ownedRuntimeError && (!runtime || !eventMatchesRuntime(data, runtime))) return
-      if (isActiveSession) state.lastError = message
+      // Explain the failure the same way the REST panels do; a bare code or raw
+      // upstream text is not something a user can act on.
+      const explained = describeFailure(data, message)
+      if (isActiveSession) state.lastError = explained
       if (code.startsWith('LLM') || code.startsWith('GEN') || code.startsWith('AGENT') || code === 'chat_error') {
         if (runtime) {
           runtime.isGenerating = false
@@ -1138,7 +1142,7 @@ export const useChatStore = defineStore('chat', () => {
         window.dispatchEvent(createTtsStopEvent())
         if (runtime) completeRuntimeRequest(runtime)
       }
-      if (isActiveSession) ElMessage.error(message)
+      if (isActiveSession) ElMessage.error(explained)
     })
 
     if (typeof window !== 'undefined') {

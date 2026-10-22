@@ -589,6 +589,7 @@ import type { PluginLoadFailure, PluginRuntimeState, PluginToolCapabilityContrib
 import type { CapabilityDescriptor, CapabilityKind, CapabilityRiskLevel, SkillCatalogItem, StreamActionRecord, StreamActionsSnapshot, StreamCapabilityDescriptor, StreamDraftConsumerSnapshot, StreamDraftsSnapshot, StreamExecuteResponse, StreamLocalEvent, StreamObsProfile, StreamReplyDraft, StreamRuntimeSnapshot } from '../../../../shared/capability'
 import type { AgentTraceSnapshot, MCPSnapshot, MCPServerConfigSnapshot, MCPServerStatusSnapshot, RuntimeLoopRecord, StepExecutionRecord } from '../../../../shared/agent'
 import { projectToolActionStatus, toolActionStatusLabel, toolEvidenceFromRecord, type ToolActionStatus } from '../toolActionProjection'
+import { describeFailure } from '@/shared/errors/describe-error'
 
 type TagType = 'success' | 'warning' | 'danger' | 'info' | 'primary'
 type CapabilityKindFilter = CapabilityKind | ''
@@ -1307,7 +1308,7 @@ async function handleSkillFileImport(event: Event) {
     await mergeImportedSkills(imported)
     ElMessage.success(`已导入 ${imported.length} 个 Skill`)
   } catch (error) {
-    const message = error instanceof Error ? error.message : '导入 Skills 失败'
+    const message = describeFailure(error, '导入 Skills 失败')
     ElMessage.error(message)
   }
 }
@@ -1488,7 +1489,7 @@ async function loadImportedSkills() {
     persistImportedSkillsToLocalStorage()
   } catch (error) {
     importedSkillBackendReady.value = false
-    importedSkillStorageError.value = error instanceof Error ? error.message : '后端技能存储不可用'
+    importedSkillStorageError.value = describeFailure(error, '后端技能存储不可用')
     importedSkillItems.value = localItems
   } finally {
     loadingImportedSkills.value = false
@@ -1521,7 +1522,7 @@ async function persistImportedSkills() {
     markImportedSkillsDirty(false)
   } catch (error) {
     importedSkillBackendReady.value = false
-    importedSkillStorageError.value = error instanceof Error ? error.message : '后端技能保存失败'
+    importedSkillStorageError.value = describeFailure(error, '后端技能保存失败')
     markImportedSkillsDirty(true)
     ElMessage.warning('后端保存失败，已先保存在本地')
   } finally {
@@ -1684,7 +1685,7 @@ async function deleteImportedSkills(skillIds: string[], options: { confirm?: boo
         markImportedSkillsDirty(false)
       } catch (error) {
         importedSkillBackendReady.value = false
-        importedSkillStorageError.value = error instanceof Error ? error.message : '后端技能删除失败'
+        importedSkillStorageError.value = describeFailure(error, '后端技能删除失败')
         markImportedSkillsDirty(true)
         ElMessage.warning('后端删除失败，已先更新本地列表')
       }
@@ -1775,7 +1776,7 @@ async function loadPlugins() {
     pluginLoadFailures.value = payload.loadFailures ?? []
   } catch (error) {
     if (requestId !== pluginLoadSequence) return
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     pushLog(`插件工具加载失败: ${message}`)
   } finally {
     if (requestId === pluginLoadSequence) loadingPlugins.value = false
@@ -1795,7 +1796,7 @@ async function loadCapabilities() {
     }
   } catch (error) {
     if (requestId !== capabilityLoadSequence) return
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     capabilityLoadError.value = `能力快照加载失败: ${message}`
   } finally {
     if (requestId === capabilityLoadSequence) loadingCapabilities.value = false
@@ -1810,7 +1811,7 @@ async function loadToolTrace() {
     agentTrace.value = snapshot
   } catch (error) {
     if (requestId !== toolTraceLoadSequence) return
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     pushLog(`后端工具记录加载失败: ${message}`)
   }
 }
@@ -1825,7 +1826,7 @@ async function loadMcpServers() {
     mcpSnapshot.value = snapshot
   } catch (error) {
     if (requestId !== mcpLoadSequence) return
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     mcpLoadError.value = `MCP 服务加载失败: ${message}`
   } finally {
     if (requestId === mcpLoadSequence) loadingMcp.value = false
@@ -1847,7 +1848,7 @@ async function loadStream() {
     streamModerationMaxMessagesPerMinute.value = Number(moderation?.maxMessagesPerMinute || 30)
     twitchSubscriptionDraft.value = [...(streamSnapshot.value.platforms?.twitch?.subscriptionPlan?.desired || [])]
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     streamLoadError.value = `直播能力加载失败: ${message}`
   } finally {
     loadingStream.value = false
@@ -1889,7 +1890,7 @@ async function probeTwitchConfig() {
     const ready = configured && Object.values(configured).filter(Boolean).length
     ElMessage.info(`Twitch 只读检查完成：${ready || 0} 项能力就绪；未建立连接或发送消息`)
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`Twitch 只读检查失败: ${message}`)
   } finally {
     probingTwitchConfig.value = false
@@ -1938,7 +1939,7 @@ async function saveTwitchConfig() {
       : 0
     ElMessage.success(`Twitch 凭据已安全保存并完成内存重配置；只读检查就绪 ${ready} 项，不会自动连接或发言`)
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`Twitch 配置失败: ${message}`)
   } finally {
     savingTwitchConfig.value = false
@@ -1957,7 +1958,7 @@ async function clearTwitchConfig() {
     await Promise.all([loadStream(), loadTwitchConfigStatus()])
     ElMessage.success('Twitch 凭据已清除，IRC 自动重连意图已停止')
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`清除 Twitch 凭据失败: ${message}`)
   } finally {
     savingTwitchConfig.value = false
@@ -1980,7 +1981,7 @@ async function configureObs() {
     if (probe.status === 'reachable') ElMessage.success('OBS 已配置并完成只读探测')
     else ElMessage.warning(`OBS 配置已保存，但探测状态为 ${String(probe.status || 'unknown')}`)
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`OBS 配置失败: ${message}`)
   } finally {
     configuringObs.value = false
@@ -1999,7 +2000,7 @@ async function clearObsPassword() {
     await loadStream()
     ElMessage.success('OBS 密码已从当前运行时清除')
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`OBS 密码清除失败: ${message}`)
   } finally {
     configuringObs.value = false
@@ -2033,7 +2034,7 @@ async function saveStreamModeration() {
     await loadStream()
     ElMessage.success('聊天治理策略已保存；出站消息仍需人工确认')
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`聊天治理策略更新失败: ${message}`)
   } finally {
     loadingStreamModeration.value = false
@@ -2046,7 +2047,7 @@ async function loadStreamEvents() {
     const result = await systemClient.streamEvents(20)
     streamEvents.value = result.events ?? result.items ?? []
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.warning(`本地直播事件加载失败: ${message}`)
   } finally {
     loadingStreamEvents.value = false
@@ -2059,7 +2060,7 @@ async function loadStreamDrafts() {
     const result: StreamDraftsSnapshot = await systemClient.streamDrafts(20)
     streamDrafts.value = result.drafts ?? []
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.warning(`回复草稿加载失败: ${message}`)
   } finally {
     loadingStreamDrafts.value = false
@@ -2070,7 +2071,7 @@ async function loadStreamDraftConsumer() {
   try {
     streamDraftConsumer.value = await systemClient.streamDraftConsumer()
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.warning(`自动草稿状态加载失败: ${message}`)
   }
 }
@@ -2082,7 +2083,7 @@ async function toggleStreamDraftConsumer() {
     ElMessage.success(streamDraftConsumer.value.enabled ? '已启用自动本地草稿，未发送消息' : '已关闭自动本地草稿')
     await Promise.all([loadStreamEvents(), loadStreamDrafts()])
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`自动草稿状态更新失败: ${message}`)
   } finally {
     loadingStreamDraftConsumer.value = false
@@ -2100,7 +2101,7 @@ async function consumeStreamDrafts() {
     await Promise.all([loadStreamEvents(), loadStreamDrafts()])
     ElMessage.success(`已尝试 ${result.attempted ?? 0} 条，生成 ${result.created ?? 0} 条本地草稿；未发送`)
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`批量生成草稿失败: ${message}`)
   } finally {
     consumingStreamDrafts.value = false
@@ -2113,7 +2114,7 @@ async function loadStreamActions() {
     const result: StreamActionsSnapshot = await systemClient.streamActions(50)
     streamActions.value = result.actions ?? []
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.warning(`直播动作审计加载失败: ${message}`)
   } finally {
     loadingStreamActions.value = false
@@ -2131,7 +2132,7 @@ async function reconfigureTwitch() {
     await loadStream()
     ElMessage.success('已清除本地撤销标记；仍需在 Twitch 侧确认订阅状态')
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`Twitch 状态更新失败: ${message}`)
   } finally {
     reconfiguringTwitch.value = false
@@ -2149,7 +2150,7 @@ async function saveTwitchSubscriptions() {
     await loadStream()
     ElMessage.success('已保存本地 EventSub 订阅计划，未连接 Twitch 创建订阅')
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`EventSub 订阅计划保存失败: ${message}`)
   } finally {
     loadingTwitchSubscriptions.value = false
@@ -2178,7 +2179,7 @@ async function connectTwitch() {
     if (result.ok) ElMessage.success('已请求 Twitch IRC 连接')
     else ElMessage.warning('Twitch IRC 尚未连接，请检查配置或稍后重试')
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`Twitch IRC 连接失败: ${message}`)
   } finally {
     connectingTwitch.value = false
@@ -2192,7 +2193,7 @@ async function disconnectTwitch() {
     await loadStream()
     ElMessage.success('已断开 Twitch IRC，停止自动重连意图')
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`Twitch IRC 断开失败: ${message}`)
   } finally {
     disconnectingTwitch.value = false
@@ -2221,7 +2222,7 @@ async function generateStreamDraft(event: StreamLocalEvent) {
     }
     ElMessage.success(result.draft?.status === 'generated' ? '已生成本地回复草稿，未发送' : '草稿生成失败，未发送任何消息')
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`回复草稿生成失败: ${message}`)
   } finally {
     generatingStreamDraft.value = ''
@@ -2246,7 +2247,7 @@ async function retryStreamDraft(draft: StreamReplyDraft) {
     }
     ElMessage.success(result.draft?.status === 'generated' ? '已重新生成本地回复草稿，未发送' : '草稿重新生成失败，未发送任何消息')
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`草稿重新生成失败: ${message}`)
   } finally {
     generatingStreamDraft.value = ''
@@ -2272,7 +2273,7 @@ async function toggleStreamTakeover() {
     if (result.state && streamSnapshot.value) streamSnapshot.value = { ...streamSnapshot.value, state: result.state, policy: result.policy ?? streamSnapshot.value.policy }
     ElMessage.success(streamTakeoverEnabled.value ? '已启用本地人工接管，未发送平台指令' : '已关闭本地人工接管')
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`本地接管策略更新失败: ${message}`)
   } finally {
     loadingStreamTakeover.value = false
@@ -2319,7 +2320,7 @@ async function probeStream() {
     if (!result.ok) ElMessage.warning(result.error || '适配器探测未通过')
     else ElMessage.success('适配器只读探测完成，未执行直播动作')
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`适配器探测失败: ${message}`)
   } finally {
     loadingStreamProbe.value = false
@@ -2337,7 +2338,7 @@ async function loadObsProfiles() {
     if (result.ok) ElMessage.success(`已读取 ${obsProfiles.value.length} 个 OBS 配置档`)
     else ElMessage.warning(result.error || 'OBS 配置档读取失败')
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`OBS 配置档读取失败: ${message}`)
   } finally {
     loadingObsProfiles.value = false
@@ -2366,7 +2367,7 @@ async function previewStream(kind: string, params: Record<string, unknown> = {},
     if (!result.ok) ElMessage.warning(result.error || '直播动作暂不可预览')
     else ElMessage.success('已生成直播动作预览，未执行真实操作')
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     ElMessage.error(`直播动作预览失败: ${message}`)
   } finally {
     previewingStreamCapability.value = ''
@@ -2407,7 +2408,7 @@ async function confirmStreamExecution() {
     if (result.ok) ElMessage.success(`执行完成：${result.verificationStatus || result.outcome || '已提交'}`)
     else ElMessage.error(result.message || result.error || '直播动作执行失败，可手动重试')
   } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
+    const message = describeFailure(error, '未知错误')
     streamExecution.value = { ok: false, outcome: 'failed', message }
     // Provider state can change while the confirmation dialog is open (for
     // example, Twitch EventSub may be revoked). Refresh the read-only

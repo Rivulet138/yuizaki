@@ -713,6 +713,7 @@ import { isLocalLlmEndpoint, normalizeOpenAiBaseUrl, shouldAutoDiscoverLlmModels
 import { LLM_PROVIDER_BASE_URLS, choosePreferredLlmModel, getLlmProviderOptions, inferLlmProviderPreset } from '../llmProviders'
 import type { LlmProviderPreset } from '../llmProviders'
 import { isPlainRecord, normalizeResourceStatus, normalizeStorageStatus } from '../resourceStatus'
+import { describeFailure } from '@/shared/errors/describe-error'
 
 type SaveTimeout = ReturnType<typeof window.setTimeout>
 type SettingSectionId = 'access' | 'llm' | 'voice' | 'asr' | 'memory' | 'summary' | 'svc' | 'resources' | 'system' | 'runtime-guide'
@@ -1111,7 +1112,7 @@ const clearSensitiveSetting = async (key: string, clearLocal: () => void) => {
     failedSavePatch.value = stripPatchPath(failedSavePatch.value, key)
     ElMessage.success(t('settings.apiKeyCleared'))
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : t('common.error.unknown'))
+    ElMessage.error(describeFailure(error, t('common.error.unknown')))
   } finally {
     setSensitiveDeleting(key, false)
   }
@@ -1412,7 +1413,7 @@ const clearLlmApiKey = async () => {
     }
     ElMessage.success(t('settings.llm.apiKeyCleared'))
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : t('common.error.unknown'))
+    ElMessage.error(describeFailure(error, t('common.error.unknown')))
   } finally {
     setSensitiveDeleting(key, false)
   }
@@ -1943,7 +1944,7 @@ const updateDesktopInputBindings = async (patch: InputBindingSettingsPatch) => {
   try {
     await inputBindingsStore.update(patch)
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '桌面快捷键保存失败')
+    ElMessage.error(describeFailure(error, '桌面快捷键保存失败'))
   }
 }
 
@@ -2002,7 +2003,7 @@ const resetDesktopInputBindings = async () => {
     await inputBindingsStore.reset()
     ElMessage.success('桌面输入已恢复默认')
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '恢复默认失败')
+    ElMessage.error(describeFailure(error, '恢复默认失败'))
   }
 }
 
@@ -2385,7 +2386,7 @@ const applyImportedSettings = async (payload: unknown) => {
     scheduleLlmModelDiscovery({ manual: false })
     ElMessage.success(t('settings.messages.importOk'))
   } catch (error) {
-    ElMessage.error(t('settings.messages.importFailed', { message: error instanceof Error ? error.message : t('common.error.unknown') }))
+    ElMessage.error(t('settings.messages.importFailed', { message: describeFailure(error, t('common.error.unknown'))}))
   } finally {
     llmImporting.value = false
   }
@@ -2400,7 +2401,7 @@ const handleLlmImportFile = async (event: Event) => {
     const payload = JSON.parse(await file.text()) as unknown
     await applyImportedSettings(payload)
   } catch (error) {
-    ElMessage.error(t('settings.messages.importFailed', { message: error instanceof Error ? error.message : t('settings.messages.importInvalid') }))
+    ElMessage.error(t('settings.messages.importFailed', { message: describeFailure(error, t('settings.messages.importInvalid'))}))
   }
 }
 
@@ -2411,7 +2412,7 @@ const exportLlmProfile = async () => {
     saveJsonDownload(buildLlmProfilePayload(true), `yuizaki-llm-profile-${stamp}.json`)
     ElMessage.success(t('settings.messages.exportOk'))
   } catch (error) {
-    ElMessage.error(t('settings.messages.exportFailed', { message: error instanceof Error ? error.message : t('common.error.unknown') }))
+    ElMessage.error(t('settings.messages.exportFailed', { message: describeFailure(error, t('common.error.unknown'))}))
   } finally {
     llmExporting.value = false
   }
@@ -2566,7 +2567,7 @@ const rollbackSettings = async () => {
     hydrateForm()
     await loadSettingsAdmin()
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : t('common.error.unknown'))
+    ElMessage.error(describeFailure(error, t('common.error.unknown')))
   }
 }
 
@@ -2590,7 +2591,7 @@ const clearSettingsHistory = async () => {
     settingsHistory.value = []
     ElMessage.success(t('settings.messages.historyCleared'))
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : t('common.error.unknown'))
+    ElMessage.error(describeFailure(error, t('common.error.unknown')))
   }
 }
 
@@ -2648,7 +2649,7 @@ const loadResourceStatus = async () => {
     selectRequiredResources(resourceStatus.value)
     syncResourceProgressPolling()
   } catch (error) {
-    const message = error instanceof Error ? error.message : t('settings.resource.statusFailed')
+    const message = describeFailure(error, t('settings.resource.statusFailed'))
     resourceMessage.value = message
     resourceMessageType.value = 'error'
     ElMessage.error(message)
@@ -2681,7 +2682,7 @@ const runResourceCommand = async (
       ElMessage.warning(result.message)
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : t('settings.resource.taskFailed')
+    const message = describeFailure(error, t('settings.resource.taskFailed'))
     resourceMessage.value = message
     resourceMessageType.value = 'error'
     ElMessage.error(message)
@@ -2708,7 +2709,7 @@ const cancelActiveResourceDownloads = async () => {
       ElMessage.info(message)
     }
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : t('settings.resource.taskFailed'))
+    ElMessage.error(describeFailure(error, t('settings.resource.taskFailed')))
   } finally {
     resourceCancelLoading.value = false
   }
@@ -2775,7 +2776,7 @@ const removeModelResource = async (
       ElMessage.warning(result.failed.map((item) => item.reason).join('; ') || result.message)
     }
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : t('settings.resource.taskFailed'))
+    ElMessage.error(describeFailure(error, t('settings.resource.taskFailed')))
   } finally {
     resourceActionKey.value = ''
   }
@@ -2792,7 +2793,7 @@ const loadStorageStatus = async () => {
     storageStatus.value = normalizeStorageStatus(await resourceClient.storageStatus())
   } catch (error) {
     storageStatus.value = null
-    ElMessage.error(error instanceof Error ? error.message : t('settings.storage.loadFailed'))
+    ElMessage.error(describeFailure(error, t('settings.storage.loadFailed')))
   } finally {
     storageLoading.value = false
   }
@@ -2868,7 +2869,7 @@ const cleanupStorage = async (targets: StorageCleanupTarget[]) => {
       }))
     }
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : t('settings.storage.cleanFailed'))
+    ElMessage.error(describeFailure(error, t('settings.storage.cleanFailed')))
   } finally {
     storageActionKey.value = ''
   }
@@ -3078,7 +3079,7 @@ const resetSettingKey = async () => {
     await loadSettings()
     hydrateForm()
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : t('common.error.unknown'))
+    ElMessage.error(describeFailure(error, t('common.error.unknown')))
   }
 }
 

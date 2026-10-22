@@ -74,6 +74,7 @@ import { API_ORIGIN, requestJson, resolveBackendUrl } from '@/api/clients/http-c
 import { settingsClient, type SettingsResponse } from '@/api/clients/settings-client'
 import { useSettingsStore } from '@/state/settingsStore'
 import { useRoute, useRouter } from 'vue-router'
+import { describeFailure } from '@/shared/errors/describe-error'
 
 const props = defineProps<{
   embedded?: boolean
@@ -174,7 +175,7 @@ const loadSettings = async () => {
     applySettings(settings)
   } catch (error) {
     if (unmounted || requestId !== settingsLoadSequence) return
-    ElMessage.error(error instanceof Error ? error.message : t('svcPanel.loadFailed'))
+    ElMessage.error(describeFailure(error, t('svcPanel.loadFailed')))
   }
 }
 
@@ -196,7 +197,7 @@ const testService = async () => {
     }
   } catch (error) {
     svcCheckState.value = 'error'
-    ElMessage.error(error instanceof Error ? error.message : t('svcPanel.serviceUnavailable'))
+    ElMessage.error(describeFailure(error, t('svcPanel.serviceUnavailable')))
   }
 }
 
@@ -263,7 +264,7 @@ const startConversion = async () => {
     }
     ElMessage.success(t('svcPanel.svcComplete'))
   } catch (error) {
-    conversionError.value = error instanceof Error ? error.message : String(error)
+    conversionError.value = describeFailure(error, t('svcPanel.serviceUnavailable'))
     ElMessage.error(conversionError.value)
   } finally {
     isConverting.value = false

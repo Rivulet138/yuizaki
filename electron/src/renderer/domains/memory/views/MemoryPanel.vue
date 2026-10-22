@@ -141,6 +141,7 @@ import type { MemoryDeletePreview, MemoryImportResult, MemoryIndexRebuildJob, Me
 import { getMemoryIndexUiStatus } from '../memory-index-status'
 import type { MemoryDoc } from '../composables/useMemoryDomain'
 import { memoryInspectorActionsKey } from '../components/memory-panel-types'
+import { describeFailure } from '@/shared/errors/describe-error'
 
 type TagType = 'success' | 'warning' | 'danger' | 'info' | 'primary'
 type DocViewMode = 'all' | 'recallable' | 'review' | 'important' | 'hits'
@@ -343,7 +344,7 @@ const previewMemoryMaintenance = async () => {
     maintenancePreview.value = await memoryClient.previewMaintenance(maintenancePayload())
     maintenancePreviewPolicyKey.value = maintenancePolicyKey()
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '无法预览记忆整理结果')
+    ElMessage.error(describeFailure(error, '无法预览记忆整理结果'))
   } finally {
     maintenancePreviewLoading.value = false
   }
@@ -387,7 +388,7 @@ const applyMemoryMaintenance = async () => {
       ElMessage.warning('整理已完成，但最新预览暂时无法刷新')
     }
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '记忆整理失败')
+    ElMessage.error(describeFailure(error, '记忆整理失败'))
   } finally {
     maintenanceApplyLoading.value = false
   }
@@ -404,7 +405,7 @@ const updateDefaultMemoryScope = async (value: string) => {
     ElMessage.success('记忆作用域已保存')
     await refreshMemoryState()
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '保存记忆作用域失败')
+    ElMessage.error(describeFailure(error, '保存记忆作用域失败'))
   } finally {
     workspaceScopeSaving.value = false
   }
@@ -644,7 +645,7 @@ const refreshIndexStatus = async () => {
       void monitorMemoryIndexRebuild(job.job_id, false)
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : '无法读取索引状态'
+    const message = describeFailure(error, '无法读取索引状态')
     indexStatus.value = {
       status: 'error',
       count: docs.value.length,
@@ -692,7 +693,7 @@ const exportMemory = async () => {
     URL.revokeObjectURL(url)
     ElMessage.success(`已导出 ${payload.count} 条记忆`)
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '导出记忆失败')
+    ElMessage.error(describeFailure(error, '导出记忆失败'))
   } finally {
     exportLoading.value = false
   }
@@ -741,7 +742,7 @@ const handleMemoryImportFile = async (event: Event) => {
     await refreshMemoryState()
   } catch (error) {
     if (error !== 'cancel' && !(error instanceof Error && error.message === 'cancel')) {
-      ElMessage.error(error instanceof Error ? error.message : '导入记忆失败')
+      ElMessage.error(describeFailure(error, '导入记忆失败'))
     }
   } finally {
     input.value = ''
@@ -764,7 +765,7 @@ const decideReviewCandidate = async ({ doc, decision }: { doc: MemoryDoc; decisi
     ElMessage.success(decision === 'approve' ? '已保留这条记忆' : '已拒绝这条候选')
     await refreshMemoryState()
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '复核操作失败')
+    ElMessage.error(describeFailure(error, '复核操作失败'))
   } finally {
     reviewProcessingId.value = ''
   }
@@ -814,7 +815,7 @@ const monitorMemoryIndexRebuild = async (jobId: string, announceCompletion: bool
       if (error instanceof Error && /404|not found/i.test(error.message)) {
         await refreshIndexStatus().catch(() => undefined)
       } else {
-        ElMessage.error(error instanceof Error ? error.message : '无法读取索引重建进度')
+        ElMessage.error(describeFailure(error, '无法读取索引重建进度'))
       }
     }
   } finally {
@@ -837,7 +838,7 @@ const rebuildMemoryIndex = async () => {
     await monitorMemoryIndexRebuild(response.job.job_id, true)
   } catch (error) {
     rebuildIndexLoading.value = false
-    ElMessage.error(error instanceof Error ? error.message : '重建索引失败')
+    ElMessage.error(describeFailure(error, '重建索引失败'))
   }
 }
 
@@ -848,7 +849,7 @@ const cancelMemoryIndexRebuild = async () => {
     const response = await memoryClient.cancelIndexRebuild(job.job_id)
     projectRebuildJob(response.job, response.index_status)
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '取消索引重建失败')
+    ElMessage.error(describeFailure(error, '取消索引重建失败'))
   }
 }
 
@@ -883,7 +884,7 @@ const handleRecallFeedback = async (payload: { id: string; feedback: 'helpful' |
     await recordRecallFeedback(payload.id, payload.feedback, doc ? docSessionId(doc) : scopedDocOptions().sessionId)
     ElMessage.success(payload.feedback === 'helpful' ? '已记录，这条记忆会继续优先保留' : '已记录，你可以随时在记忆库中修正或暂停使用')
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '记录召回反馈失败')
+    ElMessage.error(describeFailure(error, '记录召回反馈失败'))
   }
 }
 
@@ -1016,7 +1017,7 @@ const batchUpdateVisibleDocs = async (
     ElMessage.success(`已处理 ${targets.length} 条记忆`)
     await refreshMemoryState()
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '批量整理失败')
+    ElMessage.error(describeFailure(error, '批量整理失败'))
   } finally {
     batchActionLoading.value = false
   }
@@ -1069,7 +1070,7 @@ const batchDeleteVisibleDocs = async () => {
   } catch (error) {
     docs.value = previousDocs
     selectedDocId.value = previousSelectedDocId
-    ElMessage.error(error instanceof Error ? error.message : '批量删除失败')
+    ElMessage.error(describeFailure(error, '批量删除失败'))
   } finally {
     batchDeleteProgress.active = false
     batchActionLoading.value = false
@@ -1115,7 +1116,7 @@ const submitEditDoc = async () => {
       void refreshMemoryState()
     }
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '更新记忆失败')
+    ElMessage.error(describeFailure(error, '更新记忆失败'))
   }
 }
 
@@ -1146,7 +1147,7 @@ const removeDoc = async (id: string) => {
     if (selectedDocId.value === id) selectedDocId.value = fallbackId
     await refreshMemoryState()
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '永久删除失败')
+    ElMessage.error(describeFailure(error, '永久删除失败'))
   } finally {
     setDocRemoving(id, false)
   }
@@ -1181,7 +1182,7 @@ const forgetDoc = async (id: string) => {
     ElMessage.success('这条记忆已暂停使用')
     await refreshMemoryState()
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '暂停使用失败')
+    ElMessage.error(describeFailure(error, '暂停使用失败'))
   } finally {
     setPendingDocId(forgettingDocIds, id, false)
   }
@@ -1196,7 +1197,7 @@ const restoreForgottenDoc = async (id: string) => {
     ElMessage.success('这条记忆已重新启用')
     await refreshMemoryState()
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '重新启用失败')
+    ElMessage.error(describeFailure(error, '重新启用失败'))
   } finally {
     setPendingDocId(restoringDocIds, id, false)
   }
@@ -1306,7 +1307,7 @@ const saveInspectorDraft = async () => {
       '记忆已保存',
     )
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '保存记忆失败')
+    ElMessage.error(describeFailure(error, '保存记忆失败'))
   } finally {
     inspectorDraftSaving.value = false
   }

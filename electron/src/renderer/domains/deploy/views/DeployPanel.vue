@@ -139,6 +139,7 @@ import { systemClient, summaryClient } from '@/api/client'
 import type { ProviderStatus } from '@/../shared/agent'
 import { resolveBackendUrl } from '@/api/clients/http-client'
 import { buildDeployPlatformCommands, resolveDeployPlatform } from '../platform-commands'
+import { describeFailure } from '@/shared/errors/describe-error'
 
 const props = defineProps<{
   embedded?: boolean
@@ -201,7 +202,7 @@ const checkHealthByHttp = async () => {
     health.healthy = false
     health.status = 'offline'
     health.message = t('deploy.backendOffline')
-    actionError.value = error instanceof Error ? error.message : t('deploy.healthCheckFailed')
+    actionError.value = describeFailure(error, t('deploy.healthCheckFailed'))
   } finally {
     if (gen === refreshGeneration) {
       lastCheckedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
@@ -229,7 +230,7 @@ const checkReadiness = async () => {
     if (gen !== refreshGeneration) return
     readiness.checked = true
     readiness.ready = false
-    readiness.message = error instanceof Error ? error.message : t('deploy.readinessFailed')
+    readiness.message = describeFailure(error, t('deploy.readinessFailed'))
   } finally {
     if (gen === refreshGeneration) readinessLoading.value = false
   }
@@ -245,7 +246,7 @@ const checkProviders = async () => {
     providerSummary.healthy = Number(data.summary?.healthy || 0)
     providerSummary.requiredHealthy = data.summary?.requiredHealthy === true
   } catch (error) {
-    providersError.value = error instanceof Error ? error.message : t('deploy.providersFailed')
+    providersError.value = describeFailure(error, t('deploy.providersFailed'))
   } finally {
     providersLoading.value = false
   }
@@ -273,7 +274,7 @@ const startPython = async () => {
       ElMessage.error(actionError.value)
     }
   } catch (error) {
-    actionError.value = error instanceof Error ? error.message : t('deploy.startError')
+    actionError.value = describeFailure(error, t('deploy.startError'))
     ElMessage.error(actionError.value)
   } finally {
     startLoading.value = false
@@ -317,7 +318,7 @@ const stopPython = async () => {
       ElMessage.error(actionError.value)
     }
   } catch (error) {
-    actionError.value = error instanceof Error ? error.message : t('deploy.stopError')
+    actionError.value = describeFailure(error, t('deploy.stopError'))
     ElMessage.error(actionError.value)
   } finally {
     stopLoading.value = false

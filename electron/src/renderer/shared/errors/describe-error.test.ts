@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { describeError, explainError } from './describe-error'
+import { describeError, describeFailure, explainError } from './describe-error'
 
 const httpError = (patch: Record<string, unknown>) => Object.assign(new Error(''), patch)
 
@@ -71,5 +71,37 @@ describe('describeError', () => {
   it('always returns a non-empty string', () => {
     expect(describeError(undefined)).not.toHaveLength(0)
     expect(describeError(new Error(''))).not.toHaveLength(0)
+  })
+})
+
+describe('describeFailure', () => {
+  it('prefers the shared explanation when a known code arrives', () => {
+    const text = describeFailure(httpError({ code: 'llm_key_missing' }), '保存失败')
+    expect(text).toContain('API Key')
+    expect(text).not.toContain('保存失败')
+  })
+
+  it('prefers the shared explanation when only an HTTP status arrives', () => {
+    const text = describeFailure(httpError({ status: 503, message: 'upstream down' }), '保存失败')
+    expect(text).toContain('服务暂时不可用')
+    expect(text).toContain('upstream down')
+  })
+
+  it('keeps the caller context for an unidentifiable failure', () => {
+    expect(describeFailure(new Error('TypeError: x is not a function'), '批量删除失败')).toBe('批量删除失败')
+  })
+
+  it('keeps the caller context for an unknown code', () => {
+    expect(describeFailure(httpError({ code: 'brand_new_code' }), '刷新失败')).toBe('刷新失败')
+  })
+
+  it('never returns an empty string when context is missing', () => {
+    expect(describeFailure(new Error('boom'))).not.toHaveLength(0)
+    expect(describeFailure(undefined, '   ')).not.toHaveLength(0)
+  })
+
+  it('does not leak a raw transport message for unidentified failures', () => {
+    const text = describeFailure(httpError({ message: 'Network Error' }), '连接失败')
+    expect(text).toBe('连接失败')
   })
 })

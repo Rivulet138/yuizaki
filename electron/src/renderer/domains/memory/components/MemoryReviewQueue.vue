@@ -2,6 +2,9 @@
   <section class="review" aria-labelledby="memory-review-title">
     <div class="review-heading"><h3 id="memory-review-title">需要检查</h3><el-tag :type="docs.length ? 'warning' : 'success'">{{ docs.length }} 条</el-tag></div>
     <AsyncState :loading="loading" :error="error" :empty="docs.length === 0" empty-text="目前没有需要你检查的记录" loading-text="正在读取需要检查的记录…" @retry="emit('retry')">
+      <template #empty>
+        <p class="review-empty-hint">当写入的记忆置信度偏低或与既有记忆冲突时，才会出现在这里。现在不需要做任何事，继续对话即可。</p>
+      </template>
       <div class="review-list">
         <article v-for="doc in docs" :key="doc.id">
           <div><strong>{{ doc.type || '记忆' }}</strong><p>{{ compactText(doc.text, 140) }}</p></div>
@@ -34,6 +37,7 @@ const reviewReason = (doc: MemoryDoc) => {
 }
 </script>
 <style scoped>
-.review,.review-list { display: flex; flex-direction: column; gap: 12px; }.review-heading,.review-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.review-heading h3 { margin: 0; color: var(--yui-text); font-size: 15px; }.review-heading p { margin: 4px 0 0; color: var(--yui-muted); font-size: 11px; line-height: 1.45; }.review-list article { display: flex; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--yui-border); }.review-list strong { color: var(--yui-text); }.review-list p { margin: 5px 0 0; color: var(--yui-text); font-size: 13px; line-height: 1.55; }.review-meta { flex-wrap: wrap; justify-content: flex-end; color: var(--yui-muted); font-size: 12px; }.review-actions { display: inline-flex; align-items: center; gap: 6px; }
+.review,.review-list { display: flex; flex-direction: column; gap: 12px; }.review-empty-hint { max-width: 420px; margin: 0 auto; color: var(--yui-muted); font-size: 12px; line-height: 1.6; text-align: center; }
+.review-heading,.review-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.review-heading h3 { margin: 0; color: var(--yui-text); font-size: 15px; }.review-heading p { margin: 4px 0 0; color: var(--yui-muted); font-size: 11px; line-height: 1.45; }.review-list article { display: flex; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--yui-border); }.review-list strong { color: var(--yui-text); }.review-list p { margin: 5px 0 0; color: var(--yui-text); font-size: 13px; line-height: 1.55; }.review-meta { flex-wrap: wrap; justify-content: flex-end; color: var(--yui-muted); font-size: 12px; }.review-actions { display: inline-flex; align-items: center; gap: 6px; }
 @media (max-width: 760px) { .review-list article { flex-direction: column; }.review-meta { justify-content: flex-start; } }
 </style>

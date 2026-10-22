@@ -203,3 +203,29 @@ export function describeError(error: unknown): string {
   const body = action ? `${title}：${action}` : title
   return code && !body.includes(code) ? `${body}（${code}）` : body
 }
+
+/** True when the failure carries something the shared table can act on. */
+const isIdentifiable = (error: unknown): boolean => {
+  const { code, status } = explainError(error)
+  if (typeof status === 'number') return true
+  return Boolean(code && Object.prototype.hasOwnProperty.call(CODE_TABLE, code))
+}
+
+/**
+ * Context-first failure text for toasts and inline alerts.
+ *
+ * Call sites used to repeat `error instanceof Error ? error.message : '上下文'`,
+ * which put raw transport strings in front of the user ("Request failed with
+ * status code 500", SDK wording, stack hints) and discarded the sentence the
+ * caller already had. This keeps the caller's context unless the failure is
+ * machine-identifiable, in which case the shared explanation wins because it
+ * carries a next step.
+ *
+ * `context` is expected to be already-localised by the caller, so an
+ * i18n-aware panel keeps its own wording for unrecognised failures.
+ */
+export function describeFailure(error: unknown, context?: string): string {
+  if (isIdentifiable(error)) return describeError(error)
+  const fallback = context?.trim()
+  return fallback || describeError(error)
+}

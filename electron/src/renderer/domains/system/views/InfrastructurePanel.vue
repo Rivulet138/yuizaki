@@ -321,6 +321,7 @@ import { t } from '@/i18n'
 import { useSystemDomain } from '../composables/useSystemDomain'
 import type { BackupRestoreEffectStatus, BackupRestorePlanItem, BackupRestoreResponse, BackupTarget } from '../../../../shared/agent'
 import DeployPanel from '@/domains/deploy/views/DeployPanel.vue'
+import { describeFailure } from '@/shared/errors/describe-error'
 
 interface RuntimeResourceSnapshot {
   measuredAt: string
@@ -448,7 +449,7 @@ const downloadRuntimeDiagnostic = async () => {
     URL.revokeObjectURL(url)
     ElMessage.success(t('infrastructure.exportedDiagnostic', { ok: successfulSources, total: sources.length }))
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : t('infrastructure.exportFailed'))
+    ElMessage.error(describeFailure(error, t('infrastructure.exportFailed')))
   } finally {
     runtimeDiagnosticExporting.value = false
   }
@@ -589,7 +590,7 @@ const loadRuntimeSnapshot = async () => {
   try {
     runtimeSnapshot.value = await window.petApi.runtime.getResourceSnapshot()
   } catch (error) {
-    runtimeError.value = error instanceof Error ? error.message : t('infrastructure.runtimeUnavailable')
+    runtimeError.value = describeFailure(error, t('infrastructure.runtimeUnavailable'))
   } finally {
     runtimeLoading.value = false
   }
@@ -604,7 +605,7 @@ const clearRuntimeCache = async () => {
     ElMessage.success(`${t('infrastructure.clearCache')}: ${formatBytes(result.clearedBytes)}`)
     await loadRuntimeSnapshot()
   } catch (error) {
-    runtimeError.value = error instanceof Error ? error.message : t('infrastructure.cacheClearFailed')
+    runtimeError.value = describeFailure(error, t('infrastructure.cacheClearFailed'))
     ElMessage.error(runtimeError.value)
   } finally {
     runtimeClearing.value = false
@@ -656,7 +657,7 @@ const loadApiGaps = async () => {
     }
     apiGapLoaded.value = true
   } catch (error) {
-    apiGapError.value = error instanceof Error ? error.message : String(error)
+    apiGapError.value = describeFailure(error, t('infrastructure.apiSnapshotFailed'))
   } finally {
     apiGapLoading.value = false
   }
@@ -675,7 +676,7 @@ const downloadExport = async (kind: 'json' | 'csv') => {
     URL.revokeObjectURL(url)
     ElMessage.success(t('infrastructure.exportedFile', { kind: kind.toUpperCase() }))
   } catch (error) {
-    apiGapError.value = error instanceof Error ? error.message : String(error)
+    apiGapError.value = describeFailure(error, t('infrastructure.exportFailed'))
     ElMessage.error(apiGapError.value)
   } finally {
     exportingKind.value = null
@@ -691,7 +692,7 @@ const updateStats = async () => {
     await loadApiGaps()
     ElMessage.success(t('infrastructure.statsUpdated'))
   } catch (error) {
-    apiGapError.value = error instanceof Error ? error.message : String(error)
+    apiGapError.value = describeFailure(error, t('infrastructure.statsUpdateFailed'))
     ElMessage.error(apiGapError.value)
   } finally {
     apiGapLoading.value = false

@@ -47,6 +47,7 @@ import { computed, onMounted, ref } from 'vue'
 import { t } from '@/i18n'
 import { systemClient } from '@/api/clients/system-client'
 import SettingsSectionHeader from './SettingsSectionHeader.vue'
+import { describeFailure } from '@/shared/errors/describe-error'
 
 type ConsentSnapshot = {
   consented: boolean
@@ -79,7 +80,7 @@ const load = async () => {
   try {
     applySnapshot(await systemClient.productMetricsConsent())
   } catch (err: unknown) {
-    error.value = err instanceof Error ? err.message : t('common.error.unknown')
+    error.value = describeFailure(err, t('common.error.unknown'))
     consented.value = false
   } finally {
     loading.value = false
@@ -96,7 +97,7 @@ const handleChange = async (nextValue: string | number | boolean) => {
     applySnapshot(await systemClient.patchProductMetricsConsent(nextValue))
   } catch (err: unknown) {
     consented.value = previous
-    error.value = err instanceof Error ? err.message : t('settings.productMetrics.failed')
+    error.value = describeFailure(err, t('settings.productMetrics.failed'))
   } finally {
     saving.value = false
   }

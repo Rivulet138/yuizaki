@@ -27,6 +27,7 @@ import 'element-plus/es/components/input/style/css'
 import { memoryInspectorActionsKey } from './memory-panel-types'
 import type { MemoryOperation } from '@/api/clients/memory-client'
 import type { MemoryDoc, MemoryInspectorDraft, MemoryLayer, MemoryOption, MemoryVersionSnapshot } from './memory-panel-types'
+import { describeFailure } from '@/shared/errors/describe-error'
 
 const props = defineProps<{ doc: MemoryDoc | null; draft: MemoryInspectorDraft; layers: MemoryLayer[]; sourceOptions: MemoryOption[]; dirty: boolean; saving: boolean; forgetting: boolean; removing: boolean; docScopeLabel:(doc:MemoryDoc)=>string; docSourceLabel:(doc:MemoryDoc)=>string; qualityPercent:(doc:MemoryDoc)=>string; metadataPreview:(doc:MemoryDoc)=>string; auditEntries:(doc:MemoryDoc)=>Array<Record<string,unknown>>; auditActionLabel:(value:unknown)=>string; auditEntrySummary:(entry:Record<string,unknown>)=>string; operations: MemoryOperation[]; operationsLoading: boolean; operationsError?: string | null }>()
 const emit = defineEmits<{ save:[]; reset:[]; edit:[doc:MemoryDoc]; boost:[doc:MemoryDoc]; forget:[id:string]; remove:[id:string]; 'move-layer':[payload:{doc:MemoryDoc;layer:string}]; 'update-draft':[value:Partial<MemoryInspectorDraft>] }>()
@@ -96,7 +97,7 @@ const rollback = async (revision: number) => {
   try {
     await inspectorActions.rollback(props.doc, revision)
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '版本恢复失败')
+    ElMessage.error(describeFailure(error, '版本恢复失败'))
   } finally {
     rollingBackRevision.value = null
   }
