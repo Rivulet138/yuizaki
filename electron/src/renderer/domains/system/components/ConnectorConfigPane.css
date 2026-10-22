@@ -1,0 +1,205 @@
+/* Styles for one connector config pane.
+ * Split out of AgentGovernancePanel because scoped CSS does not cross the
+ * component boundary: everything the pane renders is styled here. */
+
+.bridge-qr {
+  font-family: 'Cascadia Mono', Consolas, 'Courier New', monospace;
+  font-size: 10px;
+  line-height: 10px;
+  letter-spacing: 0;
+  white-space: pre;
+  background: #fff;
+  color: #111;
+  padding: 8px;
+  border-radius: 6px;
+  overflow-x: auto;
+  max-height: 260px;
+}
+
+.connector-account-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.connector-bridge-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+}
+
+.connector-config-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-card);
+  background: var(--yui-surface-muted);
+}
+
+.connector-config-head,
+.connector-config-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.connector-config-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.connector-config-head > div:first-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.connector-config-head strong {
+  color: var(--yui-text);
+}
+
+.connector-config-head span {
+  color: var(--yui-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.connector-config-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.connector-config-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.connector-probe-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--yui-border);
+  border-radius: var(--yui-radius-card);
+  color: var(--yui-muted);
+  font-size: 12px;
+}
+
+.connector-probe-error {
+  color: var(--yui-danger, #dc2626);
+}
+
+/* Shared with the panel diagnostics block; the panel keeps its own copy. */
+.inline-diagnostic-details,
+.advanced-connection-details {
+  color: var(--yui-muted);
+  font-size: 12px;
+}
+
+.inline-diagnostic-details summary,
+.advanced-connection-details summary {
+  cursor: pointer;
+  color: var(--yui-muted);
+}
+
+.inline-diagnostic-details summary:hover,
+.advanced-connection-details summary:hover {
+  color: var(--yui-text);
+}
+
+.inline-diagnostic-details > span,
+.inline-diagnostic-details > code {
+  display: inline-block;
+  margin: 4px 10px 0 0;
+}
+
+.inline-diagnostic-details > code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--yui-muted);
+}
+
+.connector-delivery-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--yui-border);
+}
+
+.connector-recovery-telemetry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 8px 10px;
+  border-radius: var(--yui-radius-card);
+  background: var(--yui-surface-muted);
+  color: var(--yui-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.connector-recovery-error {
+  color: var(--yui-danger, #dc2626);
+}
+
+.connector-delivery-item {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--yui-radius-card);
+  background: var(--yui-panel-surface, var(--yui-surface-raised));
+}
+
+.connector-delivery-item > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.connector-delivery-item strong,
+.connector-delivery-item span,
+.connector-delivery-item small {
+  overflow-wrap: anywhere;
+}
+
+.connector-delivery-item strong {
+  color: var(--yui-text);
+  font-size: 12px;
+}
+
+.connector-delivery-item span,
+.connector-delivery-item small {
+  color: var(--yui-muted);
+  font-size: 11px;
+}
+
+.connector-secret-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.connector-secret-row .el-input {
+  min-width: 0;
+  flex: 1;
+}

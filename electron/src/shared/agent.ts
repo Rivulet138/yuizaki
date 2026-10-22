@@ -209,6 +209,10 @@ export interface QqBridgeSnapshot {
   loginHint: string
   accountId: string | null
   accountName: string | null
+  qrText: string | null
+  signServerUrl: string
+  signServerConfigured: boolean
+  captureMode: 'pty' | 'console' | string
 }
 
 export interface ConnectorDeliveryItem {

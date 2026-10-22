@@ -269,6 +269,12 @@ export function useSystemDomain() {
     return result
   }
 
+  const setQqBridgeSignServer = async (url: string) => {
+    const result = await qqBridgeRequest.execute(() => systemClient.setQqBridgeSignServer(url))
+    if (result) qqBridge.value = result.bridge
+    return result
+  }
+
   const startQqBridge = async () => {
     const result = await qqBridgeRequest.execute(() => systemClient.startQqBridge())
     if (result) qqBridge.value = result.bridge
@@ -435,6 +441,7 @@ export function useSystemDomain() {
     qqBridge,
     loadQqBridge,
     installQqBridge,
+    setQqBridgeSignServer,
     startQqBridge,
     stopQqBridge,
     logoutQqBridge,

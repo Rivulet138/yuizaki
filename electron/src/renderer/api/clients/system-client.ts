@@ -358,6 +358,11 @@ export const systemClient = {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ acceptRisk }),
   }),
+  setQqBridgeSignServer: async (url: string) => requestJson<{ ok: boolean; bridge: QqBridgeSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/qq/bridge/sign-server`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  }),
   startQqBridge: async () => requestJson<{ ok: boolean; bridge: QqBridgeSnapshot; config?: MessageConnectorConfigSnapshot | null }>(`${CONTROL_ORIGIN}/api/system/connectors/qq/bridge/start`, { method: 'POST' }),
   stopQqBridge: async () => requestJson<{ ok: boolean; bridge: QqBridgeSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/qq/bridge/stop`, { method: 'POST' }),
   logoutQqBridge: async () => requestJson<{ ok: boolean; bridge: QqBridgeSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/qq/bridge/logout`, { method: 'POST' }),
