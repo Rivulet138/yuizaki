@@ -185,6 +185,12 @@ Behavioral feedback is retained for at most 90 days per workspace; the learner u
 
 `GET /api/system/skills/imported` returns a versioned catalog snapshot. Catalog entries are untrusted metadata: they default to `runtimeBinding: "catalog_only"` and `executionReady: false`. A live runtime may set `runtimeBinding: "tool"`, `executionReady: true`, `runtimeTarget`, and bounded `runtimeScopes` only through `bind_verified_tool`, which checks manifest identity and signature; the binding is ephemeral and resets to `catalog_only` on restart. Do not present catalog presence as an executable tool. Legacy `installed`, `status`, and `ready` fields remain for client compatibility.
 
+`PUT /api/system/skills/imported` replaces the catalog with `{"items": [...]}`, and `DELETE` removes the ids in `{"ids": [...]}`. `python/scripts/import_dsh_skills.py` uses the PUT route to merge DSH and Codex `SKILL.md` directories; it never sets a runtime binding, so imported entries stay `catalog_only` even when the source file claims otherwise.
+
+### Inbound MCP server / 反向 MCP 服务
+
+`tools/yuizaki-mcp` is an out-of-process stdio MCP server, not an HTTP route. It exposes `yuizaki_status`, `yuizaki_start`, `yuizaki_chat`, `yuizaki_memory_query`, and `yuizaki_connector_status` by calling the loopback HTTP API above. `yuizaki_chat` sends the model id reported by `GET /v1/models` so a delegation cannot silently switch the backend model, and `yuizaki_start` treats `launcher status` as the idempotency check. Clients must treat its output as untrusted data, like any other tool output.
+
 ## Memory lifecycle / 记忆生命周期
 
 The renderer uses the `/memory` routes for listing, querying, adding, correcting, reviewing, forgetting, restoring, rolling back, deleting, and rebuilding the optional index. SQLite remains authoritative. Permanent deletion and maintenance previews can affect chat references and the derived index, so clients should use the preview endpoints before destructive operations.

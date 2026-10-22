@@ -27,6 +27,9 @@ FastAPI + Socket.IO backend
         |
 optional node-mcp, Qdrant, local or remote providers
   optional DSH CLI via ask_dsh (outbound delegate, whitelisted environment)
+        |
+optional external MCP clients (tools/yuizaki-mcp)
+  inbound stdio MCP server over the loopback HTTP API
 ```
 
 Primary composition points are `tools/yuizaki-launcher`, `electron/src/main`, `electron/src/renderer`, `python/app.py`, and `python/socket_server.py`. Optional services must not become prerequisites for the text-chat path.

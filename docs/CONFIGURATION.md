@@ -133,6 +133,32 @@ MCP is disabled by default because it launches a real browser that can reach pub
 
 If `node-mcp` is not installed because MCP was disabled during setup, enabling it later installs the dependencies on the next launcher start.
 
+### MCP client / 作为 MCP 客户端
+
+The backend is also a standard MCP **client**: `python/modules/agent/mcp_manager.py` speaks JSON-RPC 2.0 (`initialize`, `tools/list`, `tools/call`, protocol `2025-06-18`) over `stdio` and `streamable_http`, and stores servers in `python/data/mcp_servers.json`. Built-in presets cover Playwright, Chrome/Edge DevTools, Notion, Todoist, and a read-only SQLite view of `chat.db`. Custom `stdio` servers are refused unless `YUIZAKI_ALLOW_CUSTOM_MCP_STDIO=1` or the definition matches a shipped preset.
+
+### Outbound MCP server for DSH / 供 DSH 使用的 MCP 服务
+
+`tools/yuizaki-mcp` is a dependency-free stdio MCP server that exposes the running backend to DSH: `yuizaki_status`, `yuizaki_start`, `yuizaki_chat`, `yuizaki_memory_query`, and `yuizaki_connector_status`. It accepts only a loopback `YUIZAKI_BASE_URL` and reuses the model id reported by `GET /v1/models`, so it cannot pin a different model than the backend. See [`tools/yuizaki-mcp/README.md`](../tools/yuizaki-mcp/README.md) for the registration snippet.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `YUIZAKI_BASE_URL` | `http://127.0.0.1:8001` | Backend origin; non-loopback values are rejected per call |
+| `YUIZAKI_LAUNCHER` | `<repo>/YuizakiLauncher[.exe]` | Launcher used by `yuizaki_start` |
+| `YUIZAKI_MODEL` | discovered from `/v1/models` | Override the chat model id |
+
+### Imported skill catalog / 导入技能目录
+
+`python/scripts/import_dsh_skills.py` reads `SKILL.md` directories from `~/.dsh/skills` and `~/.codex/skills` (override with `YUIZAKI_SKILL_SOURCES`, an `os.pathsep`-separated list) and merges them into `python/data/imported_skills.json`.
+
+```powershell
+python python/scripts/import_dsh_skills.py --dry-run   # show the diff only
+python python/scripts/import_dsh_skills.py             # push through the API, else write the file
+python python/scripts/import_dsh_skills.py --offline   # always write the file
+```
+
+Imported entries are metadata only: the store forces `runtimeBinding="catalog_only"` and `executionReady=false`, and the importer never copies trust fields from a source file. Re-running the import is idempotent, and each write leaves a timestamped `imported_skills.json.bak-*` backup. Category and `fit` are derived conservatively; developer-oriented skills are marked `fit=low` because a companion app does not execute them.
+
 ## SVC and SoulX / 变声与 SoulX
 
 The optional SoulX Singer service converts a generated voice clip. It is not required for text chat, ASR, or the default TTS path.

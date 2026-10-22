@@ -1,0 +1,20 @@
+{
+  "name": "yuizaki-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "MCP server exposing the local Yuizaki desktop companion backend to DSH and other MCP clients",
+  "type": "module",
+  "main": "server.mjs",
+  "bin": {
+    "yuizaki-mcp": "server.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "selftest": "node server.mjs --selftest",
+    "test": "node --test"
+  }
+}
