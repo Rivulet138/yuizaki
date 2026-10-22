@@ -151,6 +151,45 @@ def test_bootstrap_upgrades_the_previous_revision_index(tmp_path, monkeypatch) -
         engine.dispose()
 
 
+def test_schema_comparison_ignores_appended_column_order(tmp_path, monkeypatch) -> None:
+    """A column appended by ALTER TABLE must not fail the schema check.
+
+    Databases upgraded from an older revision physically order columns
+    differently from databases created at head. Comparing position rejected
+    those upgrades with "database schema does not match the current baseline"
+    and blocked startup for every existing install.
+    """
+    database = tmp_path / "chat.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database.as_posix()}")
+    cfg = migration_bootstrap.load_alembic_config()
+    command.upgrade(cfg, "head")
+
+    engine = create_engine(str(cfg.get_main_option("sqlalchemy.url")))
+    try:
+        with engine.begin() as connection:
+            # Recreate the exact shape an older install gets: context was not in
+            # the original table, so the upgrade appends it at the end.
+            connection.exec_driver_sql("ALTER TABLE workspaces DROP COLUMN context")
+            connection.exec_driver_sql("ALTER TABLE workspaces ADD COLUMN context JSON")
+        ok, message = migration_bootstrap.check_database_at_head()
+        assert ok, message
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_from_an_older_revision_reaches_the_baseline(tmp_path, monkeypatch) -> None:
+    """The real upgrade path (older revision -> head) must satisfy the checker."""
+    database = tmp_path / "chat.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database.as_posix()}")
+    cfg = migration_bootstrap.load_alembic_config()
+    command.upgrade(cfg, "20260815_00")
+    command.upgrade(cfg, "head")
+
+    ok, message = migration_bootstrap.check_database_at_head()
+    assert ok, message
+    assert migration_bootstrap.bootstrap_database()[0] is True
+
+
 def test_module_still_defines_the_api_schema_policy_imports() -> None:
     """enforce_schema_policy imports these by name; a rename would break startup."""
     assert migration_bootstrap.__file__ is not None

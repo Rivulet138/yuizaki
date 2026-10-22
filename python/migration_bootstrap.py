@@ -77,7 +77,7 @@ def _expected_schema() -> dict[str, Any]:
     tables: dict[str, Any] = {}
     for table_name, table in Base.metadata.tables.items():
         tables[table_name] = {
-            "columns": tuple(_column_signature(column) for column in table.columns),
+            "columns": tuple(sorted(_column_signature(column) for column in table.columns)),
             "primary_key": tuple(column.name for column in table.primary_key.columns),
             "indexes": tuple(
                 sorted(
@@ -111,7 +111,9 @@ def _inspect_db_state(database_url: str) -> dict[str, Any]:
             schema: dict[str, Any] = {}
             for table in sorted(tables - {"alembic_version"}):
                 schema[table] = {
-                    "columns": tuple(_actual_column_signature(column) for column in inspector.get_columns(table)),
+                    # Sorted to match _expected_schema: SQLite appends ALTER TABLE
+                    # columns, so physical order must not fail the check.
+                    "columns": tuple(sorted(_actual_column_signature(column) for column in inspector.get_columns(table))),
                     "primary_key": tuple(inspector.get_pk_constraint(table).get("constrained_columns") or ()),
                     "indexes": tuple(sorted(
                         _index_signature(index.get("name"), bool(index.get("unique")), index.get("column_names") or ())
