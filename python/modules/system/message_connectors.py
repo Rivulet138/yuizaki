@@ -850,7 +850,13 @@ class MessageConnectorRegistry:
             and connector_id not in self._disabled
         )
 
-    def verify_request(self, connector_id: str, headers: Mapping[str, str], body: bytes = b"") -> bool:
+    def verify_request(
+        self,
+        connector_id: str,
+        headers: Mapping[str, str],
+        body: bytes = b"",
+        query: Mapping[str, str] | None = None,
+    ) -> bool:
         # Telegram uses its optional secret header; QQ/WeChat bridges use the
         # configured bearer token. Discord uses Ed25519.
         expected = self._bridge_token(connector_id) if connector_id in {"qq", "wechat"} else (self._secret(connector_id) if connector_id == "telegram" else "")
@@ -863,6 +869,11 @@ class MessageConnectorRegistry:
             authorization = _text(headers.get("Authorization"))
             if authorization.lower().startswith("bearer "):
                 provided = authorization[7:].strip()
+        if not provided and connector_id in {"qq", "wechat"} and query:
+            # OneBot 11 bridges commonly carry the access token in the query
+            # string instead of an Authorization header. Accepted for the
+            # personal-bridge connectors only, and compared in constant time.
+            provided = _text(query.get("access_token") or query.get("token"))
         if connector_id == "discord":
             public_key = self._public_key(connector_id)
             # Discord signs every interaction, including the endpoint PING.

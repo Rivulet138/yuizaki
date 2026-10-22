@@ -86,6 +86,22 @@
           "revision": "81aeb3ae772c70093c3de74dc23c92d983801ae4"
         }
       ]
+    },
+    "qq_bridge": {
+      "label": "QQ 个人账号桥 (Lagrange.OneBot, win-x64)",
+      "version": "nightly-2026-10-22",
+      "requiredOnFirstRun": false,
+      "kind": "archive",
+      "license": "Upstream repository ships no LICENSE file (all rights reserved by its authors)",
+      "licenseUrl": "https://github.com/LagrangeDev/Lagrange.Core",
+      "downloadBytes": 34989556,
+      "notes": "Optional third-party personal-account QQ client. Not redistributed with this project: the bridge manager downloads it from the upstream author's release only after the user accepts the account-ban and licensing risk. The 'nightly' tag moves, so this pin will eventually mismatch and must be re-pinned deliberately.",
+      "sources": [
+        {
+          "url": "https://github.com/LagrangeDev/Lagrange.Core/releases/download/nightly/Lagrange.OneBot_win-x64_net9.0_SelfContained.zip",
+          "sha256": "f49d7351ee37f4985d3b90383a727f5fe25a2fba1265b7153822ba5702291025"
+        }
+      ]
     }
   }
 }

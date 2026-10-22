@@ -40,6 +40,7 @@ python/CharacterModels/v2ProPlus/<character>
 - 设置快照历史与回滚（最多 20 个快照，凭据在写入磁盘前被清除）；工作区上下文存入 SQLite 工作区行。
 - Windows 和明确的 Linux X11 会话支持可见窗口发现、聚焦和关闭；能力默认关闭并需要独立 host token。
 - Telegram、Discord、QQ/微信个人桥提供实验性入口，默认关闭。
+- QQ 内置桥：在设置里一键下载并托管桥进程，扫码即接入，无需自备 OneBot 服务。
 
 ## 资源与运行边界
 
@@ -52,6 +53,7 @@ python/CharacterModels/v2ProPlus/<character>
 | SoulX Singer | 音色转换 | `resources.lock.json` | 可选 |
 | Live2D / VRM | 桌宠角色 | 用户导入或明确许可的目录 | 使用桌宠时需要 |
 | Qdrant | 可重建语义索引 | 本机 Docker 或远程地址 | 可选 |
+| QQ 内置桥 | 个人账号 QQ 接入 | `resources.lock.json` 固定的上游 release，由内置桥管理器下载 | 可选，约 34 MiB；第三方组件，上游未声明许可 |
 
 模型、声音、角色、字体和美术素材有独立许可。不要将密钥、数据库、个人对话、截图、音频缓存或模型权重提交到 Git。
 
@@ -232,6 +234,7 @@ Yuizaki is a local-first Windows/Linux AI desktop companion Agent with text and 
 - Settings snapshot history with rollback (at most 20 snapshots; credentials are scrubbed before they reach disk); workspace context is stored on the SQLite workspace row.
 - Visible-window discovery, focus, and close on Windows and explicit Linux X11 sessions; disabled by default and protected by a separate host token.
 - Experimental Telegram, Discord, QQ, and WeChat personal bridges; disabled by default.
+- Managed QQ bridge: download and supervise the bridge from Settings and sign in by QR, without installing an OneBot server yourself.
 
 MCP is optional and starts disabled; add `--with-mcp` (or `YUIZAKI_WITH_MCP=1`) to enable browser automation tools. Launcher builds require Go 1.27+.
 

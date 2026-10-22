@@ -38,6 +38,7 @@ from modules.system.backend_api_auth import HOST_DESKTOP_ACTION_TOKEN_ENV
 from modules.system.cache_janitor import run_audio_cache_janitor
 from modules.system.companion_runtime import build_companion_runtime_snapshot
 from modules.system.governance_alert_state import GovernanceAlertStateStore
+from modules.system.qq_bridge import QqBridgeSupervisor, load_bridge_resource
 from modules.system.memory_query import build_memory_query_request
 from modules.system.runtime_endpoints import build_companion_runtime_endpoint
 from modules.system.message_connectors import MessageConnectorRegistry
@@ -740,6 +741,10 @@ router_registry.include(
         get_relationship_writer=lambda: _write_relationship_memory,
     )
 )
+_qq_bridge_supervisor = QqBridgeSupervisor(
+    data_dir=data_dir_from_env(),
+    resource=load_bridge_resource(Path(__file__).resolve().parents[1] / "resources.lock.json"),
+)
 _connector_router = create_message_connector_router(
     registry_provider=lambda: _message_connector_registry,
     turn_service_provider=lambda: sio_server.runtime.turn_service if sio_server and sio_server.runtime else None,
@@ -748,6 +753,7 @@ _connector_router = create_message_connector_router(
     fast_ack_connectors={"telegram", "qq", "wechat"},
     recovery_interval_seconds=15.0,
     recovery_metrics_path=data_dir_from_env() / "connector_recovery.json",
+    qq_bridge_provider=lambda: _qq_bridge_supervisor,
 )
 _connector_recovery_controller = getattr(_connector_router, "connector_recovery_controller", None)
 router_registry.include(_connector_router, name="connectors")

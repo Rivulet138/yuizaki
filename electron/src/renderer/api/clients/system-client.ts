@@ -9,6 +9,7 @@ import type {
   ConnectorDeliverySnapshot,
   ConnectorDeliveryItem,
   ConnectorAccountSnapshot,
+  QqBridgeSnapshot,
   MessageConnectorConfigSnapshot,
   MessageConnectorConfigUpdate,
   AgentTraceSnapshot,
@@ -351,6 +352,15 @@ export const systemClient = {
   refreshConnectorAccount: async (connectorId: 'qq' | 'wechat') => requestJson<{ ok: boolean; account: ConnectorAccountSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/account/status`),
   logoutConnectorAccount: async (connectorId: 'qq' | 'wechat') => requestJson<{ ok: boolean; account: ConnectorAccountSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/account/logout`, { method: 'POST' }),
   unbindConnectorAccount: async (connectorId: 'qq' | 'wechat') => requestJson<{ ok: boolean; account: ConnectorAccountSnapshot; config: MessageConnectorConfigSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/account`, { method: 'DELETE' }),
+  qqBridgeStatus: async () => requestJson<{ ok: boolean; bridge: QqBridgeSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/qq/bridge`),
+  installQqBridge: async (acceptRisk: boolean) => requestJson<{ ok: boolean; bridge: QqBridgeSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/qq/bridge/install`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ acceptRisk }),
+  }),
+  startQqBridge: async () => requestJson<{ ok: boolean; bridge: QqBridgeSnapshot; config?: MessageConnectorConfigSnapshot | null }>(`${CONTROL_ORIGIN}/api/system/connectors/qq/bridge/start`, { method: 'POST' }),
+  stopQqBridge: async () => requestJson<{ ok: boolean; bridge: QqBridgeSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/qq/bridge/stop`, { method: 'POST' }),
+  logoutQqBridge: async () => requestJson<{ ok: boolean; bridge: QqBridgeSnapshot }>(`${CONTROL_ORIGIN}/api/system/connectors/qq/bridge/logout`, { method: 'POST' }),
   connectorDeliveries: async (connectorId: MessageConnectorConfigSnapshot['id'], limit = 20) => {
     const result = await requestJson<{ ok: boolean; connector_id: string; items: RawConnectorDelivery[]; recovery?: RawConnectorRecovery | null }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/deliveries?limit=${encodeURIComponent(String(limit))}`)
     return { ok: result.ok, connectorId: result.connector_id, items: (result.items || []).map(normalizeConnectorDelivery), recovery: normalizeConnectorRecovery(result.recovery) } satisfies ConnectorDeliverySnapshot

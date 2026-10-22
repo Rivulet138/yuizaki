@@ -236,6 +236,20 @@ Rejected callbacks are acknowledged without creating delivery records:
 {"ok": true, "accepted": false, "reason": "rate_limited"}
 ```
 
+### Managed QQ bridge / 内置桥
+
+Five endpoints manage the local bridge process; none of them enables the connector implicitly except `start`.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/system/connectors/qq/bridge` | Bridge state, version, PID, API port, derived `bridgeUrl`, last error, login hint |
+| `POST .../bridge/install` | `{"acceptRisk": true}` required; downloads the pinned archive, verifies SHA256, unpacks only the executable. `422 qq_bridge_risk_not_accepted`, `502 qq_bridge_hash_mismatch` |
+| `POST .../bridge/start` | Writes the OneBot config, spawns the bridge with its own console, and wires + enables the QQ connector |
+| `POST .../bridge/stop` | Stops the process and disables the connector |
+| `POST .../bridge/logout` | Stops, removes the generated config and session data, clears bridge URL and token |
+
+Webhook authentication accepts the OneBot `access_token` query parameter for the personal-bridge connectors in addition to the `Authorization: Bearer` header, because OneBot 11 bridges commonly push events with the token in the query string.
+
 The response is HTTP 200, not 429, to avoid bridge redelivery storms. Allowlist rejection uses
 `not_allowlisted`; unsupported/self/untriggered events use `unsupported_event`. Existing accepted
 event IDs retain their delivery idempotency and fast-ack behavior. Authentication remains mandatory.

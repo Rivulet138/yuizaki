@@ -49,6 +49,11 @@ including endpoint `PING`. QQ and WeChat require a Bridge Token before enablemen
 QQ and WeChat use a user-selected local personal-account bridge. This is not an official platform API; lockout,
  privacy, disconnect, and protocol-change risks are explicitly accepted by the local user.
 Personal-account protocols can lead to an account ban; use a secondary account for QQ testing.
+The optional managed bridge downloads a third-party personal-account client from its upstream release
+only after an explicit risk acknowledgement, verifies the archive against a pinned SHA256, and unpacks
+only the executable. The upstream repository ships no LICENSE file, so this component carries unresolved
+licensing and is never redistributed with this project; it runs with its own console window and the
+generated OneBot token, not with Yuizaki credentials.
 QQ ignores self/non-message events, requires group mentions by default, supports sender/group
 allowlists, and bounds per-session admission and active turns. Rejected events return a 2xx
 acknowledgement without creating a delivery; this is not an authentication substitute.

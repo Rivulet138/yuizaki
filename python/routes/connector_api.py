@@ -21,6 +21,7 @@ from modules.system.message_connectors import (
     MessageConnectorError,
     MessageConnectorRegistry,
 )
+from modules.system.qq_bridge import QqBridgeError
 
 MAX_CONNECTOR_BODY_BYTES = 512 * 1024
 LOGGER = logging.getLogger(__name__)
@@ -298,6 +299,7 @@ def create_message_connector_router(
     recovery_interval_seconds: float | None = None,
     recovery_metrics_path: str | Path | None = None,
     wall_clock: Callable[[], float] | None = None,
+    qq_bridge_provider: Callable[[], Any] | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["connectors"])
     fast_ack = frozenset(
@@ -402,6 +404,92 @@ def create_message_connector_router(
         if snapshot is None:
             return JSONResponse({"ok": False, "error": "account_binding_not_supported"}, status_code=404)
         return JSONResponse({"ok": True, "account": snapshot, "config": registry.config_snapshot(connector_id)})
+
+    # ---------------------------------------------------------------- bridge
+    # The managed bridge removes the "install and wire a OneBot server yourself"
+    # step. It is QQ-only and downloads a third-party client after an explicit
+    # risk acknowledgement; nothing here enables a connector on its own.
+    def _bridge() -> Any:
+        bridge = qq_bridge_provider() if qq_bridge_provider is not None else None
+        if bridge is None:
+            raise QqBridgeError("qq_bridge_unavailable", "内置桥管理器不可用", status_code=503)
+        return bridge
+
+    def _bridge_error(exc: QqBridgeError) -> JSONResponse:
+        return JSONResponse(
+            {"ok": False, "error": exc.code, "message": str(exc)},
+            status_code=exc.status_code,
+        )
+
+    def _wire_connector_config(bridge: Any) -> dict[str, Any] | None:
+        """Point the QQ connector at the managed bridge and enable it."""
+        status = bridge.status()
+        if not status.get("running") or not status.get("bridgeUrl"):
+            return registry_provider().config_snapshot("qq")
+        token = str(getattr(bridge, "current_token", "") or "")
+        try:
+            return registry_provider().update_config("qq", {
+                "accountMode": "personal_bridge",
+                "bridgeUrl": status["bridgeUrl"],
+                "bridgeProtocol": "onebot11",
+                "bridgeToken": token,
+                "enabled": True,
+            })
+        except MessageConnectorError as exc:
+            LOGGER.warning("QQ bridge auto-wiring failed: %s", exc.code)
+            return registry_provider().config_snapshot("qq")
+
+    @router.get("/api/system/connectors/qq/bridge")
+    async def qq_bridge_status() -> JSONResponse:
+        try:
+            return JSONResponse({"ok": True, "bridge": await asyncio.to_thread(_bridge().status)})
+        except QqBridgeError as exc:
+            return _bridge_error(exc)
+
+    @router.post("/api/system/connectors/qq/bridge/install")
+    async def qq_bridge_install(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            payload = {}
+        accept_risk = bool(payload.get("acceptRisk")) if isinstance(payload, dict) else False
+        try:
+            bridge = _bridge()
+            status = await asyncio.to_thread(bridge.install, accept_risk=accept_risk)
+            return JSONResponse({"ok": True, "bridge": status})
+        except QqBridgeError as exc:
+            return _bridge_error(exc)
+
+    @router.post("/api/system/connectors/qq/bridge/start")
+    async def qq_bridge_start() -> JSONResponse:
+        try:
+            bridge = _bridge()
+            status = await asyncio.to_thread(bridge.start)
+            config = await asyncio.to_thread(_wire_connector_config, bridge)
+            return JSONResponse({"ok": True, "bridge": status, "config": config})
+        except QqBridgeError as exc:
+            return _bridge_error(exc)
+
+    @router.post("/api/system/connectors/qq/bridge/stop")
+    async def qq_bridge_stop() -> JSONResponse:
+        try:
+            bridge = _bridge()
+            status = await asyncio.to_thread(bridge.stop)
+            registry_provider().update_config("qq", {"enabled": False})
+            return JSONResponse({"ok": True, "bridge": status})
+        except QqBridgeError as exc:
+            return _bridge_error(exc)
+
+    @router.post("/api/system/connectors/qq/bridge/logout")
+    async def qq_bridge_logout() -> JSONResponse:
+        try:
+            bridge = _bridge()
+            status = await asyncio.to_thread(bridge.logout)
+            registry_provider().update_config("qq", {"enabled": False, "clearBridgeUrl": True, "clearBridgeToken": True})
+            return JSONResponse({"ok": True, "bridge": status})
+        except QqBridgeError as exc:
+            return _bridge_error(exc)
+
 
     @router.get("/api/system/connectors/{connector_id}/deliveries")
     @router.get("/api/system/connectors/{connector_id}/events")
@@ -744,12 +832,12 @@ def create_message_connector_router(
             return JSONResponse({"ok": False, "error": "payload_must_be_object"}, status_code=400)
         # Discord requires a PING response before the endpoint can be enabled.
         if connector_id == "discord" and payload.get("type") == 1:
-            if not registry.verify_request(connector_id, request.headers, raw_body):
+            if not registry.verify_request(connector_id, request.headers, raw_body, dict(request.query_params)):
                 return JSONResponse({"ok": False, "error": "invalid_signature"}, status_code=401)
             return JSONResponse({"type": 1})
         if not registry.is_enabled(connector_id):
             return JSONResponse({"ok": False, "error": "connector_disabled"}, status_code=409)
-        if not registry.verify_request(connector_id, request.headers, raw_body):
+        if not registry.verify_request(connector_id, request.headers, raw_body, dict(request.query_params)):
             return JSONResponse({"ok": False, "error": "invalid_webhook_auth"}, status_code=401)
         try:
             message = registry.parse(connector_id, payload, received_at=received_at)

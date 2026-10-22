@@ -89,6 +89,34 @@
                 <el-tag v-if="connectorId === 'discord'" size="small" :type="connectorConfigs.discord?.publicKeyConfigured ? 'success' : 'info'">Public Key {{ connectorConfigs.discord?.publicKeyConfigured ? '已配置' : '未配置' }}</el-tag>
               </div>
               <template v-if="connectorId === 'qq' || connectorId === 'wechat'">
+                <div v-if="connectorId === 'qq'" class="connector-bridge-box connector-managed-bridge">
+                  <el-alert title="内置桥：由 Yuizaki 自行下载并托管桥进程，无需另装 OneBot 服务。" type="info" :closable="false" show-icon />
+                  <div class="connector-config-flags">
+                    <el-tag size="small" :type="qqBridgeTagType">{{ qqBridgeStateLabel }}</el-tag>
+                    <el-tag v-if="qqBridge?.installed" size="small" type="info">版本 {{ qqBridge?.version }}</el-tag>
+                    <el-tag v-if="qqBridge?.apiPort" size="small" type="info">端口 {{ qqBridge?.apiPort }}</el-tag>
+                  </div>
+                  <p v-if="qqBridge?.loginHint" class="connector-hint">{{ qqBridge?.loginHint }}</p>
+                  <p v-if="qqBridge?.lastError" class="connector-hint connector-hint-error">{{ qqBridge?.lastError }}</p>
+                  <p v-else-if="!qqBridge?.installed" class="connector-hint">
+                    首次使用会下载第三方个人账号客户端（约 34 MB），存在账号封禁风险；上游仓库未声明开源许可，本项目不分发该二进制。
+                  </p>
+                  <div class="connector-config-actions">
+                    <el-button
+                      v-if="!qqBridge?.installed"
+                      type="primary"
+                      size="small"
+                      :loading="bridgeBusy"
+                      @click="installManagedBridge"
+                    >下载并安装内置桥</el-button>
+                    <template v-else>
+                      <el-button v-if="!qqBridge?.running" type="primary" size="small" :loading="bridgeBusy" @click="startManagedBridge">启动并扫码</el-button>
+                      <el-button v-else plain size="small" :loading="bridgeBusy" @click="refreshManagedBridge">刷新状态</el-button>
+                      <el-button v-if="qqBridge?.running" type="danger" plain size="small" :disabled="bridgeBusy" @click="stopManagedBridge">停止桥</el-button>
+                      <el-button type="danger" link size="small" :disabled="bridgeBusy" @click="logoutManagedBridge">退出并清除登录</el-button>
+                    </template>
+                  </div>
+                </div>
                 <div class="connector-bridge-box">
                   <el-alert title="个人账号桥接，稳定性取决于桥接程序。" type="warning" :closable="false" show-icon />
                   <div class="connector-secret-row">
@@ -599,6 +627,12 @@ const {
   cancelConnectorEvent,
   resolveConnectorEvent,
   probeConnector,
+  qqBridge,
+  loadQqBridge,
+  installQqBridge,
+  startQqBridge,
+  stopQqBridge,
+  logoutQqBridge,
   disableConnector,
   toggleAgentPlugin,
   updateAgentPluginConfig,
@@ -627,6 +661,7 @@ const refreshingMcpNames = ref(new Set<string>())
 const revokingPermissionKeys = ref(new Set<string>())
 const togglingAgentPluginIds = ref(new Set<string>())
 const disablingConnectorIds = ref(new Set<string>())
+const bridgeBusy = ref(false)
 const loadingConnectorConfigIds = ref(new Set<string>())
 const savingConnectorIds = ref(new Set<string>())
 const retryingDeliveryKeys = ref(new Set<string>())
@@ -1376,6 +1411,65 @@ const saveConnectorConfig = async (connectorId: MessageConnectorId) => {
 }
 
 const accountStateLabel = (state: string) => ({ connected: '已连接', awaiting_scan: '等待登录', signed_out: '未登录', error: '桥接错误' }[state] || state)
+
+const qqBridgeStateLabel = computed(() => {
+  const state = qqBridge.value?.state || 'not_installed'
+  return ({
+    not_installed: '内置桥未安装',
+    installed: '内置桥已安装',
+    starting: '内置桥启动中',
+    awaiting_scan: '等待扫码',
+    connected: '内置桥已连接',
+    failed: '内置桥异常',
+    stopped: '内置桥已停止',
+  } as Record<string, string>)[state] || state
+})
+
+const qqBridgeTagType = computed(() => {
+  const state = qqBridge.value?.state || 'not_installed'
+  if (state === 'connected') return 'success'
+  if (state === 'awaiting_scan' || state === 'starting') return 'warning'
+  if (state === 'failed') return 'danger'
+  return 'info'
+})
+
+const withBridgeBusy = async (action: () => Promise<unknown>, success?: string) => {
+  if (bridgeBusy.value) return
+  bridgeBusy.value = true
+  try {
+    await action()
+    if (success) ElMessage.success(success)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '内置桥操作失败')
+  } finally {
+    bridgeBusy.value = false
+    await loadConnectors().catch(() => undefined)
+  }
+}
+
+const installManagedBridge = () => withBridgeBusy(async () => {
+  await ElMessageBox.confirm(
+    '内置桥是第三方个人账号客户端，接入个人 QQ 账号存在封禁风险，且上游未声明开源许可。仍然继续下载并安装吗？',
+    '确认风险',
+    { type: 'warning', confirmButtonText: '我已了解，继续', cancelButtonText: '取消' },
+  )
+  await installQqBridge(true)
+}, '内置桥已安装')
+
+const startManagedBridge = () => withBridgeBusy(async () => {
+  const result = await startQqBridge()
+  const hint = (result as { bridge?: { loginHint?: string } } | undefined)?.bridge?.loginHint
+  ElMessage.success(hint || '桥已启动，请在弹出的窗口中扫码')
+}, undefined)
+
+const refreshManagedBridge = () => withBridgeBusy(() => loadQqBridge(), undefined)
+const stopManagedBridge = () => withBridgeBusy(() => stopQqBridge(), '内置桥已停止')
+const logoutManagedBridge = () => withBridgeBusy(() => logoutQqBridge(), '已退出并清除登录状态')
+
+onMounted(() => {
+  void loadQqBridge().catch(() => undefined)
+})
+
 const loginPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
   addPending(accountBusyIds, connectorId)
   try { const account = await loginConnectorAccount(connectorId); if (account) ElMessage.success(account.loginUrl ? '登录请求已创建，请打开登录页' : `连接状态：${accountStateLabel(account.loginState)}`) } catch (error) { ElMessage.error(error instanceof Error ? error.message : '登录请求失败') } finally { removePending(accountBusyIds, connectorId); await loadConnectors().catch(() => undefined) }

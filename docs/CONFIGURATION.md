@@ -235,6 +235,22 @@ Telegram, Discord, QQ personal bridge, and WeChat personal bridge adapters are e
 
 Enabling a connector authorizes its declared inbound message and outbound reply flow without per-message approval. Stored secrets are not returned by status APIs. QQ and WeChat personal bridges are not official platform APIs and require separate local compatibility testing.
 
+### Managed bridge / 内置桥
+
+Yuizaki can own the bridge process itself, so a personal account can be connected from the QQ tab without installing a OneBot server by hand.
+
+| Step | What happens |
+| --- | --- |
+| Install | Downloads the pinned archive from `resources.lock.json` (`qq_bridge`), verifies SHA256, unpacks only the executable into `python/data/qq-bridge/<version>/` |
+| Start | Generates `appsettings.json` with `Account.Uin = 0` (QR login), `Message.IgnoreSelf`, plain-text QR, and two OneBot 11 implementations: `HttpPost` pushing to this backend's webhook and `Http` serving `send_private_msg` on a free loopback port |
+| Wire | Writes `bridgeUrl`/`bridgeProtocol=onebot11`/`bridgeToken` into the QQ connector and enables it |
+| Scan | The bridge is spawned with its own console window; the QR is drawn there. Yuizaki reports `awaiting_scan` until `get_login_info` answers, then `connected` |
+| Logout | Stops the process, deletes the generated config and the bridge session directory, clears the connector's bridge URL and token |
+
+`GET /api/system/connectors/qq/bridge` reports one of `not_installed`, `installed`, `starting`, `awaiting_scan`, `connected`, `failed`, `stopped`. The generated access token is stored in `python/data/qq_bridge_state.json` so a restart keeps the connector and the bridge in sync.
+
+This project does not redistribute the bridge binary: it is fetched from the upstream author's release at the user's explicit request (`acceptRisk`), and the upstream repository currently ships **no LICENSE file**, so treat the download as a third-party component with unresolved licensing. The release is pinned by hash, and the moving upstream tag means the pin will eventually need a deliberate refresh.
+
 QQ personal-account protocols carry an account-ban risk; use a secondary account for testing.
 `onebot11` / `onebot12` parsing applies to QQ only; WeChat remains a generic bridge.
 QQ admission settings are editable through `PUT /api/system/connectors/qq/config`:

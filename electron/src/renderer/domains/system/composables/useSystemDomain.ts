@@ -10,6 +10,7 @@ import type {
   ConnectorRecoverySnapshot,
   ConnectorProbeSnapshot,
   ConnectorAccountSnapshot,
+  QqBridgeSnapshot,
   AgentTraceSnapshot,
   CompanionRuntimeSnapshot,
   ExperienceMetricsSnapshot,
@@ -43,6 +44,7 @@ export function useSystemDomain() {
   const connectorRecovery = ref<Record<string, ConnectorRecoverySnapshot | null>>({})
   const connectorAccounts = ref<Record<string, ConnectorAccountSnapshot>>({})
   const connectorProbes = ref<Record<string, ConnectorProbeSnapshot | null>>({})
+  const qqBridge = ref<QqBridgeSnapshot | null>(null)
 
   const diagnosticsRequest = useDomainRequest<DiagnosticsSnapshot>()
   const logsRequest = useDomainRequest<SystemLogsSnapshot>()
@@ -81,6 +83,7 @@ export function useSystemDomain() {
   const cancelConnectorEventRequest = useDomainRequest<{ ok: boolean; cancelled?: boolean; outcome?: 'cancelled' | 'too_late' | 'unknown'; status?: string }>()
   const connectorAccountRequest = useDomainRequest<{ ok: boolean; account: ConnectorAccountSnapshot }>()
   const connectorProbeRequest = useDomainRequest<ConnectorProbeSnapshot>()
+  const qqBridgeRequest = useDomainRequest<{ ok: boolean; bridge: QqBridgeSnapshot }>()
 
   const loadDiagnostics = async () => {
     const result = await diagnosticsRequest.execute(() => systemClient.diagnostics())
@@ -255,6 +258,35 @@ export function useSystemDomain() {
     return result
   }
 
+  const loadQqBridge = async () => {
+    const result = await qqBridgeRequest.execute(() => systemClient.qqBridgeStatus())
+    if (result) qqBridge.value = result.bridge
+  }
+
+  const installQqBridge = async (acceptRisk: boolean) => {
+    const result = await qqBridgeRequest.execute(() => systemClient.installQqBridge(acceptRisk))
+    if (result) qqBridge.value = result.bridge
+    return result
+  }
+
+  const startQqBridge = async () => {
+    const result = await qqBridgeRequest.execute(() => systemClient.startQqBridge())
+    if (result) qqBridge.value = result.bridge
+    return result
+  }
+
+  const stopQqBridge = async () => {
+    const result = await qqBridgeRequest.execute(() => systemClient.stopQqBridge())
+    if (result) qqBridge.value = result.bridge
+    return result
+  }
+
+  const logoutQqBridge = async () => {
+    const result = await qqBridgeRequest.execute(() => systemClient.logoutQqBridge())
+    if (result) qqBridge.value = result.bridge
+    return result
+  }
+
   const loadConnectorDeliveries = async (connectorId: 'telegram' | 'discord' | 'qq' | 'wechat') => {
     const result = await connectorDeliveriesRequest.execute(() => systemClient.connectorDeliveries(connectorId, 20))
     if (result) {
@@ -400,6 +432,12 @@ export function useSystemDomain() {
     connectorRecovery,
     connectorAccounts,
     connectorProbes,
+    qqBridge,
+    loadQqBridge,
+    installQqBridge,
+    startQqBridge,
+    stopQqBridge,
+    logoutQqBridge,
     diagnosticsRequest,
     logsRequest,
     backupTargetsRequest,

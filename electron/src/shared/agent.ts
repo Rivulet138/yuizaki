@@ -189,6 +189,26 @@ export interface ConnectorAccountSnapshot {
   lastError: string | null
 }
 
+/**
+ * Managed QQ bridge: Yuizaki owns the local bridge process so a personal account
+ * can be connected without installing and wiring a OneBot server by hand.
+ */
+export interface QqBridgeSnapshot {
+  id: 'qq' | string
+  installed: boolean
+  state: 'not_installed' | 'installed' | 'starting' | 'awaiting_scan' | 'connected' | 'failed' | 'stopped' | string
+  version: string
+  running: boolean
+  pid: number | null
+  apiPort: number | null
+  bridgeUrl: string
+  tokenConfigured: boolean
+  startedAt: number | null
+  lastError: string | null
+  installDir: string
+  loginHint: string
+}
+
 export interface ConnectorDeliveryItem {
   deliveryKey: string
   idempotencyKey: string
