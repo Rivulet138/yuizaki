@@ -10,6 +10,7 @@ import { petControlClient, settingsClient, systemClient } from '@/api/client'
 import { workspaceClient } from '@/api/clients/workspace-client'
 import { parseProactiveOpportunityIdentity } from '@/../shared/proactive'
 import { currentLocale } from '@/i18n'
+import { hasUnauthorizedMarker } from '@/api/clients/http-client'
 import { syncCompanionVoiceSettings } from './companion-voice-settings'
 import { useProactiveControls } from './useProactiveControls'
 import {
@@ -28,7 +29,7 @@ export const reportCompanionRuntimeSinkError = (failure: { sink: CompanionRuntim
     event: 'companion_runtime.sink_failure',
     ...failure,
   }
-  if (failure.message.includes('未授权')) {
+  if (hasUnauthorizedMarker(failure.message)) {
     logger.warn('[CompanionRuntime] sink unavailable without control authorization', payload)
     return
   }

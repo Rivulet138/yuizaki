@@ -1,14 +1,14 @@
 <template>
   <section class="review" aria-labelledby="memory-review-title">
-    <div class="review-heading"><h3 id="memory-review-title">需要检查</h3><el-tag :type="docs.length ? 'warning' : 'success'">{{ docs.length }} 条</el-tag></div>
-    <AsyncState :loading="loading" :error="error" :empty="docs.length === 0" empty-text="目前没有需要你检查的记录" loading-text="正在读取需要检查的记录…" @retry="emit('retry')">
+    <div class="review-heading"><h3 id="memory-review-title">{{ t('memoryView.needsReview') }}</h3><el-tag :type="docs.length ? 'warning' : 'success'">{{ t('memoryView.countItems', { count: docs.length }) }}</el-tag></div>
+    <AsyncState :loading="loading" :error="error" :empty="docs.length === 0" :empty-text="t('memoryView.reviewEmpty')" :loading-text="t('memoryView.reviewLoading')" @retry="emit('retry')">
       <template #empty>
-        <p class="review-empty-hint">当写入的记忆置信度偏低或与既有记忆冲突时，才会出现在这里。现在不需要做任何事，继续对话即可。</p>
+        <p class="review-empty-hint">{{ t('memoryView.reviewEmptyHint') }}</p>
       </template>
       <div class="review-list">
         <article v-for="doc in docs" :key="doc.id">
-          <div><strong>{{ doc.type || '记忆' }}</strong><p>{{ compactText(doc.text, 140) }}</p></div>
-          <div class="review-meta"><el-tag size="small" type="info">{{ layerLabel(doc.layer) }}</el-tag><span>{{ reviewReason(doc) }}</span><div class="review-actions"><el-button size="small" type="success" plain :loading="props.processingId === doc.id" :disabled="props.processingId !== ''" @click="decide(doc, 'approve')">保留并使用</el-button><el-button size="small" type="danger" plain :loading="props.processingId === doc.id" :disabled="props.processingId !== ''" @click="decide(doc, 'reject')">拒绝使用</el-button><el-button type="primary" link @click="emit('review', doc)">查看详情</el-button></div></div>
+          <div><strong>{{ doc.type || t('memoryView.memoryFallback') }}</strong><p>{{ compactText(doc.text, 140) }}</p></div>
+          <div class="review-meta"><el-tag size="small" type="info">{{ layerLabel(doc.layer) }}</el-tag><span>{{ reviewReason(doc) }}</span><div class="review-actions"><el-button size="small" type="success" plain :loading="props.processingId === doc.id" :disabled="props.processingId !== ''" @click="decide(doc, 'approve')">{{ t('memoryView.reviewApprove') }}</el-button><el-button size="small" type="danger" plain :loading="props.processingId === doc.id" :disabled="props.processingId !== ''" @click="decide(doc, 'reject')">{{ t('memoryView.reviewReject') }}</el-button><el-button type="primary" link @click="emit('review', doc)">{{ t('memoryView.reviewDetails') }}</el-button></div></div>
         </article>
       </div>
     </AsyncState>
@@ -18,7 +18,9 @@
 import 'element-plus/es/components/button/style/css'
 import 'element-plus/es/components/tag/style/css'
 import { ElButton, ElTag } from 'element-plus'
+import { computed } from 'vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
+import { t } from '@/i18n'
 import type { MemoryDoc } from './memory-panel-types'
 const props = defineProps<{ docs: MemoryDoc[]; compactText: (text?: string | null, limit?: number) => string; qualityPercent: (doc: MemoryDoc) => string; processingId: string; loading?: boolean; error?: string }>()
 const emit = defineEmits<{ review: [doc: MemoryDoc]; decide: [payload: { doc: MemoryDoc; decision: 'approve' | 'reject' }]; retry: [] }>()
@@ -26,14 +28,21 @@ const decide = (doc: MemoryDoc, decision: 'approve' | 'reject') => {
   if (props.processingId) return
   emit('decide', { doc, decision })
 }
-const layerLabels: Record<string, string> = { profile: '偏好与称呼', working: '当前事项', episodic: '发生过的事', relationship: '相处方式', reflective: '经验总结', semantic: '稳定事实' }
-const layerLabel = (value?: string) => layerLabels[String(value || '')] || '未分类'
+const layerLabels = computed<Record<string, string>>(() => ({
+  profile: t('memoryView.reviewLayerProfile'),
+  working: t('memoryView.reviewLayerWorking'),
+  episodic: t('memoryView.reviewLayerEpisodic'),
+  relationship: t('memoryView.reviewLayerRelationship'),
+  reflective: t('memoryView.reviewLayerReflective'),
+  semantic: t('memoryView.reviewLayerSemantic'),
+}))
+const layerLabel = (value?: string) => layerLabels.value[String(value || '')] || t('memoryView.uncategorized')
 const reviewReason = (doc: MemoryDoc) => {
   const metadata = doc.metadata || {}
-  if (metadata.memory_role === 'tool_permission') return '涉及工具或权限，需要你决定'
-  if (metadata.sensitive_category && metadata.sensitive_category !== 'none') return `包含敏感信息：${metadata.sensitive_category}`
-  if (metadata.admission_reason === 'untrusted_source_requires_review') return '来源还没有被验证'
-  return '来源需要检查'
+  if (metadata.memory_role === 'tool_permission') return t('memoryView.reviewReasonPermission')
+  if (metadata.sensitive_category && metadata.sensitive_category !== 'none') return t('memoryView.reviewReasonSensitive', { category: String(metadata.sensitive_category) })
+  if (metadata.admission_reason === 'untrusted_source_requires_review') return t('memoryView.reviewReasonUntrusted')
+  return t('memoryView.reviewReasonUnknown')
 }
 </script>
 <style scoped>

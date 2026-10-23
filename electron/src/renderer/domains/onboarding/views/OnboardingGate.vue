@@ -362,7 +362,7 @@ const checkMicrophone = async (): Promise<void> => {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     const inventory = await enumerateAudioDevices().catch(() => null)
     deviceResults.value.microphone = inventory && inventory.inputCount > 0
-      ? `${t('onboarding.optional.microphonePassed')}（检测到 ${inventory.inputCount} 个输入设备）`
+      ? `${t('onboarding.optional.microphonePassed')}${t('misc.inputDevicesDetected', { count: inventory.inputCount })}`
       : t('onboarding.optional.microphonePassed')
     report = { probeId: 'host.microphone', outcome: 'ready', messageCode: 'permission_granted' }
   } catch (cause) {
@@ -404,7 +404,7 @@ const checkSpeaker = async (): Promise<void> => {
     await finished
     const inventory = await enumerateAudioDevices().catch(() => null)
     deviceResults.value.speaker = inventory && inventory.outputCount > 0
-      ? `${t('onboarding.optional.speakerPlayed')}（检测到 ${inventory.outputCount} 个输出设备）`
+      ? `${t('onboarding.optional.speakerPlayed')}${t('misc.outputDevicesDetected', { count: inventory.outputCount })}`
       : t('onboarding.optional.speakerPlayed')
     report = { probeId: 'host.speaker', outcome: 'ready', messageCode: 'test_completed' }
   } catch (cause) {

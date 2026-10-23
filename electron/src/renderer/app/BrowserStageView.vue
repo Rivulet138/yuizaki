@@ -131,11 +131,13 @@ const socketClient = getSocketClient()
 const realtimeConnected = socketClient.connected
 let compactMediaQuery: MediaQueryList | null = null
 
-const localeOptions = [
-  { value: 'zh-CN', label: '中文' },
+// Locale endonyms: each option names the language in its own script, so these
+// table values are intentionally identical across all three locales.
+const localeOptions = computed(() => [
+  { value: 'zh-CN', label: t('misc.localeChinese') },
   { value: 'en-US', label: 'EN' },
-  { value: 'ja-JP', label: '日本語' },
-]
+  { value: 'ja-JP', label: t('misc.localeJapanese') },
+])
 const stageStyle = computed(() => ({
   '--stage-wallpaper': props.currentWallpaper
     ? `url("${props.currentWallpaper}")`

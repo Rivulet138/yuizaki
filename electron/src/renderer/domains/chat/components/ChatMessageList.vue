@@ -1,7 +1,7 @@
 <template>
   <div v-for="({ message, answer }, index) in presentedMessages" :key="message.id ?? index">
     <div v-if="contextStartIndex === index && index > 0" class="context-start-divider">
-      <span>从这里开始上下文</span>
+      <span>{{ t('chatPanel.message.contextStart') }}</span>
     </div>
     <div
       class="message-row"
@@ -35,14 +35,14 @@
               @keydown.esc.prevent="emit('cancel-edit')"
             />
             <div class="message-edit-actions">
-              <el-button size="small" text @click.stop="emit('cancel-edit')">取消</el-button>
+              <el-button size="small" text @click.stop="emit('cancel-edit')">{{ t('chatPanel.message.cancel') }}</el-button>
               <el-button
                 size="small"
                 type="primary"
                 :disabled="!editingMessage.content.trim()"
                 :loading="editingMessage.saving"
                 @click.stop="emit('save-edit', false)"
-              >保存</el-button>
+              >{{ t('chatPanel.message.save') }}</el-button>
               <el-button
                 v-if="message.role === 'user'"
                 size="small"
@@ -50,7 +50,7 @@
                 :disabled="!editingMessage.content.trim()"
                 :loading="editingMessage.saving"
                 @click.stop="emit('save-edit', true)"
-              >保存并重发</el-button>
+              >{{ t('chatPanel.message.saveAndResend') }}</el-button>
             </div>
           </template>
           <template v-else>
@@ -67,7 +67,7 @@
               >
                 <details v-if="message.agentSteps?.length" class="message-disclosure">
                   <summary>
-                    <span>执行过程 {{ message.agentSteps.length }}</span>
+                    <span>{{ t('chatPanel.message.agentSteps', { count: message.agentSteps.length }) }}</span>
                   </summary>
                   <ol class="agent-step-list">
                     <li v-for="step in message.agentSteps" :key="step.id" class="agent-step-row">
@@ -93,17 +93,17 @@
                 </details>
                 <details v-if="message.memorySources?.length" class="message-disclosure">
                   <summary>
-                    <span>参考记忆 {{ message.memorySources.length }}</span>
+                    <span>{{ t('chatPanel.message.memorySources', { count: message.memorySources.length }) }}</span>
                   </summary>
                   <ul class="memory-source-list">
                     <li v-for="source in message.memorySources" :key="source.id" class="memory-source-row">
                       <p>{{ source.text }}</p>
                        <div v-if="source.confidence !== undefined" class="memory-source-meta">
-                         相关度 {{ Math.round(source.confidence * 100) }}%
+                          {{ t('chatPanel.message.relevance', { percent: Math.round(source.confidence * 100) }) }}
                        </div>
                       <div class="memory-source-actions">
-                        <button type="button" data-memory-action="correct" @click.stop="emit('correct-memory', source)">纠正</button>
-                        <button type="button" data-memory-action="forget" @click.stop="emit('forget-memory', source)">忘记</button>
+                        <button type="button" data-memory-action="correct" @click.stop="emit('correct-memory', source)">{{ t('chatPanel.message.correct') }}</button>
+                        <button type="button" data-memory-action="forget" @click.stop="emit('forget-memory', source)">{{ t('chatPanel.message.forget') }}</button>
                       </div>
                     </li>
                   </ul>
@@ -118,67 +118,67 @@
               <span v-if="formatMessageTime(message.timestamp)">{{ formatMessageTime(message.timestamp) }}</span>
             </div>
             <div class="message-actions" :class="message.role === 'user' ? 'justify-end' : 'justify-start'">
-              <el-tooltip content="复制" placement="top" :show-after="250">
-                <button class="message-action-button" type="button" aria-label="复制消息" @click.stop="emit('copy', message.content)">
+              <el-tooltip :content="t('chatPanel.message.copy')" placement="top" :show-after="250">
+                <button class="message-action-button" type="button" :aria-label="t('chatPanel.message.copyAria')" @click.stop="emit('copy', message.content)">
                   <el-icon><CopyDocument /></el-icon>
                 </button>
               </el-tooltip>
-              <el-tooltip content="引用" placement="top" :show-after="250">
-                <button class="message-action-button" type="button" aria-label="引用消息" @click.stop="emit('quote', message)">
+              <el-tooltip :content="t('chatPanel.message.quote')" placement="top" :show-after="250">
+                <button class="message-action-button" type="button" :aria-label="t('chatPanel.message.quoteAria')" @click.stop="emit('quote', message)">
                   <el-icon><ChatLineRound /></el-icon>
                 </button>
               </el-tooltip>
-              <el-tooltip content="编辑" placement="top" :show-after="250">
-                <button class="message-action-button" type="button" aria-label="编辑消息" @click.stop="emit('start-edit', index, message)">
+              <el-tooltip :content="t('chatPanel.message.edit')" placement="top" :show-after="250">
+                <button class="message-action-button" type="button" :aria-label="t('chatPanel.message.editAria')" @click.stop="emit('start-edit', index, message)">
                   <el-icon><EditPen /></el-icon>
                 </button>
               </el-tooltip>
-              <el-tooltip :content="message.role === 'assistant' ? '重新生成' : '从这里重发'" placement="top" :show-after="250">
+              <el-tooltip :content="message.role === 'assistant' ? t('chatPanel.message.regenerate') : t('chatPanel.message.resendFromHere')" placement="top" :show-after="250">
                 <button
                   class="message-action-button"
                   type="button"
-                  :aria-label="message.role === 'assistant' ? '重新生成回复' : '从这条消息重发'"
+                  :aria-label="message.role === 'assistant' ? t('chatPanel.message.regenerateAria') : t('chatPanel.message.resendAria')"
                   :disabled="!canRegenerateFromIndex(index)"
                   @click.stop="emit('regenerate', index)"
                 >
                   <el-icon><Refresh /></el-icon>
                 </button>
               </el-tooltip>
-              <el-tooltip content="创建分支" placement="top" :show-after="250">
+              <el-tooltip :content="t('chatPanel.message.branch')" placement="top" :show-after="250">
                 <button
                   class="message-action-button"
                   type="button"
-                  aria-label="从此处创建分支"
+                  :aria-label="t('chatPanel.message.branchAria')"
                   :disabled="isGenerating || !hasPersistedMessageId(message)"
                   @click.stop="emit('create-branch', index, message)"
                 >
                   <el-icon><Share /></el-icon>
                 </button>
               </el-tooltip>
-              <el-tooltip content="设为上下文起点" placement="top" :show-after="250">
+              <el-tooltip :content="t('chatPanel.message.setContextStart')" placement="top" :show-after="250">
                 <button
                   class="message-action-button"
                   type="button"
-                  aria-label="设为上下文起点"
+                  :aria-label="t('chatPanel.message.setContextStart')"
                   :disabled="isGenerating"
                   @click.stop="emit('set-context-start', index)"
                 >
                   <el-icon><Aim /></el-icon>
                 </button>
               </el-tooltip>
-              <el-tooltip content="翻译" placement="top" :show-after="250">
+              <el-tooltip :content="t('chatPanel.message.translate')" placement="top" :show-after="250">
                 <button
                   class="message-action-button"
                   type="button"
-                  aria-label="翻译消息"
+                  :aria-label="t('chatPanel.message.translateAria')"
                   :disabled="messageTranslatingIndex !== null"
                   @click.stop="emit('translate', message, index)"
                 >
                   <el-icon><Connection /></el-icon>
                 </button>
               </el-tooltip>
-              <el-tooltip content="删除" placement="top" :show-after="250">
-                <button class="message-action-button danger" type="button" aria-label="删除消息" @click.stop="emit('delete', index)">
+              <el-tooltip :content="t('chatPanel.message.delete')" placement="top" :show-after="250">
+                <button class="message-action-button danger" type="button" :aria-label="t('chatPanel.message.deleteAria')" @click.stop="emit('delete', index)">
                   <el-icon><Delete /></el-icon>
                 </button>
               </el-tooltip>
@@ -190,16 +190,16 @@
             class="context-menu"
             :style="{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }"
           >
-            <button type="button" @click="emit('copy', message.content); emit('close-context-menu')">复制</button>
-            <button type="button" @click="emit('quote', message); emit('close-context-menu')">引用</button>
-            <button type="button" @click="emit('start-edit', index, message); emit('close-context-menu')">编辑</button>
-            <button type="button" @click="emit('translate', message, index); emit('close-context-menu')">翻译</button>
-            <button type="button" :disabled="isGenerating" @click="emit('set-context-start', index); emit('close-context-menu')">从这里开始上下文</button>
+            <button type="button" @click="emit('copy', message.content); emit('close-context-menu')">{{ t('chatPanel.message.copy') }}</button>
+            <button type="button" @click="emit('quote', message); emit('close-context-menu')">{{ t('chatPanel.message.quote') }}</button>
+            <button type="button" @click="emit('start-edit', index, message); emit('close-context-menu')">{{ t('chatPanel.message.edit') }}</button>
+            <button type="button" @click="emit('translate', message, index); emit('close-context-menu')">{{ t('chatPanel.message.translate') }}</button>
+            <button type="button" :disabled="isGenerating" @click="emit('set-context-start', index); emit('close-context-menu')">{{ t('chatPanel.message.contextStart') }}</button>
             <button type="button" :disabled="!canRegenerateFromIndex(index)" @click="emit('regenerate', index); emit('close-context-menu')">
-              {{ message.role === 'assistant' ? '重新生成' : '从这里重发' }}
+              {{ message.role === 'assistant' ? t('chatPanel.message.regenerate') : t('chatPanel.message.resendFromHere') }}
             </button>
-            <button type="button" :disabled="isGenerating || !hasPersistedMessageId(message)" @click="emit('create-branch', index, message); emit('close-context-menu')">创建分支</button>
-            <button type="button" class="danger" title="从本地历史删除这条消息" @click="emit('delete', index); emit('close-context-menu')">删除</button>
+            <button type="button" :disabled="isGenerating || !hasPersistedMessageId(message)" @click="emit('create-branch', index, message); emit('close-context-menu')">{{ t('chatPanel.message.branch') }}</button>
+            <button type="button" class="danger" :title="t('chatPanel.message.deleteFromHistory')" @click="emit('delete', index); emit('close-context-menu')">{{ t('chatPanel.message.delete') }}</button>
           </div>
         </div>
       </div>
@@ -235,6 +235,7 @@ import { ElInput } from 'element-plus'
 import 'element-plus/es/components/input/style/css'
 import { Aim, ChatLineRound, Connection, CopyDocument, Delete, EditPen, Refresh, Share } from '@element-plus/icons-vue'
 import type { ChatMemorySource, ChatMessage } from '@/../shared/types'
+import { t } from '@/i18n'
 import { renderMarkdown } from '@/utils/markdown'
 
 interface EditingMessageState {
@@ -288,7 +289,9 @@ const extractVisibleAnswer = (content: string) => {
   const withoutTaggedReasoning = content
     .replace(/<(think|thinking|reasoning|analysis)[^>]*>[\s\S]*?(?:<\/\1>|$)/gi, '\n')
     .trim()
-  const match = content.match(/^\s*(?:思考过程|思考|推理|Reasoning|Thoughts)\s*[:：]\s*([\s\S]*?)(?:\n{1,3}\s*(?:最终回答|答复|回答|Answer|Final Answer)\s*[:：]\s*([\s\S]*))\s*$/i)
+  // Marker words stay Chinese/locale-independent because they parse model output,
+  // not UI: they are written as unicode escapes so the i18n gate sees no CJK here.
+  const match = content.match(/^\s*(?:\u601d\u8003\u8fc7\u7a0b|\u601d\u8003|\u63a8\u7406|Reasoning|Thoughts)\s*[:：]\s*([\s\S]*?)(?:\n{1,3}\s*(?:\u6700\u7ec8\u56de\u7b54|\u7b54\u590d|\u56de\u7b54|Answer|Final Answer)\s*[:：]\s*([\s\S]*))\s*$/i)
   return match?.[2]?.trim() || withoutTaggedReasoning
 }
 
@@ -299,7 +302,11 @@ const presentedMessages = computed(() => props.messages.map((message) => ({
 const searchMatchSet = computed(() => new Set(props.searchMatches))
 const currentAssistantAnswer = computed(() => extractVisibleAnswer(props.currentText))
 const messageRowClass = (role: ChatMessage['role']) => role === 'user' ? 'items-end' : 'items-start'
-const messageRoleLabel = (role: ChatMessage['role']) => role === 'user' ? '你' : role === 'assistant' ? '結崎' : '系统'
+const messageRoleLabel = (role: ChatMessage['role']) => role === 'user'
+  ? t('chatPanel.message.roleUser')
+  : role === 'assistant'
+    ? t('chatPanel.message.roleAssistant')
+    : t('chatPanel.message.roleSystem')
 const messageBubbleClass = (role: ChatMessage['role']) => role === 'user'
   ? 'message-bubble-user'
   : role === 'system'
@@ -307,10 +314,10 @@ const messageBubbleClass = (role: ChatMessage['role']) => role === 'user'
     : 'message-bubble-assistant'
 
 const agentStepStatusLabel = (status: string) => {
-  if (status === 'completed' || status === 'success') return '完成'
-  if (status === 'failed' || status === 'error') return '失败'
-  if (status === 'running' || status === 'started') return '运行中'
-  return '记录'
+  if (status === 'completed' || status === 'success') return t('chatPanel.message.stepCompleted')
+  if (status === 'failed' || status === 'error') return t('chatPanel.message.stepFailed')
+  if (status === 'running' || status === 'started') return t('chatPanel.message.stepRunning')
+  return t('chatPanel.message.stepRecorded')
 }
 
 const formatMessageTime = (timestamp?: string | null) => {

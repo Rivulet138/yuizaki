@@ -18,6 +18,7 @@ import type {
 } from '../../shared/resource-manager'
 import type { AvatarCapabilitySnapshot, AvatarCommand, AvatarCommandResult } from '../../shared/avatar-command'
 import { CONTROL_ORIGIN } from '../api/clients/http-client'
+import { t } from '@/i18n'
 
 type PetControlAutomationOptions = PetControlTriggerOptions & {
   signal?: AbortSignal
@@ -38,8 +39,8 @@ const getControlOrigin = (): string => {
 }
 
 const createControlConnectionError = (error: unknown): Error => {
-  const detail = error instanceof Error && error.message ? `（${error.message}）` : ''
-  return new Error(`无法连接桌宠控制服务：请确认 Yuizaki 主程序正在运行。${detail}`, { cause: error })
+  const detail = error instanceof Error && error.message ? error.message : ''
+  return new Error(detail ? t('misc.petControlUnavailableWithDetail', { detail }) : t('misc.petControlUnavailable'), { cause: error })
 }
 
 const requestJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
@@ -198,21 +199,21 @@ export const petControl = {
     if (window.petApi?.pet?.beginAdjustment) {
       return window.petApi.pet.beginAdjustment()
     }
-    throw new Error('全屏位置调整仅在 Electron 桌面窗口中可用。')
+    throw new Error(t('misc.adjustmentElectronOnly'))
   },
 
   async completeAdjustment(): Promise<PetControlState> {
     if (window.petApi?.pet?.completeAdjustment) {
       return window.petApi.pet.completeAdjustment()
     }
-    throw new Error('无法完成位置调整：请从 Electron 桌面窗口操作。')
+    throw new Error(t('misc.completeAdjustmentDesktopOnly'))
   },
 
   async cancelAdjustment(): Promise<PetControlState> {
     if (window.petApi?.pet?.cancelAdjustment) {
       return window.petApi.pet.cancelAdjustment()
     }
-    throw new Error('无法取消位置调整：请从 Electron 桌面窗口操作。')
+    throw new Error(t('misc.cancelAdjustmentDesktopOnly'))
   },
 
   async setDoNotDisturb(doNotDisturb: boolean): Promise<PetControlState> {

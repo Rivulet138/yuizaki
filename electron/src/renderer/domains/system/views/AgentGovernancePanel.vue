@@ -1,17 +1,17 @@
 <template>
-  <PanelShell title="权限审计" tone="admin">
+  <PanelShell :title="t('governance.title')" tone="admin">
     <div class="governance-console">
-      <section class="governance-toolbar" aria-label="治理操作">
+      <section class="governance-toolbar" :aria-label="t('governance.actionsAria')">
         <div>
           <strong>{{ governancePosture }}</strong>
         </div>
         <div class="toolbar-actions">
           <el-tag :type="governancePostureTagType">{{ governancePosture }}</el-tag>
-          <el-button type="primary" :loading="refreshing" @click="refreshGovernance">刷新治理快照</el-button>
+          <el-button type="primary" :loading="refreshing" @click="refreshGovernance">{{ t('governance.refreshSnapshot') }}</el-button>
         </div>
       </section>
 
-      <nav class="governance-view-nav" aria-label="权限视图" role="tablist">
+      <nav class="governance-view-nav" :aria-label="t('governance.viewsAria')" role="tablist">
         <button
           v-for="view in governanceViews"
           :key="view.id"
@@ -30,10 +30,10 @@
         <template #header>
           <div class="card-head">
             <div>
-              <strong>连接器状态</strong>
-              <span>{{ connectorSummary.running }} 个运行中 · {{ connectorSummary.uninstalled }} 个未安装 · {{ connectorSummary.failures }} 个故障</span>
+              <strong>{{ t('governance.connectorsTitle') }}</strong>
+              <span>{{ t('governance.connectorsSummary', { running: connectorSummary.running, uninstalled: connectorSummary.uninstalled, failures: connectorSummary.failures }) }}</span>
             </div>
-            <el-button plain size="small" :loading="connectorsRequest.loading" @click="loadConnectors">刷新连接器</el-button>
+            <el-button plain size="small" :loading="connectorsRequest.loading" @click="loadConnectors">{{ t('governance.refreshConnectors') }}</el-button>
           </div>
         </template>
         <AsyncState :loading="connectorsRequest.loading" :error="connectorsRequest.error" :show-retry="false">
@@ -49,12 +49,12 @@
               </div>
               <p>{{ connector.message }}</p>
               <div class="connector-meta">
-                <span>能力：{{ connector.capabilities.join('、') }}</span>
-                <span>数据流：{{ connector.dataFlow.join('；') }}</span>
-                <span v-if="connector.readiness">资格：{{ connectorReadinessLabel(connector.readiness) }}</span>
+                <span>{{ t('governance.connectorCapabilities', { names: connector.capabilities.join(t('governance.listSeparator')) }) }}</span>
+                <span>{{ t('governance.connectorDataFlow', { names: connector.dataFlow.join(t('governance.flowSeparator')) }) }}</span>
+                <span v-if="connector.readiness">{{ t('governance.connectorReadiness', { value: connectorReadinessLabel(connector.readiness) }) }}</span>
               </div>
               <div class="connector-footer">
-                <small v-if="connector.experimental">实验性，默认不启用</small>
+                <small v-if="connector.experimental">{{ t('governance.connectorExperimental') }}</small>
                 <el-button
                   v-if="connector.canDisable && connector.state !== 'disabled'"
                   type="danger"
@@ -64,12 +64,12 @@
                   :disabled="disablingConnectorIds.has(connector.id)"
                   @click="disableConnectorItem(connector.id)"
                 >
-                  一键停用
+                  {{ t('governance.connectorDisable') }}
                 </el-button>
               </div>
             </article>
           </div>
-          <el-empty v-else description="暂无连接器状态" :image-size="64" />
+          <el-empty v-else :description="t('governance.emptyConnectors')" :image-size="64" />
           <el-tabs v-model="activeConnectorId" class="connector-config-tabs">
             <el-tab-pane v-for="connectorId in messageConnectorIds" :key="connectorId" :label="connectorDisplayName(connectorId)" :name="connectorId" lazy>
             <ConnectorConfigPane :connector-id="connectorId" :api="connectorPaneApi" />
@@ -83,11 +83,11 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>MCP 服务</strong>
-                <span>{{ connectedMcpCount }} / {{ mcpRows.length }} 个连接可用</span>
+                <strong>{{ t('governance.mcpTitle') }}</strong>
+                <span>{{ t('governance.mcpSummary', { connected: connectedMcpCount, total: mcpRows.length }) }}</span>
               </div>
               <div class="action-row">
-                <el-button plain size="small" :loading="mcpRequest.loading" @click="loadMcp">刷新</el-button>
+                <el-button plain size="small" :loading="mcpRequest.loading" @click="loadMcp">{{ t('governance.refresh') }}</el-button>
               </div>
             </div>
           </template>
@@ -100,7 +100,7 @@
               show-icon
               :closable="false"
             />
-            <div v-if="mcpRows.length" class="mcp-filter-row" role="tablist" aria-label="MCP 服务筛选">
+            <div v-if="mcpRows.length" class="mcp-filter-row" role="tablist" :aria-label="t('governance.mcpFilterAria')">
               <button
                 v-for="option in mcpFilterOptions"
                 :key="option.value"
@@ -124,20 +124,20 @@
                   <el-tag :type="mcpRowTagType(row)" size="small">{{ mcpRowStatusLabel(row) }}</el-tag>
                 </div>
                 <div class="server-inventory">
-                  <el-tag size="small" type="success" :title="formatInventoryNames(row.tools)">工具 {{ row.tools_count }}</el-tag>
-                  <el-tag size="small" type="info" :title="formatInventoryNames(row.resources)">资源 {{ row.resources_count }}</el-tag>
-                  <el-tag size="small" type="warning" :title="formatInventoryNames(row.prompts)">提示模板 {{ row.prompts_count }}</el-tag>
-                  <el-tag v-if="row.inventory_error" size="small" type="danger" :title="row.inventory_error">库存异常</el-tag>
+                  <el-tag size="small" type="success" :title="formatInventoryNames(row.tools)">{{ t('governance.inventoryTools', { count: row.tools_count }) }}</el-tag>
+                  <el-tag size="small" type="info" :title="formatInventoryNames(row.resources)">{{ t('governance.inventoryResources', { count: row.resources_count }) }}</el-tag>
+                  <el-tag size="small" type="warning" :title="formatInventoryNames(row.prompts)">{{ t('governance.inventoryPrompts', { count: row.prompts_count }) }}</el-tag>
+                  <el-tag v-if="row.inventory_error" size="small" type="danger" :title="row.inventory_error">{{ t('governance.inventoryError') }}</el-tag>
                 </div>
                 <div class="server-meta">
-                  <span>传输：{{ transportLabel(row.transport) }}</span>
-                  <span>调用 {{ row.total_calls ?? 0 }}</span>
-                  <span>失败 {{ row.total_failures ?? 0 }}</span>
-                  <span>待处理 {{ row.pending_requests ?? 0 }}</span>
+                  <span>{{ t('governance.transport', { value: transportLabel(row.transport) }) }}</span>
+                  <span>{{ t('governance.calls', { count: row.total_calls ?? 0 }) }}</span>
+                  <span>{{ t('governance.failures', { count: row.total_failures ?? 0 }) }}</span>
+                  <span>{{ t('governance.pending', { count: row.pending_requests ?? 0 }) }}</span>
                   <details v-if="row.env_keys?.length || row.header_keys?.length" class="inline-diagnostic-details">
-                    <summary>查看连接配置</summary>
-                    <span v-if="row.env_keys?.length">环境变量：{{ row.env_keys.join('、') }}</span>
-                    <span v-if="row.header_keys?.length">请求头：{{ row.header_keys.join('、') }}</span>
+                    <summary>{{ t('governance.viewConnectionConfig') }}</summary>
+                    <span v-if="row.env_keys?.length">{{ t('governance.envKeys', { names: row.env_keys.join(t('governance.listSeparator')) }) }}</span>
+                    <span v-if="row.header_keys?.length">{{ t('governance.headerKeys', { names: row.header_keys.join(t('governance.listSeparator')) }) }}</span>
                   </details>
                 </div>
                 <div class="server-footer">
@@ -156,7 +156,7 @@
                       :disabled="refreshingMcpNames.has(row.name) || removingMcpNames.has(row.name)"
                       @click="refreshMcpItem(row.name)"
                     >
-                      重连
+                      {{ t('governance.reconnect') }}
                     </el-button>
                     <el-button
                       type="danger"
@@ -166,7 +166,7 @@
                       :disabled="removingMcpNames.has(row.name)"
                       @click="removeMcpItem(row.name)"
                     >
-                      删除
+                      {{ t('governance.delete') }}
                     </el-button>
                   </div>
                 </div>
@@ -176,7 +176,7 @@
                     <span>{{ entry.event }}</span>
                     <small>{{ formatMcpTimestamp(entry.timestamp) }}</small>
                   </div>
-                  <span v-if="!row.history.length" class="empty-inline">暂无连接历史</span>
+                  <span v-if="!row.history.length" class="empty-inline">{{ t('governance.emptyHistory') }}</span>
                 </div>
               </article>
             </div>
@@ -189,7 +189,7 @@
             <template #header>
               <div class="card-head compact">
                 <div>
-                  <strong>新增 MCP 服务器</strong>
+                  <strong>{{ t('governance.addMcpTitle') }}</strong>
                 </div>
                 <el-tag type="primary">{{ transportLabel(mcpForm.transport) }}</el-tag>
               </div>
@@ -203,8 +203,8 @@
                 <div class="preset-meta">
                   <el-tag size="small" type="info">{{ presetCategoryLabel(preset.category) }}</el-tag>
                   <el-tag size="small" type="primary">{{ transportLabel(preset.transport) }}</el-tag>
-                  <el-tag v-if="preset.env_keys?.length" size="small" type="warning">{{ preset.env_keys.length }} 个环境变量</el-tag>
-                  <el-tag v-if="preset.header_keys?.length" size="small" type="danger">{{ preset.header_keys.length }} 个请求头</el-tag>
+                  <el-tag v-if="preset.env_keys?.length" size="small" type="warning">{{ t('governance.envKeyCount', { count: preset.env_keys.length }) }}</el-tag>
+                  <el-tag v-if="preset.header_keys?.length" size="small" type="danger">{{ t('governance.headerKeyCount', { count: preset.header_keys.length }) }}</el-tag>
                 </div>
                 <el-button
                   size="small"
@@ -214,33 +214,33 @@
                   :loading="installMcpPresetRequest.loading"
                   @click="installPreset(preset.id)"
                 >
-                  {{ preset.installed ? '已安装' : '安装' }}
+                  {{ preset.installed ? t('governance.installed') : t('governance.install') }}
                 </el-button>
               </article>
             </div>
             <el-alert v-if="installMcpPresetRequest.error" class="panel-alert" :title="installMcpPresetRequest.error" type="error" show-icon :closable="false" />
             <div class="form-grid">
-              <el-input v-model="mcpForm.name" size="small" placeholder="服务标识名，例如 fetch" />
+              <el-input v-model="mcpForm.name" size="small" :placeholder="t('governance.mcpNamePlaceholder')" />
               <el-select v-model="mcpForm.transport" size="small">
                 <el-option label="HTTP" value="http" />
                 <el-option label="SSE" value="sse" />
                 <el-option label="STDIO" value="stdio" />
-                <el-option label="流式 HTTP" value="streamable_http" />
+                <el-option :label="t('governance.transportStreamableHttp')" value="streamable_http" />
               </el-select>
-              <el-input v-if="mcpForm.transport !== 'stdio'" v-model="mcpForm.base_url" size="small" class="wide" placeholder="服务地址 URL" />
-              <el-input v-if="mcpForm.transport === 'stdio'" v-model="mcpForm.command" size="small" placeholder="启动命令，例如 npx / python" />
+              <el-input v-if="mcpForm.transport !== 'stdio'" v-model="mcpForm.base_url" size="small" class="wide" :placeholder="t('governance.mcpBaseUrlPlaceholder')" />
+              <el-input v-if="mcpForm.transport === 'stdio'" v-model="mcpForm.command" size="small" :placeholder="t('governance.mcpCommandPlaceholder')" />
             </div>
             <details class="advanced-connection-details">
-              <summary>高级连接设置</summary>
+              <summary>{{ t('governance.advancedConnection') }}</summary>
               <div class="advanced-connection-fields">
-                <el-input v-if="mcpForm.transport === 'stdio'" v-model="mcpForm.args_text" size="small" placeholder='启动参数 JSON，例如 ["--config","E:\\My App\\mcp.json"]' />
-                <el-input v-model="mcpForm.env_text" size="small" class="wide" placeholder='环境变量 JSON，例如 {"FIRECRAWL_API_KEY":"{env:FIRECRAWL_API_KEY}"}' />
-                <el-input v-model="mcpForm.headers_text" size="small" class="wide" placeholder='请求头 JSON，例如 {"Authorization":"Bearer {env:TOKEN}"}' />
+                <el-input v-if="mcpForm.transport === 'stdio'" v-model="mcpForm.args_text" size="small" :placeholder="t('governance.argsPlaceholder')" />
+                <el-input v-model="mcpForm.env_text" size="small" class="wide" :placeholder="t('governance.envPlaceholder')" />
+                <el-input v-model="mcpForm.headers_text" size="small" class="wide" :placeholder="t('governance.headersPlaceholder')" />
               </div>
             </details>
             <el-alert v-if="addMcpRequest.error" class="panel-alert" :title="addMcpRequest.error" type="error" show-icon :closable="false" />
             <div class="submit-row">
-              <el-button type="primary" :disabled="!canSubmitMcp" :loading="addMcpRequest.loading" @click="submitMcp">注册并刷新</el-button>
+              <el-button type="primary" :disabled="!canSubmitMcp" :loading="addMcpRequest.loading" @click="submitMcp">{{ t('governance.registerAndRefresh') }}</el-button>
             </div>
           </el-card>
 
@@ -248,11 +248,11 @@
             <template #header>
               <div class="card-head compact">
                 <div>
-                  <strong>{{ permissionRows.length }} 条已记住规则</strong>
+                  <strong>{{ t('governance.rememberedRules', { count: permissionRows.length }) }}</strong>
                 </div>
                 <div class="action-row">
-                  <el-button plain size="small" :loading="permissionsRequest.loading" @click="loadPermissions">刷新</el-button>
-                  <el-button size="small" type="danger" :disabled="permissionRows.length === 0" :loading="clearPermissionsRequest.loading" @click="clearAllPermissions">清空</el-button>
+                  <el-button plain size="small" :loading="permissionsRequest.loading" @click="loadPermissions">{{ t('governance.refresh') }}</el-button>
+                  <el-button size="small" type="danger" :disabled="permissionRows.length === 0" :loading="clearPermissionsRequest.loading" @click="clearAllPermissions">{{ t('governance.clear') }}</el-button>
                 </div>
               </div>
             </template>
@@ -269,7 +269,7 @@
                 <article v-for="row in permissionRows" :key="row.key" class="permission-item" :class="row.approved ? 'approved' : 'denied'">
                   <div>
                     <strong>{{ row.key }}</strong>
-                    <span>{{ capabilityLabel(row.capabilityType, row.capabilityKind) }} · 风险 {{ riskLabel(row.riskLevel) }}</span>
+                    <span>{{ capabilityLabel(row.capabilityType, row.capabilityKind) }} · {{ t('governance.risk', { value: riskLabel(row.riskLevel) }) }}</span>
                   </div>
                   <el-button
                     type="danger"
@@ -279,11 +279,11 @@
                     :disabled="revokingPermissionKeys.has(row.key)"
                     @click="revokePermissionItem(row.key)"
                   >
-                    撤销
+                    {{ t('governance.revoke') }}
                   </el-button>
                 </article>
               </div>
-              <el-empty v-else description="暂无审批记录" :image-size="60" />
+              <el-empty v-else :description="t('governance.emptyPermissions')" :image-size="60" />
             </AsyncState>
           </el-card>
         </aside>
@@ -294,10 +294,10 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>扩展宿主</strong>
-                <span>智能体 / 桌面应用 / MCP</span>
+                <strong>{{ t('governance.extensionsTitle') }}</strong>
+                <span>{{ t('governance.extensionsSubtitle') }}</span>
               </div>
-              <el-button plain size="small" :loading="agentPluginsRequest.loading" @click="refreshExtensions">刷新扩展</el-button>
+              <el-button plain size="small" :loading="agentPluginsRequest.loading" @click="refreshExtensions">{{ t('governance.refreshExtensions') }}</el-button>
             </div>
           </template>
           <AsyncState :loading="extensionLoading" :error="extensionError" :show-retry="false">
@@ -309,15 +309,15 @@
               </article>
             </div>
             <el-alert v-if="agentPluginMutationError" class="panel-alert" :title="agentPluginMutationError" type="error" show-icon :closable="false" />
-            <div v-if="agentPluginRows.length" class="agent-plugin-list" aria-label="智能体插件运行配置">
+            <div v-if="agentPluginRows.length" class="agent-plugin-list" :aria-label="t('governance.agentPluginListAria')">
               <article v-for="plugin in agentPluginRows" :key="plugin.id" class="agent-plugin-item" :class="{ disabled: !plugin.enabled, broken: plugin.error }">
                 <div class="agent-plugin-main">
                   <div>
                     <strong>{{ plugin.name || plugin.id }}</strong>
-                    <span v-if="plugin.version">版本 {{ plugin.version }}</span>
+                    <span v-if="plugin.version">{{ t('governance.version', { value: plugin.version }) }}</span>
                   </div>
                   <div class="action-row">
-                    <el-tag size="small" :type="plugin.loaded ? 'success' : plugin.error ? 'danger' : 'info'">{{ plugin.loaded ? '已加载' : plugin.error ? '异常' : '未加载' }}</el-tag>
+                    <el-tag size="small" :type="plugin.loaded ? 'success' : plugin.error ? 'danger' : 'info'">{{ plugin.loaded ? t('governance.loaded') : plugin.error ? t('governance.loadError') : t('governance.notLoaded') }}</el-tag>
                     <el-switch
                       :model-value="plugin.enabled"
                       size="small"
@@ -335,15 +335,15 @@
                     resize="vertical"
                     spellcheck="false"
                   />
-                  <el-button size="small" type="primary" plain :loading="updateAgentPluginConfigRequest.loading" @click="saveAgentPluginConfig(plugin.id)">保存配置</el-button>
+                  <el-button size="small" type="primary" plain :loading="updateAgentPluginConfigRequest.loading" @click="saveAgentPluginConfig(plugin.id)">{{ t('governance.saveConfig') }}</el-button>
                 </div>
               </article>
             </div>
-            <el-empty v-else description="暂无智能体插件" :image-size="60" />
+            <el-empty v-else :description="t('governance.emptyAgentPlugins')" :image-size="60" />
             <div class="contribution-matrix">
-              <div class="matrix-head">贡献类型</div>
-              <div>Electron 插件</div>
-              <div>智能体插件</div>
+              <div class="matrix-head">{{ t('governance.matrixHead') }}</div>
+              <div>{{ t('governance.category.electronPlugins') }}</div>
+              <div>{{ t('governance.category.agentPlugins') }}</div>
               <div>MCP</div>
               <template v-for="row in contributionComparisonRows" :key="row.category">
                 <div class="matrix-category">{{ contributionCategoryLabel(row.category) }}</div>
@@ -359,9 +359,9 @@
           <template #header>
             <div class="card-head compact">
               <div>
-                <strong>{{ permissionAuditRows.length }} 条事件</strong>
+                <strong>{{ t('governance.auditEventCount', { count: permissionAuditRows.length }) }}</strong>
               </div>
-              <el-tag :type="permissionAuditRows.length ? 'warning' : 'success'">{{ permissionAuditRows.length ? '可追踪' : '暂无事件' }}</el-tag>
+              <el-tag :type="permissionAuditRows.length ? 'warning' : 'success'">{{ permissionAuditRows.length ? t('governance.traceable') : t('governance.noEvents') }}</el-tag>
             </div>
           </template>
           <AsyncState :loading="permissionsRequest.loading" :error="permissionsRequest.error" :show-retry="false">
@@ -370,11 +370,11 @@
                 <div class="audit-dot"></div>
                 <div>
                   <strong>{{ permissionAuditTitle(item) }}</strong>
-                  <span>{{ formatMcpTimestamp(item.timestamp) }} · {{ decisionLabel(item.decision) }} · 风险 {{ riskLabel(item.risk_level) }}</span>
+                  <span>{{ formatMcpTimestamp(item.timestamp) }} · {{ decisionLabel(item.decision) }} · {{ t('governance.risk', { value: riskLabel(item.risk_level) }) }}</span>
                 </div>
               </article>
             </div>
-            <el-empty v-else description="暂无审批审计事件" :image-size="60" />
+            <el-empty v-else :description="t('governance.emptyAudit')" :image-size="60" />
           </AsyncState>
         </el-card>
       </section>
@@ -406,6 +406,7 @@ import 'element-plus/es/components/tabs/style/css'
 import 'element-plus/es/components/tab-pane/style/css'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
+import { t } from '@/i18n'
 import { systemClient } from '@/api/client'
 import { useSystemDomain } from '../composables/useSystemDomain'
 import ConnectorConfigPane from '../components/ConnectorConfigPane.vue'
@@ -417,12 +418,12 @@ import type { PluginContributionSummary } from '@/../shared/plugin'
 
 type GovernanceViewId = 'connectors' | 'mcp' | 'permissions' | 'extensions'
 
-const governanceViews: Array<{ id: GovernanceViewId; label: string }> = [
-  { id: 'connectors', label: '连接器' },
+const governanceViews = computed<Array<{ id: GovernanceViewId; label: string }>>(() => [
+  { id: 'connectors', label: t('governance.view.connectors') },
   { id: 'mcp', label: 'MCP' },
-  { id: 'permissions', label: '授权' },
-  { id: 'extensions', label: '扩展' },
-]
+  { id: 'permissions', label: t('governance.view.permissions') },
+  { id: 'extensions', label: t('governance.view.extensions') },
+])
 const activeGovernanceView = ref<GovernanceViewId>('connectors')
 
 const {
@@ -632,10 +633,10 @@ const connectedMcpCount = computed(() => mcpRows.value.filter((row) => row.conne
 const failingMcpCount = computed(() => mcpRows.value.filter((row) => row.enabled && !row.connected).length)
 const disabledMcpCount = computed(() => mcpRows.value.filter((row) => !row.enabled).length)
 const mcpFilterOptions = computed<MCPFilterOption[]>(() => [
-  { value: 'all', label: '全部', count: mcpRows.value.length },
-  { value: 'connected', label: '已连接', count: connectedMcpCount.value },
-  { value: 'error', label: '需处理', count: failingMcpCount.value },
-  { value: 'disabled', label: '未启用', count: disabledMcpCount.value },
+  { value: 'all', label: t('governance.filter.all'), count: mcpRows.value.length },
+  { value: 'connected', label: t('governance.filter.connected'), count: connectedMcpCount.value },
+  { value: 'error', label: t('governance.filter.needsAttention'), count: failingMcpCount.value },
+  { value: 'disabled', label: t('governance.filter.disabled'), count: disabledMcpCount.value },
 ])
 const filteredMcpRows = computed(() => mcpRows.value.filter((row) => {
   if (mcpFilter.value === 'connected') return row.connected
@@ -644,33 +645,33 @@ const filteredMcpRows = computed(() => mcpRows.value.filter((row) => {
   return true
 }))
 const mcpEmptyDescription = computed(() => {
-  if (!mcpRows.value.length) return '暂无 MCP 服务器配置'
+  if (!mcpRows.value.length) return t('governance.emptyMcpServers')
   const selected = mcpFilterOptions.value.find((item) => item.value === mcpFilter.value)
-  return `没有${selected?.label || '当前'} MCP 服务`
+  return t('governance.emptyMcpFiltered', { filter: selected?.label || t('governance.current') })
 })
 
 const connectorStateLabel = (state: ConnectorState) => {
   const labels: Record<ConnectorState, string> = {
-    running: '运行中',
-    disabled: '已停用',
-    failure: '故障',
-    uninstalled: '未安装',
+    running: t('governance.state.running'),
+    disabled: t('governance.state.disabled'),
+    failure: t('governance.state.failure'),
+    uninstalled: t('governance.state.uninstalled'),
   }
   return labels[state]
 }
 
 const connectorReadinessLabel = (readiness: ConnectorStatus['readiness']) => {
-  if (!readiness) return '未提供'
-  if (readiness.status === 'ready_for_staging') return readiness.requiresPublicHttps ? '配置完整，仍需公网 HTTPS 验证' : '配置完整，仍需桥接可达性验证'
-  if (readiness.status === 'not_qualified') return readiness.reasons[0]?.detail || '未达到 staging 条件'
+  if (!readiness) return t('governance.notProvided')
+  if (readiness.status === 'ready_for_staging') return readiness.requiresPublicHttps ? t('governance.readiness.publicHttps') : t('governance.readiness.bridgeReachable')
+  if (readiness.status === 'not_qualified') return readiness.reasons[0]?.detail || t('governance.readiness.notQualified')
   return readiness.status
 }
 
 const connectorDisplayName = (connectorId: MessageConnectorId) => ({
   telegram: 'Telegram',
   discord: 'Discord',
-  qq: 'QQ 个人账号兼容桥',
-  wechat: '微信个人账号兼容桥',
+  qq: t('governance.connectorName.qq'),
+  wechat: t('governance.connectorName.wechat'),
 }[connectorId])
 
 const copyConnectorWebhookPath = async (connectorId: MessageConnectorId) => {
@@ -679,9 +680,9 @@ const copyConnectorWebhookPath = async (connectorId: MessageConnectorId) => {
   try {
     if (!navigator.clipboard?.writeText) throw new Error('clipboard_unavailable')
     await navigator.clipboard.writeText(path)
-    ElMessage.success('回调路径已复制')
+    ElMessage.success(t('governance.toast.webhookPathCopied'))
   } catch {
-    ElMessage.warning('当前环境无法访问剪贴板，请手动复制回调路径')
+    ElMessage.warning(t('governance.toast.clipboardUnavailable'))
   }
 }
 
@@ -702,24 +703,24 @@ const refreshConnectorState = async (connectorId: MessageConnectorId) => {
   ])
 }
 const formatRecoveryTime = (timestamp: number | null | undefined) => {
-  if (!timestamp || !Number.isFinite(timestamp)) return '尚未扫描'
+  if (!timestamp || !Number.isFinite(timestamp)) return t('governance.notScanned')
   return new Date(timestamp * 1000).toLocaleString()
 }
 const connectorDeliveryStatusLabel = (status: string) => ({
-  delivered: '已送达',
-  processing: '处理中',
-  sending: '发送中（取消过晚）',
-  failed: '待重投',
-  unknown_effect: '外部结果未知（需人工确认）',
+  delivered: t('governance.delivery.delivered'),
+  processing: t('governance.delivery.processing'),
+  sending: t('governance.delivery.sending'),
+  failed: t('governance.delivery.failed'),
+  unknown_effect: t('governance.delivery.unknownEffect'),
 }[status] || status)
 
 const connectorProbeSnapshot = (connectorId: MessageConnectorId) => connectorProbes.value[connectorId]
 const connectorProbeStatusLabel = (snapshot: ConnectorProbeSnapshot) => {
-  if (snapshot.status === 'reachable') return '连接可用'
-  if (snapshot.status === 'signature_ready') return '仅签名校验就绪'
-  if (snapshot.status === 'bridge_reachable') return '兼容桥可用'
-  if (snapshot.status === 'provider_rejected') return '服务端拒绝'
-  if (snapshot.status === 'unreachable') return '无法连接'
+  if (snapshot.status === 'reachable') return t('governance.probe.reachable')
+  if (snapshot.status === 'signature_ready') return t('governance.probe.signatureReady')
+  if (snapshot.status === 'bridge_reachable') return t('governance.probe.bridgeReachable')
+  if (snapshot.status === 'provider_rejected') return t('governance.probe.providerRejected')
+  if (snapshot.status === 'unreachable') return t('governance.probe.unreachable')
   return snapshot.status
 }
 const connectorProbeTagType = (snapshot: ConnectorProbeSnapshot): 'success' | 'info' | 'warning' | 'danger' => {
@@ -736,10 +737,10 @@ const cancelConnectorEventItem = async (connectorId: MessageConnectorId, eventId
   addPending(cancellingEventIds, eventId)
   try {
     const result = await cancelConnectorEvent(connectorId, eventId)
-    if (result?.cancelled) ElMessage.success('事件处理已取消')
-    else ElMessage.warning(cancelConnectorEventRequest.error || '取消过晚；回复可能已经发送')
+    if (result?.cancelled) ElMessage.success(t('governance.toast.eventCancelled'))
+    else ElMessage.warning(cancelConnectorEventRequest.error || t('governance.toast.tooLateToCancel'))
   } catch (error) {
-    ElMessage.warning(error instanceof Error ? describeError(error) : '取消状态未知；请刷新后检查')
+    ElMessage.warning(error instanceof Error ? describeError(error) : t('governance.toast.cancelStateUnknown'))
   } finally {
     removePending(cancellingEventIds, eventId)
     await refreshConnectorState(connectorId).catch(() => undefined)
@@ -750,9 +751,9 @@ const retryDeliveryItem = async (connectorId: MessageConnectorId, deliveryKey: s
   addPending(retryingDeliveryKeys, deliveryKey)
   try {
     const result = await retryConnectorDelivery(connectorId, deliveryKey)
-    if (result?.ok) ElMessage.success(result.alreadySent ? '该事件已送达' : '回复已重新投递')
+    if (result?.ok) ElMessage.success(result.alreadySent ? t('governance.toast.alreadySent') : t('governance.toast.resentDelivery'))
   } catch (error) {
-    ElMessage.error(error instanceof Error ? describeError(error) : '重新投递失败')
+    ElMessage.error(error instanceof Error ? describeError(error) : t('governance.toast.redeliverFailed'))
   } finally {
     removePending(retryingDeliveryKeys, deliveryKey)
     await refreshConnectorState(connectorId).catch(() => undefined)
@@ -767,12 +768,12 @@ const resolveConnectorEventItem = async (
   try {
     await ElMessageBox.confirm(
       outcome === 'delivered'
-        ? '请先在外部平台确认这条回复已经出现，再将本地状态标记为已送达。'
-        : '请确认外部平台没有收到这条回复。此操作不会自动再次发送。',
-      outcome === 'delivered' ? '确认外部发送结果' : '确认未送达',
+        ? t('governance.confirm.resolveDeliveredMessage')
+        : t('governance.confirm.resolveFailedMessage'),
+      outcome === 'delivered' ? t('governance.confirm.resolveDeliveredTitle') : t('governance.confirm.resolveFailedTitle'),
       {
-        confirmButtonText: outcome === 'delivered' ? '标记已送达' : '标记未送达',
-        cancelButtonText: '取消',
+        confirmButtonText: outcome === 'delivered' ? t('governance.confirm.markDelivered') : t('governance.confirm.markFailed'),
+        cancelButtonText: t('governance.common.cancel'),
         type: outcome === 'delivered' ? 'info' : 'warning',
       },
     )
@@ -783,12 +784,12 @@ const resolveConnectorEventItem = async (
   try {
     const result = await resolveConnectorEvent(connectorId, eventId, outcome)
     if (result?.ok) {
-      ElMessage.success(result.alreadyResolved ? '事件状态已经收敛' : outcome === 'delivered' ? '已标记为送达' : '已标记为失败，可人工重投')
+      ElMessage.success(result.alreadyResolved ? t('governance.toast.stateConverged') : outcome === 'delivered' ? t('governance.toast.markedDelivered') : t('governance.toast.markedFailed'))
     } else {
-      ElMessage.warning(resolveConnectorEventRequest.error || '状态未能收敛，请刷新后重试')
+      ElMessage.warning(resolveConnectorEventRequest.error || t('governance.toast.stateNotConverged'))
     }
   } catch (error) {
-    ElMessage.warning(error instanceof Error ? describeError(error) : '状态未能收敛，请刷新后重试')
+    ElMessage.warning(error instanceof Error ? describeError(error) : t('governance.toast.stateNotConverged'))
   } finally {
     removePending(resolvingEventIds, eventId)
     await refreshConnectorState(connectorId).catch(() => undefined)
@@ -810,9 +811,9 @@ const probeConnectorItem = async (connectorId: MessageConnectorId, notify = true
 }
 
 const governancePosture = computed(() => {
-  if (failingMcpCount.value > 0) return '需要复核 MCP 连接'
-  if (mcpRows.value.length === 0 && permissionRows.value.length === 0) return '等待治理快照'
-  return '治理面稳定'
+  if (failingMcpCount.value > 0) return t('governance.posture.reviewMcp')
+  if (mcpRows.value.length === 0 && permissionRows.value.length === 0) return t('governance.posture.awaitingSnapshot')
+  return t('governance.posture.stable')
 })
 
 const governancePostureTagType = computed(() => {
@@ -823,21 +824,21 @@ const governancePostureTagType = computed(() => {
 
 const extensionHosts = computed(() => [
   {
-    label: '智能体插件',
+    label: t('governance.category.agentPlugins'),
     value: agentPluginRows.value.length,
-    detail: `${agentPluginRows.value.filter((item) => item.enabled).length} 个已启用`,
+    detail: t('governance.enabledCount', { count: agentPluginRows.value.filter((item) => item.enabled).length }),
     tone: 'blue',
   },
   {
-    label: 'Electron 插件',
+    label: t('governance.category.electronPlugins'),
     value: electronPluginSnapshot.value?.plugins.length ?? 0,
-    detail: `${electronPluginSnapshot.value?.plugins.filter((item) => item.enabled).length ?? 0} 个已启用`,
+    detail: t('governance.enabledCount', { count: electronPluginSnapshot.value?.plugins.filter((item) => item.enabled).length ?? 0 }),
     tone: 'violet',
   },
   {
-    label: 'MCP 贡献',
+    label: t('governance.category.mcpContributions'),
     value: mcpContributionSummary.value.reduce((total, item) => total + item.count, 0),
-    detail: '来自外部上下文协议服务',
+    detail: t('governance.category.mcpDetail'),
     tone: 'green',
   },
 ])
@@ -855,22 +856,22 @@ const mcpHistoryTagType = (status: string): 'success' | 'warning' | 'danger' | '
 
 const mcpHistoryStatusLabel = (status: string) => {
   const labels: Record<string, string> = {
-    ok: '成功',
-    enabled: '启用',
-    started: '启动',
-    pending: '等待',
-    closing: '关闭中',
-    error: '错误',
-    failed: '失败',
-    disabled: '禁用',
-    closed: '已关闭',
-    removed: '已删除',
+    ok: t('governance.history.ok'),
+    enabled: t('governance.history.enabled'),
+    started: t('governance.history.started'),
+    pending: t('governance.history.pending'),
+    closing: t('governance.history.closing'),
+    error: t('governance.history.error'),
+    failed: t('governance.history.failed'),
+    disabled: t('governance.history.disabled'),
+    closed: t('governance.history.closed'),
+    removed: t('governance.history.removed'),
   }
   return labels[status] || status
 }
 
 const formatInventoryNames = (items?: MCPInventoryItem[] | null) => {
-  if (!items?.length) return '未上报库存条目'
+  if (!items?.length) return t('governance.inventoryEmpty')
   return items.map((item) => item.description ? `${item.name}: ${item.description}` : item.name).join('\n')
 }
 
@@ -896,14 +897,14 @@ const transportLabel = (transport: string) => {
 
 const presetCategoryLabel = (category: string) => {
   const labels: Record<string, string> = {
-    companion: '桌宠',
-    daily: '日常',
-    diagnostics: '诊断',
-    browser: '浏览器',
-    research: '调研',
-    web: '网页',
-    docs: '文档',
-    code: '代码',
+    companion: t('governance.preset.companion'),
+    daily: t('governance.preset.daily'),
+    diagnostics: t('governance.preset.diagnostics'),
+    browser: t('governance.preset.browser'),
+    research: t('governance.preset.research'),
+    web: t('governance.preset.web'),
+    docs: t('governance.preset.docs'),
+    code: t('governance.preset.code'),
   }
   return labels[category] || category
 }
@@ -922,10 +923,10 @@ const mcpRowTagType = (row: MCPRow): 'success' | 'warning' | 'danger' | 'info' =
 }
 
 const mcpRowStatusLabel = (row: MCPRow) => {
-  if (!row.enabled) return '已禁用'
-  if (row.connected) return '已连接'
-  if (row.inventory_error) return '库存异常'
-  return '离线'
+  if (!row.enabled) return t('governance.mcpRow.disabled')
+  if (row.connected) return t('governance.mcpRow.connected')
+  if (row.inventory_error) return t('governance.inventoryError')
+  return t('governance.mcpRow.offline')
 }
 
 const mcpEndpointLabel = (row: MCPRow) => row.transport === 'stdio' ? `${row.command || 'stdio'} ${(row.args || []).join(' ')}`.trim() : row.base_url
@@ -947,33 +948,33 @@ const canSubmitMcp = computed(() => {
 
 const contributionCategoryLabel = (category: ContributionCategory) => {
   const labels: Record<ContributionCategory, string> = {
-    ui: '界面入口',
-    capability: '能力工具',
-    event: '事件钩子',
-    policy: '权限策略',
+    ui: t('governance.contribution.ui'),
+    capability: t('governance.contribution.capability'),
+    event: t('governance.contribution.event'),
+    policy: t('governance.contribution.policy'),
   }
   return labels[category]
 }
 
 const capabilityLabel = (type: string, kind: string) => `${type || 'tool'} / ${kind || 'tool'}`
-const riskLabel = (risk?: string | null) => risk || '未知'
+const riskLabel = (risk?: string | null) => risk || t('governance.riskUnknown')
 
 const decisionLabel = (decision: string) => {
   const labels: Record<string, string> = {
-    approved: '已允许',
-    allowed: '已允许',
-    denied: '已拒绝',
-    auto_allow: '自动允许',
-    remembered_allow: '记住允许',
-    remembered_deny: '记住阻断',
-    remembered: '已记住',
-    revoked: '已撤销',
-    cleared: '已清空',
+    approved: t('governance.decision.approved'),
+    allowed: t('governance.decision.approved'),
+    denied: t('governance.decision.denied'),
+    auto_allow: t('governance.decision.autoAllow'),
+    remembered_allow: t('governance.decision.rememberedAllow'),
+    remembered_deny: t('governance.decision.rememberedDeny'),
+    remembered: t('governance.decision.remembered'),
+    revoked: t('governance.decision.revoked'),
+    cleared: t('governance.decision.cleared'),
   }
   return labels[decision] || decision
 }
 
-const permissionAuditTitle = (item: PermissionAuditRecord) => item.capability_id || item.tool_name || item.capability_kind || '未命名能力'
+const permissionAuditTitle = (item: PermissionAuditRecord) => item.capability_id || item.tool_name || item.capability_kind || t('governance.unnamedCapability')
 
 const refreshGovernance = async () => {
   await Promise.all([
@@ -1004,11 +1005,11 @@ const clearAllPermissions = async () => {
   if (permissionRows.value.length === 0) return
   try {
     await ElMessageBox.confirm(
-      `将清空 ${permissionRows.value.length} 条已记住的权限规则。之后工具调用会重新询问。`,
-      '清空已记住权限',
+      t('governance.confirm.clearPermissionsMessage', { count: permissionRows.value.length }),
+      t('governance.confirm.clearPermissionsTitle'),
       {
-        confirmButtonText: '清空权限',
-        cancelButtonText: '取消',
+        confirmButtonText: t('governance.confirm.clearPermissionsConfirm'),
+        cancelButtonText: t('governance.common.cancel'),
         type: 'warning',
       },
     )
@@ -1025,11 +1026,11 @@ const parseRecordJson = (value: string, label: string): Record<string, string> |
   try {
     parsed = JSON.parse(trimmed)
   } catch {
-    ElMessage.error(`${label} 必须是有效 JSON`)
+    ElMessage.error(t('governance.toast.invalidJson', { label }))
     return undefined
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    ElMessage.error(`${label} 必须是 JSON 对象`)
+    ElMessage.error(t('governance.toast.invalidJsonObject', { label }))
     return undefined
   }
   return Object.fromEntries(
@@ -1041,16 +1042,16 @@ const parseRecordJson = (value: string, label: string): Record<string, string> |
 
 const submitMcp = async () => {
   if (!mcpForm.name.trim()) {
-    ElMessage.warning('请填写 MCP 服务标识名')
+    ElMessage.warning(t('governance.toast.mcpNameRequired'))
     return
   }
   if (!canSubmitMcp.value) {
-    ElMessage.warning(mcpForm.transport === 'stdio' ? '请填写 STDIO 启动命令' : '请填写有效的 MCP 服务 URL')
+    ElMessage.warning(mcpForm.transport === 'stdio' ? t('governance.toast.mcpCommandRequired') : t('governance.toast.mcpUrlRequired'))
     return
   }
-  const env = parseRecordJson(mcpForm.env_text, '环境变量')
+  const env = parseRecordJson(mcpForm.env_text, t('governance.field.envKeys'))
   if (mcpForm.env_text.trim() && !env) return
-  const headers = parseRecordJson(mcpForm.headers_text, '请求头')
+  const headers = parseRecordJson(mcpForm.headers_text, t('governance.field.headers'))
   if (mcpForm.headers_text.trim() && !headers) return
   let args: string[] | undefined
   if (mcpForm.args_text.trim()) {
@@ -1061,7 +1062,7 @@ const submitMcp = async () => {
       }
       args = parsed
     } catch {
-      ElMessage.error('参数必须是 JSON 字符串数组')
+      ElMessage.error(t('governance.toast.argsMustBeStringArray'))
       return
     }
   }
@@ -1087,17 +1088,17 @@ const submitMcp = async () => {
 
 const installPreset = async (presetId: string) => {
   const result = await installMcpPreset(presetId)
-  if (result?.ok) ElMessage.success('MCP 预设已安装')
+  if (result?.ok) ElMessage.success(t('governance.toast.mcpPresetInstalled'))
 }
 
 const removeMcpItem = async (serverName: string) => {
   try {
     await ElMessageBox.confirm(
-      `将删除 MCP 服务“${serverName}”。重新注册前，它提供的工具和资源不会再出现。`,
-      '删除 MCP 服务',
+      t('governance.confirm.removeMcpMessage', { name: serverName }),
+      t('governance.confirm.removeMcpTitle'),
       {
-        confirmButtonText: '删除服务',
-        cancelButtonText: '取消',
+        confirmButtonText: t('governance.confirm.removeMcpConfirm'),
+        cancelButtonText: t('governance.common.cancel'),
         type: 'warning',
       },
     )
@@ -1150,7 +1151,7 @@ const disableConnectorItem = async (connectorId: string) => {
       if (messageConnectorIds.includes(connectorId as MessageConnectorId)) {
         await loadConnectorConfig(connectorId as MessageConnectorId)
       }
-      ElMessage.success('连接器已停用')
+      ElMessage.success(t('governance.toast.connectorDisabled'))
     } else if (result?.error) {
       ElMessage.error(result.error)
     }
@@ -1181,7 +1182,7 @@ const loadConnectorConfig = async (connectorId: MessageConnectorId) => {
     if (connectorId === 'qq' || connectorId === 'wechat') await loadConnectorAccount(connectorId)
     return result
   } catch (error) {
-    ElMessage.error(error instanceof Error ? describeError(error) : `${connectorId} 配置读取失败`)
+    ElMessage.error(error instanceof Error ? describeError(error) : t('governance.toast.connectorConfigFailed', { connector: connectorId }))
     return null
   } finally {
     removePending(loadingConnectorConfigIds, connectorId)
@@ -1201,7 +1202,7 @@ const loadConnectorConfigs = async () => {
 const saveConnectorConfig = async (connectorId: MessageConnectorId) => {
   const draft = connectorDrafts[connectorId]
   if (connectorId === 'discord' && draft.publicKey && !/^[0-9a-fA-F]{64}$/.test(draft.publicKey)) {
-    ElMessage.warning('Discord Public Key 必须是 64 位十六进制字符串')
+    ElMessage.warning(t('governance.toast.discordPublicKeyInvalid'))
     return
   }
   const payload: MessageConnectorConfigUpdate = { enabled: draft.enabled }
@@ -1243,28 +1244,33 @@ const saveConnectorConfig = async (connectorId: MessageConnectorId) => {
     draft.clearBridgeToken = false
     await loadConnectors()
     const probe = await probeConnectorItem(connectorId, false)
-    if (probe?.ok) ElMessage.success(`${connectorDisplayName(connectorId)} 设置已保存，${connectorProbeStatusLabel(probe)}`)
-    else if (probe) ElMessage.warning(`${connectorDisplayName(connectorId)} 设置已保存，但${connectorProbeStatusLabel(probe)}`)
-    else ElMessage.success(`${connectorDisplayName(connectorId)} 设置已保存，连接状态待检查`)
+    if (probe?.ok) ElMessage.success(t('governance.toast.connectorSaved', { name: connectorDisplayName(connectorId), status: connectorProbeStatusLabel(probe) }))
+    else if (probe) ElMessage.warning(t('governance.toast.connectorSavedBut', { name: connectorDisplayName(connectorId), status: connectorProbeStatusLabel(probe) }))
+    else ElMessage.success(t('governance.toast.connectorSavedPending', { name: connectorDisplayName(connectorId) }))
   } catch (error) {
-    ElMessage.error(error instanceof Error ? describeError(error) : '连接器设置保存失败')
+    ElMessage.error(error instanceof Error ? describeError(error) : t('governance.toast.connectorSaveFailed'))
   } finally {
     removePending(savingConnectorIds, connectorId)
   }
 }
 
-const accountStateLabel = (state: string) => ({ connected: '已连接', awaiting_scan: '等待登录', signed_out: '未登录', error: '桥接错误' }[state] || state)
+const accountStateLabel = (state: string) => ({
+  connected: t('governance.account.connected'),
+  awaiting_scan: t('governance.account.awaitingScan'),
+  signed_out: t('governance.account.signedOut'),
+  error: t('governance.account.error'),
+}[state] || state)
 
 const qqBridgeStateLabel = computed(() => {
   const state = qqBridge.value?.state || 'not_installed'
   return ({
-    not_installed: '内置桥未安装',
-    installed: '内置桥已安装',
-    starting: '内置桥启动中',
-    awaiting_scan: '等待扫码',
-    connected: '内置桥已连接',
-    failed: '内置桥异常',
-    stopped: '内置桥已停止',
+    not_installed: t('governance.bridge.notInstalled'),
+    installed: t('governance.bridge.installed'),
+    starting: t('governance.bridge.starting'),
+    awaiting_scan: t('governance.bridge.awaitingScan'),
+    connected: t('governance.bridge.connected'),
+    failed: t('governance.bridge.failed'),
+    stopped: t('governance.bridge.stopped'),
   } as Record<string, string>)[state] || state
 })
 
@@ -1283,7 +1289,7 @@ const withBridgeBusy = async (action: () => Promise<unknown>, success?: string) 
     await action()
     if (success) ElMessage.success(success)
   } catch (error) {
-    ElMessage.error(error instanceof Error ? describeError(error) : '内置桥操作失败')
+    ElMessage.error(error instanceof Error ? describeError(error) : t('governance.toast.bridgeOperationFailed'))
   } finally {
     bridgeBusy.value = false
     await loadConnectors().catch(() => undefined)
@@ -1292,17 +1298,17 @@ const withBridgeBusy = async (action: () => Promise<unknown>, success?: string) 
 
 const installManagedBridge = () => withBridgeBusy(async () => {
   await ElMessageBox.confirm(
-    '内置桥是第三方个人账号客户端，接入个人 QQ 账号存在封禁风险，且上游未声明开源许可。仍然继续下载并安装吗？',
-    '确认风险',
-    { type: 'warning', confirmButtonText: '我已了解，继续', cancelButtonText: '取消' },
+    t('governance.confirm.bridgeRiskMessage'),
+    t('governance.confirm.bridgeRiskTitle'),
+    { type: 'warning', confirmButtonText: t('governance.confirm.bridgeRiskConfirm'), cancelButtonText: t('governance.common.cancel') },
   )
   await installQqBridge(true)
-}, '内置桥已安装')
+}, t('governance.bridge.installed'))
 
 const startManagedBridge = () => withBridgeBusy(async () => {
   const result = await startQqBridge()
   const hint = (result as { bridge?: { loginHint?: string } } | undefined)?.bridge?.loginHint
-  ElMessage.success(hint || '桥已启动，请在弹出的窗口中扫码')
+  ElMessage.success(hint || t('governance.toast.bridgeStarted'))
 }, undefined)
 
 const refreshManagedBridge = () => withBridgeBusy(() => loadQqBridge(), undefined)
@@ -1310,16 +1316,16 @@ const signServerDraft = ref('')
 watch(() => qqBridge.value?.signServerUrl, (url) => { signServerDraft.value = url || '' }, { immediate: true })
 const saveSignServer = () => withBridgeBusy(async () => {
   await setQqBridgeSignServer(signServerDraft.value.trim())
-}, '签名服务已保存')
-const stopManagedBridge = () => withBridgeBusy(() => stopQqBridge(), '内置桥已停止')
-const logoutManagedBridge = () => withBridgeBusy(() => logoutQqBridge(), '已退出并清除登录状态')
+}, t('governance.toast.signServerSaved'))
+const stopManagedBridge = () => withBridgeBusy(() => stopQqBridge(), t('governance.bridge.stopped'))
+const logoutManagedBridge = () => withBridgeBusy(() => logoutQqBridge(), t('governance.toast.bridgeLoggedOut'))
 
 onMounted(() => {
   void loadQqBridge().catch(() => undefined)
 })
 
 // While the bridge waits for a QR scan the state only changes on the backend,
-// so poll gently instead of making the user press "刷新状态".
+// so poll gently instead of making the user press the refresh button.
 let bridgePollTimer: ReturnType<typeof setInterval> | null = null
 const stopBridgePolling = () => {
   if (bridgePollTimer) {
@@ -1340,7 +1346,7 @@ onBeforeUnmount(stopBridgePolling)
 
 const loginPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
   addPending(accountBusyIds, connectorId)
-  try { const account = await loginConnectorAccount(connectorId); if (account) ElMessage.success(account.loginUrl ? '登录请求已创建，请打开登录页' : `连接状态：${accountStateLabel(account.loginState)}`) } catch (error) { ElMessage.error(error instanceof Error ? describeError(error) : '登录请求失败') } finally { removePending(accountBusyIds, connectorId); await loadConnectors().catch(() => undefined) }
+  try { const account = await loginConnectorAccount(connectorId); if (account) ElMessage.success(account.loginUrl ? t('governance.toast.loginCreated') : t('governance.toast.connectionState', { state: accountStateLabel(account.loginState) })) } catch (error) { ElMessage.error(error instanceof Error ? describeError(error) : t('governance.toast.loginFailed')) } finally { removePending(accountBusyIds, connectorId); await loadConnectors().catch(() => undefined) }
 }
 const refreshPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
   addPending(accountBusyIds, connectorId)
@@ -1348,15 +1354,15 @@ const refreshPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
 }
 const logoutPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
   addPending(accountBusyIds, connectorId)
-  try { await logoutConnectorAccount(connectorId); ElMessage.success('账号已退出') } finally { removePending(accountBusyIds, connectorId); await loadConnectors().catch(() => undefined) }
+  try { await logoutConnectorAccount(connectorId); ElMessage.success(t('governance.toast.accountLoggedOut')) } finally { removePending(accountBusyIds, connectorId); await loadConnectors().catch(() => undefined) }
 }
 
 const unbindPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
   try {
-    await ElMessageBox.confirm('将停用连接器并清除桥地址、协议令牌和账号状态。', '清除桥接配置', {
+    await ElMessageBox.confirm(t('governance.confirm.unbindMessage'), t('governance.confirm.unbindTitle'), {
       type: 'warning',
-      confirmButtonText: '清除',
-      cancelButtonText: '取消',
+      confirmButtonText: t('governance.confirm.unbindConfirm'),
+      cancelButtonText: t('governance.common.cancel'),
     })
   } catch {
     return
@@ -1375,9 +1381,9 @@ const unbindPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
     draft.clearBridgeProtocol = false
     draft.clearBridgeToken = false
     await loadConnectors()
-    ElMessage.success('桥接配置已清除')
+    ElMessage.success(t('governance.toast.bridgeCleared'))
   } catch (error) {
-    ElMessage.error(error instanceof Error ? describeError(error) : '桥接配置清除失败')
+    ElMessage.error(error instanceof Error ? describeError(error) : t('governance.toast.bridgeClearFailed'))
   } finally {
     removePending(accountBusyIds, connectorId)
   }
@@ -1389,18 +1395,18 @@ const saveAgentPluginConfig = async (pluginId: string) => {
   try {
     config = JSON.parse(rawConfig)
   } catch {
-    ElMessage.error('插件配置必须是有效 JSON')
+    ElMessage.error(t('governance.toast.pluginConfigInvalidJson'))
     return
   }
 
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
-    ElMessage.error('插件配置必须是 JSON 对象')
+    ElMessage.error(t('governance.toast.pluginConfigNotObject'))
     return
   }
 
   const result = await updateAgentPluginConfig(pluginId, config as Record<string, unknown>)
   if (result?.ok) {
-    ElMessage.success('插件配置已保存')
+    ElMessage.success(t('governance.toast.pluginConfigSaved'))
   }
 }
 

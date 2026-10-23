@@ -2,7 +2,7 @@
   <div class="workspace-prompt-editor" :class="{ 'is-dense': dense }">
     <section v-if="showMode" class="prompt-section">
       <header class="prompt-section-header">
-        <h3>提示词模式</h3>
+        <h3>{{ t('promptPanel.mode.title') }}</h3>
       </header>
       <div class="mode-segment">
         <button
@@ -19,14 +19,14 @@
 
     <section class="prompt-section">
       <header class="prompt-section-header">
-        <h3>基础提示词</h3>
-        <el-button size="small" text @click="resetBasePrompts">恢复默认</el-button>
+        <h3>{{ t('promptPanel.base.title') }}</h3>
+        <el-button size="small" text @click="resetBasePrompts">{{ t('promptPanel.base.reset') }}</el-button>
       </header>
       <el-form class="prompt-form" label-position="top" @submit.prevent>
-        <el-form-item label="任务模式">
+        <el-form-item :label="t('promptPanel.base.workLabel')">
           <el-input v-model="promptEngineeringModel.workPrompt" type="textarea" :rows="dense ? 4 : 6" resize="none" />
         </el-form-item>
-        <el-form-item label="日常陪伴">
+        <el-form-item :label="t('promptPanel.base.dailyLabel')">
           <el-input v-model="promptEngineeringModel.dailyPrompt" type="textarea" :rows="dense ? 4 : 6" resize="none" />
         </el-form-item>
       </el-form>
@@ -34,23 +34,23 @@
 
     <section class="prompt-section">
       <header class="prompt-section-header">
-        <h3>人格角色卡</h3>
+        <h3>{{ t('promptPanel.roleCard.title') }}</h3>
         <div class="section-actions">
           <input ref="roleCardFileInput" class="hidden-file-input" type="file" accept=".json,application/json" @change="importRoleCardFile">
-          <el-button size="small" plain @click="openRoleCardFilePicker">导入</el-button>
-          <el-button size="small" plain :disabled="!hasRoleCardContent(roleCardModel) || Boolean(roleCardJsonError)" @click="exportRoleCardFile">导出</el-button>
-          <el-switch v-model="roleCardModel.enabled" size="small" inline-prompt active-text="开" inactive-text="关" />
+          <el-button size="small" plain @click="openRoleCardFilePicker">{{ t('promptPanel.roleCard.import') }}</el-button>
+          <el-button size="small" plain :disabled="!hasRoleCardContent(roleCardModel) || Boolean(roleCardJsonError)" @click="exportRoleCardFile">{{ t('promptPanel.roleCard.export') }}</el-button>
+          <el-switch v-model="roleCardModel.enabled" size="small" inline-prompt :active-text="t('promptPanel.switch.on')" :inactive-text="t('promptPanel.switch.off')" />
         </div>
       </header>
 
       <el-form class="prompt-form" label-position="top" @submit.prevent>
-        <el-form-item label="角色卡 JSON">
+        <el-form-item :label="t('promptPanel.roleCard.jsonLabel')">
           <el-input
             v-model="roleCardJson"
             type="textarea"
             :rows="dense ? 8 : 12"
             resize="none"
-            placeholder="{&#10;  &quot;name&quot;: &quot;結崎&quot;,&#10;  &quot;personality&quot;: &quot;温暖、轻快&quot;,&#10;  &quot;scenario&quot;: &quot;住在桌面上的本地 AI 桌宠&quot;,&#10;  &quot;instructions&quot;: &quot;回答简短自然&quot;,&#10;  &quot;firstMessage&quot;: &quot;今天也在这里。&quot;&#10;}"
+            :placeholder="t('promptPanel.roleCard.jsonPlaceholder')"
           />
         </el-form-item>
         <p v-if="roleCardJsonError" class="prompt-field-error">{{ roleCardJsonError }}</p>
@@ -59,27 +59,27 @@
 
     <section class="prompt-section">
       <header class="prompt-section-header">
-        <h3>世界书</h3>
-        <el-switch v-model="worldBookModel.enabled" size="small" inline-prompt active-text="开" inactive-text="关" />
+        <h3>{{ t('promptPanel.world.title') }}</h3>
+        <el-switch v-model="worldBookModel.enabled" size="small" inline-prompt :active-text="t('promptPanel.switch.on')" :inactive-text="t('promptPanel.switch.off')" />
       </header>
 
       <div class="world-book-options">
         <label>
-          <span>扫描深度</span>
+          <span>{{ t('promptPanel.world.scanDepth') }}</span>
           <el-input-number v-model="worldBookModel.scanDepth" size="small" :min="1" :max="32" controls-position="right" />
         </label>
         <label>
-          <span>条目上限</span>
+          <span>{{ t('promptPanel.world.maxEntries') }}</span>
           <el-input-number v-model="worldBookModel.maxEntries" size="small" :min="1" :max="64" controls-position="right" />
         </label>
         <label>
-          <span>预算</span>
+          <span>{{ t('promptPanel.world.budget') }}</span>
           <el-input-number v-model="worldBookModel.budgetTokens" size="small" :min="128" :max="32000" :step="128" controls-position="right" />
         </label>
       </div>
 
       <div class="world-toolbar">
-        <el-input v-model="worldBookSearch" size="small" placeholder="筛选条目" clearable />
+        <el-input v-model="worldBookSearch" size="small" :placeholder="t('promptPanel.world.searchPlaceholder')" clearable />
         <div class="mode-segment world-state-filter">
           <button
             v-for="option in worldBookStateFilterOptions"
@@ -101,13 +101,13 @@
           :disabled="filteredWorldEntries.length === 0"
           @change="toggleFilteredWorldEntrySelection"
         >
-          选中结果
+          {{ t('promptPanel.world.selectAllFiltered') }}
         </el-checkbox>
-        <span>{{ selectedWorldEntryIds.length }} 已选</span>
-        <el-button size="small" plain :disabled="selectedWorldEntryIds.length === 0" @click="batchSetWorldEntriesEnabled(true)">启用</el-button>
-        <el-button size="small" plain :disabled="selectedWorldEntryIds.length === 0" @click="batchSetWorldEntriesEnabled(false)">停用</el-button>
-        <el-button size="small" plain :disabled="selectedWorldEntryIds.length === 0" @click="exportSelectedWorldBookFile">导出选中</el-button>
-        <el-button size="small" text type="danger" :disabled="selectedWorldEntryIds.length === 0" @click="removeSelectedWorldEntries">删除选中</el-button>
+        <span>{{ t('promptPanel.world.selectedCount', { count: selectedWorldEntryIds.length }) }}</span>
+        <el-button size="small" plain :disabled="selectedWorldEntryIds.length === 0" @click="batchSetWorldEntriesEnabled(true)">{{ t('promptPanel.world.enableSelected') }}</el-button>
+        <el-button size="small" plain :disabled="selectedWorldEntryIds.length === 0" @click="batchSetWorldEntriesEnabled(false)">{{ t('promptPanel.world.disableSelected') }}</el-button>
+        <el-button size="small" plain :disabled="selectedWorldEntryIds.length === 0" @click="exportSelectedWorldBookFile">{{ t('promptPanel.world.exportSelected') }}</el-button>
+        <el-button size="small" text type="danger" :disabled="selectedWorldEntryIds.length === 0" @click="removeSelectedWorldEntries">{{ t('promptPanel.world.deleteSelected') }}</el-button>
       </div>
 
       <div class="world-import-row">
@@ -116,7 +116,7 @@
           type="textarea"
           :rows="dense ? 3 : 4"
           resize="none"
-          placeholder="粘贴 character_book、entries 或世界书 JSON"
+          :placeholder="t('promptPanel.world.importPlaceholder')"
         />
         <div class="world-import-actions">
           <div class="mode-segment world-import-mode">
@@ -125,28 +125,28 @@
               :class="{ active: worldBookImportMode === 'replace' }"
               @click="worldBookImportMode = 'replace'"
             >
-              替换
+              {{ t('promptPanel.world.importModeReplace') }}
             </button>
             <button
               type="button"
               :class="{ active: worldBookImportMode === 'merge' }"
               @click="worldBookImportMode = 'merge'"
             >
-              追加
+              {{ t('promptPanel.world.importModeMerge') }}
             </button>
           </div>
           <input ref="worldBookFileInput" class="hidden-file-input" type="file" accept=".json,application/json" @change="importWorldBookFile">
-          <el-button size="small" plain @click="openWorldBookFilePicker">导入文件</el-button>
-          <el-button size="small" type="primary" plain :disabled="!worldBookJson.trim()" @click="importWorldBookJson">导入 JSON</el-button>
-          <el-button size="small" plain :disabled="!worldBookModel.entries.length" @click="exportWorldBookFile">导出文件</el-button>
-          <el-button size="small" text :disabled="!worldBookJson.trim()" @click="worldBookJson = ''">清空</el-button>
+          <el-button size="small" plain @click="openWorldBookFilePicker">{{ t('promptPanel.world.importFile') }}</el-button>
+          <el-button size="small" type="primary" plain :disabled="!worldBookJson.trim()" @click="importWorldBookJson">{{ t('promptPanel.world.importJson') }}</el-button>
+          <el-button size="small" plain :disabled="!worldBookModel.entries.length" @click="exportWorldBookFile">{{ t('promptPanel.world.exportFile') }}</el-button>
+          <el-button size="small" text :disabled="!worldBookJson.trim()" @click="worldBookJson = ''">{{ t('promptPanel.world.clear') }}</el-button>
         </div>
       </div>
       <p v-if="worldBookJsonError" class="prompt-field-error">{{ worldBookJsonError }}</p>
 
       <div v-if="worldBookModel.entries.length" class="world-preview" data-testid="world-book-preview">
         <div class="world-preview-head">
-          <span>触发预览</span>
+          <span>{{ t('promptPanel.world.previewTitle') }}</span>
           <span>{{ worldBookPreviewStatus }}</span>
         </div>
         <el-input
@@ -155,7 +155,7 @@
           type="textarea"
           :rows="dense ? 2 : 3"
           resize="none"
-          placeholder="输入最近对话测试"
+          :placeholder="t('promptPanel.world.previewPlaceholder')"
         />
         <div v-if="worldBookPreviewMatches.length" class="world-preview-list">
           <button
@@ -165,7 +165,7 @@
             class="world-preview-item"
             @click="focusWorldEntryFromPreview(match.entry)"
           >
-            <span>{{ match.entry.title || '未命名条目' }}</span>
+            <span>{{ match.entry.title || t('promptPanel.world.untitledEntry') }}</span>
             <small>{{ match.reason }}</small>
           </button>
         </div>
@@ -173,11 +173,11 @@
       </div>
 
       <div class="world-entry-create">
-        <el-input v-model="worldEntryDraft.title" size="small" placeholder="条目名称" />
-        <el-input v-model="worldEntryDraft.keys" size="small" placeholder="关键词，用逗号分隔" />
-        <el-button size="small" type="primary" plain :disabled="!worldEntryDraft.title.trim() && !worldEntryDraft.content.trim()" @click="addWorldEntry">添加</el-button>
+        <el-input v-model="worldEntryDraft.title" size="small" :placeholder="t('promptPanel.world.entryTitlePlaceholder')" />
+        <el-input v-model="worldEntryDraft.keys" size="small" :placeholder="t('promptPanel.world.entryKeysPlaceholder')" />
+        <el-button size="small" type="primary" plain :disabled="!worldEntryDraft.title.trim() && !worldEntryDraft.content.trim()" @click="addWorldEntry">{{ t('promptPanel.world.addEntry') }}</el-button>
       </div>
-      <el-input v-model="worldEntryDraft.content" class="world-entry-draft-content" type="textarea" :rows="2" resize="none" placeholder="触发后插入的内容" />
+      <el-input v-model="worldEntryDraft.content" class="world-entry-draft-content" type="textarea" :rows="2" resize="none" :placeholder="t('promptPanel.world.entryContentPlaceholder')" />
 
       <template v-if="filteredWorldEntries.length">
         <div class="world-entry-list">
@@ -185,38 +185,38 @@
             <div class="world-entry-head">
               <el-checkbox :model-value="isWorldEntrySelected(entry.id)" @change="(checked: boolean) => setWorldEntrySelected(entry.id, checked)" />
               <el-switch v-model="entry.enabled" size="small" />
-              <el-input v-model="entry.title" size="small" placeholder="条目名称" />
+              <el-input v-model="entry.title" size="small" :placeholder="t('promptPanel.world.entryTitlePlaceholder')" />
               <el-input-number v-model="entry.priority" size="small" :min="0" :max="99" controls-position="right" />
-              <el-button size="small" text type="danger" @click="removeWorldEntry(entry.id)">删除</el-button>
+              <el-button size="small" text type="danger" @click="removeWorldEntry(entry.id)">{{ t('promptPanel.world.deleteEntry') }}</el-button>
             </div>
-            <el-input :model-value="entry.keys.join(', ')" size="small" placeholder="关键词" @update:model-value="(value: string) => updateWorldEntryKeys(entry.id, value)" />
-            <el-input :model-value="entry.secondaryKeys.join(', ')" size="small" placeholder="二级关键词" @update:model-value="(value: string) => updateWorldEntrySecondaryKeys(entry.id, value)" />
+            <el-input :model-value="entry.keys.join(', ')" size="small" :placeholder="t('promptPanel.world.entryKeys')" @update:model-value="(value: string) => updateWorldEntryKeys(entry.id, value)" />
+            <el-input :model-value="entry.secondaryKeys.join(', ')" size="small" :placeholder="t('promptPanel.world.entrySecondaryKeys')" @update:model-value="(value: string) => updateWorldEntrySecondaryKeys(entry.id, value)" />
             <div class="world-entry-options">
               <label>
-                <span>顺序</span>
+                <span>{{ t('promptPanel.world.entryOrder') }}</span>
                 <el-input-number v-model="entry.insertionOrder" size="small" :min="-999" :max="999" controls-position="right" />
               </label>
               <label>
-                <span>概率</span>
+                <span>{{ t('promptPanel.world.entryProbability') }}</span>
                 <el-input-number v-model="entry.probability" size="small" :min="0" :max="100" controls-position="right" />
               </label>
-              <el-switch v-model="entry.constant" size="small" inline-prompt active-text="常驻" inactive-text="常驻" />
-              <el-switch v-model="entry.selective" size="small" inline-prompt active-text="二级" inactive-text="二级" />
-              <el-switch v-model="entry.caseSensitive" size="small" inline-prompt active-text="大小写" inactive-text="大小写" />
-              <el-switch v-model="entry.matchWholeWords" size="small" inline-prompt active-text="整词" inactive-text="整词" />
+              <el-switch v-model="entry.constant" size="small" inline-prompt :active-text="t('promptPanel.world.entryConstant')" :inactive-text="t('promptPanel.world.entryConstant')" />
+              <el-switch v-model="entry.selective" size="small" inline-prompt :active-text="t('promptPanel.world.entrySelective')" :inactive-text="t('promptPanel.world.entrySelective')" />
+              <el-switch v-model="entry.caseSensitive" size="small" inline-prompt :active-text="t('promptPanel.world.entryCaseSensitive')" :inactive-text="t('promptPanel.world.entryCaseSensitive')" />
+              <el-switch v-model="entry.matchWholeWords" size="small" inline-prompt :active-text="t('promptPanel.world.entryWholeWords')" :inactive-text="t('promptPanel.world.entryWholeWords')" />
             </div>
-            <el-input v-model="entry.content" type="textarea" :rows="dense ? 2 : 3" resize="none" placeholder="内容" />
+            <el-input v-model="entry.content" type="textarea" :rows="dense ? 2 : 3" resize="none" :placeholder="t('promptPanel.world.entryContent')" />
           </article>
         </div>
         <div v-if="worldBookTotalPages > 1" class="world-pager">
-          <span>第 {{ worldBookPage }} / {{ worldBookTotalPages }} 页</span>
+          <span>{{ t('promptPanel.world.pageIndicator', { page: worldBookPage, total: worldBookTotalPages }) }}</span>
           <div>
-            <el-button size="small" plain :disabled="worldBookPage <= 1" @click="goWorldBookPage(-1)">上一页</el-button>
-            <el-button size="small" plain :disabled="worldBookPage >= worldBookTotalPages" @click="goWorldBookPage(1)">下一页</el-button>
+            <el-button size="small" plain :disabled="worldBookPage <= 1" @click="goWorldBookPage(-1)">{{ t('promptPanel.world.prevPage') }}</el-button>
+            <el-button size="small" plain :disabled="worldBookPage >= worldBookTotalPages" @click="goWorldBookPage(1)">{{ t('promptPanel.world.nextPage') }}</el-button>
           </div>
         </div>
       </template>
-      <el-empty v-else :description="worldBookModel.entries.length ? '无匹配条目' : '暂无条目'" :image-size="48" />
+      <el-empty v-else :description="worldBookModel.entries.length ? t('promptPanel.world.emptyFiltered') : t('promptPanel.world.emptyAll')" :image-size="48" />
     </section>
   </div>
 </template>
@@ -237,6 +237,7 @@ import { ElForm, ElFormItem } from 'element-plus'
 import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/form-item/style/css'
 import { computed, reactive, ref, watch } from 'vue'
+import { t } from '@/i18n'
 import { DEFAULT_DAILY_PROMPT, DEFAULT_WORK_PROMPT, useWorkspaceStore } from '@/stores/workspaceStore'
 import type { WorkspacePromptEngineering, WorkspacePromptMode, WorkspaceRoleCard, WorkspaceWorldBook, WorkspaceWorldBookEntry } from '@/../shared/workspace'
 
@@ -293,17 +294,17 @@ interface WorldBookPreviewMatch {
   contentCharacters: number
 }
 
-const promptModeOptions: Array<{ label: string; value: WorkspacePromptMode }> = [
-  { label: '自动', value: 'auto' },
-  { label: '任务', value: 'work' },
-  { label: '日常陪伴', value: 'daily' },
-]
+const promptModeOptions = computed<Array<{ label: string; value: WorkspacePromptMode }>>(() => [
+  { label: t('promptPanel.mode.auto'), value: 'auto' },
+  { label: t('promptPanel.mode.work'), value: 'work' },
+  { label: t('promptPanel.mode.daily'), value: 'daily' },
+])
 
-const worldBookStateFilterOptions: Array<{ label: string; value: 'all' | 'enabled' | 'disabled' }> = [
-  { label: '全部', value: 'all' },
-  { label: '启用', value: 'enabled' },
-  { label: '停用', value: 'disabled' },
-]
+const worldBookStateFilterOptions = computed<Array<{ label: string; value: 'all' | 'enabled' | 'disabled' }>>(() => [
+  { label: t('promptPanel.world.filterAll'), value: 'all' },
+  { label: t('promptPanel.world.filterEnabled'), value: 'enabled' },
+  { label: t('promptPanel.world.filterDisabled'), value: 'disabled' },
+])
 
 const activeWorkspaceId = computed(() => workspaceStore.activeWorkspaceId)
 const workspacePromptMode = computed<WorkspacePromptMode>({
@@ -420,7 +421,7 @@ const createWorldBookPreviewMatch = (entry: WorkspaceWorldBookEntry, text: strin
       entry,
       primaryKeys: [],
       secondaryKeys: [],
-      reason: '常驻',
+      reason: t('promptPanel.world.matchConstant'),
       contentCharacters: entry.content.length,
     }
   }
@@ -466,14 +467,19 @@ const worldBookPreviewMatches = computed(() => {
 })
 
 const worldBookPreviewStatus = computed(() => {
-  if (!worldBookModel.enabled) return '已关闭'
+  if (!worldBookModel.enabled) return t('promptPanel.world.previewDisabled')
   const usedCharacters = worldBookPreviewMatches.value.reduce((total, match) => total + match.contentCharacters, 0)
-  return `命中 ${worldBookPreviewMatches.value.length} 条 · ${usedCharacters} 字`
+  return t('promptPanel.world.previewStatus', {
+    count: worldBookPreviewMatches.value.length,
+    chars: usedCharacters,
+  })
 })
 
 const worldBookPreviewEmptyLabel = computed(() => {
-  if (!worldBookModel.enabled) return '世界书已关闭'
-  return worldBookPreviewText.value.trim() ? '未命中' : '等待输入'
+  if (!worldBookModel.enabled) return t('promptPanel.world.previewWorldDisabled')
+  return worldBookPreviewText.value.trim()
+    ? t('promptPanel.world.previewNoMatch')
+    : t('promptPanel.world.previewWaiting')
 })
 
 const parseWorldKeys = (value: string) =>
@@ -708,7 +714,7 @@ const importRoleCardFile = async (event: Event) => {
   try {
     setRoleCardJsonText(await file.text())
   } catch {
-    roleCardJsonError.value = '无法读取 JSON 文件'
+    roleCardJsonError.value = t('promptPanel.common.readJsonFailed')
   } finally {
     if (input) input.value = ''
   }
@@ -746,7 +752,7 @@ const addWorldEntry = () => {
   worldBookModel.enabled = true
   worldBookModel.entries.unshift({
     id: createWorldEntryId(),
-    title: title || '未命名条目',
+    title: title || t('promptPanel.world.untitledEntry'),
     keys: parseWorldKeys(worldEntryDraft.keys),
     secondaryKeys: [],
     content,
@@ -829,7 +835,7 @@ const normalizeImportedWorldEntry = (raw: unknown, index: number): WorkspaceWorl
   const id = readIdentifier(raw, ['id', 'uid'])
   return {
     id: id || createWorldEntryId(),
-    title: readString(raw, ['title', 'comment', 'name', 'memo', 'displayName']) || id || `条目 ${index + 1}`,
+    title: readString(raw, ['title', 'comment', 'name', 'memo', 'displayName']) || id || t('promptPanel.world.entryFallbackTitle', { index: index + 1 }),
     keys: readStringList(raw, ['keys', 'key', 'primaryKeys', 'primary_keys', 'keywords', 'triggers']),
     secondaryKeys,
     content,
@@ -939,17 +945,17 @@ const importWorldBookFromText = (value: string) => {
     const parsed = JSON.parse(trimmed) as unknown
     const book = resolveImportedWorldBook(parsed)
     if (!book) {
-      worldBookJsonError.value = '世界书 JSON 需要是对象'
+      worldBookJsonError.value = t('promptPanel.world.invalidShape')
       return
     }
     if (!applyImportedWorldBook(book, worldBookImportMode.value)) {
-      worldBookJsonError.value = '没有找到可导入的世界书条目'
+      worldBookJsonError.value = t('promptPanel.world.noImportableEntries')
       return
     }
     worldBookJsonError.value = ''
     worldBookJson.value = ''
   } catch {
-    worldBookJsonError.value = 'JSON 格式不正确'
+    worldBookJsonError.value = t('promptPanel.common.invalidJson')
   }
 }
 
@@ -968,7 +974,7 @@ const importWorldBookFile = async (event: Event) => {
   try {
     importWorldBookFromText(await file.text())
   } catch {
-    worldBookJsonError.value = '无法读取 JSON 文件'
+    worldBookJsonError.value = t('promptPanel.common.readJsonFailed')
   } finally {
     if (input) input.value = ''
   }
@@ -1004,7 +1010,7 @@ const applyRoleCardJson = (value: string) => {
   try {
     const parsed = JSON.parse(trimmed) as unknown
     if (!isRecord(parsed)) {
-      roleCardJsonError.value = '角色卡 JSON 需要是一个对象'
+      roleCardJsonError.value = t('promptPanel.roleCard.invalidShape')
       return
     }
     roleCardJsonError.value = ''
@@ -1014,7 +1020,7 @@ const applyRoleCardJson = (value: string) => {
       applyImportedWorldBook(embeddedWorldBook, worldBookModel.entries.length ? 'merge' : 'replace')
     }
   } catch {
-    roleCardJsonError.value = 'JSON 格式不正确，已保留上一次有效角色卡'
+    roleCardJsonError.value = t('promptPanel.roleCard.invalidJson')
   }
 }
 

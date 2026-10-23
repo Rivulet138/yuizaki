@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { systemClient } from '@/api/client'
 import type { HttpClientError } from '@/api/clients/http-client'
+import { t } from '@/i18n'
 
 export type VisualPerceptionPhase = 'disabled' | 'waiting' | 'capturing' | 'ready' | 'error'
 export type VisualAnalysisStatus = 'unavailable' | 'pending' | 'cached' | 'ready' | 'empty' | 'error' | null
@@ -274,7 +275,7 @@ export const useSystemStore = defineStore('system', () => {
 
   const markVisualPerceptionError = (message: string) => {
     visualPerceptionPhase.value = 'error'
-    visualPerceptionError.value = message || '实时视觉不可用'
+    visualPerceptionError.value = message || t('misc.realtimeVisionUnavailable')
   }
 
   return {

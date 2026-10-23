@@ -1,13 +1,17 @@
 import type { HttpClientError } from '@/api/clients/http-client'
+import { currentLocale, t } from '@/i18n'
+import { errorMessages } from '@/i18n/errorMessages'
 
 /**
  * Turn a backend error into one sentence a user can act on.
  *
  * The backend returns stable machine codes (`qq_bridge_hash_mismatch`,
  * `dsh_empty_output`, `rate_limited`, ...). Panels used to show those codes, or a
- * bare HTTP status, straight to the user. This module owns the translation in
- * one place so every surface explains the same failure the same way and keeps
- * the raw code available for support.
+ * bare HTTP status, straight to the user. This module owns the mapping from code
+ * to message key in one place, so every surface explains the same failure the
+ * same way and keeps the raw code available for support; the sentences
+ * themselves live in `i18n/errorMessages.ts`, which makes them translatable
+ * without touching this logic.
  */
 
 export interface ErrorExplanation {
@@ -23,121 +27,145 @@ export interface ErrorExplanation {
   requestId?: string
 }
 
+/**
+ * Message keys for one code. Keeping keys rather than text here is what lets the
+ * catalogue be re-translated as data; a missing key would render as its own name,
+ * so every entry must name the keys that `i18n/errorMessages.ts` defines.
+ */
 type Entry = { title: string; action?: string }
 
 const CODE_TABLE: Record<string, Entry> = {
   // ---- transport / local service ----
-  service_unavailable: {
-    title: '无法连接本地服务',
-    action: '确认 Yuizaki 后端与 Electron 控制服务在运行，然后重试。',
-  },
-  request_timeout: { title: '本地服务响应超时', action: '稍后重试；若持续发生，请重启 Electron 窗口。' },
-  backend_auth_missing: { title: '后端服务未授权', action: '刷新控制页，或从 Electron 应用入口重新打开界面。' },
+  service_unavailable: { title: 'error.service_unavailable.title', action: 'error.service_unavailable.action' },
+  request_timeout: { title: 'error.request_timeout.title', action: 'error.request_timeout.action' },
+  backend_auth_missing: { title: 'error.backend_auth_missing.title', action: 'error.backend_auth_missing.action' },
 
   // ---- model provider ----
-  llm_not_initialized: { title: '模型服务尚未就绪', action: '在「设置 → 模型」填写 API Key 后重试。' },
-  llm_key_missing: { title: '缺少模型 API Key', action: '在「设置 → 模型」填写密钥；命令行启动时可用 YUIZAKI_PROVIDER_CREDENTIALS_JSON 注入。' },
-  provider_rejected: { title: '模型服务拒绝了请求', action: '检查 API Key、余额与模型名是否与该端点匹配。' },
-  empty_reply: { title: '模型返回了空回复', action: '重试一次；若持续为空，检查模型名或降低温度。' },
-  turn_runner_exception: { title: '本轮处理中断，结果未确认', action: '刷新后检查实际结果，不要直接重试写操作。' },
+  llm_not_initialized: { title: 'error.llm_not_initialized.title', action: 'error.llm_not_initialized.action' },
+  llm_key_missing: { title: 'error.llm_key_missing.title', action: 'error.llm_key_missing.action' },
+  provider_rejected: { title: 'error.provider_rejected.title', action: 'error.provider_rejected.action' },
+  empty_reply: { title: 'error.empty_reply.title', action: 'error.empty_reply.action' },
+  turn_runner_exception: { title: 'error.turn_runner_exception.title', action: 'error.turn_runner_exception.action' },
 
   // ---- DSH delegation ----
-  dsh_invalid_task: { title: '任务描述不合法', action: '任务不能为空、不能以 -- 开头，且不超过 4000 字。' },
-  dsh_invalid_config: { title: 'DSH 命令配置无效', action: '检查 YUIZAKI_DSH_COMMAND 是否为 JSON argv 数组（不能是 .cmd）。' },
-  dsh_not_found: { title: '找不到 DSH 可执行程序', action: '确认已安装 DSH，或设置 YUIZAKI_DSH_COMMAND 指向入口文件。' },
-  dsh_busy: { title: 'DSH 正在处理其它任务', action: '等当前任务结束后再试；同一时间只允许一个 DSH 进程。' },
-  dsh_timeout: { title: 'DSH 执行超时', action: '任务可能已改动文件，先核实结果再决定是否重试。' },
-  dsh_nonzero_exit: { title: 'DSH 执行失败', action: '查看返回的错误输出；可能已改动文件，不要自动重试。' },
-  dsh_output_too_large: { title: 'DSH 输出过长', action: '把任务拆小，或让它只返回结论摘要。' },
-  dsh_empty_output: {
-    title: 'DSH 没有返回任何内容',
-    action: '通常是 DSH 缺少模型凭据：设置 DEEPSEEK_API_KEY 或初始化 headless profile 后重试。',
-  },
-  dsh_execution_context_required: { title: '缺少执行上下文', action: '本次调用未携带授权上下文，请重新发起请求。' },
+  dsh_invalid_task: { title: 'error.dsh_invalid_task.title', action: 'error.dsh_invalid_task.action' },
+  dsh_invalid_config: { title: 'error.dsh_invalid_config.title', action: 'error.dsh_invalid_config.action' },
+  dsh_not_found: { title: 'error.dsh_not_found.title', action: 'error.dsh_not_found.action' },
+  dsh_busy: { title: 'error.dsh_busy.title', action: 'error.dsh_busy.action' },
+  dsh_timeout: { title: 'error.dsh_timeout.title', action: 'error.dsh_timeout.action' },
+  dsh_nonzero_exit: { title: 'error.dsh_nonzero_exit.title', action: 'error.dsh_nonzero_exit.action' },
+  dsh_output_too_large: { title: 'error.dsh_output_too_large.title', action: 'error.dsh_output_too_large.action' },
+  dsh_empty_output: { title: 'error.dsh_empty_output.title', action: 'error.dsh_empty_output.action' },
+  dsh_execution_context_required: { title: 'error.dsh_execution_context_required.title', action: 'error.dsh_execution_context_required.action' },
 
   // ---- QQ managed bridge ----
-  qq_bridge_unavailable: { title: '内置桥管理器不可用', action: '确认后端已启动且资源锁包含 qq_bridge 条目。' },
-  qq_bridge_risk_not_accepted: { title: '尚未确认账号风险', action: '安装前需要勾选确认：个人账号协议存在封禁风险。' },
-  qq_bridge_no_source: { title: '缺少桥下载源', action: 'resources.lock.json 中的 qq_bridge 条目缺少 url 或 sha256。' },
-  qq_bridge_hash_mismatch: { title: '桥安装包校验失败', action: '已丢弃下载内容。上游 release 可能已更新，需要重新固定 sha256。' },
-  qq_bridge_install_failed: { title: '桥安装失败', action: '检查网络与磁盘空间后重试。' },
-  qq_bridge_install_incomplete: { title: '安装包内容不完整', action: '压缩包中没有可执行文件，请重新安装。' },
-  qq_bridge_not_installed: { title: '内置桥尚未安装', action: '先点击「下载并安装内置桥」。' },
-  qq_bridge_spawn_failed: { title: '桥进程启动失败', action: '检查杀毒软件是否拦截，或手动运行该 exe 查看报错。' },
+  qq_bridge_unavailable: { title: 'error.qq_bridge_unavailable.title', action: 'error.qq_bridge_unavailable.action' },
+  qq_bridge_risk_not_accepted: { title: 'error.qq_bridge_risk_not_accepted.title', action: 'error.qq_bridge_risk_not_accepted.action' },
+  qq_bridge_no_source: { title: 'error.qq_bridge_no_source.title', action: 'error.qq_bridge_no_source.action' },
+  qq_bridge_hash_mismatch: { title: 'error.qq_bridge_hash_mismatch.title', action: 'error.qq_bridge_hash_mismatch.action' },
+  qq_bridge_install_failed: { title: 'error.qq_bridge_install_failed.title', action: 'error.qq_bridge_install_failed.action' },
+  qq_bridge_install_incomplete: { title: 'error.qq_bridge_install_incomplete.title', action: 'error.qq_bridge_install_incomplete.action' },
+  qq_bridge_not_installed: { title: 'error.qq_bridge_not_installed.title', action: 'error.qq_bridge_not_installed.action' },
+  qq_bridge_spawn_failed: { title: 'error.qq_bridge_spawn_failed.title', action: 'error.qq_bridge_spawn_failed.action' },
 
   // ---- connector admission ----
-  missing_bridge_url: { title: '缺少桥地址', action: '填写桥地址，或改用内置桥自动配置。' },
-  missing_bridge_token: { title: '缺少桥令牌', action: '填写桥令牌，或改用内置桥自动生成。' },
-  invalid_bridge_url: { title: '桥地址格式不正确', action: '必须是 http(s):// 的完整地址。' },
-  personal_bridge_only: { title: '仅支持个人账号桥模式', action: 'QQ / 微信只保留个人账号兼容桥，官方连接器已移除。' },
-  official_connector_removed: { title: '官方连接器已移除', action: '请使用个人账号兼容桥，或改用内置桥。' },
-  invalid_webhook_auth: { title: '回调鉴权失败', action: '检查桥的 access_token 或 Authorization 头是否与配置一致。' },
-  connector_disabled: { title: '连接器未启用', action: '先在连接器面板启用它。' },
-  not_allowlisted: { title: '发送者不在白名单内', action: '把该用户或群加入允许列表，或清空白名单。' },
-  rate_limited: { title: '触发频率限制', action: '稍后再发；可在 QQ 连接器里调整 ratePerMinute。' },
-  connector_event_in_progress: { title: '上一条消息仍在处理', action: '等它完成后再发送。' },
+  missing_bridge_url: { title: 'error.missing_bridge_url.title', action: 'error.missing_bridge_url.action' },
+  missing_bridge_token: { title: 'error.missing_bridge_token.title', action: 'error.missing_bridge_token.action' },
+  invalid_bridge_url: { title: 'error.invalid_bridge_url.title', action: 'error.invalid_bridge_url.action' },
+  personal_bridge_only: { title: 'error.personal_bridge_only.title', action: 'error.personal_bridge_only.action' },
+  official_connector_removed: { title: 'error.official_connector_removed.title', action: 'error.official_connector_removed.action' },
+  invalid_webhook_auth: { title: 'error.invalid_webhook_auth.title', action: 'error.invalid_webhook_auth.action' },
+  connector_disabled: { title: 'error.connector_disabled.title', action: 'error.connector_disabled.action' },
+  not_allowlisted: { title: 'error.not_allowlisted.title', action: 'error.not_allowlisted.action' },
+  rate_limited: { title: 'error.rate_limited.title', action: 'error.rate_limited.action' },
+  connector_event_in_progress: { title: 'error.connector_event_in_progress.title', action: 'error.connector_event_in_progress.action' },
 
   // ---- workspace / settings ----
-  workspace_mismatch: { title: '跨工作区请求被拒绝', action: '切换到消息所属的工作区后重试。' },
-  context_revision_conflict: { title: '工作区上下文已被修改', action: '刷新后重新编辑，避免覆盖他人的改动。' },
-  permission_required: { title: '该操作需要确认', action: '在弹出的权限提示里允许后重试。' },
-  MEMORY_RECALL_FAILED: { title: '记忆检索失败', action: '重试；若持续失败，检查嵌入模型与索引状态。' },
-  invalid_json: { title: '请求内容不是合法 JSON', action: '重新提交；如果是桥推送，检查桥的事件格式。' },
-  payload_too_large: { title: '请求内容过大', action: '缩小消息或附件后重试。' },
-  text_required: { title: '内容不能为空', action: '输入一些文字后重试。' },
-  file_too_large: { title: '文件超出大小限制', action: '压缩或拆分后重试。' },
+  workspace_mismatch: { title: 'error.workspace_mismatch.title', action: 'error.workspace_mismatch.action' },
+  context_revision_conflict: { title: 'error.context_revision_conflict.title', action: 'error.context_revision_conflict.action' },
+  permission_required: { title: 'error.permission_required.title', action: 'error.permission_required.action' },
+  MEMORY_RECALL_FAILED: { title: 'error.MEMORY_RECALL_FAILED.title', action: 'error.MEMORY_RECALL_FAILED.action' },
+  invalid_json: { title: 'error.invalid_json.title', action: 'error.invalid_json.action' },
+  payload_too_large: { title: 'error.payload_too_large.title', action: 'error.payload_too_large.action' },
+  text_required: { title: 'error.text_required.title', action: 'error.text_required.action' },
+  file_too_large: { title: 'error.file_too_large.title', action: 'error.file_too_large.action' },
 
   // ---- tools / agent runtime ----
-  tool_timeout: { title: '工具执行超时', action: '缩小任务范围后重试；超时任务可能仍有副作用。' },
-  tool_not_exposed: { title: '该工具当前未开放', action: '在治理面板启用对应插件或 MCP 服务后重试。' },
-  tool_executor_not_available: { title: '工具执行器不可用', action: '重启后端后再试。' },
-  tool_executor_returned_none: { title: '工具没有返回结果', action: '重试；若持续失败，检查该工具的实现日志。' },
-  permission_denied: { title: '权限不足', action: '在权限提示中允许该工具，或调整插件开关。' },
-  user_denied: { title: '你拒绝了该操作', action: '如需继续，请在权限提示中允许后重试。' },
-  untrusted_mcp_followup_requires_confirmation: { title: '该跟进操作需要确认', action: '在权限提示中确认后重试。' },
-  generation_manager_unavailable: { title: '生成会话未就绪', action: '稍等片刻再发送，或重启后端。' },
-  llm_unavailable: { title: '模型服务不可用', action: '检查「设置 → 模型」与网络连接后重试。' },
-  chat_completion_failed: { title: '对话生成失败', action: '重试；若持续失败，检查模型配置与余额。' },
-  chat_error: { title: '对话处理出错', action: '重试；必要时查看后端日志。' },
-  companion_not_found: { title: '找不到伴侣配置', action: '在设置里重新选择伴侣后重试。' },
-  dsh_io_error: { title: 'DSH 读写管道异常', action: '重试；任务可能已部分执行，请先核实文件。' },
-  translate_error: { title: '翻译失败', action: '检查模型服务后重试。' },
+  tool_timeout: { title: 'error.tool_timeout.title', action: 'error.tool_timeout.action' },
+  tool_not_exposed: { title: 'error.tool_not_exposed.title', action: 'error.tool_not_exposed.action' },
+  tool_executor_not_available: { title: 'error.tool_executor_not_available.title', action: 'error.tool_executor_not_available.action' },
+  tool_executor_returned_none: { title: 'error.tool_executor_returned_none.title', action: 'error.tool_executor_returned_none.action' },
+  permission_denied: { title: 'error.permission_denied.title', action: 'error.permission_denied.action' },
+  user_denied: { title: 'error.user_denied.title', action: 'error.user_denied.action' },
+  untrusted_mcp_followup_requires_confirmation: { title: 'error.untrusted_mcp_followup_requires_confirmation.title', action: 'error.untrusted_mcp_followup_requires_confirmation.action' },
+  generation_manager_unavailable: { title: 'error.generation_manager_unavailable.title', action: 'error.generation_manager_unavailable.action' },
+  llm_unavailable: { title: 'error.llm_unavailable.title', action: 'error.llm_unavailable.action' },
+  chat_completion_failed: { title: 'error.chat_completion_failed.title', action: 'error.chat_completion_failed.action' },
+  chat_error: { title: 'error.chat_error.title', action: 'error.chat_error.action' },
+  companion_not_found: { title: 'error.companion_not_found.title', action: 'error.companion_not_found.action' },
+  dsh_io_error: { title: 'error.dsh_io_error.title', action: 'error.dsh_io_error.action' },
+  translate_error: { title: 'error.translate_error.title', action: 'error.translate_error.action' },
 
   // ---- storage / index ----
-  database_error: { title: '数据库操作失败', action: '稍后重试；若持续失败，检查磁盘空间与数据文件权限。' },
-  database_not_initialized: { title: '数据库尚未初始化', action: '等待启动完成，或重启后端。' },
-  memory_search_scan_limit_reached: { title: '记忆检索到扫描上限', action: '缩小查询范围，或重建索引。' },
-  memory_index_rebuild_cancelled: { title: '索引重建已取消', action: '需要时可以重新发起重建。' },
+  database_error: { title: 'error.database_error.title', action: 'error.database_error.action' },
+  database_not_initialized: { title: 'error.database_not_initialized.title', action: 'error.database_not_initialized.action' },
+  memory_search_scan_limit_reached: { title: 'error.memory_search_scan_limit_reached.title', action: 'error.memory_search_scan_limit_reached.action' },
+  memory_index_rebuild_cancelled: { title: 'error.memory_index_rebuild_cancelled.title', action: 'error.memory_index_rebuild_cancelled.action' },
 
   // ---- scheduler / recovery ----
-  scheduler_not_available: { title: '计划任务服务未就绪', action: '重启后端后再试。' },
-  scheduled_task_exception: { title: '计划任务执行异常', action: '查看任务详情与日志，修正后重试。' },
-  unsupported_schedule_mode: { title: '不支持的调度方式', action: '改用支持的模式（间隔、每日或自定义）。' },
-  recovery_not_available: { title: '当前没有可恢复的会话', action: '刷新后重新发起请求。' },
-  recovery_resume_failed: { title: '会话恢复失败', action: '重新发起该轮对话。' },
-  recovery_resume_invalid: { title: '会话恢复数据无效', action: '放弃恢复并重新发起请求。' },
+  scheduler_not_available: { title: 'error.scheduler_not_available.title', action: 'error.scheduler_not_available.action' },
+  scheduled_task_exception: { title: 'error.scheduled_task_exception.title', action: 'error.scheduled_task_exception.action' },
+  unsupported_schedule_mode: { title: 'error.unsupported_schedule_mode.title', action: 'error.unsupported_schedule_mode.action' },
+  recovery_not_available: { title: 'error.recovery_not_available.title', action: 'error.recovery_not_available.action' },
+  recovery_resume_failed: { title: 'error.recovery_resume_failed.title', action: 'error.recovery_resume_failed.action' },
+  recovery_resume_invalid: { title: 'error.recovery_resume_invalid.title', action: 'error.recovery_resume_invalid.action' },
 
   // ---- voice / bridge transport ----
-  svc_error: { title: '变声服务出错', action: '检查 SVC 服务是否运行后重试。' },
-  svc_not_initialized: { title: '变声服务未就绪', action: '在设置中启用 SVC，或改用默认语音。' },
-  relationship_history_unavailable: { title: '关系历史暂不可用', action: '稍后重试；不影响当前对话。' },
-  connection_closed: { title: '连接已断开', action: '等待自动重连；若未恢复，请刷新界面。' },
-  server_reconnect: { title: '服务正在重连', action: '稍候再操作。' },
-  unauthorized: { title: '未通过鉴权', action: '刷新控制页，或从 Electron 应用入口重新打开。' },
-  auth_failed: { title: '鉴权失败', action: '检查控制令牌或后端令牌配置。' },
+  svc_error: { title: 'error.svc_error.title', action: 'error.svc_error.action' },
+  svc_not_initialized: { title: 'error.svc_not_initialized.title', action: 'error.svc_not_initialized.action' },
+  relationship_history_unavailable: { title: 'error.relationship_history_unavailable.title', action: 'error.relationship_history_unavailable.action' },
+  connection_closed: { title: 'error.connection_closed.title', action: 'error.connection_closed.action' },
+  server_reconnect: { title: 'error.server_reconnect.title', action: 'error.server_reconnect.action' },
+  unauthorized: { title: 'error.unauthorized.title', action: 'error.unauthorized.action' },
+  auth_failed: { title: 'error.auth_failed.title', action: 'error.auth_failed.action' },
 }
 
 const STATUS_FALLBACK: Record<number, Entry> = {
-  400: { title: '请求内容不被接受', action: '检查输入后重试。' },
-  401: { title: '未通过身份验证', action: '检查 API Key 或控制令牌。' },
-  403: { title: '没有权限执行该操作', action: '确认当前工作区与权限范围。' },
-  404: { title: '目标不存在', action: '刷新后重试；它可能已被删除。' },
-  409: { title: '当前状态不允许该操作', action: '刷新后按提示重试。' },
-  422: { title: '参数校验未通过', action: '按提示修正输入。' },
-  429: { title: '请求过于频繁', action: '稍后重试。' },
-  502: { title: '上游服务异常', action: '稍后重试；若是桥，检查桥进程是否在运行。' },
-  503: { title: '服务暂时不可用', action: '稍后重试；若刚启动，等待初始化完成。' },
-  504: { title: '上游响应超时', action: '稍后重试或缩小任务范围。' },
+  400: { title: 'error.http_400.title', action: 'error.http_400.action' },
+  401: { title: 'error.http_401.title', action: 'error.http_401.action' },
+  403: { title: 'error.http_403.title', action: 'error.http_403.action' },
+  404: { title: 'error.http_404.title', action: 'error.http_404.action' },
+  409: { title: 'error.http_409.title', action: 'error.http_409.action' },
+  422: { title: 'error.http_422.title', action: 'error.http_422.action' },
+  429: { title: 'error.http_429.title', action: 'error.http_429.action' },
+  502: { title: 'error.http_502.title', action: 'error.http_502.action' },
+  503: { title: 'error.http_503.title', action: 'error.http_503.action' },
+  504: { title: 'error.http_504.title', action: 'error.http_504.action' },
+}
+
+/**
+ * The catalogue, widened for lookup by locale and key: `definePanelMessages`
+ * infers a literal key union, which cannot be indexed with a runtime string.
+ */
+const catalog: Record<string, Record<string, string>> = errorMessages as unknown as Record<
+  string,
+  Record<string, string>
+>
+
+/**
+ * Resolve one catalogue key for the active locale.
+ *
+ * `t()` is the normal path. It answers with the key itself when the catalogue has
+ * not been merged into the shared table yet (that merge lives in `i18n/index.ts`,
+ * which this module deliberately does not own), and a toast reading
+ * `error.dsh_timeout.title` is worse than any fallback, so the catalogue is asked
+ * directly as a second chance. Once the module is registered the second lookup
+ * never runs.
+ */
+const message = (key: string): string => {
+  const translated = t(key)
+  if (translated !== key) return translated
+  return catalog[currentLocale.value]?.[key] ?? key
 }
 
 const readField = (value: unknown, key: string): unknown =>
@@ -153,7 +181,9 @@ const asNumber = (value: unknown): number | undefined =>
 const looksLikeCode = (value: string): boolean => /^[A-Za-z][A-Za-z0-9_]{2,60}$/.test(value)
 
 export function explainError(error: unknown): ErrorExplanation {
-  if (error == null) return { title: '操作失败', action: '请重试。' }
+  if (error == null) {
+    return { title: message('error.unknown.title'), action: message('error.unknown.action') }
+  }
 
   const candidate = error as Partial<HttpClientError> & Record<string, unknown>
   const rawCode = asString(candidate.code) || asString(readField(candidate.payload, 'code'))
@@ -168,14 +198,24 @@ export function explainError(error: unknown): ErrorExplanation {
   const code = rawCode || messageCode || payloadCode
 
   const known = code ? CODE_TABLE[code] : undefined
-  if (known) return { title: known.title, action: known.action, code, status, requestId }
+  if (known) {
+    return {
+      title: message(known.title),
+      action: known.action ? message(known.action) : undefined,
+      code,
+      status,
+      requestId,
+    }
+  }
 
   const byStatus = status ? STATUS_FALLBACK[status] : undefined
   if (byStatus) {
-    const detail = rawMessage && !looksLikeCode(rawMessage) && rawMessage !== byStatus.title ? rawMessage : undefined
+    const title = message(byStatus.title)
+    const action = byStatus.action ? message(byStatus.action) : ''
+    const detail = rawMessage && !looksLikeCode(rawMessage) && rawMessage !== title ? rawMessage : undefined
     return {
-      title: byStatus.title,
-      action: detail ? `${byStatus.action}（后端说明：${detail}）` : byStatus.action,
+      title,
+      action: detail ? t('error.format.statusDetail', { action, detail }) : action,
       code,
       status,
       requestId,
@@ -186,8 +226,8 @@ export function explainError(error: unknown): ErrorExplanation {
   // a bare HTTP wrapper so the toast never reads "http_400".
   const readable = rawMessage && !looksLikeCode(rawMessage) ? rawMessage : ''
   return {
-    title: readable || '操作失败',
-    action: readable ? undefined : '请重试；若持续失败，请查看日志。',
+    title: readable || message('error.unknown.title'),
+    action: readable ? undefined : message('error.unknown.retryAction'),
     code,
     status,
     requestId,
@@ -200,8 +240,8 @@ export function explainError(error: unknown): ErrorExplanation {
  */
 export function describeError(error: unknown): string {
   const { title, action, code } = explainError(error)
-  const body = action ? `${title}：${action}` : title
-  return code && !body.includes(code) ? `${body}（${code}）` : body
+  const body = action ? t('error.format.titleAction', { title, action }) : title
+  return code && !body.includes(code) ? t('error.format.withCode', { body, code }) : body
 }
 
 /** True when the failure carries something the shared table can act on. */

@@ -1,3 +1,5 @@
+import { t } from '@/i18n'
+
 export type DeployCommandCard = {
   title: string
   command: string
@@ -17,9 +19,9 @@ export const buildDeployPlatformCommands = (platform: 'linux' | 'windows'): Depl
   return {
     label: linux ? 'Linux' : 'Windows',
     commands: [
-      { title: '完整启动（含 MCP）', command: launcher },
-      { title: '轻量启动（不含 MCP）', command: `${launcher} --no-mcp` },
-      { title: '前端调试', command: `${launcher} --dev-renderer` },
+      { title: t('misc.deployFullLaunch'), command: launcher },
+      { title: t('misc.deployLiteLaunch'), command: `${launcher} --no-mcp` },
+      { title: t('misc.deployFrontendDebug'), command: `${launcher} --dev-renderer` },
     ],
   }
 }

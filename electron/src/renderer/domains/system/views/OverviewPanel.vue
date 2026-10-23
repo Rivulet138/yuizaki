@@ -1,10 +1,10 @@
 <template>
-  <PanelShell title="运行状态" tone="admin">
+  <PanelShell :title="t('overview.title')" tone="admin">
     <template #actions>
-      <el-button plain :loading="overviewRefreshLoading" @click="refreshOverview">刷新</el-button>
+      <el-button plain :loading="overviewRefreshLoading" @click="refreshOverview">{{ t('overview.refresh') }}</el-button>
     </template>
     <div class="overview-console">
-      <nav class="overview-view-nav" aria-label="状态视图" role="tablist">
+      <nav class="overview-view-nav" :aria-label="t('overview.viewNavAria')" role="tablist">
         <button
           v-for="view in overviewViews"
           :key="view.id"
@@ -19,10 +19,10 @@
         </button>
       </nav>
 
-      <section v-show="activeOverviewView === 'status'" class="ops-card runtime-readiness-card" aria-label="运行环境与下一步操作">
+      <section v-show="activeOverviewView === 'status'" class="ops-card runtime-readiness-card" :aria-label="t('overview.readinessAria')">
         <div class="ops-card-head">
           <div>
-            <h3>{{ runtimeActionItems.length ? `需要处理 ${runtimeActionItems.length} 项` : '运行链路就绪' }}</h3>
+            <h3>{{ runtimeActionItems.length ? t('overview.readinessPending', { count: runtimeActionItems.length }) : t('overview.readinessReady') }}</h3>
           </div>
         </div>
         <el-alert
@@ -44,9 +44,9 @@
           </article>
         </div>
         <div v-else class="runtime-ready-state">
-          <strong>可以开始对话</strong>
+          <strong>{{ t('overview.readinessCanChat') }}</strong>
         </div>
-        <div class="runtime-chain" aria-label="核心链路状态">
+        <div class="runtime-chain" :aria-label="t('overview.chainAria')">
           <span v-for="item in chainChecks" :key="item.label" class="runtime-chain-item" :class="item.tone" :title="item.desc">
             <i aria-hidden="true"></i>
             <strong>{{ item.label }}</strong>
@@ -55,45 +55,45 @@
         </div>
       </section>
 
-      <section v-show="activeOverviewView === 'voice'" class="ops-card voice-quality-card" aria-label="语音体验质量">
+      <section v-show="activeOverviewView === 'voice'" class="ops-card voice-quality-card" :aria-label="t('overview.voice.aria')">
         <div class="ops-card-head">
           <div>
-            <h3>语音体验</h3>
+            <h3>{{ t('overview.voice.title') }}</h3>
           </div>
         </div>
         <AsyncState :loading="voiceRequest.loading" :error="voiceRequest.error" :show-retry="false">
           <div v-if="voiceSnapshot" class="voice-quality-grid">
             <div class="voice-quality-metric">
-              <strong>{{ voiceSnapshot.sample_count > 0 ? '已记录' : '暂无数据' }}</strong>
-              <span>语音响应</span>
+              <strong>{{ voiceSnapshot.sample_count > 0 ? t('overview.voice.recorded') : t('overview.voice.noData') }}</strong>
+              <span>{{ t('overview.voice.metric.response') }}</span>
             </div>
             <div class="voice-quality-metric">
               <strong>{{ voiceComfortLabel }}</strong>
-              <span>语音体验</span>
+              <span>{{ t('overview.voice.metric.comfort') }}</span>
             </div>
             <div class="voice-quality-metric">
               <strong>{{ voiceQualificationLabel }}</strong>
-              <span>设备检查</span>
+              <span>{{ t('overview.voice.metric.device') }}</span>
             </div>
           </div>
           <details v-if="voiceSnapshot" class="voice-diagnostics-details">
-            <summary>查看详细诊断</summary>
+            <summary>{{ t('overview.voice.details') }}</summary>
             <div class="voice-quality-grid">
               <div class="voice-quality-metric">
                 <strong>{{ voiceEvidenceLabel }}</strong>
-                <span>数据来源</span>
+                <span>{{ t('overview.voice.metric.evidence') }}</span>
               </div>
               <div class="voice-quality-metric">
                 <strong>{{ voiceSnapshot.sample_count }}</strong>
-                <span>记录数量</span>
+                <span>{{ t('overview.voice.metric.samples') }}</span>
               </div>
               <div class="voice-quality-metric">
                 <strong>{{ voiceP95Label(voiceSnapshot.stages.first_audio) }}</strong>
-                <span>首段响应通常耗时</span>
+                <span>{{ t('overview.voice.metric.firstAudio') }}</span>
               </div>
               <div class="voice-quality-metric">
                 <strong>{{ voiceP95Label(voiceSnapshot.stages.interruption) }}</strong>
-                <span>打断响应通常耗时</span>
+                <span>{{ t('overview.voice.metric.interruption') }}</span>
               </div>
             </div>
           </details>
@@ -109,15 +109,15 @@
           <div v-if="voiceRecommendations.length" class="voice-quality-notes">
             <span v-for="recommendation in voiceRecommendations.slice(0, 2)" :key="recommendation">{{ recommendation }}</span>
           </div>
-          <el-empty v-if="voiceSnapshot && voiceSnapshot.sample_count === 0" description="暂无采样" :image-size="48" />
+          <el-empty v-if="voiceSnapshot && voiceSnapshot.sample_count === 0" :description="t('overview.voice.empty')" :image-size="48" />
         </AsyncState>
       </section>
 
-      <section v-show="activeOverviewView === 'platform'" class="ops-card platform-card" aria-label="跨平台能力">
+      <section v-show="activeOverviewView === 'platform'" class="ops-card platform-card" :aria-label="t('overview.platform.aria')">
         <div class="ops-card-head">
           <div>
-            <h3>平台能力</h3>
-            <span v-if="platformSnapshot">宿主：{{ platformHostLabel }}</span>
+            <h3>{{ t('overview.platform.title') }}</h3>
+            <span v-if="platformSnapshot">{{ t('overview.platform.host', { host: platformHostLabel }) }}</span>
           </div>
         </div>
         <AsyncState :loading="platformRequest.loading" :error="platformRequest.error" :show-retry="false">
@@ -125,16 +125,16 @@
             <table class="platform-table">
               <thead>
                 <tr>
-                  <th>平台</th>
-                  <th>桌面壳</th>
+                  <th>{{ t('overview.platform.columnPlatform') }}</th>
+                  <th>{{ t('overview.platform.columnDesktop') }}</th>
                   <th>Live2D / VRM</th>
-                  <th>文字 / 语音</th>
-                  <th>桌面动作</th>
+                  <th>{{ t('overview.platform.columnTextVoice') }}</th>
+                  <th>{{ t('overview.platform.columnActions') }}</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="row in platformRows" :key="row.id" :class="{ host: row.host }">
-                  <th scope="row"><strong>{{ row.name }}</strong><small v-if="row.host">当前宿主</small></th>
+                  <th scope="row"><strong>{{ row.name }}</strong><small v-if="row.host">{{ t('overview.platform.currentHost') }}</small></th>
                   <td v-for="capability in platformCapabilityKeys" :key="`${row.id}-${capability}`">
                     <el-tag size="small" :type="platformTagType(row.capabilities[capability].status)">
                       {{ platformStatusLabel(row.capabilities[capability].status) }}
@@ -145,49 +145,49 @@
               </tbody>
             </table>
           </div>
-          <el-empty v-else description="暂无平台能力数据" :image-size="56" />
+          <el-empty v-else :description="t('overview.platform.empty')" :image-size="56" />
         </AsyncState>
       </section>
 
       <section v-show="activeOverviewView === 'runtime'" class="ops-grid">
-        <article class="ops-card context-card" aria-label="当前应用">
+        <article class="ops-card context-card" :aria-label="t('overview.activeApp.title')">
           <div class="ops-card-head">
             <div>
-              <h3>当前应用</h3>
-              <span>前台</span>
+              <h3>{{ t('overview.activeApp.title') }}</h3>
+              <span>{{ t('overview.activeApp.foreground') }}</span>
             </div>
             <el-tag :type="activeApplication ? 'success' : 'info'">
-              {{ activeApplication ? '已读取' : '不可用' }}
+              {{ activeApplication ? t('overview.status.read') : t('overview.status.unavailable') }}
             </el-tag>
           </div>
-          <div v-if="activeApplicationRequest.loading" class="compact-status">读取中</div>
+          <div v-if="activeApplicationRequest.loading" class="compact-status">{{ t('overview.status.reading') }}</div>
           <dl v-else-if="activeApplication" class="context-list">
-            <div><dt>进程</dt><dd>{{ activeApplication.name }}</dd></div>
-            <div><dt>窗口</dt><dd :title="activeApplication.title">{{ activeApplication.title || '无标题' }}</dd></div>
-            <div><dt>进程号</dt><dd>{{ activeApplication.process_id }}</dd></div>
+            <div><dt>{{ t('overview.activeApp.process') }}</dt><dd>{{ activeApplication.name }}</dd></div>
+            <div><dt>{{ t('overview.activeApp.window') }}</dt><dd :title="activeApplication.title">{{ activeApplication.title || t('overview.activeApp.untitled') }}</dd></div>
+            <div><dt>{{ t('overview.activeApp.pid') }}</dt><dd>{{ activeApplication.process_id }}</dd></div>
           </dl>
-          <div v-else class="compact-status">{{ activeApplicationRequest.error || '浏览器不可用' }}</div>
+          <div v-else class="compact-status">{{ activeApplicationRequest.error || t('overview.activeApp.browserUnavailable') }}</div>
         </article>
 
-        <article class="ops-card orchestration-card" aria-label="运行编排">
+        <article class="ops-card orchestration-card" :aria-label="t('overview.orchestration.title')">
           <div class="ops-card-head">
             <div>
-              <h3>运行编排</h3>
+              <h3>{{ t('overview.orchestration.title') }}</h3>
             </div>
             <el-tag :type="orchestrationSnapshot ? 'success' : 'info'">
-              {{ orchestrationSnapshot ? '已读取' : '不可用' }}
+              {{ orchestrationSnapshot ? t('overview.status.read') : t('overview.status.unavailable') }}
             </el-tag>
           </div>
-          <div v-if="orchestrationRequest.loading" class="compact-status">读取中</div>
+          <div v-if="orchestrationRequest.loading" class="compact-status">{{ t('overview.status.reading') }}</div>
           <template v-else-if="orchestrationSnapshot">
             <div class="orchestration-counts">
-              <span>智能体 <strong>{{ orchestrationSnapshot.summary?.agents ?? orchestrationSnapshot.agents?.length ?? 0 }}</strong></span>
-              <span>技能 <strong>{{ orchestrationSnapshot.summary?.skills ?? orchestrationSnapshot.skills.length }}</strong></span>
-              <span>命令 <strong>{{ orchestrationSnapshot.summary?.commands ?? orchestrationSnapshot.commands.length }}</strong></span>
-              <span>钩子 <strong>{{ orchestrationSnapshot.summary?.hooks ?? orchestrationSnapshot.hooks.length }}</strong></span>
+              <span>{{ t('overview.orchestration.agents') }} <strong>{{ orchestrationSnapshot.summary?.agents ?? orchestrationSnapshot.agents?.length ?? 0 }}</strong></span>
+              <span>{{ t('overview.orchestration.skills') }} <strong>{{ orchestrationSnapshot.summary?.skills ?? orchestrationSnapshot.skills.length }}</strong></span>
+              <span>{{ t('overview.orchestration.commands') }} <strong>{{ orchestrationSnapshot.summary?.commands ?? orchestrationSnapshot.commands.length }}</strong></span>
+              <span>{{ t('overview.orchestration.hooks') }} <strong>{{ orchestrationSnapshot.summary?.hooks ?? orchestrationSnapshot.hooks.length }}</strong></span>
             </div>
             <details class="orchestration-details">
-              <summary>查看条目</summary>
+              <summary>{{ t('overview.orchestration.details') }}</summary>
               <ul>
                 <li v-for="item in orchestrationEntries" :key="`${item.kind}:${item.id}`">
                   <strong>{{ item.name }}</strong><span>{{ item.kind }}</span>
@@ -195,14 +195,14 @@
               </ul>
             </details>
           </template>
-          <div v-else class="compact-status">{{ orchestrationRequest.error || '暂无编排数据' }}</div>
+          <div v-else class="compact-status">{{ orchestrationRequest.error || t('overview.orchestration.empty') }}</div>
         </article>
       </section>
 
       <section v-show="activeOverviewView === 'pet'" class="ops-card pet-ops-card">
         <div class="ops-card-head pet-head">
           <div>
-            <h3>桌宠控制</h3>
+            <h3>{{ t('overview.pet.title') }}</h3>
           </div>
           <div class="pet-chip-row">
             <span v-for="chip in petChips" :key="chip.label" :class="chip.tone">{{ chip.label }}</span>
@@ -211,11 +211,11 @@
 
         <div class="pet-control-grid">
           <div class="control-block model-block">
-            <label>当前模型</label>
+            <label>{{ t('overview.pet.model') }}</label>
             <el-select
               v-model="selectedModelId"
               class="field"
-              placeholder="选择可用模型"
+              :placeholder="t('overview.pet.modelPlaceholder')"
               :disabled="petCatalog.models.length === 0"
             >
               <el-option
@@ -227,13 +227,13 @@
             </el-select>
             <div class="row action-row compact-actions">
               <el-button type="primary" :disabled="!selectedModelId" @click="applyModel">
-                应用模型
+                {{ t('overview.pet.applyModel') }}
               </el-button>
             </div>
           </div>
 
           <div class="control-block scale-block">
-            <label>缩放比例 · {{ scaleDraft.toFixed(2) }}</label>
+            <label>{{ t('overview.pet.scale', { value: scaleDraft.toFixed(2) }) }}</label>
             <el-slider
               v-model="scaleDraft"
               :min="0.12"
@@ -244,7 +244,7 @@
           </div>
 
           <div class="control-block scale-block">
-            <label>透明度 · {{ Math.round(opacityDraft * 100) }}%</label>
+            <label>{{ t('overview.pet.opacity', { value: Math.round(opacityDraft * 100) }) }}</label>
             <el-slider
               v-model="opacityDraft"
               :min="0.1"
@@ -255,87 +255,87 @@
           </div>
 
           <div class="control-block">
-            <label>允许拖动</label>
+            <label>{{ t('overview.pet.allowDrag') }}</label>
             <div class="row">
               <el-switch
                 :model-value="petState.interactMode"
-                active-text="允许"
-                inactive-text="禁止"
+                :active-text="t('overview.pet.toggle.allow')"
+                :inactive-text="t('overview.pet.toggle.forbid')"
                 @change="setInteractMode"
               />
             </div>
           </div>
 
           <div class="control-block emphasis-block">
-            <label>桌宠可见性</label>
+            <label>{{ t('overview.pet.visibility') }}</label>
             <div class="row">
               <el-switch
                 :model-value="petState.visible"
-                active-text="显示"
-                inactive-text="隐藏"
+                :active-text="t('overview.pet.toggle.show')"
+                :inactive-text="t('overview.pet.toggle.hide')"
                 @change="setPetVisible"
               />
             </div>
           </div>
 
           <div class="control-block emphasis-block">
-            <label>免打扰模式</label>
+            <label>{{ t('overview.pet.dnd') }}</label>
             <div class="row">
               <el-switch
                 :model-value="petState.doNotDisturb"
-                active-text="开启"
-                inactive-text="关闭"
+                :active-text="t('overview.pet.toggle.on')"
+                :inactive-text="t('overview.pet.toggle.off')"
                 @change="setDoNotDisturb"
               />
             </div>
           </div>
 
           <div class="control-block emphasis-block">
-            <label>鼠标事件</label>
+            <label>{{ t('overview.pet.mouseEvents') }}</label>
             <div class="row">
               <el-switch
                 :model-value="petState.clickThrough"
-                active-text="穿透"
-                inactive-text="接收"
+                :active-text="t('overview.pet.toggle.clickThrough')"
+                :inactive-text="t('overview.pet.toggle.receive')"
                 @change="setClickThrough"
               />
             </div>
           </div>
 
           <div class="control-block emphasis-block">
-            <label>位置锁定</label>
+            <label>{{ t('overview.pet.positionLock') }}</label>
             <div class="row">
               <el-switch
                 :model-value="petState.locked"
-                active-text="锁定"
-                inactive-text="解锁"
+                :active-text="t('overview.pet.toggle.lock')"
+                :inactive-text="t('overview.pet.toggle.unlock')"
                 @change="setLocked"
               />
             </div>
           </div>
 
           <div class="control-block dock-block">
-            <label>位置 · {{ petState.placement === 'bottom-right' ? '右下角' : '自由定位' }}</label>
-            <el-button type="primary" @click="dockBottomRight">定位到右下角</el-button>
+            <label>{{ t('overview.pet.position', { value: petState.placement === 'bottom-right' ? t('overview.pet.placement.bottomRight') : t('overview.pet.placement.free') }) }}</label>
+            <el-button type="primary" @click="dockBottomRight">{{ t('overview.pet.dock') }}</el-button>
           </div>
         </div>
 
-        <div v-if="avatarCapabilities" class="pet-capability-summary" aria-label="桌宠能力">
+        <div v-if="avatarCapabilities" class="pet-capability-summary" :aria-label="t('overview.pet.capabilityAria')">
           <div class="pet-capability-item">
             <strong>{{ avatarCapabilities.expressions.length }}</strong>
-            <span>表情</span>
+            <span>{{ t('overview.pet.expressions') }}</span>
           </div>
           <div class="pet-capability-item">
             <strong>{{ avatarCapabilities.motions.length }}</strong>
-            <span>动作</span>
+            <span>{{ t('overview.pet.motions') }}</span>
           </div>
           <div class="pet-capability-item">
-            <strong>{{ avatarCapabilities.actions.gaze ? '可用' : '无' }}</strong>
-            <span>注视</span>
+            <strong>{{ avatarCapabilities.actions.gaze ? t('overview.status.available') : t('overview.pet.capability.none') }}</strong>
+            <span>{{ t('overview.pet.gaze') }}</span>
           </div>
           <div class="pet-capability-item">
-            <strong>{{ avatarCapabilities.actions.viseme ? '可用' : '无' }}</strong>
-            <span>口型同步</span>
+            <strong>{{ avatarCapabilities.actions.viseme ? t('overview.status.available') : t('overview.pet.capability.none') }}</strong>
+            <span>{{ t('overview.pet.viseme') }}</span>
           </div>
         </div>
       </section>
@@ -360,6 +360,7 @@ import { ElTag } from 'element-plus'
 import 'element-plus/es/components/tag/style/css'
 import { computed, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref } from 'vue'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
+import { t } from '@/i18n'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import { useSystemOverview } from '../composables/useSystemOverview'
 import { useSettingsStore } from '@/state/settingsStore'
@@ -387,13 +388,13 @@ type ActiveApplicationSnapshot = {
 
 type OverviewView = 'status' | 'voice' | 'platform' | 'runtime' | 'pet'
 
-const overviewViews: Array<{ id: OverviewView; label: string }> = [
-  { id: 'status', label: '状态' },
-  { id: 'voice', label: '语音' },
-  { id: 'platform', label: '平台' },
-  { id: 'runtime', label: '运行' },
-  { id: 'pet', label: '桌宠' },
-]
+const overviewViews = computed<Array<{ id: OverviewView; label: string }>>(() => [
+  { id: 'status', label: t('overview.view.status') },
+  { id: 'voice', label: t('overview.view.voice') },
+  { id: 'platform', label: t('overview.view.platform') },
+  { id: 'runtime', label: t('overview.view.runtime') },
+  { id: 'pet', label: t('overview.view.pet') },
+])
 const activeOverviewView = ref<OverviewView>('status')
 
 const platformSnapshot = ref<PlatformCapabilitySnapshot | null>(null)
@@ -418,7 +419,7 @@ const loadPlatformMatrix = async () => {
   try {
     platformSnapshot.value = await systemClient.platforms()
   } catch (error: any) {
-    platformRequest.error = error?.message || '平台能力读取失败'
+    platformRequest.error = error?.message || t('overview.error.platform')
   } finally {
     platformRequest.loading = false
   }
@@ -435,7 +436,7 @@ const loadRuntimeDependencies = async () => {
     providerSnapshot.value = providers
     connectorSnapshot.value = connectors
   } catch (error: any) {
-    runtimeRequest.error = error?.message || '运行依赖读取失败'
+    runtimeRequest.error = error?.message || t('overview.error.runtime')
   } finally {
     runtimeRequest.loading = false
   }
@@ -447,7 +448,7 @@ const loadVoiceDiagnostics = async () => {
   try {
     voiceSnapshot.value = await systemClient.voiceDiagnostics()
   } catch (error: any) {
-    voiceRequest.error = error?.message || '语音体验数据读取失败'
+    voiceRequest.error = error?.message || t('overview.error.voice')
   } finally {
     voiceRequest.loading = false
   }
@@ -460,7 +461,7 @@ const loadActiveApplication = async () => {
     activeApplication.value = await systemClient.activeApplication()
   } catch (error: any) {
     activeApplication.value = null
-    activeApplicationRequest.error = error?.message || '前台应用不可用'
+    activeApplicationRequest.error = error?.message || t('overview.error.activeApp')
   } finally {
     activeApplicationRequest.loading = false
   }
@@ -473,7 +474,7 @@ const loadOrchestration = async () => {
     orchestrationSnapshot.value = await systemClient.orchestration()
   } catch (error: any) {
     orchestrationSnapshot.value = null
-    orchestrationRequest.error = error?.message || '运行编排不可用'
+    orchestrationRequest.error = error?.message || t('overview.error.orchestration')
   } finally {
     orchestrationRequest.loading = false
   }
@@ -491,64 +492,64 @@ const loadAvatarCapabilities = async () => {
 
 const voiceEvidenceLabel = computed(() => {
   const kinds = voiceSnapshot.value?.evidence_kinds ?? []
-  if (!kinds.length) return '暂无'
-  if (kinds.includes('real_device')) return '真实设备'
-  return '本地 fixture'
+  if (!kinds.length) return t('overview.none')
+  if (kinds.includes('real_device')) return t('overview.voice.evidence.realDevice')
+  return t('overview.voice.evidence.fixture')
 })
 const voiceP95Label = (stage: Record<string, unknown> | undefined): string => {
   const value = stage?.p95_ms
-  return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value)} 毫秒` : '暂无'
+  return typeof value === 'number' && Number.isFinite(value) ? t('overview.voice.p95', { ms: Math.round(value) }) : t('overview.none')
 }
 const voiceComfortLabel = computed(() => {
   const comfort = voiceSnapshot.value?.comfort
   const gate = comfort && typeof comfort === 'object' ? comfort.comfort_gate : null
   const status = gate && typeof gate === 'object' ? (gate as Record<string, unknown>).status : null
-  if (status === 'pass') return '通过'
-  if (status === 'needs_attention') return '需关注'
-  return '数据不足'
+  if (status === 'pass') return t('overview.voice.comfort.pass')
+  if (status === 'needs_attention') return t('overview.voice.comfort.needsAttention')
+  return t('overview.voice.comfort.insufficient')
 })
 const voiceComfortSummary = computed(() => {
   const comfort = voiceSnapshot.value?.comfort
   if (!comfort || typeof comfort !== 'object') return ''
   const sampleCount = comfort.sample_count
-  if (typeof sampleCount !== 'number' || sampleCount <= 0) return '尚未记录舒适度场景；当前仅展示运行时语音采样。'
+  if (typeof sampleCount !== 'number' || sampleCount <= 0) return t('overview.voice.comfort.noneRecorded')
   const gate = comfort.comfort_gate
-  if (!gate || typeof gate !== 'object') return `已记录 ${sampleCount} 个舒适度场景。`
+  if (!gate || typeof gate !== 'object') return t('overview.voice.comfort.samples', { count: sampleCount })
   const failures = (gate as Record<string, unknown>).failures
   if (Array.isArray(failures) && failures.length > 0) return String(failures[0])
-  return `已记录 ${sampleCount} 个舒适度场景，未发现回归问题。`
+  return t('overview.voice.comfort.samplesNoRegression', { count: sampleCount })
 })
 const voiceComfortSignalSummary = computed(() => {
   const comfort = voiceSnapshot.value?.comfort
   if (!comfort || typeof comfort !== 'object') return ''
   const signals = comfort.comfort_signals
-  if (!signals || typeof signals !== 'object') return '尚未接入显式 comfort signal 分类器。'
+  if (!signals || typeof signals !== 'object') return t('overview.voice.signal.noClassifier')
   const report = signals as Record<string, unknown>
   const count = typeof report.sample_count === 'number' ? report.sample_count : 0
   const missing = Array.isArray(report.missing_signals)
     ? report.missing_signals.map(item => String(item)).filter(Boolean)
     : []
-  if (count <= 0) return '尚未记录 hesitation、backchannel 或 background speech 信号。'
-  if (missing.length) return `已记录 ${count} 个显式舒适度信号；尚缺 ${missing.join('、')}。`
-  return `已记录 ${count} 个显式舒适度信号，来源和置信度均已做边界校验。`
+  if (count <= 0) return t('overview.voice.signal.noneRecorded')
+  if (missing.length) return t('overview.voice.signal.missing', { count, missing: missing.join(t('overview.listSeparator')) })
+  return t('overview.voice.signal.ok', { count })
 })
 const voiceQualificationLabel = computed(() => {
   const status = voiceSnapshot.value?.release_gate?.status
-  if (status === 'pass') return '已通过'
-  if (status === 'fail') return '未资格化'
-  return '暂无'
+  if (status === 'pass') return t('overview.voice.qualification.pass')
+  if (status === 'fail') return t('overview.voice.qualification.fail')
+  return t('overview.none')
 })
 const voiceQualificationSummary = computed(() => {
   const qualification = voiceSnapshot.value?.qualification
   if (!qualification) return ''
-  if (qualification.status === 'qualified') return '真实设备语音资格已通过发布门禁。'
+  if (qualification.status === 'qualified') return t('overview.voice.qualification.ok')
   const gaps = Array.isArray(qualification.gaps)
     ? qualification.gaps
       .map((gap) => typeof gap?.kind === 'string' ? gap.kind : '')
       .filter(Boolean)
       .slice(0, 2)
     : []
-  return gaps.length ? `语音发布资格未通过：${gaps.join('、')}` : '语音发布资格尚未完成真实设备验证。'
+  return gaps.length ? t('overview.voice.qualification.gaps', { gaps: gaps.join(t('overview.listSeparator')) }) : t('overview.voice.qualification.incomplete')
 })
 const voiceRecommendations = computed(() => voiceSnapshot.value?.recommendations ?? [])
 
@@ -556,10 +557,10 @@ const orchestrationEntries = computed(() => {
   const snapshot = orchestrationSnapshot.value
   if (!snapshot) return []
   return [
-    ...(snapshot.agents ?? []).map(item => ({ id: item.id, name: item.name, kind: '智能体' })),
-    ...snapshot.skills.map(item => ({ id: item.id, name: item.name, kind: '技能' })),
-    ...snapshot.commands.map(item => ({ id: item.id, name: item.name, kind: '命令' })),
-    ...snapshot.hooks.map(item => ({ id: item.id, name: item.name, kind: '钩子' })),
+    ...(snapshot.agents ?? []).map(item => ({ id: item.id, name: item.name, kind: t('overview.orchestration.agents') })),
+    ...snapshot.skills.map(item => ({ id: item.id, name: item.name, kind: t('overview.orchestration.skills') })),
+    ...snapshot.commands.map(item => ({ id: item.id, name: item.name, kind: t('overview.orchestration.commands') })),
+    ...snapshot.hooks.map(item => ({ id: item.id, name: item.name, kind: t('overview.orchestration.hooks') })),
   ].slice(0, 12)
 })
 
@@ -571,11 +572,11 @@ const platformHostLabel = computed(() => {
 })
 const platformCapabilityKeys = ['desktop', 'live2d_vrm', 'text_voice', 'native_actions'] as const
 const platformStatusLabel = (status: PlatformCapabilityState) => ({
-  available: '可用',
-  needs_config: '需配置',
-  experimental: '实验性',
-  planned: '规划中',
-  unsupported: '不支持',
+  available: t('overview.status.available'),
+  needs_config: t('overview.platform.status.needsConfig'),
+  experimental: t('overview.platform.status.experimental'),
+  planned: t('overview.platform.status.planned'),
+  unsupported: t('overview.platform.status.unsupported'),
 }[status] || status)
 const platformTagType = (status: PlatformCapabilityState) => ({
   available: 'success',
@@ -596,33 +597,33 @@ const runtimeRows = computed(() => {
   return [
     {
       key: 'providers',
-      label: '模型与语音服务',
-      value: !providers.length ? '暂无 provider' : requiredHealthy ? `${providers.filter((item) => item.healthy).length}/${providers.length} 健康` : '有必需服务异常',
-      desc: providerFailures[0]?.message || (providers.length ? 'LLM、ASR、TTS 和视觉 provider' : '尚未读取 provider 状态'),
+      label: t('overview.row.providers'),
+      value: !providers.length ? t('overview.value.noProvider') : requiredHealthy ? t('overview.value.providerHealth', { healthy: providers.filter((item) => item.healthy).length, total: providers.length }) : t('overview.value.providerRequiredFailure'),
+      desc: providerFailures[0]?.message || (providers.length ? t('overview.desc.providers') : t('overview.desc.providersUnread')),
       tone: !providers.length ? 'warning' : requiredHealthy ? 'online' : 'offline',
       to: canonicalPath('infrastructure'),
     },
     {
       key: 'connectors',
-      label: '连接器',
-      value: connectorFailures.length ? `${connectorFailures.length} 项故障` : `${runningConnectors.length} 项运行中`,
-      desc: connectorFailures[0]?.lastError || '外部消息与工具连接器默认可停用',
+      label: t('overview.row.connectors'),
+      value: connectorFailures.length ? t('overview.value.connectorFailures', { count: connectorFailures.length }) : t('overview.value.connectorRunning', { count: runningConnectors.length }),
+      desc: connectorFailures[0]?.lastError || t('overview.desc.connectors'),
       tone: connectorFailures.length ? 'warning' : 'online',
       to: canonicalPath('agent-governance'),
     },
     {
       key: 'pet',
-      label: '桌宠资源',
-      value: currentModel.value ? '已加载' : '待配置',
-      desc: currentModel.value?.name || '选择 Live2D 或 VRM 模型',
+      label: t('overview.row.pet'),
+      value: currentModel.value ? t('overview.status.loaded') : t('overview.status.pendingConfigure'),
+      desc: currentModel.value?.name || t('overview.desc.petModel'),
       tone: currentModel.value ? 'online' : 'warning',
       to: canonicalPath('pet'),
     },
     {
       key: 'platform',
-      label: '当前平台',
-      value: platformHostLabel.value || '待检测',
-      desc: '能力矩阵显示已验证和实验性边界',
+      label: t('overview.row.platform'),
+      value: platformHostLabel.value || t('overview.status.pendingCheck'),
+      desc: t('overview.desc.platform'),
       tone: platformSnapshot.value ? 'online' : 'warning',
       to: canonicalPath('deploy'),
     },
@@ -671,11 +672,11 @@ const llmReady = computed(() => {
   return isLocalLlmProvider.value || hasLlmKey.value
 })
 const llmStatusText = computed(() => {
-  if (!canAssessConfiguredServices.value) return '待检测'
-  if (!hasLlmEndpoint.value) return '缺少地址'
-  if (!hasLlmModel.value) return '待选模型'
-  if (!isLocalLlmProvider.value && !hasLlmKey.value) return '缺少 Key'
-  return '已配置'
+  if (!canAssessConfiguredServices.value) return t('overview.status.pendingCheck')
+  if (!hasLlmEndpoint.value) return t('overview.status.endpointMissing')
+  if (!hasLlmModel.value) return t('overview.status.modelMissing')
+  if (!isLocalLlmProvider.value && !hasLlmKey.value) return t('overview.status.keyMissing')
+  return t('overview.status.configured')
 })
 
 const asrReady = computed(() => {
@@ -686,23 +687,23 @@ const asrReady = computed(() => {
   return Boolean(settingsStore.state.asr.base_url.trim())
 })
 const asrStatusText = computed(() => {
-  if (!canAssessConfiguredServices.value) return '待检测'
-  if (settingsStore.state.asr.provider === 'disabled') return '已关闭'
-  return asrReady.value ? '已配置' : '缺少地址'
+  if (!canAssessConfiguredServices.value) return t('overview.status.pendingCheck')
+  if (settingsStore.state.asr.provider === 'disabled') return t('overview.status.disabled')
+  return asrReady.value ? t('overview.status.configured') : t('overview.status.endpointMissing')
 })
 
 const ttsConfigured = computed(() => ['genie-tts', 'openai-compatible'].includes(settingsStore.state.tts.provider))
 const ttsReady = computed(() => Boolean(canAssessConfiguredServices.value && systemStore.pythonRunning && ttsConfigured.value))
 const ttsStatusText = computed(() => {
-  if (!canAssessConfiguredServices.value) return '待检测'
-  if (!ttsConfigured.value) return '冲突'
-  return systemStore.pythonRunning ? '已配置' : '待后端'
+  if (!canAssessConfiguredServices.value) return t('overview.status.pendingCheck')
+  if (!ttsConfigured.value) return t('overview.status.conflict')
+  return systemStore.pythonRunning ? t('overview.status.configured') : t('overview.status.waitingBackend')
 })
 const promptModeLabel = computed(() => {
   const mode = workspaceStore.activeWorkspace.context.promptMode || 'auto'
-  if (mode === 'work') return '工作'
-  if (mode === 'daily') return '日常'
-  return workspaceStore.activeWorkspaceId === 'default' ? '自动·日常' : '自动·工作'
+  if (mode === 'work') return t('overview.prompt.work')
+  if (mode === 'daily') return t('overview.prompt.daily')
+  return workspaceStore.activeWorkspaceId === 'default' ? t('overview.prompt.autoDaily') : t('overview.prompt.autoWork')
 })
 const promptContextReady = computed(() => {
   const context = workspaceStore.activeWorkspace.context
@@ -718,8 +719,8 @@ const chainIssues = computed<ChainIssue[]>(() => {
   if (!systemStore.controlRunning) {
     issues.push({
       key: 'control',
-      title: '控制服务未连接',
-      desc: systemStore.controlHealthError || '设置和桌宠状态暂不可读',
+      title: t('overview.issue.controlTitle'),
+      desc: systemStore.controlHealthError || t('overview.issue.controlDesc'),
       tone: 'offline',
     })
   }
@@ -727,8 +728,8 @@ const chainIssues = computed<ChainIssue[]>(() => {
   if (!systemStore.pythonRunning) {
     issues.push({
       key: 'python',
-      title: 'Python 后端未连接',
-      desc: systemStore.pythonHealthError || 'LLM、ASR、TTS 暂不可用',
+      title: t('overview.issue.pythonTitle'),
+      desc: systemStore.pythonHealthError || t('overview.issue.pythonDesc'),
       tone: 'offline',
     })
   }
@@ -736,37 +737,37 @@ const chainIssues = computed<ChainIssue[]>(() => {
   if (!systemStore.sioConnected) {
     issues.push({
       key: 'socket',
-      title: 'Socket.IO 未连接',
-      desc: '对话流、TTS 回传和桌宠联动会中断',
+      title: t('overview.issue.socketTitle'),
+      desc: t('overview.issue.socketDesc'),
       tone: 'warning',
     })
   }
 
   if (canAssessConfiguredServices.value) {
     if (!hasLlmEndpoint.value) {
-      issues.push({ key: 'llm-url', title: 'LLM 缺少地址', desc: '请在模型与语音中填写服务地址', tone: 'offline' })
+      issues.push({ key: 'llm-url', title: t('overview.issue.llmUrlTitle'), desc: t('overview.issue.llmUrlDesc'), tone: 'offline' })
     } else if (!hasLlmModel.value) {
-      issues.push({ key: 'llm-model', title: 'LLM 未选择模型', desc: '请选择当前提供商的模型', tone: 'offline' })
+      issues.push({ key: 'llm-model', title: t('overview.issue.llmModelTitle'), desc: t('overview.issue.llmModelDesc'), tone: 'offline' })
     } else if (!isLocalLlmProvider.value && !hasLlmKey.value) {
-      issues.push({ key: 'llm-key', title: 'LLM 缺少 Key', desc: 'Ollama 和 LM Studio 不需要 Key，其他提供商需要填写', tone: 'offline' })
+      issues.push({ key: 'llm-key', title: t('overview.issue.llmKeyTitle'), desc: t('overview.issue.llmKeyDesc'), tone: 'offline' })
     }
 
     if (settingsStore.state.asr.provider === 'disabled') {
-      issues.push({ key: 'asr-disabled', title: 'ASR 已关闭', desc: '语音输入不会进入对话链路', tone: 'warning' })
+      issues.push({ key: 'asr-disabled', title: t('overview.issue.asrDisabledTitle'), desc: t('overview.issue.asrDisabledDesc'), tone: 'warning' })
     } else if (!asrReady.value) {
-      issues.push({ key: 'asr-url', title: 'ASR 缺少地址', desc: '当前提供商需要填写服务地址', tone: 'warning' })
+      issues.push({ key: 'asr-url', title: t('overview.issue.asrUrlTitle'), desc: t('overview.issue.asrUrlDesc'), tone: 'warning' })
     }
 
     if (!ttsConfigured.value) {
-      issues.push({ key: 'tts-provider', title: 'TTS 配置冲突', desc: '请选择有效的 TTS 提供商', tone: 'offline' })
+      issues.push({ key: 'tts-provider', title: t('overview.issue.ttsConflictTitle'), desc: t('overview.issue.ttsProviderDesc'), tone: 'offline' })
     }
 
   }
 
   if (!currentModel.value) {
-    issues.push({ key: 'pet-model', title: '桌宠模型未加载', desc: '请选择 Live2D 或 VRM 模型', tone: 'warning' })
+    issues.push({ key: 'pet-model', title: t('overview.issue.petModelTitle'), desc: t('overview.desc.petModel'), tone: 'warning' })
   } else if (!petState.value.visible) {
-    issues.push({ key: 'pet-hidden', title: '桌宠已隐藏', desc: '桌宠动作和表情不会显示', tone: 'warning' })
+    issues.push({ key: 'pet-hidden', title: t('overview.issue.petHiddenTitle'), desc: t('overview.issue.petHiddenDesc'), tone: 'warning' })
   }
 
   return issues
@@ -784,7 +785,7 @@ const runtimeActionItems = computed<RuntimeActionItem[]>(() => {
   const localIssues = chainIssues.value.map((item) => ({
     ...item,
     to: issueTarget(item.key),
-    actionLabel: ['control', 'python', 'socket'].includes(item.key) ? '查看诊断' : '前往设置',
+    actionLabel: ['control', 'python', 'socket'].includes(item.key) ? t('overview.action.viewDiagnostics') : t('overview.action.goSettings'),
   }))
   const remoteIssues = runtimeRows.value
     .filter((item) => item.tone !== 'online')
@@ -792,11 +793,11 @@ const runtimeActionItems = computed<RuntimeActionItem[]>(() => {
     .filter((item) => item.key !== 'platform' || platformSnapshot.value)
     .map((item) => ({
       key: item.key,
-      title: `${item.label}：${item.value}`,
+      title: t('overview.runtimeActionTitle', { label: item.label, value: item.value }),
       desc: item.desc,
       tone: item.tone,
       to: item.to,
-      actionLabel: '查看详情',
+      actionLabel: t('overview.action.viewDetail'),
     }))
 
   const seen = new Set<string>()
@@ -812,15 +813,15 @@ const runtimeActionItems = computed<RuntimeActionItem[]>(() => {
 
 const chainChecks = computed<Array<{ label: string; value: string; desc: string; tone: CheckTone }>>(() => [
   {
-    label: '对话链路',
-    value: chatChainReady.value ? '已配置' : '待连接',
-    desc: chatChainReady.value ? settingsStore.state.llm.model : '后端 / Socket.IO / LLM',
+    label: t('overview.chain.chat'),
+    value: chatChainReady.value ? t('overview.status.configured') : t('overview.chain.pendingConnection'),
+    desc: chatChainReady.value ? settingsStore.state.llm.model : t('overview.chain.backendChain'),
     tone: chatChainReady.value ? 'online' : 'warning',
   },
   {
-    label: '提示词',
+    label: t('overview.chain.prompt'),
     value: promptModeLabel.value,
-    desc: promptContextReady.value ? '工作/日常提示词已配置' : '提示词未完整',
+    desc: promptContextReady.value ? t('overview.chain.promptReady') : t('overview.chain.promptIncomplete'),
     tone: promptContextReady.value ? 'online' : 'offline',
   },
   {
@@ -838,18 +839,18 @@ const chainChecks = computed<Array<{ label: string; value: string; desc: string;
   {
     label: 'TTS',
     value: ttsStatusText.value,
-    desc: ttsConfigured.value ? `${settingsStore.state.tts.provider} 已配置` : '请选择有效的 TTS 提供商',
+    desc: ttsConfigured.value ? t('overview.chain.ttsConfigured', { provider: settingsStore.state.tts.provider }) : t('overview.issue.ttsProviderDesc'),
     tone: ttsReady.value ? 'online' : 'offline',
   },
   {
-    label: '桌宠联动',
-    value: petLinkReady.value ? '可用' : '待检查',
-    desc: currentModel.value?.name || '未加载模型',
+    label: t('overview.chain.petLink'),
+    value: petLinkReady.value ? t('overview.status.available') : t('overview.chain.pendingCheck'),
+    desc: currentModel.value?.name || t('overview.chain.noModel'),
     tone: petLinkReady.value ? 'online' : 'warning',
   },
   {
-    label: '语音对话',
-    value: voiceChainReady.value ? '已配置' : '待配置',
+    label: t('overview.chain.voice'),
+    value: voiceChainReady.value ? t('overview.status.configured') : t('overview.status.pendingConfigure'),
     desc: 'ASR / LLM / TTS',
     tone: voiceChainReady.value ? 'online' : 'warning',
   },
@@ -884,11 +885,11 @@ const refreshOverview = async () => {
 }
 
 const petChips = computed(() => [
-  { label: currentModel.value?.name ?? '未发现模型', tone: 'ok' },
-  { label: petState.value.ready ? '已加载' : '加载中', tone: petState.value.ready ? 'ok' : 'warn' },
-  { label: petState.value.interactMode ? '可拖动' : '鼠标穿透', tone: petState.value.interactMode ? 'warn' : 'info' },
-  { label: petState.value.clickThrough ? '完全穿透' : '可交互', tone: petState.value.clickThrough ? 'ok' : 'warn' },
-  { label: petState.value.locked ? '位置锁定' : '位置可调', tone: petState.value.locked ? 'err' : 'info' },
+  { label: currentModel.value?.name ?? t('overview.pet.chip.noModel'), tone: 'ok' },
+  { label: petState.value.ready ? t('overview.status.loaded') : t('overview.status.loading'), tone: petState.value.ready ? 'ok' : 'warn' },
+  { label: petState.value.interactMode ? t('overview.pet.chip.draggable') : t('overview.pet.chip.clickThrough'), tone: petState.value.interactMode ? 'warn' : 'info' },
+  { label: petState.value.clickThrough ? t('overview.pet.chip.fullClickThrough') : t('overview.pet.chip.interactive'), tone: petState.value.clickThrough ? 'ok' : 'warn' },
+  { label: petState.value.locked ? t('overview.pet.positionLock') : t('overview.pet.chip.unlocked'), tone: petState.value.locked ? 'err' : 'info' },
 ])
 
 let syncTimer: number | null = null

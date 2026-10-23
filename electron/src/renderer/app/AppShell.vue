@@ -338,7 +338,7 @@ const handleToggleVisionShortcut = () => {
     vision: { ...vision, enabled },
   })
   ElMessage({
-    message: enabled ? '桌宠视觉已恢复' : '桌宠视觉已暂停',
+    message: enabled ? t('misc.petVisionResumed') : t('misc.petVisionPaused'),
     type: enabled ? 'success' : 'warning',
     duration: 1800,
   })

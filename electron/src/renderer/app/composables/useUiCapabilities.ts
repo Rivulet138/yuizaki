@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { systemClient, type UiCapabilitiesSnapshot, type UiClientCapabilities } from '@/api/clients/system-client'
+import { t } from '@/i18n'
 
 const emptyClient = (mode: 'browser' | 'electron'): UiClientCapabilities => ({
   mode,
@@ -75,11 +76,11 @@ export const useUiCapabilities = () => {
     try {
       const next = normalizeSnapshot(await systemClient.uiCapabilities())
       if (generation !== refreshGeneration) return
-      if (!next) throw new Error('浏览器能力响应格式无效')
+      if (!next) throw new Error(t('misc.browserCapabilitiesInvalidFormat'))
       snapshot.value = next
     } catch (cause) {
       if (generation !== refreshGeneration) return
-      error.value = cause instanceof Error ? cause.message : '浏览器能力读取失败'
+      error.value = cause instanceof Error ? cause.message : t('misc.browserCapabilitiesReadFailed')
     } finally {
       if (generation === refreshGeneration) loading.value = false
     }

@@ -1,75 +1,75 @@
 <template>
-  <PanelShell title="行为记录" tone="admin">
+  <PanelShell :title="t('memoryView.personaTitle')" tone="admin">
     <div class="persona-panel">
       <div class="panel-toolbar">
         <div>
-          <h3>当前状态</h3>
+          <h3>{{ t('memoryView.personaCurrentState') }}</h3>
         </div>
-        <el-button type="primary" plain :loading="loading" :disabled="loading" @click="loadHeartbeat">刷新状态</el-button>
+        <el-button type="primary" plain :loading="loading" :disabled="loading" @click="loadHeartbeat">{{ t('memoryView.personaRefresh') }}</el-button>
       </div>
 
       <el-alert v-if="loadError" :title="loadError" type="warning" show-icon :closable="false" />
 
       <el-card shadow="never">
-         <template #header>桌宠状态</template>
+         <template #header>{{ t('memoryView.personaPetStatus') }}</template>
         <el-descriptions :column="3" border>
-          <el-descriptions-item label="心情">{{ heartbeat?.persona?.mood || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="活跃程度">{{ heartbeat?.persona?.energy || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="互动熟悉度">{{ formatAffinity(heartbeat?.persona?.affinity) }}</el-descriptions-item>
-          <el-descriptions-item label="运行状态">{{ heartbeat?.running ? '运行中' : '已停止' }}</el-descriptions-item>
-          <el-descriptions-item label="已运行次数">{{ heartbeat?.tick_count || 0 }}</el-descriptions-item>
-          <el-descriptions-item label="自动检查间隔">{{ heartbeat?.interval_seconds || '-' }} 秒</el-descriptions-item>
+          <el-descriptions-item :label="t('memoryView.personaMood')">{{ heartbeat?.persona?.mood || '-' }}</el-descriptions-item>
+          <el-descriptions-item :label="t('memoryView.personaEnergy')">{{ heartbeat?.persona?.energy || '-' }}</el-descriptions-item>
+          <el-descriptions-item :label="t('memoryView.personaAffinity')">{{ formatAffinity(heartbeat?.persona?.affinity) }}</el-descriptions-item>
+          <el-descriptions-item :label="t('memoryView.personaRunningState')">{{ heartbeat?.running ? t('memoryView.personaRunning') : t('memoryView.personaStopped') }}</el-descriptions-item>
+          <el-descriptions-item :label="t('memoryView.personaTickCount')">{{ heartbeat?.tick_count || 0 }}</el-descriptions-item>
+          <el-descriptions-item :label="t('memoryView.personaInterval')">{{ t('memoryView.personaIntervalValue', { count: heartbeat?.interval_seconds || '-' }) }}</el-descriptions-item>
         </el-descriptions>
       </el-card>
 
       <el-card shadow="never">
-        <template #header>最新行为</template>
-        <el-empty v-if="!latestBehaviorEvent" description="暂无截获的行为事件" />
+        <template #header>{{ t('memoryView.personaLatestBehavior') }}</template>
+        <el-empty v-if="!latestBehaviorEvent" :description="t('memoryView.personaNoInterceptedEvents')" />
         <div v-else class="event-section">
           <el-descriptions :column="2" border>
-            <el-descriptions-item label="类型">{{ behaviorTypeLabel(latestBehaviorEvent.type) }}</el-descriptions-item>
-            <el-descriptions-item label="触发原因">{{ latestBehaviorEvent.trigger_reason || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="情绪">{{ behaviorValueLabel(latestBehaviorEvent.emotion_id) }}</el-descriptions-item>
-            <el-descriptions-item label="动作">{{ behaviorValueLabel(latestBehaviorEvent.motion_group) }}</el-descriptions-item>
-            <el-descriptions-item label="互动提示" :span="2">{{ latestBehaviorEvent.prompt || '-' }}</el-descriptions-item>
+            <el-descriptions-item :label="t('memoryView.personaType')">{{ behaviorTypeLabel(latestBehaviorEvent.type) }}</el-descriptions-item>
+            <el-descriptions-item :label="t('memoryView.personaTriggerReason')">{{ latestBehaviorEvent.trigger_reason || '-' }}</el-descriptions-item>
+            <el-descriptions-item :label="t('memoryView.personaEmotion')">{{ behaviorValueLabel(latestBehaviorEvent.emotion_id) }}</el-descriptions-item>
+            <el-descriptions-item :label="t('memoryView.personaMotion')">{{ behaviorValueLabel(latestBehaviorEvent.motion_group) }}</el-descriptions-item>
+            <el-descriptions-item :label="t('memoryView.personaPrompt')" :span="2">{{ latestBehaviorEvent.prompt || '-' }}</el-descriptions-item>
           </el-descriptions>
 
-          <el-alert :title="latestBehaviorEvent.message || '(无消息体)'" type="info" :closable="false" />
+          <el-alert :title="latestBehaviorEvent.message || t('memoryView.personaNoMessage')" type="info" :closable="false" />
 
           <el-alert
             v-if="latestBehaviorEvent.proactive_state?.suppression_reasons?.length"
-            :title="`暂未主动互动：${latestBehaviorEvent.proactive_state.suppression_reasons.map(suppressionReasonLabel).join('、')}`"
+            :title="t('memoryView.personaSuppression', { reasons: suppressionReasonsText })"
             type="warning"
             show-icon
             :closable="false"
           />
 
           <div class="button-row">
-            <el-button size="small" type="primary" plain :loading="triggeringEmotion" :disabled="triggeringEmotion || !latestBehaviorEvent.emotion_id" @click="triggerEmotion">触发表情</el-button>
-            <el-button size="small" type="primary" plain :loading="triggeringMotion" :disabled="triggeringMotion || !latestBehaviorEvent.motion_group" @click="triggerMotion">触发动作</el-button>
-            <el-button size="small" type="success" plain @click="pushPromptToAdvice">加入聊天建议</el-button>
+            <el-button size="small" type="primary" plain :loading="triggeringEmotion" :disabled="triggeringEmotion || !latestBehaviorEvent.emotion_id" @click="triggerEmotion">{{ t('memoryView.personaTriggerEmotion') }}</el-button>
+            <el-button size="small" type="primary" plain :loading="triggeringMotion" :disabled="triggeringMotion || !latestBehaviorEvent.motion_group" @click="triggerMotion">{{ t('memoryView.personaTriggerMotion') }}</el-button>
+            <el-button size="small" type="success" plain @click="pushPromptToAdvice">{{ t('memoryView.personaPushAdvice') }}</el-button>
           </div>
         </div>
       </el-card>
 
       <el-card shadow="never">
-        <template #header>最近行为</template>
-        <el-empty v-if="!heartbeat?.behavior_events?.length" description="暂无行为事件" />
+        <template #header>{{ t('memoryView.personaRecentBehavior') }}</template>
+        <el-empty v-if="!heartbeat?.behavior_events?.length" :description="t('memoryView.personaNoBehaviorEvents')" />
         <div v-else class="event-table-wrap">
           <el-table :data="heartbeat.behavior_events.slice().reverse()" size="small" border>
-            <el-table-column prop="at" label="时间" width="180" />
-            <el-table-column label="类型" width="160"><template #default="scope">{{ behaviorTypeLabel(scope.row.type) }}</template></el-table-column>
-            <el-table-column prop="message" label="消息" min-width="260" show-overflow-tooltip />
+            <el-table-column prop="at" :label="t('memoryView.personaColumnTime')" width="180" />
+            <el-table-column :label="t('memoryView.personaType')" width="160"><template #default="scope">{{ behaviorTypeLabel(scope.row.type) }}</template></el-table-column>
+            <el-table-column prop="message" :label="t('memoryView.personaColumnMessage')" min-width="260" show-overflow-tooltip />
           </el-table>
         </div>
       </el-card>
 
       <el-card shadow="never">
-        <template #header>互动建议</template>
+        <template #header>{{ t('memoryView.personaAdviceTitle') }}</template>
         <div v-if="behaviorSuggestions.length" class="suggestion-list">
           <el-tag v-for="(item, index) in behaviorSuggestions" :key="index" type="info">{{ item }}</el-tag>
         </div>
-        <el-empty v-else description="暂无行为建议" :image-size="56" />
+        <el-empty v-else :description="t('memoryView.personaNoAdvice')" :image-size="56" />
       </el-card>
     </div>
   </PanelShell>
@@ -94,6 +94,7 @@ import 'element-plus/es/components/card/style/css'
 import 'element-plus/es/components/descriptions/style/css'
 import 'element-plus/es/components/descriptions-item/style/css'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
+import { t } from '@/i18n'
 import { petControlClient, systemClient } from '@/api/client'
 import { useChatStore } from '@/stores/chatStore'
 import type { HeartbeatSnapshot } from '@/../shared/agent'
@@ -118,43 +119,46 @@ const formatAffinity = (value: number | undefined) => {
   return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`
 }
 
+const behaviorValueLabels = computed<Record<string, string>>(() => ({
+  happy: t('memoryView.behaviorHappy'),
+  sad: t('memoryView.behaviorSad'),
+  angry: t('memoryView.behaviorAngry'),
+  surprised: t('memoryView.behaviorSurprised'),
+  neutral: t('memoryView.behaviorNeutral'),
+  excited: t('memoryView.behaviorExcited'),
+  idle: t('memoryView.behaviorIdle'),
+  wave: t('memoryView.behaviorWave'),
+  nod: t('memoryView.behaviorNod'),
+}))
 const behaviorValueLabel = (value: unknown) => {
-  const labels: Record<string, string> = {
-    happy: '开心',
-    sad: '低落',
-    angry: '生气',
-    surprised: '惊讶',
-    neutral: '平静',
-    excited: '兴奋',
-    idle: '待机',
-    wave: '挥手',
-    nod: '点头',
-  }
   const text = typeof value === 'string' ? value.trim() : ''
-  return labels[text] || text.replaceAll('_', ' ') || '-'
+  return behaviorValueLabels.value[text] || text.replaceAll('_', ' ') || '-'
 }
 
-const suppressionReasonLabel = (value: string) => {
-  const labels: Record<string, string> = {
-    cooldown: '仍在冷却时间内',
-    disabled: '主动互动已关闭',
-    quiet_hours: '处于免打扰时段',
-    no_signal: '暂时没有可用内容',
-    rate_limited: '互动频率已达到上限',
-  }
-  return labels[value] || value.replaceAll('_', ' ')
-}
+const suppressionReasonLabels = computed<Record<string, string>>(() => ({
+  cooldown: t('memoryView.suppressionCooldown'),
+  disabled: t('memoryView.suppressionDisabled'),
+  quiet_hours: t('memoryView.suppressionQuietHours'),
+  no_signal: t('memoryView.suppressionNoSignal'),
+  rate_limited: t('memoryView.suppressionRateLimited'),
+}))
+const suppressionReasonLabel = (value: string) => suppressionReasonLabels.value[value] || value.replaceAll('_', ' ')
+const suppressionReasonsText = computed(() => {
+  const reasons = latestBehaviorEvent.value?.proactive_state?.suppression_reasons
+  if (!Array.isArray(reasons) || reasons.length === 0) return ''
+  return reasons.map(suppressionReasonLabel).join(t('memoryView.personaSuppressionSeparator'))
+})
 
+const behaviorTypeLabels = computed<Record<string, string>>(() => ({
+  proactive_message: t('memoryView.behaviorTypeProactive'),
+  scheduled_task: t('memoryView.behaviorTypeScheduled'),
+  emotion: t('memoryView.behaviorTypeEmotion'),
+  motion: t('memoryView.behaviorTypeMotion'),
+  reminder: t('memoryView.behaviorTypeReminder'),
+}))
 const behaviorTypeLabel = (value: unknown) => {
-  const labels: Record<string, string> = {
-    proactive_message: '主动消息',
-    scheduled_task: '计划任务',
-    emotion: '情绪变化',
-    motion: '动作变化',
-    reminder: '提醒',
-  }
   const text = typeof value === 'string' ? value : ''
-  return labels[text] || text || '行为事件'
+  return behaviorTypeLabels.value[text] || text || t('memoryView.behaviorTypeFallback')
 }
 
 const loadHeartbeat = async () => {
@@ -169,8 +173,8 @@ const loadHeartbeat = async () => {
     behaviorSuggestions.value = Array.isArray(events) ? events.slice(-5).map((item) => item.message).filter(Boolean) : []
   } catch (error) {
     if (requestId !== heartbeatLoadSequence) return
-    loadError.value = describeFailure(error, '无法读取桌宠状态')
-    console.warn('加载 Heartbeat 状态失败', error)
+    loadError.value = describeFailure(error, t('memoryView.personaLoadError'))
+    console.warn(t('memoryView.personaLoadWarn'), error)
   } finally {
     if (requestId === heartbeatLoadSequence) loading.value = false
   }
@@ -184,9 +188,9 @@ const triggerEmotion = async () => {
   triggeringEmotion.value = true
   try {
     await petControlClient.triggerEmotion(emotionId)
-    ElMessage.success('已播放表情')
+    ElMessage.success(t('memoryView.personaEmotionPlayed'))
   } catch {
-    ElMessage.warning('当前行为事件未映射到可用表情预设')
+    ElMessage.warning(t('memoryView.personaEmotionUnavailable'))
   } finally {
     triggeringEmotion.value = false
   }
@@ -200,9 +204,9 @@ const triggerMotion = async () => {
   triggeringMotion.value = true
   try {
     await petControlClient.triggerMotion(motionGroup, 0)
-    ElMessage.success('已播放动作')
+    ElMessage.success(t('memoryView.personaMotionPlayed'))
   } catch {
-    ElMessage.warning('当前行为事件未映射到可用动作组')
+    ElMessage.warning(t('memoryView.personaMotionUnavailable'))
   } finally {
     triggeringMotion.value = false
   }
@@ -213,7 +217,7 @@ const pushPromptToAdvice = () => {
     return
   }
   appendLocalAdvice(latestBehaviorEvent.value.message, 'persona-debug')
-  ElMessage.success('已加入聊天建议')
+  ElMessage.success(t('memoryView.personaAdviceAdded'))
 }
 
 onMounted(() => {

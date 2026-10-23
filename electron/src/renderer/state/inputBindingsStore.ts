@@ -9,6 +9,7 @@ import {
   type InputBindingSettingsPatch,
   type InputBindingSnapshot,
 } from '@/../shared/input-bindings'
+import { t } from '@/i18n'
 
 const emptyStatus = (): InputBindingRegistrationStatus => ({
   mouseHookAvailable: false,
@@ -73,7 +74,7 @@ const saveBrowserSettings = (settings: InputBindingSettings): void => {
   try {
     window.localStorage.setItem(BROWSER_STORAGE_KEY, JSON.stringify(settings))
   } catch {
-    state.error = '浏览器无法保存快捷键设置'
+    state.error = t('misc.browserCannotSaveShortcuts')
   }
 }
 
@@ -81,7 +82,7 @@ const saveBrowserShortcutsEnabled = (enabled: boolean): void => {
   try {
     window.localStorage.setItem(BROWSER_SCOPE_STORAGE_KEY, enabled ? 'enabled' : 'disabled')
   } catch {
-    state.error = '浏览器无法保存本页输入开关'
+    state.error = t('misc.browserCannotSaveInputScope')
   }
 }
 
@@ -178,5 +179,5 @@ export const useInputBindingsStore = () => ({
   reset,
   setBrowserShortcutsEnabled,
   markBrowserAction,
-  pushToTalkLabel: computed(() => `按住${mouseButtonLabel(state.settings.pushToTalk.mouseButton)}`),
+  pushToTalkLabel: computed(() => t('misc.pushToTalkHold', { button: mouseButtonLabel(state.settings.pushToTalk.mouseButton) })),
 })

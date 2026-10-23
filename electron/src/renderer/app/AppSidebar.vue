@@ -7,11 +7,11 @@
         :src="yuizakiConfig.decorations.letterDecor"
         alt="Yuizaki"
       />
-      <span class="brand-name">結崎</span>
+      <span class="brand-name">{{ t('nav.brandWordmark') }}</span>
     </div>
 
     <nav class="menu">
-      <section class="menu-group" aria-label="常用">
+      <section class="menu-group" :aria-label="t('nav.common')">
         <router-link
           v-for="menu in primaryMenus"
           :key="menu.id"
@@ -33,10 +33,10 @@
         type="button"
         :aria-expanded="advancedOpen"
         aria-controls="advanced-navigation"
-        title="高级功能"
+        :title="t('nav.advancedTitle')"
         @click="advancedOpen = !advancedOpen"
       >
-        <span class="admin-toggle-label">高级</span>
+        <span class="admin-toggle-label">{{ t('nav.advanced') }}</span>
         <el-icon class="admin-toggle-icon" :class="{ expanded: advancedOpen }"><ArrowDown /></el-icon>
       </button>
 

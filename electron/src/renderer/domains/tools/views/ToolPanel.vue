@@ -1,10 +1,10 @@
 <template>
   <PanelShell
-    title="能力与工具"
+    :title="t('tools.title')"
     tone="tool"
   >
     <div class="tool-panel">
-      <nav class="tool-view-nav" aria-label="工具视图" role="tablist">
+      <nav class="tool-view-nav" :aria-label="t('tools.viewNavAria')" role="tablist">
         <button
           v-for="view in toolViews"
           :key="view.id"
@@ -20,7 +20,7 @@
       </nav>
 
       <div v-show="activeToolView === 'status'" class="tool-view-stack">
-      <section class="tool-health panel-card" aria-label="本地能力状态">
+      <section class="tool-health panel-card" :aria-label="t('tools.healthAria')">
         <button
           v-for="item in healthItems"
           :key="item.key"
@@ -37,116 +37,116 @@
 
       </div>
 
-      <section v-show="activeToolView === 'stream'" class="stream-summary panel-card" aria-label="直播能力状态">
+      <section v-show="activeToolView === 'stream'" class="stream-summary panel-card" :aria-label="t('tools.stream.sectionAria')">
         <div class="section-heading">
           <div>
-            <h3>直播能力</h3>
+            <h3>{{ t('tools.stream.title') }}</h3>
           </div>
           <div class="section-actions">
             <el-tag :type="streamStatusTagType" effect="light">{{ streamStatusLabel }}</el-tag>
-            <el-button plain :loading="loadingStreamProbe" @click="probeStream">探测适配器</el-button>
-            <el-button plain :icon="Refresh" :loading="loadingStream" @click="loadStream">刷新</el-button>
+            <el-button plain :loading="loadingStreamProbe" @click="probeStream">{{ t('tools.stream.probeAdapter') }}</el-button>
+            <el-button plain :icon="Refresh" :loading="loadingStream" @click="loadStream">{{ t('tools.refresh') }}</el-button>
           </div>
         </div>
         <el-alert v-if="streamLoadError" class="panel-alert" type="warning" :closable="false" show-icon>
           <div class="alert-row"><span>{{ streamLoadError }}</span></div>
         </el-alert>
         <div v-if="streamSnapshot" class="stream-status-line">
-          <span>适配器：{{ streamSnapshot.adapter?.name || streamSnapshot.adapter?.id || '未连接' }}</span>
-          <span>{{ streamSnapshot.adapter?.configured ? '已配置' : '未配置' }}</span>
-           <span>Twitch EventSub：{{ streamSnapshot.platforms?.twitch?.revoked ? '订阅已撤销，需重新配置' : streamSnapshot.platforms?.twitch?.eventsubConfigured ? '已配置，仅接收入站事件' : '未配置' }}</span>
-           <span>Twitch 出站聊天：{{ streamSnapshot.platforms?.twitch?.outboundActions ? '已配置，仍需确认' : '未配置' }}</span>
-          <span>Twitch IRC：{{ twitchIrcStatusLabel }}</span>
+          <span>{{ t('tools.stream.adapterLine', { name: streamSnapshot.adapter?.name || streamSnapshot.adapter?.id || t('tools.state.notConnected') }) }}</span>
+          <span>{{ streamSnapshot.adapter?.configured ? t('tools.state.configured') : t('tools.state.notConfigured') }}</span>
+           <span>{{ t('tools.stream.eventsubLine', { state: streamSnapshot.platforms?.twitch?.revoked ? t('tools.stream.eventsubRevoked') : streamSnapshot.platforms?.twitch?.eventsubConfigured ? t('tools.stream.eventsubInbound') : t('tools.state.notConfigured') }) }}</span>
+           <span>{{ t('tools.stream.outboundLine', { state: streamSnapshot.platforms?.twitch?.outboundActions ? t('tools.stream.outboundNeedsConfirm') : t('tools.state.notConfigured') }) }}</span>
+          <span>{{ t('tools.stream.ircLine', { state: twitchIrcStatusLabel }) }}</span>
           <el-button
             v-if="!streamSnapshot.platforms?.twitch?.ircConnection?.desired"
             size="small"
             text
             :loading="connectingTwitch"
             @click="connectTwitch"
-          >连接 IRC</el-button>
+          >{{ t('tools.stream.connectIrc') }}</el-button>
           <el-button
             v-else
             size="small"
             text
             :loading="disconnectingTwitch"
             @click="disconnectTwitch"
-          >断开 IRC</el-button>
+          >{{ t('tools.stream.disconnectIrc') }}</el-button>
           <el-button
             v-if="streamSnapshot.platforms?.twitch?.revoked"
             size="small"
             text
             :loading="reconfiguringTwitch"
             @click="reconfigureTwitch"
-          >标记已重新配置</el-button>
+          >{{ t('tools.stream.markReconfigured') }}</el-button>
         </div>
         <div class="stream-safety-controls stream-twitch-config">
           <div>
-            <strong>Twitch 凭据</strong>
+            <strong>{{ t('tools.stream.twitchCredentials') }}</strong>
             <small>{{ twitchConfigStatusText }}</small>
           </div>
           <div class="stream-twitch-fields">
             <el-input v-model="twitchClientIdDraft" size="small" clearable placeholder="Client ID" />
             <el-input v-model="twitchEventsubSecretDraft" size="small" type="password" show-password clearable placeholder="EventSub Secret" />
-            <el-input v-model="twitchEventsubTokenDraft" size="small" type="password" show-password clearable placeholder="EventSub Token（可选）" />
+            <el-input v-model="twitchEventsubTokenDraft" size="small" type="password" show-password clearable :placeholder="t('tools.stream.eventsubTokenPlaceholder')" />
             <el-input v-model="twitchChatTokenDraft" size="small" type="password" show-password clearable placeholder="Chat Token" />
             <el-input v-model="twitchBroadcasterIdDraft" size="small" clearable placeholder="Broadcaster ID" />
             <el-input v-model="twitchSenderIdDraft" size="small" clearable placeholder="Sender ID" />
-            <el-input v-model="twitchModeratorIdDraft" size="small" clearable placeholder="Moderator ID（可选）" />
-            <el-input v-model="twitchChannelDraft" size="small" clearable placeholder="频道名（不含 #）" />
-            <el-input v-model="twitchUsernameDraft" size="small" clearable placeholder="IRC 用户名" />
-            <el-input v-model="twitchEventsubCallbackUrlDraft" size="small" clearable placeholder="EventSub HTTPS 回调（可选）" />
-            <el-select v-model="twitchSubscriptionProviderDraft" size="small" clearable placeholder="订阅管理方式">
-              <el-option label="仅本地计划" value="none" />
-              <el-option label="本地 staging" value="in-memory-staging" />
-              <el-option label="Twitch Helix" value="helix" />
+            <el-input v-model="twitchModeratorIdDraft" size="small" clearable :placeholder="t('tools.stream.moderatorIdPlaceholder')" />
+            <el-input v-model="twitchChannelDraft" size="small" clearable :placeholder="t('tools.stream.channelPlaceholder')" />
+            <el-input v-model="twitchUsernameDraft" size="small" clearable :placeholder="t('tools.stream.ircUsernamePlaceholder')" />
+            <el-input v-model="twitchEventsubCallbackUrlDraft" size="small" clearable :placeholder="t('tools.stream.callbackUrlPlaceholder')" />
+            <el-select v-model="twitchSubscriptionProviderDraft" size="small" clearable :placeholder="t('tools.stream.subscriptionProviderPlaceholder')">
+              <el-option :label="t('tools.stream.providerLocalOnly')" value="none" />
+              <el-option :label="t('tools.stream.providerLocalStaging')" value="in-memory-staging" />
+              <el-option :label="t('tools.stream.providerHelix')" value="helix" />
             </el-select>
             <div class="stream-twitch-actions">
-              <el-button size="small" plain :loading="savingTwitchConfig" @click="saveTwitchConfig">保存并重配置</el-button>
-              <el-button size="small" plain :loading="probingTwitchConfig" @click="probeTwitchConfig">只读检查</el-button>
-              <el-button size="small" text type="danger" :loading="savingTwitchConfig" @click="clearTwitchConfig">清除凭据</el-button>
+              <el-button size="small" plain :loading="savingTwitchConfig" @click="saveTwitchConfig">{{ t('tools.stream.saveTwitch') }}</el-button>
+              <el-button size="small" plain :loading="probingTwitchConfig" @click="probeTwitchConfig">{{ t('tools.stream.readOnlyCheck') }}</el-button>
+              <el-button size="small" text type="danger" :loading="savingTwitchConfig" @click="clearTwitchConfig">{{ t('tools.stream.clearCredentials') }}</el-button>
             </div>
           </div>
         </div>
         <div class="stream-safety-controls stream-obs-config">
           <div>
             <strong>OBS WebSocket</strong>
-            <small>{{ streamSnapshot?.adapter?.passwordConfigured ? '密码已配置' : '密码未配置' }} · 临时保存</small>
+            <small>{{ streamSnapshot?.adapter?.passwordConfigured ? t('tools.stream.obsPasswordConfigured') : t('tools.stream.obsPasswordNotConfigured') }} · {{ t('tools.stream.obsPasswordTemporary') }}</small>
           </div>
           <div class="stream-obs-fields">
             <el-input v-model="obsEndpointDraft" size="small" placeholder="ws://127.0.0.1:4455" clearable />
-            <el-input v-model="obsPasswordDraft" size="small" type="password" show-password clearable placeholder="OBS 密码（可选，仅内存）" />
-            <el-checkbox v-model="obsAllowRemote" size="small">允许非本机 endpoint</el-checkbox>
-            <el-button size="small" plain :loading="configuringObs" @click="configureObs">保存并探测</el-button>
-            <el-button v-if="streamSnapshot?.adapter?.passwordConfigured" size="small" text type="danger" :loading="configuringObs" @click="clearObsPassword">清除密码</el-button>
+            <el-input v-model="obsPasswordDraft" size="small" type="password" show-password clearable :placeholder="t('tools.stream.obsPasswordPlaceholder')" />
+            <el-checkbox v-model="obsAllowRemote" size="small">{{ t('tools.stream.obsAllowRemote') }}</el-checkbox>
+            <el-button size="small" plain :loading="configuringObs" @click="configureObs">{{ t('tools.stream.obsSaveAndProbe') }}</el-button>
+            <el-button v-if="streamSnapshot?.adapter?.passwordConfigured" size="small" text type="danger" :loading="configuringObs" @click="clearObsPassword">{{ t('tools.stream.obsClearPassword') }}</el-button>
           </div>
         </div>
         <div class="stream-safety-controls stream-profile-controls">
           <div>
-            <strong>OBS 配置档</strong>
-            <small>{{ obsProfiles.length ? `${obsCurrentProfile || '未选择'} · ${obsProfiles.length} 个` : '未读取' }}</small>
+            <strong>{{ t('tools.stream.obsProfileTitle') }}</strong>
+            <small>{{ obsProfiles.length ? `${obsCurrentProfile || t('tools.state.notSelected')} · ${t('tools.stream.obsProfileCount', { count: obsProfiles.length })}` : t('tools.state.notLoaded') }}</small>
           </div>
           <div class="stream-profile-fields">
-            <el-select v-model="obsProfileDraft" size="small" filterable allow-create clearable placeholder="配置档名称">
+            <el-select v-model="obsProfileDraft" size="small" filterable allow-create clearable :placeholder="t('tools.stream.obsProfileNamePlaceholder')">
               <el-option v-for="profile in obsProfiles" :key="profile.profileName" :label="profile.profileName" :value="profile.profileName" />
             </el-select>
-            <el-button size="small" plain :loading="loadingObsProfiles" @click="loadObsProfiles">读取配置档</el-button>
-            <el-button size="small" type="warning" plain :loading="previewingStreamCapability === 'stream.profile_switch'" :disabled="!obsProfileDraft.trim() || Boolean(previewingStreamCapability)" @click="previewObsProfileSwitch">预览切换</el-button>
+            <el-button size="small" plain :loading="loadingObsProfiles" @click="loadObsProfiles">{{ t('tools.stream.obsReadProfiles') }}</el-button>
+            <el-button size="small" type="warning" plain :loading="previewingStreamCapability === 'stream.profile_switch'" :disabled="!obsProfileDraft.trim() || Boolean(previewingStreamCapability)" @click="previewObsProfileSwitch">{{ t('tools.stream.obsPreviewSwitch') }}</el-button>
           </div>
         </div>
         <div class="stream-safety-controls stream-subscription-controls">
           <div>
-            <strong>EventSub 本地订阅计划</strong>
+            <strong>{{ t('tools.stream.subscriptionTitle') }}</strong>
             <small>{{ streamSubscriptionStatusLabel }}</small>
           </div>
           <el-checkbox-group v-model="twitchSubscriptionDraft" class="stream-subscription-options" :disabled="loadingTwitchSubscriptions">
             <el-checkbox v-for="option in twitchSubscriptionOptions" :key="option.value" :value="option.value">{{ option.label }}</el-checkbox>
           </el-checkbox-group>
-          <el-button size="small" plain :loading="loadingTwitchSubscriptions" @click="saveTwitchSubscriptions">保存计划</el-button>
+          <el-button size="small" plain :loading="loadingTwitchSubscriptions" @click="saveTwitchSubscriptions">{{ t('tools.stream.savePlan') }}</el-button>
         </div>
         <div class="stream-safety-controls">
           <div>
-            <strong>本地人工接管</strong>
-            <small>{{ streamTakeoverEnabled ? '已启用 · 需确认' : '未启用' }}</small>
+            <strong>{{ t('tools.stream.takeoverTitle') }}</strong>
+            <small>{{ streamTakeoverEnabled ? t('tools.stream.takeoverEnabled') : t('tools.state.disabled') }}</small>
           </div>
           <el-button
             size="small"
@@ -154,25 +154,25 @@
             :type="streamTakeoverEnabled ? 'warning' : 'default'"
             :loading="loadingStreamTakeover"
             @click="toggleStreamTakeover"
-          >{{ streamTakeoverEnabled ? '关闭接管' : '启用接管' }}</el-button>
+          >{{ streamTakeoverEnabled ? t('tools.stream.takeoverDisable') : t('tools.stream.takeoverEnable') }}</el-button>
         </div>
         <div class="stream-safety-controls stream-moderation-controls">
           <div>
-            <strong>聊天内容治理</strong>
+            <strong>{{ t('tools.stream.moderationTitle') }}</strong>
             <small>{{ streamModerationSummary }}</small>
           </div>
           <el-switch v-model="streamModerationEnabled" :disabled="loadingStreamModeration" />
-          <el-button size="small" plain :loading="loadingStreamModeration" @click="saveStreamModeration">保存治理</el-button>
+          <el-button size="small" plain :loading="loadingStreamModeration" @click="saveStreamModeration">{{ t('tools.stream.saveModeration') }}</el-button>
           <div class="stream-moderation-fields">
-            <el-input v-model="streamModerationTermsInput" size="small" clearable placeholder="敏感词，用逗号分隔" />
-            <el-input-number v-model="streamModerationSlowModeSeconds" size="small" :min="0" :max="3600" :step="1" controls-position="right" aria-label="慢模式秒数" />
-            <el-input-number v-model="streamModerationMaxMessagesPerMinute" size="small" :min="1" :max="600" :step="1" controls-position="right" aria-label="每分钟最多消息数" />
+            <el-input v-model="streamModerationTermsInput" size="small" clearable :placeholder="t('tools.stream.moderationTermsPlaceholder')" />
+            <el-input-number v-model="streamModerationSlowModeSeconds" size="small" :min="0" :max="3600" :step="1" controls-position="right" :aria-label="t('tools.stream.slowModeSecondsAria')" />
+            <el-input-number v-model="streamModerationMaxMessagesPerMinute" size="small" :min="1" :max="600" :step="1" controls-position="right" :aria-label="t('tools.stream.maxMessagesPerMinuteAria')" />
           </div>
         </div>
         <div class="stream-safety-controls">
           <div>
-            <strong>自动生成本地草稿</strong>
-            <small>{{ streamDraftConsumer?.running ? '运行中 · 仅草稿' : streamDraftConsumer?.enabled ? '已启用' : '已关闭' }}</small>
+            <strong>{{ t('tools.stream.draftConsumerTitle') }}</strong>
+            <small>{{ streamDraftConsumer?.running ? t('tools.stream.draftConsumerRunning') : streamDraftConsumer?.enabled ? t('tools.state.enabled') : t('tools.state.closed') }}</small>
           </div>
           <el-button
             size="small"
@@ -180,13 +180,13 @@
             :type="streamDraftConsumer?.enabled ? 'warning' : 'default'"
             :loading="loadingStreamDraftConsumer"
             @click="toggleStreamDraftConsumer"
-          >{{ streamDraftConsumer?.enabled ? '关闭自动草稿' : '启用自动草稿' }}</el-button>
+          >{{ streamDraftConsumer?.enabled ? t('tools.stream.draftConsumerDisable') : t('tools.stream.draftConsumerEnable') }}</el-button>
         </div>
         <div v-if="streamCapabilities.length" class="stream-capability-list">
           <div v-for="item in streamCapabilities" :key="item.id" class="stream-capability-row">
             <div>
               <strong>{{ item.name || item.id }}</strong>
-              <small>{{ item.available ? (item.executionReady ? '可执行' : item.needsConfig ? '需配置 OBS' : '仅本地') : '未连接' }} · {{ streamRiskLabel(item.riskLevel) }}</small>
+              <small>{{ item.available ? (item.executionReady ? t('tools.stream.capabilityExecutable') : item.needsConfig ? t('tools.stream.capabilityNeedsObs') : t('tools.stream.capabilityLocalOnly')) : t('tools.state.notConnected') }} · {{ streamRiskLabel(item.riskLevel) }}</small>
             </div>
             <el-button
               size="small"
@@ -194,13 +194,13 @@
               :loading="previewingStreamCapability === item.id"
               :disabled="!item.available || Boolean(previewingStreamCapability)"
               @click="previewStream(item.id)"
-            >预览</el-button>
+            >{{ t('tools.stream.preview') }}</el-button>
           </div>
         </div>
-        <el-empty v-else description="暂无可用能力" :image-size="48" />
+        <el-empty v-else :description="t('tools.stream.emptyCapabilities')" :image-size="48" />
         <div v-if="streamSnapshot?.preview" class="stream-preview-note">
-          <strong>预览：{{ streamSnapshot.preview.summary || streamActionLabel(streamSnapshot.preview.action || streamSnapshot.preview.kind) }}</strong>
-           <span>风险：{{ streamRiskLabel(streamSnapshot.preview.riskLevel) }}</span>
+          <strong>{{ t('tools.stream.previewLine', { summary: streamSnapshot.preview.summary || streamActionLabel(streamSnapshot.preview.action || streamSnapshot.preview.kind) }) }}</strong>
+           <span>{{ t('tools.stream.riskLine', { risk: streamRiskLabel(streamSnapshot.preview.riskLevel) }) }}</span>
           <el-button
             size="small"
             type="primary"
@@ -208,16 +208,16 @@
             :loading="loadingStreamExecute"
             :disabled="!streamSnapshot.preview.requestId || Boolean(streamExecution?.ok) || !streamPreviewExecutionReady"
             @click="confirmStreamExecution"
-          >{{ streamPreviewExecutionReady ? '确认执行' : '需配置 OBS' }}</el-button>
+          >{{ streamPreviewExecutionReady ? t('tools.stream.confirmExecute') : t('tools.stream.capabilityNeedsObs') }}</el-button>
         </div>
         <div v-if="streamExecution" class="stream-execution-note" :class="{ failed: !streamExecution.ok }">
-          <strong>{{ streamExecution.ok ? '执行完成' : '执行失败' }}</strong>
-           <span v-if="!streamExecution.ok">请检查配置后重试</span>
-          <el-button v-if="!streamExecution.ok" size="small" plain :loading="loadingStreamExecute" @click="confirmStreamExecution">手动重试</el-button>
+          <strong>{{ streamExecution.ok ? t('tools.stream.executionDone') : t('tools.stream.executionFailed') }}</strong>
+           <span v-if="!streamExecution.ok">{{ t('tools.stream.executionRetryHint') }}</span>
+          <el-button v-if="!streamExecution.ok" size="small" plain :loading="loadingStreamExecute" @click="confirmStreamExecution">{{ t('tools.stream.manualRetry') }}</el-button>
         </div>
         <div class="stream-actions-heading">
-          <strong>直播动作审计</strong>
-          <el-button size="small" text :loading="loadingStreamActions" @click="loadStreamActions">刷新审计</el-button>
+          <strong>{{ t('tools.stream.auditTitle') }}</strong>
+          <el-button size="small" text :loading="loadingStreamActions" @click="loadStreamActions">{{ t('tools.stream.refreshAudit') }}</el-button>
         </div>
         <div v-if="streamActions.length" class="stream-action-list">
           <div v-for="action in streamActions" :key="`${action.requestId}:${action.at}:${action.status}`" class="stream-action-row">
@@ -228,19 +228,19 @@
             <small v-if="action.verificationStatus || action.errorCode">{{ action.verificationStatus || action.errorCode }}</small>
           </div>
         </div>
-        <el-empty v-else description="暂无直播动作审计" :image-size="40" />
+        <el-empty v-else :description="t('tools.stream.emptyAudit')" :image-size="40" />
         <div class="stream-events-heading">
-          <strong>最近本地事件</strong>
+          <strong>{{ t('tools.stream.eventsTitle') }}</strong>
             <div class="stream-event-heading-actions">
-              <el-button size="small" text :loading="consumingStreamDrafts" @click="consumeStreamDrafts">生成未处理草稿</el-button>
-              <el-button size="small" text :loading="loadingStreamEvents" @click="loadStreamEvents">刷新事件</el-button>
+              <el-button size="small" text :loading="consumingStreamDrafts" @click="consumeStreamDrafts">{{ t('tools.stream.generatePendingDrafts') }}</el-button>
+              <el-button size="small" text :loading="loadingStreamEvents" @click="loadStreamEvents">{{ t('tools.stream.refreshEvents') }}</el-button>
             </div>
         </div>
         <div v-if="streamEvents.length" class="stream-event-list">
           <div v-for="event in streamEvents" :key="event.eventId || event.id || `${event.kind}-${event.createdAt || event.receivedAt}`" class="stream-event-row">
             <span>{{ streamEventKindLabel(event.kind) }}</span>
-            <strong>{{ event.text || event.message || '（无文本）' }}</strong>
-            <small>{{ event.author || event.source || '本地' }} · {{ formatStreamEventTime(event.createdAt ?? event.receivedAt ?? event.at) }} · {{ event.delivered ? '已投递' : '仅本地队列' }}</small>
+            <strong>{{ event.text || event.message || t('tools.stream.noText') }}</strong>
+            <small>{{ event.author || event.source || t('tools.stream.localSource') }} · {{ formatStreamEventTime(event.createdAt ?? event.receivedAt ?? event.at) }} · {{ event.delivered ? t('tools.stream.delivered') : t('tools.stream.localQueueOnly') }}</small>
             <div class="stream-event-actions">
               <el-button
                 size="small"
@@ -248,26 +248,26 @@
                 :loading="generatingStreamDraft === streamEventId(event)"
                 :disabled="!streamEventId(event) || Boolean(generatingStreamDraft)"
                 @click="generateStreamDraft(event)"
-              >生成草稿</el-button>
+              >{{ t('tools.stream.generateDraft') }}</el-button>
               <span v-if="streamDraftByEventId.get(streamEventId(event))" class="stream-draft-status">
-                {{ streamDraftByEventId.get(streamEventId(event))?.status === 'generated' ? '已有草稿' : '草稿失败' }}
+                {{ streamDraftByEventId.get(streamEventId(event))?.status === 'generated' ? t('tools.stream.draftGenerated') : t('tools.stream.draftFailed') }}
               </span>
             </div>
           </div>
         </div>
-        <el-empty v-else description="暂无本地事件" :image-size="40" />
+        <el-empty v-else :description="t('tools.stream.emptyEvents')" :image-size="40" />
         <div class="stream-drafts-heading">
-          <strong>回复草稿</strong>
-          <el-button size="small" text :loading="loadingStreamDrafts" @click="loadStreamDrafts">刷新草稿</el-button>
+          <strong>{{ t('tools.stream.draftsTitle') }}</strong>
+          <el-button size="small" text :loading="loadingStreamDrafts" @click="loadStreamDrafts">{{ t('tools.stream.refreshDrafts') }}</el-button>
         </div>
         <div v-if="streamDrafts.length" class="stream-draft-list">
           <div v-for="draft in streamDrafts" :key="draft.draftId" class="stream-draft-row">
             <div>
-              <strong>{{ draft.author || '观众' }}</strong>
-              <small>{{ draft.eventText || '（无原始消息）' }}</small>
+              <strong>{{ draft.author || t('tools.stream.viewer') }}</strong>
+              <small>{{ draft.eventText || t('tools.stream.noOriginalMessage') }}</small>
             </div>
             <p v-if="draft.reply">{{ draft.reply }}</p>
-            <p v-else class="stream-draft-error">{{ draft.error || '未生成回复' }}</p>
+            <p v-else class="stream-draft-error">{{ draft.error || t('tools.stream.noReply') }}</p>
             <el-button
               v-if="draft.status === 'generated' && draft.reply && draft.sendStatus !== 'known_success' && draft.sendStatus !== 'unknown_effect'"
               size="small"
@@ -275,7 +275,7 @@
               :loading="previewingStreamCapability === `stream.chat_send:${draft.draftId}`"
               :disabled="Boolean(previewingStreamCapability)"
               @click="previewDraftSend(draft)"
-            >预览发送</el-button>
+            >{{ t('tools.stream.previewSend') }}</el-button>
             <el-button
               v-if="draft.status === 'failed'"
               size="small"
@@ -283,11 +283,11 @@
               :loading="generatingStreamDraft === draft.eventId"
               :disabled="Boolean(generatingStreamDraft)"
               @click="retryStreamDraft(draft)"
-            >重新生成</el-button>
+            >{{ t('tools.stream.regenerate') }}</el-button>
             <small>{{ streamDraftDeliveryLabel(draft) }} · {{ formatStreamEventTime(draft.createdAt) }}</small>
           </div>
         </div>
-        <el-empty v-else description="暂无草稿" :image-size="40" />
+        <el-empty v-else :description="t('tools.stream.emptyDrafts')" :image-size="40" />
       </section>
 
       <section v-show="activeToolView === 'capabilities'" class="capability-workspace panel-card">
@@ -297,34 +297,34 @@
               <h3>{{ activeFilterLabel }}</h3>
             </div>
             <div class="section-actions">
-              <el-button v-if="filterKind === 'mcp-tool'" plain size="small" @click="openMcpManagement">管理 MCP 服务</el-button>
-              <el-button plain :icon="Refresh" :loading="loadingSnapshots" @click="refreshSnapshots">刷新能力</el-button>
+              <el-button v-if="filterKind === 'mcp-tool'" plain size="small" @click="openMcpManagement">{{ t('tools.manageMcp') }}</el-button>
+              <el-button plain :icon="Refresh" :loading="loadingSnapshots" @click="refreshSnapshots">{{ t('tools.refreshCapabilities') }}</el-button>
             </div>
           </div>
 
           <div class="toolbar">
-            <el-input v-model="searchText" clearable placeholder="搜索能力、范围、标签">
+            <el-input v-model="searchText" clearable :placeholder="t('tools.searchPlaceholder')">
               <template #prefix>
                 <el-icon><Search /></el-icon>
               </template>
             </el-input>
-            <el-select v-model="filterKind" placeholder="能力来源" class="toolbar-select" @change="activeHealthKey = ''">
+            <el-select v-model="filterKind" :placeholder="t('tools.sourcePlaceholder')" class="toolbar-select" @change="activeHealthKey = ''">
               <el-option v-for="item in sourceCards" :key="item.kind || 'all'" :label="`${item.title} (${item.count})`" :value="item.kind" />
             </el-select>
-            <el-select v-model="filterRisk" clearable placeholder="风险级别" class="toolbar-select">
+            <el-select v-model="filterRisk" clearable :placeholder="t('tools.riskPlaceholder')" class="toolbar-select">
               <el-option v-for="risk in riskOptions" :key="risk.value" :label="risk.label" :value="risk.value" />
             </el-select>
-            <el-select v-model="filterApproval" placeholder="权限确认" class="toolbar-select">
-              <el-option label="全部" value="all" />
-              <el-option label="需确认" value="required" />
-              <el-option label="免确认" value="free" />
+            <el-select v-model="filterApproval" :placeholder="t('tools.approvalPlaceholder')" class="toolbar-select">
+              <el-option :label="t('tools.approvalAll')" value="all" />
+              <el-option :label="t('tools.approvalRequired')" value="required" />
+              <el-option :label="t('tools.approvalFree')" value="free" />
             </el-select>
           </div>
 
           <el-alert v-if="capabilityLoadError" class="panel-alert" type="warning" :closable="false" show-icon>
             <div class="alert-row">
               <span>{{ capabilityLoadError }}</span>
-              <el-button size="small" text :loading="loadingCapabilities" @click.stop="loadCapabilities">重试</el-button>
+              <el-button size="small" text :loading="loadingCapabilities" @click.stop="loadCapabilities">{{ t('tools.retry') }}</el-button>
             </div>
           </el-alert>
 
@@ -345,14 +345,14 @@
               <p>{{ displayCapabilityDescription(item) }}</p>
               <div class="row-meta">
                 <span>{{ executionLabel(item) }}</span>
-                <span>{{ item.observability?.trace ? '记录调用' : '未记录调用' }}</span>
-                <span>超时 {{ formatTimeout(item.timeoutMs) }}</span>
-                <span v-if="item.hasPostcondition" class="completion-meta">完成可验证</span>
-                <span v-else-if="item.hasRecheck" class="completion-meta">可复查</span>
+                <span>{{ item.observability?.trace ? t('tools.recordedCall') : t('tools.unrecordedCall') }}</span>
+                <span>{{ t('tools.timeoutInline', { value: formatTimeout(item.timeoutMs) }) }}</span>
+                <span v-if="item.hasPostcondition" class="completion-meta">{{ t('tools.verifiableCompletion') }}</span>
+                <span v-else-if="item.hasRecheck" class="completion-meta">{{ t('tools.recheckable') }}</span>
               </div>
             </button>
           </div>
-          <el-empty v-else description="没有匹配的能力" />
+          <el-empty v-else :description="t('tools.emptyCapabilities')" />
         </div>
 
         <aside class="detail-pane">
@@ -365,7 +365,7 @@
 
             <div class="risk-card" :class="`risk-${selectedCapability.riskLevel}`">
               <div>
-                <span>风险和权限</span>
+                <span>{{ t('tools.riskAndPermission') }}</span>
                 <strong>{{ riskLabel(selectedCapability.riskLevel) }}</strong>
               </div>
               <small>{{ riskHint(selectedCapability) }}</small>
@@ -373,59 +373,59 @@
 
             <div class="detail-grid">
               <div>
-                <span>类型</span>
+                <span>{{ t('tools.fieldType') }}</span>
                 <strong>{{ kindLabel(selectedCapability.kind) }}</strong>
               </div>
               <div>
-                <span>归属</span>
+                <span>{{ t('tools.fieldOwner') }}</span>
                 <strong>{{ ownerLabel(selectedCapability.owner) }}</strong>
               </div>
               <div>
-                <span>超时</span>
+                <span>{{ t('tools.fieldTimeout') }}</span>
                 <strong>{{ formatTimeout(selectedCapability.timeoutMs) }}</strong>
               </div>
             </div>
 
             <details class="capability-identity-details">
-              <summary>查看内部标识</summary>
+              <summary>{{ t('tools.showInternalId') }}</summary>
               <code>{{ selectedCapability.id }}</code>
             </details>
 
             <div class="detail-section">
-              <span class="section-label">作用范围</span>
+              <span class="section-label">{{ t('tools.scopes') }}</span>
               <div class="token-list">
                 <el-tag v-for="scope in selectedCapability.scopes || []" :key="scope" size="small" effect="plain">{{ scope }}</el-tag>
-                <span v-if="!(selectedCapability.scopes || []).length" class="muted-text">未声明范围</span>
+                <span v-if="!(selectedCapability.scopes || []).length" class="muted-text">{{ t('tools.noScopes') }}</span>
               </div>
             </div>
 
             <div class="detail-section">
-              <span class="section-label">标签</span>
+              <span class="section-label">{{ t('tools.tags') }}</span>
               <div class="token-list">
                 <el-tag v-for="tag in capabilityTags(selectedCapability)" :key="tag" size="small" type="info" effect="plain">{{ tag }}</el-tag>
-                <span v-if="!capabilityTags(selectedCapability).length" class="muted-text">暂无标签</span>
+                <span v-if="!capabilityTags(selectedCapability).length" class="muted-text">{{ t('tools.noTags') }}</span>
               </div>
             </div>
 
             <div class="detail-section">
-              <span class="section-label">输入结构</span>
+              <span class="section-label">{{ t('tools.inputSchema') }}</span>
               <div class="schema-summary">
                 <strong>{{ schemaSummary(selectedCapability.inputSchema) }}</strong>
                 <details>
-                  <summary>查看 JSON schema</summary>
+                  <summary>{{ t('tools.viewJsonSchema') }}</summary>
                   <pre>{{ schemaPreview(selectedCapability.inputSchema) }}</pre>
                 </details>
               </div>
             </div>
           </template>
-          <el-empty v-else description="未选择能力" />
+          <el-empty v-else :description="t('tools.emptySelection')" />
         </aside>
       </section>
 
       <section v-show="activeToolView === 'skills'" class="skill-catalog panel-card">
         <div class="section-heading">
           <div>
-            <h3>项目技能</h3>
+            <h3>{{ t('tools.skills.title') }}</h3>
           </div>
           <div class="section-actions">
             <input
@@ -437,23 +437,23 @@
               @change="handleSkillFileImport"
             />
             <div class="skill-summary">
-              <el-tag type="success" effect="light">内置 {{ builtInSkillCount }}</el-tag>
-              <el-tag v-if="importedSkillItems.length" type="info" effect="light">导入 {{ importedSkillItems.length }}</el-tag>
+              <el-tag type="success" effect="light">{{ t('tools.skills.builtInCount', { count: builtInSkillCount }) }}</el-tag>
+              <el-tag v-if="importedSkillItems.length" type="info" effect="light">{{ t('tools.skills.importedCount', { count: importedSkillItems.length }) }}</el-tag>
               <el-tag v-if="importedSkillItems.length" :type="skillStorageTagType" effect="light">{{ skillStorageLabel }}</el-tag>
-              <el-tag type="primary" effect="light">分类 {{ skillCategoryOptions.length }}</el-tag>
+              <el-tag type="primary" effect="light">{{ t('tools.skills.categoryCount', { count: skillCategoryOptions.length }) }}</el-tag>
             </div>
-            <el-button plain :icon="Upload" :loading="loadingImportedSkills || savingImportedSkills" @click="openSkillImport">导入 Skills</el-button>
+            <el-button plain :icon="Upload" :loading="loadingImportedSkills || savingImportedSkills" @click="openSkillImport">{{ t('tools.skills.import') }}</el-button>
           </div>
         </div>
 
         <div class="toolbar skill-toolbar">
-          <el-input v-model="skillSearchText" clearable placeholder="搜索技能、分类、标签">
+          <el-input v-model="skillSearchText" clearable :placeholder="t('tools.skills.searchPlaceholder')">
             <template #prefix>
               <el-icon><Search /></el-icon>
             </template>
           </el-input>
-          <el-select v-model="skillCategoryFilter" placeholder="分类" class="toolbar-select">
-            <el-option label="全部分类" value="all" />
+          <el-select v-model="skillCategoryFilter" :placeholder="t('tools.skills.categoryPlaceholder')" class="toolbar-select">
+            <el-option :label="t('tools.skills.allCategories')" value="all" />
             <el-option v-for="category in skillCategoryOptions" :key="category" :label="skillCategoryLabel(category)" :value="category" />
           </el-select>
         </div>
@@ -466,23 +466,23 @@
               :disabled="!hasActiveSkillFilter || !filteredImportedSkillItems.length || savingImportedSkills"
               @change="(value) => toggleFilteredSkillSelection(Boolean(value))"
             >
-              筛选结果
+              {{ t('tools.skills.filterResult') }}
             </el-checkbox>
-            <span>已选 {{ selectedSkillCount }} 个，自定义 {{ importedSkillItems.length }} 个</span>
-            <span v-if="hasActiveSkillFilter">当前匹配 {{ filteredImportedSkillItems.length }} 个</span>
+            <span>{{ t('tools.skills.selectedSummary', { selected: selectedSkillCount, total: importedSkillItems.length }) }}</span>
+            <span v-if="hasActiveSkillFilter">{{ t('tools.skills.matchSummary', { count: filteredImportedSkillItems.length }) }}</span>
           </div>
           <div class="skill-bulkbar-actions">
             <el-button size="small" plain :icon="Check" :disabled="!hasActiveSkillFilter || !filteredImportedSkillItems.length || savingImportedSkills" @click="selectFilteredImportedSkills">
-              选择筛选结果
+              {{ t('tools.skills.selectFiltered') }}
             </el-button>
             <el-button size="small" plain :icon="Close" :disabled="!selectedSkillCount || savingImportedSkills" @click="clearSkillSelection">
-              清除选择
+              {{ t('tools.skills.clearSelection') }}
             </el-button>
             <el-button size="small" plain type="danger" :icon="Delete" :disabled="!selectedSkillCount || savingImportedSkills" :loading="savingImportedSkills" @click="deleteSelectedSkills">
-              删除选中
+              {{ t('tools.skills.deleteSelected') }}
             </el-button>
             <el-button size="small" plain type="danger" :icon="Delete" :disabled="!canDeleteFilteredSkills || savingImportedSkills" :loading="savingImportedSkills" @click="deleteFilteredImportedSkills">
-              删除筛选结果
+              {{ t('tools.skills.deleteFiltered') }}
             </el-button>
           </div>
         </div>
@@ -505,43 +505,43 @@
             </div>
             <p>{{ skill.description }}</p>
             <div class="skill-meta">
-              <el-tag v-if="!skill.imported" size="small" type="success" effect="plain">内置</el-tag>
-              <el-tag v-else size="small" type="warning" effect="plain">自定义</el-tag>
-              <el-tag v-if="skill.imported && skill.runtimeBinding === 'catalog_only'" size="small" type="info" effect="plain">仅目录</el-tag>
-              <el-tag v-if="skill.fit === 'high'" size="small" type="primary" effect="plain">高适配</el-tag>
-              <el-tag v-else-if="skill.fit === 'medium'" size="small" type="info" effect="plain">中适配</el-tag>
+              <el-tag v-if="!skill.imported" size="small" type="success" effect="plain">{{ t('tools.kind.builtin') }}</el-tag>
+              <el-tag v-else size="small" type="warning" effect="plain">{{ t('tools.skills.badgeImported') }}</el-tag>
+              <el-tag v-if="skill.imported && skill.runtimeBinding === 'catalog_only'" size="small" type="info" effect="plain">{{ t('tools.skills.badgeCatalogOnly') }}</el-tag>
+              <el-tag v-if="skill.fit === 'high'" size="small" type="primary" effect="plain">{{ t('tools.skills.badgeHighFit') }}</el-tag>
+              <el-tag v-else-if="skill.fit === 'medium'" size="small" type="info" effect="plain">{{ t('tools.skills.badgeMediumFit') }}</el-tag>
             </div>
             <div v-if="skill.imported" class="skill-actions">
-              <el-button size="small" plain type="danger" :icon="Delete" :loading="savingImportedSkills" @click="removeImportedSkill(skill.id)">删除</el-button>
+              <el-button size="small" plain type="danger" :icon="Delete" :loading="savingImportedSkills" @click="removeImportedSkill(skill.id)">{{ t('tools.skills.delete') }}</el-button>
             </div>
           </article>
         </div>
-        <el-empty v-else description="没有匹配的技能" />
+        <el-empty v-else :description="t('tools.skills.emptyFiltered')" />
       </section>
 
       <section v-show="activeToolView === 'history'" class="bottom-grid">
         <article class="panel-card plugin-panel">
           <div class="section-heading compact">
             <div>
-              <h3>插件工具</h3>
+              <h3>{{ t('tools.source.plugin') }}</h3>
             </div>
             <el-tag :type="pluginHealthTagType" effect="light">{{ pluginHealthLabel }}</el-tag>
           </div>
           <div v-if="pluginTools.length" class="plugin-list">
             <div v-for="tool in pluginTools" :key="tool.id" class="mini-item">
               <strong>{{ tool.name }}</strong>
-              <span>{{ tool.desc || '插件未提供说明' }}</span>
+              <span>{{ tool.desc || t('tools.history.pluginNoDescription') }}</span>
             </div>
           </div>
-          <el-empty v-else description="暂无插件工具" :image-size="64" />
+          <el-empty v-else :description="t('tools.history.emptyPluginTools')" :image-size="64" />
         </article>
 
         <article class="panel-card log-panel">
           <div class="section-heading compact">
             <div>
-              <h3>最近调用</h3>
+              <h3>{{ t('tools.history.recentTitle') }}</h3>
             </div>
-            <el-tag effect="plain">{{ recentToolLogs.length }} 条记录</el-tag>
+            <el-tag effect="plain">{{ t('tools.history.recordCount', { count: recentToolLogs.length }) }}</el-tag>
           </div>
           <div v-if="recentToolLogs.length" class="log-list">
             <div v-for="(log, idx) in recentToolLogs" :key="`${log.sortKey}-${idx}`" class="log-item">
@@ -551,7 +551,7 @@
               <small v-if="log.evidence?.length" class="log-evidence">{{ log.evidence[0] }}</small>
             </div>
           </div>
-          <el-empty v-else description="暂无工具调用记录" :image-size="64" />
+          <el-empty v-else :description="t('tools.history.emptyLogs')" :image-size="64" />
         </article>
       </section>
     </div>
@@ -583,6 +583,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Check, Close, Delete, Refresh, Search, Upload } from '@element-plus/icons-vue'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
+import { t } from '@/i18n'
 import { pluginClient, systemClient } from '@/api/client'
 import { curatedSkillRecommendations } from '../skillRecommendations'
 import type { PluginLoadFailure, PluginRuntimeState, PluginToolCapabilityContribution } from '../../../../shared/plugin'
@@ -604,13 +605,13 @@ type ToolViewId = 'status' | 'stream' | 'capabilities' | 'skills' | 'history'
 const IMPORTED_SKILLS_STORAGE_KEY = 'yuizaki.importedSkills'
 const IMPORTED_SKILLS_MIGRATION_KEY = 'yuizaki.importedSkills.backendMigrated'
 const IMPORTED_SKILLS_DIRTY_KEY = 'yuizaki.importedSkills.localDirty'
-const toolViews: Array<{ id: ToolViewId; label: string }> = [
-  { id: 'status', label: '状态' },
-  { id: 'stream', label: '直播' },
-  { id: 'capabilities', label: '能力' },
-  { id: 'skills', label: '技能' },
-  { id: 'history', label: '记录' },
-]
+const toolViews = computed<Array<{ id: ToolViewId; label: string }>>(() => [
+  { id: 'status', label: t('tools.view.status') },
+  { id: 'stream', label: t('tools.view.stream') },
+  { id: 'capabilities', label: t('tools.view.capabilities') },
+  { id: 'skills', label: t('tools.view.skills') },
+  { id: 'history', label: t('tools.view.history') },
+])
 const activeToolView = ref<ToolViewId>('status')
 const route = useRoute()
 const router = useRouter()
@@ -744,88 +745,88 @@ let capabilityLoadSequence = 0
 let toolTraceLoadSequence = 0
 let mcpLoadSequence = 0
 
-const riskOptions: RiskOption[] = [
-  { value: 'safe', label: '安全' },
-  { value: 'low', label: '低风险' },
-  { value: 'medium', label: '中风险' },
-  { value: 'high', label: '高风险' },
-  { value: 'critical', label: '关键风险' },
-]
+const riskOptions = computed<RiskOption[]>(() => [
+  { value: 'safe', label: t('tools.risk.safe') },
+  { value: 'low', label: t('tools.risk.low') },
+  { value: 'medium', label: t('tools.risk.medium') },
+  { value: 'high', label: t('tools.risk.high') },
+  { value: 'critical', label: t('tools.risk.critical') },
+])
 
-const capabilityDescriptionOverrides: Record<string, string> = {
-  open_app: '按名称启动本地桌面应用。',
-  open_url: '使用默认浏览器打开链接。',
-  read_file: '读取本地文本文件内容。',
-  write_file: '将文本内容写入本地文件。',
-  web_search: '搜索当前公开网络信息，并返回带链接的简明结果。',
-  'browser.open_page': '通过 Playwright MCP 服务打开浏览器页面。',
-  'time.now': '获取当前本地时间。',
-  mcp_playwright_browser_open_page: '在 Playwright 浏览器上下文中打开 URL，并等待网络空闲。',
-  mcp_playwright_browser_click: '打开 URL 后点击指定 CSS 选择器。',
-  'yuizaki.observe-recall-loop': '收集运行时输入，召回相关记忆，并送入桌宠智能体链路。',
-  'yuizaki.capability-routing': '通过统一能力快照选择内置工具、插件工具或 MCP 工具。',
-  'yuizaki.create-once-task': '在本地调度器中创建一次性任务。',
-  'yuizaki.create-interval-task': '在本地调度器中创建按间隔重复执行的任务。',
-  'yuizaki.skill.voice-dialogue-chain': '把麦克风输入整理成文本，交给 LLM 生成回复，再触发 TTS 和桌宠动作。',
-  'yuizaki.skill.long-dialogue-summary': '把长聊天、语音转写和会话记录整理成摘要、决定、待办和风险。',
-  'yuizaki.skill.companion-reflection': '分析对话里的情绪、沟通模式和可改进点，用于长期桌宠记忆和关系反馈。',
-  'yuizaki.skill.memory-capture': '把事实、偏好、项目决定和待办沉淀到可检索记忆。',
-  'yuizaki.skill.realtime-screen-vision': '把桌面截图作为短时视觉帧交给桌宠理解，OCR 仅用于需要精确读字的场景。',
-  'yuizaki.skill.local-file-organizer': '识别本机文件、素材和导入资源用途，给出整理、重命名和归档建议。',
-  'yuizaki.skill.ocr-document-organizer': '读取截图、票据或扫描文档里的关键信息，生成结构化条目并建议归档位置。',
-  'yuizaki.skill.webapp-testing': '用 Playwright 检查本地 Electron/Vite 页面、交互、截图和控制台错误。',
-  'yuizaki.skill.frontend-design': '优化桌宠面板、设置页、本地能力页和调试页的布局、文案、状态和响应式细节。',
-  'yuizaki.skill.interface-hardening': '检查空状态、错误提示、长文本溢出、中文文案、深色模式和失败降级。',
-  'yuizaki.skill.code-review': '按缺陷、回归风险、缺失测试和行为变化审查改动。',
-  'yuizaki.skill.repo-analysis': '只读梳理代码结构、调用关系和风险点，用于复杂改动前建立事实图。',
-  'yuizaki.skill.best-practice-research': '优先查官方文档和上游资料，适合接新模型、TTS、ASR、MCP、Ollama、LM Studio 或 SDK 前使用。',
-  'yuizaki.skill.mcp-builder': '把本地工具、资源读取、浏览器控制或外部服务包装成标准 MCP 工具。',
-  'yuizaki.skill.skill-authoring': '把常用链路沉淀成可复用 Skill，包括触发条件、输入、流程、校验和失败兜底。',
-  'yuizaki.skill.image-generation': '生成或编辑头像、背景、UI 参考图和透明素材。',
-  'yuizaki.skill.image-enhancement': '提升截图清晰度和可读性，适合 UI 验收、反馈图和文档插图。',
-  'yuizaki.skill.document-export': '把摘要、报告和会话结果导出为 PDF、DOCX、PPTX 或 XLSX。',
-  'yuizaki.skill.spreadsheet-helper': '编写和调试 Excel/表格公式，适合导入数据、统计结果和批量整理。',
-  'yuizaki.skill.task-triage': '把用户反馈、长对话或问题清单拆成优先级、复现步骤、下一步动作和回复草稿。',
-  'yuizaki.skill.agent-trace-debug': '分析模型、工具调用、记忆召回和插件钩子的执行轨迹，用于排查输出问题。',
-  'yuizaki.skill.release-notes': '把技术改动整理成用户可读的更新说明。',
-  'yuizaki.skill.design-system': '沉淀颜色、间距、组件状态和文案规则，让设置页、桌宠页和能力页保持一致。',
-  'yuizaki.skill.web-research': '对需要时效性的模型、插件、依赖和工具信息进行搜索、比对和资料整理。',
-  'yuizaki.skill.content-writing': '把调研结果、教程、FAQ 和版本说明写成清晰中文内容。',
-  'yuizaki.skill.project-planning': '把模糊需求拆成范围、里程碑、验收标准和风险。',
-  'yuizaki.skill.quality-cleanup': '清理重复抽象、冗余 UI 文案、过度包装和不一致命名，保持改动小而可验收。',
-}
+const capabilityDescriptionOverrides = computed<Record<string, string>>(() => ({
+  open_app: t('tools.capDesc.openApp'),
+  open_url: t('tools.capDesc.openUrl'),
+  read_file: t('tools.capDesc.readFile'),
+  write_file: t('tools.capDesc.writeFile'),
+  web_search: t('tools.capDesc.webSearch'),
+  'browser.open_page': t('tools.capDesc.browserOpenPage'),
+  'time.now': t('tools.capDesc.timeNow'),
+  mcp_playwright_browser_open_page: t('tools.capDesc.playwrightOpenPage'),
+  mcp_playwright_browser_click: t('tools.capDesc.playwrightClick'),
+  'yuizaki.observe-recall-loop': t('tools.capDesc.observeRecall'),
+  'yuizaki.capability-routing': t('tools.capDesc.capabilityRouting'),
+  'yuizaki.create-once-task': t('tools.capDesc.createOnceTask'),
+  'yuizaki.create-interval-task': t('tools.capDesc.createIntervalTask'),
+  'yuizaki.skill.voice-dialogue-chain': t('tools.capDesc.voiceDialogueChain'),
+  'yuizaki.skill.long-dialogue-summary': t('tools.capDesc.longDialogueSummary'),
+  'yuizaki.skill.companion-reflection': t('tools.capDesc.companionReflection'),
+  'yuizaki.skill.memory-capture': t('tools.capDesc.memoryCapture'),
+  'yuizaki.skill.realtime-screen-vision': t('tools.capDesc.realtimeScreenVision'),
+  'yuizaki.skill.local-file-organizer': t('tools.capDesc.localFileOrganizer'),
+  'yuizaki.skill.ocr-document-organizer': t('tools.capDesc.ocrDocumentOrganizer'),
+  'yuizaki.skill.webapp-testing': t('tools.capDesc.webappTesting'),
+  'yuizaki.skill.frontend-design': t('tools.capDesc.frontendDesign'),
+  'yuizaki.skill.interface-hardening': t('tools.capDesc.interfaceHardening'),
+  'yuizaki.skill.code-review': t('tools.capDesc.codeReview'),
+  'yuizaki.skill.repo-analysis': t('tools.capDesc.repoAnalysis'),
+  'yuizaki.skill.best-practice-research': t('tools.capDesc.bestPracticeResearch'),
+  'yuizaki.skill.mcp-builder': t('tools.capDesc.mcpBuilder'),
+  'yuizaki.skill.skill-authoring': t('tools.capDesc.skillAuthoring'),
+  'yuizaki.skill.image-generation': t('tools.capDesc.imageGeneration'),
+  'yuizaki.skill.image-enhancement': t('tools.capDesc.imageEnhancement'),
+  'yuizaki.skill.document-export': t('tools.capDesc.documentExport'),
+  'yuizaki.skill.spreadsheet-helper': t('tools.capDesc.spreadsheetHelper'),
+  'yuizaki.skill.task-triage': t('tools.capDesc.taskTriage'),
+  'yuizaki.skill.agent-trace-debug': t('tools.capDesc.agentTraceDebug'),
+  'yuizaki.skill.release-notes': t('tools.capDesc.releaseNotes'),
+  'yuizaki.skill.design-system': t('tools.capDesc.designSystem'),
+  'yuizaki.skill.web-research': t('tools.capDesc.webResearch'),
+  'yuizaki.skill.content-writing': t('tools.capDesc.contentWriting'),
+  'yuizaki.skill.project-planning': t('tools.capDesc.projectPlanning'),
+  'yuizaki.skill.quality-cleanup': t('tools.capDesc.qualityCleanup'),
+}))
 
-const capabilityNameDescriptionOverrides: Record<string, string> = {
-  open_app: '按名称启动本地桌面应用。',
-  open_url: '使用默认浏览器打开链接。',
-  read_file: '读取本地文本文件内容。',
-  write_file: '将文本内容写入本地文件。',
-  web_search: '搜索当前公开网络信息，并返回带链接的简明结果。',
-  'browser.open_page': '通过 Playwright MCP 服务打开浏览器页面。',
-  'time.now': '获取当前本地时间。',
-  mcp_playwright_browser_open_page: '在 Playwright 浏览器上下文中打开 URL，并等待网络空闲。',
-  mcp_playwright_browser_click: '打开 URL 后点击指定 CSS 选择器。',
-  'Observe / Recall Loop': '收集运行时输入，召回相关记忆，并送入桌宠智能体链路。',
-  'Capability Routing': '通过统一能力快照选择内置工具、插件工具或 MCP 工具。',
-  'Create Once Task': '在本地调度器中创建一次性任务。',
-  'Create Interval Task': '在本地调度器中创建按间隔重复执行的任务。',
-}
+const capabilityNameDescriptionOverrides = computed<Record<string, string>>(() => ({
+  open_app: t('tools.capDesc.openApp'),
+  open_url: t('tools.capDesc.openUrl'),
+  read_file: t('tools.capDesc.readFile'),
+  write_file: t('tools.capDesc.writeFile'),
+  web_search: t('tools.capDesc.webSearch'),
+  'browser.open_page': t('tools.capDesc.browserOpenPage'),
+  'time.now': t('tools.capDesc.timeNow'),
+  mcp_playwright_browser_open_page: t('tools.capDesc.playwrightOpenPage'),
+  mcp_playwright_browser_click: t('tools.capDesc.playwrightClick'),
+  'Observe / Recall Loop': t('tools.capDesc.observeRecall'),
+  'Capability Routing': t('tools.capDesc.capabilityRouting'),
+  'Create Once Task': t('tools.capDesc.createOnceTask'),
+  'Create Interval Task': t('tools.capDesc.createIntervalTask'),
+}))
 
-const capabilityRawDescriptionOverrides: Record<string, string> = {
-  'launch a desktop application by name': '按名称启动本地桌面应用。',
-  'open a url in the default browser': '使用默认浏览器打开链接。',
-  'read a local text file': '读取本地文本文件内容。',
-  'write text content to a local file': '将文本内容写入本地文件。',
-  'search the web for current public information and return concise results with urls': '搜索当前公开网络信息，并返回带链接的简明结果。',
-  'open a browser page via playwright mcp server': '通过 Playwright MCP 服务打开浏览器页面。',
-  'get the current local time': '获取当前本地时间。',
-  'open a url in a playwright browser context and wait for network idle. (mcp: playwright/browser.open_page)': '在 Playwright 浏览器上下文中打开 URL，并等待网络空闲。',
-  'open a url and click a css selector with playwright. (mcp: playwright/browser.click)': '打开 URL 后点击指定 CSS 选择器。',
-  'collect runtime input, recall memory, and feed the companion agent pipeline.': '收集运行时输入，召回相关记忆，并送入桌宠智能体链路。',
-  'route builtin, plugin, and mcp capabilities through the unified registry snapshot.': '通过统一能力快照选择内置工具、插件工具或 MCP 工具。',
-  'create a one-shot scheduled task in the local scheduler.': '在本地调度器中创建一次性任务。',
-  'create a recurring scheduled task in the local scheduler.': '在本地调度器中创建按间隔重复执行的任务。',
-}
+const capabilityRawDescriptionOverrides = computed<Record<string, string>>(() => ({
+  'launch a desktop application by name': t('tools.capDesc.openApp'),
+  'open a url in the default browser': t('tools.capDesc.openUrl'),
+  'read a local text file': t('tools.capDesc.readFile'),
+  'write text content to a local file': t('tools.capDesc.writeFile'),
+  'search the web for current public information and return concise results with urls': t('tools.capDesc.webSearch'),
+  'open a browser page via playwright mcp server': t('tools.capDesc.browserOpenPage'),
+  'get the current local time': t('tools.capDesc.timeNow'),
+  'open a url in a playwright browser context and wait for network idle. (mcp: playwright/browser.open_page)': t('tools.capDesc.playwrightOpenPage'),
+  'open a url and click a css selector with playwright. (mcp: playwright/browser.click)': t('tools.capDesc.playwrightClick'),
+  'collect runtime input, recall memory, and feed the companion agent pipeline.': t('tools.capDesc.observeRecall'),
+  'route builtin, plugin, and mcp capabilities through the unified registry snapshot.': t('tools.capDesc.capabilityRouting'),
+  'create a one-shot scheduled task in the local scheduler.': t('tools.capDesc.createOnceTask'),
+  'create a recurring scheduled task in the local scheduler.': t('tools.capDesc.createIntervalTask'),
+}))
 
 const normalizedSearch = computed(() => searchText.value.trim().toLowerCase())
 const normalizedSkillSearch = computed(() => skillSearchText.value.trim().toLowerCase())
@@ -879,7 +880,7 @@ const streamDraftByEventId = computed(() => {
 const streamStatusLabel = computed(() => {
   const state = streamSnapshot.value?.state || 'disconnected'
   const labels: Record<string, string> = {
-    disconnected: '未连接', ready: '已就绪', preview: '预览中', live: '直播中', ending: '结束中', ended: '已结束', error: '故障',
+    disconnected: t('tools.stream.stateDisconnected'), ready: t('tools.stream.stateReady'), preview: t('tools.stream.statePreview'), live: t('tools.stream.stateLive'), ending: t('tools.stream.stateEnding'), ended: t('tools.stream.stateEnded'), error: t('tools.stream.stateError'),
   }
   return labels[state] || state
 })
@@ -897,28 +898,28 @@ const streamPreviewExecutionReady = computed(() => {
 })
 function streamActionLabel(action: unknown) {
   const labels: Record<string, string> = {
-    'stream.chat_send': '发送聊天消息',
-    'stream.profile_switch': '切换 OBS 配置档',
-    'stream.scene_switch': '切换 OBS 场景',
-    'stream.start': '开始直播',
-    'stream.stop': '结束直播',
+    'stream.chat_send': t('tools.stream.actionChatSend'),
+    'stream.profile_switch': t('tools.stream.actionProfileSwitch'),
+    'stream.scene_switch': t('tools.stream.actionSceneSwitch'),
+    'stream.start': t('tools.stream.actionStart'),
+    'stream.stop': t('tools.stream.actionStop'),
   }
   const value = typeof action === 'string' ? action : ''
-  return labels[value] || value || '直播动作'
+  return labels[value] || value || t('tools.stream.actionFallback')
 }
 
-const twitchSubscriptionOptions = [
-  { value: 'channel.chat.message', label: '聊天消息' },
-  { value: 'channel.follow', label: '关注事件' },
-  { value: 'channel.subscribe', label: '订阅事件' },
-]
+const twitchSubscriptionOptions = computed(() => [
+  { value: 'channel.chat.message', label: t('tools.stream.subscriptionChatMessage') },
+  { value: 'channel.follow', label: t('tools.stream.subscriptionFollow') },
+  { value: 'channel.subscribe', label: t('tools.stream.subscriptionSubscribe') },
+])
 const streamSubscriptionStatusLabel = computed(() => {
   const plan = streamSnapshot.value?.platforms?.twitch?.subscriptionPlan
-  if (!plan) return '未读取'
-  if (plan.status === 'planned') return `已保存 ${plan.desired?.length || 0} 类 · 本地`
-  if (plan.status === 'revoked') return '已撤销 · 需重配'
-  if (plan.status === 'unconfigured') return '缺少 Secret'
-  return '未选择'
+  if (!plan) return t('tools.state.notLoaded')
+  if (plan.status === 'planned') return t('tools.stream.subscriptionSaved', { count: plan.desired?.length || 0 })
+  if (plan.status === 'revoked') return t('tools.stream.subscriptionRevoked')
+  if (plan.status === 'unconfigured') return t('tools.stream.subscriptionMissingSecret')
+  return t('tools.state.notSelected')
 })
 
 const skillCategoryOptions = computed(() => (
@@ -927,42 +928,42 @@ const skillCategoryOptions = computed(() => (
 ))
 
 const healthItems = computed<HealthItem[]>(() => [
-  { key: 'ready', label: '可执行', value: readyCapabilityCount.value, detail: '低风险', tone: 'emerald' },
-  { key: 'approval', label: '需确认', value: approvalRequiredCount.value, detail: '执行前确认', tone: 'amber' },
-  { key: 'mcp-error', label: 'MCP 异常', value: mcpErrorCount.value, detail: '连接/清单', tone: mcpErrorCount.value ? 'rose' : 'emerald' },
-  { key: 'plugin-error', label: '插件异常', value: pluginIssueCount.value, detail: '加载/阻断', tone: pluginIssueCount.value ? 'rose' : 'emerald' },
-  { key: 'trace', label: '调用记录', value: recentToolLogs.value.length, detail: '最近链路', tone: 'blue' },
+  { key: 'ready', label: t('tools.health.ready'), value: readyCapabilityCount.value, detail: t('tools.health.readyDetail'), tone: 'emerald' },
+  { key: 'approval', label: t('tools.health.approval'), value: approvalRequiredCount.value, detail: t('tools.health.approvalDetail'), tone: 'amber' },
+  { key: 'mcp-error', label: t('tools.health.mcpError'), value: mcpErrorCount.value, detail: t('tools.health.mcpErrorDetail'), tone: mcpErrorCount.value ? 'rose' : 'emerald' },
+  { key: 'plugin-error', label: t('tools.health.pluginError'), value: pluginIssueCount.value, detail: t('tools.health.pluginErrorDetail'), tone: pluginIssueCount.value ? 'rose' : 'emerald' },
+  { key: 'trace', label: t('tools.health.trace'), value: recentToolLogs.value.length, detail: t('tools.health.traceDetail'), tone: 'blue' },
 ])
 
 const sourceCards = computed<SourceCard[]>(() => [
   {
     kind: '',
-    title: '全部能力',
+    title: t('tools.source.all'),
     count: capabilities.value.length,
   },
   {
     kind: 'builtin-tool',
-    title: '内置工具',
+    title: t('tools.source.builtin'),
     count: countByKind('builtin-tool'),
   },
   {
     kind: 'mcp-tool',
-    title: 'MCP 工具',
+    title: t('tools.source.mcp'),
     count: countByKind('mcp-tool'),
   },
   {
     kind: 'plugin-tool',
-    title: '插件工具',
+    title: t('tools.source.plugin'),
     count: countByKind('plugin-tool'),
   },
   {
     kind: 'skill',
-    title: '编排技能',
+    title: t('tools.source.skill'),
     count: countByKind('skill'),
   },
   {
     kind: 'command',
-    title: '本地命令',
+    title: t('tools.source.command'),
     count: countByKind('command'),
   },
 ])
@@ -970,11 +971,11 @@ const sourceCards = computed<SourceCard[]>(() => [
 const pluginHealthLabel = computed(() => {
   const blocked = pluginStates.value.filter(item => ['blocked', 'error'].includes(item.status)).length
   const degraded = pluginStates.value.filter(item => item.status === 'degraded').length
-  if (pluginLoadFailures.value.length) return `${pluginLoadFailures.value.length} 个加载失败`
-  if (blocked) return `${blocked} 个不可用`
-  if (degraded) return `${degraded} 个降级`
-  if (pluginStates.value.length) return `${pluginStates.value.length} 个已加载`
-  return '暂无插件'
+  if (pluginLoadFailures.value.length) return t('tools.history.pluginLoadFailures', { count: pluginLoadFailures.value.length })
+  if (blocked) return t('tools.history.pluginBlocked', { count: blocked })
+  if (degraded) return t('tools.history.pluginDegraded', { count: degraded })
+  if (pluginStates.value.length) return t('tools.history.pluginLoaded', { count: pluginStates.value.length })
+  return t('tools.history.pluginEmpty')
 })
 
 const pluginHealthTagType = computed<TagType>(() => {
@@ -1030,10 +1031,10 @@ const filteredImportedIndeterminate = computed(() => (
 ))
 const canDeleteFilteredSkills = computed(() => hasActiveSkillFilter.value && filteredImportedSkillItems.value.length > 0)
 const skillStorageLabel = computed(() => {
-  if (savingImportedSkills.value) return '保存中'
-  if (loadingImportedSkills.value) return '读取中'
-  if (importedSkillBackendReady.value) return '后端已保存'
-  return '本地暂存'
+  if (savingImportedSkills.value) return t('tools.skills.storageSaving')
+  if (loadingImportedSkills.value) return t('tools.skills.storageLoading')
+  if (importedSkillBackendReady.value) return t('tools.skills.storageBackend')
+  return t('tools.skills.storageLocal')
 })
 const skillStorageTagType = computed<TagType>(() => {
   if (savingImportedSkills.value || loadingImportedSkills.value) return 'info'
@@ -1063,9 +1064,9 @@ const recentToolLogs = computed(() => (
 ))
 
 const activeFilterLabel = computed(() => {
-  const kind = sourceCards.value.find(item => item.kind === filterKind.value)?.title || '全部能力'
-  const risk = filterRisk.value ? riskLabel(filterRisk.value) : '全部风险'
-  const approval = filterApproval.value === 'required' ? '需确认' : filterApproval.value === 'free' ? '免确认' : '全部权限'
+  const kind = sourceCards.value.find(item => item.kind === filterKind.value)?.title || t('tools.source.all')
+  const risk = filterRisk.value ? riskLabel(filterRisk.value) : t('tools.filter.allRisks')
+  const approval = filterApproval.value === 'required' ? t('tools.health.approval') : filterApproval.value === 'free' ? t('tools.approvalFree') : t('tools.filter.allApprovals')
   const preset = healthItems.value.find(item => item.key === activeHealthKey.value)?.label
   return `${preset || kind} · ${risk} · ${approval}`
 })
@@ -1144,11 +1145,11 @@ function applyHealthAction(action: HealthActionKey) {
 
 function kindLabel(kind: CapabilityKind) {
   const labels: Record<CapabilityKind, string> = {
-    'builtin-tool': '内置',
-    'plugin-tool': '插件',
+    'builtin-tool': t('tools.kind.builtin'),
+    'plugin-tool': t('tools.kind.plugin'),
     'mcp-tool': 'MCP',
     skill: 'Skill',
-    command: '命令',
+    command: t('tools.kind.command'),
   }
   return labels[kind] || kind
 }
@@ -1166,11 +1167,11 @@ function kindTagType(kind: CapabilityKind): TagType {
 
 function kindFallbackDescription(kind: CapabilityKind) {
   const map: Record<CapabilityKind, string> = {
-    'builtin-tool': 'Yuizaki 后端内置能力，用于基础动作或本地资源访问。',
-    'plugin-tool': '插件贡献能力，是否可用取决于插件加载状态。',
-    'mcp-tool': 'MCP 服务暴露的工具，是否可用取决于对应服务连接状态。',
-    skill: '编排技能，用来描述一段可复用的智能体流程。',
-    command: '本地命令入口，用来触发后端任务或调度动作。',
+    'builtin-tool': t('tools.kindFallback.builtin'),
+    'plugin-tool': t('tools.kindFallback.plugin'),
+    'mcp-tool': t('tools.kindFallback.mcp'),
+    skill: t('tools.kindFallback.skill'),
+    command: t('tools.kindFallback.command'),
   }
   return map[kind]
 }
@@ -1180,39 +1181,39 @@ function normalizeDescriptionKey(value?: string) {
 }
 
 function displayCapabilityDescription(item: CapabilityDescriptor) {
-  const idOverride = capabilityDescriptionOverrides[item.id]
+  const idOverride = capabilityDescriptionOverrides.value[item.id]
   if (idOverride) return idOverride
 
-  const nameOverride = capabilityNameDescriptionOverrides[item.name]
+  const nameOverride = capabilityNameDescriptionOverrides.value[item.name]
   if (nameOverride) return nameOverride
 
-  const rawDescriptionOverride = capabilityRawDescriptionOverrides[normalizeDescriptionKey(item.description)]
+  const rawDescriptionOverride = capabilityRawDescriptionOverrides.value[normalizeDescriptionKey(item.description)]
   if (rawDescriptionOverride) return rawDescriptionOverride
 
   return item.description || kindFallbackDescription(item.kind)
 }
 
 function executionLabel(item: CapabilityDescriptor) {
-  if (item.requiresApproval) return '执行前确认'
-  if (['mcp-tool', 'plugin-tool'].includes(item.kind)) return '启用即授权'
-  if (['high', 'critical'].includes(item.riskLevel)) return '高风险免确认'
-  return '可直接执行'
+  if (item.requiresApproval) return t('tools.execution.confirm')
+  if (['mcp-tool', 'plugin-tool'].includes(item.kind)) return t('tools.execution.serviceGrants')
+  if (['high', 'critical'].includes(item.riskLevel)) return t('tools.execution.highRiskFree')
+  return t('tools.execution.direct')
 }
 
 function ownerLabel(owner?: string) {
-  if (!owner) return '未声明'
+  if (!owner) return t('tools.state.notDeclared')
   const labels: Record<string, string> = {
-    'yuizaki.builtin-tools': '内置工具',
-    'yuizaki.companion-orchestrator': '桌宠编排',
-    'yuizaki.task-router': '任务路由',
+    'yuizaki.builtin-tools': t('tools.source.builtin'),
+    'yuizaki.companion-orchestrator': t('tools.owner.companionOrchestrator'),
+    'yuizaki.task-router': t('tools.owner.taskRouter'),
   }
-  if (owner.startsWith('plugin:')) return `插件 ${owner.slice('plugin:'.length)}`
+  if (owner.startsWith('plugin:')) return t('tools.owner.pluginPrefix', { name: owner.slice('plugin:'.length) })
   if (owner.startsWith('mcp:')) return `MCP ${owner.slice('mcp:'.length)}`
   return labels[owner] || owner
 }
 
 function riskLabel(risk: CapabilityRiskLevel) {
-  return riskOptions.find(item => item.value === risk)?.label || risk
+  return riskOptions.value.find(item => item.value === risk)?.label || risk
 }
 
 function riskTagType(risk: CapabilityRiskLevel): TagType {
@@ -1227,11 +1228,11 @@ function riskTagType(risk: CapabilityRiskLevel): TagType {
 }
 
 function riskHint(item: CapabilityDescriptor) {
-  if (item.requiresApproval) return '执行前会弹出确认。'
-  if (['mcp-tool', 'plugin-tool'].includes(item.kind)) return '由对应服务或插件的启用开关授权，关闭后停止调用。'
-  if (['high', 'critical'].includes(item.riskLevel)) return '会触碰文件、桌面或外部服务，建议保留记录。'
-  if (item.riskLevel === 'medium') return '适合按需调用并保留执行记录。'
-  return '适合作为常规入口。'
+  if (item.requiresApproval) return t('tools.riskHint.confirm')
+  if (['mcp-tool', 'plugin-tool'].includes(item.kind)) return t('tools.riskHint.serviceGrants')
+  if (['high', 'critical'].includes(item.riskLevel)) return t('tools.riskHint.high')
+  if (item.riskLevel === 'medium') return t('tools.riskHint.medium')
+  return t('tools.riskHint.default')
 }
 
 function capabilityTags(item: CapabilityDescriptor) {
@@ -1251,7 +1252,7 @@ function schemaFieldNames(schema?: Record<string, unknown>) {
 
 function schemaSummary(schema?: Record<string, unknown>) {
   const fields = schemaFieldNames(schema)
-  if (!fields.length) return '未声明字段'
+  if (!fields.length) return t('tools.schema.noFields')
   if (fields.length <= 4) return fields.join(', ')
   return `${fields.slice(0, 4).join(', ')} +${fields.length - 4}`
 }
@@ -1266,25 +1267,25 @@ function schemaPreview(schema?: Record<string, unknown>) {
 }
 
 function formatTimeout(timeoutMs?: number) {
-  if (!timeoutMs) return '默认'
+  if (!timeoutMs) return t('tools.timeout.default')
   if (timeoutMs >= 1000) return `${Math.round(timeoutMs / 1000)}s`
   return `${timeoutMs}ms`
 }
 
 function skillCategoryLabel(category: string) {
   const labels: Record<string, string> = {
-    companion: '桌宠与记忆',
-    perception: '感知能力',
-    development: '开发工程',
-    frontend: '界面体验',
-    research: '资料调研',
-    automation: '自动化',
-    document: '文档数据',
-    mcp: 'MCP 扩展',
-    governance: '质量治理',
-    media: '图像媒体',
-    authoring: '技能编写',
-    general: '通用',
+    companion: t('tools.skillCategory.companion'),
+    perception: t('tools.skillCategory.perception'),
+    development: t('tools.skillCategory.development'),
+    frontend: t('tools.skillCategory.frontend'),
+    research: t('tools.skillCategory.research'),
+    automation: t('tools.skillCategory.automation'),
+    document: t('tools.skillCategory.document'),
+    mcp: t('tools.skillCategory.mcp'),
+    governance: t('tools.skillCategory.governance'),
+    media: t('tools.skillCategory.media'),
+    authoring: t('tools.skillCategory.authoring'),
+    general: t('tools.skillCategory.general'),
   }
   return labels[category] || category
 }
@@ -1302,13 +1303,13 @@ async function handleSkillFileImport(event: Event) {
   try {
     const imported = await importSkillFiles(files)
     if (!imported.length) {
-      ElMessage.warning('没有识别到可导入的 Skill')
+      ElMessage.warning(t('tools.skills.importNone'))
       return
     }
     await mergeImportedSkills(imported)
-    ElMessage.success(`已导入 ${imported.length} 个 Skill`)
+    ElMessage.success(t('tools.skills.imported', { count: imported.length }))
   } catch (error) {
-    const message = describeFailure(error, '导入 Skills 失败')
+    const message = describeFailure(error, t('tools.skills.importFailed'))
     ElMessage.error(message)
   }
 }
@@ -1332,7 +1333,7 @@ function parseSkillJson(text: string, fileName: string): ImportedSkillCatalogIte
   try {
     payload = JSON.parse(text)
   } catch {
-    throw new Error(`${fileName} 不是有效 JSON`)
+    throw new Error(t('tools.skills.invalidJson', { fileName }))
   }
 
   const candidates = Array.isArray(payload)
@@ -1357,7 +1358,7 @@ function parseSkillMarkdown(text: string, fileName: string): ImportedSkillCatalo
     .map(line => line.trim())
     .find(line => line && !line.startsWith('#') && !line.startsWith('---'))
   const name = frontmatter.name || frontmatter.title || heading || fileName.replace(/\.(md|markdown)$/i, '')
-  const description = frontmatter.description || firstParagraph || '导入的本地 Skill'
+  const description = frontmatter.description || firstParagraph || t('tools.skills.importedDescription')
 
   return normalizeImportedSkill({
     id: frontmatter.id,
@@ -1384,7 +1385,7 @@ function parseFrontmatter(text: string): Record<string, string> {
 function normalizeImportedSkill(candidate: unknown, fallbackId: string): ImportedSkillCatalogItem | null {
   if (!isRecord(candidate)) return null
   const name = stringField(candidate.name) || stringField(candidate.title) || stringField(candidate.id) || fallbackId
-  const description = stringField(candidate.description) || stringField(candidate.desc) || stringField(candidate.summary) || '导入的本地 Skill'
+  const description = stringField(candidate.description) || stringField(candidate.desc) || stringField(candidate.summary) || t('tools.skills.importedDescription')
   const tags = normalizeTags(candidate.tags)
   const category = normalizeSkillCategory(stringField(candidate.category), name, description, tags)
 
@@ -1421,15 +1422,15 @@ function normalizeSkillCategory(category: string, name: string, description: str
   if (allowed.has(category)) return category
   const haystack = `${name} ${description} ${tags.join(' ')}`.toLowerCase()
   if (haystack.includes('mcp')) return 'mcp'
-  if (/(ui|ux|frontend|visual|design|界面)/i.test(haystack)) return 'frontend'
-  if (/(memory|dialogue|companion|voice|tts|asr|桌宠|语音|记忆)/i.test(haystack)) return 'companion'
-  if (/(doc|pdf|sheet|ppt|document|文档|表格)/i.test(haystack)) return 'document'
-  if (/(test|debug|review|code|ci|repo|测试|代码)/i.test(haystack)) return 'development'
-  if (/(image|media|audio|video|图像|媒体)/i.test(haystack)) return 'media'
-  if (/(research|search|docs|调研|搜索)/i.test(haystack)) return 'research'
-  if (/(plan|quality|cleanup|治理)/i.test(haystack)) return 'governance'
-  if (/(skill|author|prompt|编写)/i.test(haystack)) return 'authoring'
-  if (/(task|file|automation|自动化|任务|文件)/i.test(haystack)) return 'automation'
+  if (/(ui|ux|frontend|visual|design|\u754c\u9762)/i.test(haystack)) return 'frontend'
+  if (/(memory|dialogue|companion|voice|tts|asr|\u684c\u5ba0|\u8bed\u97f3|\u8bb0\u5fc6)/i.test(haystack)) return 'companion'
+  if (/(doc|pdf|sheet|ppt|document|\u6587\u6863|\u8868\u683c)/i.test(haystack)) return 'document'
+  if (/(test|debug|review|code|ci|repo|\u6d4b\u8bd5|\u4ee3\u7801)/i.test(haystack)) return 'development'
+  if (/(image|media|audio|video|\u56fe\u50cf|\u5a92\u4f53)/i.test(haystack)) return 'media'
+  if (/(research|search|docs|\u8c03\u7814|\u641c\u7d22)/i.test(haystack)) return 'research'
+  if (/(plan|quality|cleanup|\u6cbb\u7406)/i.test(haystack)) return 'governance'
+  if (/(skill|author|prompt|\u7f16\u5199)/i.test(haystack)) return 'authoring'
+  if (/(task|file|automation|\u81ea\u52a8\u5316|\u4efb\u52a1|\u6587\u4ef6)/i.test(haystack)) return 'automation'
   return 'general'
 }
 
@@ -1467,7 +1468,7 @@ async function mergeImportedSkills(skills: ImportedSkillCatalogItem[]) {
 }
 
 async function removeImportedSkill(skillId: string) {
-  await deleteImportedSkills([skillId], { confirm: false, successMessage: '已删除 Skill' })
+  await deleteImportedSkills([skillId], { confirm: false, successMessage: t('tools.skills.deleted') })
 }
 
 async function loadImportedSkills() {
@@ -1489,7 +1490,7 @@ async function loadImportedSkills() {
     persistImportedSkillsToLocalStorage()
   } catch (error) {
     importedSkillBackendReady.value = false
-    importedSkillStorageError.value = describeFailure(error, '后端技能存储不可用')
+    importedSkillStorageError.value = describeFailure(error, t('tools.skills.backendUnavailable'))
     importedSkillItems.value = localItems
   } finally {
     loadingImportedSkills.value = false
@@ -1522,9 +1523,9 @@ async function persistImportedSkills() {
     markImportedSkillsDirty(false)
   } catch (error) {
     importedSkillBackendReady.value = false
-    importedSkillStorageError.value = describeFailure(error, '后端技能保存失败')
+    importedSkillStorageError.value = describeFailure(error, t('tools.skills.backendSaveFailed'))
     markImportedSkillsDirty(true)
-    ElMessage.warning('后端保存失败，已先保存在本地')
+    ElMessage.warning(t('tools.skills.backendSaveWarning'))
   } finally {
     savingImportedSkills.value = false
   }
@@ -1629,8 +1630,8 @@ function clearSkillSelection() {
 async function deleteSelectedSkills() {
   await deleteImportedSkills([...selectedSkillIds.value], {
     confirm: true,
-    title: '删除选中 Skills',
-    successMessage: '已删除选中的 Skill',
+    title: t('tools.skills.deleteSelectedTitle'),
+    successMessage: t('tools.skills.deleteSelectedDone'),
   })
 }
 
@@ -1638,8 +1639,8 @@ async function deleteFilteredImportedSkills() {
   if (!canDeleteFilteredSkills.value) return
   await deleteImportedSkills(filteredImportedSkillIds.value, {
     confirm: true,
-    title: '删除筛选结果',
-    successMessage: '已删除当前筛选结果中的 Skill',
+    title: t('tools.skills.deleteFilteredTitle'),
+    successMessage: t('tools.skills.deleteFilteredDone'),
   })
 }
 
@@ -1649,11 +1650,11 @@ async function deleteImportedSkills(skillIds: string[], options: { confirm?: boo
   if (options.confirm !== false) {
     try {
       await ElMessageBox.confirm(
-        `将直接删除 ${uniqueIds.length} 个自定义 Skill，内置技能不会受影响。`,
-        options.title || '删除 Skills',
+        t('tools.skills.deleteConfirm', { count: uniqueIds.length }),
+        options.title || t('tools.skills.deleteTitle'),
         {
-          confirmButtonText: '删除',
-          cancelButtonText: '取消',
+          confirmButtonText: t('tools.action.delete'),
+          cancelButtonText: t('tools.action.cancel'),
           type: 'warning',
         },
       )
@@ -1685,9 +1686,9 @@ async function deleteImportedSkills(skillIds: string[], options: { confirm?: boo
         markImportedSkillsDirty(false)
       } catch (error) {
         importedSkillBackendReady.value = false
-        importedSkillStorageError.value = describeFailure(error, '后端技能删除失败')
+        importedSkillStorageError.value = describeFailure(error, t('tools.skills.backendDeleteFailed'))
         markImportedSkillsDirty(true)
-        ElMessage.warning('后端删除失败，已先更新本地列表')
+        ElMessage.warning(t('tools.skills.backendDeleteWarning'))
       }
     } finally {
       savingImportedSkills.value = false
@@ -1695,7 +1696,7 @@ async function deleteImportedSkills(skillIds: string[], options: { confirm?: boo
     }
   }
 
-  ElMessage.success(options.successMessage || '已删除 Skill')
+  ElMessage.success(options.successMessage || t('tools.skills.deleted'))
 }
 
 function pruneSelectedSkillIds() {
@@ -1709,7 +1710,7 @@ const pushLog = (text: string) => {
   logs.value.unshift({
     time: now.toLocaleTimeString(),
     text,
-    source: '本地',
+    source: t('tools.stream.localSource'),
     status: 'ok',
     sortKey: now.toISOString(),
   })
@@ -1734,7 +1735,7 @@ function toolLogTagType(status?: string | null): TagType {
 
 function toolLogFromStep(step: StepExecutionRecord): ToolLogItem {
   const capability = step.capability_id || step.tool || step.capability_kind || step.kind
-  const result = step.error ? `失败: ${step.error}` : (step.title || step.reply_preview || step.status || '已记录')
+  const result = step.error ? t('tools.log.stepFailed', { error: step.error }) : (step.title || step.reply_preview || step.status || t('tools.log.recorded'))
   return {
     time: formatTraceTime(step.timestamp),
     text: `${capability} · ${result}`,
@@ -1776,8 +1777,8 @@ async function loadPlugins() {
     pluginLoadFailures.value = payload.loadFailures ?? []
   } catch (error) {
     if (requestId !== pluginLoadSequence) return
-    const message = describeFailure(error, '未知错误')
-    pushLog(`插件工具加载失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    pushLog(t('tools.log.pluginLoadFailed', { message }))
   } finally {
     if (requestId === pluginLoadSequence) loadingPlugins.value = false
   }
@@ -1796,8 +1797,8 @@ async function loadCapabilities() {
     }
   } catch (error) {
     if (requestId !== capabilityLoadSequence) return
-    const message = describeFailure(error, '未知错误')
-    capabilityLoadError.value = `能力快照加载失败: ${message}`
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    capabilityLoadError.value = t('tools.log.capabilityLoadFailed', { message })
   } finally {
     if (requestId === capabilityLoadSequence) loadingCapabilities.value = false
   }
@@ -1811,8 +1812,8 @@ async function loadToolTrace() {
     agentTrace.value = snapshot
   } catch (error) {
     if (requestId !== toolTraceLoadSequence) return
-    const message = describeFailure(error, '未知错误')
-    pushLog(`后端工具记录加载失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    pushLog(t('tools.log.traceLoadFailed', { message }))
   }
 }
 
@@ -1826,8 +1827,8 @@ async function loadMcpServers() {
     mcpSnapshot.value = snapshot
   } catch (error) {
     if (requestId !== mcpLoadSequence) return
-    const message = describeFailure(error, '未知错误')
-    mcpLoadError.value = `MCP 服务加载失败: ${message}`
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    mcpLoadError.value = t('tools.log.mcpLoadFailed', { message })
   } finally {
     if (requestId === mcpLoadSequence) loadingMcp.value = false
   }
@@ -1848,8 +1849,8 @@ async function loadStream() {
     streamModerationMaxMessagesPerMinute.value = Number(moderation?.maxMessagesPerMinute || 30)
     twitchSubscriptionDraft.value = [...(streamSnapshot.value.platforms?.twitch?.subscriptionPlan?.desired || [])]
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    streamLoadError.value = `直播能力加载失败: ${message}`
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    streamLoadError.value = t('tools.log.streamLoadFailed', { message })
   } finally {
     loadingStream.value = false
   }
@@ -1863,7 +1864,7 @@ async function loadTwitchConfigStatus() {
       ? 'helix'
       : result.subscriptionProvider || 'none'
     if (!result.secureStorageAvailable) {
-      ElMessage.warning('系统安全凭据存储不可用，Twitch 配置已禁用')
+      ElMessage.warning(t('tools.stream.secureStoreUnavailable'))
     }
   } catch {
     twitchConfigStatus.value = null
@@ -1872,10 +1873,10 @@ async function loadTwitchConfigStatus() {
 
 const twitchConfigStatusText = computed(() => {
   const status = twitchConfigStatus.value
-  if (!status) return '读取配置状态失败'
-  if (!status.secureStorageAvailable) return '系统安全存储不可用'
+  if (!status) return t('tools.stream.twitchStatusFailed')
+  if (!status.secureStorageAvailable) return t('tools.stream.twitchStatusUnavailable')
   const configured = Object.entries(status.configured).filter(([, value]) => value).map(([key]) => key)
-  return configured.length ? `已安全保存 ${configured.length} 项；输入框不会回显凭据` : '未配置；凭据仅保存到系统安全存储'
+  return configured.length ? t('tools.stream.twitchStatusSaved', { count: configured.length }) : t('tools.stream.twitchStatusUnconfigured')
 })
 
 async function probeTwitchConfig() {
@@ -1883,15 +1884,15 @@ async function probeTwitchConfig() {
   try {
     const result = await systemClient.probeTwitch()
     if (result.ok !== true) {
-      ElMessage.warning(String(result.error || 'Twitch 只读检查未通过'))
+      ElMessage.warning(String(result.error || t('tools.stream.twitchProbeFailed')))
       return
     }
     const configured = result.configured as Record<string, unknown> | undefined
     const ready = configured && Object.values(configured).filter(Boolean).length
-    ElMessage.info(`Twitch 只读检查完成：${ready || 0} 项能力就绪；未建立连接或发送消息`)
+    ElMessage.info(t('tools.stream.twitchProbeDone', { count: ready || 0 }))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`Twitch 只读检查失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.twitchProbeError', { message }))
   } finally {
     probingTwitchConfig.value = false
   }
@@ -1919,7 +1920,7 @@ async function saveTwitchConfig() {
   try {
     const result = await systemClient.updateTwitchConfig(twitchConfigPayload())
     if (result.ok !== true) {
-      ElMessage.warning(String(result.error || 'Twitch 配置未保存'))
+      ElMessage.warning(String(result.error || t('tools.stream.twitchSaveNotApplied')))
       return
     }
     twitchEventsubSecretDraft.value = ''
@@ -1937,10 +1938,10 @@ async function saveTwitchConfig() {
     const ready = probe.configured && typeof probe.configured === 'object'
       ? Object.values(probe.configured as Record<string, unknown>).filter(Boolean).length
       : 0
-    ElMessage.success(`Twitch 凭据已安全保存并完成内存重配置；只读检查就绪 ${ready} 项，不会自动连接或发言`)
+    ElMessage.success(t('tools.stream.twitchSaved', { count: ready }))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`Twitch 配置失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.twitchSaveError', { message }))
   } finally {
     savingTwitchConfig.value = false
   }
@@ -1952,14 +1953,14 @@ async function clearTwitchConfig() {
     const fields = ['ClientId', 'EventsubSecret', 'EventsubToken', 'ChatToken', 'BroadcasterId', 'SenderId', 'ModeratorId', 'Channel', 'Username', 'EventsubCallbackUrl', 'SubscriptionProvider']
     const result = await systemClient.updateTwitchConfig(Object.fromEntries(fields.map(field => [`clear${field}`, true])))
     if (result.ok !== true) {
-      ElMessage.warning(String(result.error || 'Twitch 凭据未清除'))
+      ElMessage.warning(String(result.error || t('tools.stream.twitchClearNotApplied')))
       return
     }
     await Promise.all([loadStream(), loadTwitchConfigStatus()])
-    ElMessage.success('Twitch 凭据已清除，IRC 自动重连意图已停止')
+    ElMessage.success(t('tools.stream.twitchCleared'))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`清除 Twitch 凭据失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.twitchClearError', { message }))
   } finally {
     savingTwitchConfig.value = false
   }
@@ -1978,11 +1979,11 @@ async function configureObs() {
     await loadStream()
     const probe = await systemClient.probeStream()
     streamProbe.value = probe.probe ?? probe
-    if (probe.status === 'reachable') ElMessage.success('OBS 已配置并完成只读探测')
-    else ElMessage.warning(`OBS 配置已保存，但探测状态为 ${String(probe.status || 'unknown')}`)
+    if (probe.status === 'reachable') ElMessage.success(t('tools.stream.obsConfigured'))
+    else ElMessage.warning(t('tools.stream.obsSavedWithStatus', { status: String(probe.status || 'unknown') }))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`OBS 配置失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.obsConfigureError', { message }))
   } finally {
     configuringObs.value = false
   }
@@ -1998,20 +1999,20 @@ async function clearObsPassword() {
     })
     obsPasswordDraft.value = ''
     await loadStream()
-    ElMessage.success('OBS 密码已从当前运行时清除')
+    ElMessage.success(t('tools.stream.obsPasswordCleared'))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`OBS 密码清除失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.obsPasswordClearError', { message }))
   } finally {
     configuringObs.value = false
   }
 }
 
 const streamModerationSummary = computed(() => {
-  if (!streamModerationEnabled.value) return '已关闭'
+  if (!streamModerationEnabled.value) return t('tools.state.closed')
   const terms = streamModerationTermsInput.value.split(',').map(item => item.trim()).filter(Boolean).length
-  const slow = streamModerationSlowModeSeconds.value > 0 ? `慢 ${streamModerationSlowModeSeconds.value}s` : '无慢'
-  return `${terms} 词 · ${slow} · ${streamModerationMaxMessagesPerMinute.value}/分`
+  const slow = streamModerationSlowModeSeconds.value > 0 ? t('tools.stream.moderationSlow', { seconds: streamModerationSlowModeSeconds.value }) : t('tools.stream.moderationNoSlow')
+  return t('tools.stream.moderationSummary', { terms, slow, rate: streamModerationMaxMessagesPerMinute.value })
 })
 
 async function saveStreamModeration() {
@@ -2028,14 +2029,14 @@ async function saveStreamModeration() {
       maxMessagesPerMinute: streamModerationMaxMessagesPerMinute.value,
     })
     if (!result.ok) {
-      ElMessage.warning('聊天治理策略未更新')
+      ElMessage.warning(t('tools.stream.moderationNotUpdated'))
       return
     }
     await loadStream()
-    ElMessage.success('聊天治理策略已保存；出站消息仍需人工确认')
+    ElMessage.success(t('tools.stream.moderationSaved'))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`聊天治理策略更新失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.moderationError', { message }))
   } finally {
     loadingStreamModeration.value = false
   }
@@ -2047,8 +2048,8 @@ async function loadStreamEvents() {
     const result = await systemClient.streamEvents(20)
     streamEvents.value = result.events ?? result.items ?? []
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.warning(`本地直播事件加载失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.warning(t('tools.stream.eventsLoadFailed', { message }))
   } finally {
     loadingStreamEvents.value = false
   }
@@ -2060,8 +2061,8 @@ async function loadStreamDrafts() {
     const result: StreamDraftsSnapshot = await systemClient.streamDrafts(20)
     streamDrafts.value = result.drafts ?? []
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.warning(`回复草稿加载失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.warning(t('tools.stream.draftsLoadFailed', { message }))
   } finally {
     loadingStreamDrafts.value = false
   }
@@ -2071,8 +2072,8 @@ async function loadStreamDraftConsumer() {
   try {
     streamDraftConsumer.value = await systemClient.streamDraftConsumer()
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.warning(`自动草稿状态加载失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.warning(t('tools.stream.draftConsumerLoadFailed', { message }))
   }
 }
 
@@ -2080,11 +2081,11 @@ async function toggleStreamDraftConsumer() {
   loadingStreamDraftConsumer.value = true
   try {
     streamDraftConsumer.value = await systemClient.setStreamDraftConsumer(!streamDraftConsumer.value?.enabled)
-    ElMessage.success(streamDraftConsumer.value.enabled ? '已启用自动本地草稿，未发送消息' : '已关闭自动本地草稿')
+    ElMessage.success(streamDraftConsumer.value.enabled ? t('tools.stream.draftConsumerEnabled') : t('tools.stream.draftConsumerDisabled'))
     await Promise.all([loadStreamEvents(), loadStreamDrafts()])
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`自动草稿状态更新失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.draftConsumerError', { message }))
   } finally {
     loadingStreamDraftConsumer.value = false
   }
@@ -2095,14 +2096,14 @@ async function consumeStreamDrafts() {
   try {
     const result = await systemClient.consumeStreamDrafts({ limit: 3 })
     if (!result.ok && !(result.created ?? 0)) {
-      ElMessage.warning(result.errors?.[0]?.error || '未处理直播事件')
+      ElMessage.warning(result.errors?.[0]?.error || t('tools.stream.noPendingEvents'))
       return
     }
     await Promise.all([loadStreamEvents(), loadStreamDrafts()])
-    ElMessage.success(`已尝试 ${result.attempted ?? 0} 条，生成 ${result.created ?? 0} 条本地草稿；未发送`)
+    ElMessage.success(t('tools.stream.draftsConsumed', { attempted: result.attempted ?? 0, created: result.created ?? 0 }))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`批量生成草稿失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.consumeDraftsError', { message }))
   } finally {
     consumingStreamDrafts.value = false
   }
@@ -2114,8 +2115,8 @@ async function loadStreamActions() {
     const result: StreamActionsSnapshot = await systemClient.streamActions(50)
     streamActions.value = result.actions ?? []
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.warning(`直播动作审计加载失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.warning(t('tools.stream.auditLoadFailed', { message }))
   } finally {
     loadingStreamActions.value = false
   }
@@ -2126,14 +2127,14 @@ async function reconfigureTwitch() {
   try {
     const result = await systemClient.reconfigureTwitch()
     if (result.ok !== true) {
-      ElMessage.warning(String(result.error || 'Twitch 状态未更新'))
+      ElMessage.warning(String(result.error || t('tools.stream.twitchReconfigureNotApplied')))
       return
     }
     await loadStream()
-    ElMessage.success('已清除本地撤销标记；仍需在 Twitch 侧确认订阅状态')
+    ElMessage.success(t('tools.stream.twitchReconfigured'))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`Twitch 状态更新失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.twitchReconfigureError', { message }))
   } finally {
     reconfiguringTwitch.value = false
   }
@@ -2144,14 +2145,14 @@ async function saveTwitchSubscriptions() {
   try {
     const result = await systemClient.configureTwitchSubscriptions(twitchSubscriptionDraft.value)
     if (result.ok !== true) {
-      ElMessage.warning(String(result.error || 'EventSub 订阅计划未保存'))
+      ElMessage.warning(String(result.error || t('tools.stream.subscriptionNotSaved')))
       return
     }
     await loadStream()
-    ElMessage.success('已保存本地 EventSub 订阅计划，未连接 Twitch 创建订阅')
+    ElMessage.success(t('tools.stream.subscriptionSavedMessage'))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`EventSub 订阅计划保存失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.subscriptionSaveError', { message }))
   } finally {
     loadingTwitchSubscriptions.value = false
   }
@@ -2159,16 +2160,16 @@ async function saveTwitchSubscriptions() {
 
 const twitchIrcStatusLabel = computed(() => {
   const connection = streamSnapshot.value?.platforms?.twitch?.ircConnection
-  if (!connection) return '未启用'
-  if (connection.status === 'connected') return '已连接'
-  if (connection.status === 'connecting') return '连接中'
+  if (!connection) return t('tools.state.disabled')
+  if (connection.status === 'connected') return t('tools.stream.ircConnected')
+  if (connection.status === 'connecting') return t('tools.stream.ircConnecting')
   if (connection.status === 'backoff') {
     const seconds = connection.nextRetryInSeconds
-    return seconds == null ? '等待重连' : `等待重连 ${Math.ceil(seconds)} 秒`
+    return seconds == null ? t('tools.stream.ircWaitingReconnect') : t('tools.stream.ircWaitingReconnectSeconds', { seconds: Math.ceil(seconds) })
   }
-  if (connection.status === 'unconfigured') return '未配置'
-  if (connection.status === 'revoked') return '已撤销'
-  return '已断开'
+  if (connection.status === 'unconfigured') return t('tools.state.notConfigured')
+  if (connection.status === 'revoked') return t('tools.stream.ircRevoked')
+  return t('tools.stream.ircDisconnected')
 })
 
 async function connectTwitch() {
@@ -2176,11 +2177,11 @@ async function connectTwitch() {
   try {
     const result = await systemClient.connectTwitch()
     await loadStream()
-    if (result.ok) ElMessage.success('已请求 Twitch IRC 连接')
-    else ElMessage.warning('Twitch IRC 尚未连接，请检查配置或稍后重试')
+    if (result.ok) ElMessage.success(t('tools.stream.ircConnectRequested'))
+    else ElMessage.warning(t('tools.stream.ircNotConnected'))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`Twitch IRC 连接失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.ircConnectError', { message }))
   } finally {
     connectingTwitch.value = false
   }
@@ -2191,10 +2192,10 @@ async function disconnectTwitch() {
   try {
     await systemClient.disconnectTwitch()
     await loadStream()
-    ElMessage.success('已断开 Twitch IRC，停止自动重连意图')
+    ElMessage.success(t('tools.stream.ircDisconnectedMessage'))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`Twitch IRC 断开失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.ircDisconnectError', { message }))
   } finally {
     disconnectingTwitch.value = false
   }
@@ -2207,23 +2208,23 @@ function streamEventId(event: StreamLocalEvent) {
 async function generateStreamDraft(event: StreamLocalEvent) {
   const eventId = streamEventId(event)
   if (!eventId) {
-    ElMessage.warning('该事件缺少可用标识，无法生成草稿')
+    ElMessage.warning(t('tools.stream.eventMissingId'))
     return
   }
   generatingStreamDraft.value = eventId
   try {
     const result = await systemClient.generateStreamDraft({ eventId })
     if (!result.ok && !result.draft) {
-      ElMessage.warning(result.error || '回复草稿生成失败')
+      ElMessage.warning(result.error || t('tools.stream.draftGenerateFailed'))
       return
     }
     if (result.draft) {
       streamDrafts.value = [result.draft, ...streamDrafts.value.filter(item => item.requestId !== result.draft?.requestId)].slice(0, 20)
     }
-    ElMessage.success(result.draft?.status === 'generated' ? '已生成本地回复草稿，未发送' : '草稿生成失败，未发送任何消息')
+    ElMessage.success(result.draft?.status === 'generated' ? t('tools.stream.draftGeneratedLocal') : t('tools.stream.draftGenerateFailedNoSend'))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`回复草稿生成失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.draftGenerateError', { message }))
   } finally {
     generatingStreamDraft.value = ''
   }
@@ -2232,33 +2233,33 @@ async function generateStreamDraft(event: StreamLocalEvent) {
 async function retryStreamDraft(draft: StreamReplyDraft) {
   const eventId = String(draft.eventId || '').trim()
   if (!eventId) {
-    ElMessage.warning('该草稿缺少事件标识，无法重新生成')
+    ElMessage.warning(t('tools.stream.draftMissingId'))
     return
   }
   generatingStreamDraft.value = eventId
   try {
     const result = await systemClient.generateStreamDraft({ eventId, retry: true })
     if (!result.ok && !result.draft) {
-      ElMessage.warning(result.error || '草稿重新生成失败')
+      ElMessage.warning(result.error || t('tools.stream.draftRetryFailed'))
       return
     }
     if (result.draft) {
       streamDrafts.value = [result.draft, ...streamDrafts.value.filter(item => item.requestId !== result.draft?.requestId)].slice(0, 20)
     }
-    ElMessage.success(result.draft?.status === 'generated' ? '已重新生成本地回复草稿，未发送' : '草稿重新生成失败，未发送任何消息')
+    ElMessage.success(result.draft?.status === 'generated' ? t('tools.stream.draftRegenerated') : t('tools.stream.draftRetryFailedNoSend'))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`草稿重新生成失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.draftRetryError', { message }))
   } finally {
     generatingStreamDraft.value = ''
   }
 }
 
 function streamDraftDeliveryLabel(draft: StreamReplyDraft) {
-  if (draft.sendStatus === 'known_success' || draft.sent) return '已确认发送'
-  if (draft.sendStatus === 'unknown_effect') return '发送效果未知，需人工确认'
-  if (draft.sendStatus === 'failed') return '发送失败，可重新预览'
-  return draft.status === 'generated' ? '仅本地草稿，未发送' : '生成失败'
+  if (draft.sendStatus === 'known_success' || draft.sent) return t('tools.stream.deliveryConfirmed')
+  if (draft.sendStatus === 'unknown_effect') return t('tools.stream.deliveryUnknown')
+  if (draft.sendStatus === 'failed') return t('tools.stream.deliveryFailed')
+  return draft.status === 'generated' ? t('tools.stream.deliveryDraftOnly') : t('tools.stream.deliveryGenerateFailed')
 }
 
 async function toggleStreamTakeover() {
@@ -2266,47 +2267,47 @@ async function toggleStreamTakeover() {
   try {
     const result = await systemClient.setStreamTakeover(!streamTakeoverEnabled.value)
     if (!result.ok) {
-      ElMessage.warning(result.error || '本地接管策略未更新')
+      ElMessage.warning(result.error || t('tools.stream.takeoverNotUpdated'))
       return
     }
     streamTakeoverEnabled.value = result.enabled ?? !streamTakeoverEnabled.value
     if (result.state && streamSnapshot.value) streamSnapshot.value = { ...streamSnapshot.value, state: result.state, policy: result.policy ?? streamSnapshot.value.policy }
-    ElMessage.success(streamTakeoverEnabled.value ? '已启用本地人工接管，未发送平台指令' : '已关闭本地人工接管')
+    ElMessage.success(streamTakeoverEnabled.value ? t('tools.stream.takeoverEnabledMessage') : t('tools.stream.takeoverDisabledMessage'))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`本地接管策略更新失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.takeoverError', { message }))
   } finally {
     loadingStreamTakeover.value = false
   }
 }
 
 function formatStreamEventTime(value: number | string | null | undefined) {
-  if (value == null || value === '') return '时间未知'
+  if (value == null || value === '') return t('tools.time.unknown')
   const date = new Date(typeof value === 'number' ? value : String(value))
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleTimeString()
 }
 
 function formatStreamActionStatus(status: string | undefined) {
   const labels: Record<string, string> = {
-    sending: '发送中',
-    known_success: '已确认成功',
-    unknown_effect: '效果未知',
-    failed: '失败',
+    sending: t('tools.stream.statusSending'),
+    known_success: t('tools.stream.statusKnownSuccess'),
+    unknown_effect: t('tools.stream.statusUnknownEffect'),
+    failed: t('tools.stream.statusFailed'),
   }
-  return labels[status || ''] || status || '未知'
+  return labels[status || ''] || status || t('tools.stream.statusUnknown')
 }
 
 function streamEventKindLabel(kind: string | undefined) {
   const labels: Record<string, string> = {
-    'channel.chat.message': '聊天消息',
-    'channel.follow': '新关注',
-    'channel.subscribe': '新订阅',
-    'channel.cheer': '打赏',
+    'channel.chat.message': t('tools.stream.subscriptionChatMessage'),
+    'channel.follow': t('tools.stream.eventKindFollow'),
+    'channel.subscribe': t('tools.stream.eventKindSubscribe'),
+    'channel.cheer': t('tools.stream.eventKindCheer'),
     'channel.raid': 'Raid',
-    'stream.online': '开播',
-    'stream.offline': '下播',
+    'stream.online': t('tools.stream.eventKindOnline'),
+    'stream.offline': t('tools.stream.eventKindOffline'),
   }
-  return labels[kind || ''] || kind || '本地事件'
+  return labels[kind || ''] || kind || t('tools.stream.eventKindFallback')
 }
 
 async function probeStream() {
@@ -2317,11 +2318,11 @@ async function probeStream() {
     streamProbe.value = result.probe ?? null
     if (result.state && streamSnapshot.value) streamSnapshot.value = { ...streamSnapshot.value, state: result.state }
     await loadStream()
-    if (!result.ok) ElMessage.warning(result.error || '适配器探测未通过')
-    else ElMessage.success('适配器只读探测完成，未执行直播动作')
+    if (!result.ok) ElMessage.warning(result.error || t('tools.stream.probeNotPassed'))
+    else ElMessage.success(t('tools.stream.probeDone'))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`适配器探测失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.probeError', { message }))
   } finally {
     loadingStreamProbe.value = false
   }
@@ -2335,11 +2336,11 @@ async function loadObsProfiles() {
     obsProfiles.value = (result.profiles || []).filter((profile) => typeof profile?.profileName === 'string' && profile.profileName.trim())
     obsCurrentProfile.value = typeof result.currentProfileName === 'string' ? result.currentProfileName : ''
     if (!obsProfileDraft.value && obsCurrentProfile.value) obsProfileDraft.value = obsCurrentProfile.value
-    if (result.ok) ElMessage.success(`已读取 ${obsProfiles.value.length} 个 OBS 配置档`)
-    else ElMessage.warning(result.error || 'OBS 配置档读取失败')
+    if (result.ok) ElMessage.success(t('tools.stream.obsProfilesLoaded', { count: obsProfiles.value.length }))
+    else ElMessage.warning(result.error || t('tools.stream.obsProfilesFailed'))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`OBS 配置档读取失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.obsProfilesError', { message }))
   } finally {
     loadingObsProfiles.value = false
   }
@@ -2364,11 +2365,11 @@ async function previewStream(kind: string, params: Record<string, unknown> = {},
         params: result.preview.params || {},
       }
     }
-    if (!result.ok) ElMessage.warning(result.error || '直播动作暂不可预览')
-    else ElMessage.success('已生成直播动作预览，未执行真实操作')
+    if (!result.ok) ElMessage.warning(result.error || t('tools.stream.previewUnavailable'))
+    else ElMessage.success(t('tools.stream.previewReady'))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
-    ElMessage.error(`直播动作预览失败: ${message}`)
+    const message = describeFailure(error, t('tools.log.unknownError'))
+    ElMessage.error(t('tools.stream.previewError', { message }))
   } finally {
     previewingStreamCapability.value = ''
   }
@@ -2380,21 +2381,21 @@ async function previewDraftSend(draft: StreamReplyDraft) {
 }
 
 function streamRiskLabel(risk: string | undefined) {
-  const labels: Record<string, string> = { safe: '安全', low: '低风险', medium: '中风险', high: '高风险', critical: '关键风险' }
-  return labels[risk || ''] || risk || '未声明风险'
+  const labels: Record<string, string> = { safe: t('tools.risk.safe'), low: t('tools.risk.low'), medium: t('tools.risk.medium'), high: t('tools.risk.high'), critical: t('tools.risk.critical') }
+  return labels[risk || ''] || risk || t('tools.risk.undeclared')
 }
 
 async function confirmStreamExecution() {
   const pending = streamPendingExecution.value
   if (!pending?.requestId) {
-    ElMessage.warning('预览已失效，请重新生成预览')
+    ElMessage.warning(t('tools.stream.previewExpired'))
     return
   }
   try {
     await ElMessageBox.confirm(
-        `确认执行“${streamActionLabel(pending.action)}”？风险：${streamRiskLabel(streamSnapshot.value?.preview?.riskLevel)}。`,
-      '确认直播动作',
-      { type: 'warning', confirmButtonText: '确认执行', cancelButtonText: '取消' },
+        t('tools.stream.confirmExecuteMessage', { action: streamActionLabel(pending.action), risk: streamRiskLabel(streamSnapshot.value?.preview?.riskLevel) }),
+      t('tools.stream.confirmTitle'),
+      { type: 'warning', confirmButtonText: t('tools.stream.confirmExecute'), cancelButtonText: t('tools.action.cancel') },
     )
   } catch {
     return
@@ -2405,10 +2406,10 @@ async function confirmStreamExecution() {
     streamExecution.value = result
     if (result.state && streamSnapshot.value) streamSnapshot.value = { ...streamSnapshot.value, state: result.state }
     await Promise.all([loadStream(), loadStreamEvents(), loadStreamActions(), loadStreamDraftConsumer()])
-    if (result.ok) ElMessage.success(`执行完成：${result.verificationStatus || result.outcome || '已提交'}`)
-    else ElMessage.error(result.message || result.error || '直播动作执行失败，可手动重试')
+    if (result.ok) ElMessage.success(t('tools.stream.executionDoneWith', { status: result.verificationStatus || result.outcome || t('tools.stream.submitted') }))
+    else ElMessage.error(result.message || result.error || t('tools.stream.executionFailedHint'))
   } catch (error) {
-    const message = describeFailure(error, '未知错误')
+    const message = describeFailure(error, t('tools.log.unknownError'))
     streamExecution.value = { ok: false, outcome: 'failed', message }
     // Provider state can change while the confirmation dialog is open (for
     // example, Twitch EventSub may be revoked). Refresh the read-only
@@ -2419,7 +2420,7 @@ async function confirmStreamExecution() {
       // Keep the original execution error visible when the status refresh is
       // unavailable; the next explicit refresh can reconcile the snapshot.
     }
-    ElMessage.error(`直播动作执行失败: ${message}`)
+    ElMessage.error(t('tools.stream.executionError', { message }))
   } finally {
     loadingStreamExecute.value = false
   }

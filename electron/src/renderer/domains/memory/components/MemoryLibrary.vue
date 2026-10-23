@@ -1,49 +1,49 @@
 <template>
   <section class="library" aria-labelledby="memory-library-title">
     <div class="library-heading">
-      <div><h3 id="memory-library-title">记忆库</h3><span class="count-label" role="status" aria-live="polite">{{ filteredCount }} 条</span></div>
-<el-input :model-value="searchText" clearable placeholder="搜索记忆内容" class="search-input" aria-label="搜索记忆内容" @update:model-value="emit('update:searchText', String($event))" />
+      <div><h3 id="memory-library-title">{{ t('memoryView.libraryTitle') }}</h3><span class="count-label" role="status" aria-live="polite">{{ t('memoryView.countItems', { count: filteredCount }) }}</span></div>
+<el-input :model-value="searchText" clearable :placeholder="t('memoryView.librarySearchPlaceholder')" class="search-input" :aria-label="t('memoryView.librarySearchAria')" @update:model-value="emit('update:searchText', String($event))" />
     </div>
     <details class="filter-disclosure" :open="filterDisclosureOpen" @toggle="syncFilterDisclosure">
-      <summary>筛选与排序 <span v-if="hasFilters">已启用</span></summary>
-      <div class="filter-toolbar" aria-label="记忆筛选">
-        <div class="view-tabs" role="group" aria-label="记忆视图">
+      <summary>{{ t('memoryView.libraryFilters') }} <span v-if="hasFilters">{{ t('memoryView.libraryFiltersActive') }}</span></summary>
+      <div class="filter-toolbar" :aria-label="t('memoryView.libraryFiltersAria')">
+        <div class="view-tabs" role="group" :aria-label="t('memoryView.libraryViewsAria')">
           <button v-for="option in viewOptions" :key="option.value" type="button" :aria-pressed="viewMode === option.value" @click="emit('update:viewMode', option.value)">{{ option.label }} <span>{{ docViewCount(option.value) }}</span></button>
         </div>
-        <el-select :model-value="filterLayer" size="small" clearable placeholder="全部类别" aria-label="按类别筛选" @update:model-value="emit('update:filterLayer', String($event || ''))">
+        <el-select :model-value="filterLayer" size="small" clearable :placeholder="t('memoryView.libraryAllLayers')" :aria-label="t('memoryView.libraryFilterLayerAria')" @update:model-value="emit('update:filterLayer', String($event || ''))">
           <el-option v-for="layer in layers" :key="layer.value" :label="layer.label" :value="layer.value" />
         </el-select>
-        <el-select :model-value="sortMode" size="small" aria-label="排序方式" @update:model-value="emit('update:sortMode', $event as DocSortMode)">
-          <el-option label="最近更新" value="updated" /><el-option label="长期保留优先级" value="importance" /><el-option label="可靠程度" value="quality" /><el-option label="准确把握" value="confidence" />
+        <el-select :model-value="sortMode" size="small" :aria-label="t('memoryView.librarySortAria')" @update:model-value="emit('update:sortMode', $event as DocSortMode)">
+          <el-option :label="t('memoryView.sortUpdated')" value="updated" /><el-option :label="t('memoryView.sortImportance')" value="importance" /><el-option :label="t('memoryView.reliability')" value="quality" /><el-option :label="t('memoryView.sortConfidence')" value="confidence" />
         </el-select>
       </div>
     </details>
-      <div v-if="hasFilters" class="batch-toolbar" role="toolbar" aria-label="批量操作">
-      <div class="batch-actions"><el-button size="small" plain @click="emit('reset-filters')">清空筛选</el-button><el-button size="small" plain :loading="batchActionLoading" :disabled="batchActionDisabled" @click="emit('batch-boost')">提高重要度</el-button><el-button size="small" type="danger" plain :loading="batchActionLoading" :disabled="batchActionDisabled" @click="emit('batch-delete')">{{ batchDeleteLabel }}</el-button></div>
+      <div v-if="hasFilters" class="batch-toolbar" role="toolbar" :aria-label="t('memoryView.libraryBatchAria')">
+      <div class="batch-actions"><el-button size="small" plain @click="emit('reset-filters')">{{ t('memoryView.clearFilters') }}</el-button><el-button size="small" plain :loading="batchActionLoading" :disabled="batchActionDisabled" @click="emit('batch-boost')">{{ t('memoryView.boostImportance') }}</el-button><el-button size="small" type="danger" plain :loading="batchActionLoading" :disabled="batchActionDisabled" @click="emit('batch-delete')">{{ batchDeleteLabel }}</el-button></div>
     </div>
     <AsyncState
       :loading="loading"
       :error="error"
       :empty="filteredCount === 0"
-      error-title="记忆库暂时不可用"
-      retry-text="重新连接"
-      :empty-text="hasFilters ? '没有符合当前筛选的记忆' : '记忆库还是空的'"
+      :error-title="t('memoryView.libraryUnavailable')"
+      :retry-text="t('memoryView.libraryReconnect')"
+      :empty-text="hasFilters ? t('memoryView.libraryEmptyFiltered') : t('memoryView.libraryEmpty')"
       @retry="emit('retry')"
     >
       <template #empty>
         <p class="library-empty-hint">
-          {{ hasFilters ? '换个关键词，或清空筛选后查看全部记忆。' : '对话中产生的长期记忆会自动出现在这里；也可以在「设置 → 存储」导入已有记忆。' }}
+          {{ hasFilters ? t('memoryView.libraryEmptyHintFiltered') : t('memoryView.libraryEmptyHint') }}
         </p>
-        <el-button v-if="hasFilters" size="small" plain @click="emit('reset-filters')">清空筛选</el-button>
+        <el-button v-if="hasFilters" size="small" plain @click="emit('reset-filters')">{{ t('memoryView.clearFilters') }}</el-button>
       </template>
       <div class="master-detail">
-        <div class="memory-list" role="listbox" aria-label="记忆列表">
+        <div class="memory-list" role="listbox" :aria-label="t('memoryView.libraryListAria')">
           <button v-for="doc in visibleDocs" :key="doc.id" type="button" role="option" class="memory-row" :aria-selected="selectedDoc?.id === doc.id" :class="{ hit: isQueryHit(doc) }" :data-memory-id="doc.id" @click="emit('select', doc)">
             <span class="doc-title"><strong>{{ docTypeLabel(doc.type) }}</strong><el-tag size="small" :type="stateTagType(doc.state)">{{ memoryStateLabel(doc.state) }}</el-tag></span>
             <p>{{ doc.text }}</p>
             <span class="doc-meta"><span>{{ layerLabel(doc.layer) }}</span><span>{{ docSourceLabel(doc) }}</span><span>{{ docUpdatedLabel(doc) }}</span></span>
           </button>
-          <button v-if="remainingCount" type="button" class="show-more" @click="emit('show-more')">再显示 {{ remainingCount }} 条</button>
+          <button v-if="remainingCount" type="button" class="show-more" @click="emit('show-more')">{{ t('memoryView.libraryShowMore', { count: remainingCount }) }}</button>
         </div>
         <MemoryInspector
           :doc="selectedDoc" :draft="inspectorDraft" :layers="layers" :source-options="sourceOptions"
@@ -66,8 +66,9 @@ import 'element-plus/es/components/option/style/css'
 import { ElButton, ElInput, ElOption, ElSelect, ElTag } from 'element-plus'
 import 'element-plus/es/components/input/style/css'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
+import { t } from '@/i18n'
 import MemoryInspector from './MemoryInspector.vue'
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { MemoryOperation } from '@/api/clients/memory-client'
 import type { DocSortMode, DocViewMode, MemoryDoc, MemoryInspectorDraft, MemoryLayer, MemoryOption, TagType } from './memory-panel-types'
 
@@ -99,11 +100,27 @@ const emit = defineEmits<{
   retry: []; 'show-more': []; 'reset-filters': []; 'batch-boost': []; 'batch-delete': []; 'save-inspector': []; 'reset-inspector': []; 'update-inspector-draft': [value: Partial<MemoryInspectorDraft>]
 }>()
 
-const memoryStateLabels: Record<string, string> = { active: '可用于对话', forgotten: '暂停使用', expired: '已过期', scheduled: '待生效', superseded: '已替代', rejected: '已拒绝', invalid: '需检查' }
-const memoryStateLabel = (state?: string) => memoryStateLabels[String(state || 'active')] || '可用于对话'
-const docTypeLabels: Record<string, string> = { fact: '事实', preference: '偏好', event: '事件', promise: '约定', taboo: '边界', summary: '总结', chat: '对话记录' }
-const docTypeLabel = (type?: string) => docTypeLabels[String(type || '')] || type || '记忆'
-const layerLabel = (value?: string) => props.layers.find(layer => layer.value === value)?.label || '未分类'
+const memoryStateLabels = computed<Record<string, string>>(() => ({
+  active: t('memoryView.availableForChat'),
+  forgotten: t('memoryView.paused'),
+  expired: t('memoryView.stateExpired'),
+  scheduled: t('memoryView.stateScheduled'),
+  superseded: t('memoryView.stateSuperseded'),
+  rejected: t('memoryView.stateRejected'),
+  invalid: t('memoryView.stateInvalid'),
+}))
+const memoryStateLabel = (state?: string) => memoryStateLabels.value[String(state || 'active')] || t('memoryView.availableForChat')
+const docTypeLabels = computed<Record<string, string>>(() => ({
+  fact: t('memoryView.docTypeFact'),
+  preference: t('memoryView.docTypePreference'),
+  event: t('memoryView.docTypeEvent'),
+  promise: t('memoryView.docTypePromise'),
+  taboo: t('memoryView.docTypeTaboo'),
+  summary: t('memoryView.docTypeSummary'),
+  chat: t('memoryView.docTypeChat'),
+}))
+const docTypeLabel = (type?: string) => docTypeLabels.value[String(type || '')] || type || t('memoryView.memoryFallback')
+const layerLabel = (value?: string) => props.layers.find(layer => layer.value === value)?.label || t('memoryView.uncategorized')
 const stateTagType = (state?: string): TagType => {
   const value = String(state || 'active')
   if (value === 'active') return 'success'

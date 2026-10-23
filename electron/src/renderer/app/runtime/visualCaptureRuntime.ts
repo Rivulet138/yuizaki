@@ -5,6 +5,7 @@ import {
   isVisualFrameResult,
   VisualCaptureEpoch,
 } from '@/visual-capture-epoch'
+import { t } from '@/i18n'
 
 type CaptureMode = 'display' | 'region'
 
@@ -138,7 +139,7 @@ export const createVisualCaptureRuntime = (options: VisualCaptureRuntimeOptions)
     if (!socket.isConnected()) return 'skipped:socket-disconnected'
     const screenApi = options.getScreenApi()
     if (!screenApi?.capture) {
-      options.state.markVisualPerceptionError('当前环境不支持屏幕采集')
+      options.state.markVisualPerceptionError(t('misc.screenCaptureUnsupported'))
       return 'skipped:capture-api-unavailable'
     }
     if (frameInFlight) return 'skipped:capture-in-flight'
@@ -163,7 +164,7 @@ export const createVisualCaptureRuntime = (options: VisualCaptureRuntimeOptions)
         : await screenApi.capture(vision.displayIndex, captureOptions)
       if (!epoch.isCurrent(captureEpoch)) return 'skipped:capture-invalidated'
       if (typeof image !== 'string' || !image.startsWith('data:image/')) {
-        options.state.markVisualPerceptionError('没有捕获到可用画面')
+        options.state.markVisualPerceptionError(t('misc.noUsableFrameCaptured'))
         return 'skipped:invalid-image'
       }
       frameSequence += 1
@@ -193,7 +194,7 @@ export const createVisualCaptureRuntime = (options: VisualCaptureRuntimeOptions)
       if (!epoch.isCurrent(captureEpoch)) return 'skipped:capture-error-invalidated'
       options.logger.warn('Failed to capture realtime visual frame:', error)
       const message = error instanceof Error ? error.message : String(error)
-      options.state.markVisualPerceptionError(message || '实时视觉采集失败')
+      options.state.markVisualPerceptionError(message || t('misc.realtimeVisionCaptureFailed'))
       return `skipped:capture-error:${message}`
     } finally {
       frameInFlight = false

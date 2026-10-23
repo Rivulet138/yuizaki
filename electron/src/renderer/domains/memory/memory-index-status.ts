@@ -1,4 +1,5 @@
 import type { MemoryIndexStatus } from '@/api/clients/memory-client'
+import { t } from '@/i18n'
 
 export type MemoryIndexStatusTone = 'success' | 'warning' | 'danger' | 'info'
 
@@ -13,7 +14,7 @@ export const getMemoryIndexUiStatus = (
   loading: boolean,
 ): MemoryIndexUiStatus => {
   if (!status || loading) {
-    return { label: '加载中', availabilityLabel: '状态待载入', tone: 'info' }
+    return { label: t('memoryView.indexLoading'), availabilityLabel: t('memoryView.indexPendingAvailability'), tone: 'info' }
   }
 
   const runtimeStatus = status.status.toLowerCase()
@@ -24,22 +25,22 @@ export const getMemoryIndexUiStatus = (
     && !indexDirty
 
   if (status.healthy === false) {
-    return { label: '后端异常', availabilityLabel: '权威库异常', tone: 'danger' }
+    return { label: t('memoryView.indexBackendError'), availabilityLabel: t('memoryView.indexAuthorityError'), tone: 'danger' }
   }
   if (rebuildState === 'failed' || rebuildState === 'interrupted' || runtimeStatus.includes('error') || runtimeStatus.includes('fail')) {
-    return { label: '重建失败', availabilityLabel: '权威库可用', tone: 'warning' }
+    return { label: t('memoryView.indexRebuildFailed'), availabilityLabel: t('memoryView.indexAuthorityAvailable'), tone: 'warning' }
   }
   if (rebuildState === 'cancelled') {
-    return { label: '已取消', availabilityLabel: '权威库可用', tone: 'info' }
+    return { label: t('memoryView.indexCancelled'), availabilityLabel: t('memoryView.indexAuthorityAvailable'), tone: 'info' }
   }
   if (runtimeStatus === 'indexing' || rebuildState === 'queued' || rebuildState === 'running' || rebuildState === 'cancelling') {
-    return { label: '重建中', availabilityLabel: '索引重建中', tone: 'info' }
+    return { label: t('memoryView.indexRebuilding'), availabilityLabel: t('memoryView.indexRebuildingAvailability'), tone: 'info' }
   }
   if (indexDirty) {
-    return { label: '需重建', availabilityLabel: '索引需重建', tone: 'warning' }
+    return { label: t('memoryView.indexNeedsRebuild'), availabilityLabel: t('memoryView.indexNeedsRebuildAvailability'), tone: 'warning' }
   }
   if (!indexReady) {
-    return { label: '索引不可用', availabilityLabel: '权威库可用', tone: 'warning' }
+    return { label: t('memoryView.indexUnavailable'), availabilityLabel: t('memoryView.indexAuthorityAvailable'), tone: 'warning' }
   }
-  return { label: '可用', availabilityLabel: '索引可用', tone: 'success' }
+  return { label: t('memoryView.indexAvailable'), availabilityLabel: t('memoryView.indexAvailableAvailability'), tone: 'success' }
 }

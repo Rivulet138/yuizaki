@@ -2,7 +2,7 @@
   <el-card class="desktop-input-card" shadow="never">
     <template #header>
       <div class="card-header">
-        <div class="header-title"><span>桌面输入</span></div>
+        <div class="header-title"><span>{{ t('settingsSection.desktopInput.title') }}</span></div>
         <div class="button-row">
           <el-tag :type="pushToTalkStatusType">
             {{ pushToTalkStatusLabel }}
@@ -10,16 +10,16 @@
           <el-button
             :icon="Connection"
             :loading="state.loading"
-            title="重新连接桌面输入"
-            aria-label="重新连接桌面输入"
+            :title="t('settingsSection.desktopInput.reconnect')"
+            :aria-label="t('settingsSection.desktopInput.reconnect')"
             @click="$emit('retry')"
           />
           <el-button
             data-testid="reset-input-bindings"
             :icon="Refresh"
             :loading="state.loading"
-            title="恢复默认快捷键"
-            aria-label="恢复默认快捷键"
+            :title="t('settingsSection.desktopInput.resetShortcuts')"
+            :aria-label="t('settingsSection.desktopInput.resetShortcuts')"
             @click="$emit('reset')"
           />
         </div>
@@ -30,26 +30,26 @@
       v-if="!state.available"
       type="info"
       :closable="false"
-      title="桌面应用输入服务尚未连接；快捷键仍可编辑，连接后会自动注册。"
+      :title="t('settingsSection.desktopInput.unavailable')"
     />
     <el-alert
       v-else-if="state.browserFallback"
       type="info"
       :closable="false"
-      :title="state.browserShortcutsEnabled ? '浏览器快捷键和本页鼠标侧键正在监听；全局桌面动作需要桌面应用。' : '本页输入已暂停；桌面应用的全局输入不受影响。'"
+      :title="state.browserShortcutsEnabled ? t('settingsSection.desktopInput.browserActive') : t('settingsSection.desktopInput.browserPaused')"
     />
     <el-alert
       v-else-if="state.status.errors.length"
       type="warning"
       :closable="false"
-      :title="state.status.errors.join('；')"
+      :title="state.status.errors.join(t('settingsSection.desktopInput.errorSeparator'))"
     />
     <el-alert v-if="state.error" type="error" :closable="false" :title="state.error" />
 
     <div v-if="state.browserFallback" class="browser-scope-row">
       <div>
-        <strong>本页输入</strong>
-        <small v-if="state.lastBrowserActionAt" class="field-note browser-feedback">最近触发：{{ lastBrowserActionLabel }}</small>
+        <strong>{{ t('settingsSection.desktopInput.pageInput') }}</strong>
+        <small v-if="state.lastBrowserActionAt" class="field-note browser-feedback">{{ t('settingsSection.desktopInput.lastTriggered', { label: lastBrowserActionLabel }) }}</small>
       </div>
       <el-switch
         data-testid="toggle-browser-input"
@@ -62,7 +62,7 @@
     <el-form class="desktop-input-form" label-position="top" @submit.prevent>
       <div class="desktop-input-row">
         <div>
-          <strong>按住说话</strong>
+          <strong>{{ t('settingsSection.desktopInput.pushToTalk') }}</strong>
         </div>
         <el-switch
           data-testid="toggle-talk"
@@ -77,8 +77,8 @@
           class="desktop-input-select"
           @change="$emit('set-push-to-talk-mouse-button', Number($event))"
         >
-          <el-option label="鼠标侧键 1（后退）" :value="4" />
-          <el-option label="鼠标侧键 2（前进）" :value="5" />
+          <el-option :label="t('settingsSection.desktopInput.mouseButtonBack')" :value="4" />
+          <el-option :label="t('settingsSection.desktopInput.mouseButtonForward')" :value="5" />
         </el-select>
       </div>
 
@@ -87,15 +87,15 @@
         class="mouse-hook-warning"
         type="warning"
         :closable="false"
-        :title="state.browserFallback ? (state.browserShortcutsEnabled ? '只在当前浏览器页面监听鼠标侧键。' : '本页输入已暂停，不会监听鼠标侧键。') : '已监听全局鼠标侧键，可能影响其他应用的输入。'"
+        :title="state.browserFallback ? (state.browserShortcutsEnabled ? t('settingsSection.desktopInput.mouseHookBrowserEnabled') : t('settingsSection.desktopInput.mouseHookBrowserPaused')) : t('settingsSection.desktopInput.mouseHookGlobal')"
       />
 
       <div class="desktop-input-row" data-testid="desktop-action-beta">
-        <div><strong>桌面动作</strong></div>
+        <div><strong>{{ t('settingsSection.desktopInput.desktopAction') }}</strong></div>
         <div class="button-row">
           <el-tag :type="desktopActionStatusType">{{ desktopActionStatusLabel }}</el-tag>
-          <el-tag v-if="desktopAction.status.leaseState === 'unconfirmed'" type="danger">尚未授权</el-tag>
-          <el-tag v-else-if="desktopAction.status.authorizationGranted" type="success">已授权</el-tag>
+          <el-tag v-if="desktopAction.status.leaseState === 'unconfirmed'" type="danger">{{ t('settingsSection.desktopInput.authPending') }}</el-tag>
+          <el-tag v-else-if="desktopAction.status.authorizationGranted" type="success">{{ t('settingsSection.desktopInput.authGranted') }}</el-tag>
         </div>
         <div class="button-row desktop-action-controls">
           <el-switch
@@ -111,7 +111,7 @@
             :disabled="!desktopActionControlAvailable"
             @click="runDesktopAction('rearm')"
           >
-            重新启用
+            {{ t('settingsSection.desktopInput.rearm') }}
           </el-button>
           <el-button
             v-if="desktopAction.status.enabled"
@@ -120,15 +120,15 @@
             :disabled="!desktopActionControlAvailable || desktopAction.status.leaseState !== 'confirmed'"
             @click="runDesktopAction('manageAuthorization')"
           >
-            管理授权
+            {{ t('settingsSection.desktopInput.manageAuth') }}
           </el-button>
           <el-button
             data-testid="desktop-action-refresh"
             :icon="Refresh"
             :loading="desktopAction.loading"
             :disabled="!desktopAction.available"
-            title="刷新桌面动作状态"
-            aria-label="刷新桌面动作状态"
+            :title="t('settingsSection.desktopInput.refreshStatus')"
+            :aria-label="t('settingsSection.desktopInput.refreshStatus')"
             @click="runDesktopAction('status')"
           />
         </div>
@@ -138,7 +138,7 @@
           data-testid="desktop-action-error"
           type="error"
           :closable="false"
-          :title="desktopAction.status.lastError?.message || desktopAction.status.reason || '桌面动作暂不可用'"
+          :title="desktopAction.status.lastError?.message || desktopAction.status.reason || t('settingsSection.desktopInput.actionUnavailable')"
         />
       </div>
 
@@ -150,7 +150,7 @@
           <el-input
             :data-testid="binding.action === 'interact' ? 'shortcut' : undefined"
             :model-value="draftValues[binding.action]"
-            :placeholder="activeKeyboardCapture === binding.action ? '请按下组合键' : '点击后按下组合键'"
+            :placeholder="activeKeyboardCapture === binding.action ? t('settingsSection.desktopInput.pressKeys') : t('settingsSection.desktopInput.clickThenPressKeys')"
             :disabled="state.loading"
             :readonly="editingAction !== binding.action"
             @update:model-value="draftValues[binding.action] = String($event)"
@@ -163,16 +163,16 @@
               <div class="binding-actions">
                 <el-button
                   :icon="editingAction === binding.action ? Check : Edit"
-                  :title="editingAction === binding.action ? '保存编辑' : '编辑快捷键'"
-                  :aria-label="editingAction === binding.action ? '保存编辑' : '编辑快捷键'"
+                  :title="editingAction === binding.action ? t('settingsSection.desktopInput.saveEdit') : t('settingsSection.desktopInput.editShortcut')"
+                  :aria-label="editingAction === binding.action ? t('settingsSection.desktopInput.saveEdit') : t('settingsSection.desktopInput.editShortcut')"
                   @mousedown.prevent
                   @click="toggleEditing(binding.action)"
                 />
                 <el-button
                   :icon="CircleClose"
                   :disabled="!state.settings.keyboard[binding.action]"
-                  :title="`清除${binding.label}`"
-                  :aria-label="`清除${binding.label}`"
+                  :title="t('settingsSection.desktopInput.clearBinding', { label: binding.label })"
+                  :aria-label="t('settingsSection.desktopInput.clearBinding', { label: binding.label })"
                   @mousedown.prevent
                   @click="clearBinding(binding.action)"
                 />
@@ -208,6 +208,7 @@ import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/form-item/style/css'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Check, CircleClose, Connection, Edit, Refresh } from '@element-plus/icons-vue'
+import { t } from '@/i18n'
 import type { InputBindingRegistrationStatus, InputBindingSettings, KeyboardShortcutAction, MouseSideButton } from '@/../shared/input-bindings'
 import type { DesktopActionResult, DesktopActionStatus } from '@/../shared/desktop-action'
 
@@ -261,9 +262,9 @@ const desktopAction = reactive({
   status: defaultDesktopActionStatus(),
 })
 const desktopActionStatusLabel = computed(() => {
-  if (!desktopActionControlAvailable.value) return '不可用'
-  if (desktopAction.status.emergencyStopped) return '已停止'
-  return desktopAction.status.enabled ? '已启用' : '已关闭'
+  if (!desktopActionControlAvailable.value) return t('settingsSection.desktopInput.statusUnavailable')
+  if (desktopAction.status.emergencyStopped) return t('settingsSection.desktopInput.statusStopped')
+  return desktopAction.status.enabled ? t('settingsSection.desktopInput.statusEnabled') : t('settingsSection.desktopInput.statusDisabled')
 })
 const desktopActionControlAvailable = computed(() => (
   desktopAction.available
@@ -309,12 +310,12 @@ const draftValues = reactive<Record<KeyboardShortcutAction, string>>({
 
 const pushToTalkStatusLabel = computed(() => {
   if (state.browserFallback) {
-    if (!state.browserShortcutsEnabled) return '本页输入已暂停'
-    return state.settings.pushToTalk.enabled ? '本页按住说话' : '鼠标输入未启用'
+    if (!state.browserShortcutsEnabled) return t('settingsSection.desktopInput.browserInputPaused')
+    return state.settings.pushToTalk.enabled ? t('settingsSection.desktopInput.browserPushToTalk') : t('settingsSection.desktopInput.mouseInputDisabled')
   }
-  if (!state.settings.pushToTalk.enabled) return '鼠标输入未启用'
-  if (state.loading) return '正在连接鼠标监听'
-  return state.status.pushToTalkActive ? '侧键监听可用' : '侧键监听不可用'
+  if (!state.settings.pushToTalk.enabled) return t('settingsSection.desktopInput.mouseInputDisabled')
+  if (state.loading) return t('settingsSection.desktopInput.connectingMouse')
+  return state.status.pushToTalkActive ? t('settingsSection.desktopInput.sideButtonListening') : t('settingsSection.desktopInput.sideButtonUnavailable')
 })
 const pushToTalkStatusType = computed<'success' | 'warning' | 'info'>(() => {
   if (state.browserFallback && !state.browserShortcutsEnabled) return 'info'
@@ -325,25 +326,25 @@ const pushToTalkStatusType = computed<'success' | 'warning' | 'info'>(() => {
 })
 
 const lastBrowserActionLabel = computed(() => ({
-  interact: '拖动模式',
-  lock: '锁定桌宠',
-  openPanel: '打开陪伴面板',
-  toggleVision: '切换视觉',
-  emergencyStop: '紧急停止',
-  startVoice: '开始按住说话',
-  stopVoice: '结束按住说话',
-}[state.lastBrowserAction || ''] || '输入动作'))
+  interact: t('settingsSection.desktopInput.lastActionInteract'),
+  lock: t('settingsSection.desktopInput.lastActionLock'),
+  openPanel: t('settingsSection.desktopInput.lastActionOpenPanel'),
+  toggleVision: t('settingsSection.desktopInput.lastActionToggleVision'),
+  emergencyStop: t('settingsSection.desktopInput.lastActionEmergencyStop'),
+  startVoice: t('settingsSection.desktopInput.lastActionStartVoice'),
+  stopVoice: t('settingsSection.desktopInput.lastActionStopVoice'),
+}[state.lastBrowserAction || ''] || t('settingsSection.desktopInput.lastActionUnknown')))
 
 const bindingStatus = (action: KeyboardShortcutAction): { label: string; type: 'success' | 'warning' | 'danger' | 'info' } => {
   const value = state.settings.keyboard[action]
-  if (!value) return { label: '已禁用', type: 'info' }
+  if (!value) return { label: t('settingsSection.desktopInput.shortcutDisabled'), type: 'info' }
   if (state.browserFallback) {
     return state.browserShortcutsEnabled
-      ? { label: '本页监听中', type: 'success' }
-      : { label: '已暂停', type: 'info' }
+      ? { label: t('settingsSection.desktopInput.listeningInPage'), type: 'success' }
+      : { label: t('settingsSection.desktopInput.paused'), type: 'info' }
   }
-  if (state.status.keyboard[action]) return { label: '已注册', type: 'success' }
-  return { label: '注册失败', type: 'danger' }
+  if (state.status.keyboard[action]) return { label: t('settingsSection.desktopInput.registered'), type: 'success' }
+  return { label: t('settingsSection.desktopInput.registerFailed'), type: 'danger' }
 }
 
 const toggleEditing = (action: KeyboardShortcutAction) => {
@@ -374,7 +375,7 @@ const finishCapture = (action: KeyboardShortcutAction) => {
 
 watch(() => state.settings.keyboard, (keyboard) => {
   if (editingAction.value) return
-  for (const binding of keyboardBindingRows) draftValues[binding.action] = keyboard[binding.action]
+  for (const binding of keyboardBindingRows.value) draftValues[binding.action] = keyboard[binding.action]
 }, { deep: true })
 
 const handleKeydown = (action: KeyboardShortcutAction, event: KeyboardEvent) => {
@@ -394,16 +395,16 @@ const handleKeydown = (action: KeyboardShortcutAction, event: KeyboardEvent) => 
   emit('capture-keyboard', action, event)
   activeKeyboardCapture.value = null
 }
-const keyboardBindingRows: Array<{ action: KeyboardShortcutAction; label: string }> = [
-  { action: 'emergencyStop', label: '紧急停止' },
-  { action: 'interact', label: '切换拖动模式' },
-  { action: 'lock', label: '锁定桌宠位置' },
-  { action: 'openPanel', label: '打开陪伴面板' },
-  { action: 'toggleVision', label: '暂停或恢复视觉' },
-]
+const keyboardBindingRows = computed<Array<{ action: KeyboardShortcutAction; label: string }>>(() => [
+  { action: 'emergencyStop', label: t('settingsSection.desktopInput.bindingEmergencyStop') },
+  { action: 'interact', label: t('settingsSection.desktopInput.bindingInteract') },
+  { action: 'lock', label: t('settingsSection.desktopInput.bindingLock') },
+  { action: 'openPanel', label: t('settingsSection.desktopInput.bindingOpenPanel') },
+  { action: 'toggleVision', label: t('settingsSection.desktopInput.bindingToggleVision') },
+])
 
 onMounted(() => {
-  for (const binding of keyboardBindingRows) draftValues[binding.action] = state.settings.keyboard[binding.action]
+  for (const binding of keyboardBindingRows.value) draftValues[binding.action] = state.settings.keyboard[binding.action]
   void runDesktopAction('status')
 })
 </script>

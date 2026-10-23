@@ -49,7 +49,7 @@
               <el-icon><Close /></el-icon>
             </button>
           </div>
-          <div class="chat-top-group" aria-label="对话工具">
+          <div class="chat-top-group" :aria-label="t('chatPanel.panel.toolsAria')">
             <el-tooltip :content="t('chat.search.open')" placement="bottom">
               <button class="top-icon-button" type="button" :aria-label="t('chat.search.open')" @click="toggleMessageSearch"><el-icon><Search /></el-icon></button>
             </el-tooltip>
@@ -60,7 +60,7 @@
               <button class="top-icon-button" type="button" :aria-label="resolvedTheme === 'dark' ? t('chat.theme.light') : t('chat.theme.dark')" @click="toggleTheme"><el-icon><Sunny v-if="resolvedTheme === 'dark'" /><Moon v-else /></el-icon></button>
             </el-tooltip>
           </div>
-          <div class="chat-top-group chat-top-group--settings" aria-label="对话设置">
+          <div class="chat-top-group chat-top-group--settings" :aria-label="t('chatPanel.panel.settingsAria')">
             <el-tooltip :content="t('chat.petSettings')" placement="bottom">
               <button class="top-icon-button" type="button" :aria-label="t('chat.petSettings')" data-testid="chat-pet-settings" @click="openPetSettings"><el-icon><StarFilled /></el-icon></button>
             </el-tooltip>
@@ -547,44 +547,44 @@ const voiceModeOptions = computed(() => [
 
 const quickPhraseIconKeys = new Set<QuickPhraseIconKey>(['camera', 'refresh', 'voice', 'magic'])
 
-const defaultQuickPhrases: QuickPhrase[] = [
+const defaultQuickPhrases = computed<QuickPhrase[]>(() => [
   {
     id: 'summarize-material',
-    label: '总结材料',
-    text: '请帮我总结当前材料里的重点，并给出下一步建议。',
+    label: t('chatPanel.panel.quickSummarizeLabel'),
+    text: t('chatPanel.panel.quickSummarizeText'),
     iconKey: 'magic',
   },
   {
     id: 'continue-context',
-    label: '继续刚才',
-    text: '请接着上一轮对话继续，先复述你理解的上下文，再给我下一步。',
+    label: t('chatPanel.panel.quickContinueLabel'),
+    text: t('chatPanel.panel.quickContinueText'),
     iconKey: 'refresh',
   },
   {
     id: 'voice-brief',
-    label: '语音简答',
-    text: '请用适合语音播放的方式回答：短句、自然、不要长列表。',
+    label: t('chatPanel.panel.quickVoiceLabel'),
+    text: t('chatPanel.panel.quickVoiceText'),
     iconKey: 'voice',
   },
   {
     id: 'break-down',
-    label: '帮我拆解',
-    text: '请把这件事拆成 3 个可执行步骤，并说明每一步的判断标准。',
+    label: t('chatPanel.panel.quickBreakdownLabel'),
+    text: t('chatPanel.panel.quickBreakdownText'),
     iconKey: 'magic',
   },
-]
+])
 
 const QUICK_PHRASES_STORAGE_KEY = 'yuizaki.chat.quickPhrases'
 const TEXT_ATTACHMENT_EXTENSIONS = new Set(['txt', 'md', 'markdown', 'json', 'jsonl', 'csv', 'tsv', 'log', 'yaml', 'yml', 'xml', 'html', 'css', 'js', 'ts', 'tsx', 'jsx', 'vue', 'py', 'bat', 'ps1', 'sh'])
 const MAX_ATTACHMENT_TEXT_CHARS = 16000
 
 const loadQuickPhrases = (): QuickPhrase[] => {
-  if (typeof window === 'undefined') return defaultQuickPhrases.map((item) => ({ ...item }))
+  if (typeof window === 'undefined') return defaultQuickPhrases.value.map((item) => ({ ...item }))
   try {
     const raw = window.localStorage.getItem(QUICK_PHRASES_STORAGE_KEY)
-    if (!raw) return defaultQuickPhrases.map((item) => ({ ...item }))
+    if (!raw) return defaultQuickPhrases.value.map((item) => ({ ...item }))
     const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return defaultQuickPhrases.map((item) => ({ ...item }))
+    if (!Array.isArray(parsed)) return defaultQuickPhrases.value.map((item) => ({ ...item }))
     const phrases = parsed
       .filter((item): item is QuickPhrase => Boolean(item && typeof item.label === 'string' && typeof item.text === 'string'))
       .map((item) => {
@@ -598,9 +598,9 @@ const loadQuickPhrases = (): QuickPhrase[] => {
           iconKey,
         }
       })
-    return phrases.length ? phrases : defaultQuickPhrases.map((item) => ({ ...item }))
+    return phrases.length ? phrases : defaultQuickPhrases.value.map((item) => ({ ...item }))
   } catch {
-    return defaultQuickPhrases.map((item) => ({ ...item }))
+    return defaultQuickPhrases.value.map((item) => ({ ...item }))
   }
 }
 
@@ -1495,7 +1495,7 @@ const removeQuickPhrase = (id: string) => {
 }
 
 const resetQuickPhrases = () => {
-  quickPhrases.value = defaultQuickPhrases.map((item) => ({ ...item }))
+  quickPhrases.value = defaultQuickPhrases.value.map((item) => ({ ...item }))
 }
 
 const openExpandedComposer = () => {
@@ -1582,22 +1582,26 @@ const removeAttachment = (id: string) => {
 }
 
 const attachmentPromptBlock = (attachment: ChatAttachment) => {
-  const header = `【附件：${attachment.name}｜${attachment.type || 'unknown'}｜${formatBytes(attachment.size)}】`
+  const header = t('chatPanel.panel.attachmentHeader', {
+    name: attachment.name,
+    type: attachment.type || 'unknown',
+    size: formatBytes(attachment.size),
+  })
   if (attachment.kind === 'text') {
-    const truncated = attachment.content && attachment.content.length >= MAX_ATTACHMENT_TEXT_CHARS ? '\n\n[内容已截断]' : ''
+    const truncated = attachment.content && attachment.content.length >= MAX_ATTACHMENT_TEXT_CHARS ? t('chatPanel.panel.attachmentTruncated') : ''
     return `${header}\n${attachment.content || ''}${truncated}`
   }
   if (attachment.kind === 'image') {
-    return `${header}\n图片已作为附件加入；请基于文件名和用户补充说明处理。`
+    return `${header}\n${t('chatPanel.panel.attachmentImage')}`
   }
-  return `${header}\n该文件为二进制或暂不支持直接读取，请基于文件名和用户补充说明处理。`
+  return `${header}\n${t('chatPanel.panel.attachmentBinary')}`
 }
 
 const buildComposerMessage = () => {
   const text = inputText.value.trim()
   const attachmentText = attachments.value.map(attachmentPromptBlock).join('\n\n')
   if (!attachmentText) return text
-  return [text, `以下是本次上传的文件内容或元数据：\n\n${attachmentText}`].filter(Boolean).join('\n\n')
+  return [text, t('chatPanel.panel.attachmentIntro', { content: attachmentText })].filter(Boolean).join('\n\n')
 }
 
 const handleSendComposer = () => {

@@ -1,4 +1,5 @@
 import appIcon from '../assets/yuizaki/icons/yuizaki-icon.png'
+import { t } from '@/i18n'
 
 const slideModules = import.meta.glob('../assets/yuizaki/slides/*.{png,jpg,jpeg,webp}', {
   eager: true,
@@ -22,9 +23,11 @@ const decorations = Object.fromEntries(
 ) as Record<string, string>
 
 export const yuizakiConfig = {
-  appName: '結崎',
-  heroTitle: '結崎 · 本地桌宠 Agent',
-  heroSubtitle: '桌宠对话、Live2D/VRM 模型、长期记忆与本地工具的本地角色入口',
+  // Brand title and hero copy are locale-dependent, so they are lazy getters:
+  // callers spread this config inside components that re-render on locale change.
+  get appName(): string { return t('nav.brandWordmark') },
+  get heroTitle(): string { return t('misc.heroTitle') },
+  get heroSubtitle(): string { return t('misc.heroSubtitle') },
   appIcon,
   slideshowIntervalMs: 5000,
   decorations: {

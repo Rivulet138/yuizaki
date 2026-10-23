@@ -2,25 +2,25 @@
   <section class="overview" aria-labelledby="memory-overview-title">
     <div class="overview-heading">
       <div>
-        <h3 id="memory-overview-title">使用情况</h3>
+        <h3 id="memory-overview-title">{{ t('memoryView.overviewTitle') }}</h3>
       </div>
-      <span v-if="loading" class="loading-label" role="status">正在刷新…</span>
+      <span v-if="loading" class="loading-label" role="status">{{ t('memoryView.overviewLoading') }}</span>
     </div>
 
     <div v-if="error" class="overview-error" role="alert">
       <span>{{ error }}</span>
-      <el-button link type="danger" size="small" @click="emit('retry')">重试概览</el-button>
+      <el-button link type="danger" size="small" @click="emit('retry')">{{ t('memoryView.overviewRetry') }}</el-button>
     </div>
 
-    <dl class="metric-grid" aria-label="记忆状态统计">
-      <div><dt>已保存</dt><dd>{{ overview?.total ?? 0 }}</dd></div>
-      <div><dt>可用于对话</dt><dd>{{ overview?.recallable ?? 0 }}</dd></div>
-      <div><dt>需要检查</dt><dd>{{ reviewCount }}</dd></div>
-      <div><dt>暂停使用</dt><dd>{{ forgottenCount }}</dd></div>
+    <dl class="metric-grid" :aria-label="t('memoryView.metricsAria')">
+      <div><dt>{{ t('memoryView.saved') }}</dt><dd>{{ overview?.total ?? 0 }}</dd></div>
+      <div><dt>{{ t('memoryView.availableForChat') }}</dt><dd>{{ overview?.recallable ?? 0 }}</dd></div>
+      <div><dt>{{ t('memoryView.needsReview') }}</dt><dd>{{ reviewCount }}</dd></div>
+      <div><dt>{{ t('memoryView.paused') }}</dt><dd>{{ forgottenCount }}</dd></div>
     </dl>
 
     <details class="overview-section overview-disclosure" open aria-labelledby="memory-layer-title">
-      <summary class="section-heading"><h4 id="memory-layer-title">按内容类别</h4><span>点击类别查看</span></summary>
+      <summary class="section-heading"><h4 id="memory-layer-title">{{ t('memoryView.layersTitle') }}</h4><span>{{ t('memoryView.layersHint') }}</span></summary>
       <div class="layer-list">
         <button v-for="layer in layers" :key="layer.value" type="button" :aria-pressed="selectedLayer === layer.value" @click="emit('select-layer', layer.value)">
           <strong>{{ layer.label }}</strong><span>{{ layer.desc }}</span><b>{{ layer.count ?? 0 }}</b>
@@ -30,7 +30,7 @@
 
     <div class="overview-columns">
       <details class="overview-section overview-disclosure" open aria-labelledby="memory-activity-title">
-        <summary class="section-heading"><h4 id="memory-activity-title">最近活动</h4><span>{{ overview?.latest_activity.length ?? 0 }} 条</span></summary>
+        <summary class="section-heading"><h4 id="memory-activity-title">{{ t('memoryView.recentActivity') }}</h4><span>{{ t('memoryView.countItems', { count: overview?.latest_activity.length ?? 0 }) }}</span></summary>
         <ul v-if="overview?.latest_activity.length" class="activity-list">
           <li v-for="item in overview.latest_activity" :key="`${item.id}-${item.updated_at || item.action || ''}`">
             <div>
@@ -41,11 +41,11 @@
             <time v-if="item.updated_at" :datetime="item.updated_at">{{ formatTime(item.updated_at) }}</time>
           </li>
         </ul>
-        <p v-else class="empty-copy">暂无最近活动。</p>
+        <p v-else class="empty-copy">{{ t('memoryView.activityEmpty') }}</p>
       </details>
 
       <details class="overview-section overview-disclosure" aria-labelledby="memory-forgotten-title">
-        <summary class="section-heading"><h4 id="memory-forgotten-title">暂停使用的记忆</h4><span>{{ forgottenDocs.length }} 条</span></summary>
+        <summary class="section-heading"><h4 id="memory-forgotten-title">{{ t('memoryView.pausedMemories') }}</h4><span>{{ t('memoryView.countItems', { count: forgottenDocs.length }) }}</span></summary>
         <ul v-if="forgottenDocs.length" class="forgotten-list">
           <li v-for="doc in forgottenDocs" :key="doc.id">
             <div><strong>{{ compactText(doc.text) }}</strong><span>{{ layerLabel(doc.layer) }} · {{ docTypeLabel(doc.type) }}</span></div>
@@ -53,10 +53,10 @@
               :data-testid="`memory-restore-${doc.id}`" size="small" plain
               :loading="restoringDocIds.has(doc.id)" :disabled="restoringDocIds.has(doc.id)"
               @click="emit('restore', doc.id)"
-            >重新启用</el-button>
+            >{{ t('memoryView.restore') }}</el-button>
           </li>
         </ul>
-        <p v-else class="empty-copy">目前没有暂停使用的记忆。</p>
+        <p v-else class="empty-copy">{{ t('memoryView.pausedEmpty') }}</p>
       </details>
     </div>
   </section>
@@ -66,6 +66,7 @@
 import { computed } from 'vue'
 import { ElButton } from 'element-plus'
 import type { MemoryOverview } from '@/api/clients/memory-client'
+import { t } from '@/i18n'
 import type { MemoryDoc, MemoryLayer } from './memory-panel-types'
 
 import 'element-plus/es/components/button/style/css'
@@ -85,19 +86,34 @@ const reviewCount = computed(() => Number(props.overview?.by_review_status.pendi
 const forgottenCount = computed(() => props.overview?.by_state.forgotten ?? props.forgottenDocs.length)
 const compactText = (value: string, limit = 86) => value.length > limit ? `${value.slice(0, limit - 1)}…` : value
 const formatTime = (value: string) => value.replace('T', ' ').slice(0, 16)
-const layerLabel = (value?: string) => props.layers.find(layer => layer.value === value)?.label || '未分类'
-const docTypeLabels: Record<string, string> = { fact: '事实', preference: '偏好', event: '事件', promise: '约定', taboo: '边界', summary: '总结', chat: '对话记录' }
-const docTypeLabel = (value?: string) => docTypeLabels[String(value || '')] || value || '记忆'
+const layerLabel = (value?: string) => props.layers.find(layer => layer.value === value)?.label || t('memoryView.uncategorized')
+const docTypeLabels = computed<Record<string, string>>(() => ({
+  fact: t('memoryView.docTypeFact'),
+  preference: t('memoryView.docTypePreference'),
+  event: t('memoryView.docTypeEvent'),
+  promise: t('memoryView.docTypePromise'),
+  taboo: t('memoryView.docTypeTaboo'),
+  summary: t('memoryView.docTypeSummary'),
+  chat: t('memoryView.docTypeChat'),
+}))
+const docTypeLabel = (value?: string) => docTypeLabels.value[String(value || '')] || value || t('memoryView.memoryFallback')
 type ActivityItem = MemoryOverview['latest_activity'][number]
-const eventKindLabels: Record<string, string> = {
-  care_signal: '记录了你的近况',
-  mood_shift: '更新了最近状态',
-  trust_shift: '更新了相处状态',
-  gratitude: '记住了你的感谢',
-  preference_confirmed: '记住了一个偏好',
-  task_completed: '记录了一项已完成事项',
-}
-const moodLabels: Record<string, string> = { tired: '有些疲惫', happy: '心情不错', sad: '有些低落', anxious: '有些焦虑', calm: '比较平静', busy: '比较忙' }
+const eventKindLabels = computed<Record<string, string>>(() => ({
+  care_signal: t('memoryView.eventCareSignal'),
+  mood_shift: t('memoryView.eventMoodShift'),
+  trust_shift: t('memoryView.eventTrustShift'),
+  gratitude: t('memoryView.eventGratitude'),
+  preference_confirmed: t('memoryView.eventPreferenceConfirmed'),
+  task_completed: t('memoryView.eventTaskCompleted'),
+}))
+const moodLabels = computed<Record<string, string>>(() => ({
+  tired: t('memoryView.moodTired'),
+  happy: t('memoryView.moodHappy'),
+  sad: t('memoryView.moodSad'),
+  anxious: t('memoryView.moodAnxious'),
+  calm: t('memoryView.moodCalm'),
+  busy: t('memoryView.moodBusy'),
+}))
 const readableText = (value: string) => value
   .replace(/\b(?:kind|mood|affinity|energy|confidence|source|layer|memory_role)\s*=\s*[^,;\s]+/gi, '')
   .replace(/\s{2,}/g, ' ')
@@ -105,25 +121,25 @@ const readableText = (value: string) => value
   .trim()
 const activityTitle = (item: ActivityItem) => {
   const eventKind = String(item.relationship_event?.kind || '')
-  if (eventKindLabels[eventKind]) return eventKindLabels[eventKind]
-  if (item.memory_role === 'user_fact') return '记住了一个关于你的事实'
-  if (item.memory_role === 'tool_permission') return '有一项权限记录需要检查'
-  if (item.action === 'soft_forget' || item.state === 'forgotten') return '暂停使用了一条记忆'
-  if (item.action === 'restore') return '重新启用了一条记忆'
-  if (item.action === 'corrected') return '修正了一条记忆'
-  return '更新了一条记忆'
+  if (eventKindLabels.value[eventKind]) return eventKindLabels.value[eventKind]
+  if (item.memory_role === 'user_fact') return t('memoryView.activityUserFact')
+  if (item.memory_role === 'tool_permission') return t('memoryView.activityToolPermission')
+  if (item.action === 'soft_forget' || item.state === 'forgotten') return t('memoryView.activitySoftForget')
+  if (item.action === 'restore') return t('memoryView.activityRestore')
+  if (item.action === 'corrected') return t('memoryView.activityCorrected')
+  return t('memoryView.activityUpdated')
 }
 const activitySummary = (item: ActivityItem) => {
-  const mood = moodLabels[String(item.relationship_event?.mood || '')]
-  if (mood) return `最近状态：${mood}`
+  const mood = moodLabels.value[String(item.relationship_event?.mood || '')]
+  if (mood) return t('memoryView.activityMood', { mood })
   const text = readableText(item.text)
-  return text || '内容未提供'
+  return text || t('memoryView.activityNoContent')
 }
 const activityMeta = (item: ActivityItem) => {
-  if (item.memory_role === 'tool_permission' || item.review_status === 'pending') return '需要检查'
-  if (item.scope === 'session') return '本次会话'
-  if (item.scope === 'global') return '所有工作区'
-  return '当前工作区'
+  if (item.memory_role === 'tool_permission' || item.review_status === 'pending') return t('memoryView.needsReview')
+  if (item.scope === 'session') return t('memoryView.scopeSession')
+  if (item.scope === 'global') return t('memoryView.scopeAllWorkspaces')
+  return t('memoryView.scopeWorkspace')
 }
 </script>
 

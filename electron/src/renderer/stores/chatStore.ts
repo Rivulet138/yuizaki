@@ -18,6 +18,7 @@ import type {
 } from '../../shared/types'
 import { SocketEvents } from '../net/socketClient'
 import { describeFailure } from '@/shared/errors/describe-error'
+import { t } from '@/i18n'
 import { normalizeSentenceEmotionCues } from '../pet-sentence-emotion-scheduler'
 import { useWorkspaceStore } from './workspaceStore'
 import {
@@ -485,7 +486,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!isRecord(item)) return []
     const id = String(item.id ?? item.step_id ?? `step-${index + 1}`).trim()
     const tool = String(item.tool ?? '').trim()
-    const title = String(item.title || item.description || tool || `步骤 ${index + 1}`).trim()
+    const title = String(item.title || item.description || tool || t('chatStore.stepFallback', { index: index + 1 })).trim()
     if (!title) return []
     const success = typeof item.success === 'boolean' ? item.success : undefined
     const status = String(item.status ?? (success === false ? 'failed' : success === true ? 'completed' : 'recorded')).trim()
@@ -827,7 +828,7 @@ export const useChatStore = defineStore('chat', () => {
       state.isGenerating = false
       state.currentText = ''
       pendingUserMessages.clear()
-      state.lastError = '实时通道已断开，请确认 Python 服务和 Socket.IO 已启动'
+      state.lastError = t('chatStore.channelDisconnected')
     })
 
     socketClient.on(SocketEvents.ASR_FINAL, (data: unknown) => {
@@ -1115,7 +1116,7 @@ export const useChatStore = defineStore('chat', () => {
     socketClient.on(SocketEvents.TTS_DONE, (data: unknown) => handleTtsAudio(data, true))
 
     socketClient.on(SocketEvents.ERROR, (data: unknown) => {
-      const message = readString(data, 'message') || readString(data, 'error') || '对话服务返回错误'
+      const message = readString(data, 'message') || readString(data, 'error') || t('chatStore.serviceErrorFallback')
       const code = readString(data, 'code')
       const runtime = resolveEventRuntime(data)
       const isActiveSession = !runtime || runtime.sessionId === state.currentSessionId
@@ -1210,7 +1211,7 @@ export const useChatStore = defineStore('chat', () => {
 
     const socketClient = chatClient.getSocketClient()
     if (!socketClient.isConnected()) {
-      const message = '实时通道未连接，请先启动 Python 服务并等待 Socket.IO 连接'
+      const message = t('chatStore.channelNotConnected')
       state.lastError = message
       ElMessage.warning(message)
       return false
@@ -1456,7 +1457,7 @@ export const useChatStore = defineStore('chat', () => {
       })
       socketClient.sendInterrupt(state.currentSessionId, requestId, source)
     } else {
-      ElMessage.info('当前未连接 Socket.IO，已仅在前端中断显示')
+      ElMessage.info(t('chatStore.interruptLocalOnly'))
     }
 
     state.isGenerating = false
@@ -1554,7 +1555,7 @@ export const useChatStore = defineStore('chat', () => {
   const appendAdviceMessage = (text: string) => {
     const content = text.trim()
     if (!content) return
-    state.messages.push({ role: 'assistant', content: `[建议] ${content}`, timestamp: new Date().toISOString() })
+    state.messages.push({ role: 'assistant', content: t('chatStore.advicePrefix', { content }), timestamp: new Date().toISOString() })
   }
 
   const dismissAdvice = (adviceId: string) => {
@@ -1662,20 +1663,27 @@ export const useChatStore = defineStore('chat', () => {
   const copyMessage = async (content: string) => {
     try {
       await navigator.clipboard.writeText(content)
-      ElMessage.success('已复制到剪贴板')
+      ElMessage.success(t('chatStore.copied'))
     } catch {
-      ElMessage.warning('复制失败')
+      ElMessage.warning(t('chatStore.copyFailed'))
     }
   }
 
   const transcriptText = () => state.messages
-    .map((message) => `${message.role === 'user' ? '你' : message.role === 'assistant' ? '結崎' : '系统'}：${message.content}`)
+    .map((message) => t('chatStore.transcriptLine', {
+      role: message.role === 'user'
+        ? t('chatStore.transcriptUser')
+        : message.role === 'assistant'
+          ? t('chatStore.transcriptAssistant')
+          : t('chatStore.transcriptSystem'),
+      content: message.content,
+    }))
     .join('\n\n')
 
   const copyTranscript = async () => {
     const text = transcriptText()
     if (!text) {
-      ElMessage.info('暂无可复制的对话')
+      ElMessage.info(t('chatStore.noTranscript'))
       return
     }
     await copyMessage(text)
@@ -1684,7 +1692,7 @@ export const useChatStore = defineStore('chat', () => {
   const copyLastAssistantMessage = async () => {
     const lastAssistant = [...state.messages].reverse().find((message) => message.role === 'assistant')
     if (!lastAssistant) {
-      ElMessage.info('暂无助手回复可复制')
+      ElMessage.info(t('chatStore.noAssistantReply'))
       return
     }
     await copyMessage(lastAssistant.content)
@@ -1706,7 +1714,7 @@ export const useChatStore = defineStore('chat', () => {
     const timestamp = new Date().toISOString()
     state.messages.push({
       role: 'system',
-      content: '已清理上下文。之后发送的消息只会携带从这里开始的新上下文。',
+      content: t('chatStore.contextCleared'),
       timestamp,
     })
     state.contextStartIndex = state.messages.length

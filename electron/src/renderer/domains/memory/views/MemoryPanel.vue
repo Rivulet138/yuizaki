@@ -1,49 +1,49 @@
 
 <template>
-  <PanelShell title="长期记忆" tone="companion" density="compact">
-    <template #status><span class="local-status" role="status">对话自动整理</span></template>
+  <PanelShell :title="t('memoryPanel.title')" tone="companion" density="compact">
+    <template #status><span class="local-status" role="status">{{ t('memoryPanel.statusAutoOrganize') }}</span></template>
     <template #actions>
-      <label class="scope-control"><span>使用范围</span><el-select :model-value="currentMemoryScope" size="small" :disabled="workspaceScopeSaving" aria-label="记忆使用范围" @change="updateDefaultMemoryScope"><el-option v-for="scope in memoryScopeOptions" :key="scope.value" :label="scope.label" :value="scope.value" :disabled="scope.value === 'session' && !sessionStore.activeSession" /></el-select></label>
+      <label class="scope-control"><span>{{ t('memoryPanel.scopeLabel') }}</span><el-select :model-value="currentMemoryScope" size="small" :disabled="workspaceScopeSaving" :aria-label="t('memoryPanel.scopeAria')" @change="updateDefaultMemoryScope"><el-option v-for="scope in memoryScopeOptions" :key="scope.value" :label="scope.label" :value="scope.value" :disabled="scope.value === 'session' && !sessionStore.activeSession" /></el-select></label>
       <el-dropdown trigger="click" @command="handleAdvancedToolCommand">
-        <el-button data-testid="memory-advanced-tools-toggle" plain :icon="Tools" :type="advancedToolsVisible ? 'primary' : 'default'" aria-label="打开高级工具" :aria-expanded="advancedToolsVisible">高级工具</el-button>
+        <el-button data-testid="memory-advanced-tools-toggle" plain :icon="Tools" :type="advancedToolsVisible ? 'primary' : 'default'" :aria-label="t('memoryPanel.advancedToolsAria')" :aria-expanded="advancedToolsVisible">{{ t('memoryPanel.advancedToolsLabel') }}</el-button>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item command="open-index">索引与检索工具</el-dropdown-item>
-            <el-dropdown-item command="export" :disabled="exportLoading">导出当前范围</el-dropdown-item>
-            <el-dropdown-item command="import" :disabled="importLoading">导入记忆备份</el-dropdown-item>
+            <el-dropdown-item command="open-index">{{ t('memoryPanel.advancedIndexTools') }}</el-dropdown-item>
+            <el-dropdown-item command="export" :disabled="exportLoading">{{ t('memoryPanel.exportCurrentScope') }}</el-dropdown-item>
+            <el-dropdown-item command="import" :disabled="importLoading">{{ t('memoryPanel.importBackup') }}</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
-      <input ref="memoryImportInput" class="memory-import-input" type="file" accept="application/json,.json" aria-label="选择记忆备份文件" @change="handleMemoryImportFile" />
-      <el-button data-testid="memory-refresh" circle plain :icon="Refresh" title="刷新记忆" aria-label="刷新记忆" :loading="docsRequest.loading" @click="refreshMemoryState" />
+      <input ref="memoryImportInput" class="memory-import-input" type="file" accept="application/json,.json" :aria-label="t('memoryPanel.importFileAria')" @change="handleMemoryImportFile" />
+      <el-button data-testid="memory-refresh" circle plain :icon="Refresh" :title="t('memoryPanel.refresh')" :aria-label="t('memoryPanel.refresh')" :loading="docsRequest.loading" @click="refreshMemoryState" />
     </template>
 
     <div class="memory-panel">
       <section v-if="importReport" class="memory-import-report" aria-live="polite">
         <div class="import-report-head">
-          <strong>最近一次导入结果</strong>
-          <el-button link size="small" @click="importReport = null">关闭</el-button>
+          <strong>{{ t('memoryPanel.lastImportTitle') }}</strong>
+          <el-button link size="small" @click="importReport = null">{{ t('memoryPanel.close') }}</el-button>
         </div>
         <div class="import-report-grid">
-          <span>写入 <strong>{{ importReport.imported_count }}</strong> 条</span>
-          <span>跳过 <strong>{{ importReport.skipped_count }}</strong> 条</span>
-          <span>重新启用暂停内容 <strong>{{ importReport.restored_soft_forgotten_count ?? 0 }}</strong> 条</span>
-          <span>索引状态 <strong>{{ importReport.effects?.index === 'rebuild_required' ? '需要重建' : '未变化' }}</strong></span>
+          <span>{{ t('memoryPanel.importWritten') }} <strong>{{ importReport.imported_count }}</strong> {{ t('memoryPanel.unitItems') }}</span>
+          <span>{{ t('memoryPanel.importSkipped') }} <strong>{{ importReport.skipped_count }}</strong> {{ t('memoryPanel.unitItems') }}</span>
+          <span>{{ t('memoryPanel.importRestored') }} <strong>{{ importReport.restored_soft_forgotten_count ?? 0 }}</strong> {{ t('memoryPanel.unitItems') }}</span>
+          <span>{{ t('memoryPanel.importIndexStatus') }} <strong>{{ importReport.effects?.index === 'rebuild_required' ? t('memoryPanel.indexRebuildRequired') : t('memoryPanel.indexUnchanged') }}</strong></span>
         </div>
         <div v-if="importReport.skipped_count" class="import-report-reasons">
-          <span v-for="(count, reason) in (importReport.skipped_reason_counts || {})" :key="reason">{{ importReasonLabel(reason) }}：{{ count }}</span>
+          <span v-for="(count, reason) in (importReport.skipped_reason_counts || {})" :key="reason">{{ importReasonLabel(reason) }}{{ t('memoryPanel.labelSeparator') }}{{ count }}</span>
         </div>
         <details v-if="importReport.skipped.length" class="import-report-details">
-          <summary>查看跳过记录（{{ importReport.skipped.length }}）</summary>
+          <summary>{{ t('memoryPanel.importSkippedDetails', { count: importReport.skipped.length }) }}</summary>
           <ul>
             <li v-for="(item, index) in importReport.skipped.slice(0, 50)" :key="`${item.id || 'unknown'}-${index}`">
-              <strong>{{ item.id || '此条记录' }}</strong><span>{{ importReasonLabel(item.reason) }}</span><small v-if="item.detail">{{ compactText(String(item.detail), 120) }}</small>
+              <strong>{{ item.id || t('memoryPanel.thisRecord') }}</strong><span>{{ importReasonLabel(item.reason) }}</span><small v-if="item.detail">{{ compactText(String(item.detail), 120) }}</small>
             </li>
           </ul>
-          <p v-if="importReport.skipped.length > 50">仅显示前 50 条，共 {{ importReport.skipped.length }} 条。</p>
+          <p v-if="importReport.skipped.length > 50">{{ t('memoryPanel.importSkippedTruncated', { count: importReport.skipped.length }) }}</p>
         </details>
       </section>
-      <nav class="memory-tabs" role="tablist" aria-label="记忆视图">
+      <nav class="memory-tabs" role="tablist" :aria-label="t('memoryPanel.tabsAria')">
         <button v-for="(tab, index) in memoryTabs" :id="`memory-tab-${tab.value}`" :key="tab.value" type="button" role="tab" :tabindex="activeTab === tab.value ? 0 : -1" :aria-selected="activeTab === tab.value" :aria-controls="`memory-panel-${tab.value}`" @click="activeTab = tab.value" @keydown="onMemoryTabKeydown($event, index)">
           <el-icon aria-hidden="true"><component :is="tab.icon" /></el-icon><span class="tab-label">{{ tab.label }}</span><span v-if="tab.count !== undefined" class="tab-count">{{ tab.count }}</span>
         </button>
@@ -76,7 +76,7 @@
       </div>
     </div>
 
-    <el-drawer v-model="advancedToolsVisible" title="高级记忆工具" size="min(560px, 92vw)" append-to-body>
+    <el-drawer v-model="advancedToolsVisible" :title="t('memoryPanel.advancedDrawerTitle')" size="min(560px, 92vw)" append-to-body>
       <MemoryAdvancedTools
         :index-status="indexStatus" :rebuild-job="indexStatus?.job ?? null" :index-status-label="indexStatusLabel" :index-availability-label="indexAvailabilityLabel" :index-status-tone="indexStatusTone"
         :doc-count="docs.length" :rebuild-index-loading="rebuildIndexLoading" :query-form="queryForm" :layers="layers"
@@ -95,15 +95,15 @@
       />
     </el-drawer>
 
-    <el-dialog v-model="editDialogVisible" title="编辑记忆内容" width="min(640px, 92vw)">
+    <el-dialog v-model="editDialogVisible" :title="t('memoryPanel.editDialogTitle')" width="min(640px, 92vw)">
       <el-form label-position="top" @submit.prevent>
-        <el-form-item label="记住的内容"><el-input v-model="editForm.text" type="textarea" :rows="5" /></el-form-item>
-        <div class="dialog-grid"><el-form-item label="归类"><el-select v-model="editForm.layer"><el-option v-for="layer in layers" :key="layer.value" :label="layer.label" :value="layer.value" /></el-select></el-form-item><el-form-item label="内容类型"><el-input v-model="editForm.type" /></el-form-item></div>
-        <div class="dialog-grid"><el-form-item :label="`长期保留优先级：${scorePercent(editForm.importance)}`"><el-slider v-model="editForm.importance" :min="0" :max="1" :step="0.05" /></el-form-item><el-form-item :label="`准确把握：${scorePercent(editForm.confidence)}`"><el-slider v-model="editForm.confidence" :min="0" :max="1" :step="0.05" /></el-form-item></div>
-        <el-form-item label="记录来源"><el-select v-model="editForm.source"><el-option v-for="source in memorySourceOptions" :key="source.value" :label="source.label" :value="source.value" /></el-select></el-form-item>
-        <details><summary>元数据</summary><el-input v-model="editForm.metadataJson" type="textarea" :rows="4" /></details>
+        <el-form-item :label="t('memoryPanel.editTextLabel')"><el-input v-model="editForm.text" type="textarea" :rows="5" /></el-form-item>
+        <div class="dialog-grid"><el-form-item :label="t('memoryPanel.editLayerLabel')"><el-select v-model="editForm.layer"><el-option v-for="layer in layers" :key="layer.value" :label="layer.label" :value="layer.value" /></el-select></el-form-item><el-form-item :label="t('memoryPanel.editTypeLabel')"><el-input v-model="editForm.type" /></el-form-item></div>
+        <div class="dialog-grid"><el-form-item :label="t('memoryPanel.editImportanceLabel', { percent: scorePercent(editForm.importance) })"><el-slider v-model="editForm.importance" :min="0" :max="1" :step="0.05" /></el-form-item><el-form-item :label="t('memoryPanel.editConfidenceLabel', { percent: scorePercent(editForm.confidence) })"><el-slider v-model="editForm.confidence" :min="0" :max="1" :step="0.05" /></el-form-item></div>
+        <el-form-item :label="t('memoryPanel.editSourceLabel')"><el-select v-model="editForm.source"><el-option v-for="source in memorySourceOptions" :key="source.value" :label="source.label" :value="source.value" /></el-select></el-form-item>
+        <details><summary>{{ t('memoryPanel.editMetadata') }}</summary><el-input v-model="editForm.metadataJson" type="textarea" :rows="4" /></details>
       </el-form>
-      <template #footer><el-button @click="editDialogVisible = false">取消</el-button><el-button type="primary" :loading="updateRequest.loading" :disabled="!editForm.text.trim()" @click="submitEditDoc">保存修改</el-button></template>
+      <template #footer><el-button @click="editDialogVisible = false">{{ t('memoryPanel.cancel') }}</el-button><el-button type="primary" :loading="updateRequest.loading" :disabled="!editForm.text.trim()" @click="submitEditDoc">{{ t('memoryPanel.saveChanges') }}</el-button></template>
     </el-dialog>
   </PanelShell>
 </template>
@@ -142,6 +142,7 @@ import { getMemoryIndexUiStatus } from '../memory-index-status'
 import type { MemoryDoc } from '../composables/useMemoryDomain'
 import { memoryInspectorActionsKey } from '../components/memory-panel-types'
 import { describeFailure } from '@/shared/errors/describe-error'
+import { t } from '@/i18n'
 
 type TagType = 'success' | 'warning' | 'danger' | 'info' | 'primary'
 type DocViewMode = 'all' | 'recallable' | 'review' | 'important' | 'hits'
@@ -220,36 +221,36 @@ const hydrateMaintenancePolicy = () => {
 const DOC_RENDER_BATCH_SIZE = 80
 const visibleDocLimit = ref(DOC_RENDER_BATCH_SIZE)
 
-const layers = [
-  { value: 'profile', label: '偏好与称呼', desc: '喜欢什么、希望怎样称呼你', color: 'purple' },
-  { value: 'working', label: '当前事项', desc: '正在推进的项目或短期目标', color: 'blue' },
-  { value: 'episodic', label: '发生过的事', desc: '具体事件、约定或经历', color: 'amber' },
-  { value: 'relationship', label: '相处方式', desc: '互动边界和重要关系事件', color: 'pink' },
-  { value: 'reflective', label: '经验总结', desc: '系统整理的复盘内容', color: 'emerald' },
-  { value: 'semantic', label: '稳定事实', desc: '长期成立的背景信息', color: 'slate' },
-]
+const layers = computed(() => [
+  { value: 'profile', label: t('memoryPanel.layerProfileLabel'), desc: t('memoryPanel.layerProfileDesc'), color: 'purple' },
+  { value: 'working', label: t('memoryPanel.layerWorkingLabel'), desc: t('memoryPanel.layerWorkingDesc'), color: 'blue' },
+  { value: 'episodic', label: t('memoryPanel.layerEpisodicLabel'), desc: t('memoryPanel.layerEpisodicDesc'), color: 'amber' },
+  { value: 'relationship', label: t('memoryPanel.layerRelationshipLabel'), desc: t('memoryPanel.layerRelationshipDesc'), color: 'pink' },
+  { value: 'reflective', label: t('memoryPanel.layerReflectiveLabel'), desc: t('memoryPanel.layerReflectiveDesc'), color: 'emerald' },
+  { value: 'semantic', label: t('memoryPanel.layerSemanticLabel'), desc: t('memoryPanel.layerSemanticDesc'), color: 'slate' },
+])
 
-const memoryScopeOptions: Array<{ value: MemoryScope; label: string }> = [
-  { value: 'global', label: '所有对话' },
-  { value: 'workspace', label: '当前工作区' },
-  { value: 'session', label: '当前会话' },
-]
-const memorySourceOptions = [
-  { value: 'manual', label: '手动录入' },
-  { value: 'session', label: '对话片段' },
-  { value: 'relationship', label: '互动记录' },
-  { value: 'reflection', label: '系统总结' },
-  { value: 'import', label: '资料导入' },
-  { value: 'profile', label: '用户资料' },
-]
+const memoryScopeOptions = computed<Array<{ value: MemoryScope; label: string }>>(() => [
+  { value: 'global', label: t('memoryPanel.scopeGlobal') },
+  { value: 'workspace', label: t('memoryPanel.scopeWorkspace') },
+  { value: 'session', label: t('memoryPanel.scopeSession') },
+])
+const memorySourceOptions = computed(() => [
+  { value: 'manual', label: t('memoryPanel.sourceManual') },
+  { value: 'session', label: t('memoryPanel.sourceSession') },
+  { value: 'relationship', label: t('memoryPanel.sourceRelationship') },
+  { value: 'reflection', label: t('memoryPanel.sourceReflection') },
+  { value: 'import', label: t('memoryPanel.sourceImport') },
+  { value: 'profile', label: t('memoryPanel.sourceProfile') },
+])
 
-const docViewOptions: Array<{ value: DocViewMode; label: string }> = [
-  { value: 'all', label: '全部' },
-  { value: 'recallable', label: '可用于对话' },
-  { value: 'review', label: '待确认' },
-  { value: 'important', label: '优先保留' },
-  { value: 'hits', label: '本次命中' },
-]
+const docViewOptions = computed<Array<{ value: DocViewMode; label: string }>>(() => [
+  { value: 'all', label: t('memoryPanel.viewAll') },
+  { value: 'recallable', label: t('memoryPanel.viewRecallable') },
+  { value: 'review', label: t('memoryPanel.viewReview') },
+  { value: 'important', label: t('memoryPanel.viewImportant') },
+  { value: 'hits', label: t('memoryPanel.viewHits') },
+])
 
 const layerTagType = (layer?: string) => {
   const map: Record<string, TagType> = { profile: 'warning', working: 'primary', episodic: 'info', relationship: 'danger', reflective: 'success', semantic: 'info' }
@@ -275,7 +276,7 @@ const compactText = (text?: string | null, limit = 120) => {
 
 const docUpdatedLabel = (doc: MemoryDoc) => {
   const raw = doc.updated_at || (typeof doc.metadata?.timestamp === 'string' ? doc.metadata.timestamp : '')
-  if (!raw) return '未记录时间'
+  if (!raw) return t('memoryPanel.updatedUnknown')
   return String(raw).replace('T', ' ').slice(0, 16)
 }
 
@@ -290,11 +291,11 @@ const docSessionId = (doc: MemoryDoc) => stringMeta(doc, 'session_id') || (docSc
 
 const scopeLabel = (scope?: string | null) => {
   const map: Record<string, string> = {
-    global: '所有工作区',
-    workspace: '当前工作区',
-    session: '当前会话',
+    global: t('memoryPanel.scopeGlobalWorkspace'),
+    workspace: t('memoryPanel.scopeWorkspace'),
+    session: t('memoryPanel.scopeSession'),
   }
-  return map[String(scope || '')] || String(scope || '当前工作区')
+  return map[String(scope || '')] || String(scope || t('memoryPanel.scopeWorkspace'))
 }
 
 const maintenancePayload = (): MemoryMaintenancePolicyPayload => ({
@@ -313,10 +314,10 @@ const maintenancePreviewMatchesPolicy = computed(() => Boolean(
 ))
 
 const maintenanceReasonLabel = (reasons: string[]) => reasons.map((reason) => ({
-  stale_working: '超过当前事项保留期限',
-  low_quality: '可靠程度低于设定值',
-  exact_duplicate: '与保留项完全重复',
-}[reason] || reason)).join('、')
+  stale_working: t('memoryPanel.maintenanceStaleWorking'),
+  low_quality: t('memoryPanel.maintenanceLowQuality'),
+  exact_duplicate: t('memoryPanel.maintenanceExactDuplicate'),
+}[reason] || reason)).join(t('memoryPanel.enumerationSeparator'))
 
 const saveMemoryPolicy = async () => {
   if (maintenanceSaving.value) return
@@ -331,7 +332,7 @@ const saveMemoryPolicy = async () => {
         includeExactDuplicates: maintenancePolicy.includeExactDuplicates,
       },
     })
-    ElMessage.success('记忆整理规则已保存')
+    ElMessage.success(t('memoryPanel.maintenanceSaved'))
   } finally {
     maintenanceSaving.value = false
   }
@@ -344,7 +345,7 @@ const previewMemoryMaintenance = async () => {
     maintenancePreview.value = await memoryClient.previewMaintenance(maintenancePayload())
     maintenancePreviewPolicyKey.value = maintenancePolicyKey()
   } catch (error) {
-    ElMessage.error(describeFailure(error, '无法预览记忆整理结果'))
+    ElMessage.error(describeFailure(error, t('memoryPanel.maintenancePreviewFailed')))
   } finally {
     maintenancePreviewLoading.value = false
   }
@@ -353,19 +354,19 @@ const previewMemoryMaintenance = async () => {
 const applyMemoryMaintenance = async () => {
   if (maintenanceApplyLoading.value) return
   if (!maintenancePreviewMatchesPolicy.value) {
-    ElMessage.warning('整理规则已变化，请重新预览影响后再执行')
+    ElMessage.warning(t('memoryPanel.maintenancePolicyChanged'))
     return
   }
   const previewToken = maintenancePreview.value?.preview_token
   if (!previewToken) {
-    ElMessage.warning('请重新预览后再执行')
+    ElMessage.warning(t('memoryPanel.maintenancePreviewStale'))
     return
   }
   try {
     await ElMessageBox.confirm(
-      `将永久删除 ${maintenancePreview.value?.summary.delete_count ?? 0} 条记忆，操作不可恢复。`,
-      '永久删除记忆',
-      { confirmButtonText: '永久删除', cancelButtonText: '取消', type: 'warning' },
+      t('memoryPanel.maintenanceDeleteConfirmMessage', { count: maintenancePreview.value?.summary.delete_count ?? 0 }),
+      t('memoryPanel.maintenanceDeleteConfirmTitle'),
+      { confirmButtonText: t('memoryPanel.permanentDelete'), cancelButtonText: t('memoryPanel.cancel'), type: 'warning' },
     )
   } catch {
     return
@@ -377,7 +378,7 @@ const applyMemoryMaintenance = async () => {
       preview_token: previewToken,
       confirmation: 'PERMANENT_DELETE',
     })
-    ElMessage.success(`已永久删除 ${result.changed_count} 条记忆`)
+    ElMessage.success(t('memoryPanel.maintenanceDeleted', { count: result.changed_count }))
     await refreshMemoryState()
     try {
       maintenancePreview.value = await memoryClient.previewMaintenance(maintenancePayload())
@@ -385,10 +386,10 @@ const applyMemoryMaintenance = async () => {
     } catch {
       maintenancePreview.value = null
       maintenancePreviewPolicyKey.value = ''
-      ElMessage.warning('整理已完成，但最新预览暂时无法刷新')
+      ElMessage.warning(t('memoryPanel.maintenanceRefreshFailed'))
     }
   } catch (error) {
-    ElMessage.error(describeFailure(error, '记忆整理失败'))
+    ElMessage.error(describeFailure(error, t('memoryPanel.maintenanceApplyFailed')))
   } finally {
     maintenanceApplyLoading.value = false
   }
@@ -402,17 +403,17 @@ const updateDefaultMemoryScope = async (value: string) => {
   try {
     await workspaceStore.updateWorkspaceRemote(workspaceId, { memory_scope: nextScope })
     queryForm.scope = nextScope
-    ElMessage.success('记忆作用域已保存')
+    ElMessage.success(t('memoryPanel.scopeSaved'))
     await refreshMemoryState()
   } catch (error) {
-    ElMessage.error(describeFailure(error, '保存记忆作用域失败'))
+    ElMessage.error(describeFailure(error, t('memoryPanel.scopeSaveFailed')))
   } finally {
     workspaceScopeSaving.value = false
   }
 }
 
 
-const layerStats = computed(() => layers.map(layer => ({
+const layerStats = computed(() => layers.value.map(layer => ({
   ...layer,
   count: overview.value?.by_layer[layer.value] ?? docs.value.filter(doc => doc.layer === layer.value).length,
 })))
@@ -428,9 +429,9 @@ const reviewDocs = computed(() => reviewCandidates.value.slice().sort((left, rig
   return leftScore - rightScore
 }))
 const memoryTabs = computed(() => [
-  { value: 'library' as const, label: '记忆库', count: docs.value.length, icon: Collection },
-  { value: 'review' as const, label: '需要检查', count: reviewDocs.value.length, icon: User },
-  { value: 'overview' as const, label: '使用情况', icon: DataAnalysis },
+  { value: 'library' as const, label: t('memoryPanel.tabLibrary'), count: docs.value.length, icon: Collection },
+  { value: 'review' as const, label: t('memoryPanel.tabReview'), count: reviewDocs.value.length, icon: User },
+  { value: 'overview' as const, label: t('memoryPanel.tabOverview'), icon: DataAnalysis },
 ])
 
 
@@ -457,7 +458,7 @@ const querySummary = computed(() => {
   const results = queryResult.value?.results ?? []
   if (!results.length) return ''
   const best = Math.max(...results.map(item => Number(item.score ?? 0)))
-  return `${results.length} 条命中 · 最高得分 ${best.toFixed(4)}`
+  return t('memoryPanel.querySummary', { count: results.length, score: best.toFixed(4) })
 })
 
 const defaultQueryLayers = ['profile', 'working', 'episodic', 'relationship', 'reflective', 'semantic']
@@ -560,9 +561,9 @@ const batchTargetDocs = computed(() => hasDocFilters.value ? filteredDocs.value 
 const batchTargetCount = computed(() => batchTargetDocs.value.length)
 const batchActionDisabled = computed(() => batchActionLoading.value || !hasDocFilters.value || batchTargetCount.value === 0)
 const batchDeleteLabel = computed(() => {
-  if (batchDeleteProgress.active) return `删除中 ${batchDeleteProgress.done}/${batchDeleteProgress.total}`
-  if (!hasDocFilters.value) return '先筛选再删除'
-  return `永久删除筛选结果 (${batchTargetCount.value})`
+  if (batchDeleteProgress.active) return t('memoryPanel.batchDeleting', { done: batchDeleteProgress.done, total: batchDeleteProgress.total })
+  if (!hasDocFilters.value) return t('memoryPanel.batchDeleteNeedFilters')
+  return t('memoryPanel.batchDeleteFilteredLabel', { count: batchTargetCount.value })
 })
 
 const showMoreDocs = () => {
@@ -603,7 +604,7 @@ const resetQueryLayers = () => {
 const rollbackMemoryDoc = async (doc: MemoryDoc, revision: number) => {
   const result = await memoryClient.rollbackDoc(doc.id, revision, docSessionId(doc))
   if (result?.status === 'rolled_back' || result?.status === 'updated' || result?.status === 'ok') {
-    ElMessage.success(`已恢复到版本 ${revision}`)
+    ElMessage.success(t('memoryPanel.rollbackSuccess', { revision }))
     selectedDocId.value = doc.id
     await refreshMemoryState()
   }
@@ -645,7 +646,7 @@ const refreshIndexStatus = async () => {
       void monitorMemoryIndexRebuild(job.job_id, false)
     }
   } catch (error) {
-    const message = describeFailure(error, '无法读取索引状态')
+    const message = describeFailure(error, t('memoryPanel.indexStatusReadFailed'))
     indexStatus.value = {
       status: 'error',
       count: docs.value.length,
@@ -691,9 +692,9 @@ const exportMemory = async () => {
     link.download = `yuizaki-memory-${currentMemoryScope.value}-${new Date().toISOString().slice(0, 10)}.json`
     link.click()
     URL.revokeObjectURL(url)
-    ElMessage.success(`已导出 ${payload.count} 条记忆`)
+    ElMessage.success(t('memoryPanel.exportSuccess', { count: payload.count }))
   } catch (error) {
-    ElMessage.error(describeFailure(error, '导出记忆失败'))
+    ElMessage.error(describeFailure(error, t('memoryPanel.exportFailed')))
   } finally {
     exportLoading.value = false
   }
@@ -706,12 +707,12 @@ const handleMemoryImportFile = async (event: Event) => {
   importLoading.value = true
   importReport.value = null
   try {
-    if (file.size > 10 * 1024 * 1024) throw new Error('导入文件不能超过 10 MB')
+    if (file.size > 10 * 1024 * 1024) throw new Error(t('memoryPanel.importTooLarge'))
     const parsed: unknown = JSON.parse(await file.text())
-    if (!parsed || typeof parsed !== 'object') throw new Error('导入文件不是有效 JSON')
+    if (!parsed || typeof parsed !== 'object') throw new Error(t('memoryPanel.importInvalidJson'))
     const envelope = parsed as { format?: unknown; version?: unknown; docs?: unknown }
     if (envelope.format !== 'yuizaki-memory-export' || envelope.version !== 1 || !Array.isArray(envelope.docs)) {
-      throw new Error('不支持的记忆备份格式或版本')
+      throw new Error(t('memoryPanel.importUnsupportedFormat'))
     }
     const importDocs = envelope.docs.filter((item): item is { id?: string; text: string; metadata?: Record<string, unknown> } => {
       if (!item || typeof item !== 'object') return false
@@ -720,13 +721,17 @@ const handleMemoryImportFile = async (event: Event) => {
         && (candidate.id === undefined || typeof candidate.id === 'string')
         && (candidate.metadata === undefined || (candidate.metadata !== null && typeof candidate.metadata === 'object' && !Array.isArray(candidate.metadata)))
     })
-    if (!importDocs.length) throw new Error('备份中没有可导入的记忆')
+    if (!importDocs.length) throw new Error(t('memoryPanel.importEmpty'))
     const existingIds = new Set(docs.value.map(doc => doc.id))
     const duplicateCount = importDocs.filter(doc => doc.id && existingIds.has(doc.id)).length
     await ElMessageBox.confirm(
-      `将导入 ${importDocs.length} 条记忆到“${scopeLabel(currentMemoryScope.value)}”。${duplicateCount ? `其中 ${duplicateCount} 条 ID 已存在，将自动跳过。` : ''}`,
-      '确认导入记忆',
-      { confirmButtonText: '开始导入', cancelButtonText: '取消', type: 'info' },
+      t('memoryPanel.importConfirmMessage', {
+        count: importDocs.length,
+        scope: scopeLabel(currentMemoryScope.value),
+        note: duplicateCount ? t('memoryPanel.importConfirmNote', { count: duplicateCount }) : '',
+      }),
+      t('memoryPanel.importConfirmTitle'),
+      { confirmButtonText: t('memoryPanel.importStart'), cancelButtonText: t('memoryPanel.cancel'), type: 'info' },
     )
     const result = await memoryClient.importDocs({
       format: 'yuizaki-memory-export',
@@ -738,11 +743,11 @@ const handleMemoryImportFile = async (event: Event) => {
       conflict: 'skip',
     })
     importReport.value = result
-    ElMessage.success(`导入完成：${result.imported_count} 条，跳过 ${result.skipped_count} 条`)
+    ElMessage.success(t('memoryPanel.importSuccess', { imported: result.imported_count, skipped: result.skipped_count }))
     await refreshMemoryState()
   } catch (error) {
     if (error !== 'cancel' && !(error instanceof Error && error.message === 'cancel')) {
-      ElMessage.error(describeFailure(error, '导入记忆失败'))
+      ElMessage.error(describeFailure(error, t('memoryPanel.importFailed')))
     }
   } finally {
     input.value = ''
@@ -751,10 +756,10 @@ const handleMemoryImportFile = async (event: Event) => {
 }
 
 const importReasonLabel = (reason: string) => ({
-  id_exists: 'ID 已存在',
-  terminal_or_review_candidate: '候选或终态记录',
-  write_failed: '写入失败',
-  restore_state_failed: '恢复状态失败',
+  id_exists: t('memoryPanel.importReasonIdExists'),
+  terminal_or_review_candidate: t('memoryPanel.importReasonTerminal'),
+  write_failed: t('memoryPanel.importReasonWriteFailed'),
+  restore_state_failed: t('memoryPanel.importReasonRestoreFailed'),
 }[reason] || reason)
 
 const decideReviewCandidate = async ({ doc, decision }: { doc: MemoryDoc; decision: 'approve' | 'reject' }) => {
@@ -762,10 +767,10 @@ const decideReviewCandidate = async ({ doc, decision }: { doc: MemoryDoc; decisi
   reviewProcessingId.value = doc.id
   try {
     await reviewCandidate(doc.id, decision, decision === 'approve' ? 'user_approved' : 'user_rejected', docSessionId(doc))
-    ElMessage.success(decision === 'approve' ? '已保留这条记忆' : '已拒绝这条候选')
+    ElMessage.success(decision === 'approve' ? t('memoryPanel.reviewKept') : t('memoryPanel.reviewRejected'))
     await refreshMemoryState()
   } catch (error) {
-    ElMessage.error(describeFailure(error, '复核操作失败'))
+    ElMessage.error(describeFailure(error, t('memoryPanel.reviewFailed')))
   } finally {
     reviewProcessingId.value = ''
   }
@@ -796,13 +801,13 @@ const monitorMemoryIndexRebuild = async (jobId: string, announceCompletion: bool
       if (rebuildTerminalStates.has(response.job.state)) {
         if (response.job.state === 'completed') {
           const indexedCount = Number(response.job.result?.indexed_count ?? response.job.processed_count)
-          if (announceCompletion) ElMessage.success(`索引已重建：${indexedCount} 条`)
+          if (announceCompletion) ElMessage.success(t('memoryPanel.indexRebuilt', { count: indexedCount }))
           await refreshMemoryState()
         } else if (response.job.state === 'cancelled') {
-          if (announceCompletion) ElMessage.info('索引重建已取消，记忆库仍可使用')
+          if (announceCompletion) ElMessage.info(t('memoryPanel.indexRebuildCancelled'))
           await refreshIndexStatus()
         } else if (announceCompletion) {
-          ElMessage.error(response.job.last_error || '重建索引失败，可直接重试')
+          ElMessage.error(response.job.last_error || t('memoryPanel.indexRebuildFailedRetry'))
         }
         break
       }
@@ -815,7 +820,7 @@ const monitorMemoryIndexRebuild = async (jobId: string, announceCompletion: bool
       if (error instanceof Error && /404|not found/i.test(error.message)) {
         await refreshIndexStatus().catch(() => undefined)
       } else {
-        ElMessage.error(describeFailure(error, '无法读取索引重建进度'))
+        ElMessage.error(describeFailure(error, t('memoryPanel.indexRebuildProgressFailed')))
       }
     }
   } finally {
@@ -838,7 +843,7 @@ const rebuildMemoryIndex = async () => {
     await monitorMemoryIndexRebuild(response.job.job_id, true)
   } catch (error) {
     rebuildIndexLoading.value = false
-    ElMessage.error(describeFailure(error, '重建索引失败'))
+    ElMessage.error(describeFailure(error, t('memoryPanel.indexRebuildFailed')))
   }
 }
 
@@ -849,7 +854,7 @@ const cancelMemoryIndexRebuild = async () => {
     const response = await memoryClient.cancelIndexRebuild(job.job_id)
     projectRebuildJob(response.job, response.index_status)
   } catch (error) {
-    ElMessage.error(describeFailure(error, '取消索引重建失败'))
+    ElMessage.error(describeFailure(error, t('memoryPanel.indexRebuildCancelFailed')))
   }
 }
 
@@ -858,7 +863,7 @@ const parseJsonObject = (rawValue: string, label: string) => {
   if (!raw) return {}
   const parsed: unknown = JSON.parse(raw)
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${label} 必须是 JSON object`)
+    throw new Error(t('memoryPanel.jsonObjectRequired', { label }))
   }
   return parsed as Record<string, unknown>
 }
@@ -882,9 +887,9 @@ const handleRecallFeedback = async (payload: { id: string; feedback: 'helpful' |
   try {
     const doc = queryResult.value?.results.find(item => item.id === payload.id)
     await recordRecallFeedback(payload.id, payload.feedback, doc ? docSessionId(doc) : scopedDocOptions().sessionId)
-    ElMessage.success(payload.feedback === 'helpful' ? '已记录，这条记忆会继续优先保留' : '已记录，你可以随时在记忆库中修正或暂停使用')
+    ElMessage.success(payload.feedback === 'helpful' ? t('memoryPanel.feedbackHelpful') : t('memoryPanel.feedbackRecorded'))
   } catch (error) {
-    ElMessage.error(describeFailure(error, '记录召回反馈失败'))
+    ElMessage.error(describeFailure(error, t('memoryPanel.feedbackFailed')))
   }
 }
 
@@ -906,7 +911,7 @@ const openRequestedMemoryDoc = () => {
   if (!requestedId) return
   const doc = docs.value.find(item => item.id === requestedId)
   if (!doc) {
-    ElMessage.warning('未找到要纠正的记忆')
+    ElMessage.warning(t('memoryPanel.docNotFound'))
     return
   }
   selectDocById(requestedId)
@@ -968,7 +973,7 @@ const moveDocLayer = async (doc: MemoryDoc, layer: string) => {
       metadata: { layer },
       edit_reason: `move_layer:${doc.layer || 'unknown'}->${layer}`,
     },
-    `已移动到 ${layer}`,
+    t('memoryPanel.movedToLayer', { layer }),
   )
 }
 
@@ -980,7 +985,7 @@ const boostDocImportance = async (doc: MemoryDoc) => {
       importance: nextImportance,
       edit_reason: 'boost_importance',
     },
-    '重要度已提高',
+    t('memoryPanel.importanceBoosted'),
   )
 }
 
@@ -991,17 +996,17 @@ const batchUpdateVisibleDocs = async (
   const targets = batchTargetDocs.value.slice()
   if (batchActionLoading.value) return
   if (!hasDocFilters.value) {
-    ElMessage.info('请先选择视图、类别或搜索词，再批量处理')
+    ElMessage.info(t('memoryPanel.batchNeedsFilters'))
     return
   }
   if (!targets.length) return
   try {
     await ElMessageBox.confirm(
-      `将对当前筛选结果中的 ${targets.length} 条记忆执行“${actionLabel}”。`,
-      '批量整理记忆',
+      t('memoryPanel.batchConfirmMessage', { count: targets.length, action: actionLabel }),
+      t('memoryPanel.batchConfirmTitle'),
       {
         confirmButtonText: actionLabel,
-        cancelButtonText: '取消',
+        cancelButtonText: t('memoryPanel.cancel'),
         type: 'warning',
       },
     )
@@ -1014,16 +1019,16 @@ const batchUpdateVisibleDocs = async (
     for (const doc of targets) {
       await updateDoc(doc.id, buildDocUpdatePayload(doc, buildOverrides(doc)))
     }
-    ElMessage.success(`已处理 ${targets.length} 条记忆`)
+    ElMessage.success(t('memoryPanel.batchProcessed', { count: targets.length }))
     await refreshMemoryState()
   } catch (error) {
-    ElMessage.error(describeFailure(error, '批量整理失败'))
+    ElMessage.error(describeFailure(error, t('memoryPanel.batchFailed')))
   } finally {
     batchActionLoading.value = false
   }
 }
 
-const batchBoostVisibleDocs = () => batchUpdateVisibleDocs('提高重要度', doc => ({
+const batchBoostVisibleDocs = () => batchUpdateVisibleDocs(t('memoryPanel.batchBoostAction'), doc => ({
   importance: Math.min(1, Math.max(Number(doc.importance ?? 0.5), 0.85)),
   edit_reason: 'batch_boost_importance',
 }))
@@ -1032,7 +1037,7 @@ const batchDeleteVisibleDocs = async () => {
   const targets = batchTargetDocs.value.slice()
   if (batchActionLoading.value) return
   if (!hasDocFilters.value) {
-    ElMessage.info('请先选择视图、类别或搜索词，再批量删除')
+    ElMessage.info(t('memoryPanel.batchDeleteSelectionRequired'))
     return
   }
   if (!targets.length) return
@@ -1045,10 +1050,10 @@ const batchDeleteVisibleDocs = async () => {
     deletePreview.value = await memoryClient.previewDelete(ids, scopedDocOptions().sessionId)
     await ElMessageBox.confirm(
       deletePreviewMessage(deletePreview.value),
-      `永久删除 ${targets.length} 条记忆`,
+      t('memoryPanel.batchDeleteConfirmTitle', { count: targets.length }),
       {
-        confirmButtonText: '永久删除',
-        cancelButtonText: '取消',
+        confirmButtonText: t('memoryPanel.permanentDelete'),
+        cancelButtonText: t('memoryPanel.cancel'),
         type: 'warning',
       },
     )
@@ -1065,12 +1070,12 @@ const batchDeleteVisibleDocs = async () => {
     if (targetIds.has(selectedDocId.value)) selectedDocId.value = nextSelectedId
     const result = await memoryClient.removeDocs(ids, scopedDocOptions().sessionId)
     batchDeleteProgress.done = result.deleted_count ?? ids.length
-    ElMessage.success(`已永久删除 ${batchDeleteProgress.done} 条记忆`)
+    ElMessage.success(t('memoryPanel.batchDeleted', { count: batchDeleteProgress.done }))
     await refreshIndexStatus().catch(error => console.debug('[MemoryPanel] failed to refresh index status after batch delete:', error))
   } catch (error) {
     docs.value = previousDocs
     selectedDocId.value = previousSelectedDocId
-    ElMessage.error(describeFailure(error, '批量删除失败'))
+    ElMessage.error(describeFailure(error, t('memoryPanel.batchDeleteFailed')))
   } finally {
     batchDeleteProgress.active = false
     batchActionLoading.value = false
@@ -1110,13 +1115,13 @@ const submitEditDoc = async () => {
     }
     const result = await updateDoc(editForm.id, payload)
     if (result?.status === 'updated') {
-      ElMessage.success('记忆已更新')
+      ElMessage.success(t('memoryPanel.docUpdated'))
       editDialogVisible.value = false
       selectedDocId.value = editForm.id
       void refreshMemoryState()
     }
   } catch (error) {
-    ElMessage.error(describeFailure(error, '更新记忆失败'))
+    ElMessage.error(describeFailure(error, t('memoryPanel.docUpdateFailed')))
   }
 }
 
@@ -1127,10 +1132,10 @@ const removeDoc = async (id: string) => {
     deletePreview.value = await memoryClient.previewDelete([id], doc ? docSessionId(doc) : scopedDocOptions().sessionId)
     await ElMessageBox.confirm(
       deletePreviewMessage(deletePreview.value),
-      '永久删除记忆',
+      t('memoryPanel.maintenanceDeleteConfirmTitle'),
       {
-        confirmButtonText: '永久删除',
-        cancelButtonText: '取消',
+        confirmButtonText: t('memoryPanel.permanentDelete'),
+        cancelButtonText: t('memoryPanel.cancel'),
 
         type: 'warning',
       },
@@ -1143,31 +1148,31 @@ const removeDoc = async (id: string) => {
   try {
     const fallbackId = filteredDocs.value.find(doc => doc.id !== id)?.id || ''
     await memoryClient.removeDoc(id, doc ? docSessionId(doc) : scopedDocOptions().sessionId)
-    ElMessage.success('已永久删除这条记忆')
+    ElMessage.success(t('memoryPanel.docDeleted'))
     if (selectedDocId.value === id) selectedDocId.value = fallbackId
     await refreshMemoryState()
   } catch (error) {
-    ElMessage.error(describeFailure(error, '永久删除失败'))
+    ElMessage.error(describeFailure(error, t('memoryPanel.docDeleteFailed')))
   } finally {
     setDocRemoving(id, false)
   }
 }
 
 const deletePreviewMessage = (preview: MemoryDeletePreview) => {
-  const parts = [`共 ${preview.total_count} 条：${preview.hard_delete_count} 条物理删除`]
-  if (preview.candidate_tombstone_count) parts.push(`${preview.candidate_tombstone_count} 条候选仅保留防复活 tombstone`)
-  if (preview.affected_message_count) parts.push(`将清理 ${preview.affected_message_count} 条聊天引用`)
-  parts.push('索引对应条目会移除，操作不可恢复。')
-  return parts.join('；')
+  const parts = [t('memoryPanel.deletePreviewSummary', { total: preview.total_count, hard: preview.hard_delete_count })]
+  if (preview.candidate_tombstone_count) parts.push(t('memoryPanel.deletePreviewCandidates', { count: preview.candidate_tombstone_count }))
+  if (preview.affected_message_count) parts.push(t('memoryPanel.deletePreviewMessages', { count: preview.affected_message_count }))
+  parts.push(t('memoryPanel.deletePreviewIndexNote'))
+  return parts.join(t('memoryPanel.clauseSeparator'))
 }
 
 const forgetDoc = async (id: string) => {
   if (forgettingDocIds.value.has(id)) return
   try {
     await ElMessageBox.confirm(
-      '停止使用后，这条记忆不会再影响对话；内容仍会保留，你可以在“使用情况”中重新启用。',
-      '停止使用这条记忆',
-      { confirmButtonText: '停止使用', cancelButtonText: '取消', type: 'warning' },
+      t('memoryPanel.forgetConfirmMessage'),
+      t('memoryPanel.forgetConfirmTitle'),
+      { confirmButtonText: t('memoryPanel.forgetConfirmAction'), cancelButtonText: t('memoryPanel.cancel'), type: 'warning' },
     )
   } catch {
     return
@@ -1179,10 +1184,10 @@ const forgetDoc = async (id: string) => {
     const doc = docs.value.find(item => item.id === id)
     await softForgetDoc(id, { reason: 'user_soft_forget', session_id: doc ? docSessionId(doc) : scopedDocOptions().sessionId })
     if (selectedDocId.value === id) selectedDocId.value = fallbackId
-    ElMessage.success('这条记忆已暂停使用')
+    ElMessage.success(t('memoryPanel.forgetSuccess'))
     await refreshMemoryState()
   } catch (error) {
-    ElMessage.error(describeFailure(error, '暂停使用失败'))
+    ElMessage.error(describeFailure(error, t('memoryPanel.forgetFailed')))
   } finally {
     setPendingDocId(forgettingDocIds, id, false)
   }
@@ -1194,10 +1199,10 @@ const restoreForgottenDoc = async (id: string) => {
   try {
     const doc = forgottenDocs.value.find(item => item.id === id) || docs.value.find(item => item.id === id)
     await restoreDoc(id, { reason: 'user_restore', session_id: doc ? docSessionId(doc) : scopedDocOptions().sessionId })
-    ElMessage.success('这条记忆已重新启用')
+    ElMessage.success(t('memoryPanel.restoreSuccess'))
     await refreshMemoryState()
   } catch (error) {
-    ElMessage.error(describeFailure(error, '重新启用失败'))
+    ElMessage.error(describeFailure(error, t('memoryPanel.restoreFailed')))
   } finally {
     setPendingDocId(restoringDocIds, id, false)
   }
@@ -1217,14 +1222,14 @@ const docSourceValue = (doc: MemoryDoc) => {
 const docSourceLabel = (doc: MemoryDoc) => {
   const label = docSourceValue(doc)
   const labels: Record<string, string> = {
-    manual: '手动',
-    session: '会话',
-    relationship: '互动记录',
-    reflection: '系统总结',
-    import: '导入',
-    profile: '用户资料',
-    default: '默认',
-    explicit: '显式',
+    manual: t('memoryPanel.sourceShortManual'),
+    session: t('memoryPanel.sourceShortSession'),
+    relationship: t('memoryPanel.sourceRelationship'),
+    reflection: t('memoryPanel.sourceReflection'),
+    import: t('memoryPanel.sourceShortImport'),
+    profile: t('memoryPanel.sourceProfile'),
+    default: t('memoryPanel.sourceShortDefault'),
+    explicit: t('memoryPanel.sourceShortExplicit'),
   }
   return labels[label] || label
 }
@@ -1304,10 +1309,10 @@ const saveInspectorDraft = async () => {
         },
         edit_reason: 'inspector_edit',
       },
-      '记忆已保存',
+      t('memoryPanel.inspectorSaved'),
     )
   } catch (error) {
-    ElMessage.error(describeFailure(error, '保存记忆失败'))
+    ElMessage.error(describeFailure(error, t('memoryPanel.inspectorSaveFailed')))
   } finally {
     inspectorDraftSaving.value = false
   }
@@ -1328,8 +1333,8 @@ const docAuditEntries = (doc: MemoryDoc) => {
 
 const auditActionLabel = (value: unknown) => {
   const map: Record<string, string> = {
-    create: '创建',
-    update: '更新',
+    create: t('memoryPanel.auditCreate'),
+    update: t('memoryPanel.auditUpdate'),
   }
   const key = String(value || 'event')
   return map[key] || key
@@ -1338,7 +1343,7 @@ const auditActionLabel = (value: unknown) => {
 const auditEntrySummary = (entry: Record<string, unknown>) => {
   const at = typeof entry.at === 'string' ? entry.at.replace('T', ' ').slice(0, 16) : ''
   const reason = typeof entry.reason === 'string' ? entry.reason : ''
-  return [at, reason].filter(Boolean).join(' · ') || '无时间'
+  return [at, reason].filter(Boolean).join(' · ') || t('memoryPanel.noTimestamp')
 }
 
 watch(

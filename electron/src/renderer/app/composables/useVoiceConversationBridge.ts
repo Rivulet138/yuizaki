@@ -7,6 +7,7 @@ import { PetSentenceEmotionScheduler, type PetTtsPlaybackStartedDetail } from '@
 import { useChatStore } from '@/stores/chatStore'
 import { petControl } from '@/utils/petControl'
 import { chatClient, shortcutClient, systemClient } from '@/api/client'
+import { t } from '@/i18n'
 import {
   getCompanionInterruptionEpoch,
   publishCompanionJobEvent,
@@ -415,14 +416,14 @@ export function useVoiceConversationBridge() {
         return
       } catch (error) {
         console.warn('[VoiceBridge] realtime voice unavailable, falling back:', error)
-        ElMessage.warning('即时语音不可用，已切换到本地语音链路')
+        ElMessage.warning(t('misc.instantVoiceFallback'))
       }
     } else if (chatStore.chatOptions.response_mode === 'instant') {
       console.info('[VoiceBridge] realtime voice is warming; using the local pipeline for this turn')
     }
 
     if (!socketClient.isConnected()) {
-      ElMessage.warning('实时通道未连接，无法开始语音输入')
+      ElMessage.warning(t('misc.realtimeChannelDisconnected'))
       return
     }
     try {
@@ -433,7 +434,7 @@ export function useVoiceConversationBridge() {
       })
       activeVoiceTransport = 'pipeline'
     } catch {
-      ElMessage.error(audioCaptureState.error || '麦克风启动失败')
+      ElMessage.error(audioCaptureState.error || t('misc.microphoneStartFailed'))
     }
   }
 

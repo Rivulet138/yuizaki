@@ -8,7 +8,7 @@
   >
     <div class="async-state__header">
       <span class="async-state__pulse"></span>
-      <span>{{ loadingText || '正在加载数据…' }}</span>
+      <span>{{ loadingText || t('ui.loading') }}</span>
     </div>
     <div class="skeleton-list">
       <div v-for="n in 3" :key="n" class="skeleton-row">
@@ -20,13 +20,13 @@
   <div v-else-if="error" class="async-error" role="alert">
     <div class="async-error__icon">!</div>
     <div>
-      <strong>{{ errorTitle || '加载失败' }}</strong>
+      <strong>{{ errorTitle || t('ui.loadFailed') }}</strong>
       <p>{{ error }}</p>
-       <button v-if="props.showRetry" class="retry-btn" @click="$emit('retry')">{{ retryText || '重试' }}</button>
+       <button v-if="props.showRetry" class="retry-btn" @click="$emit('retry')">{{ retryText || t('ui.retry') }}</button>
     </div>
   </div>
   <div v-else-if="empty" class="async-state async-state--empty">
-    <el-empty :description="emptyText || '暂无数据'" :image-size="64">
+    <el-empty :description="emptyText || t('ui.empty')" :image-size="64">
       <template v-if="$slots.empty" #default>
         <slot name="empty" />
       </template>
@@ -40,6 +40,7 @@ import { onMounted, onUnmounted } from 'vue'
 import { ElEmpty } from 'element-plus'
 import 'element-plus/es/components/empty/style/css'
 import { createReducedMotionObserver } from '@/app/runtime/reducedMotion'
+import { t } from '@/i18n'
 
 const props = withDefaults(defineProps<{
   loading?: boolean

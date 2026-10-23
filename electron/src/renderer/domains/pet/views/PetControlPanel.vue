@@ -1,10 +1,10 @@
 <template>
-  <PanelShell title="桌宠控制" tone="companion">
+  <PanelShell :title="t('petControl.title')" tone="companion">
     <template #actions>
-      <el-button :icon="Clock" plain @click="relationshipHistoryVisible = true">关系历史</el-button>
+      <el-button :icon="Clock" plain @click="relationshipHistoryVisible = true">{{ t('petControl.relationshipHistory') }}</el-button>
     </template>
     <div class="pet-console">
-      <section class="status-strip" aria-label="桌宠状态">
+      <section class="status-strip" :aria-label="t('petControl.statusAria')">
         <article v-for="item in statusCards" :key="item.label" class="status-card">
           <span>{{ item.label }}</span>
           <strong>{{ item.value }}</strong>
@@ -51,12 +51,12 @@
         <el-card class="control-card appearance-card" shadow="never">
           <template #header>
             <div class="card-heading">
-              <span>外观参数</span>
+              <span>{{ t('petControl.appearance.title') }}</span>
               <el-tag size="small" type="info">{{ scaleDraft.toFixed(2) }} × {{ Math.round(opacityDraft * 100) }}%</el-tag>
             </div>
           </template>
-          <label class="field-label">缩放 {{ scaleDraft.toFixed(2) }}</label>
-          <div class="preset-row" aria-label="尺寸预设">
+          <label class="field-label">{{ t('petControl.appearance.scale', { value: scaleDraft.toFixed(2) }) }}</label>
+          <div class="preset-row" :aria-label="t('petControl.appearance.sizePresetAria')">
             <el-button
               v-for="option in sizePresetOptions"
               :key="option.value"
@@ -69,24 +69,24 @@
             </el-button>
           </div>
           <el-slider v-model="scaleDraft" :min="0.12" :max="0.6" :step="0.01" @change="applyScale" />
-          <label class="field-label">透明度 {{ ratioPercent(opacityDraft) }}</label>
+          <label class="field-label">{{ t('petControl.appearance.opacity', { value: ratioPercent(opacityDraft) }) }}</label>
           <el-slider v-model="opacityDraft" :min="0.1" :max="1" :step="0.05" @change="applyOpacity" />
         </el-card>
 
         <el-card class="control-card capability-card" shadow="never">
           <template #header>
             <div class="card-heading">
-              <span>模型能力与诊断</span>
+              <span>{{ t('petControl.capability.title') }}</span>
               <el-tag size="small" :type="avatarCapabilities ? 'success' : 'warning'">
-                {{ avatarCapabilities ? '能力已同步' : '等待渲染器' }}
+                {{ avatarCapabilities ? t('petControl.capability.synced') : t('petControl.capability.pending') }}
               </el-tag>
             </div>
           </template>
           <div class="capability-summary">
-            <span>{{ state.modelType.toUpperCase() }} · {{ currentModel?.name ?? '未选择模型' }}</span>
-            <span>状态：{{ state.ready ? '已就绪' : '未就绪' }}</span>
+            <span>{{ state.modelType.toUpperCase() }} · {{ currentModel?.name ?? t('petControl.capability.noModel') }}</span>
+            <span>{{ t('petControl.capability.status', { value: state.ready ? t('petControl.status.ready') : t('petControl.status.notReady') }) }}</span>
           </div>
-          <div v-if="avatarCapabilities" class="capability-tags" aria-label="模型动作能力">
+          <div v-if="avatarCapabilities" class="capability-tags" :aria-label="t('petControl.capability.actionsAria')">
             <el-tag
               v-for="item in capabilityRows"
               :key="item.key"
@@ -94,7 +94,7 @@
               :type="item.enabled ? 'success' : 'info'"
               effect="plain"
             >
-              {{ item.label }} {{ item.enabled ? '可用' : '不可用' }}
+              {{ item.label }} {{ item.enabled ? t('petControl.capability.available') : t('petControl.capability.unavailable') }}
             </el-tag>
           </div>
           <div class="button-row">
@@ -103,16 +103,16 @@
               :disabled="!avatarCapabilities?.actions.gaze || operationLoading"
               @click="previewGaze"
             >
-              注视中心
+              {{ t('petControl.capability.gazeCenter') }}
             </el-button>
             <el-button
               plain
               :disabled="!avatarCapabilities?.actions.cancel || operationLoading"
               @click="cancelAvatarActions"
             >
-              停止当前动作
+              {{ t('petControl.capability.stopAction') }}
             </el-button>
-            <el-button plain :loading="refreshingPet" @click="refresh">同步能力</el-button>
+            <el-button plain :loading="refreshingPet" @click="refresh">{{ t('petControl.capability.sync') }}</el-button>
           </div>
         </el-card>
 
@@ -121,23 +121,23 @@
         <el-card class="control-card lipsync-card" shadow="never">
           <template #header>
             <div class="card-heading">
-              <span>口型校准</span>
-              <el-tag size="small" type="info">{{ currentModel?.name ?? '当前模型' }}</el-tag>
+              <span>{{ t('petControl.lipSync.title') }}</span>
+              <el-tag size="small" type="info">{{ currentModel?.name ?? t('petControl.lipSync.currentModel') }}</el-tag>
             </div>
           </template>
-          <label class="field-label">增益 {{ lipSyncDraft.gain.toFixed(1) }}</label>
+          <label class="field-label">{{ t('petControl.lipSync.gain', { value: lipSyncDraft.gain.toFixed(1) }) }}</label>
           <el-slider v-model="lipSyncDraft.gain" :min="0.5" :max="12" :step="0.1" />
-          <label class="field-label">噪声门 {{ lipSyncDraft.noiseGate.toFixed(3) }}</label>
+          <label class="field-label">{{ t('petControl.lipSync.noiseGate', { value: lipSyncDraft.noiseGate.toFixed(3) }) }}</label>
           <el-slider v-model="lipSyncDraft.noiseGate" :min="0" :max="0.1" :step="0.001" />
-          <label class="field-label">张嘴上限 {{ lipSyncDraft.maxOpen.toFixed(2) }}</label>
+          <label class="field-label">{{ t('petControl.lipSync.maxOpen', { value: lipSyncDraft.maxOpen.toFixed(2) }) }}</label>
           <el-slider v-model="lipSyncDraft.maxOpen" :min="0.1" :max="1" :step="0.05" />
-          <label class="field-label">开启速度 {{ lipSyncDraft.attack.toFixed(2) }}</label>
+          <label class="field-label">{{ t('petControl.lipSync.attack', { value: lipSyncDraft.attack.toFixed(2) }) }}</label>
           <el-slider v-model="lipSyncDraft.attack" :min="0.05" :max="1" :step="0.05" />
-          <label class="field-label">闭合速度 {{ lipSyncDraft.release.toFixed(2) }}</label>
+          <label class="field-label">{{ t('petControl.lipSync.release', { value: lipSyncDraft.release.toFixed(2) }) }}</label>
           <el-slider v-model="lipSyncDraft.release" :min="0.05" :max="1" :step="0.05" />
           <div class="button-row">
-            <el-button type="primary" plain :loading="operationLoading" @click="applyLipSyncProfile">应用口型参数</el-button>
-            <el-button plain :disabled="operationLoading" @click="resetLipSyncProfile">恢复默认</el-button>
+            <el-button type="primary" plain :loading="operationLoading" @click="applyLipSyncProfile">{{ t('petControl.lipSync.apply') }}</el-button>
+            <el-button plain :disabled="operationLoading" @click="resetLipSyncProfile">{{ t('petControl.lipSync.reset') }}</el-button>
           </div>
         </el-card>
 
@@ -145,35 +145,35 @@
         <el-card class="control-card manifest-card" shadow="never">
           <template #header>
             <div class="card-heading">
-              <span>可用模型上下文</span>
-              <el-tag size="small" type="info">{{ currentModel?.type.toUpperCase() ?? '模型' }}</el-tag>
+              <span>{{ t('petControl.manifest.title') }}</span>
+              <el-tag size="small" type="info">{{ currentModel?.type.toUpperCase() ?? t('petControl.manifest.modelFallback') }}</el-tag>
             </div>
           </template>
           <div class="model-meta">
-            <span>表情 {{ currentManifest?.expressions.length ?? 0 }}</span>
-            <span>参数 {{ currentManifest?.parameterControls.length ?? 0 }}</span>
-            <span>动作组 {{ Object.keys(currentManifest?.motions ?? {}).length }}</span>
+            <span>{{ t('petControl.manifest.expressions', { count: currentManifest?.expressions.length ?? 0 }) }}</span>
+            <span>{{ t('petControl.manifest.parameters', { count: currentManifest?.parameterControls.length ?? 0 }) }}</span>
+            <span>{{ t('petControl.manifest.motionGroups', { count: Object.keys(currentManifest?.motions ?? {}).length }) }}</span>
           </div>
           <el-input
             :model-value="currentModel?.promptContext ?? ''"
             type="textarea"
             :rows="5"
             readonly
-            placeholder="当前模型没有可用的动作上下文"
+            :placeholder="t('petControl.manifest.emptyContext')"
           />
           <div class="button-row">
-            <el-button plain :disabled="!currentModel?.promptContext" @click="copyPromptContext">复制模型上下文</el-button>
+            <el-button plain :disabled="!currentModel?.promptContext" @click="copyPromptContext">{{ t('petControl.manifest.copy') }}</el-button>
           </div>
         </el-card>
 
         <el-card class="control-card expression-card" shadow="never">
           <template #header>
             <div class="card-heading">
-              <span>表情与参数</span>
+              <span>{{ t('petControl.expression.title') }}</span>
             </div>
           </template>
-          <label class="field-label">情绪预设</label>
-          <el-select v-model="selectedEmotionId" class="full-field" filterable placeholder="当前模型没有情绪预设" :disabled="emotionOptions.length === 0">
+          <label class="field-label">{{ t('petControl.expression.emotionPreset') }}</label>
+          <el-select v-model="selectedEmotionId" class="full-field" filterable :placeholder="t('petControl.expression.emptyEmotionPreset')" :disabled="emotionOptions.length === 0">
             <el-option
               v-for="emotion in emotionOptions"
               :key="emotion.id"
@@ -182,11 +182,11 @@
             />
           </el-select>
           <div class="button-row">
-            <el-button type="primary" plain :disabled="!selectedEmotionId" @click="previewEmotionPreset">播放情绪预设</el-button>
+            <el-button type="primary" plain :disabled="!selectedEmotionId" @click="previewEmotionPreset">{{ t('petControl.expression.playEmotionPreset') }}</el-button>
           </div>
 
-          <label class="field-label">表情混合</label>
-          <el-select v-model="selectedExpressionId" class="full-field" filterable placeholder="请选择">
+          <label class="field-label">{{ t('petControl.expression.mix') }}</label>
+          <el-select v-model="selectedExpressionId" class="full-field" filterable :placeholder="t('petControl.selectPlaceholder')">
             <el-option
               v-for="expression in expressionOptions"
               :key="expression.id"
@@ -194,14 +194,14 @@
               :value="expression.id"
             />
           </el-select>
-          <label class="field-label">权重 {{ ratioPercent(expressionWeight) }}</label>
+          <label class="field-label">{{ t('petControl.expression.weight', { value: ratioPercent(expressionWeight) }) }}</label>
           <el-slider v-model="expressionWeight" :min="0" :max="1" :step="0.05" />
           <div class="button-row">
-            <el-button type="primary" :disabled="!selectedExpressionId" @click="previewExpressionMix">预览表情</el-button>
+            <el-button type="primary" :disabled="!selectedExpressionId" @click="previewExpressionMix">{{ t('petControl.expression.preview') }}</el-button>
           </div>
 
-          <label class="field-label">参数覆盖</label>
-          <el-select v-model="selectedParameterId" class="full-field" filterable placeholder="请选择">
+          <label class="field-label">{{ t('petControl.expression.parameterOverride') }}</label>
+          <el-select v-model="selectedParameterId" class="full-field" filterable :placeholder="t('petControl.selectPlaceholder')">
             <el-option
               v-for="parameter in parameterOptions"
               :key="parameter.id"
@@ -209,10 +209,10 @@
               :value="parameter.id"
             />
           </el-select>
-          <label class="field-label">参数值 {{ parameterValue.toFixed(2) }}</label>
+          <label class="field-label">{{ t('petControl.expression.parameterValue', { value: parameterValue.toFixed(2) }) }}</label>
           <el-slider v-model="parameterValue" :min="selectedParameterRange.min" :max="selectedParameterRange.max" :step="selectedParameterStep" />
           <div class="button-row">
-            <el-button plain :disabled="!selectedParameterId" @click="previewParameterOverride">预览参数</el-button>
+            <el-button plain :disabled="!selectedParameterId" @click="previewParameterOverride">{{ t('petControl.expression.previewParameter') }}</el-button>
           </div>
         </el-card>
         </details>
@@ -220,12 +220,12 @@
         <el-card class="control-card motion-card" shadow="never">
           <template #header>
             <div class="card-heading">
-              <span>动作与位置</span>
-              <el-tag size="small" type="info">{{ state.placement === 'free' ? '自由' : placementLabel(state.placement) }}</el-tag>
+              <span>{{ t('petControl.motion.title') }}</span>
+              <el-tag size="small" type="info">{{ state.placement === 'free' ? t('petControl.motion.free') : placementLabel(state.placement) }}</el-tag>
             </div>
           </template>
-          <label class="field-label">动作预览</label>
-          <el-select v-model="selectedMotionId" class="full-field" filterable placeholder="请选择">
+          <label class="field-label">{{ t('petControl.motion.preview') }}</label>
+          <el-select v-model="selectedMotionId" class="full-field" filterable :placeholder="t('petControl.selectPlaceholder')">
             <el-option
               v-for="motion in motionOptions"
               :key="motion.id"
@@ -234,10 +234,10 @@
             />
           </el-select>
           <div class="button-row">
-            <el-button plain :disabled="!selectedMotionId" @click="previewMotion">播放</el-button>
+            <el-button plain :disabled="!selectedMotionId" @click="previewMotion">{{ t('petControl.motion.play') }}</el-button>
           </div>
 
-          <label class="field-label">模型锚点</label>
+          <label class="field-label">{{ t('petControl.motion.anchor') }}</label>
           <div class="position-grid position-grid--labeled">
             <label>
               <span>X</span>
@@ -249,21 +249,21 @@
             </label>
           </div>
           <div class="button-row">
-            <el-button plain :disabled="state.locked" @click="applyPosition">保存锚点</el-button>
-            <el-button plain :loading="refreshingPet" :disabled="refreshingPet" @click="refresh">刷新桌宠状态</el-button>
+            <el-button plain :disabled="state.locked" @click="applyPosition">{{ t('petControl.motion.saveAnchor') }}</el-button>
+            <el-button plain :loading="refreshingPet" :disabled="refreshingPet" @click="refresh">{{ t('petControl.motion.refresh') }}</el-button>
           </div>
-          <label class="field-label">屏幕停靠</label>
+          <label class="field-label">{{ t('petControl.motion.screenDock') }}</label>
           <div class="form-grid compact-grid">
-            <el-select v-model="selectedDisplayId" class="full-field" placeholder="选择屏幕">
+            <el-select v-model="selectedDisplayId" class="full-field" :placeholder="t('petControl.motion.selectDisplay')">
               <el-option :label="defaultDisplayLabel" :value="null" />
               <el-option v-for="display in displayOptions" :key="display.id" :label="displayOptionLabel(display)" :value="display.id" />
             </el-select>
-            <el-select v-model="selectedPlacement" class="full-field" placeholder="停靠位置">
+            <el-select v-model="selectedPlacement" class="full-field" :placeholder="t('petControl.motion.selectPlacement')">
               <el-option v-for="option in placementOptions" :key="option.value" :label="option.label" :value="option.value" />
             </el-select>
           </div>
           <div class="button-row">
-            <el-button type="primary" plain @click="applyPlacement">应用停靠</el-button>
+            <el-button type="primary" plain @click="applyPlacement">{{ t('petControl.motion.applyPlacement') }}</el-button>
           </div>
         </el-card>
 
@@ -272,54 +272,54 @@
         <el-card class="control-card behavior-card" shadow="never">
           <template #header>
             <div class="card-heading">
-              <span>待机人格</span>
+              <span>{{ t('petControl.behavior.title') }}</span>
             </div>
           </template>
-          <label class="field-label">桌宠状态</label>
-          <el-select v-model="selectedBehaviorState" class="full-field" placeholder="选择行为状态">
+          <label class="field-label">{{ t('petControl.behavior.state') }}</label>
+          <el-select v-model="selectedBehaviorState" class="full-field" :placeholder="t('petControl.behavior.selectState')">
             <el-option v-for="option in behaviorStateOptions" :key="option.value" :label="option.label" :value="option.value" />
           </el-select>
           <div class="button-row">
-            <el-button plain @click="applyBehaviorState">保存行为状态</el-button>
+            <el-button plain @click="applyBehaviorState">{{ t('petControl.behavior.save') }}</el-button>
           </div>
           <div class="form-grid compact-grid">
-            <el-input v-model="idleProfileDraft.mood" placeholder="心情，例如轻松、专注" clearable />
-            <el-input v-model="idleProfileDraft.supportStyle" placeholder="回应方式，例如安静陪伴" clearable />
-            <el-input v-model="idleProfileDraft.relationshipStage" placeholder="关系阶段，例如熟悉期" clearable />
-            <el-input v-model="idleProfileDraft.relationshipTrend" placeholder="关系变化，例如升温" clearable />
+            <el-input v-model="idleProfileDraft.mood" :placeholder="t('petControl.behavior.moodPlaceholder')" clearable />
+            <el-input v-model="idleProfileDraft.supportStyle" :placeholder="t('petControl.behavior.supportStylePlaceholder')" clearable />
+            <el-input v-model="idleProfileDraft.relationshipStage" :placeholder="t('petControl.behavior.relationshipStagePlaceholder')" clearable />
+            <el-input v-model="idleProfileDraft.relationshipTrend" :placeholder="t('petControl.behavior.relationshipTrendPlaceholder')" clearable />
           </div>
           <div class="form-grid compact-grid">
-            <label class="field-label">空闲活跃度 {{ ratioPercent(idleProfileDraft.energy) }}</label>
+            <label class="field-label">{{ t('petControl.behavior.energy', { value: ratioPercent(idleProfileDraft.energy) }) }}</label>
             <el-slider v-model="idleProfileDraft.energy" :min="0" :max="1" :step="0.05" />
-            <label class="field-label">互动亲和度 {{ ratioPercent(idleProfileDraft.affinity) }}</label>
+            <label class="field-label">{{ t('petControl.behavior.affinity', { value: ratioPercent(idleProfileDraft.affinity) }) }}</label>
             <el-slider v-model="idleProfileDraft.affinity" :min="0" :max="1" :step="0.05" />
-            <label class="field-label">信任感 {{ ratioPercent(idleProfileDraft.trust) }}</label>
+            <label class="field-label">{{ t('petControl.behavior.trust', { value: ratioPercent(idleProfileDraft.trust) }) }}</label>
             <el-slider v-model="idleProfileDraft.trust" :min="0" :max="1" :step="0.05" />
-            <label class="field-label">关系亲密度 {{ ratioPercent(idleProfileDraft.intimacy) }}</label>
+            <label class="field-label">{{ t('petControl.behavior.intimacy', { value: ratioPercent(idleProfileDraft.intimacy) }) }}</label>
             <el-slider v-model="idleProfileDraft.intimacy" :min="0" :max="1" :step="0.05" />
           </div>
           <div class="button-row">
-            <el-button type="primary" plain @click="applyIdleProfile">保存待机配置</el-button>
+            <el-button type="primary" plain @click="applyIdleProfile">{{ t('petControl.behavior.saveProfile') }}</el-button>
           </div>
         </el-card>
         <el-card class="control-card recovery-card" shadow="never">
           <template #header>
             <div class="card-heading">
-              <span>显示与渲染控制</span>
-              <el-tag size="small" :type="state.ready ? 'success' : 'warning'">{{ state.ready ? '已加载' : '未就绪' }}</el-tag>
+              <span>{{ t('petControl.recovery.title') }}</span>
+              <el-tag size="small" :type="state.ready ? 'success' : 'warning'">{{ state.ready ? t('petControl.status.loaded') : t('petControl.status.notReady') }}</el-tag>
             </div>
           </template>
           <div class="recovery-actions">
-            <el-button type="primary" plain @click="dockBottomRight">停靠右下角</el-button>
-            <el-button plain @click="reloadRenderer">重新加载 Live2D</el-button>
-            <el-button plain @click="showPet">显示桌宠</el-button>
-            <el-button plain @click="hidePet">隐藏桌宠</el-button>
+            <el-button type="primary" plain @click="dockBottomRight">{{ t('petControl.recovery.dockBottomRight') }}</el-button>
+            <el-button plain @click="reloadRenderer">{{ t('petControl.recovery.reloadRenderer') }}</el-button>
+            <el-button plain @click="showPet">{{ t('petControl.recovery.show') }}</el-button>
+            <el-button plain @click="hidePet">{{ t('petControl.recovery.hide') }}</el-button>
           </div>
-          <label class="field-label">口型同步音频 URL</label>
+          <label class="field-label">{{ t('petControl.recovery.audioUrl') }}</label>
           <div class="model-import-row">
-            <el-input v-model="lipSyncAudioUrl" placeholder="http(s) 音频地址" clearable />
-            <el-button plain :disabled="!lipSyncAudioUrl.trim()" @click="startLipSync">开始口型同步</el-button>
-            <el-button plain @click="stopLipSync">停止口型同步</el-button>
+            <el-input v-model="lipSyncAudioUrl" :placeholder="t('petControl.recovery.audioUrlPlaceholder')" clearable />
+            <el-button plain :disabled="!lipSyncAudioUrl.trim()" @click="startLipSync">{{ t('petControl.recovery.startLipSync') }}</el-button>
+            <el-button plain @click="stopLipSync">{{ t('petControl.recovery.stopLipSync') }}</el-button>
           </div>
         </el-card>
         </details>
@@ -354,7 +354,7 @@ import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import PetModelManager from '../components/PetModelManager.vue'
 import PetResidenceControls from '../components/PetResidenceControls.vue'
 import RelationshipHistoryDrawer from '../components/RelationshipHistoryDrawer.vue'
-import { useI18n } from '@/i18n'
+import { t } from '@/i18n'
 import { petControl, type PetBehaviorState } from '@/utils/petControl'
 import {
   DEFAULT_PET_CONTROL_STATE,
@@ -373,7 +373,6 @@ import { AVATAR_COMMAND_VERSION, type AvatarAction, type AvatarCapabilitySnapsho
 
 type PlacementPreset = Exclude<PetPlacement, 'free'>
 
-const { t } = useI18n()
 const state = reactive<PetControlState>({ ...DEFAULT_PET_CONTROL_STATE })
 const catalog = reactive<PetModelCatalogPayload>({ activeModelId: null, models: [] })
 const avatarCapabilities = ref<AvatarCapabilitySnapshot | null>(null)
@@ -414,11 +413,10 @@ const hasLoadedState = ref(false)
 const operationMessage = ref('')
 const operationAlertType = ref<'success' | 'warning' | 'info' | 'error'>('info')
 const relationshipHistoryVisible = ref(false)
-const localModelRefreshHint = '如果模型文件是在资源管理器里删除或补齐的，请点击“刷新”同步列表。'
 const modelSourceLabels = {
-  bundled: '内置',
-  local: '本地',
-  plugin: '插件',
+  bundled: 'petControl.modelSource.bundled',
+  local: 'petControl.modelSource.local',
+  plugin: 'petControl.modelSource.plugin',
 } as const
 const ratioPercent = (value: number) => `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`
 let refreshSequence = 0
@@ -436,19 +434,19 @@ const activeSizePreset = computed(() =>
 )
 const localModelPlaceholder = computed(() => (
   localModelType.value === 'live2d'
-    ? '.model3.json、文件夹或 .zip 路径'
-    : '.vrm 文件或文件夹路径'
+    ? t('petControl.model.placeholderLive2d')
+    : t('petControl.model.placeholderVrm')
 ))
 const modelSourceLabel = (model: Pick<PetModelDefinition, 'source'>): string =>
-  model.source ? modelSourceLabels[model.source] : '内置'
+  t(model.source ? modelSourceLabels[model.source] : 'petControl.modelSource.bundled')
 const modelOptionLabel = (model: PetModelDefinition): string =>
   `${model.name} · ${model.type.toUpperCase()} · ${modelSourceLabel(model)}`
-const currentModelSourceLabel = computed(() => currentModel.value ? modelSourceLabel(currentModel.value) : '未选择')
+const currentModelSourceLabel = computed(() => currentModel.value ? modelSourceLabel(currentModel.value) : t('petControl.modelSource.none'))
 const modelSyncHint = computed(() => {
   if (!state.modelId || !currentModel.value || state.modelId === currentModel.value.id) {
     return ''
   }
-  return `当前模型不可用，已回退到 ${currentModel.value.name}。`
+  return t('petControl.model.syncFallback', { name: currentModel.value.name })
 })
 
 const currentManifest = computed(() => currentModel.value?.manifest ?? null)
@@ -459,29 +457,31 @@ const emotionOptions = computed(() => currentModel.value?.emotions ?? [])
 const displayOptions = computed(() => displays.items)
 const defaultDisplayLabel = computed(() => {
   const activeDisplay = displays.items.find((display) => display.id === displays.activeDisplayId)
-  return activeDisplay ? `默认屏幕 · ${displayOptionLabel(activeDisplay)}` : '默认屏幕'
+  return activeDisplay
+    ? t('petControl.display.defaultWithLabel', { label: displayOptionLabel(activeDisplay) })
+    : t('petControl.display.default')
 })
-const behaviorStateOptions: Array<{ label: string; value: PetBehaviorState }> = [
-  { label: '待机', value: 'idle' },
-  { label: '困倦', value: 'sleepy' },
-  { label: '等待', value: 'waiting' },
-  { label: '好奇', value: 'curious' },
-  { label: '专注', value: 'focused' },
-  { label: '思考中', value: 'thinking' },
-  { label: '说话中', value: 'speaking' },
-  { label: '回应中', value: 'reacting' },
-  { label: '被打断后停顿', value: 'interrupted' },
-]
+const behaviorStateOptions = computed<Array<{ label: string; value: PetBehaviorState }>>(() => [
+  { label: t('petControl.behaviorState.idle'), value: 'idle' },
+  { label: t('petControl.behaviorState.sleepy'), value: 'sleepy' },
+  { label: t('petControl.behaviorState.waiting'), value: 'waiting' },
+  { label: t('petControl.behaviorState.curious'), value: 'curious' },
+  { label: t('petControl.behaviorState.focused'), value: 'focused' },
+  { label: t('petControl.behaviorState.thinking'), value: 'thinking' },
+  { label: t('petControl.behaviorState.speaking'), value: 'speaking' },
+  { label: t('petControl.behaviorState.reacting'), value: 'reacting' },
+  { label: t('petControl.behaviorState.interrupted'), value: 'interrupted' },
+])
 const capabilityRows = computed(() => {
   const actions = avatarCapabilities.value?.actions
   return [
-    { key: 'behavior', label: '行为', enabled: Boolean(actions?.behavior) },
-    { key: 'affect', label: '情绪', enabled: Boolean(actions?.affect) },
-    { key: 'gaze', label: '注视', enabled: Boolean(actions?.gaze) },
-    { key: 'motion', label: '动作', enabled: Boolean(actions?.motion) },
-    { key: 'expression', label: '表情', enabled: Boolean(actions?.expression) },
-    { key: 'parameterPatch', label: '参数', enabled: Boolean(actions?.parameterPatch) },
-    { key: 'viseme', label: '口型', enabled: Boolean(actions?.viseme) },
+    { key: 'behavior', label: t('petControl.capabilityRow.behavior'), enabled: Boolean(actions?.behavior) },
+    { key: 'affect', label: t('petControl.capabilityRow.affect'), enabled: Boolean(actions?.affect) },
+    { key: 'gaze', label: t('petControl.capabilityRow.gaze'), enabled: Boolean(actions?.gaze) },
+    { key: 'motion', label: t('petControl.capabilityRow.motion'), enabled: Boolean(actions?.motion) },
+    { key: 'expression', label: t('petControl.capabilityRow.expression'), enabled: Boolean(actions?.expression) },
+    { key: 'parameterPatch', label: t('petControl.capabilityRow.parameterPatch'), enabled: Boolean(actions?.parameterPatch) },
+    { key: 'viseme', label: t('petControl.capabilityRow.viseme'), enabled: Boolean(actions?.viseme) },
   ]
 })
 const sizePresetOptions = [
@@ -490,17 +490,17 @@ const sizePresetOptions = [
   { label: 'L', value: 'large', scale: 0.5 },
   { label: 'XL', value: 'xlarge', scale: 0.58 },
 ]
-const fallbackPlacementOptions: Array<{ label: string; value: PlacementPreset }> = [
-  { label: '右下角', value: 'bottom-right' },
-  { label: '左下角', value: 'bottom-left' },
-  { label: '右上角', value: 'top-right' },
-  { label: '左上角', value: 'top-left' },
-  { label: '居中', value: 'center' },
-]
+const fallbackPlacementOptions = computed<Array<{ label: string; value: PlacementPreset }>>(() => [
+  { label: t('petControl.placement.bottomRight'), value: 'bottom-right' },
+  { label: t('petControl.placement.bottomLeft'), value: 'bottom-left' },
+  { label: t('petControl.placement.topRight'), value: 'top-right' },
+  { label: t('petControl.placement.topLeft'), value: 'top-left' },
+  { label: t('petControl.placement.center'), value: 'center' },
+])
 const placementOptions = computed(() => (
   placementPresets.value.length
     ? placementPresets.value.map((preset) => ({ label: preset.name, value: preset.placement }))
-    : fallbackPlacementOptions
+    : fallbackPlacementOptions.value
 ))
 const selectedParameter = computed(() => parameterOptions.value.find((item) => item.id === selectedParameterId.value) ?? null)
 const selectedParameterRange = computed(() => selectedParameter.value
@@ -514,81 +514,83 @@ const selectedParameterStep = computed(() => {
 const effectiveInteraction = computed(() => {
   if (!state.ready) {
     return {
-      label: '等待渲染',
-      strategy: '等待模型',
-      detail: '渲染未就绪',
+      label: t('petControl.interaction.waitingLabel'),
+      strategy: t('petControl.interaction.waitingStrategy'),
+      detail: t('petControl.interaction.waitingDetail'),
     }
   }
 
   if (state.locked) {
     return {
-      label: state.clickThrough ? '专注常驻' : '锁定守护',
-      strategy: state.clickThrough ? '鼠标穿透' : '锁定交互',
-      detail: state.interactMode ? '拖动模式已挂起，需先解锁' : '位置已锁定',
+      label: state.clickThrough ? t('petControl.interaction.focusLabel') : t('petControl.interaction.lockedLabel'),
+      strategy: state.clickThrough ? t('petControl.interaction.clickThroughStrategy') : t('petControl.interaction.lockedStrategy'),
+      detail: state.interactMode ? t('petControl.interaction.lockedDetailInteract') : t('petControl.interaction.lockedDetail'),
     }
   }
 
   if (state.clickThrough) {
     return {
-      label: '穿透常驻',
-      strategy: '鼠标穿透',
-      detail: state.interactMode ? '拖动模式待命，关闭穿透后生效' : '不拦截主屏幕操作',
+      label: t('petControl.interaction.passiveLabel'),
+      strategy: t('petControl.interaction.clickThroughStrategy'),
+      detail: state.interactMode ? t('petControl.interaction.passiveDetailInteract') : t('petControl.interaction.passiveDetail'),
     }
   }
 
   if (state.interactMode) {
     return {
-      label: '调整位置',
-      strategy: '拖动模式',
-      detail: '可拖动和滚轮缩放',
+      label: t('petControl.interaction.adjustLabel'),
+      strategy: t('petControl.interaction.adjustStrategy'),
+      detail: t('petControl.interaction.adjustDetail'),
     }
   }
 
   return {
-    label: '可交互',
-    strategy: '接收交互',
-    detail: '常规点击模式',
+    label: t('petControl.interaction.interactiveLabel'),
+    strategy: t('petControl.interaction.interactiveStrategy'),
+    detail: t('petControl.interaction.interactiveDetail'),
   }
 })
 
-const formatCoordinate = (value: number | null) => (typeof value === 'number' ? Math.round(value).toString() : '自动')
+const formatCoordinate = (value: number | null) => (typeof value === 'number' ? Math.round(value).toString() : t('petControl.status.auto'))
 
-const placementLabel = (value: PetPlacement) => placementOptions.value.find((option) => option.value === value)?.label ?? '自由位置'
+const placementLabel = (value: PetPlacement) => placementOptions.value.find((option) => option.value === value)?.label ?? t('petControl.placement.freePosition')
 
 const displayOptionLabel = (display: PetDisplayInfo) => {
   const size = `${Math.round(display.workArea.width)}×${Math.round(display.workArea.height)}`
   const index = displays.items.findIndex((item) => item.id === display.id)
-  const label = index >= 0 ? `屏幕 ${index + 1}` : display.label.replace(/\s*Primary\s*/i, '').replace(/\s*\([^)]*\)\s*$/, '').trim() || '屏幕'
-  return `${label}${display.primary ? ' · 主屏幕' : ''} · ${size}`
+  const label = index >= 0
+    ? t('petControl.display.screen', { index: index + 1 })
+    : display.label.replace(/\s*Primary\s*/i, '').replace(/\s*\([^)]*\)\s*$/, '').trim() || t('petControl.display.screenFallback')
+  return `${label}${display.primary ? t('petControl.display.primary') : ''} · ${size}`
 }
 
 const activeDisplayLabel = computed(() => {
   const displayId = state.displayId ?? displays.activeDisplayId
   const display = displays.items.find((item) => item.id === displayId)
-  return display ? displayOptionLabel(display) : '默认屏幕'
+  return display ? displayOptionLabel(display) : t('petControl.display.default')
 })
 
 const emotionOptionLabel = (emotion: PetEmotionPreset) =>
-  `${emotion.label} · 动作 ${emotion.motions.length} · 表情 ${emotion.expressions.length}`
+  t('petControl.expression.emotionOption', { label: emotion.label, motions: emotion.motions.length, expressions: emotion.expressions.length })
 
 const statusCards = computed(() => [
   {
-    label: '桌宠层',
-    value: state.ready ? '已加载' : hasLoadedState.value ? '未就绪' : '加载中',
-    detail: currentModel.value?.name ?? '等待模型清单',
+    label: t('petControl.card.layer'),
+    value: state.ready ? t('petControl.status.loaded') : hasLoadedState.value ? t('petControl.status.notReady') : t('petControl.status.loading'),
+    detail: currentModel.value?.name ?? t('petControl.card.waitingManifest'),
   },
   {
-    label: '鼠标策略',
+    label: t('petControl.card.mouseStrategy'),
     value: effectiveInteraction.value.strategy,
     detail: effectiveInteraction.value.detail,
   },
   {
-    label: '外观参数',
+    label: t('petControl.appearance.title'),
     value: `${state.scale.toFixed(2)} × ${Math.round(state.opacity * 100)}%`,
-    detail: `锚点 X ${formatCoordinate(state.positionX)} · Y ${formatCoordinate(state.positionY)}`,
+    detail: t('petControl.card.anchorDetail', { x: formatCoordinate(state.positionX), y: formatCoordinate(state.positionY) }),
   },
   {
-    label: '停靠位置',
+    label: t('petControl.card.dockPosition'),
     value: placementLabel(state.placement),
     detail: activeDisplayLabel.value,
   },
@@ -667,34 +669,34 @@ const scheduleReadyRetry = () => {
 const errorMessage = (error: unknown, fallback: string): string => {
   const message = error instanceof Error && error.message ? error.message : fallback
   if (message.includes('Local model not found') || message.includes('Local VRM asset not found') || message.includes('Local model asset not found')) {
-    return `${message}。${localModelRefreshHint}`
+    return t('petControl.error.modelNotFoundSuffix', { message, hint: t('petControl.model.refreshHint') })
   }
   if (message.includes('FileReferences.Moc')) {
-    return 'Live2D 模型缺少 Moc 引用。请检查 .model3.json 中的 FileReferences.Moc，并确认对应 .moc3 文件存在。'
+    return t('petControl.error.live2dMissingMoc')
   }
   if (message.includes('FileReferences.Textures')) {
-    return 'Live2D 模型缺少贴图引用。请检查 .model3.json 中的 FileReferences.Textures，并确认贴图文件存在。'
+    return t('petControl.error.live2dMissingTextures')
   }
   if (message.includes('missing or unsafe referenced assets')) {
     return message.replace(
       'Live2D model has missing or unsafe referenced assets:',
-      'Live2D 模型资源不完整或引用路径不安全：',
+      t('petControl.error.live2dUnsafeAssets'),
     )
   }
   if (message.includes('model directory is outside the model library')) {
-    return 'Live2D 模型目录不在受管理的模型库内，请重新选择模型文件夹。'
+    return t('petControl.error.live2dOutsideLibrary')
   }
   if (message.includes('No .model3.json file found')) {
-    return '所选文件夹中未找到 .model3.json 文件。'
+    return t('petControl.error.noModel3Json')
   }
   if (message.includes('Choose a Live2D .model3.json file')) {
-    return '请选择 Live2D .model3.json 文件、模型文件夹或 .zip 压缩包。'
+    return t('petControl.error.chooseModel3Json')
   }
   if (message.includes('Local model path does not exist')) {
-    return '本地模型路径不存在。'
+    return t('petControl.error.localModelMissing')
   }
   if (message.includes('Imported model was copied, but it could not be indexed')) {
-    return '模型已复制，但后端资源检查未通过。请确认 .model3.json、Moc 和贴图文件完整后再导入。'
+    return t('petControl.error.importIndexFailed')
   }
   return message
 }
@@ -702,7 +704,7 @@ const errorMessage = (error: unknown, fallback: string): string => {
 const runPetOperation = async <T,>(
   task: () => Promise<T>,
   successMessage?: string,
-  failureMessage = '桌宠操作失败',
+  failureMessage = t('petControl.error.operationFailed'),
   action = 'other',
 ): Promise<T | null> => {
   if (operationLoading.value) return null
@@ -748,7 +750,7 @@ const applyModelImportResult = (result: {
   syncDrafts()
 }
 
-const showPetLayerAfterModelChange = async (failureMessage = '桌宠模型已更新，但显示桌宠层失败') => {
+const showPetLayerAfterModelChange = async (failureMessage = t('petControl.error.showLayerFailed')) => {
   try {
     await petControl.setVisible(true)
   } catch (error) {
@@ -768,7 +770,7 @@ const refresh = async () => {
       petControl.getDisplays(),
       typeof petControl.getPlacementPresets === 'function'
         ? petControl.getPlacementPresets().catch((error) => {
-            console.warn('读取桌宠停靠预设失败', error)
+            console.warn(t('petControl.log.loadPresetsFailed'), error)
             return null
           })
         : Promise.resolve(null),
@@ -798,7 +800,7 @@ const refresh = async () => {
     if (requestId !== refreshSequence) return
     hasLoadedState.value = true
     operationAlertType.value = 'error'
-    operationMessage.value = errorMessage(error, '无法读取桌宠状态')
+    operationMessage.value = errorMessage(error, t('petControl.error.stateReadFailed'))
     ElMessage.error(operationMessage.value)
   } finally {
     if (requestId === refreshSequence) refreshingPet.value = false
@@ -809,8 +811,8 @@ const applyModel = async () => {
   if (!selectedModelId.value) return
   const result = await runPetOperation(
     () => petControl.setModel(selectedModelId.value),
-    '模型已切换',
-    '切换模型失败',
+    t('petControl.success.modelSwitched'),
+    t('petControl.error.modelSwitchFailed'),
     'model-apply',
   )
   if (!result) return
@@ -832,7 +834,7 @@ const applyOpacity = async (value: number | number[]) => {
 const applyLipSyncProfile = async () => {
   const result = await runPetOperation(
     () => petControl.updateConfig({ lipSyncProfile: { ...lipSyncDraft } }),
-    '口型校准已应用',
+    t('petControl.success.lipSyncApplied'),
   )
   applyState(result)
   if (result) Object.assign(lipSyncDraft, result.lipSyncProfile)
@@ -845,7 +847,7 @@ const resetLipSyncProfile = async () => {
 
 const applySizePreset = async (scale: number) => {
   scaleDraft.value = scale
-  applyState(await runPetOperation(() => petControl.setScale(scale), '尺寸预设已应用'))
+  applyState(await runPetOperation(() => petControl.setScale(scale), t('petControl.success.sizePresetApplied')))
 }
 
 const setDoNotDisturb = async (enabled: string | number | boolean) => {
@@ -853,8 +855,8 @@ const setDoNotDisturb = async (enabled: string | number | boolean) => {
   applyState(await runPetOperation(
     () => petControl.setDoNotDisturb(isEnabled),
     // eslint-disable-next-line no-extra-boolean-cast -- keep the status branch tied to the normalized boolean value.
-    Boolean(enabled) ? '免打扰已开启' : '免打扰已关闭',
-    '更新免打扰失败',
+    Boolean(enabled) ? t('petControl.success.dndOn') : t('petControl.success.dndOff'),
+    t('petControl.error.dndFailed'),
     'dnd',
   ))
 }
@@ -863,13 +865,17 @@ const importLocalModel = async (sourceOverride?: string, modelTypeOverride?: Pet
   const sourcePath = (sourceOverride ?? localModelSourcePath.value).trim()
   const modelType = modelTypeOverride ?? localModelType.value
   if (!sourcePath) {
-    ElMessage.warning(modelType === 'live2d' ? '请输入 .model3.json 文件或模型文件夹路径' : '请输入 .vrm 文件路径')
+    ElMessage.warning(
+      modelType === 'live2d'
+        ? t('petControl.warning.live2dPathRequired')
+        : t('petControl.warning.vrmPathRequired'),
+    )
     return
   }
   const result = await runPetOperation(
     () => petControl.importLocalModel(sourcePath, modelType),
-    modelType === 'live2d' ? 'Live2D 模型已导入' : 'VRM 模型已导入',
-    '导入模型失败',
+    modelType === 'live2d' ? t('petControl.success.live2dImported') : t('petControl.success.vrmImported'),
+    t('petControl.error.modelImportFailed'),
     'model-import',
   )
   if (!result) return
@@ -882,7 +888,7 @@ const oneClickImportModelFolder = async () => {
   const result = await runPetOperation(
     () => petControl.importLocalModelFromPicker('auto'),
     undefined,
-    '模型文件夹导入失败',
+    t('petControl.error.modelFolderImportFailed'),
     'model-import',
   )
   if (!result || result.canceled) return
@@ -891,8 +897,8 @@ const oneClickImportModelFolder = async () => {
   await refresh()
   operationAlertType.value = 'success'
   operationMessage.value = result.modelType === 'vrm'
-    ? '3D/VRM 模型已导入并切换到桌宠层'
-    : 'Live2D 模型已导入并切换到桌宠层'
+    ? t('petControl.success.vrmImportedAndShown')
+    : t('petControl.success.live2dImportedAndShown')
   ElMessage.success(operationMessage.value)
 }
 
@@ -900,7 +906,7 @@ const pickAndImportLocalModel = async () => {
   const picked = await runPetOperation(
     () => petControl.pickLocalModel(localModelType.value),
     undefined,
-    '打开模型选择器失败',
+    t('petControl.error.pickerFailed'),
     'model-browse',
   )
   if (!picked || picked.canceled || !picked.sourcePath) return
@@ -913,11 +919,11 @@ const deleteCurrentLocalModel = async () => {
   if (!model || model.source !== 'local') return
   try {
     await ElMessageBox.confirm(
-      `将从本地模型库删除「${model.name}」，此操作会移除该模型文件并切换到可用模型。`,
-      '删除本地模型',
+      t('petControl.model.deleteConfirm', { name: model.name }),
+      t('petControl.model.deleteTitle'),
       {
-        confirmButtonText: '删除模型',
-        cancelButtonText: '取消',
+        confirmButtonText: t('petControl.model.deleteConfirmButton'),
+        cancelButtonText: t('petControl.action.cancel'),
         type: 'warning',
       },
     )
@@ -927,8 +933,8 @@ const deleteCurrentLocalModel = async () => {
 
   const result = await runPetOperation(
     () => petControl.deleteLocalModel(model.id),
-    '本地模型已删除',
-    '删除本地模型失败',
+    t('petControl.success.modelDeleted'),
+    t('petControl.error.modelDeleteFailed'),
     'model-delete',
   )
   if (!result) return
@@ -936,7 +942,7 @@ const deleteCurrentLocalModel = async () => {
   catalog.activeModelId = result.catalog.activeModelId
   catalog.models = result.catalog.models
   syncDrafts()
-  await showPetLayerAfterModelChange('本地模型已删除，但显示桌宠层失败')
+  await showPetLayerAfterModelChange(t('petControl.error.modelDeletedShowFailed'))
   await refresh()
 }
 
@@ -946,12 +952,12 @@ const previewExpressionMix = async () => {
     expressions: [{ expression: selectedExpressionId.value, weight: expressionWeight.value }],
     intensity: expressionWeight.value,
     durationMs: 1800,
-  }), '表情混合已发送')
+  }), t('petControl.success.expressionMixSent'))
 }
 
 const previewEmotionPreset = async () => {
   if (!selectedEmotionId.value) return
-  await runPetOperation(() => petControl.triggerEmotion(selectedEmotionId.value), '情绪预设已发送')
+  await runPetOperation(() => petControl.triggerEmotion(selectedEmotionId.value), t('petControl.success.emotionPresetSent'))
 }
 
 const previewParameterOverride = async () => {
@@ -961,13 +967,13 @@ const previewParameterOverride = async () => {
     parameterOverrides: [{ id: selectedParameterId.value, value: parameterValue.value, weight: 1 }],
     intensity: 1,
     durationMs: 1800,
-  }), '参数覆盖已发送')
+  }), t('petControl.success.parameterOverrideSent'))
 }
 
 const previewMotion = async () => {
   const motion = motionOptions.value.find((item) => item.id === selectedMotionId.value)
   if (!motion) return
-  await runPetOperation(() => petControl.triggerMotion(motion.group, motion.index), '动作已发送')
+  await runPetOperation(() => petControl.triggerMotion(motion.group, motion.index), t('petControl.success.motionSent'))
 }
 
 const buildAvatarCommand = (action: AvatarAction): AvatarCommand => {
@@ -991,41 +997,41 @@ const buildAvatarCommand = (action: AvatarAction): AvatarCommand => {
 const sendAvatarAction = async (action: AvatarAction, successMessage: string) => {
   const capability = avatarCapabilities.value?.actions[action.type]
   if (!capability) {
-    ElMessage.info('当前模型不支持该能力')
+    ElMessage.info(t('petControl.error.capabilityUnsupported'))
     return
   }
   const result = await runPetOperation(
     () => petControl.triggerAvatarCommand(buildAvatarCommand(action)),
     successMessage,
-    '发送模型动作失败',
+    t('petControl.error.avatarActionFailed'),
     `avatar-${action.type}`,
   )
   if (result && result.status !== 'completed' && result.status !== 'started' && result.status !== 'accepted') {
     operationAlertType.value = 'warning'
-    operationMessage.value = result.message ?? `模型动作状态：${result.status}`
+    operationMessage.value = result.message ?? t('petControl.avatar.status', { status: result.status })
   }
 }
 
 const previewGaze = async () => {
-  await sendAvatarAction({ type: 'gaze', target: { x: 0, y: 0, z: 0 }, strength: 0.8, holdMs: 1800 }, '已发送注视中心')
+  await sendAvatarAction({ type: 'gaze', target: { x: 0, y: 0, z: 0 }, strength: 0.8, holdMs: 1800 }, t('petControl.success.gazeSent'))
 }
 
 const cancelAvatarActions = async () => {
-  await sendAvatarAction({ type: 'cancel' }, '已停止当前模型动作')
+  await sendAvatarAction({ type: 'cancel' }, t('petControl.success.avatarCancelSent'))
 }
 
 const applyPosition = async () => {
-  applyState(await runPetOperation(() => petControl.move(positionXDraft.value, positionYDraft.value), '位置已应用'))
+  applyState(await runPetOperation(() => petControl.move(positionXDraft.value, positionYDraft.value), t('petControl.success.positionApplied')))
   await refresh()
 }
 
 const applyPlacement = async () => {
-  applyState(await runPetOperation(() => petControl.place(selectedPlacement.value, selectedDisplayId.value), '屏幕停靠已应用'))
+  applyState(await runPetOperation(() => petControl.place(selectedPlacement.value, selectedDisplayId.value), t('petControl.success.placementApplied')))
   await refresh()
 }
 
 const applyBehaviorState = async () => {
-  await runPetOperation(() => petControl.setBehaviorState(selectedBehaviorState.value, 1800), '行为状态已应用')
+  await runPetOperation(() => petControl.setBehaviorState(selectedBehaviorState.value, 1800), t('petControl.success.behaviorStateApplied'))
 }
 
 const normalizeIdleText = (value: string | null | undefined): string | null => {
@@ -1043,14 +1049,14 @@ const applyIdleProfile = async () => {
     affinity: idleProfileDraft.affinity,
     trust: idleProfileDraft.trust,
     intimacy: idleProfileDraft.intimacy,
-  }), '待机画像已应用')
+  }), t('petControl.success.idleProfileApplied'))
 }
 
 const copyPromptContext = async () => {
   const prompt = currentModel.value?.promptContext
   if (!prompt) return
   await navigator.clipboard.writeText(prompt)
-  ElMessage.success('提示词上下文已复制')
+  ElMessage.success(t('petControl.success.promptCopied'))
 }
 
 const setClickThrough = async (enabled: string | number | boolean) => {
@@ -1062,7 +1068,7 @@ const setClickThrough = async (enabled: string | number | boolean) => {
       await petControl.setVisible(true)
     }
     return petControl.setClickThrough(clickThrough)
-  }, undefined, '更新鼠标穿透失败', 'click-through')
+  }, undefined, t('petControl.error.clickThroughFailed'), 'click-through')
   applyState(result)
   if (result !== null) await refresh()
 }
@@ -1071,7 +1077,7 @@ const setLocked = async (enabled: string | number | boolean) => {
   applyState(await runPetOperation(
     () => petControl.setLocked(Boolean(enabled)),
     undefined,
-    '更新位置锁定失败',
+    t('petControl.error.lockFailed'),
     'lock',
   ))
 }
@@ -1079,8 +1085,8 @@ const setLocked = async (enabled: string | number | boolean) => {
 const enterAdjustmentMode = async () => {
   const result = await runPetOperation(
     () => petControl.beginAdjustment(),
-    '已进入全屏位置调整',
-    '无法进入全屏位置调整',
+    t('petControl.success.adjustmentEntered'),
+    t('petControl.error.adjustmentFailed'),
     'adjustment',
   )
   applyState(result)
@@ -1096,18 +1102,18 @@ const restoreResidentMode = async () => {
     await petControl.setLocked(false)
     await petControl.setClickThrough(true)
     return petControl.snapBottomRight()
-  }, '已恢复穿透常驻', '恢复桌宠常驻失败', 'restore')
+  }, t('petControl.success.restoreResident'), t('petControl.error.restoreFailed'), 'restore')
   applyState(result)
   if (result !== null) await refresh()
 }
 
 const dockBottomRight = async () => {
-  applyState(await runPetOperation(() => petControl.snapBottomRight(), '已贴到右下角'))
+  applyState(await runPetOperation(() => petControl.snapBottomRight(), t('petControl.success.dockedBottomRight')))
   await refresh()
 }
 
 const reloadRenderer = async () => {
-  await runPetOperation(() => petControl.reloadRenderer(), 'Live2D 已请求重新加载')
+  await runPetOperation(() => petControl.reloadRenderer(), t('petControl.success.rendererReloaded'))
   readyRetryCount = 0
   scheduleReadyRetry()
 }
@@ -1115,23 +1121,23 @@ const reloadRenderer = async () => {
 const startLipSync = async () => {
   const audioUrl = lipSyncAudioUrl.value.trim()
   if (!audioUrl) {
-    ElMessage.warning('请输入 http(s) 音频地址')
+    ElMessage.warning(t('petControl.warning.audioUrlRequired'))
     return
   }
-  await runPetOperation(() => petControl.startLipSync(audioUrl), '口型同步已开始')
+  await runPetOperation(() => petControl.startLipSync(audioUrl), t('petControl.success.lipSyncStarted'))
 }
 
 const stopLipSync = async () => {
-  await runPetOperation(() => petControl.stopLipSync(), '口型同步已停止')
+  await runPetOperation(() => petControl.stopLipSync(), t('petControl.success.lipSyncStopped'))
 }
 
 const showPet = async () => {
-  const result = await runPetOperation(() => petControl.setVisible(true), '桌宠已显示')
+  const result = await runPetOperation(() => petControl.setVisible(true), t('petControl.success.petShown'))
   if (result !== null) await refresh()
 }
 
 const hidePet = async () => {
-  const result = await runPetOperation(() => petControl.setVisible(false), '桌宠已隐藏')
+  const result = await runPetOperation(() => petControl.setVisible(false), t('petControl.success.petHidden'))
   if (result !== null) await refresh()
 }
 

@@ -1,10 +1,10 @@
 <template>
-  <PanelShell title="插件管理" tone="companion">
+  <PanelShell :title="t('pluginPanel.title')" tone="companion">
     <div class="plugin-console">
-      <section class="plugin-toolbar" aria-label="插件操作">
+      <section class="plugin-toolbar" :aria-label="t('pluginPanel.actionsAria')">
         <div class="toolbar-actions">
-          <el-button plain :disabled="problemPluginCount === 0 && loadFailures.length === 0" @click="showProblemPlugins">筛选异常插件</el-button>
-<el-button type="primary" :loading="pluginsRequest.loading" @click="loadPlugins">刷新插件状态</el-button>
+          <el-button plain :disabled="problemPluginCount === 0 && loadFailures.length === 0" @click="showProblemPlugins">{{ t('pluginPanel.filterProblems') }}</el-button>
+<el-button type="primary" :loading="pluginsRequest.loading" @click="loadPlugins">{{ t('pluginPanel.refresh') }}</el-button>
         </div>
       </section>
 
@@ -13,27 +13,27 @@
           <template #header>
             <div class="card-head">
               <div>
-              <strong>{{ filteredPluginRows.length }} / {{ pluginRows.length }} 个插件</strong>
+              <strong>{{ t('pluginPanel.count', { filtered: filteredPluginRows.length, total: pluginRows.length }) }}</strong>
               </div>
-              <el-tag :type="blockedOrErrorCount > 0 ? 'danger' : 'success'">{{ blockedOrErrorCount > 0 ? '存在异常' : '无异常' }}</el-tag>
+              <el-tag :type="blockedOrErrorCount > 0 ? 'danger' : 'success'">{{ blockedOrErrorCount > 0 ? t('pluginPanel.hasProblems') : t('pluginPanel.noProblems') }}</el-tag>
             </div>
           </template>
 
           <div class="filter-bar">
-            <el-input v-model="searchQuery" clearable placeholder="搜索技能名称、能做的事、工具或模型" />
-            <el-select v-model="statusFilter" class="filter-select" placeholder="状态">
-              <el-option label="全部状态" value="all" />
-              <el-option label="需处理" value="problem" />
-              <el-option label="已加载" value="loaded" />
-              <el-option label="降级" value="degraded" />
-              <el-option label="阻断" value="blocked" />
-              <el-option label="异常" value="error" />
+            <el-input v-model="searchQuery" clearable :placeholder="t('pluginPanel.searchPlaceholder')" />
+            <el-select v-model="statusFilter" class="filter-select" :placeholder="t('pluginPanel.statusPlaceholder')">
+              <el-option :label="t('pluginPanel.statusAll')" value="all" />
+              <el-option :label="t('pluginPanel.statusProblem')" value="problem" />
+              <el-option :label="t('pluginPanel.statusLoaded')" value="loaded" />
+              <el-option :label="t('pluginPanel.statusDegraded')" value="degraded" />
+              <el-option :label="t('pluginPanel.statusBlocked')" value="blocked" />
+              <el-option :label="t('pluginPanel.statusError')" value="error" />
             </el-select>
-            <el-select v-model="categoryFilter" class="filter-select" placeholder="类型">
-              <el-option label="全部类型" value="all" />
-              <el-option label="桌宠能力" value="capability" />
-              <el-option label="事件联动" value="event" />
-              <el-option label="权限范围" value="policy" />
+            <el-select v-model="categoryFilter" class="filter-select" :placeholder="t('pluginPanel.categoryPlaceholder')">
+              <el-option :label="t('pluginPanel.categoryAll')" value="all" />
+              <el-option :label="t('pluginPanel.contributionCapability')" value="capability" />
+              <el-option :label="t('pluginPanel.contributionEvent')" value="event" />
+              <el-option :label="t('pluginPanel.contributionPolicy')" value="policy" />
             </el-select>
           </div>
 
@@ -41,7 +41,7 @@
             :loading="pluginsRequest.loading"
             :error="pluginsRequest.error"
             :empty="pluginRows.length === 0"
-            empty-text="暂无技能"
+            :empty-text="t('pluginPanel.emptySkills')"
             :show-retry="false"
           >
             <div v-if="filteredPluginRows.length" class="plugin-grid">
@@ -62,14 +62,14 @@
                 <p>{{ pluginSkillSummary(plugin) }}</p>
                 <div class="plugin-card-meta">
                   <el-tag size="small" :type="statusTagType(plugin.status)">{{ statusLabel(plugin.status) }}</el-tag>
-                  <span>入口 {{ plugin.routeCount }}</span>
-                  <span>能力 {{ plugin.toolCount }}</span>
-                  <span v-if="plugin.petEvents?.length">触发 {{ plugin.petEvents.length }}</span>
-                  <span>执行 {{ plugin.activeCount }}</span>
+                  <span>{{ t('pluginPanel.statEntries', { count: plugin.routeCount }) }}</span>
+                  <span>{{ t('pluginPanel.statCapabilities', { count: plugin.toolCount }) }}</span>
+                  <span v-if="plugin.petEvents?.length">{{ t('pluginPanel.statTriggers', { count: plugin.petEvents.length }) }}</span>
+                  <span>{{ t('pluginPanel.statExecutions', { count: plugin.activeCount }) }}</span>
                 </div>
               </button>
             </div>
-            <el-empty v-else description="没有匹配当前筛选的插件" :image-size="72" />
+            <el-empty v-else :description="t('pluginPanel.emptyFiltered')" :image-size="72" />
           </AsyncState>
         </el-card>
 
@@ -77,7 +77,7 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>{{ selectedPlugin?.name ?? '选择插件查看详情' }}</strong>
+                <strong>{{ selectedPlugin?.name ?? t('pluginPanel.selectHint') }}</strong>
               </div>
               <el-tag :type="statusTagType(selectedPluginState?.status)">{{ statusLabel(selectedPluginState?.status ?? 'loaded') }}</el-tag>
             </div>
@@ -85,7 +85,7 @@
 
           <div v-if="selectedPlugin" class="detail-stack">
             <div class="detail-block skill-benefit-block">
-              <label>插件能力</label>
+              <label>{{ t('pluginPanel.detailCapabilities') }}</label>
               <p class="skill-benefit-text">{{ selectedSkillSummary }}</p>
               <div v-if="selectedPlugin.petEvents?.length" class="tag-wrap">
                 <el-tag v-for="event in selectedPlugin.petEvents" :key="`${event.event}-${event.routeId || 'local'}`" type="info">
@@ -95,7 +95,7 @@
             </div>
 
             <div v-if="selectedPetEventRows.length" class="detail-block pet-trigger-block">
-              <label>事件触发</label>
+              <label>{{ t('pluginPanel.detailEvents') }}</label>
               <div class="pet-trigger-list">
                 <div v-for="event in selectedPetEventRows" :key="`${event.event}-${event.routeId || 'local'}`" class="pet-trigger-row">
                   <div class="pet-trigger-head">
@@ -110,38 +110,40 @@
             </div>
 
             <div class="detail-block risk-block">
-              <label>技能组成</label>
+              <label>{{ t('pluginPanel.detailComposition') }}</label>
               <div class="tag-wrap">
-                <el-tag v-if="selectedPlugin.toolCapabilities?.length" type="success">工具能力 {{ selectedPlugin.toolCapabilities.length }}</el-tag>
-                <el-tag v-if="selectedPlugin.modelProviders?.length" type="warning">角色模型 {{ selectedPlugin.modelProviders.length }}</el-tag>
-                <el-tag v-if="selectedPlugin.petEvents?.length" type="info">桌宠事件 {{ selectedPlugin.petEvents.length }}</el-tag>
-                <el-tag v-if="permissionCount > 0" type="danger">权限项 {{ permissionCount }}</el-tag>
-                <el-tag v-if="selectedPluginState?.executionIsolation === 'node-permission-process'" type="success">受限进程</el-tag>
-                <el-tag v-if="selectedPluginState?.stats.totalInvocations" type="info">调用记录 {{ selectedPluginState.stats.totalInvocations }}</el-tag>
+                <el-tag v-if="selectedPlugin.toolCapabilities?.length" type="success">{{ t('pluginPanel.compositionTools', { count: selectedPlugin.toolCapabilities.length }) }}</el-tag>
+                <el-tag v-if="selectedPlugin.modelProviders?.length" type="warning">{{ t('pluginPanel.compositionModels', { count: selectedPlugin.modelProviders.length }) }}</el-tag>
+                <el-tag v-if="selectedPlugin.petEvents?.length" type="info">{{ t('pluginPanel.compositionPetEvents', { count: selectedPlugin.petEvents.length }) }}</el-tag>
+                <el-tag v-if="permissionCount > 0" type="danger">{{ t('pluginPanel.compositionPermissions', { count: permissionCount }) }}</el-tag>
+                <el-tag v-if="selectedPluginState?.executionIsolation === 'node-permission-process'" type="success">{{ t('pluginPanel.isolationRestricted') }}</el-tag>
+                <el-tag v-if="selectedPluginState?.stats.totalInvocations" type="info">{{ t('pluginPanel.compositionInvocations', { count: selectedPluginState.stats.totalInvocations }) }}</el-tag>
               </div>
             </div>
 
             <div class="detail-block">
-              <label>底层权限</label>
+              <label>{{ t('pluginPanel.detailPermissions') }}</label>
               <div class="tag-wrap permission-tags">
-                <el-tag v-for="routeId in selectedPlugin.permissions.routes" :key="`route:${routeId}`" type="primary">路由：{{ routeId }}</el-tag>
-                <el-tag v-for="toolId in selectedPlugin.permissions.toolScopes" :key="`tool:${toolId}`" type="success">工具：{{ toolId }}</el-tag>
-                <el-tag v-for="providerId in selectedPlugin.permissions.modelScopes" :key="`model:${providerId}`" type="warning">模型：{{ providerId }}</el-tag>
-                <el-tag v-if="selectedPlugin.permissions.agentBridge" type="danger">智能体连接</el-tag>
-                <el-tag v-for="host in selectedPlugin.permissions.allowedHosts ?? []" :key="`host:${host}`" type="info">主机：{{ host }}</el-tag>
-                <el-tag v-for="allowedPath in selectedPlugin.permissions.allowedPaths ?? []" :key="`path:${allowedPath}`">路径：{{ allowedPath }}</el-tag>
-                <el-tag v-for="command in selectedPlugin.permissions.allowedCommands ?? []" :key="`command:${command}`" type="danger">命令：{{ command }}</el-tag>
-                <span v-if="permissionCount === 0" class="muted-text">未申请额外权限</span>
+                <el-tag v-for="routeId in selectedPlugin.permissions.routes" :key="`route:${routeId}`" type="primary">{{ t('pluginPanel.permissionRoute', { id: routeId }) }}</el-tag>
+                <el-tag v-for="toolId in selectedPlugin.permissions.toolScopes" :key="`tool:${toolId}`" type="success">{{ t('pluginPanel.permissionTool', { id: toolId }) }}</el-tag>
+                <el-tag v-for="providerId in selectedPlugin.permissions.modelScopes" :key="`model:${providerId}`" type="warning">{{ t('pluginPanel.permissionModel', { id: providerId }) }}</el-tag>
+                <el-tag v-if="selectedPlugin.permissions.agentBridge" type="danger">{{ t('pluginPanel.permissionAgentBridge') }}</el-tag>
+                <el-tag v-for="host in selectedPlugin.permissions.allowedHosts ?? []" :key="`host:${host}`" type="info">{{ t('pluginPanel.permissionHost', { host }) }}</el-tag>
+                <el-tag v-for="allowedPath in selectedPlugin.permissions.allowedPaths ?? []" :key="`path:${allowedPath}`">
+                  {{ t('pluginPanel.permissionPath', { path: allowedPath }) }}
+                </el-tag>
+                <el-tag v-for="command in selectedPlugin.permissions.allowedCommands ?? []" :key="`command:${command}`" type="danger">{{ t('pluginPanel.permissionCommand', { command }) }}</el-tag>
+                <span v-if="permissionCount === 0" class="muted-text">{{ t('pluginPanel.noExtraPermissions') }}</span>
               </div>
             </div>
 
             <div class="detail-block">
-              <label>运行记录</label>
+              <label>{{ t('pluginPanel.auditTitle') }}</label>
               <div class="kv-list">
-                <div><strong>最近审计：</strong>{{ selectedPluginState?.lastAuditAt ?? '暂无' }}</div>
-                <div><strong>最近错误：</strong>{{ selectedPluginState?.lastError ?? '暂无' }}</div>
-                <div><strong>累计成功：</strong>{{ selectedPluginState?.stats.okCount ?? 0 }} 次</div>
-                <div><strong>累计失败：</strong>{{ selectedPluginState?.stats.errorCount ?? 0 }} 次 · 超时 {{ selectedPluginState?.stats.timeoutCount ?? 0 }} 次 · 拒绝 {{ selectedPluginState?.stats.deniedCount ?? 0 }} 次</div>
+                <div><strong>{{ t('pluginPanel.auditLastAtLabel') }}</strong>{{ selectedPluginState?.lastAuditAt ?? t('pluginPanel.notAvailable') }}</div>
+                <div><strong>{{ t('pluginPanel.auditLastErrorLabel') }}</strong>{{ selectedPluginState?.lastError ?? t('pluginPanel.notAvailable') }}</div>
+                <div><strong>{{ t('pluginPanel.auditOkLabel') }}</strong>{{ t('pluginPanel.auditOkValue', { count: selectedPluginState?.stats.okCount ?? 0 }) }}</div>
+                <div><strong>{{ t('pluginPanel.auditErrorLabel') }}</strong>{{ t('pluginPanel.auditErrorValue', { count: selectedPluginState?.stats.errorCount ?? 0, timeouts: selectedPluginState?.stats.timeoutCount ?? 0, denied: selectedPluginState?.stats.deniedCount ?? 0 }) }}</div>
               </div>
               <el-alert
                 v-for="issue in selectedPluginState?.validationIssues ?? []"
@@ -153,7 +155,7 @@
               />
             </div>
           </div>
-            <el-empty v-else description="未选择插件" />
+            <el-empty v-else :description="t('pluginPanel.emptySelection')" />
         </el-card>
       </section>
 
@@ -161,20 +163,20 @@
         <el-card class="panel-card" shadow="never">
           <template #header>
             <div class="card-head compact">
-            <strong>运行中的插件</strong>
-              <el-tag type="info">{{ selectedPluginState?.activeExecutions.length ?? 0 }} 条</el-tag>
+            <strong>{{ t('pluginPanel.runningTitle') }}</strong>
+              <el-tag type="info">{{ t('pluginPanel.recordCount', { count: selectedPluginState?.activeExecutions.length ?? 0 }) }}</el-tag>
             </div>
           </template>
-          <el-empty v-if="selectedPluginState == null || selectedPluginState.activeExecutions.length === 0" description="当前没有插件在运行" :image-size="56" />
+          <el-empty v-if="selectedPluginState == null || selectedPluginState.activeExecutions.length === 0" :description="t('pluginPanel.emptyRunning')" :image-size="56" />
           <el-table v-else :data="selectedPluginState.activeExecutions" size="small" stripe>
-            <el-table-column prop="routeId" label="功能" min-width="140" />
-            <el-table-column prop="startedAt" label="开始时间" min-width="160" />
-            <el-table-column prop="status" label="状态" width="110">
+            <el-table-column prop="routeId" :label="t('pluginPanel.columnRoute')" min-width="140" />
+            <el-table-column prop="startedAt" :label="t('pluginPanel.columnStartedAt')" min-width="160" />
+            <el-table-column prop="status" :label="t('pluginPanel.columnStatus')" width="110">
               <template #default="scope">
                 <el-tag size="small" type="info">{{ executionStatusLabel(scope.row.status) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="100">
+            <el-table-column :label="t('pluginPanel.columnActions')" width="100">
               <template #default="scope">
                 <el-button
                   link
@@ -183,7 +185,7 @@
                   :disabled="!selectedPlugin?.execution.allowCancellation || cancellingInvocationIds.has(scope.row.invocationId)"
                   @click="handleCancel(selectedPlugin.id, scope.row.routeId, scope.row.invocationId)"
                 >
-                  取消
+                  {{ t('pluginPanel.actionCancel') }}
                 </el-button>
               </template>
             </el-table-column>
@@ -193,18 +195,18 @@
         <el-card class="panel-card" shadow="never">
           <template #header>
             <div class="card-head compact">
-            <strong>插件能力组成</strong>
-              <el-tag type="info">{{ contributionSummaries.length }} 类</el-tag>
+            <strong>{{ t('pluginPanel.compositionTitle') }}</strong>
+              <el-tag type="info">{{ t('pluginPanel.categoryCount', { count: contributionSummaries.length }) }}</el-tag>
             </div>
           </template>
           <div v-if="contributionSummaries.length" class="contribution-list">
             <div v-for="item in contributionSummaries" :key="item.category" class="contribution-item">
               <span>{{ contributionLabel(item.category) }}</span>
               <strong>{{ item.count }}</strong>
-              <small>{{ item.items.slice(0, 4).join(' / ') || '暂无条目' }}</small>
+              <small>{{ item.items.slice(0, 4).join(' / ') || t('pluginPanel.noEntries') }}</small>
             </div>
           </div>
-          <el-empty v-else description="暂无插件能力摘要" :image-size="56" />
+          <el-empty v-else :description="t('pluginPanel.emptyComposition')" :image-size="56" />
         </el-card>
       </section>
 
@@ -212,36 +214,36 @@
         <el-card class="panel-card" shadow="never">
           <template #header>
             <div class="card-head compact">
-            <strong>加载失败 / 清单错误</strong>
-              <el-tag :type="loadFailures.length > 0 ? 'danger' : 'success'">{{ loadFailures.length }} 条</el-tag>
+            <strong>{{ t('pluginPanel.loadFailuresTitle') }}</strong>
+              <el-tag :type="loadFailures.length > 0 ? 'danger' : 'success'">{{ t('pluginPanel.recordCount', { count: loadFailures.length }) }}</el-tag>
             </div>
           </template>
-          <el-empty v-if="loadFailures.length === 0" description="暂无插件加载失败记录" :image-size="56" />
+          <el-empty v-if="loadFailures.length === 0" :description="t('pluginPanel.emptyLoadFailures')" :image-size="56" />
           <el-table v-else :data="loadFailures" size="small" stripe height="220">
-            <el-table-column prop="manifestPath" label="清单路径" min-width="220" />
-            <el-table-column prop="pluginId" label="技能名称" min-width="120" />
-            <el-table-column prop="reason" label="原因" min-width="220" />
+            <el-table-column prop="manifestPath" :label="t('pluginPanel.columnManifestPath')" min-width="220" />
+            <el-table-column prop="pluginId" :label="t('pluginPanel.columnSkillName')" min-width="120" />
+            <el-table-column prop="reason" :label="t('pluginPanel.columnReason')" min-width="220" />
           </el-table>
         </el-card>
 
         <el-card class="panel-card" shadow="never">
           <template #header>
             <div class="card-head compact">
-            <strong>运行记录</strong>
-              <el-tag type="info">最近 {{ auditLogs.length }} 条</el-tag>
+            <strong>{{ t('pluginPanel.auditTitle') }}</strong>
+              <el-tag type="info">{{ t('pluginPanel.recentCount', { count: auditLogs.length }) }}</el-tag>
             </div>
           </template>
-          <el-empty v-if="auditLogs.length === 0" description="暂无插件调用记录" :image-size="56" />
+          <el-empty v-if="auditLogs.length === 0" :description="t('pluginPanel.emptyAudit')" :image-size="56" />
           <el-table v-else :data="auditLogs" size="small" stripe height="240">
-            <el-table-column prop="timestamp" label="时间" min-width="160" />
-            <el-table-column prop="pluginId" label="技能" min-width="130" />
-            <el-table-column prop="routeId" label="路由" min-width="110" />
-            <el-table-column prop="status" label="结果" width="96">
+            <el-table-column prop="timestamp" :label="t('pluginPanel.columnTime')" min-width="160" />
+            <el-table-column prop="pluginId" :label="t('pluginPanel.columnSkill')" min-width="130" />
+            <el-table-column prop="routeId" :label="t('pluginPanel.columnRouteId')" min-width="110" />
+            <el-table-column prop="status" :label="t('pluginPanel.columnResult')" width="96">
               <template #default="scope">
                 <el-tag :type="auditTagType(scope.row.status)">{{ auditStatusLabel(scope.row.status) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="detail" label="详情" min-width="220" />
+            <el-table-column prop="detail" :label="t('pluginPanel.columnDetail')" min-width="220" />
           </el-table>
         </el-card>
       </section>
@@ -269,6 +271,7 @@ import 'element-plus/es/components/option/style/css'
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
+import { t } from '@/i18n'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import { usePluginDomain } from '../composables/usePluginDomain'
 import { getDesktopPetEventDefinition } from '../../../../shared/plugin'
@@ -321,40 +324,40 @@ const auditTagType = (status: PluginAuditRecord['status']) => {
 
 const statusLabel = (status: PluginRuntimeState['status']) => {
   const labels: Record<PluginRuntimeState['status'], string> = {
-    loaded: '已加载',
-    degraded: '降级',
-    blocked: '阻断',
-    error: '异常',
+    loaded: t('pluginPanel.statusLoaded'),
+    degraded: t('pluginPanel.statusDegraded'),
+    blocked: t('pluginPanel.statusBlocked'),
+    error: t('pluginPanel.statusError'),
   }
   return labels[status]
 }
 
 const auditStatusLabel = (status: PluginAuditRecord['status']) => {
   const labels: Record<PluginAuditRecord['status'], string> = {
-    ok: '成功',
-    error: '错误',
-    timeout: '超时',
-    denied: '拒绝',
-    cancelled: '取消',
+    ok: t('pluginPanel.auditOk'),
+    error: t('pluginPanel.auditError'),
+    timeout: t('pluginPanel.auditTimeout'),
+    denied: t('pluginPanel.auditDenied'),
+    cancelled: t('pluginPanel.auditCancelled'),
   }
   return labels[status]
 }
 
 const executionStatusLabel = (status: PluginExecutionStatus) => {
   const labels: Record<PluginExecutionStatus, string> = {
-    running: '运行中',
-    cancelled: '已取消',
-    timed_out: '已超时',
+    running: t('pluginPanel.executionRunning'),
+    cancelled: t('pluginPanel.executionCancelled'),
+    timed_out: t('pluginPanel.executionTimedOut'),
   }
   return labels[status]
 }
 
 const contributionLabel = (category: PluginContributionCategory) => {
   const labels: Record<PluginContributionCategory, string> = {
-    ui: '界面入口',
-    capability: '桌宠能力',
-    event: '事件联动',
-    policy: '权限范围',
+    ui: t('pluginPanel.contributionUi'),
+    capability: t('pluginPanel.contributionCapability'),
+    event: t('pluginPanel.contributionEvent'),
+    policy: t('pluginPanel.contributionPolicy'),
   }
   return labels[category]
 }
@@ -362,7 +365,9 @@ const contributionLabel = (category: PluginContributionCategory) => {
 const petEventLabel = (event: DesktopPetEventName) => getDesktopPetEventDefinition(event).label
 
 const petEventRouteLabel = (event: { event: DesktopPetEventName; routeId?: string }) =>
-  event.routeId ? `${petEventLabel(event.event)}触发 ${event.routeId}` : `${petEventLabel(event.event)}仅声明`
+  event.routeId
+    ? t('pluginPanel.petEventTriggered', { event: petEventLabel(event.event), route: event.routeId })
+    : t('pluginPanel.petEventDeclared', { event: petEventLabel(event.event) })
 
 const buildPetEventRow = (event: PluginPetEventSubscription) => {
   const definition = getDesktopPetEventDefinition(event.event)
@@ -372,28 +377,28 @@ const buildPetEventRow = (event: PluginPetEventSubscription) => {
     trigger: definition.trigger,
     payloadHint: definition.payloadHint,
     frequencyHint: definition.frequencyHint,
-    routeLabel: event.routeId ? `调用 ${event.routeId}` : '仅声明',
-    descriptionText: event.description || `${definition.label}时让桌宠技能做出响应。`,
+    routeLabel: event.routeId ? t('pluginPanel.routeCall', { route: event.routeId }) : t('pluginPanel.declaredOnly'),
+    descriptionText: event.description || t('pluginPanel.petEventDescription', { label: definition.label }),
   }
 }
 
 const pluginSkillSummary = (plugin: DesktopPetPlugin & { lastError?: string }) => {
   if (plugin.lastError && plugin.lastError !== '—') {
-    return `最近异常：${plugin.lastError}`
+    return t('pluginPanel.lastErrorSummary', { error: plugin.lastError })
   }
   const primaryTool = plugin.toolCapabilities?.[0]
   if (primaryTool) {
-  return primaryTool.desc || `可调用工具：${primaryTool.name}`
+  return primaryTool.desc || t('pluginPanel.toolSummary', { tool: primaryTool.name })
   }
   const primaryModel = plugin.modelProviders?.[0]
   if (primaryModel) {
-    return `提供 ${primaryModel.modelType.toUpperCase()} 角色模型「${primaryModel.name}」`
+    return t('pluginPanel.modelSummary', { type: primaryModel.modelType.toUpperCase(), name: primaryModel.name })
   }
   const primaryEvent = plugin.petEvents?.[0]
   if (primaryEvent) {
-    return primaryEvent.description || `响应「${petEventLabel(primaryEvent.event)}」事件`
+    return primaryEvent.description || t('pluginPanel.eventSummary', { event: petEventLabel(primaryEvent.event) })
   }
-  return '已安装，暂未声明额外桌宠能力'
+  return t('pluginPanel.installedNoCapability')
 }
 
 const contributionSummaries = computed(() =>
@@ -484,9 +489,9 @@ const showProblemPlugins = () => {
 const handleCancel = async (pluginId: string, routeId: string, invocationId: string) => {
   const cancelled = await cancelExecution(pluginId, routeId, invocationId)
   if (cancelled) {
-    ElMessage.success('技能执行取消请求已发送')
+    ElMessage.success(t('pluginPanel.cancelSent'))
   } else {
-    ElMessage.error(cancelRequest.error || '取消技能执行失败')
+    ElMessage.error(cancelRequest.error || t('pluginPanel.cancelFailed'))
   }
 }
 

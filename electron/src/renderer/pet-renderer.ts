@@ -1,4 +1,5 @@
 import "pixi.js/unsafe-eval";
+import { t } from "@/i18n";
 import type { Live2DSprite } from "easy-live2d";
 import { Config as Live2DConfig } from "easy-live2d";
 import * as PIXI from "pixi.js";
@@ -395,7 +396,7 @@ class PetRenderer {
 		this.setupModelInteractivity();
 		this.setupAdjustmentControls();
 		this.setupIPCListeners();
-		this.showNotice("正在恢复上次桌宠模型...");
+		this.showNotice(t("petRenderer.restoringModel"));
 		// Live2D resolves its ready promise from a render frame. Keep the Pixi
 		// ticker alive while the initial model is loading, even if this window
 		// is still hidden; the visibility policy is restored after load settles.
@@ -413,7 +414,7 @@ class PetRenderer {
 		this.app.ticker.start();
 		const loadGeneration = this.beginModelLoadGeneration();
 		const modelLabel = this.config.modelType === "vrm" ? "VRM" : "Live2D";
-		this.showNotice(`正在加载 ${modelLabel} 桌宠...`);
+		this.showNotice(t("petRenderer.loadingModel", { model: modelLabel }));
 		const reusableRuntime = this.config.modelType === "vrm"
 			? this.vrmRuntime
 			: this.live2dRuntime;
@@ -434,7 +435,10 @@ class PetRenderer {
 				if (loadGeneration !== this.modelLoadGeneration) return;
 				this.reportModelLoadTerminal(this.config.modelType, modelPath, error);
 				this.showNotice(
-					`${modelLabel} 桌宠加载失败，已保留当前模型。${error instanceof Error ? ` ${error.message}` : ""}`,
+					t("petRenderer.loadFailed", {
+						model: modelLabel,
+						detail: error instanceof Error ? ` ${error.message}` : "",
+					}),
 				);
 				this.reportState(true);
 			}
@@ -575,7 +579,7 @@ class PetRenderer {
 				attempt += 1;
 				const delayMs = MODEL_LOAD_RETRY_BASE_MS * 2 ** (attempt - 1);
 				this.showNotice(
-					`桌宠加载遇到问题，正在重试 (${attempt}/${MODEL_LOAD_MAX_RETRIES})...`,
+					t("petRenderer.retryLoad", { attempt, max: MODEL_LOAD_MAX_RETRIES }),
 				);
 				console.warn("[PetRenderer] model load retry scheduled", {
 					modelType,
@@ -2374,7 +2378,7 @@ class PetRenderer {
 		this.syncAdjustmentControls();
 		void task.catch((error: unknown) => {
 			logger.error(`[PetRenderer] failed to ${action} adjustment:`, error);
-			this.showNotice(action === "save" ? "位置保存失败" : "取消调整失败");
+			this.showNotice(action === "save" ? t("petRenderer.savePositionFailed") : t("petRenderer.cancelAdjustFailed"));
 		}).finally(() => {
 			this.adjustmentActionPending = false;
 			this.syncAdjustmentControls();
@@ -2970,12 +2974,12 @@ class PetRenderer {
 			menu.appendChild(button);
 		};
 
-		addButton("打开聊天", () => window.live2dApi?.pet.openChatCenter?.());
-		addButton("锁定 / 解锁", () => window.live2dApi?.pet.setLocked?.(!this.config.locked));
-		addButton("回到右下角", () => window.live2dApi?.pet.snapBottomRight?.());
-		addButton("开启鼠标穿透", () => window.live2dApi?.pet.setClickThrough?.(true));
-		addButton("重新加载模型", () => window.live2dApi?.pet.reloadRenderer?.());
-		addButton("关闭菜单", () => undefined);
+		addButton(t("petRenderer.menu.openChat"), () => window.live2dApi?.pet.openChatCenter?.());
+		addButton(t("petRenderer.menu.lockToggle"), () => window.live2dApi?.pet.setLocked?.(!this.config.locked));
+		addButton(t("petRenderer.menu.snapBottomRight"), () => window.live2dApi?.pet.snapBottomRight?.());
+		addButton(t("petRenderer.menu.clickThrough"), () => window.live2dApi?.pet.setClickThrough?.(true));
+		addButton(t("petRenderer.menu.reloadModel"), () => window.live2dApi?.pet.reloadRenderer?.());
+		addButton(t("petRenderer.menu.close"), () => undefined);
 
 		document.body.appendChild(menu);
 		this.quickMenuEl = menu;

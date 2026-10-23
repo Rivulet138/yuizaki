@@ -1,38 +1,38 @@
 <template>
   <section class="vision-section">
-    <div class="subsection-title">实时视觉模型</div>
-    <el-form-item label="使用独立视觉模型">
+    <div class="subsection-title">{{ t('settingsSection.vision.title') }}</div>
+    <el-form-item :label="t('settingsSection.vision.useIndependent')">
       <el-switch :model-value="modelValue.enabled" @change="update('enabled', Boolean($event))" />
     </el-form-item>
     <div v-if="modelValue.enabled" class="form-grid three">
-      <el-form-item label="视觉提供商">
+      <el-form-item :label="t('settingsSection.vision.provider')">
         <el-select :model-value="modelValue.provider" class="full-width" @change="update('provider', String($event) as LlmProviderPreset)">
           <el-option v-for="option in providerOptions" :key="option.value" :label="option.label" :value="option.value" />
         </el-select>
       </el-form-item>
-      <el-form-item label="视觉模型">
+      <el-form-item :label="t('settingsSection.vision.model')">
         <el-input :model-value="modelValue.model" @update:model-value="update('model', String($event))" />
       </el-form-item>
-      <el-form-item label="视觉超时">
+      <el-form-item :label="t('settingsSection.vision.timeout')">
         <el-input-number :model-value="modelValue.timeout" :min="5" :max="120" controls-position="right" @change="updateTimeout" />
       </el-form-item>
-      <el-form-item label="图像细节">
+      <el-form-item :label="t('settingsSection.vision.detail')">
         <el-select :model-value="modelValue.detail" class="full-width" @change="update('detail', String($event) as VisionDetail)">
-          <el-option label="优先速度" value="low" />
-          <el-option label="自动" value="auto" />
-          <el-option label="优先细节" value="high" />
-          <el-option label="原始质量" value="original" />
+          <el-option :label="t('settingsSection.vision.detailLow')" value="low" />
+          <el-option :label="t('settingsSection.vision.detailAuto')" value="auto" />
+          <el-option :label="t('settingsSection.vision.detailHigh')" value="high" />
+          <el-option :label="t('settingsSection.vision.detailOriginal')" value="original" />
         </el-select>
       </el-form-item>
-      <el-form-item label="视觉 API 地址（OpenAI 兼容）">
+      <el-form-item :label="t('settingsSection.vision.baseUrl')">
         <el-input :model-value="modelValue.baseUrl" @update:model-value="update('baseUrl', String($event))" />
       </el-form-item>
-      <el-form-item v-if="!keylessProviders.has(modelValue.provider)" label="视觉 API Key">
+      <el-form-item v-if="!keylessProviders.has(modelValue.provider)" :label="t('settingsSection.vision.apiKey')">
         <el-input :model-value="modelValue.apiKey" type="password" show-password @update:model-value="update('apiKey', String($event))" />
       </el-form-item>
     </div>
     <p v-if="modelValue.enabled && (!modelValue.baseUrl.trim() || !modelValue.model.trim())" class="field-hint error">
-      视觉 API 地址和视觉模型未配置
+      {{ t('settingsSection.vision.missingConfig') }}
     </p>
   </section>
 </template>
@@ -50,6 +50,7 @@ import 'element-plus/es/components/input-number/style/css'
 import { ElFormItem } from 'element-plus'
 import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/form-item/style/css'
+import { t } from '@/i18n'
 import type { LlmProviderPreset } from '../llmProviders'
 
 type VisionDetail = 'low' | 'high' | 'auto' | 'original'

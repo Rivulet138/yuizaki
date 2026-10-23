@@ -1,14 +1,14 @@
 <template>
   <el-popover placement="top-end" :width="380" trigger="click" popper-class="chat-runtime-popper" @show="emit('refresh-audio-devices')">
     <template #reference>
-      <button class="runtime-settings-button" type="button" aria-label="对话运行设置" title="对话运行设置">
+      <button class="runtime-settings-button" type="button" :aria-label="t('chatPanel.runtime.openAria')" :title="t('chatPanel.runtime.openAria')">
         <el-icon><Operation /></el-icon>
       </button>
     </template>
 
     <div class="runtime-settings">
       <header class="runtime-settings__header">
-        <strong>运行设置</strong>
+        <strong>{{ t('chatPanel.runtime.title') }}</strong>
         <span :title="modelLabel">{{ modelLabel }}</span>
       </header>
 
@@ -17,12 +17,12 @@
         :options="responseModeOptions"
         size="small"
         class="runtime-settings__modes"
-        aria-label="响应速度"
+        :aria-label="t('chatPanel.runtime.responseSpeedAria')"
         @update:model-value="emitField('response_mode', $event)"
       />
 
       <label class="runtime-field">
-        <span>语音</span>
+        <span>{{ t('chatPanel.runtime.voice') }}</span>
         <el-segmented
           :model-value="modelValue.voice_mode"
           :options="voiceModeOptions"
@@ -32,7 +32,7 @@
       </label>
 
       <label class="runtime-field">
-        <span>抢话灵敏度</span>
+        <span>{{ t('chatPanel.runtime.vadEagerness') }}</span>
         <el-segmented
           :model-value="modelValue.vad_eagerness"
           :options="vadEagernessOptions"
@@ -42,39 +42,39 @@
       </label>
 
       <label class="runtime-field">
-        <span>麦克风</span>
+        <span>{{ t('chatPanel.runtime.microphone') }}</span>
         <el-select
           :model-value="modelValue.audio_input_device_id"
           size="small"
           clearable
           :loading="audioDevicesLoading"
-          placeholder="系统默认"
+          :placeholder="t('chatPanel.runtime.systemDefault')"
           @update:model-value="emitField('audio_input_device_id', $event)"
         >
-          <el-option label="系统默认" value="" />
+          <el-option :label="t('chatPanel.runtime.systemDefault')" value="" />
           <el-option v-for="device in audioInputDevices" :key="device.deviceId" :label="device.label" :value="device.deviceId" />
         </el-select>
       </label>
 
       <label class="runtime-field">
-        <span>模型</span>
+        <span>{{ t('chatPanel.runtime.model') }}</span>
         <el-select
           :model-value="modelValue.model"
           size="small"
           clearable
           filterable
-          placeholder="默认模型"
+          :placeholder="t('chatPanel.runtime.defaultModel')"
           :loading="modelsLoading"
           @visible-change="(visible: boolean) => visible && emit('refresh-models')"
           @update:model-value="emitField('model', $event)"
         >
-          <el-option label="默认模型" value="" />
+          <el-option :label="t('chatPanel.runtime.defaultModel')" value="" />
           <el-option v-for="model in modelOptions" :key="model" :label="model" :value="model" />
         </el-select>
       </label>
 
       <label class="runtime-field">
-        <span>推理</span>
+        <span>{{ t('chatPanel.runtime.reasoning') }}</span>
         <el-select
           :model-value="modelValue.reasoning_effort"
           size="small"
@@ -86,15 +86,15 @@
 
       <div class="runtime-toggles">
         <label>
-          <span>MCP 外部工具</span>
+          <span>{{ t('chatPanel.runtime.mcpTools') }}</span>
           <el-switch :model-value="modelValue.mcp_enabled" @update:model-value="emitField('mcp_enabled', $event)" />
         </label>
         <label>
-          <span>桌宠联动</span>
+          <span>{{ t('chatPanel.runtime.petLink') }}</span>
           <el-switch :model-value="modelValue.pet_link_enabled" @update:model-value="emitField('pet_link_enabled', $event)" />
         </label>
         <label>
-          <span>语音回复</span>
+          <span>{{ t('chatPanel.runtime.voiceReply') }}</span>
           <el-switch :model-value="modelValue.tts_enabled" @update:model-value="emitTts" />
         </label>
       </div>
@@ -102,7 +102,7 @@
       <footer class="runtime-settings__footer">
         <button class="runtime-link-button" :class="{ active: promptActive }" type="button" @click="emit('open-prompt')">
           <el-icon><Tickets /></el-icon>
-          <span>提示词</span>
+          <span>{{ t('chatPanel.runtime.prompt') }}</span>
         </button>
         <ChatAdvancedOptions
           :model-value="modelValue"
@@ -125,7 +125,9 @@ import { ElOption, ElSelect } from 'element-plus'
 import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/option/style/css'
 import { Operation, Tickets } from '@element-plus/icons-vue'
+import { computed } from 'vue'
 import ChatAdvancedOptions, { type ChatAdvancedOptionsModel } from './ChatAdvancedOptions.vue'
+import { t } from '@/i18n'
 
 export type ChatRuntimeSettingsModel = ChatAdvancedOptionsModel & {
   model: string
@@ -142,17 +144,17 @@ export type ChatRuntimeSettingsModel = ChatAdvancedOptionsModel & {
 type SelectOption = { label: string; value: string }
 export type AudioInputDeviceOption = { deviceId: string; label: string }
 
-const voiceModeOptions = [
-  { label: '按键', value: 'push-to-talk' },
-  { label: '连续', value: 'continuous' },
-]
+const voiceModeOptions = computed(() => [
+  { label: t('chatPanel.runtime.voiceModeKey'), value: 'push-to-talk' },
+  { label: t('chatPanel.runtime.voiceModeContinuous'), value: 'continuous' },
+])
 
-const vadEagernessOptions = [
-  { label: '低', value: 'low' },
-  { label: '中', value: 'medium' },
-  { label: '高', value: 'high' },
-  { label: '自动', value: 'auto' },
-]
+const vadEagernessOptions = computed(() => [
+  { label: t('chatPanel.runtime.vadLow'), value: 'low' },
+  { label: t('chatPanel.runtime.vadMedium'), value: 'medium' },
+  { label: t('chatPanel.runtime.vadHigh'), value: 'high' },
+  { label: t('chatPanel.runtime.vadAuto'), value: 'auto' },
+])
 
 defineProps<{
   modelValue: ChatRuntimeSettingsModel

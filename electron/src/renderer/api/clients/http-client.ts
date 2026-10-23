@@ -1,3 +1,5 @@
+import { t } from '@/i18n'
+
 const env = import.meta.env
 const LOCAL_API_FALLBACK_ORIGIN = 'http://localhost:8001'
 const LOCAL_CONTROL_FALLBACK_ORIGIN = 'http://localhost:38945'
@@ -73,10 +75,19 @@ const CONTROL_TOKEN_PARAM = 'control_token'
 const CONTROL_TOKEN_REFRESH_RETRY_MS = 3_000
 const RUNTIME_API_ORIGIN_CACHE_MS = 10_000
 const LOCAL_REQUEST_TIMEOUT_MS = 12_000
-export const BACKEND_AUTH_MISSING_MESSAGE = '后端服务未授权：请刷新控制页，或从 Electron 应用入口重新打开界面。'
-const LOCAL_SERVICE_UNAVAILABLE_MESSAGE = '无法连接本地服务：请确认 Yuizaki 后端和 Electron 控制服务正在运行，然后重启 Electron 窗口重试。'
+// Resolved lazily: these are user-facing error strings, and an eager read would freeze
+// whichever locale happened to be active when this module was first imported.
+export const backendAuthMissingMessage = (): string => t('misc.backendAuthMissing')
+const localServiceUnavailableMessage = (): string => t('misc.localServiceUnavailable')
 const localServiceTimeoutMessage = (timeoutMs: number): string =>
-  `本地服务响应超时：请求已等待 ${Math.ceil(timeoutMs / 1000)} 秒，请检查后端或控制服务是否卡住。`
+  t('misc.localServiceTimeout', { seconds: Math.ceil(timeoutMs / 1000) })
+
+// Wire marker, not UI copy: the local control service answers an unauthenticated
+// request with a Chinese "unauthorized" message, and that payload is language-
+// independent. It is written escaped on purpose so it is not mistaken for a
+// translatable string.
+const UNAUTHORIZED_WIRE_MARKER = '\u672a\u6388\u6743'
+export const hasUnauthorizedMarker = (message: string): boolean => message.includes(UNAUTHORIZED_WIRE_MARKER)
 
 export interface LocalRequestInit extends RequestInit {
   timeoutMs?: number
@@ -519,7 +530,7 @@ const throwResponseError = async (response: Response, requestUrl: string, needsL
     error.retryable = false
   }
   if (needsLocalAuth && response.status === 401 && !hasAuthHeader) {
-    error.message = BACKEND_AUTH_MISSING_MESSAGE
+    error.message = backendAuthMissingMessage()
     error.code = 'auth_missing'
   }
   throw error
@@ -555,7 +566,7 @@ export const isAuthMissingError = (error: unknown): boolean => {
   return clientError.code === 'auth_missing' ||
     clientError.status === 401 ||
     error.message.includes('control_token') ||
-    error.message.includes('未授权')
+    hasUnauthorizedMarker(error.message)
 }
 
 // Bootstrap requests are shared: cancel the caller's wait without cancelling other callers.
@@ -595,7 +606,7 @@ const requestResponse = async <T>(
     }
   }
   if (needsLocalAuth && !hasAuthHeader) {
-    throw createClientError(BACKEND_AUTH_MISSING_MESSAGE, { code: 'auth_missing' })
+    throw createClientError(backendAuthMissingMessage(), { code: 'auth_missing' })
   }
   let requestUrl = await awaitWithCallerSignal(rewriteBackendRequestUrl(url, authHeaders), init?.signal)
   ensureRequestActive()
@@ -609,13 +620,13 @@ const requestResponse = async <T>(
     if (error instanceof DOMException && error.name === 'AbortError') throw error
     if (init?.signal?.aborted) throw error
     if (needsLocalAuth && !hasAuthHeader) {
-      throw createClientError(BACKEND_AUTH_MISSING_MESSAGE, { code: 'auth_missing' })
+      throw createClientError(backendAuthMissingMessage(), { code: 'auth_missing' })
     }
     if (error instanceof LocalRequestTimeoutError) {
       throw createClientError(error.message, { code: 'request_timeout' })
     }
     const detail = error instanceof Error && error.message ? `（${error.message}）` : ''
-    throw createClientError(`${LOCAL_SERVICE_UNAVAILABLE_MESSAGE}${detail}`, { code: 'service_unavailable' })
+    throw createClientError(`${localServiceUnavailableMessage()}${detail}`, { code: 'service_unavailable' })
   }
   if (needsLocalAuth && response.status === 401) {
     timeoutLease?.dispose()
@@ -639,7 +650,7 @@ const requestResponse = async <T>(
           throw createClientError(error.message, { code: 'request_timeout' })
         }
         const detail = error instanceof Error && error.message ? `（${error.message}）` : ''
-        throw createClientError(`${LOCAL_SERVICE_UNAVAILABLE_MESSAGE}${detail}`, { code: 'service_unavailable' })
+        throw createClientError(`${localServiceUnavailableMessage()}${detail}`, { code: 'service_unavailable' })
       }
     }
   }

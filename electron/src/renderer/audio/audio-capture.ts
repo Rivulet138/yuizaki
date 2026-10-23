@@ -1,6 +1,7 @@
 import { reactive, ref, type Ref } from 'vue';
 import { SocketClient } from '../net/socketClient';
 import { chatClient } from '@/api/client';
+import { t } from '@/i18n';
 import pcmCaptureWorkletUrl from './pcm-capture.worklet.ts?worker&url';
 
 type BrowserWindowWithAudioContext = Window & typeof globalThis & {
@@ -57,16 +58,16 @@ const createEnvelopeId = (prefix: string) => `${prefix}_${Date.now()}_${Math.ran
 const normalizeMicrophoneError = (error: unknown): string => {
   if (error instanceof DOMException) {
     if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-      return '麦克风权限被拒绝';
+      return t('audio.micPermissionDenied');
     }
     if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-      return '没有找到可用麦克风';
+      return t('audio.micNotFound');
     }
     if (error.name === 'NotReadableError') {
-      return '麦克风正被其他程序占用';
+      return t('audio.micBusy');
     }
   }
-  return error instanceof Error && error.message ? error.message : '麦克风启动失败';
+  return error instanceof Error && error.message ? error.message : t('audio.startFailed');
 };
 
 const computeRms = (samples: Float32Array): number => {
@@ -131,7 +132,7 @@ export const enumerateAudioInputDevices = async (): Promise<AudioInputDevice[]> 
   const devices = await enumerate.call(navigator.mediaDevices);
   return devices
     .filter((device) => device.kind === 'audioinput' && device.deviceId.trim())
-    .map((device) => ({ deviceId: device.deviceId, label: device.label.trim() || '未命名麦克风' }))
+    .map((device) => ({ deviceId: device.deviceId, label: device.label.trim() || t('audio.unnamedDevice') }))
     .slice(0, 16);
 };
 
@@ -232,13 +233,13 @@ export class AudioCapture {
   private inputTrack: MediaStreamTrack | null = null;
   private readonly handleInputTrackEnded = (): void => {
     this.status.inputHealth = 'disconnected';
-    this.status.error = '麦克风设备已断开';
+    this.status.error = t('audio.deviceDisconnected');
     if (!this.isRecording.value) return;
     this.stop({ sendFinal: false });
     this.status.phase = 'error';
     this.status.isRecording = false;
     this.status.inputHealth = 'disconnected';
-    this.status.error = '麦克风设备已断开';
+    this.status.error = t('audio.deviceDisconnected');
   };
   private readonly status = reactive<AudioCaptureStatus>({
     phase: 'idle',
@@ -286,7 +287,7 @@ export class AudioCapture {
     try {
       const socketClient = chatClient.getSocketClient();
       if (!socketClient.isConnected()) {
-        throw new Error('Socket.IO 未连接，无法开始语音输入');
+        throw new Error(t('audio.socketNotConnected'));
       }
 
       this.resetStatusForStart();
@@ -312,7 +313,7 @@ export class AudioCapture {
         },
       });
       const track = this.mediaStream.getAudioTracks()[0];
-      if (!track) throw new Error('没有找到可用麦克风');
+      if (!track) throw new Error(t('audio.micNotFound'));
       this.inputTrack = track;
       track.addEventListener('ended', this.handleInputTrackEnded, { once: true });
       const audioTrackSettings = track.getSettings();
@@ -453,13 +454,13 @@ export class AudioCapture {
   private sendAudioChunkNow(pcmData: Float32Array, socketClient: SocketClient): void {
     if (!socketClient.isConnected()) {
       const wasRecording = this.isRecording.value;
-      this.status.error = '实时通道连接已断开';
+      this.status.error = t('audio.channelDisconnected');
       if (wasRecording) {
         // Do not emit a final empty turn after transport loss. Releasing the
         // device immediately prevents a silent microphone from staying open.
         this.stop({ sendFinal: false });
         this.status.phase = 'error';
-        this.status.error = '实时通道连接已断开';
+        this.status.error = t('audio.channelDisconnected');
       }
       return;
     }

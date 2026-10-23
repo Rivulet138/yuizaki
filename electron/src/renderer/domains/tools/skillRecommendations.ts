@@ -1,10 +1,15 @@
 import type { SkillCatalogItem } from '../../../../shared/capability'
+import { t } from '@/i18n'
 
+// Descriptions are lazy getters instead of plain strings: the array is built at
+// module scope, so an eager `t()` call would freeze the locale that happened to
+// be active on first import. ToolPanel spreads each item inside a computed, so
+// the getter re-reads the active locale whenever the list is rebuilt.
 export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.voice-dialogue-chain',
     name: 'Voice Dialogue Chain',
-    description: '把麦克风输入整理成文本，交给 LLM 生成回复，再触发 TTS 和桌宠动作。适合做免打开浏览器面板的语音桌宠入口。',
+    get description(): string { return t('misc.skillDesc.voiceDialogueChain') },
     category: 'companion',
     source: 'project',
     status: 'built-in',
@@ -16,7 +21,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.long-dialogue-summary',
     name: 'Long Dialogue Summary',
-    description: '把长聊天、语音转写和会话记录整理成摘要、决定、待办和风险，用于记忆写入和任务提醒。',
+    get description(): string { return t('misc.skillDesc.longDialogueSummary') },
     category: 'companion',
     source: 'project',
     status: 'built-in',
@@ -28,7 +33,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.companion-reflection',
     name: 'Companion Reflection',
-    description: '分析一段对话里的情绪、沟通模式和可改进点，适合生成长期桌宠记忆和关系反馈。',
+    get description(): string { return t('misc.skillDesc.companionReflection') },
     category: 'companion',
     source: 'project',
     status: 'built-in',
@@ -40,7 +45,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.memory-capture',
     name: 'Memory Capture',
-    description: '把对话中的事实、偏好、项目决定和待办沉淀到可检索记忆，适合配合 Qdrant 或本地轻量记忆使用。',
+    get description(): string { return t('misc.skillDesc.memoryCapture') },
     category: 'companion',
     source: 'project',
     status: 'built-in',
@@ -52,7 +57,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.realtime-screen-vision',
     name: 'Realtime Screen Vision',
-    description: '把桌面截图作为短时视觉帧交给桌宠理解窗口、布局和用户动作；OCR 只在需要精确读字时作为备用能力。',
+    get description(): string { return t('misc.skillDesc.realtimeScreenVision') },
     category: 'perception',
     source: 'project',
     status: 'built-in',
@@ -64,7 +69,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.local-file-organizer',
     name: 'Local File Organizer',
-    description: '识别本机文件、素材和导入资源的用途，给出整理、重命名和归档建议，用于资源管理面板。',
+    get description(): string { return t('misc.skillDesc.localFileOrganizer') },
     category: 'automation',
     source: 'project',
     status: 'built-in',
@@ -76,7 +81,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.ocr-document-organizer',
     name: 'OCR Document Organizer',
-    description: '读取截图、票据或扫描文档里的关键信息，生成结构化条目并建议归档位置。',
+    get description(): string { return t('misc.skillDesc.ocrDocumentOrganizer') },
     category: 'document',
     source: 'project',
     status: 'built-in',
@@ -88,7 +93,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.webapp-testing',
     name: 'Webapp Testing',
-    description: '用 Playwright 检查本地 Electron/Vite 页面，验证按钮、输入框、响应式布局、截图和控制台错误。',
+    get description(): string { return t('misc.skillDesc.webappTesting') },
     category: 'development',
     source: 'project',
     status: 'built-in',
@@ -100,7 +105,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.frontend-design',
     name: 'Frontend Design Polish',
-    description: '用于继续优化桌宠面板、设置页、本地能力页和调试页的布局、文案、状态和响应式细节。',
+    get description(): string { return t('misc.skillDesc.frontendDesign') },
     category: 'frontend',
     source: 'project',
     status: 'built-in',
@@ -112,7 +117,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.interface-hardening',
     name: 'Interface Hardening',
-    description: '检查空状态、错误提示、长文本溢出、中文文案、深色模式和失败降级，适合设置与工具面板使用。',
+    get description(): string { return t('misc.skillDesc.interfaceHardening') },
     category: 'frontend',
     source: 'project',
     status: 'built-in',
@@ -124,7 +129,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.code-review',
     name: 'Code Review',
-    description: '按缺陷、回归风险、缺失测试和行为变化审查改动，适合 Yuizaki 自身开发质量门。',
+    get description(): string { return t('misc.skillDesc.codeReview') },
     category: 'development',
     source: 'project',
     status: 'built-in',
@@ -136,7 +141,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.repo-analysis',
     name: 'Repository Analysis',
-    description: '只读梳理代码结构、调用关系和风险点，适合改复杂链路前先建立事实图。',
+    get description(): string { return t('misc.skillDesc.repoAnalysis') },
     category: 'development',
     source: 'project',
     status: 'built-in',
@@ -148,7 +153,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.best-practice-research',
     name: 'Best Practice Research',
-    description: '优先查官方文档和上游资料，适合接新模型、TTS、ASR、MCP、Ollama、LM Studio 或 SDK 前使用。',
+    get description(): string { return t('misc.skillDesc.bestPracticeResearch') },
     category: 'research',
     source: 'project',
     status: 'built-in',
@@ -160,7 +165,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.mcp-builder',
     name: 'MCP Service Builder',
-    description: '把本地工具、资源读取、浏览器控制或外部服务包装成标准 MCP 工具，便于 Yuizaki 统一调度。',
+    get description(): string { return t('misc.skillDesc.mcpBuilder') },
     category: 'mcp',
     source: 'project',
     status: 'built-in',
@@ -172,7 +177,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.skill-authoring',
     name: 'Skill Authoring',
-    description: '把常用链路沉淀成可复用 Skill，包括触发条件、输入、流程、校验和失败兜底。',
+    get description(): string { return t('misc.skillDesc.skillAuthoring') },
     category: 'authoring',
     source: 'project',
     status: 'built-in',
@@ -184,7 +189,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.image-generation',
     name: 'Image Generation',
-    description: '生成或编辑头像、背景、UI 参考图和透明素材，适合角色素材与界面资源生产。',
+    get description(): string { return t('misc.skillDesc.imageGeneration') },
     category: 'media',
     source: 'project',
     status: 'built-in',
@@ -196,7 +201,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.image-enhancement',
     name: 'Image Enhancement',
-    description: '提升截图清晰度和可读性，适合 UI 验收、反馈图和文档插图。',
+    get description(): string { return t('misc.skillDesc.imageEnhancement') },
     category: 'media',
     source: 'project',
     status: 'built-in',
@@ -208,7 +213,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.document-export',
     name: 'Document Export',
-    description: '把摘要、报告和会话结果导出为 PDF、DOCX、PPTX 或 XLSX，适合长内容整理和分享。',
+    get description(): string { return t('misc.skillDesc.documentExport') },
     category: 'document',
     source: 'project',
     status: 'built-in',
@@ -220,7 +225,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.spreadsheet-helper',
     name: 'Spreadsheet Helper',
-    description: '编写和调试 Excel/表格公式，适合导入数据、统计结果和批量整理时使用。',
+    get description(): string { return t('misc.skillDesc.spreadsheetHelper') },
     category: 'document',
     source: 'project',
     status: 'built-in',
@@ -232,7 +237,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.task-triage',
     name: 'Task Triage',
-    description: '把用户反馈、长对话或问题清单拆成优先级、复现步骤、下一步动作和回复草稿。',
+    get description(): string { return t('misc.skillDesc.taskTriage') },
     category: 'automation',
     source: 'project',
     status: 'built-in',
@@ -244,7 +249,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.external-app-actions',
     name: 'External App Actions',
-    description: '调用邮件、笔记、代码托管、任务系统等外部动作；需要用户显式配置授权。',
+    get description(): string { return t('misc.skillDesc.externalAppActions') },
     category: 'automation',
     source: 'project',
     status: 'built-in',
@@ -256,7 +261,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.ci-diagnosis',
     name: 'CI Diagnosis',
-    description: '读取构建或测试失败日志，定位错误并生成修复建议，用于发布流程排障。',
+    get description(): string { return t('misc.skillDesc.ciDiagnosis') },
     category: 'development',
     source: 'project',
     status: 'built-in',
@@ -268,7 +273,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.agent-trace-debug',
     name: 'Agent Trace Debug',
-    description: '分析 LLM、工具调用、记忆召回和插件钩子的执行轨迹，适合排查“有无输出”和耗时问题。',
+    get description(): string { return t('misc.skillDesc.agentTraceDebug') },
     category: 'development',
     source: 'project',
     status: 'built-in',
@@ -280,7 +285,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.release-notes',
     name: 'Release Notes',
-    description: '把技术改动整理成用户可读的更新说明，适合版本发布和变更记录。',
+    get description(): string { return t('misc.skillDesc.releaseNotes') },
     category: 'development',
     source: 'project',
     status: 'built-in',
@@ -292,7 +297,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.design-system',
     name: 'Design System',
-    description: '沉淀颜色、间距、组件状态和文案规则，让设置页、桌宠页和能力页保持一致。',
+    get description(): string { return t('misc.skillDesc.designSystem') },
     category: 'frontend',
     source: 'project',
     status: 'built-in',
@@ -304,7 +309,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.visual-regression',
     name: 'Visual Regression',
-    description: '通过截图对比检查布局、文本溢出、遮挡和深浅色主题问题，适合 UI 改动后验收。',
+    get description(): string { return t('misc.skillDesc.visualRegression') },
     category: 'frontend',
     source: 'project',
     status: 'built-in',
@@ -316,7 +321,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.theme-assets',
     name: 'Theme Assets',
-    description: '为角色、工作区或模式生成统一色彩与素材风格，适合未来扩展个性化主题。',
+    get description(): string { return t('misc.skillDesc.themeAssets') },
     category: 'frontend',
     source: 'project',
     status: 'built-in',
@@ -328,7 +333,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.web-research',
     name: 'Web Research',
-    description: '对需要时效性的模型、插件、依赖和工具信息进行搜索、比对和资料整理。',
+    get description(): string { return t('misc.skillDesc.webResearch') },
     category: 'research',
     source: 'project',
     status: 'built-in',
@@ -340,7 +345,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.content-writing',
     name: 'Content Writing',
-    description: '把调研结果、教程、FAQ 和版本说明写成清晰中文内容，适合文档与帮助页。',
+    get description(): string { return t('misc.skillDesc.contentWriting') },
     category: 'research',
     source: 'project',
     status: 'built-in',
@@ -352,7 +357,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.news-mcp',
     name: 'News MCP',
-    description: '通过 MCP 读取新闻、金融或搜索类信息源，用于扩展实时资讯能力。',
+    get description(): string { return t('misc.skillDesc.newsMcp') },
     category: 'mcp',
     source: 'project',
     status: 'built-in',
@@ -364,7 +369,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.prompted-media-download',
     name: 'Media Download Workflow',
-    description: '作为视频和音频下载能力的候选流程；需要在 UI 中明确版权、授权和保存位置。',
+    get description(): string { return t('misc.skillDesc.promptedMediaDownload') },
     category: 'media',
     source: 'project',
     status: 'built-in',
@@ -376,7 +381,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.template-export',
     name: 'Template Export',
-    description: '把常见输出整理成固定模板，例如日报、纪要、角色卡、测试报告和调研摘要。',
+    get description(): string { return t('misc.skillDesc.templateExport') },
     category: 'document',
     source: 'project',
     status: 'built-in',
@@ -388,7 +393,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.project-planning',
     name: 'Project Planning',
-    description: '把模糊需求拆成范围、里程碑、验收标准和风险，适合复杂功能开工前使用。',
+    get description(): string { return t('misc.skillDesc.projectPlanning') },
     category: 'governance',
     source: 'project',
     status: 'built-in',
@@ -400,7 +405,7 @@ export const curatedSkillRecommendations: SkillCatalogItem[] = [
   {
     id: 'yuizaki.skill.quality-cleanup',
     name: 'Quality Cleanup',
-    description: '清理重复抽象、冗余 UI 文案、过度包装和不一致命名，保持改动小而可验收。',
+    get description(): string { return t('misc.skillDesc.qualityCleanup') },
     category: 'governance',
     source: 'project',
     status: 'built-in',

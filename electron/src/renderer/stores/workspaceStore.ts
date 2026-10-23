@@ -12,6 +12,7 @@ import type {
   WorkspaceWorldBookEntry,
 } from '../../shared/workspace'
 import { workspaceClient, type WorkspacePatchPayload } from '@/api/clients/workspace-client'
+import { t } from '@/i18n'
 import { useCompanionStore } from './companionStore'
 
 const STORAGE_KEY = 'deskpet-workspaces'
@@ -206,7 +207,7 @@ const createDefaultWorkspace = (): WorkspaceRecord => {
   const now = new Date().toISOString()
   return {
     id: 'default',
-    name: '默认场景',
+    name: t('misc.defaultWorkspaceName'),
     createdAt: now,
     updatedAt: now,
     context: createDefaultWorkspaceContext(),
@@ -396,7 +397,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const now = new Date().toISOString()
     const workspace: WorkspaceRecord = {
       id: `ws_${Date.now()}`,
-      name: name?.trim() || `场景 ${state.value.workspaces.length + 1}`,
+      name: name?.trim() || t('misc.sceneFallbackName', { index: state.value.workspaces.length + 1 }),
       createdAt: now,
       updatedAt: now,
       context: { ...activeWorkspace.value.context },
@@ -466,7 +467,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const activeCompanionId = activeWorkspace.value.companion_profile_id || companionStore.activeCompanionId || undefined
     const context = { ...activeWorkspace.value.context }
     const created = await workspaceClient.create({
-      name: name?.trim() || `场景 ${state.value.workspaces.length + 1}`,
+      name: name?.trim() || t('misc.sceneFallbackName', { index: state.value.workspaces.length + 1 }),
       companion_profile_id: activeCompanionId,
       context: context as unknown as Record<string, unknown>,
     })

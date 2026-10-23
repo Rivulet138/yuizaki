@@ -2,7 +2,7 @@
   <aside class="session-rail">
     <div class="session-rail-header">
       <div class="session-title-stack">
-        <span class="session-title">会话</span>
+        <span class="session-title">{{ t('chatPanel.rail.title') }}</span>
       </div>
       <div class="session-header-actions">
         <button
@@ -10,15 +10,15 @@
           :class="{ active: showArchived }"
           type="button"
           data-testid="session-archive-filter"
-          :aria-label="showArchived ? '显示活跃会话' : '显示已归档会话'"
-          :title="showArchived ? '活跃会话' : '已归档会话'"
+          :aria-label="showArchived ? t('chatPanel.rail.showActiveAria') : t('chatPanel.rail.showArchivedAria')"
+          :title="showArchived ? t('chatPanel.rail.activeFilterTitle') : t('chatPanel.rail.archivedFilterTitle')"
           @click="showArchived = !showArchived"
         >
           <el-icon><FolderOpened /></el-icon>
         </button>
-        <button class="new-session-btn" :class="{ loading: creating }" type="button" :disabled="creating" :aria-busy="creating" aria-label="新建会话" title="新建会话" @click="$emit('create-session')">
+        <button class="new-session-btn" :class="{ loading: creating }" type="button" :disabled="creating" :aria-busy="creating" :aria-label="t('chatPanel.rail.newSession')" :title="t('chatPanel.rail.newSession')" @click="$emit('create-session')">
           <el-icon><Loading v-if="creating" /><Plus v-else /></el-icon>
-          <span>新建</span>
+          <span>{{ t('chatPanel.rail.new') }}</span>
         </button>
       </div>
     </div>
@@ -29,8 +29,8 @@
         v-model="searchQuery"
         class="search-input"
         type="search"
-        aria-label="搜索会话"
-        placeholder="搜索会话"
+        :aria-label="t('chatPanel.rail.search')"
+        :placeholder="t('chatPanel.rail.search')"
       />
     </div>
 
@@ -62,23 +62,23 @@
               class="session-rename-input"
               type="text"
               maxlength="120"
-              aria-label="会话标题"
+              :aria-label="t('chatPanel.rail.sessionTitleAria')"
               @click.stop
               @keydown.enter.prevent.stop="commitRename(session)"
               @keydown.esc.prevent.stop="cancelRename"
               @blur="commitRename(session)"
             />
-            <span v-else class="title" @dblclick.stop="startRename(session)">{{ session.title || '未命名会话' }}</span>
-            <span v-if="session.pinned" class="pin-dot">置顶</span>
-            <span v-if="session.archived" class="session-state">已归档</span>
+            <span v-else class="title" @dblclick.stop="startRename(session)">{{ session.title || t('chatPanel.rail.untitled') }}</span>
+            <span v-if="session.pinned" class="pin-dot">{{ t('chatPanel.rail.pinned') }}</span>
+            <span v-if="session.archived" class="session-state">{{ t('chatPanel.rail.archived') }}</span>
           </div>
           <div v-if="sessionStateLabels(session.id).length" class="session-state-row" aria-live="polite">
             <span v-if="runningSessionSet.has(session.id)" class="session-state is-running">
               <el-icon><Loading /></el-icon>
-              生成中
+              {{ t('chatPanel.rail.generating') }}
             </span>
-            <span v-if="draftSessionSet.has(session.id)" class="session-state">草稿</span>
-            <span v-if="unreadSessionSet.has(session.id)" class="session-state is-unread">新回复</span>
+            <span v-if="draftSessionSet.has(session.id)" class="session-state">{{ t('chatPanel.rail.draft') }}</span>
+            <span v-if="unreadSessionSet.has(session.id)" class="session-state is-unread">{{ t('chatPanel.rail.newReply') }}</span>
           </div>
           <div class="meta-row">
             <span v-if="workspaceLabel(session.workspace_id)" class="workspace-chip">{{ workspaceLabel(session.workspace_id) }}</span>
@@ -86,22 +86,22 @@
             <span>{{ formatMessageCount(session.message_count) }}</span>
           </div>
           <p v-if="session.summary" class="session-preview">{{ session.summary }}</p>
-          <div class="quick-actions" aria-label="会话操作">
-            <button type="button" class="quick-btn" :aria-label="session.pinned ? '取消置顶会话' : '置顶会话'" :title="session.pinned ? '取消置顶' : '置顶'" @click.stop="$emit('toggle-pin', session.id, !session.pinned)">
+          <div class="quick-actions" :aria-label="t('chatPanel.rail.actions')">
+            <button type="button" class="quick-btn" :aria-label="session.pinned ? t('chatPanel.rail.unpinAria') : t('chatPanel.rail.pinAria')" :title="session.pinned ? t('chatPanel.rail.unpin') : t('chatPanel.rail.pin')" @click.stop="$emit('toggle-pin', session.id, !session.pinned)">
               <el-icon><StarFilled v-if="session.pinned" /><Star v-else /></el-icon>
             </button>
             <el-dropdown trigger="click" @command="(command: string) => handleMoreCommand(command, session)">
-              <button type="button" class="quick-btn" aria-label="更多会话操作" title="更多" @click.stop>
+              <button type="button" class="quick-btn" :aria-label="t('chatPanel.rail.moreAria')" :title="t('chatPanel.rail.more')" @click.stop>
                 <el-icon><MoreFilled /></el-icon>
               </button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item command="rename">重命名</el-dropdown-item>
-                  <el-dropdown-item command="archive">{{ session.archived ? '恢复会话' : '归档会话' }}</el-dropdown-item>
-                  <el-dropdown-item command="export-json">导出会话数据</el-dropdown-item>
-                  <el-dropdown-item command="export-csv">导出表格</el-dropdown-item>
+                  <el-dropdown-item command="rename">{{ t('chatPanel.rail.rename') }}</el-dropdown-item>
+                  <el-dropdown-item command="archive">{{ session.archived ? t('chatPanel.rail.unarchive') : t('chatPanel.rail.archive') }}</el-dropdown-item>
+                  <el-dropdown-item command="export-json">{{ t('chatPanel.rail.exportJson') }}</el-dropdown-item>
+                  <el-dropdown-item command="export-csv">{{ t('chatPanel.rail.exportCsv') }}</el-dropdown-item>
                   <el-dropdown-item divided command="delete">
-                    <span class="session-danger-action">删除</span>
+                    <span class="session-danger-action">{{ t('chatPanel.rail.delete') }}</span>
                   </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -112,7 +112,7 @@
     </div>
 
     <div v-else class="session-empty">
-      <strong>{{ searchQuery ? '没有匹配会话' : showArchived ? '暂无已归档会话' : '暂无会话' }}</strong>
+      <strong>{{ searchQuery ? t('chatPanel.rail.emptySearch') : showArchived ? t('chatPanel.rail.emptyArchived') : t('chatPanel.rail.empty') }}</strong>
     </div>
   </aside>
 </template>
@@ -128,6 +128,7 @@ import { ElMessage } from 'element-plus'
 import { FolderOpened, Loading, MoreFilled, Plus, Search, Star, StarFilled } from '@element-plus/icons-vue'
 import { computed, nextTick, ref } from 'vue'
 import { systemClient } from '@/api/client'
+import { t } from '@/i18n'
 
 interface SessionRailRecord {
   id: string
@@ -176,9 +177,9 @@ const draftSessionSet = computed(() => new Set(props.draftSessionIds))
 const runningSessionSet = computed(() => new Set(props.runningSessionIds))
 const unreadSessionSet = computed(() => new Set(props.unreadSessionIds))
 const sessionStateLabels = (sessionId: string) => [
-  runningSessionSet.value.has(sessionId) ? '生成中' : '',
-  draftSessionSet.value.has(sessionId) ? '草稿' : '',
-  unreadSessionSet.value.has(sessionId) ? '新回复' : '',
+  runningSessionSet.value.has(sessionId) ? t('chatPanel.rail.generating') : '',
+  draftSessionSet.value.has(sessionId) ? t('chatPanel.rail.draft') : '',
+  unreadSessionSet.value.has(sessionId) ? t('chatPanel.rail.newReply') : '',
 ].filter(Boolean)
 
 const startRename = (session: SessionRailRecord) => {
@@ -208,7 +209,7 @@ const isDefaultWorkspace = (workspaceId?: string | null) => normalizeWorkspaceId
 const normalizedActiveWorkspaceId = computed(() => normalizeWorkspaceId(props.activeWorkspaceId))
 const workspaceName = (workspaceId?: string | null) => {
   const id = normalizeWorkspaceId(workspaceId)
-  if (id === 'default') return '普通对话'
+  if (id === 'default') return t('chatPanel.rail.defaultWorkspace')
   return props.workspaceNames?.[id] || id
 }
 const workspaceLabel = (workspaceId?: string | null) => {
@@ -267,20 +268,22 @@ const sessionSections = computed(() => {
       if (latestDelta !== 0) return latestDelta
       return workspaceName(leftId).localeCompare(workspaceName(rightId), 'zh-CN')
     })
-    .map(([workspaceId, sessions]) => createSection(`project:${workspaceId}`, `${workspaceName(workspaceId)} 项目`, sessions))
+    .map(([workspaceId, sessions]) => createSection(`project:${workspaceId}`, t('chatPanel.rail.projectSection', { name: workspaceName(workspaceId) }), sessions))
   return [
-    createSection('current', normalizedActiveWorkspaceId.value === 'default' ? '普通对话' : `${workspaceName(normalizedActiveWorkspaceId.value)} 项目`, currentWorkspace),
-    createSection('general', '普通对话', general),
+    createSection('current', normalizedActiveWorkspaceId.value === 'default'
+      ? t('chatPanel.rail.defaultWorkspace')
+      : t('chatPanel.rail.projectSection', { name: workspaceName(normalizedActiveWorkspaceId.value) }), currentWorkspace),
+    createSection('general', t('chatPanel.rail.defaultWorkspace'), general),
     ...otherProjectSections,
   ].filter((section) => section.sessions.length > 0)
 })
 
-const formatMessageCount = (count: number) => `${Math.max(0, count)} 条消息`
+const formatMessageCount = (count: number) => t('chatPanel.rail.messageCount', { count: Math.max(0, count) })
 
 const formatSessionTime = (value?: string | null) => {
-  if (!value) return '未同步'
+  if (!value) return t('chatPanel.rail.unsynced')
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '未同步'
+  if (Number.isNaN(date.getTime())) return t('chatPanel.rail.unsynced')
   const now = new Date()
   const sameDay = date.toDateString() === now.toDateString()
   return sameDay
@@ -288,19 +291,23 @@ const formatSessionTime = (value?: string | null) => {
     : date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
 }
 
-const sessionTooltip = (session: SessionRailRecord) => {
-  const title = session.title || '未命名会话'
-  return `${title}\n${workspaceName(session.workspace_id)}\n${session.message_count} 条消息`
-}
+const sessionTooltip = (session: SessionRailRecord) => t('chatPanel.rail.tooltip', {
+  title: session.title || t('chatPanel.rail.untitled'),
+  workspace: workspaceName(session.workspace_id),
+  count: t('chatPanel.rail.messageCount', { count: session.message_count }),
+})
 
 const sessionAriaLabel = (session: SessionRailRecord) => {
-  const title = session.title || '未命名会话'
+  const separator = t('chatPanel.rail.listSeparator')
+  const title = session.title || t('chatPanel.rail.untitled')
   const state = [
     workspaceLabel(session.workspace_id) || null,
-    session.pinned ? '已置顶' : null,
-    session.id === props.activeSessionId ? '当前会话' : null,
-  ].filter(Boolean).join('，')
-  return `${title}，${session.message_count} 条消息${state ? `，${state}` : ''}`
+    session.pinned ? t('chatPanel.rail.pinnedState') : null,
+    session.id === props.activeSessionId ? t('chatPanel.rail.currentSession') : null,
+  ].filter(Boolean).join(separator)
+  return [title, t('chatPanel.rail.messageCount', { count: session.message_count }), state]
+    .filter(Boolean)
+    .join(separator)
 }
 
 const handleMoreCommand = (command: string, session: SessionRailRecord) => {
@@ -338,7 +345,7 @@ const exportSession = async (sessionId: string, workspaceId: string, format: 'js
     URL.revokeObjectURL(url)
   } catch (error) {
     console.warn('[SessionRail] failed to export session:', error)
-    ElMessage.error('导出会话失败')
+    ElMessage.error(t('chatPanel.rail.exportFailed'))
   }
 }
 </script>

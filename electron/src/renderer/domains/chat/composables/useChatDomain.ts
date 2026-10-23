@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { audioCapture } from '@/audio/audio-capture'
 import { useChatStore } from '@/stores/chatStore'
 import { chatClient } from '@/api/client'
+import { t } from '@/i18n'
 
 export function useChatDomain() {
   const chatStore = useChatStore()
@@ -27,7 +28,7 @@ export function useChatDomain() {
     if (audioCapture.getIsRecording().value) return
     const socketClient = chatClient.getSocketClient()
     if (!socketClient.isConnected()) {
-      ElMessage.warning('实时通道未连接，无法开始语音输入')
+      ElMessage.warning(t('misc.realtimeChannelDisconnected'))
       return
     }
 
@@ -41,7 +42,7 @@ export function useChatDomain() {
         deviceId: chatStore.chatOptions.audio_input_device_id,
       })
     } catch {
-      ElMessage.error(audioCaptureState.error || '麦克风启动失败')
+      ElMessage.error(audioCaptureState.error || t('misc.microphoneStartFailed'))
     }
   }
 

@@ -1,13 +1,13 @@
 <template>
-  <PanelShell title="人格设定" tone="companion">
+  <PanelShell :title="t('promptPanel.panel.title')" tone="companion">
     <div class="prompt-panel">
       <section class="prompt-card prompt-card--split">
         <header class="prompt-card-header">
           <div>
-            <h3>工作区系统提示词</h3>
+            <h3>{{ t('promptPanel.workspace.title') }}</h3>
             <span>{{ activeWorkspace.name }}</span>
           </div>
-            <el-button size="small" type="primary" :disabled="!workspacePromptDirty" :loading="savingWorkspacePrompt" @click="saveWorkspaceSystemPrompt">保存工作区提示词</el-button>
+            <el-button size="small" type="primary" :disabled="!workspacePromptDirty" :loading="savingWorkspacePrompt" @click="saveWorkspaceSystemPrompt">{{ t('promptPanel.workspace.save') }}</el-button>
         </header>
         <el-input
           v-model="workspaceSystemPrompt"
@@ -20,12 +20,12 @@
       <section class="prompt-card prompt-card--split">
         <header class="prompt-card-header">
           <div>
-            <h3>桌宠人格提示词</h3>
-            <span>{{ activeCompanion?.name || '未加载桌宠档案' }}</span>
+            <h3>{{ t('promptPanel.companion.title') }}</h3>
+            <span>{{ activeCompanion?.name || t('promptPanel.companion.noProfile') }}</span>
           </div>
           <div class="prompt-card-actions">
-          <el-button size="small" plain :loading="companionStore.loading" @click="loadCompanions">刷新桌宠档案</el-button>
-          <el-button size="small" type="primary" :disabled="!activeCompanion || !companionPromptDirty" :loading="savingCompanionPrompt" @click="saveCompanionPersonaPrompt">保存人格提示词</el-button>
+          <el-button size="small" plain :loading="companionStore.loading" @click="loadCompanions">{{ t('promptPanel.companion.refresh') }}</el-button>
+          <el-button size="small" type="primary" :disabled="!activeCompanion || !companionPromptDirty" :loading="savingCompanionPrompt" @click="saveCompanionPersonaPrompt">{{ t('promptPanel.companion.save') }}</el-button>
           </div>
         </header>
         <el-input
@@ -39,8 +39,8 @@
       <details class="prompt-editor-block">
         <summary class="prompt-card-header prompt-editor-header">
           <span>
-            <strong>高级提示词</strong>
-            <small>模式、角色卡与世界书</small>
+            <strong>{{ t('promptPanel.advanced.title') }}</strong>
+            <small>{{ t('promptPanel.advanced.hint') }}</small>
           </span>
           <span class="prompt-editor-chevron" aria-hidden="true">⌄</span>
         </summary>
@@ -58,6 +58,7 @@ import 'element-plus/es/components/input/style/css'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
+import { t } from '@/i18n'
 import WorkspacePromptEditor from '@/shared/components/prompt/WorkspacePromptEditor.vue'
 import { useCompanionRuntimeBridge } from '@/app/composables/useCompanionRuntimeBridge'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
@@ -90,7 +91,7 @@ const loadCompanions = async () => {
     await companionStore.loadCompanions()
     syncCompanionPersonaPrompt()
   } catch {
-    ElMessage.warning('桌宠档案加载失败')
+    ElMessage.warning(t('promptPanel.companion.loadFailed'))
   }
 }
 
@@ -101,9 +102,9 @@ const saveWorkspaceSystemPrompt = async () => {
     await workspaceStore.updateWorkspaceRemote(activeWorkspace.value.id, {
       system_prompt: workspaceSystemPrompt.value.trim() || null,
     })
-    ElMessage.success('场景提示词已保存')
+    ElMessage.success(t('promptPanel.workspace.saved'))
   } catch {
-    ElMessage.error('保存场景提示词失败')
+    ElMessage.error(t('promptPanel.workspace.saveFailed'))
   } finally {
     savingWorkspacePrompt.value = false
   }
@@ -117,9 +118,9 @@ const saveCompanionPersonaPrompt = async () => {
       persona_prompt: companionPersonaPrompt.value.trim() || null,
     })
     await applyActiveCompanionRuntime()
-    ElMessage.success('桌宠人格提示词已保存')
+    ElMessage.success(t('promptPanel.companion.saved'))
   } catch {
-    ElMessage.error('保存桌宠人格提示词失败')
+    ElMessage.error(t('promptPanel.companion.saveFailed'))
   } finally {
     savingCompanionPrompt.value = false
   }

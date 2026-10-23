@@ -16,7 +16,7 @@
         @keyup.space.prevent="$emit('end-hold')"
       >
         <el-icon><Microphone /></el-icon>
-        <span>{{ recording ? '松开发送' : '按住说话' }}</span>
+        <span>{{ recording ? t('chatPanel.voice.releaseToSend') : t('chatPanel.voice.holdToTalk') }}</span>
       </button>
       <button
         v-else
@@ -28,7 +28,7 @@
         @click="$emit('toggle-mic')"
       >
         <el-icon><Microphone /></el-icon>
-        <span>{{ recording ? '结束录音' : '语音输入' }}</span>
+        <span>{{ recording ? t('chatPanel.voice.stopRecording') : t('chatPanel.voice.voiceInput') }}</span>
       </button>
       <button class="voice-stop-button" type="button" :disabled="!interruptible" :aria-label="interruptibleLabel" :title="interruptibleLabel" @click="$emit('interrupt')">
         <el-icon><Mute /></el-icon>
@@ -37,12 +37,12 @@
         v-if="showRecoveryAction"
         class="voice-retry-button"
         type="button"
-        title="重连实时语音"
-        aria-label="重连实时语音"
+        :title="t('chatPanel.voice.reconnectTitle')"
+        :aria-label="t('chatPanel.voice.reconnectTitle')"
         @click="$emit('retry-realtime')"
       >
         <el-icon><Refresh /></el-icon>
-        <span>重连语音</span>
+        <span>{{ t('chatPanel.voice.reconnect') }}</span>
       </button>
     </div>
   </div>
@@ -55,6 +55,7 @@ import { computed } from 'vue'
 import { ElSegmented } from 'element-plus'
 import 'element-plus/es/components/segmented/style/css'
 import { Microphone, Mute, Refresh } from '@element-plus/icons-vue'
+import { t } from '@/i18n'
 
 const props = defineProps<{
   recording: boolean
@@ -67,7 +68,7 @@ const props = defineProps<{
   showRecoveryAction: boolean
 }>()
 
-const interruptibleLabel = computed(() => props.interruptible ? '停止当前语音响应' : '没有可停止的语音响应')
+const interruptibleLabel = computed(() => props.interruptible ? t('chatPanel.voice.stopResponse') : t('chatPanel.voice.nothingToStop'))
 
 defineEmits<{
   'update:mode': [mode: string]

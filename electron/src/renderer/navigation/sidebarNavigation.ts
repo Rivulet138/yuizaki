@@ -1,3 +1,5 @@
+import { t } from '@/i18n'
+
 export type SidebarNavigationItem = {
   id: string
 }
@@ -15,11 +17,34 @@ export const primarySidebarMenuIds = ['chat', 'memory', 'settings'] as const
 // the compact browser sidebar alongside user-facing settings.
 export const hiddenSidebarMenuIds = ['infrastructure', 'deploy'] as const
 
+// Labels are lazy getters, not plain strings: this module is imported from plain
+// .ts call sites where `computed` is not available, and the getters are read on
+// every navigation rebuild so the labels follow the active locale.
 export const advancedSidebarGroups = [
-  { id: 'companion', label: '桌宠', hint: '人格、外观与记录', ids: ['prompt', 'pet', 'persona-memory'] },
-  { id: 'tools', label: '工具', hint: '本地能力与插件', ids: ['tool', 'svc', 'plugins'] },
-  { id: 'audit', label: '审计', hint: '任务与权限追踪', ids: ['agent-trace', 'agent-governance'] },
-  { id: 'settings', label: '设置', hint: '语言与界面', ids: ['i18n'] },
+  {
+    id: 'companion',
+    get label(): string { return t('nav.groupCompanion') },
+    get hint(): string { return t('nav.hintCompanion') },
+    ids: ['prompt', 'pet', 'persona-memory'],
+  },
+  {
+    id: 'tools',
+    get label(): string { return t('nav.groupTools') },
+    get hint(): string { return t('nav.hintTools') },
+    ids: ['tool', 'svc', 'plugins'],
+  },
+  {
+    id: 'audit',
+    get label(): string { return t('nav.groupAudit') },
+    get hint(): string { return t('nav.hintAudit') },
+    ids: ['agent-trace', 'agent-governance'],
+  },
+  {
+    id: 'settings',
+    get label(): string { return t('nav.groupSettings') },
+    get hint(): string { return t('nav.hintSettings') },
+    ids: ['i18n'],
+  },
 ] as const
 
 export const buildSidebarNavigation = <T extends SidebarNavigationItem>(menus: readonly T[]): {
@@ -44,7 +69,7 @@ export const buildSidebarNavigation = <T extends SidebarNavigationItem>(menus: r
   })
   hiddenSidebarMenuIds.forEach((id) => remaining.delete(id))
   const otherItems = menus.filter((menu) => remaining.has(menu.id))
-  if (otherItems.length) advanced.push({ id: 'other', label: '其他', hint: '其他可用模块', items: otherItems })
+  if (otherItems.length) advanced.push({ id: 'other', label: t('nav.groupOther'), hint: t('nav.hintOther'), items: otherItems })
 
   return { primary, advanced }
 }

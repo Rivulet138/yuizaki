@@ -17,7 +17,7 @@
         :icon="CircleClose"
         :loading="resourceCancelLoading"
         @click="emit('cancel-downloads')"
-      >取消下载</el-button>
+      >{{ t('settingsSection.resources.cancelDownloads') }}</el-button>
     </div>
 
     <div v-if="activeDownloadProgress.length" class="resource-progress-list" aria-live="polite">
@@ -55,11 +55,11 @@
         >
           <span class="resource-download-label">{{ item.label }}</span>
           <el-tag size="small" type="info">{{ item.version }}</el-tag>
-          <el-tag v-if="item.requiredOnFirstRun" size="small" type="warning">首次运行必需</el-tag>
+          <el-tag v-if="item.requiredOnFirstRun" size="small" type="warning">{{ t('settingsSection.resources.requiredOnFirstRun') }}</el-tag>
           <span>{{ formatResourceDownloadBytes(item.downloadBytes) }}</span>
           <span>{{ item.license }}</span>
           <el-tag v-if="item.resumable" size="small" type="warning">
-            可续传 {{ formatStorageBytes(item.resumable.bytesDownloaded) }}<template v-if="item.resumable.bytesTotal !== null"> / {{ formatStorageBytes(item.resumable.bytesTotal) }}</template>
+            {{ t('settingsSection.resources.resumable', { downloaded: formatStorageBytes(item.resumable.bytesDownloaded) }) }}<template v-if="item.resumable.bytesTotal !== null"> / {{ formatStorageBytes(item.resumable.bytesTotal) }}</template>
           </el-tag>
         </el-checkbox>
       </el-checkbox-group>
@@ -69,7 +69,7 @@
         :loading="resourceActionLoading('selected-download')"
         :disabled="selectedResourceIds.length === 0"
         @click="emit('download-selected')"
-      >下载选中项</el-button>
+      >{{ t('settingsSection.resources.downloadSelected') }}</el-button>
     </div>
 
     <section v-if="storageStatus" class="storage-maintenance" aria-labelledby="storage-maintenance-title">
@@ -153,11 +153,11 @@
         </template>
         <div class="resource-details">
           <div><strong>{{ t('settings.resource.model') }}</strong><code class="resource-path">{{ resourceView.sherpaOnline.modelPath }}</code></div>
-          <div><strong>Sherpa Tokens（词表文件）</strong><code class="resource-path">{{ resourceView.sherpaOnline.tokensPath }}</code></div>
+          <div><strong>{{ t('settingsSection.resources.sherpaTokens') }}</strong><code class="resource-path">{{ resourceView.sherpaOnline.tokensPath }}</code></div>
           <div>
-            <strong>模型检查</strong>
+            <strong>{{ t('settingsSection.resources.modelCheck') }}</strong>
             <el-tag :type="resourceView.sherpaOnline.validated ? 'success' : 'warning'">
-              {{ resourceView.sherpaOnline.validated ? 'Zipformer2 CTC 已通过' : 'Zipformer2 CTC 未检查' }}
+              {{ resourceView.sherpaOnline.validated ? t('settingsSection.resources.sherpaValidated') : t('settingsSection.resources.sherpaNotChecked') }}
             </el-tag>
           </div>
         </div>
@@ -174,8 +174,8 @@
             plain
             :icon="Delete"
             :loading="resourceActionLoading('remove-sherpa_online')"
-            @click="emit('remove-resource', 'sherpa_online', '流式语音识别', resourceView.sherpaOnline.metadata)"
-          >永久卸载</el-button>
+            @click="emit('remove-resource', 'sherpa_online', t('settingsSection.resources.labelSherpaOnline'), resourceView.sherpaOnline.metadata)"
+          >{{ t('settingsSection.resources.uninstall') }}</el-button>
         </div>
       </el-card>
 
@@ -191,8 +191,8 @@
           <div><strong>{{ t('settings.resource.preprocessDir') }}</strong><code class="resource-path">{{ resourceView.soulx.preprocessDir }}</code></div>
           <div><strong>{{ t('settings.resource.referenceDir') }}</strong><code class="resource-path">{{ resourceView.soulx.referenceDir }}</code></div>
           <div>
-            <strong>参考音频</strong>
-            <el-tag :type="resourceView.soulx.hasReferenceAudio ? 'success' : 'info'">{{ resourceView.soulx.hasReferenceAudio ? '已导入' : '未导入' }}</el-tag>
+            <strong>{{ t('settingsSection.resources.referenceAudio') }}</strong>
+            <el-tag :type="resourceView.soulx.hasReferenceAudio ? 'success' : 'info'">{{ resourceView.soulx.hasReferenceAudio ? t('settingsSection.resources.referenceImported') : t('settingsSection.resources.referenceMissing') }}</el-tag>
           </div>
         </div>
         <ul v-if="resourceView.soulx.details.length" class="resource-list">
@@ -207,8 +207,8 @@
             plain
             :icon="Delete"
             :loading="resourceActionLoading('remove-soulx')"
-            @click="emit('remove-resource', 'soulx', 'SoulX 变声', resourceView.soulx.metadata)"
-          >永久卸载</el-button>
+            @click="emit('remove-resource', 'soulx', t('settingsSection.resources.labelSoulx'), resourceView.soulx.metadata)"
+          >{{ t('settingsSection.resources.uninstall') }}</el-button>
         </div>
       </el-card>
 
@@ -221,7 +221,7 @@
         </template>
         <div class="resource-details">
           <div><strong>{{ t('settings.resource.model') }}</strong><code class="resource-path">{{ resourceView.sherpa.modelPath }}</code></div>
-          <div><strong>Sherpa Tokens（词表文件）</strong><code class="resource-path">{{ resourceView.sherpa.tokensPath }}</code></div>
+          <div><strong>{{ t('settingsSection.resources.sherpaTokens') }}</strong><code class="resource-path">{{ resourceView.sherpa.tokensPath }}</code></div>
         </div>
         <ul v-if="resourceView.sherpa.details.length" class="resource-list">
           <li v-for="detail in resourceView.sherpa.details" :key="detail">{{ detail }}</li>
@@ -234,8 +234,8 @@
             plain
             :icon="Delete"
             :loading="resourceActionLoading('remove-sherpa')"
-            @click="emit('remove-resource', 'sherpa', '离线语音识别', resourceView.sherpa.metadata)"
-          >永久卸载</el-button>
+            @click="emit('remove-resource', 'sherpa', t('settingsSection.resources.labelSherpa'), resourceView.sherpa.metadata)"
+          >{{ t('settingsSection.resources.uninstall') }}</el-button>
         </div>
       </el-card>
 
@@ -261,8 +261,8 @@
             plain
             :icon="Delete"
             :loading="resourceActionLoading('remove-embedding')"
-            @click="emit('remove-resource', 'embedding', '长期记忆嵌入', resourceView.embedding.metadata)"
-          >永久卸载</el-button>
+            @click="emit('remove-resource', 'embedding', t('settingsSection.resources.labelEmbedding'), resourceView.embedding.metadata)"
+          >{{ t('settingsSection.resources.uninstall') }}</el-button>
         </div>
       </el-card>
 
@@ -290,7 +290,7 @@
             :icon="Delete"
             :loading="resourceActionLoading('remove-tts')"
             @click="emit('remove-resource', 'tts', 'Genie TTS', resourceView.tts.metadata)"
-          >永久卸载</el-button>
+          >{{ t('settingsSection.resources.uninstall') }}</el-button>
         </div>
       </el-card>
     </div>
@@ -317,6 +317,7 @@ import { ElProgress, ElTable, ElTableColumn } from 'element-plus'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 import 'element-plus/es/components/progress/style/css'
+import { computed } from 'vue'
 import { t } from '@/i18n'
 import type {
   ManagedModelResourceId,
@@ -382,24 +383,24 @@ const formatStorageBytes = (value: number): string => {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`
 }
 
-const formatResourceDownloadBytes = (value: number): string => value > 0 ? formatStorageBytes(value) : '按模型'
-const resourceProgressLabels: Record<ManagedModelResourceId, string> = {
-  soulx: 'SoulX 变声',
-  sherpa: '离线语音识别',
-  sherpa_online: '流式语音识别',
-  embedding: '长期记忆嵌入',
-  tts: 'Genie TTS',
-}
-const resourceProgressPhaseLabels: Record<ResourceProgressPhase, string> = {
-  preparing: '准备',
-  downloading: '下载',
-  verifying: '校验',
-  extracting: '解压',
-  installing: '安装',
-  cancelling: '取消中',
-}
-const resourceProgressLabel = (id: ManagedModelResourceId) => resourceProgressLabels[id]
-const resourceProgressPhaseLabel = (phase: ResourceProgressPhase) => resourceProgressPhaseLabels[phase]
+const formatResourceDownloadBytes = (value: number): string => value > 0 ? formatStorageBytes(value) : t('settingsSection.resources.bytesPerModel')
+const resourceProgressLabels = computed<Record<ManagedModelResourceId, string>>(() => ({
+  soulx: t('settingsSection.resources.labelSoulx'),
+  sherpa: t('settingsSection.resources.labelSherpa'),
+  sherpa_online: t('settingsSection.resources.labelSherpaOnline'),
+  embedding: t('settingsSection.resources.labelEmbedding'),
+  tts: t('settingsSection.resources.labelTts'),
+}))
+const resourceProgressPhaseLabels = computed<Record<ResourceProgressPhase, string>>(() => ({
+  preparing: t('settingsSection.resources.phasePreparing'),
+  downloading: t('settingsSection.resources.phaseDownloading'),
+  verifying: t('settingsSection.resources.phaseVerifying'),
+  extracting: t('settingsSection.resources.phaseExtracting'),
+  installing: t('settingsSection.resources.phaseInstalling'),
+  cancelling: t('settingsSection.resources.phaseCancelling'),
+}))
+const resourceProgressLabel = (id: ManagedModelResourceId) => resourceProgressLabels.value[id]
+const resourceProgressPhaseLabel = (phase: ResourceProgressPhase) => resourceProgressPhaseLabels.value[phase]
 const storageCategoryLabel = (id: StorageCategoryId) => t(`settings.storage.category.${id}`)
 
 const updateSelectedResourceIds = (value: unknown) => {

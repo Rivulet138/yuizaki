@@ -364,7 +364,7 @@
               <el-form label-position="top" @submit.prevent>
                 <div class="voice-main-form single">
                   <details v-if="ttsStatus || ttsStatusRequest.loading || ttsStatusRequest.error" class="tts-runtime-details">
-                    <summary>运行详情</summary>
+                    <summary>{{ t('settingsPanel.ttsRuntimeDetails') }}</summary>
                     <div class="tts-runtime-panel">
                       <div v-for="item in ttsRuntimeMetricItems" :key="item.label" class="tts-runtime-item">
                         <span>{{ item.label }}</span>
@@ -471,19 +471,19 @@
                     </el-form-item>
                     <el-form-item :label="t('settings.tts.quality')">
                       <el-select v-model="form.tts.quality" class="full-width" @change="saveTtsField('quality', $event, { flush: true })">
-                        <el-option :label="t('settings.tts.quality.qualityFirst')" value="质量优先" />
-                        <el-option :label="t('settings.tts.quality.speedFirst')" value="速度优先" />
+                        <el-option :label="t('settings.tts.quality.qualityFirst')" :value="TTS_CONTRACT_VALUES.qualityFirst" />
+                        <el-option :label="t('settings.tts.quality.speedFirst')" :value="TTS_CONTRACT_VALUES.speedFirst" />
                       </el-select>
                     </el-form-item>
                     <el-form-item :label="t('settings.tts.split')">
                       <el-select v-model="form.tts.split" class="full-width" @change="saveTtsField('split', $event, { flush: true })">
-                        <el-option :label="t('settings.tts.split.smart')" value="智能切分" />
-                        <el-option :label="t('settings.tts.split.disabled')" value="禁用" />
+                        <el-option :label="t('settings.tts.split.smart')" :value="TTS_CONTRACT_VALUES.splitSmart" />
+                        <el-option :label="t('settings.tts.split.disabled')" :value="TTS_CONTRACT_VALUES.splitDisabled" />
                       </el-select>
                     </el-form-item>
                     <el-form-item :label="t('settings.tts.mode')">
                       <el-select v-model="form.tts.mode" class="full-width" @change="saveTtsField('mode', $event, { flush: true })">
-                        <el-option :label="t('settings.tts.mode.serial')" value="串行推理" />
+                        <el-option :label="t('settings.tts.mode.serial')" :value="TTS_CONTRACT_VALUES.modeSerial" />
                       </el-select>
                     </el-form-item>
                   </div>
@@ -682,6 +682,7 @@ import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/option/style/css'
 import { Connection, Document, Download, Upload } from '@element-plus/icons-vue'
 import { currentLocale, localeLabel, normalizeLocale, setLocale, supportedLocales, t } from '@/i18n'
+import { settingsPanelTtsTokens as TTS_CONTRACT_VALUES } from '@/i18n/settingsPanelMessages'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import { useDomainRequest } from '@/shared/composables/useDomainRequest'
@@ -850,10 +851,10 @@ const form = reactive({
     ref_text: '',
     lang: 'ja',
     device: 'cpu',
-    quality: '质量优先',
-    split: '智能切分',
-    mode: '串行推理',
-    save_mode: '禁用自动保存',
+    quality: TTS_CONTRACT_VALUES.qualityFirst,
+    split: TTS_CONTRACT_VALUES.splitSmart,
+    mode: TTS_CONTRACT_VALUES.modeSerial,
+    save_mode: TTS_CONTRACT_VALUES.saveModeDisabled,
     provider: TTS_PROVIDER,
     base_url: '',
     api_key: '',
@@ -1427,10 +1428,10 @@ const defaultTtsProfile = (): TtsProfile => {
     ref_text: '',
     lang: 'ja',
     device: 'cpu',
-    quality: '质量优先',
-    split: '智能切分',
-    mode: '串行推理',
-    save_mode: '禁用自动保存',
+    quality: TTS_CONTRACT_VALUES.qualityFirst,
+    split: TTS_CONTRACT_VALUES.splitSmart,
+    mode: TTS_CONTRACT_VALUES.modeSerial,
+    save_mode: TTS_CONTRACT_VALUES.saveModeDisabled,
     provider: TTS_PROVIDER,
     base_url: '',
     api_key: '',
@@ -1453,7 +1454,7 @@ const sanitizeTtsProfile = (value?: Partial<TtsProfile> | null): TtsProfile => {
     quality: stringValue(value?.quality, defaults.quality),
     split: stringValue(value?.split, defaults.split),
     mode: stringValue(value?.mode, defaults.mode),
-    save_mode: '禁用自动保存',
+    save_mode: TTS_CONTRACT_VALUES.saveModeDisabled,
     provider: value?.provider === 'openai-compatible' ? 'openai-compatible' : TTS_PROVIDER,
     base_url: stringValue(value?.base_url, defaults.base_url),
     api_key: stringValue(value?.api_key, defaults.api_key),
@@ -1507,7 +1508,7 @@ const ttsRuntimePatchFromProfile = (profile: TtsProfile): SettingsPatch => ({
 
 const saveActiveTtsPatch = (patch: SettingsPatch) => {
   const activeProfile = snapshotTtsProfile()
-  debouncedSave({ tts: { ...ttsRuntimePatchFromProfile(activeProfile), ...patch, save_mode: '禁用自动保存' } })
+  debouncedSave({ tts: { ...ttsRuntimePatchFromProfile(activeProfile), ...patch, save_mode: TTS_CONTRACT_VALUES.saveModeDisabled } })
 }
 
 const selectedGenieCharacter = computed(() => genieCharacters.value.find((item) => item.id === form.tts.genie_character) || null)
@@ -1550,7 +1551,7 @@ const setTtsFormField = (field: TtsProfileField, value: unknown) => {
     return
   }
   if (field === 'save_mode') {
-    form.tts.save_mode = '禁用自动保存'
+    form.tts.save_mode = TTS_CONTRACT_VALUES.saveModeDisabled
     return
   }
   form.tts[field] = String(value ?? '')
@@ -1688,11 +1689,11 @@ const resourceDownloadOptions = computed<ResourceDownloadOption[]>(() => {
   const status = resourceView.value
   if (!status) return []
   const options: Array<Omit<ResourceDownloadOption, 'resumable'>> = [
-    { ...status.sherpaOnline.metadata, id: 'sherpa_online', label: '流式语音识别', ready: status.sherpaOnline.ready },
-    { ...status.sherpa.metadata, id: 'sherpa', label: '离线语音识别', ready: status.sherpa.ready },
+    { ...status.sherpaOnline.metadata, id: 'sherpa_online', label: t('settingsPanel.resourceSherpaOnline'), ready: status.sherpaOnline.ready },
+    { ...status.sherpa.metadata, id: 'sherpa', label: t('settingsPanel.resourceSherpa'), ready: status.sherpa.ready },
     { ...status.tts.metadata, id: 'tts', label: 'Genie TTS', ready: status.tts.ready },
-    { ...status.embedding.metadata, id: 'embedding', label: '长期记忆嵌入', ready: status.embedding.ready },
-    { ...status.soulx.metadata, id: 'soulx', label: 'SoulX 变声', ready: status.soulx.ready },
+    { ...status.embedding.metadata, id: 'embedding', label: t('settingsPanel.resourceEmbedding'), ready: status.embedding.ready },
+    { ...status.soulx.metadata, id: 'soulx', label: t('settingsPanel.resourceSoulx'), ready: status.soulx.ready },
   ]
   return options.map((item) => ({
     ...item,
@@ -1721,7 +1722,7 @@ const formatStorageBytes = (value: number): string => {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`
 }
 
-const formatResourceDownloadBytes = (value: number): string => value > 0 ? formatStorageBytes(value) : '按模型'
+const formatResourceDownloadBytes = (value: number): string => value > 0 ? formatStorageBytes(value) : t('settingsPanel.resourcePerModel')
 
 const storageCategoryLabel = (id: StorageCategoryId): string => t(`settings.storage.category.${id}`)
 
@@ -1903,12 +1904,12 @@ const waitForMemoryBackend = async (expectedBackend: string) => {
 
 const handleRebuildMemoryIndex = async () => {
   if (form.memory.backend === 'inmemory') {
-    ElMessage.warning('In-memory 后端没有持久化索引可重建')
+    ElMessage.warning(t('settingsPanel.message.inMemoryNoIndex'))
     return
   }
   if (!(await flushPendingSave())) return
   if (!(await waitForMemoryBackend(form.memory.backend))) {
-    ElMessage.error('记忆后端仍在切换，请稍后重试')
+    ElMessage.error(t('settingsPanel.message.memoryBackendSwitching'))
     return
   }
   const result = await memoryRebuildRequest.execute(() => memoryClient.rebuildIndex())
@@ -1944,7 +1945,7 @@ const updateDesktopInputBindings = async (patch: InputBindingSettingsPatch) => {
   try {
     await inputBindingsStore.update(patch)
   } catch (error) {
-    ElMessage.error(describeFailure(error, '桌面快捷键保存失败'))
+    ElMessage.error(describeFailure(error, t('settingsPanel.message.desktopShortcutSaveFailed')))
   }
 }
 
@@ -1965,7 +1966,7 @@ const captureKeyboardBinding = (action: KeyboardShortcutAction, event: KeyboardE
   if (event.key === 'Escape') return
   const accelerator = keyboardEventToAccelerator(event, Boolean(inputBindingState.browserFallback))
   if (!accelerator) {
-    ElMessage.warning('字母、数字和导航键至少需要一个修饰键')
+    ElMessage.warning(t('settingsPanel.message.shortcutNeedsModifier'))
     return
   }
   void setKeyboardBinding(action, accelerator)
@@ -1978,17 +1979,17 @@ const clearKeyboardBinding = (action: KeyboardShortcutAction) => {
 const setKeyboardBinding = async (action: KeyboardShortcutAction, value: string) => {
   const accelerator = normalizeKeyboardAccelerator(value)
   if (value.trim() && !accelerator) {
-    ElMessage.warning('请输入有效的组合键，例如 Control+Shift+P')
+    ElMessage.warning(t('settingsPanel.message.shortcutInvalid'))
     return
   }
   if (!inputBindingState.browserFallback && accelerator && !accelerator.includes('+') && !accelerator.startsWith('F')) {
-    ElMessage.warning('桌面全局快捷键需要修饰键，或使用 F1-F24')
+    ElMessage.warning(t('settingsPanel.message.shortcutNeedsModifierOrFunctionKey'))
     return
   }
   const keyboard = { ...inputBindingState.settings.keyboard, [action]: accelerator }
   const conflicts = findKeyboardBindingConflicts(keyboard)
   if (conflicts.length) {
-    ElMessage.warning(`快捷键重复：${conflicts[0].actions.join('、')}`)
+    ElMessage.warning(t('settingsPanel.message.shortcutDuplicate', { actions: conflicts[0].actions.join('、') }))
     return
   }
   await updateDesktopInputBindings({ keyboard: { [action]: accelerator } })
@@ -2001,9 +2002,9 @@ const retryDesktopInputBindings = () => {
 const resetDesktopInputBindings = async () => {
   try {
     await inputBindingsStore.reset()
-    ElMessage.success('桌面输入已恢复默认')
+    ElMessage.success(t('settingsPanel.message.desktopInputReset'))
   } catch (error) {
-    ElMessage.error(describeFailure(error, '恢复默认失败'))
+    ElMessage.error(describeFailure(error, t('settingsPanel.message.desktopInputResetFailed')))
   }
 }
 
@@ -2664,7 +2665,7 @@ const runResourceCommand = async (
   resources: ManagedModelResourceId[] = [],
 ) => {
   if (resourceActionKey.value || activeDownloadProgress.value.length > 0) {
-    ElMessage.warning('已有资源任务正在执行')
+    ElMessage.warning(t('settingsPanel.message.resourceTaskBusy'))
     return
   }
   resourceActionKey.value = key
@@ -2700,7 +2701,9 @@ const cancelActiveResourceDownloads = async () => {
   try {
     const result = await resourceClient.cancel(resources)
     resourceStatus.value = normalizeResourceStatus(result.status)
-    const message = result.cancelled.length > 0 ? `已取消 ${result.cancelled.length} 个下载任务` : '没有可取消的下载任务'
+    const message = result.cancelled.length > 0
+      ? t('settingsPanel.message.downloadsCancelled', { count: result.cancelled.length })
+      : t('settingsPanel.message.noCancellableDownloads')
     resourceMessage.value = message
     resourceMessageType.value = result.cancelled.length > 0 ? 'success' : 'info'
     if (result.cancelled.length > 0) {
@@ -2746,16 +2749,18 @@ const removeModelResource = async (
   metadata: ManagedResourceMetadata,
 ) => {
   if (resourceActionKey.value) {
-    ElMessage.warning('请先完成或取消当前资源任务')
+    ElMessage.warning(t('settingsPanel.message.finishCurrentResourceTask'))
     return
   }
-  const usage = metadata.inUseBy.length > 0 ? ` · 使用中：${metadata.inUseBy.join(' / ')}` : ''
+  const usage = metadata.inUseBy.length > 0
+    ? t('settingsPanel.message.inUseSuffix', { list: metadata.inUseBy.join(' / ') })
+    : ''
   try {
     await ElMessageBox.confirm(
       `${label} · ${formatResourceDownloadBytes(metadata.downloadBytes)}${usage}`,
-      '永久卸载模型',
+      t('settingsPanel.removeModelTitle'),
       {
-        confirmButtonText: '永久卸载',
+        confirmButtonText: t('settingsPanel.removeModelConfirm'),
         cancelButtonText: t('common.cancel'),
         type: 'warning',
       },
@@ -2771,7 +2776,10 @@ const removeModelResource = async (
     resourceMessage.value = result.message
     resourceMessageType.value = result.success ? 'success' : 'warning'
     if (result.success) {
-      ElMessage.success(`已永久卸载 ${label}，释放 ${formatStorageBytes(result.reclaimedBytes)}`)
+      ElMessage.success(t('settingsPanel.message.removeModelOk', {
+        label,
+        size: formatStorageBytes(result.reclaimedBytes),
+      }))
     } else {
       ElMessage.warning(result.failed.map((item) => item.reason).join('; ') || result.message)
     }
@@ -3136,10 +3144,10 @@ const hydrateForm = () => {
       ref_text: s.tts.ref_text ?? '',
       lang: s.tts.lang || 'ja',
       device: s.tts.device || 'cpu',
-      quality: s.tts.quality || '质量优先',
-      split: s.tts.split || '智能切分',
-      mode: s.tts.mode || '串行推理',
-      save_mode: s.tts.save_mode || '禁用自动保存',
+      quality: s.tts.quality || TTS_CONTRACT_VALUES.qualityFirst,
+      split: s.tts.split || TTS_CONTRACT_VALUES.splitSmart,
+      mode: s.tts.mode || TTS_CONTRACT_VALUES.modeSerial,
+      save_mode: s.tts.save_mode || TTS_CONTRACT_VALUES.saveModeDisabled,
       provider: s.tts.provider === 'openai-compatible' ? 'openai-compatible' : TTS_PROVIDER,
       base_url: s.tts.base_url || '',
       api_key: ttsMasked ? '' : ttsApiKey,

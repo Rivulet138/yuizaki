@@ -47,10 +47,10 @@
         </div>
         <el-alert v-if="lastLookup" :title="lastLookup" type="info" show-icon :closable="false" />
         <details v-if="Object.keys(messages).length" class="messages-details">
-          <summary>查看当前语言内容</summary>
+          <summary>{{ t('misc.currentLocaleContent') }}</summary>
           <pre class="messages-preview">{{ messagesPreview }}</pre>
         </details>
-        <el-empty v-else description="尚未读取翻译内容" :image-size="48" />
+        <el-empty v-else :description="t('misc.translationsNotLoaded')" :image-size="48" />
       </el-card>
     </div>
   </PanelShell>
@@ -112,8 +112,8 @@ const loadAll = async () => {
     messages.value = messageData.messages
   } catch (error) {
     if (requestId !== loadSequence) return
-    loadError.value = describeFailure(error, '后端翻译诊断加载失败')
-    console.warn('加载后端翻译诊断失败', error)
+    loadError.value = describeFailure(error, t('misc.backendDiagnosticsLoadFailed'))
+    console.warn('Failed to load backend translation diagnostics', error)
   } finally {
     if (requestId === loadSequence) loading.value = false
   }
@@ -154,7 +154,7 @@ const applyBackendLocale = async () => {
     await loadAll()
   } catch (error) {
     if (requestId !== backendLocaleSequence) return
-    const message = describeFailure(error, '切换后端语言失败')
+    const message = describeFailure(error, t('misc.backendLocaleSwitchFailed'))
     loadError.value = message
     ElMessage.error(message)
   } finally {
@@ -168,7 +168,7 @@ const lookupMessage = async () => {
     const result = await i18nClient.message(messageKey.value.trim(), selectedLocale.value || undefined)
     lastLookup.value = result.message
   } catch (error) {
-    const message = describeFailure(error, '查询翻译消息失败')
+    const message = describeFailure(error, t('misc.translationLookupFailed'))
     lastLookup.value = message
     ElMessage.error(message)
   }
@@ -180,7 +180,7 @@ const lookupError = async () => {
     const result = await i18nClient.errorMessage(messageKey.value.trim(), selectedLocale.value || undefined)
     lastLookup.value = result.message
   } catch (error) {
-    const message = describeFailure(error, '查询错误消息失败')
+    const message = describeFailure(error, t('misc.errorMessageLookupFailed'))
     lastLookup.value = message
     ElMessage.error(message)
   }

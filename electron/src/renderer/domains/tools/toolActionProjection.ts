@@ -1,4 +1,5 @@
 import { redactDiagnosticText } from '@/app/runtime/companionDiagnosticExport'
+import { t } from '@/i18n'
 
 export type ToolActionStatus = 'executing' | 'completed' | 'verified' | 'failed' | 'unknown_effect' | 'cancelled'
 
@@ -23,12 +24,12 @@ export const projectToolActionStatus = (
 export const toolActionStatusLabel = (status?: string | null): string => {
   const state = marker(status)
   const labels: Record<ToolActionStatus, string> = {
-    executing: '执行中',
-    completed: '已完成（未验证）',
-    verified: '已验证',
-    failed: '失败',
-    unknown_effect: '结果未知',
-    cancelled: '已停止',
+    executing: t('misc.toolStatusExecuting'),
+    completed: t('misc.toolStatusCompleted'),
+    verified: t('misc.toolStatusVerified'),
+    failed: t('misc.toolStatusFailed'),
+    unknown_effect: t('misc.toolStatusUnknownEffect'),
+    cancelled: t('misc.toolStatusCancelled'),
   }
   return labels[state as ToolActionStatus] ?? labels.executing
 }

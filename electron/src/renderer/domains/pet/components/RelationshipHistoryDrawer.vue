@@ -1,7 +1,7 @@
 <template>
   <el-drawer
     :model-value="modelValue"
-    title="关系历史"
+    :title="t('petPanel.history.title')"
     size="min(640px, 94vw)"
     append-to-body
     @update:model-value="$emit('update:modelValue', Boolean($event))"
@@ -12,7 +12,7 @@
         <el-segmented v-model="mode" :options="modeOptions" size="small" />
         <div class="history-actions">
           <el-tag size="small" type="info">{{ companionName }}</el-tag>
-          <el-button :icon="Refresh" plain size="small" :loading="loading" @click="load">刷新</el-button>
+          <el-button :icon="Refresh" plain size="small" :loading="loading" @click="load">{{ t('petPanel.history.refresh') }}</el-button>
         </div>
       </div>
 
@@ -20,17 +20,17 @@
         :loading="loading"
         :error="error"
         :empty="Boolean(payload) && visibleEvents.length === 0"
-        loading-text="加载关系历史"
-        empty-text="暂无关系事件"
+        :loading-text="t('petPanel.history.loading')"
+        :empty-text="t('petPanel.history.empty')"
         :show-retry="false"
       >
         <template v-if="payload">
-          <dl class="relationship-summary" aria-label="关系摘要">
-            <div><dt>相处阶段</dt><dd>{{ relationshipStageLabel(payload.summary.relationship_stage) }}</dd></div>
-            <div><dt>最近趋势</dt><dd>{{ relationshipTrendLabel(payload.summary.relationship_trend) }}</dd></div>
-            <div><dt>事件</dt><dd>{{ payload.summary.event_count }}</dd></div>
-            <div><dt>里程碑</dt><dd>{{ payload.summary.milestone_count }}</dd></div>
-            <div><dt>互动节奏</dt><dd>{{ proactiveBudgetLabel(payload.summary.proactive_budget) }}</dd></div>
+          <dl class="relationship-summary" :aria-label="t('petPanel.history.summaryAria')">
+            <div><dt>{{ t('petPanel.history.summaryStage') }}</dt><dd>{{ relationshipStageLabel(payload.summary.relationship_stage) }}</dd></div>
+            <div><dt>{{ t('petPanel.history.summaryTrend') }}</dt><dd>{{ relationshipTrendLabel(payload.summary.relationship_trend) }}</dd></div>
+            <div><dt>{{ t('petPanel.history.summaryEventCount') }}</dt><dd>{{ payload.summary.event_count }}</dd></div>
+            <div><dt>{{ t('petPanel.history.summaryMilestoneCount') }}</dt><dd>{{ payload.summary.milestone_count }}</dd></div>
+            <div><dt>{{ t('petPanel.history.summaryProactivity') }}</dt><dd>{{ proactiveBudgetLabel(payload.summary.proactive_budget) }}</dd></div>
           </dl>
 
           <ol v-if="visibleEvents.length" class="history-list">
@@ -41,12 +41,12 @@
               </div>
               <p v-if="event.text">{{ event.text }}</p>
               <dl class="history-row__meta">
-                <div v-if="event.mood"><dt>最近状态</dt><dd>{{ moodLabel(event.mood) }}</dd></div>
-                <div v-if="isNumber(event.affinity)"><dt>亲近度</dt><dd>{{ formatRatio(event.affinity) }}</dd></div>
-                <div v-if="isNumber(event.energy)"><dt>精力</dt><dd>{{ formatRatio(event.energy) }}</dd></div>
-                <div v-if="isNumber(event.importance)"><dt>重要度</dt><dd>{{ formatRatio(event.importance) }}</dd></div>
-                <div><dt>保存范围</dt><dd>{{ scopeLabel(event.scope) }}</dd></div>
-                <div v-if="event.milestone"><dt>类型</dt><dd>里程碑</dd></div>
+                <div v-if="event.mood"><dt>{{ t('petPanel.history.eventMood') }}</dt><dd>{{ moodLabel(event.mood) }}</dd></div>
+                <div v-if="isNumber(event.affinity)"><dt>{{ t('petPanel.history.eventAffinity') }}</dt><dd>{{ formatRatio(event.affinity) }}</dd></div>
+                <div v-if="isNumber(event.energy)"><dt>{{ t('petPanel.history.eventEnergy') }}</dt><dd>{{ formatRatio(event.energy) }}</dd></div>
+                <div v-if="isNumber(event.importance)"><dt>{{ t('petPanel.history.eventImportance') }}</dt><dd>{{ formatRatio(event.importance) }}</dd></div>
+                <div><dt>{{ t('petPanel.history.eventScope') }}</dt><dd>{{ scopeLabel(event.scope) }}</dd></div>
+                <div v-if="event.milestone"><dt>{{ t('petPanel.history.eventType') }}</dt><dd>{{ t('petPanel.history.milestoneValue') }}</dd></div>
               </dl>
             </li>
           </ol>
@@ -69,6 +69,7 @@ import { ElDrawer } from 'element-plus'
 import 'element-plus/es/components/drawer/style/css'
 import { Refresh } from '@element-plus/icons-vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
+import { t } from '@/i18n'
 import {
   companionClient,
   type RelationshipHistoryEvent,
@@ -87,10 +88,10 @@ const payload = ref<RelationshipHistoryPayload | null>(null)
 const loading = ref(false)
 const error = ref('')
 const mode = ref<'all' | 'milestones'>('all')
-const modeOptions = [
-  { label: '全部', value: 'all' },
-  { label: '里程碑', value: 'milestones' },
-]
+const modeOptions = computed(() => [
+  { label: t('petPanel.history.modeAll'), value: 'all' },
+  { label: t('petPanel.history.modeMilestones'), value: 'milestones' },
+])
 let requestId = 0
 
 const companionName = computed(() => activeCompanion.value?.name || activeCompanionId.value)
@@ -109,7 +110,9 @@ const load = async () => {
   } catch (loadError) {
     if (currentRequest === requestId) {
       payload.value = null
-      error.value = loadError instanceof Error ? loadError.message : '关系历史加载失败'
+      error.value = loadError instanceof Error
+        ? loadError.message
+        : t('petPanel.history.loadFailed')
     }
   } finally {
     if (currentRequest === requestId) loading.value = false
@@ -117,48 +120,59 @@ const load = async () => {
 }
 
 const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
-const formatRatio = (value: number | undefined) => isNumber(value) ? `${Math.round(value * 100)}%` : '未设置'
-const relationshipEventLabels: Record<string, string> = {
-  care_signal: '记录了你的近况',
-  mood_shift: '更新了最近状态',
-  trust_shift: '更新了相处状态',
-  gratitude: '记住了你的感谢',
-  preference_confirmed: '记住了一个偏好',
-  task_completed: '记录了一项已完成事项',
-  state_snapshot: '记录了当前状态',
-}
-const relationshipStageLabels: Record<string, string> = {
-  warming: '正在熟悉',
-  stable: '相处稳定',
-  close: '关系亲近',
-}
-const relationshipTrendLabels: Record<string, string> = {
-  rising: '逐渐靠近',
-  steady: '保持稳定',
-  falling: '需要留意',
-}
-const moodLabels: Record<string, string> = {
-  tired: '有些疲惫',
-  happy: '心情不错',
-  sad: '有些低落',
-  anxious: '有些焦虑',
-  calm: '比较平静',
-  busy: '比较忙',
-}
-const scopeLabels: Record<string, string> = { global: '所有工作区', workspace: '当前工作区', session: '当前会话' }
-const relationshipEventLabel = (value?: string | null) => relationshipEventLabels[String(value || '')] || '更新了相处状态'
-const relationshipStageLabel = (value?: string | null) => relationshipStageLabels[String(value || '')] || '未设置'
-const relationshipTrendLabel = (value?: string | null) => relationshipTrendLabels[String(value || '')] || '未设置'
-const moodLabel = (value?: string | null) => moodLabels[String(value || '')] || value || '未设置'
-const scopeLabel = (value?: string | null) => scopeLabels[String(value || '')] || '当前工作区'
+const formatRatio = (value: number | undefined) => isNumber(value)
+  ? `${Math.round(value * 100)}%`
+  : t('petPanel.history.notSet')
+const relationshipEventLabels = computed<Record<string, string>>(() => ({
+  care_signal: t('petPanel.history.event.careSignal'),
+  mood_shift: t('petPanel.history.event.moodShift'),
+  trust_shift: t('petPanel.history.event.trustShift'),
+  gratitude: t('petPanel.history.event.gratitude'),
+  preference_confirmed: t('petPanel.history.event.preferenceConfirmed'),
+  task_completed: t('petPanel.history.event.taskCompleted'),
+  state_snapshot: t('petPanel.history.event.stateSnapshot'),
+}))
+const relationshipStageLabels = computed<Record<string, string>>(() => ({
+  warming: t('petPanel.history.stage.warming'),
+  stable: t('petPanel.history.stage.stable'),
+  close: t('petPanel.history.stage.close'),
+}))
+const relationshipTrendLabels = computed<Record<string, string>>(() => ({
+  rising: t('petPanel.history.trend.rising'),
+  steady: t('petPanel.history.trend.steady'),
+  falling: t('petPanel.history.trend.falling'),
+}))
+const moodLabels = computed<Record<string, string>>(() => ({
+  tired: t('petPanel.history.mood.tired'),
+  happy: t('petPanel.history.mood.happy'),
+  sad: t('petPanel.history.mood.sad'),
+  anxious: t('petPanel.history.mood.anxious'),
+  calm: t('petPanel.history.mood.calm'),
+  busy: t('petPanel.history.mood.busy'),
+}))
+const scopeLabels = computed<Record<string, string>>(() => ({
+  global: t('petPanel.history.scope.global'),
+  workspace: t('petPanel.history.scope.workspace'),
+  session: t('petPanel.history.scope.session'),
+}))
+const relationshipEventLabel = (value?: string | null) =>
+  relationshipEventLabels.value[String(value || '')] || t('petPanel.history.eventFallback')
+const relationshipStageLabel = (value?: string | null) =>
+  relationshipStageLabels.value[String(value || '')] || t('petPanel.history.notSet')
+const relationshipTrendLabel = (value?: string | null) =>
+  relationshipTrendLabels.value[String(value || '')] || t('petPanel.history.notSet')
+const moodLabel = (value?: string | null) =>
+  moodLabels.value[String(value || '')] || value || t('petPanel.history.notSet')
+const scopeLabel = (value?: string | null) =>
+  scopeLabels.value[String(value || '')] || t('petPanel.history.scopeFallback')
 const proactiveBudgetLabel = (value?: number | null) => {
-  if (!isNumber(value)) return '未设置'
-  if (value < 0.85) return '较克制'
-  if (value >= 1.2) return '较主动'
-  return '适中'
+  if (!isNumber(value)) return t('petPanel.history.notSet')
+  if (value < 0.85) return t('petPanel.history.proactivity.restrained')
+  if (value >= 1.2) return t('petPanel.history.proactivity.active')
+  return t('petPanel.history.proactivity.balanced')
 }
 const formatTime = (value: string | null | undefined) => {
-  if (!value) return '时间未知'
+  if (!value) return t('petPanel.history.unknownTime')
   const date = new Date(value)
   return Number.isNaN(date.getTime())
     ? value

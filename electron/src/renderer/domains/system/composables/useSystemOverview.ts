@@ -2,6 +2,7 @@ import { ElMessage } from "element-plus";
 import { ref } from "vue";
 import { useSystemStore } from "@/stores/systemStore";
 import { petControl } from "@/utils/petControl";
+import { t } from "@/i18n";
 import type {
 	PetControlState,
 	PetModelCatalogPayload,
@@ -38,7 +39,7 @@ export function useSystemOverview() {
 			selectedModelId.value =
 				state.modelId ?? petCatalog.value.activeModelId ?? petCatalog.value.models[0]?.id ?? null;
 		} catch {
-			if (!silent) ElMessage.error("无法连接桌宠控制服务");
+			if (!silent) ElMessage.error(t("overview.petControlUnreachable"));
 		}
 	};
 
@@ -54,9 +55,9 @@ export function useSystemOverview() {
 			Object.assign(petState.value, state);
 			await reloadVisiblePetLayer();
 			await syncPetData(true);
-			ElMessage.success("桌宠模型已切换");
+			ElMessage.success(t("overview.modelSwitched"));
 		} catch {
-			ElMessage.error("切换桌宠模型失败");
+			ElMessage.error(t("overview.modelSwitchFailed"));
 		}
 	};
 
@@ -66,7 +67,7 @@ export function useSystemOverview() {
 			const state = await petControl.setScale(scale);
 			Object.assign(petState.value, state);
 		} catch {
-			ElMessage.error("更新桌宠大小失败");
+			ElMessage.error(t("overview.scaleFailed"));
 		}
 	};
 
@@ -77,7 +78,7 @@ export function useSystemOverview() {
 			Object.assign(petState.value, state);
 			opacityDraft.value = Number(state.opacity.toFixed(2));
 		} catch {
-			ElMessage.error("更新桌宠透明度失败");
+			ElMessage.error(t("overview.opacityFailed"));
 		}
 	};
 
@@ -86,7 +87,7 @@ export function useSystemOverview() {
 			const state = await petControl.setInteractMode(Boolean(enabled));
 			Object.assign(petState.value, state);
 		} catch {
-			ElMessage.error("切换拖动模式失败");
+			ElMessage.error(t("overview.dragModeFailed"));
 		}
 	};
 
@@ -95,7 +96,7 @@ export function useSystemOverview() {
 			const state = await petControl.setClickThrough(Boolean(enabled));
 			Object.assign(petState.value, state);
 		} catch {
-			ElMessage.error("切换鼠标穿透失败");
+			ElMessage.error(t("overview.clickThroughFailed"));
 		}
 	};
 
@@ -104,7 +105,7 @@ export function useSystemOverview() {
 			const state = await petControl.setLocked(Boolean(enabled));
 			Object.assign(petState.value, state);
 		} catch {
-			ElMessage.error("切换位置锁定失败");
+			ElMessage.error(t("overview.positionLockFailed"));
 		}
 	};
 
@@ -114,7 +115,7 @@ export function useSystemOverview() {
 			petState.value.visible = Boolean(enabled);
 			await syncPetData(true);
 		} catch {
-			ElMessage.error("切换桌宠显示状态失败");
+			ElMessage.error(t("overview.visibilityFailed"));
 		}
 	};
 
@@ -123,7 +124,7 @@ export function useSystemOverview() {
 			const state = await petControl.setDoNotDisturb(Boolean(enabled));
 			Object.assign(petState.value, state);
 		} catch {
-			ElMessage.error("切换免打扰失败");
+			ElMessage.error(t("overview.dndFailed"));
 		}
 	};
 
@@ -133,7 +134,7 @@ export function useSystemOverview() {
 			const state = await petControl.snapBottomRight();
 			Object.assign(petState.value, state);
 		} catch {
-			ElMessage.error("桌宠回到右下角失败");
+			ElMessage.error(t("overview.snapFailed"));
 		}
 	};
 
