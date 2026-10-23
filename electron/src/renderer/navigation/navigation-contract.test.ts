@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { staticNavigationModuleRecords } from '../../shared/navigation'
+import { localeTables } from '@/i18n'
 import { buildSidebarNavigation, buildSidebarRoute } from './sidebarNavigation'
 import { adminNavigationModules } from './modules'
 
@@ -12,9 +13,14 @@ describe('navigation contract', () => {
     expect(new Set(enabledIds).size).toBe(enabledIds.length)
   })
 
-  it('keeps sidebar titles concise and functional', () => {
+  it('keeps every destination labelled in all three locales', () => {
+    // Titles used to live in shared/navigation.ts as Chinese strings; they now
+    // come from the message tables, so a missing key would ship an empty label.
     for (const module of staticNavigationModuleRecords) {
-      expect(module.title).toMatch(/^[\u3400-\u9fff]{4,5}$/)
+      for (const locale of ['zh-CN', 'en-US', 'ja-JP'] as const) {
+        expect(localeTables[locale][`navigation.${module.id}.title`], `${locale} ${module.id} title`).toBeTruthy()
+        expect(localeTables[locale][`navigation.${module.id}.desc`], `${locale} ${module.id} desc`).toBeTruthy()
+      }
     }
   })
 

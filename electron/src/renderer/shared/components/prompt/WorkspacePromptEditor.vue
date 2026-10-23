@@ -238,7 +238,7 @@ import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/form-item/style/css'
 import { computed, reactive, ref, watch } from 'vue'
 import { t } from '@/i18n'
-import { DEFAULT_DAILY_PROMPT, DEFAULT_WORK_PROMPT, useWorkspaceStore } from '@/stores/workspaceStore'
+import { defaultDailyPrompt, defaultWorkPrompt, isBuiltinDailyPrompt, isBuiltinWorkPrompt, useWorkspaceStore } from '@/stores/workspaceStore'
 import type { WorkspacePromptEngineering, WorkspacePromptMode, WorkspaceRoleCard, WorkspaceWorldBook, WorkspaceWorldBookEntry } from '@/../shared/workspace'
 
 withDefaults(defineProps<{
@@ -263,8 +263,8 @@ const roleCardModel = reactive<WorkspaceRoleCard>({
 const roleCardJson = ref('')
 const roleCardJsonError = ref('')
 const promptEngineeringModel = reactive<WorkspacePromptEngineering>({
-  workPrompt: DEFAULT_WORK_PROMPT,
-  dailyPrompt: DEFAULT_DAILY_PROMPT,
+  workPrompt: defaultWorkPrompt(),
+  dailyPrompt: defaultDailyPrompt(),
 })
 const worldBookModel = reactive<WorkspaceWorldBook>({
   enabled: false,
@@ -631,8 +631,8 @@ const roleCardToJson = (roleCard: WorkspaceRoleCard) => {
 }
 
 const clonePromptEngineering = (source?: Partial<WorkspacePromptEngineering>): WorkspacePromptEngineering => ({
-  workPrompt: source?.workPrompt?.trim() || DEFAULT_WORK_PROMPT,
-  dailyPrompt: source?.dailyPrompt?.trim() || DEFAULT_DAILY_PROMPT,
+  workPrompt: source?.workPrompt?.trim() && !isBuiltinWorkPrompt(source.workPrompt) ? source.workPrompt : defaultWorkPrompt(),
+  dailyPrompt: source?.dailyPrompt?.trim() && !isBuiltinDailyPrompt(source.dailyPrompt) ? source.dailyPrompt : defaultDailyPrompt(),
 })
 
 const cloneWorldEntry = (entry: WorkspaceWorldBookEntry): WorkspaceWorldBookEntry => ({
@@ -691,8 +691,8 @@ const persistPromptContext = () => {
 }
 
 const resetBasePrompts = () => {
-  promptEngineeringModel.workPrompt = DEFAULT_WORK_PROMPT
-  promptEngineeringModel.dailyPrompt = DEFAULT_DAILY_PROMPT
+  promptEngineeringModel.workPrompt = defaultWorkPrompt()
+  promptEngineeringModel.dailyPrompt = defaultDailyPrompt()
 }
 
 const setRoleCardJsonText = (value: string) => {

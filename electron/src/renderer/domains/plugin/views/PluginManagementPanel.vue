@@ -275,6 +275,7 @@ import { t } from '@/i18n'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import { usePluginDomain } from '../composables/usePluginDomain'
 import { getDesktopPetEventDefinition } from '../../../../shared/plugin'
+import { describePetEvent } from '@/i18n/petEventText'
 import type {
   DesktopPetEventName,
   DesktopPetPlugin,
@@ -362,7 +363,7 @@ const contributionLabel = (category: PluginContributionCategory) => {
   return labels[category]
 }
 
-const petEventLabel = (event: DesktopPetEventName) => getDesktopPetEventDefinition(event).label
+const petEventLabel = (event: DesktopPetEventName) => describePetEvent(getDesktopPetEventDefinition(event)).label
 
 const petEventRouteLabel = (event: { event: DesktopPetEventName; routeId?: string }) =>
   event.routeId
@@ -370,7 +371,7 @@ const petEventRouteLabel = (event: { event: DesktopPetEventName; routeId?: strin
     : t('pluginPanel.petEventDeclared', { event: petEventLabel(event.event) })
 
 const buildPetEventRow = (event: PluginPetEventSubscription) => {
-  const definition = getDesktopPetEventDefinition(event.event)
+  const definition = describePetEvent(getDesktopPetEventDefinition(event.event))
   return {
     ...event,
     label: definition.label,
@@ -463,7 +464,7 @@ const filteredPluginRows = computed(() => {
       ...(plugin.petEvents ?? []).map((item) => item.routeId ?? ''),
       ...(plugin.petEvents ?? []).map((item) => item.description ?? ''),
       ...(plugin.petEvents ?? []).flatMap((item) => {
-        const definition = getDesktopPetEventDefinition(item.event)
+        const definition = describePetEvent(getDesktopPetEventDefinition(item.event))
         return [definition.label, definition.trigger, definition.payloadHint]
       }),
       ...(plugin.permissions.agentBridge ? ['agentBridge'] : []),

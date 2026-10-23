@@ -19,6 +19,8 @@ import { appChromeMessages } from './appChromeMessages'
 import { runtimeMessages } from './runtimeMessages'
 import { memoryPanelMessages } from './memoryPanelMessages'
 import { settingsPanelMessages } from './settingsPanelMessages'
+import { promptDefaultsMessages } from './promptDefaultsMessages'
+import { petEventMessages } from './petEventMessages'
 import { productMetricsMessages } from './productMetricsMessages'
 
 type Table = Record<string, string>
@@ -53,6 +55,8 @@ const modules: Array<{ name: string; tables: Record<string, Table> }> = [
   { name: 'runtimeMessages', tables: runtimeMessages as unknown as Record<string, Table> },
   { name: 'memoryPanelMessages', tables: memoryPanelMessages as unknown as Record<string, Table> },
   { name: 'settingsPanelMessages', tables: settingsPanelMessages as unknown as Record<string, Table> },
+  { name: 'promptDefaultsMessages', tables: promptDefaultsMessages as unknown as Record<string, Table> },
+  { name: 'petEventMessages', tables: petEventMessages as unknown as Record<string, Table> },
 ]
 
 const placeholders = (value: string): string[] =>

@@ -24,6 +24,8 @@ import { appChromeMessages } from './appChromeMessages'
 import { runtimeMessages } from './runtimeMessages'
 import { memoryPanelMessages } from './memoryPanelMessages'
 import { settingsPanelMessages } from './settingsPanelMessages'
+import { promptDefaultsMessages } from './promptDefaultsMessages'
+import { petEventMessages } from './petEventMessages'
 
 export type Locale = 'zh-CN' | 'en-US' | 'ja-JP'
 
@@ -50,6 +52,8 @@ const messages = {
     ...runtimeMessages['zh-CN'],
     ...memoryPanelMessages['zh-CN'],
     ...settingsPanelMessages['zh-CN'],
+    ...promptDefaultsMessages['zh-CN'],
+    ...petEventMessages['zh-CN'],
     ...infrastructureMessages['zh-CN'],
     ...connectorPaneMessages['zh-CN'],
     ...chatMessages['zh-CN'],
@@ -897,6 +901,8 @@ const messages = {
     ...runtimeMessages['en-US'],
     ...memoryPanelMessages['en-US'],
     ...settingsPanelMessages['en-US'],
+    ...promptDefaultsMessages['en-US'],
+    ...petEventMessages['en-US'],
     ...infrastructureMessages['en-US'],
     ...connectorPaneMessages['en-US'],
     ...chatMessages['en-US'],
@@ -1747,6 +1753,8 @@ const messages = {
     ...runtimeMessages['ja-JP'],
     ...memoryPanelMessages['ja-JP'],
     ...settingsPanelMessages['ja-JP'],
+    ...promptDefaultsMessages['ja-JP'],
+    ...petEventMessages['ja-JP'],
     ...infrastructureMessages['ja-JP'],
     ...connectorPaneMessages['ja-JP'],
     ...chatMessages['ja-JP'],

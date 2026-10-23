@@ -2,14 +2,23 @@ import { computed, reactive } from 'vue'
 import {
   DEFAULT_INPUT_BINDINGS,
   mergeInputBindingSettings,
-  mouseButtonLabel,
   normalizeInputBindingSettings,
   type InputBindingRegistrationStatus,
   type InputBindingSettings,
   type InputBindingSettingsPatch,
   type InputBindingSnapshot,
+  type MouseSideButton,
 } from '@/../shared/input-bindings'
 import { t } from '@/i18n'
+
+/**
+ * Mouse side-button name in the active UI locale.
+ *
+ * `shared/input-bindings.ts` keeps `mouseButtonLabel()` for the main process,
+ * which has no i18n layer; renderer surfaces resolve the name here instead.
+ */
+const mouseSideButtonName = (button: MouseSideButton): string =>
+  t('misc.mouseSideButton', { index: button === 4 ? 1 : 2 })
 
 const emptyStatus = (): InputBindingRegistrationStatus => ({
   mouseHookAvailable: false,
@@ -179,5 +188,5 @@ export const useInputBindingsStore = () => ({
   reset,
   setBrowserShortcutsEnabled,
   markBrowserAction,
-  pushToTalkLabel: computed(() => t('misc.pushToTalkHold', { button: mouseButtonLabel(state.settings.pushToTalk.mouseButton) })),
+  pushToTalkLabel: computed(() => t('misc.pushToTalkHold', { button: mouseSideButtonName(state.settings.pushToTalk.mouseButton) })),
 })

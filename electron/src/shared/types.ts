@@ -166,7 +166,7 @@ export interface PetControlContextPayload {
 }
 
 
-// HTTP 响应类型
+// HTTP response types
 
 export interface OCRBlock {
   text: string;
@@ -226,7 +226,7 @@ export interface SVCStatusResponse {
   error?: string;
 }
 
-// 应用状态类型
+// Application state types
 
 export interface ChatState {
   messages: ChatMessage[];
@@ -251,7 +251,7 @@ export interface AppState {
 }
 
 // ═══════════════════════════════════════════════
-//  Socket.IO 事件数据类型（与 backend/socket_events.py 对齐）
+//  Socket.IO event payloads (mirrors backend/socket_events.py)
 // ═══════════════════════════════════════════════
 
 export interface SIOAudioChunkData {
@@ -355,7 +355,7 @@ export interface SIOPetStateData {
 }
 
 // ═══════════════════════════════════════════════
-//  Live2D 相关类型
+//  Live2D types
 // ═══════════════════════════════════════════════
 
 export interface Live2DModelConfig {

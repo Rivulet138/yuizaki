@@ -20,7 +20,7 @@ const HAN = /[\u3400-\u4dbf\u4e00-\u9fff]/
  * ja-JP value containing one is Chinese text that was never translated.
  */
 const SIMPLIFIED_ONLY =
-  /[这说们个时对门问题让还关闭删设证据页显视图标记录载网络误连确认启动储忆语乐频档继续暂统项务处从后里边为员变单选应该写读级别类层组织间无夹缓调试运弹输态权块库备与归]/
+  /[这说们个时对门问题让还关闭删设证据页显视图标记录载网络误连确认启动储忆语乐频档继续暂统项务处从后边为员变单选应该读级别类层组织间无夹缓调试运弹输态权块库备归换编]/
 
 /**
  * Endonyms are written in their own language on purpose: a language picker that

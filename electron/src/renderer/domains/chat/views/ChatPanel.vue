@@ -380,7 +380,7 @@ import { enumerateAudioInputDevices, type AudioInputDevice } from '@/audio/audio
 import { shouldOfferRealtimeInterrupt, shouldOfferRealtimeRecovery } from '@/app/runtime/realtimeRecoveryPolicy'
 import { useChatStore } from '@/stores/chatStore'
 import { useSessionStore } from '@/stores/sessionStore'
-import { DEFAULT_DAILY_PROMPT, DEFAULT_WORK_PROMPT, useWorkspaceStore } from '@/stores/workspaceStore'
+import { isBuiltinDailyPrompt, isBuiltinWorkPrompt, useWorkspaceStore } from '@/stores/workspaceStore'
 import { useSettingsStore } from '@/state/settingsStore'
 import { DEFAULT_LLM_MAX_OUTPUT_TOKENS } from '@/../shared/runtime-defaults'
 import { useInputBindingsStore } from '@/state/inputBindingsStore'
@@ -658,8 +658,7 @@ const roleCardHasContent = computed(() => {
 })
 const basePromptCustomized = computed(() => {
   const promptEngineering = workspaceStore.activeWorkspace.context.promptEngineering
-  return promptEngineering.workPrompt.trim() !== DEFAULT_WORK_PROMPT.trim() ||
-    promptEngineering.dailyPrompt.trim() !== DEFAULT_DAILY_PROMPT.trim()
+  return !isBuiltinWorkPrompt(promptEngineering.workPrompt) || !isBuiltinDailyPrompt(promptEngineering.dailyPrompt)
 })
 const promptProfileActive = computed(() => {
   const context = workspaceStore.activeWorkspace.context

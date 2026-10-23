@@ -62,6 +62,10 @@ const moduleViewDefinitions: Record<NavigationModuleId, { icon: Component; loade
 
 const staticModuleDefinitions: NavigationModuleInput[] = staticNavigationModuleRecords.map((module) => ({
   ...module,
+  // Display copy comes from the message tables in localizeNavigationModule(); the
+  // records only name destinations, so the id is the last-resort label.
+  title: module.id,
+  desc: '',
   ...moduleViewDefinitions[module.id],
 }))
 

@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type {
   WorkspaceContext,
   WorkspaceMemoryPolicy,
@@ -12,28 +12,49 @@ import type {
   WorkspaceWorldBookEntry,
 } from '../../shared/workspace'
 import { workspaceClient, type WorkspacePatchPayload } from '@/api/clients/workspace-client'
-import { t } from '@/i18n'
+import { currentLocale, localeTables, t } from '@/i18n'
 import { useCompanionStore } from './companionStore'
 
 const STORAGE_KEY = 'deskpet-workspaces'
 const ACTIVE_KEY = 'deskpet-active-workspace'
 export const DEFAULT_PROMPT_VERSION = 2
 
-export const DEFAULT_WORK_PROMPT = `当前处于工作模式。你处于任务协助模式。
-- 先用一句话确认用户真正要得到的结果；仅在结果、权限或破坏性风险无法判断时提问。
-- 把事实、推断和未知分开。涉及文件、屏幕、工具结果或系统状态时，只使用本轮可验证证据。
-- 对可安全执行的本地任务，先完成最小必要操作，再核验结果；没有执行成功时不得声称已经完成。
-- 涉及写入、删除、发送、安装、授权或隐私数据时，说明影响范围并遵守既有权限策略。
-- 回答先给结论，再给必要依据和下一步。普通问题保持简洁，复杂任务才使用分段结构。
-- 使用自然中文；代码、命令、路径、字段名和专有名词保持原样。`
+/**
+ * Built-in prompt for the active UI locale.
+ *
+ * Prompts are model instructions, so they live in the message tables
+ * (`promptDefaults.*`) instead of as literals here: switching the interface
+ * language switches the built-in prompts with it.
+ */
+export const defaultWorkPrompt = (): string => t('promptDefaults.work')
+export const defaultDailyPrompt = (): string => t('promptDefaults.daily')
 
-export const DEFAULT_DAILY_PROMPT = `当前处于日常模式。你处于日常陪伴模式。
-- 先回应用户当下的情绪和意图，再决定是否提供建议；不要把闲聊改写成任务清单。
-- 语气温暖、自然、有分寸。可以表达关心和好奇，但不占有、不施压、不连续追问。
-- 不假装拥有未提供的记忆、感官或现实经历。只有收到实时画面、工具结果或明确上下文时，才据此描述。
-- 用户需要严肃协助时，自然切换为清晰、可执行的表达，并保持陪伴感。
-- 默认短句和短段落，适合 TTS；只有用户要求或问题复杂时再展开。
-- 使用自然中文，避免模板化客服语气和过度卖萌。`
+const builtinPromptTextCache = new Map<string, Set<string>>()
+
+/**
+ * Every locale's built-in text for one prompt key.
+ *
+ * A workspace stores the prompt text it was last given, so "the user never
+ * edited this" has to be recognised across languages — otherwise switching the
+ * interface language would look like a customised prompt.
+ */
+const builtinPromptTexts = (key: 'promptDefaults.work' | 'promptDefaults.daily'): Set<string> => {
+  const cached = builtinPromptTextCache.get(key)
+  if (cached) return cached
+  const texts = new Set<string>()
+  for (const table of Object.values(localeTables)) {
+    const value = table[key]
+    if (typeof value === 'string' && value.trim()) texts.add(value.trim())
+  }
+  builtinPromptTextCache.set(key, texts)
+  return texts
+}
+
+export const isBuiltinWorkPrompt = (value?: string | null): boolean =>
+  builtinPromptTexts('promptDefaults.work').has((value ?? '').trim())
+
+export const isBuiltinDailyPrompt = (value?: string | null): boolean =>
+  builtinPromptTexts('promptDefaults.daily').has((value ?? '').trim())
 
 const createDefaultRoleCard = (): WorkspaceRoleCard => ({
   enabled: true,
@@ -53,8 +74,8 @@ const createDefaultWorldBook = (): WorkspaceWorldBook => ({
 })
 
 const createDefaultPromptEngineering = (): WorkspacePromptEngineering => ({
-  workPrompt: DEFAULT_WORK_PROMPT,
-  dailyPrompt: DEFAULT_DAILY_PROMPT,
+  workPrompt: defaultWorkPrompt(),
+  dailyPrompt: defaultDailyPrompt(),
 })
 
 const createDefaultVisionSettings = (): WorkspaceVisionSettings => ({
@@ -92,11 +113,11 @@ const createDefaultWorkspaceContext = (): WorkspaceContext => ({
 })
 
 const normalizePromptEngineering = (value: Partial<WorkspacePromptEngineering> | undefined): WorkspacePromptEngineering => {
-  const workPrompt = typeof value?.workPrompt === 'string' && value.workPrompt.trim() ? value.workPrompt : DEFAULT_WORK_PROMPT
-  const dailyPrompt = typeof value?.dailyPrompt === 'string' && value.dailyPrompt.trim() ? value.dailyPrompt : DEFAULT_DAILY_PROMPT
+  const keepWork = typeof value?.workPrompt === 'string' && value.workPrompt.trim() && !isBuiltinWorkPrompt(value.workPrompt)
+  const keepDaily = typeof value?.dailyPrompt === 'string' && value.dailyPrompt.trim() && !isBuiltinDailyPrompt(value.dailyPrompt)
   return {
-    workPrompt,
-    dailyPrompt,
+    workPrompt: keepWork ? String(value?.workPrompt) : defaultWorkPrompt(),
+    dailyPrompt: keepDaily ? String(value?.dailyPrompt) : defaultDailyPrompt(),
   }
 }
 
@@ -551,6 +572,26 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     persist()
     syncActiveWorkspaceInBackground(state.value.activeWorkspaceId)
   }
+
+  // Follow the interface language: workspaces whose prompts are still the
+  // built-in default are re-localized, prompts the user edited are untouched.
+  watch(currentLocale, () => {
+    const changedIds: string[] = []
+    for (const workspace of state.value.workspaces) {
+      const engineering = workspace.context.promptEngineering
+      const workPrompt = isBuiltinWorkPrompt(engineering.workPrompt) ? defaultWorkPrompt() : engineering.workPrompt
+      const dailyPrompt = isBuiltinDailyPrompt(engineering.dailyPrompt) ? defaultDailyPrompt() : engineering.dailyPrompt
+      if (workPrompt === engineering.workPrompt && dailyPrompt === engineering.dailyPrompt) continue
+      workspace.context.promptEngineering = { workPrompt, dailyPrompt }
+      changedIds.push(workspace.id)
+    }
+    if (changedIds.length === 0) return
+    persist()
+    for (const workspaceId of changedIds) {
+      const workspace = state.value.workspaces.find((item) => item.id === workspaceId)
+      if (workspace) queueContextSave(workspaceId, { promptEngineering: workspace.context.promptEngineering })
+    }
+  })
 
   const updateWorkspaceContext = (workspaceId: string, patch: Partial<WorkspaceContext>) => {
     const workspace = state.value.workspaces.find((w) => w.id === workspaceId)

@@ -54,67 +54,72 @@ export type DesktopPetEventName =
   | 'onToolEnd'
   | 'requestPetAction'
 
+/**
+ * Desktop-pet event copy lives in the renderer i18n layer
+ * (`i18n/petEventMessages.ts`): this module only carries message keys so it stays
+ * importable from the main process, which has no i18n layer of its own.
+ */
 export interface DesktopPetEventDefinition {
-  label: string
-  trigger: string
-  payloadHint: string
-  frequencyHint: string
+  labelKey: string
+  triggerKey: string
+  payloadHintKey: string
+  frequencyHintKey: string
 }
 
 export const DESKTOP_PET_EVENT_DEFINITIONS = {
   onPetClicked: {
-    label: '点击桌宠',
-    trigger: '单击、双击、右键或长按桌宠时触发。',
-    payloadHint: '包含 gesture、button、x、y、hitArea 等点击上下文。',
-    frequencyHint: '高频交互，渲染层会做短间隔节流。',
+    labelKey: 'petEvent.onPetClicked.label',
+    triggerKey: 'petEvent.onPetClicked.trigger',
+    payloadHintKey: 'petEvent.onPetClicked.payloadHint',
+    frequencyHintKey: 'petEvent.onPetClicked.frequencyHint',
   },
   onPetDragged: {
-    label: '拖动桌宠',
-    trigger: '用户拖动或放下桌宠时触发。',
-    payloadHint: '包含 phase、x、y、deltaX、deltaY 等拖拽上下文。',
-    frequencyHint: '移动过程会节流，适合保存位置或做轻量反馈。',
+    labelKey: 'petEvent.onPetDragged.label',
+    triggerKey: 'petEvent.onPetDragged.trigger',
+    payloadHintKey: 'petEvent.onPetDragged.payloadHint',
+    frequencyHintKey: 'petEvent.onPetDragged.frequencyHint',
   },
   onPetIdle: {
-    label: '桌宠空闲',
-    trigger: '桌宠一段时间没有被对话、拖动或点击时触发。',
-    payloadHint: '包含 idleMs、behaviorState 等空闲上下文。',
-    frequencyHint: '低频事件，适合主动陪伴、轻提醒或待机动作。',
+    labelKey: 'petEvent.onPetIdle.label',
+    triggerKey: 'petEvent.onPetIdle.trigger',
+    payloadHintKey: 'petEvent.onPetIdle.payloadHint',
+    frequencyHintKey: 'petEvent.onPetIdle.frequencyHint',
   },
   onEmotionChanged: {
-    label: '情绪变化',
-    trigger: 'LLM、用户操作或插件让桌宠切换情绪/表情时触发。',
-    payloadHint: '包含 emotionId、expressionName、source 等情绪上下文。',
-    frequencyHint: '中频事件，适合联动灯效、背景或额外动作。',
+    labelKey: 'petEvent.onEmotionChanged.label',
+    triggerKey: 'petEvent.onEmotionChanged.trigger',
+    payloadHintKey: 'petEvent.onEmotionChanged.payloadHint',
+    frequencyHintKey: 'petEvent.onEmotionChanged.frequencyHint',
   },
   onSpeechStart: {
-    label: '开始说话',
-    trigger: 'TTS 口型同步开始，桌宠准备发声时触发。',
-    payloadHint: '包含 audioUrl 等播放上下文。',
-    frequencyHint: '每轮语音回复通常触发一次。',
+    labelKey: 'petEvent.onSpeechStart.label',
+    triggerKey: 'petEvent.onSpeechStart.trigger',
+    payloadHintKey: 'petEvent.onSpeechStart.payloadHint',
+    frequencyHintKey: 'petEvent.onSpeechStart.frequencyHint',
   },
   onSpeechEnd: {
-    label: '结束说话',
-    trigger: 'TTS 播放结束、停止或被用户打断时触发。',
-    payloadHint: '包含 interrupted，用于区分自然结束和用户打断。',
-    frequencyHint: '每轮语音回复通常触发一次。',
+    labelKey: 'petEvent.onSpeechEnd.label',
+    triggerKey: 'petEvent.onSpeechEnd.trigger',
+    payloadHintKey: 'petEvent.onSpeechEnd.payloadHint',
+    frequencyHintKey: 'petEvent.onSpeechEnd.frequencyHint',
   },
   onToolStart: {
-    label: '工具开始',
-    trigger: 'Agent 或插件开始执行工具能力时触发。',
-    payloadHint: '包含 toolId、pluginId、routeId 等工具上下文。',
-    frequencyHint: '按工具调用触发，适合提示桌宠进入专注或忙碌动作。',
+    labelKey: 'petEvent.onToolStart.label',
+    triggerKey: 'petEvent.onToolStart.trigger',
+    payloadHintKey: 'petEvent.onToolStart.payloadHint',
+    frequencyHintKey: 'petEvent.onToolStart.frequencyHint',
   },
   onToolEnd: {
-    label: '工具结束',
-    trigger: 'Agent 或插件工具执行完成、失败或取消时触发。',
-    payloadHint: '包含 status、durationMs、toolId、pluginId 等结果上下文。',
-    frequencyHint: '按工具调用触发，适合恢复待机或播放完成反馈。',
+    labelKey: 'petEvent.onToolEnd.label',
+    triggerKey: 'petEvent.onToolEnd.trigger',
+    payloadHintKey: 'petEvent.onToolEnd.payloadHint',
+    frequencyHintKey: 'petEvent.onToolEnd.frequencyHint',
   },
   requestPetAction: {
-    label: '请求桌宠动作',
-    trigger: '插件主动请求桌宠播放动作、表情或行为状态时触发。',
-    payloadHint: '包含 action、emotionId、motion、behaviorState 等动作上下文。',
-    frequencyHint: '由插件主动发起，应保持短动作和可取消设计。',
+    labelKey: 'petEvent.requestPetAction.label',
+    triggerKey: 'petEvent.requestPetAction.trigger',
+    payloadHintKey: 'petEvent.requestPetAction.payloadHint',
+    frequencyHintKey: 'petEvent.requestPetAction.frequencyHint',
   },
 } satisfies Record<DesktopPetEventName, DesktopPetEventDefinition>
 

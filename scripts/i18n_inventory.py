@@ -23,29 +23,49 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-RENDERER = REPO_ROOT / "electron" / "src" / "renderer"
-I18N = RENDERER / "i18n"
+SRC = REPO_ROOT / "electron" / "src"
+# `shared/` is imported by both the renderer and the main process; its text is
+# scanned too so a label cannot hide there (the main process has no i18n layer, so
+# the few strings it needs on purpose are reported rather than silently ignored).
+SCAN_ROOTS = (SRC / "renderer", SRC / "shared")
+I18N = SRC / "renderer" / "i18n"
 
 CJK = re.compile("[\u3400-\u4dbf\u4e00-\u9fff]")
 # Characters that are simplified-only: no Japanese shinjitai form uses them.
 # A ja-JP string containing one of these is Chinese left behind, not Japanese.
 SIMPLIFIED_ONLY = set(
     "这说们个时对门问题让还关闭删设证据页显视图标记录载网络误连确认启动储忆语乐频档"
-    "继续暂统项务处从后里边为员变单选应该写读级别类层组织间开无夹缓调试运弹输态权块"
-    "库备与归换删编"
+    "继续暂统项务处从后边为员变单选应该读级别类层组织间开无夹缓调试运弹输态权块"
+    "库备归换删编"
 )
 # Modules pack several `'key': 'value',` pairs onto one line, so pairs are matched
 # inside a line instead of assuming one entry per line.
 KV_ANY = re.compile(r"'([^']+)'\s*:\s*'((?:[^'\\]|\\.)*)'")
 LOCALE_HEADER = re.compile(r"^'?(zh-CN|en-US|ja-JP)'?\s*:\s*\{\s*$")
+KEY_TEMPLATE_START = re.compile(r"'([^']+)'\s*:\s*`(.*)$")
 FLAT_HEADER = re.compile(r"^export const \w+\s*=\s*\{\s*$")
 
 
 def _collect_block(lines, start_index):
-    """Yield key/value pairs from the object literal starting at start_index."""
+    """Yield key/value pairs from the object literal starting at start_index.
+
+    Values may be multi-line template literals (the built-in prompts), so a
+    backtick that opens without closing on the same line consumes the following
+    lines until the closing backtick.
+    """
     depth = 0
     started = False
+    pending_key = None
+    pending_lines: list[str] = []
     for line in lines[start_index:]:
+        if pending_key is not None:
+            pending_lines.append(line)
+            joined = "\n".join(pending_lines)
+            if "`" in joined:
+                yield pending_key, joined.split("`", 1)[0]
+                pending_key = None
+                pending_lines = []
+            continue
         if not started:
             depth = line.count("{") - line.count("}")
             started = True
@@ -53,9 +73,15 @@ def _collect_block(lines, start_index):
         depth += line.count("{") - line.count("}")
         if depth <= 0:
             return
-        if depth == 1:
-            for match in KV_ANY.finditer(line):
-                yield match.group(1), match.group(2)
+        if depth != 1:
+            continue
+        template = KEY_TEMPLATE_START.search(line)
+        if template and "`" not in template.group(2):
+            pending_key = template.group(1)
+            pending_lines = [template.group(2)]
+            continue
+        for match in KV_ANY.finditer(line):
+            yield match.group(1), match.group(2)
 
 
 def parse_message_modules():
@@ -113,27 +139,28 @@ PLACEHOLDER = re.compile(r"\{([A-Za-z0-9_]+)\}")
 
 def scan_hardcoded():
     rows = []
-    for path in sorted(list(RENDERER.rglob("*.vue")) + list(RENDERER.rglob("*.ts"))):
-        rel = path.relative_to(RENDERER).as_posix()
-        if rel.startswith("i18n/"):
-            continue
-        if rel.endswith((".test.ts", ".spec.ts")):
-            # Tests legitimately assert Chinese fixtures; they never reach a user.
-            continue
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except UnicodeDecodeError:
-            continue
-        hits = []
-        for number, line in enumerate(lines, 1):
-            if not CJK.search(line):
+    for root in SCAN_ROOTS:
+        for path in sorted(list(root.rglob("*.vue")) + list(root.rglob("*.ts"))):
+            rel = path.relative_to(SRC).as_posix()
+            if rel.startswith("renderer/i18n/"):
                 continue
-            stripped = line.strip()
-            if stripped.startswith(("//", "*", "/*", "<!--")):
+            if rel.endswith((".test.ts", ".spec.ts")):
+                # Tests legitimately assert Chinese fixtures; they never reach a user.
                 continue
-            hits.append(number)
-        if hits:
-            rows.append({"file": rel, "cjk_lines": len(hits), "total_lines": len(lines)})
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except UnicodeDecodeError:
+                continue
+            hits = []
+            for number, line in enumerate(lines, 1):
+                if not CJK.search(line):
+                    continue
+                stripped = line.strip()
+                if stripped.startswith(("//", "*", "/*", "<!--")):
+                    continue
+                hits.append(number)
+            if hits:
+                rows.append({"file": rel, "cjk_lines": len(hits), "total_lines": len(lines)})
     rows.sort(key=lambda row: -row["cjk_lines"])
     return rows
 
