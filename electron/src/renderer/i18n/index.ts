@@ -7,6 +7,23 @@ import { proactiveMessages } from './proactiveMessages'
 import { chatMessages } from './chatMessages'
 import { deployMessages } from './deployMessages'
 import { infrastructureMessages } from './infrastructureMessages'
+import { connectorPaneMessages } from './connectorPaneMessages'
+import { keyGapMessages } from './keyGapMessages'
+import { pluginPanelMessages } from './pluginPanelMessages'
+import { toolPanelMessages } from './toolPanelMessages'
+import { governancePanelMessages } from './governancePanelMessages'
+import { overviewPanelMessages } from './overviewPanelMessages'
+import { agentTracePanelMessages } from './agentTracePanelMessages'
+import { petControlPanelMessages } from './petControlPanelMessages'
+import { chatPanelMessages } from './chatPanelMessages'
+import { promptAndPetPanelMessages } from './promptAndPetPanelMessages'
+import { settingsSectionsMessages } from './settingsSectionsMessages'
+import { memoryComponentsMessages } from './memoryComponentsMessages'
+import { errorMessages } from './errorMessages'
+import { appChromeMessages } from './appChromeMessages'
+import { runtimeMessages } from './runtimeMessages'
+import { memoryPanelMessages } from './memoryPanelMessages'
+import { settingsPanelMessages } from './settingsPanelMessages'
 
 export type Locale = 'zh-CN' | 'en-US' | 'ja-JP'
 
@@ -17,7 +34,24 @@ const STORAGE_KEY = 'yuizaki.locale'
 const messages = {
   'zh-CN': {
     ...deployMessages['zh-CN'],
+    ...keyGapMessages['zh-CN'],
+    ...pluginPanelMessages['zh-CN'],
+    ...toolPanelMessages['zh-CN'],
+    ...governancePanelMessages['zh-CN'],
+    ...overviewPanelMessages['zh-CN'],
+    ...agentTracePanelMessages['zh-CN'],
+    ...petControlPanelMessages['zh-CN'],
+    ...chatPanelMessages['zh-CN'],
+    ...promptAndPetPanelMessages['zh-CN'],
+    ...settingsSectionsMessages['zh-CN'],
+    ...memoryComponentsMessages['zh-CN'],
+    ...errorMessages['zh-CN'],
+    ...appChromeMessages['zh-CN'],
+    ...runtimeMessages['zh-CN'],
+    ...memoryPanelMessages['zh-CN'],
+    ...settingsPanelMessages['zh-CN'],
     ...infrastructureMessages['zh-CN'],
+    ...connectorPaneMessages['zh-CN'],
     ...chatMessages['zh-CN'],
     ...onboardingMessages['zh-CN'],
     ...productMetricsMessages['zh-CN'],
@@ -630,6 +664,8 @@ const messages = {
     'settings.messages.templateOk': 'LLM 配置模板已生成',
     'settings.messages.llmFailed': 'LLM 连接失败：{message}',
     'settings.messages.llmOk': 'LLM 连接测试成功',
+    'settings.messages.memoryRebuildFailed': '记忆向量索引重建失败',
+    'settings.messages.memoryRebuildOk': '记忆向量索引已重建：已索引 {count} 条，跳过 {skipped} 条',
     'settings.messages.providerProfileReset': '当前提供商已重置',
     'settings.messages.rollbackOk': '设置已回滚',
     'settings.messages.saveFailed': '保存配置失败',
@@ -845,7 +881,24 @@ const messages = {
   },
   'en-US': {
     ...deployMessages['en-US'],
+    ...keyGapMessages['en-US'],
+    ...pluginPanelMessages['en-US'],
+    ...toolPanelMessages['en-US'],
+    ...governancePanelMessages['en-US'],
+    ...overviewPanelMessages['en-US'],
+    ...agentTracePanelMessages['en-US'],
+    ...petControlPanelMessages['en-US'],
+    ...chatPanelMessages['en-US'],
+    ...promptAndPetPanelMessages['en-US'],
+    ...settingsSectionsMessages['en-US'],
+    ...memoryComponentsMessages['en-US'],
+    ...errorMessages['en-US'],
+    ...appChromeMessages['en-US'],
+    ...runtimeMessages['en-US'],
+    ...memoryPanelMessages['en-US'],
+    ...settingsPanelMessages['en-US'],
     ...infrastructureMessages['en-US'],
+    ...connectorPaneMessages['en-US'],
     ...chatMessages['en-US'],
     ...onboardingMessages['en-US'],
     ...productMetricsMessages['en-US'],
@@ -1678,7 +1731,24 @@ const messages = {
   },
   'ja-JP': {
     ...deployMessages['ja-JP'],
+    ...keyGapMessages['ja-JP'],
+    ...pluginPanelMessages['ja-JP'],
+    ...toolPanelMessages['ja-JP'],
+    ...governancePanelMessages['ja-JP'],
+    ...overviewPanelMessages['ja-JP'],
+    ...agentTracePanelMessages['ja-JP'],
+    ...petControlPanelMessages['ja-JP'],
+    ...chatPanelMessages['ja-JP'],
+    ...promptAndPetPanelMessages['ja-JP'],
+    ...settingsSectionsMessages['ja-JP'],
+    ...memoryComponentsMessages['ja-JP'],
+    ...errorMessages['ja-JP'],
+    ...appChromeMessages['ja-JP'],
+    ...runtimeMessages['ja-JP'],
+    ...memoryPanelMessages['ja-JP'],
+    ...settingsPanelMessages['ja-JP'],
     ...infrastructureMessages['ja-JP'],
+    ...connectorPaneMessages['ja-JP'],
     ...chatMessages['ja-JP'],
     ...onboardingMessages['ja-JP'],
     ...productMetricsMessages['ja-JP'],
@@ -2236,6 +2306,15 @@ export const hasMessage = (key: string, locale: Locale = localeState.locale): ke
  * stops being a type error.
  */
 const messageTable = (locale: Locale): Record<string, string> => resolvedMessages[locale]
+
+/**
+ * Complete locale tables, for coverage tests and the inventory script.
+ *
+ * Exported as a widened record on purpose: the literal types behind
+ * `resolvedMessages` exist so `MessageKey` can be derived, and a partial locale
+ * would otherwise make indexing with a `Locale` union a type error.
+ */
+export const localeTables: Record<Locale, Record<string, string>> = resolvedMessages
 
 export const t = (key: string, params?: MessageParams): string => {
   const locale = localeState.locale
