@@ -41,6 +41,10 @@ LLM_TIMEOUT=60
 
 Remote providers normally require a real key. The configured endpoint must implement the OpenAI-compatible chat contract used by the adapter.
 
+Context-window and output limits, and whether a model accepts images, are declared in
+`python/modules/llm/model-capabilities.registry.json`. A model that is not listed there gets no
+extra limit enforced — add an entry when a provider needs one.
+
 For OpenLux, select `provider=custom`, `base_url=https://api.openlux.ai/v1`, and
 `model=deepseek-v4.1-flash`. Keep `api_key` empty in settings. Supply the key to the backend
 through `YUIZAKI_PROVIDER_CREDENTIALS_JSON`, a JSON object whose `llm.api_key` entry is injected

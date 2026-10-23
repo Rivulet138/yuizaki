@@ -3,161 +3,79 @@
 [![Release](https://img.shields.io/github/v/release/Rivulet138/yuizaki)](https://github.com/Rivulet138/yuizaki/releases/latest)
 [![License](https://img.shields.io/github/license/Rivulet138/yuizaki)](LICENSE)
 
-本地优先的 Windows/Linux AI 桌面伴侣 Agent，提供文字与语音对话、Live2D/VRM 桌宠、长期记忆、按请求视觉分析、工具调用和有限桌面动作。
+本地优先的 Windows / Linux AI 桌面伴侣 Agent：文字与语音对话、Live2D/VRM 桌宠、长期记忆、按需视觉、工具调用和有限的桌面动作。当前为可用 Alpha。
 
-## Genie 角色模型
+## 快速开始
 
-[下载 Genie 角色模型 Release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02)
-
-应用内下载：**设置 → 资源 → Genie TTS 资源 → 预取 Genie 资源**。版本和来源由 [`resources.lock.json`](resources.lock.json) 锁定。
-
-源码运行路径：
-
-```text
-python/.cache/GenieData/GenieData
-python/CharacterModels/v2ProPlus/<character>
-```
-
-打包运行路径：
-
-```text
-<Electron userData>/python-data/.cache/GenieData/GenieData
-<Electron userData>/python-data/CharacterModels/v2ProPlus/<character>
-```
-
-## 功能
-
-- 流式文字对话、会话隔离、历史、分支、取消与恢复。
-- Agent Turn、规划、工具调用、任务、MCP、插件和计划任务。
-- 可选 `ask_dsh`：经高风险权限确认，把明确要求的编码、测试或仓库分析委托给本机 DSH；不用于日常闲聊。
-- 可选 `tools/yuizaki-mcp`：把桌宠暴露为 MCP 服务，供 DSH 等客户端查询状态、启动应用、对话与检索记忆。
-- 可选技能目录导入：把 DSH / Codex 的 `SKILL.md` 导入为只读目录条目（`catalog_only`，不会被当作可执行工具）。
-- Live2D/VRM 角色、表情、动作、注视、口型和状态投影。
-- 按键说话、连续对话、VAD、ASR、流式 TTS 和打断。
-- 按请求的屏幕捕获、OCR 和视觉模型分析；默认不运行永久录屏。
-- SQLite 记忆权威存储，支持召回、审核、纠正、软遗忘、永久删除、导入、导出和索引重建。
-- 工作区隔离：会话、历史、消息编辑、统计与提示词上下文按工作区归属，跨工作区请求会被拒绝。
-- 设置快照历史与回滚（最多 20 个快照，凭据在写入磁盘前被清除）；工作区上下文存入 SQLite 工作区行。
-- Windows 和明确的 Linux X11 会话支持可见窗口发现、聚焦和关闭；能力默认关闭并需要独立 host token。
-- Telegram、Discord、QQ/微信个人桥提供实验性入口，默认关闭。
-- QQ 内置桥：在设置里一键下载并托管桥进程，扫码即接入，无需自备 OneBot 服务。
-
-## 资源与运行边界
-
-| 资源 | 用途 | 来源/位置 | 要求 |
-| --- | --- | --- | --- |
-| LLM Provider | 文字 Agent、规划、工具调用 | 用户配置的 OpenAI-compatible 端点 | 文字对话必需 |
-| Sherpa SenseVoice / Zipformer2 | ASR | `resources.lock.json` | 启用本地语音时必需，约 178 MiB（187 MB） |
-| Qwen3 Embedding 0.6B | 语义记忆检索 | 锁定的 Hugging Face revision | 使用语义记忆时必需，约 1.12 GiB |
-| Genie TTS | 本地语音合成 | 锁定的 `High-Logic/Genie` revision | 使用本地 TTS 时必需，约 391 MiB |
-| SoulX Singer | 音色转换 | `resources.lock.json` | 可选 |
-| Live2D / VRM | 桌宠角色 | 用户导入或明确许可的目录 | 使用桌宠时需要 |
-| Qdrant | 可重建语义索引 | 本机 Docker 或远程地址 | 可选 |
-| QQ 内置桥 | 个人账号 QQ 接入 | `resources.lock.json` 固定的上游 release，由内置桥管理器下载 | 可选，约 34 MiB；第三方组件，上游未声明许可 |
-
-模型、声音、角色、字体和美术素材有独立许可。不要将密钥、数据库、个人对话、截图、音频缓存或模型权重提交到 Git。
-
-支持 Windows 10/11 x64 和 Linux x86_64 图形桌面。macOS 没有受支持的应用和原生桌面动作适配器；Wayland 下全局输入钩子和宿主级桌面动作受合成器限制。
-
-## 安装与启动
-
-### 环境要求
-
-- Windows 10/11 x64 或 Linux x86_64 图形桌面
-- Python 3.11–3.13
-- Node.js >= 22.13、npm
-- Go 1.27+（从源码构建 Launcher；`tools/yuizaki-launcher/go.mod` 与 CI 使用该版本）
-- Docker（Windows 自动启动 Qdrant 时需要；Linux 需自行启动容器）
-
-### Go Launcher
-
-Windows：
+需要 Windows 10/11 x64 或 Linux x86_64 图形桌面、Python 3.11–3.13、Node.js ≥ 22.13、Go 1.27+（仅构建 Launcher），Docker 仅在启用 Qdrant 时需要。
 
 ```powershell
-cd electron
-npm ci
-npm run prepare:launcher:win
-cd ..
+# Windows
+cd electron; npm ci; npm run prepare:launcher:win; cd ..
 .\YuizakiLauncher.exe setup
-.\YuizakiLauncher.exe start --check
 .\YuizakiLauncher.exe start
 ```
 
-Linux：
-
 ```bash
-cd electron
-npm ci
-npm run prepare:launcher:linux
-cd ..
-chmod +x YuizakiLauncher
-./YuizakiLauncher setup
-./YuizakiLauncher start --check
-./YuizakiLauncher start
+# Linux
+cd electron && npm ci && npm run prepare:launcher:linux && cd ..
+chmod +x YuizakiLauncher && ./YuizakiLauncher setup && ./YuizakiLauncher start
 ```
 
-默认启动浏览器对话页；需要 Electron 控制面板和桌宠时加 `--electron-ui`。MCP 是可选能力，默认不启动；需要浏览器自动化工具时加 `--with-mcp`（或设置 `YUIZAKI_WITH_MCP=1`），`--no-mcp` 显式保持关闭。其他参数包括 `--check`、`--smoke`、`--with-qdrant`/`--no-qdrant`、`--no-install`、`--no-open`、`--no-show-pet`、`--dev-renderer`/`--no-dev-renderer` 和 `--browser-only`。Qdrant 的 Docker 自动启动由 Windows Launcher 管理，Linux 需自行启动配置的 Docker 服务。
+默认打开浏览器对话页；加 `--electron-ui` 使用 Electron 控制面板与桌宠，加 `--with-mcp` 启用浏览器自动化工具（MCP 默认关闭）。全部参数、首次验收和故障处理见 [`docs/QUICKSTART.md`](docs/QUICKSTART.md)。
 
-启动器在后端接收流量前运行数据库 bootstrap：空库从当前 Alembic head 创建，带有可信 revision 的旧库自动升级到当前 head 并校验 schema。head 从迁移目录动态读取，不应在客户端、测试或文档中写死 revision 字符串；有表但没有可信 Alembic revision 的数据库会拒绝启动，需要先完成明确的迁移处理。
+## 功能
 
-命令和故障处理见 [`docs/QUICKSTART.md`](docs/QUICKSTART.md)。
+- **对话**：流式文字与语音对话、会话隔离、历史与分支、取消与恢复；按键说话、VAD、ASR、流式 TTS 和打断。
+- **桌宠**：Live2D/VRM 角色、表情、动作、注视、口型与状态投影。
+- **Agent**：Agent Turn、规划、工具调用、任务、MCP、插件与计划任务。
+- **记忆**：SQLite 权威存储，支持召回、审核、纠正、软遗忘、永久删除、导入导出与索引重建。
+- **隔离与可回滚**：工作区隔离会话与提示词上下文；设置快照最多 20 份，可回滚，凭据落盘前清除。
+- **桌面动作**：Windows 与 Linux X11 下的窗口发现、聚焦和关闭，默认关闭且需独立 host token。
+- **可选集成**：`ask_dsh` 把明确要求的编码/测试委托给本机 DSH；`tools/yuizaki-mcp` 把桌宠暴露为 MCP 服务；技能目录导入只读 `SKILL.md`。
+- **消息入口**：Telegram、Discord、QQ/微信个人桥均为实验性、默认关闭；QQ 内置桥可在设置里一键托管并扫码登录。
 
-### 后端开发模式
+界面支持简体中文、English、日本語 三种语言。
 
-```powershell
-cd python
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-copy .env.example .env
-.\.venv\Scripts\python.exe app.py
-```
+## 资源与许可
 
-Linux 使用 `.venv/bin/python` 和 `cp .env.example .env`。后端默认监听 `127.0.0.1:8001`。
+大模型、语音、嵌入和角色资源由 [`resources.lock.json`](resources.lock.json) 锁定版本、校验和与许可边界。在应用内获取：**设置 → 资源**。
 
-## 设置
+| 资源 | 用途 | 体积（约） |
+| --- | --- | --- |
+| 用户配置的 OpenAI-compatible 端点 | 文字 Agent、规划、工具调用 | — |
+| Sherpa SenseVoice / Zipformer2 | 本地 ASR | 178 MiB |
+| Qwen3 Embedding 0.6B | 语义记忆检索 | 1.12 GiB |
+| Genie TTS | 本地语音合成 | 391 MiB |
+| SoulX Singer / Qdrant / QQ 内置桥 | 音色转换 / 可重建语义索引 / 个人号接入 | 可选 |
+
+Genie 角色模型另行发布：[下载 Release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02)。源码运行从 `python/.cache/GenieData/GenieData` 与 `python/CharacterModels/v2ProPlus/<character>` 读取，打包运行使用 Electron `userData` 下的 `python-data` 对应路径。
+
+模型、声音、角色、字体和美术素材有独立许可；不要提交密钥、数据库、个人对话、截图、音频缓存或模型权重。详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+
+## 配置
 
 | 文件 | 用途 |
 | --- | --- |
-| `python/.env` | Provider、端口、可选服务和运行时变量，不提交到 Git |
-| `python/config/settings.json` | 应用持久化设置，由设置页或 Launcher 管理；`YUIZAKI_SETTINGS_PATH` 可覆盖 |
-| `python/data/chat.db` | 聊天、会话、工作区上下文与伴侣数据的 SQLite 权威库；`DATABASE_URL` 可覆盖 |
-| `python/data/turn_commits.sqlite3` | 回合提交、outbox 与连接器投递状态的独立 SQLite 文件 |
-| `python/data/workspace_contexts.json`（旧版，通常不存在） | 旧版工作区提示词、角色卡、世界书与记忆策略侧车文件；启动迁移读取一次后归档，现行数据存入 SQLite 工作区行 |
-| `python/data/settings_history.json` | 设置历史快照（最多 20 个），重启后仍可回滚；凭据字段写入前会被清空 |
-| `python/modules/llm/model-capabilities.registry.json` | 显式模型上下文/输出上限与视觉能力；未列出的模型不施加任何限制 |
-| `resources.lock.json` | 模型/资源 URL、revision、校验和及许可边界 |
+| `python/.env` | Provider、端口与运行时变量（不提交） |
+| `python/config/settings.json` | 应用设置，由设置页或 Launcher 管理 |
+| `python/data/chat.db` | 聊天、会话、工作区上下文与伴侣数据 |
+| `python/data/settings_history.json` | 设置快照（最多 20 份，凭据已清除） |
 
-| 变量 | 示例/默认值 | 说明 |
-| --- | --- | --- |
-| `SERVER_PORT` | `8001` | Python HTTP 和 Socket.IO |
-| `CONTROL_SERVER_PORT` | `38945` | Electron control server |
-| `RENDERER_PORT` | `5173` | Vite 开发服务器 |
-| `MCP_PORT` | `7777` | Node MCP 服务（仅启用 MCP 时使用） |
-| `VISION_LLM_ENABLED` | `0` | 视觉默认关闭 |
-| `MEMORY_BACKEND` | `sqlite` | SQLite 为记忆权威源 |
-| `QDRANT_AUTO_START` | `0` | 是否自动启动 Qdrant |
-| `ASR_STARTUP_MODE` / `TTS_STARTUP_MODE` | `lazy` | 延迟加载语音资源 |
-| `YUIZAKI_INSTALL_PROFILE` | `core` / `full` | 基础或完整 Python 依赖 |
-| `YUIZAKI_DATA_DIR` | `python/data` | 运行时数据根目录；设置数据库与历史文件的位置 |
-| `YUIZAKI_WITH_MCP` | `0` | 等价于 Launcher 的 `--with-mcp` |
-
-完整配置见 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)。默认服务绑定 loopback；云 Provider、MCP、插件、浏览器自动化和远程 Provider 可能按配置访问外部服务或本地数据。安全边界见 [`SECURITY.md`](SECURITY.md)。
-
-Electron 控制服务的 `/health`、`/api/health` 和允许的桌宠资源 GET 路径可公开访问；其他 routed control API 需要 `Authorization: Bearer <control-token>` 或 `x-yuizaki-backend-token`。仅限 loopback、无 `Origin` 的 GET bootstrap 请求可使用 `control_token` query 参数，不能将其用于跨源或写请求。插件关闭时先停止新的 execution admission，再取消并等待请求体解析、broker 调用和 sandbox 进程树结束。
+后端开发模式：`cd python && python -m venv .venv`，安装 `requirements.txt`，复制 `.env.example` 为 `.env` 后运行 `app.py`（默认 `127.0.0.1:8001`）。完整变量、端口、视觉/记忆开关和打包方式见 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)；服务默认绑定 loopback，安全边界与鉴权见 [`SECURITY.md`](SECURITY.md)。
 
 ## 技术栈与结构
 
-Electron 44、Vue 3、TypeScript、Vite、Pinia、Element Plus、PixiJS、Three.js、Python 3.11–3.13、FastAPI、Socket.IO、SQLite、可选 Qdrant、Sherpa-ONNX、Genie TTS、RapidOCR、Go Launcher。
+Electron 44 · Vue 3 · TypeScript · Vite · Pinia · Element Plus · PixiJS · Three.js · Python 3.11–3.13 · FastAPI · Socket.IO · SQLite · 可选 Qdrant · Sherpa-ONNX · Genie TTS · RapidOCR · Go Launcher
 
 ```text
 electron/                 Electron、preload、Vue renderer 和构建脚本
 python/                   FastAPI、Agent、记忆、调度器和测试
 node-mcp/                 可选 Playwright MCP 服务（默认不启动）
 tools/yuizaki-launcher/   Go Launcher
-scripts/                  文档、资源和锁文件检查
+scripts/                  文档、资源与锁文件检查
 services/                 可选外部服务
 docs/                     快速开始、配置、API、架构、国际化与平台文档
-.github/workflows/        CI 与发行构建
 ```
 
 ## 文档
@@ -169,74 +87,40 @@ docs/                     快速开始、配置、API、架构、国际化与平
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 进程边界、Agent 阶段、数据流和权限 |
 | [`docs/API.md`](docs/API.md) | HTTP、SSE、Socket.IO、Job、记忆和认证契约 |
 | [`docs/LINUX.md`](docs/LINUX.md) | Linux、X11、Wayland、音频、GPU 和桌面限制 |
-| [`docs/I18N.md`](docs/I18N.md) | 三语（zh-CN / en-US / ja-JP）文案层、校验闸门和新增语言步骤 |
-| [`PRODUCT.md`](PRODUCT.md) | 用户、产品目标、设计原则和无障碍边界 |
-| [`DESIGN.md`](DESIGN.md) | 桌宠、聊天、语音、记忆和 Agent 作业的设计规范 |
-| [`SECURITY.md`](SECURITY.md) | 安全边界、凭据、MCP、连接器和数据处理 |
-| [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | 依赖、模型、角色、声音和字体许可 |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献流程和提交边界 |
+| [`docs/I18N.md`](docs/I18N.md) | 三语文案层、校验闸门和新增语言步骤 |
+| [`PRODUCT.md`](PRODUCT.md) · [`DESIGN.md`](DESIGN.md) | 产品目标与设计规范 |
+| [`SECURITY.md`](SECURITY.md) · [`CONTRIBUTING.md`](CONTRIBUTING.md) | 安全边界与贡献流程 |
 
 ## 验证
 
-```powershell
-cd python
-python -m pip install -r requirements-test.txt
-python -m pytest -q
-python -m compileall -q modules routes socket_handlers tests app.py socket_server.py
-cd ..
-python scripts/check_docs.py
-python scripts/check_resources.py
-cd python
-python scripts/check_requirements_lock.py
-cd ..\electron
-npm audit --audit-level=low
-npm run type-check
-npm run lint
-npm run test:unit
-npm run build
-npm run start:check
-cd ..\node-mcp
-npm ci
-npm test
-cd ..\tools\yuizaki-launcher
-go test ./...
+```bash
+cd python && python -m pytest -q && cd ..
+python scripts/check_docs.py && python scripts/check_resources.py
+cd electron && npm run type-check && npm run lint && npm run test:unit && npm run build
 ```
 
-`npm run type-check` 现在同时检查 main/preload/shared 和带 `.vue` 的 renderer 工程（`vue-tsc` + [`electron/tsconfig.renderer.json`](electron/tsconfig.renderer.json)）。renderer 的类型基线记录在 [`electron/renderer-types-baseline.json`](electron/renderer-types-baseline.json)：新增类型错误会直接失败，修好后用 `node electron/scripts/check-renderer-types.mjs --update` 收紧基线；对改动文件做严格检查时另跑 `npm run type-check:renderer:changed`。
+完整 CI（含 renderer 类型基线、资源锁校验、Launcher 测试）见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。renderer 类型错误基线记录在 [`electron/renderer-types-baseline.json`](electron/renderer-types-baseline.json)：新增错误直接失败，修好后用 `node electron/scripts/check-renderer-types.mjs --update` 收紧。
 
-## 许可与贡献
+## 许可
 
-源码采用 [MIT License](LICENSE)。MIT 不覆盖模型权重、声音、角色、字体、美术资源或外部服务；分发前阅读 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。贡献前阅读 [`CONTRIBUTING.md`](CONTRIBUTING.md)、[`SECURITY.md`](SECURITY.md) 和 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
-
-当前版本为可用 Alpha；真实设备资格、跨平台体验、第三方扩展沙箱、长期稳定性和发行治理仍在完善中。
+源码采用 [MIT License](LICENSE)。MIT 不覆盖模型权重、声音、角色、字体、美术资源或外部服务。贡献前请阅读 [`CONTRIBUTING.md`](CONTRIBUTING.md) 与 [`SECURITY.md`](SECURITY.md)。
 
 ---
 
 ## English
 
-Yuizaki is a local-first Windows/Linux AI desktop companion Agent with text and voice chat, Live2D/VRM avatars, long-term memory, request-scoped vision, tool calls, and limited desktop actions.
+A local-first Windows/Linux AI desktop companion agent: text and voice chat, Live2D/VRM pet, long-term memory, on-demand vision, tool calls, and limited desktop actions. Currently a usable alpha.
 
-### Genie character models
+```powershell
+cd electron; npm ci; npm run prepare:launcher:win; cd ..
+.\YuizakiLauncher.exe setup
+.\YuizakiLauncher.exe start
+```
 
-[Download the Genie character models release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02). In the app, use **Settings → Resources → Genie TTS Assets → Prefetch Genie Assets**. Source checkouts use `python/.cache/GenieData/GenieData` and `python/CharacterModels/v2ProPlus/<character>`; packaged runs use the corresponding Electron `userData/python-data` paths.
+Requires Windows 10/11 x64 or a Linux x86_64 desktop, Python 3.11–3.13, Node.js ≥ 22.13, and Go 1.27+ to build the launcher. Use `--electron-ui` for the Electron panel and pet, `--with-mcp` for browser-automation tools (MCP stays off by default). The UI ships in Simplified Chinese, English, and Japanese.
 
-### Features and boundaries
+Highlights: streaming chat with isolated workspaces, agent turns with tools/jobs/MCP/plugins, SQLite-authoritative memory with review and deletion, request-scoped vision, and rollback-able settings snapshots. Desktop control, messaging bridges, and MCP are opt-in and off by default.
 
-- Streaming text chat, isolated sessions, history, branches, cancellation, and recovery.
-- Agent turns, planning, tools, jobs, MCP, plugins, and scheduled tasks.
-- Optional `ask_dsh`: delegate explicitly requested coding, tests, or repository analysis to local DSH after high-risk policy approval.
-- Optional `tools/yuizaki-mcp`: expose the companion as an MCP server so DSH can read status, launch the app, chat, and query memory.
-- Optional skill catalog import: turn DSH / Codex `SKILL.md` directories into read-only catalog entries (`catalog_only`; never executed).
-- Live2D/VRM expressions, motions, gaze, lip sync, and state projection.
-- Push-to-talk, continuous conversation, VAD, ASR, streaming TTS, and interruption.
-- Request-scoped screen capture, OCR, and vision; no permanent recording loop by default.
-- SQLite-authoritative memory with review, correction, forgetting, deletion, import/export, and index rebuild.
-- Workspace isolation: sessions, history, message edits, statistics, and prompt context belong to a workspace, and cross-workspace requests are rejected.
-- Settings snapshot history with rollback (at most 20 snapshots; credentials are scrubbed before they reach disk); workspace context is stored on the SQLite workspace row.
-- Visible-window discovery, focus, and close on Windows and explicit Linux X11 sessions; disabled by default and protected by a separate host token.
-- Experimental Telegram, Discord, QQ, and WeChat personal bridges; disabled by default.
-- Managed QQ bridge: download and supervise the bridge from Settings and sign in by QR, without installing an OneBot server yourself.
+Model assets are pinned in [`resources.lock.json`](resources.lock.json); Genie character models ship as a [separate release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02). Models, voices, characters, fonts, and artwork carry their own licenses — never commit secrets, databases, conversations, screenshots, audio caches, or model weights.
 
-MCP is optional and starts disabled; add `--with-mcp` (or `YUIZAKI_WITH_MCP=1`) to enable browser automation tools. Launcher builds require Go 1.27+.
-
-Models, voices, characters, fonts, and artwork have separate licenses. Do not commit secrets, databases, personal conversations, screenshots, audio caches, or model weights. See [Third-party notices](THIRD_PARTY_NOTICES.md), [Quickstart](docs/QUICKSTART.md), [Configuration](docs/CONFIGURATION.md), [Architecture](docs/ARCHITECTURE.md), and [Security](SECURITY.md).
+Docs: [Quickstart](docs/QUICKSTART.md) · [Configuration](docs/CONFIGURATION.md) · [Architecture](docs/ARCHITECTURE.md) · [API](docs/API.md) · [Linux](docs/LINUX.md) · [i18n](docs/I18N.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
