@@ -17,8 +17,8 @@ Yuizaki is a local, single-user AI desktop pet Agent, not a hardened public serv
 ## Defaults
 
 - Backend and Electron control services bind to loopback by default.
-- The Electron control service rejects remote, `file:`, and `null` browser origins. Health and approved pet-asset GET paths are public; other routed control requests require the control token in a Bearer authorization header or `x-yuizaki-backend-token`.
-- The control-token query bootstrap is accepted only for a loopback GET without an `Origin` header. It is not accepted for cross-origin or mutating requests. Python loopback and Socket.IO traffic retain their local trust model; optional non-loopback clients require the backend token.
+- The Electron control service rejects remote, `file:`, and `null` browser origins. Health, approved pet-asset GET paths, and the routed control APIs are reachable from loopback without a token: this is a single-user local app, and a per-launch token on top of the loopback bind only locked the UI out of its own backend. A token is still accepted when a caller sends one, and the helper that verifies it stays available for a stricter deployment.
+- Disallowed browser origins are still rejected with `403`, which is the check that keeps a random web page from driving the app. Python loopback and Socket.IO traffic retain their local trust model; optional non-loopback clients require the backend token.
 - Native desktop-action control routes are the exception: they require a separate Electron-issued host token even on loopback.
 - API keys belong in `python/.env` or local settings and must never be committed or logged.
 - Microphone capture requires explicit voice mode and desktop permission.

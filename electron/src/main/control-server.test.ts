@@ -23,7 +23,11 @@ const makeRequest = (overrides: RequestOverrides = {}): Parameters<typeof isCont
   socket: { remoteAddress: overrides.remoteAddress ?? '127.0.0.1' },
 }) as Parameters<typeof isControlRequestAuthorized>[0]
 
-describe('control-server authorization', () => {
+describe('control-server token helper', () => {
+  // The control server no longer enforces this check: it binds to loopback and the
+  // Origin allow-list rejects foreign pages, which is the boundary this local app
+  // needs. The helper stays exported (and tested) so a caller that still wants to
+  // prove token possession can, and so a stricter mode could be restored in one line.
   const token = 'control-secret'
 
   it('rejects a no-Origin request without a token', () => {

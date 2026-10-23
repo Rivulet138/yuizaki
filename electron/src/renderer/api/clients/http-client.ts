@@ -633,9 +633,6 @@ const requestResponse = async <T>(
       hasAuthHeader = true
     }
   }
-  if (needsLocalAuth && !hasAuthHeader) {
-    throw createClientError(backendAuthMissingMessage(), { code: 'auth_missing' })
-  }
   let requestUrl = await awaitWithCallerSignal(rewriteBackendRequestUrl(url, authHeaders), init?.signal)
   ensureRequestActive()
   let response: Response
@@ -647,9 +644,6 @@ const requestResponse = async <T>(
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
     if (init?.signal?.aborted) throw error
-    if (needsLocalAuth && !hasAuthHeader) {
-      throw createClientError(backendAuthMissingMessage(), { code: 'auth_missing' })
-    }
     if (error instanceof LocalRequestTimeoutError) {
       throw createClientError(error.message, { code: 'request_timeout' })
     }

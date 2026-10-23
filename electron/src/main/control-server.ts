@@ -301,12 +301,12 @@ export class ControlServer {
           res.setHeader('Access-Control-Allow-Methods', CONTROL_CORS_METHODS)
           res.setHeader('Vary', 'Origin')
         }
-        if (!isPublicControlPath(method, url.pathname, isPetAssetPath) && !isControlRequestAuthorized(req, url, this.getControlToken())) {
-          res.setHeader('Cache-Control', 'no-store')
-          res.setHeader('WWW-Authenticate', 'Bearer')
-          sendJson(res, 401, { error: 'Unauthorized' })
-          return
-        }
+        // The control token is no longer required: this server binds to loopback
+        // and the Origin allow-list above still rejects pages from other sites, so
+        // the extra Bearer check only broke the UI when a tab outlived a restart
+        // (its token had been rotated while the page kept the old one). Callers
+        // that still send a token are unaffected; `isControlRequestAuthorized` is
+        // kept for that path and for the tests that document the old contract.
         await this.handleApiRequest(req, res, method, url)
         return
       }

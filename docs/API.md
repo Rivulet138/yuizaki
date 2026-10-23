@@ -25,9 +25,9 @@ FastAPI publishes the live HTTP schema at `/openapi.json` and the interactive lo
 
 ### Electron control HTTP / Electron 控制 HTTP
 
-The Electron control service exposes `/health`, `/api/health`, and approved pet-asset GET paths without a control token. Other routed control requests require `Authorization: Bearer <control-token>` or `x-yuizaki-backend-token: <control-token>`. For the local browser bootstrap only, a loopback GET with no `Origin` header may use `?control_token=<control-token>`; query authentication is rejected for cross-origin requests and mutating methods. Unauthorized requests return `401` with `WWW-Authenticate: Bearer`; disallowed browser origins return `403`.
+The Electron control service exposes `/health`, `/api/health`, and approved pet-asset GET paths without any credential. Routed control APIs are also reachable from loopback without a token; a caller may still send `Authorization: Bearer <control-token>` and it is accepted, but it is no longer required. Disallowed browser origins still return `403`, which is the boundary that matters for a local app.
 
-The control token is distinct from the host desktop-action token. Do not put either token in logs, source control, or reusable URLs.
+The optional control token is distinct from the host desktop-action token. Do not put either token in logs, source control, or reusable URLs.
 
 ## HTTP areas / HTTP 资源组
 
@@ -261,7 +261,7 @@ event IDs retain their delivery idempotency and fast-ack behavior. Authenticatio
 
 - Python, Socket.IO, and Electron control services bind to loopback by default.
 - Python loopback traffic follows the local desktop trust model; optional non-loopback Python or Socket.IO clients require `YUIZAKI_BACKEND_API_TOKEN`.
-- Electron routed control APIs require the control Bearer/header token described above, except for health and approved pet-asset GET paths. The loopback query bootstrap is restricted to no-Origin GET requests.
+- Electron routed control APIs are callable from loopback without a credential; foreign browser origins are rejected with `403`.
 - Native desktop actions use a separate host-only token and are not authorized by the normal backend token.
 - Connector webhook routes apply provider-specific verification. Configuration and management routes remain inside the normal backend boundary.
 - In the production app, accepted Telegram and personal bridge webhooks are acknowledged only after the inbound envelope is persisted in `connector_deliveries`; filtered or rate-limited events are acknowledged without a delivery. The response may contain `queued: true` while Agent execution continues. `processing`/`failed` rows are recoverable via the delivery retry route, and `sending` is treated as an unknown external effect rather than auto-retried.
