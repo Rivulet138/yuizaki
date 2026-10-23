@@ -78,6 +78,16 @@ const LOCAL_REQUEST_TIMEOUT_MS = 12_000
 // Resolved lazily: these are user-facing error strings, and an eager read would freeze
 // whichever locale happened to be active when this module was first imported.
 export const backendAuthMissingMessage = (): string => t('misc.backendAuthMissing')
+/**
+ * The page holds a control token the control server no longer accepts — typical when
+ * a tab survives a Launcher restart. Reloading the page re-issues a token.
+ */
+export const controlTokenStaleMessage = (): string => t('misc.controlTokenStale')
+/**
+ * A token was sent and refused by the backend behind the control server, which
+ * happens when Electron and Python did not receive the same backend token.
+ */
+export const backendTokenRejectedMessage = (): string => t('misc.backendTokenRejected')
 const localServiceUnavailableMessage = (): string => t('misc.localServiceUnavailable')
 const localServiceTimeoutMessage = (timeoutMs: number): string =>
   t('misc.localServiceTimeout', { seconds: Math.ceil(timeoutMs / 1000) })
@@ -529,11 +539,28 @@ const throwResponseError = async (response: Response, requestUrl: string, needsL
     if (parseError instanceof DOMException && parseError.name === 'AbortError') throw parseError
     error.retryable = false
   }
-  if (needsLocalAuth && response.status === 401 && !hasAuthHeader) {
-    error.message = backendAuthMissingMessage()
-    error.code = 'auth_missing'
+  if (response.status === 401) {
+    // Three different failures all answer 401; name the layer so the fix is obvious.
+    if (needsLocalAuth && !hasAuthHeader) {
+      error.message = backendAuthMissingMessage()
+      error.code = 'auth_missing'
+    } else if (isControlOriginUrl(requestUrl)) {
+      error.message = controlTokenStaleMessage()
+      error.code = 'auth_control_token_stale'
+    } else {
+      error.message = backendTokenRejectedMessage()
+      error.code = 'auth_backend_token_rejected'
+    }
   }
   throw error
+}
+
+const isControlOriginUrl = (url: string): boolean => {
+  try {
+    return new URL(url, CONTROL_ORIGIN).origin === new URL(CONTROL_ORIGIN).origin
+  } catch {
+    return false
+  }
 }
 
 const requestPath = (url: string): string => {
@@ -564,6 +591,7 @@ export const isAuthMissingError = (error: unknown): boolean => {
   if (!(error instanceof Error)) return false
   const clientError = error as HttpClientError
   return clientError.code === 'auth_missing' ||
+    clientError.code === 'auth_control_token_stale' ||
     clientError.status === 401 ||
     error.message.includes('control_token') ||
     hasUnauthorizedMarker(error.message)

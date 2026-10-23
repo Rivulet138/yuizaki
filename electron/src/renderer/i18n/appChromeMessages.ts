@@ -76,6 +76,8 @@ export const appChromeMessages = definePanelMessages({
     'misc.deployLiteLaunch': '轻量启动（不含 MCP）',
     'misc.deployFrontendDebug': '前端调试',
     'misc.backendAuthMissing': '后端服务未授权：请刷新控制页，或从 Electron 应用入口重新打开界面。',
+    'misc.controlTokenStale': '控制令牌已失效：请刷新页面，或从 Launcher 重新打开界面。',
+    'misc.backendTokenRejected': '后端不接受当前令牌：请用 Launcher 启动，让 Electron 与 Python 使用同一个后端令牌。',
     'misc.localServiceUnavailable': '无法连接本地服务：请确认 Yuizaki 后端和 Electron 控制服务正在运行，然后重启 Electron 窗口重试。',
     'misc.localServiceTimeout': '本地服务响应超时：请求已等待 {seconds} 秒，请检查后端或控制服务是否卡住。',
 
@@ -180,6 +182,8 @@ export const appChromeMessages = definePanelMessages({
     'misc.deployLiteLaunch': 'Lightweight launch (without MCP)',
     'misc.deployFrontendDebug': 'Frontend debugging',
     'misc.backendAuthMissing': 'The backend service is not authorized: refresh the control page, or reopen the interface from the Electron app entry.',
+    'misc.controlTokenStale': 'The control token is no longer valid: reload the page, or reopen it from the Launcher.',
+    'misc.backendTokenRejected': 'The backend rejected this token: start through the Launcher so Electron and Python share one backend token.',
     'misc.localServiceUnavailable': 'Cannot reach the local service: check that the Yuizaki backend and the Electron control service are running, then restart the Electron window.',
     'misc.localServiceTimeout': 'The local service timed out: the request waited {seconds} seconds, so check whether the backend or control service is stuck.',
 
@@ -284,6 +288,8 @@ export const appChromeMessages = definePanelMessages({
     'misc.deployLiteLaunch': '軽量起動（MCP を含まない）',
     'misc.deployFrontendDebug': 'フロントエンドのデバッグ',
     'misc.backendAuthMissing': 'バックエンドサービスが未認可です：コントロールページを再読み込みするか、Electron アプリの入口から画面を開き直してください。',
+    'misc.controlTokenStale': 'コントロールトークンが無効です：ページを再読み込みするか、ランチャーから開き直してください。',
+    'misc.backendTokenRejected': 'バックエンドがこのトークンを受け付けませんでした：ランチャーから起動し、Electron と Python で同じバックエンドトークンを使用してください。',
     'misc.localServiceUnavailable': 'ローカルサービスに接続できません：Yuizaki バックエンドと Electron コントロールサービスが起動しているか確認し、Electron ウィンドウを再起動してください。',
     'misc.localServiceTimeout': 'ローカルサービスの応答がタイムアウトしました：{seconds} 秒待機しました。バックエンドまたはコントロールサービスが停止していないか確認してください。',
 
