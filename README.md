@@ -156,7 +156,7 @@ node-mcp/                 可选 Playwright MCP 服务（默认不启动）
 tools/yuizaki-launcher/   Go Launcher
 scripts/                  文档、资源和锁文件检查
 services/                 可选外部服务
-docs/                     快速开始、配置、API、架构和平台文档
+docs/                     快速开始、配置、API、架构、国际化与平台文档
 .github/workflows/        CI 与发行构建
 ```
 
@@ -169,6 +169,7 @@ docs/                     快速开始、配置、API、架构和平台文档
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 进程边界、Agent 阶段、数据流和权限 |
 | [`docs/API.md`](docs/API.md) | HTTP、SSE、Socket.IO、Job、记忆和认证契约 |
 | [`docs/LINUX.md`](docs/LINUX.md) | Linux、X11、Wayland、音频、GPU 和桌面限制 |
+| [`docs/I18N.md`](docs/I18N.md) | 三语（zh-CN / en-US / ja-JP）文案层、校验闸门和新增语言步骤 |
 | [`PRODUCT.md`](PRODUCT.md) | 用户、产品目标、设计原则和无障碍边界 |
 | [`DESIGN.md`](DESIGN.md) | 桌宠、聊天、语音、记忆和 Agent 作业的设计规范 |
 | [`SECURITY.md`](SECURITY.md) | 安全边界、凭据、MCP、连接器和数据处理 |

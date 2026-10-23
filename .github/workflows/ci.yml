@@ -132,7 +132,7 @@ jobs:
       - name: Audit i18n coverage
         if: runner.os == 'Linux'
         working-directory: ${{ github.workspace }}
-        run: python scripts/i18n_inventory.py --max-cjk 19
+        run: python scripts/i18n_inventory.py --max-cjk 7
       - run: npm run build
       - run: npm run start:check
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
