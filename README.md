@@ -3,16 +3,12 @@
 [![Release](https://img.shields.io/github/v/release/Rivulet138/yuizaki)](https://github.com/Rivulet138/yuizaki/releases/latest)
 [![License](https://img.shields.io/github/license/Rivulet138/yuizaki)](LICENSE)
 
-本地优先的 Windows / Linux AI 桌面伴侣 Agent，提供文字与语音对话、Live2D/VRM 桌宠、长期记忆、按需视觉、工具调用和有限的桌面动作。当前为可用 Alpha。
+本地优先的 Windows / Linux AI 桌面伴侣 Agent，提供文字与语音对话、Live2D/VRM 桌宠、长期记忆、按需视觉、工具调用和有限的桌面动作。
 
-## Genie TTS 前置条件
+## Genie TTS 
 
-Genie 是本地 **TTS 和角色语音运行时**，不是聊天大模型。要同时使用文字聊天和 Genie 语音，需要分别准备：
-
-1. 一个 OpenAI-compatible 聊天端点，并配置 `LLM_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`。
-2. `full` 安装配置，以安装 Genie TTS、Sherpa ASR 和 Embedding 等完整依赖。
-3. Genie TTS 资源：启动后进入 **设置 → 资源 → Genie TTS 资源 → 预取 Genie 资源**。当前锁定 Genie TTS 2.0.2，下载量约 391 MiB。
-4. Genie 角色包：从 [Genie character models Release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02) 下载并放入角色模型目录。角色包不是根目录 MIT 许可证自动覆盖的源码文件，分发前必须阅读 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+1. Genie TTS 资源：启动后进入 **设置 → 资源 → Genie TTS 资源 → 预取 Genie 资源**。当前锁定 Genie TTS 2.0.2，下载量约 391 MiB。
+2. Genie 角色包：从 [Genie character models Release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02) 下载并放入角色模型目录。角色包不是根目录 MIT 许可证自动覆盖的源码文件，分发前必须阅读 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
 源码运行时的默认路径如下；使用打包版时，路径会映射到 Electron `userData` 下的 `python-data`：
 
@@ -20,9 +16,6 @@ Genie 是本地 **TTS 和角色语音运行时**，不是聊天大模型。要�
 | --- | --- |
 | Genie 运行时与缓存 | `python/.cache/GenieData/GenieData` |
 | Genie 角色包 | `python/CharacterModels/v2ProPlus/<character>` |
-| 默认角色 | `普拉琪娜_e15_e8_correct_sampling_v2` |
-
-最小的 Genie 配置可以写入 `python/.env`。`TTS_GENIE_MODEL_DIR` 留空时，后端使用内置包管理运行时；只有在明确使用自定义模型目录时才填写它。
 
 ```dotenv
 LLM_PROVIDER=custom
@@ -80,15 +73,6 @@ chmod +x YuizakiLauncher
 
 `setup` 创建 `python/.env` 并配置 LLM；`start --check` 只检查配置，不启动服务。默认打开浏览器对话页；加 `--electron-ui` 使用 Electron 控制面板和桌宠。MCP 默认关闭，需要浏览器自动化工具时才加 `--with-mcp`。
 
-### 首次验收顺序
-
-1. 确认对话页和 Live2D/VRM 模型正常显示。
-2. 配置 OpenAI-compatible LLM，并发送一条文字消息。
-3. 在 **设置 → 资源** 预取 Sherpa、Embedding 和 Genie 资源。
-4. 下载 Genie 角色包，确认角色名与 `TTS_GENIE_CHARACTER` 一致。
-5. 在设置中启用语音，确认 ASR、TTS、音频设备和口型同步。
-6. 最后再按需启用视觉、工具、MCP、桌面动作或消息连接器。
-
 常用 Launcher 命令：
 
 | 命令 | 作用 |
@@ -109,7 +93,7 @@ chmod +x YuizakiLauncher
 - **桌宠**：Live2D/VRM 角色、表情、动作、注视、口型与状态投影。
 - **Agent**：Agent Turn、规划、工具调用、任务、MCP、插件与计划任务。
 - **记忆**：SQLite 权威存储，支持召回、审核、纠正、软遗忘、永久删除、导入导出与索引重建。
-- **隔离与可回滚**：工作区隔离会话与提示词上下文；设置快照最多 20 份，可回滚，凭据落盘前清除。
+- **隔离**：工作区隔离会话与提示词上下文；设置快照最多 20 份。
 - **桌面动作**：Windows 与 Linux X11 下的窗口发现、聚焦和关闭，默认关闭且需独立 host token。
 - **可选集成**：`ask_dsh` 把明确要求的编码/测试委托给本机 DSH；`tools/yuizaki-mcp` 把桌宠暴露为 MCP 服务；技能目录导入只读 `SKILL.md`。
 - **消息入口**：Telegram、Discord、QQ/微信个人桥均为实验性、默认关闭；QQ 内置桥可在设置里一键托管并扫码登录。
@@ -129,7 +113,6 @@ chmod +x YuizakiLauncher
 | Genie character models | 角色音色与语音模型 | 独立 Release |
 | SoulX Singer / Qdrant / QQ 内置桥 | 音色转换 / 可重建语义索引 / 个人号接入 | 可选 |
 
-Genie 角色模型另行发布：[下载 Release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02)。源码运行从 `python/.cache/GenieData/GenieData` 与 `python/CharacterModels/v2ProPlus/<character>` 读取，打包运行使用 Electron `userData` 下的 `python-data` 对应路径。
 
 模型、声音、角色、字体和美术素材有独立许可；不要提交密钥、数据库、个人对话、截图、音频缓存或模型权重。详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
@@ -137,10 +120,10 @@ Genie 角色模型另行发布：[下载 Release](https://github.com/Rivulet138/
 
 | 文件 | 用途 |
 | --- | --- |
-| `python/.env` | Provider、端口与运行时变量（不提交） |
+| `python/.env` | Provider、端口与运行时变量 |
 | `python/config/settings.json` | 应用设置，由设置页或 Launcher 管理 |
-| `python/data/chat.db` | 聊天、会话、工作区上下文与伴侣数据 |
-| `python/data/settings_history.json` | 设置快照（最多 20 份，凭据已清除） |
+| `python/data/chat.db` | 聊天、会话、工作区上下文与数据 |
+| `python/data/settings_history.json` | 设置快照 |
 
 后端开发模式：`cd python && python -m venv .venv`，安装 `requirements.txt`，复制 `.env.example` 为 `.env` 后运行 `app.py`（默认 `127.0.0.1:8001`）。完整变量、端口、视觉/记忆开关和打包方式见 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)；服务默认绑定 loopback，安全边界与鉴权见 [`SECURITY.md`](SECURITY.md)。
 
