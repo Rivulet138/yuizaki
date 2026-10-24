@@ -17,5 +17,6 @@ def register(server: Any) -> None:
         permission_request_sid_map=server._permission_request_sid_map,
         permission_request_tool_map=server._permission_request_tool_map,
         permission_request_scope_map=server._permission_request_scope_map,
+        permission_request_resolved_map=server._permission_request_resolved_map,
         tool_executor=server.tool_executor, logger=server.logger,
     )

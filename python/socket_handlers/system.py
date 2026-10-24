@@ -44,6 +44,7 @@ def register_system_handlers(
     permission_request_sid_map: dict[str, str],
     permission_request_tool_map: dict[str, str],
     permission_request_scope_map: dict[str, str],
+    permission_request_resolved_map: dict[str, tuple[str, JsonDict]],
     tool_executor: Any,
     logger: logging.Logger | None = None,
 ) -> None:
@@ -78,33 +79,45 @@ def register_system_handlers(
 
     sio.on(SystemEvents.CLIENT_TIMING, handler=on_client_timing)
 
-    async def on_permission_response(sid: str, data: JsonDict) -> None:
+    async def on_permission_response(sid: str, data: JsonDict) -> JsonDict:
         request_id = _as_text(data.get("request_id"))
         allowed = bool(data.get("allowed", False))
         remember = bool(data.get("remember", False))
+
+        async def reject(code: str, message: str) -> JsonDict:
+            payload: JsonDict = {
+                "ok": False,
+                "request_id": request_id,
+                "code": code,
+                "message": message,
+            }
+            await sio.emit(SystemEvents.ERROR, payload, to=sid)
+            return payload
+
+        resolved_entry = permission_request_resolved_map.get(request_id)
+        if resolved_entry is not None:
+            resolved_sid, resolved_ack = resolved_entry
+            if resolved_sid != sid:
+                log.warning("Ignoring replayed permission response from unexpected sid %s for request %s", sid, request_id)
+                return await reject(
+                    "PERMISSION_SESSION_MISMATCH",
+                    "Permission response did not come from the requesting client",
+                )
+            return {**resolved_ack, "replayed": True}
+
         expected_sid = permission_request_sid_map.get(request_id)
         if not request_id or expected_sid is None:
             log.warning("Ignoring unknown permission response %s from sid %s", request_id, sid)
-            await sio.emit(
-                SystemEvents.ERROR,
-                {
-                    "code": "PERMISSION_REQUEST_UNKNOWN",
-                    "message": "Permission response did not match a pending request",
-                },
-                to=sid,
+            return await reject(
+                "PERMISSION_REQUEST_UNKNOWN",
+                "Permission response did not match a pending request",
             )
-            return
         if expected_sid != sid:
             log.warning("Ignoring permission response from unexpected sid %s for request %s", sid, request_id)
-            await sio.emit(
-                SystemEvents.ERROR,
-                {
-                    "code": "PERMISSION_SESSION_MISMATCH",
-                    "message": "Permission response did not come from the requesting client",
-                },
-                to=sid,
+            return await reject(
+                "PERMISSION_SESSION_MISMATCH",
+                "Permission response did not come from the requesting client",
             )
-            return
         tool_name = permission_request_tool_map.get(request_id)
         permission_scope = permission_request_scope_map.get(request_id)
         try:
@@ -117,20 +130,23 @@ def register_system_handlers(
             )
         except Exception:  # noqa: BLE001 - keep policy provider details out of the protocol
             log.exception("Failed to resolve permission request %s", request_id)
-            await sio.emit(SystemEvents.ERROR, {
-                "code": "PERMISSION_RESOLUTION_FAILED",
-                "message": "Permission response could not be applied",
-            }, to=sid)
-            return
+            return await reject(
+                "PERMISSION_RESOLUTION_FAILED",
+                "Permission response could not be applied",
+            )
         if resolved is False:
-            await sio.emit(SystemEvents.ERROR, {
-                "code": "PERMISSION_REQUEST_UNKNOWN",
-                "message": "Permission response did not match a pending request",
-            }, to=sid)
-            return
+            return await reject(
+                "PERMISSION_REQUEST_UNKNOWN",
+                "Permission response did not match a pending request",
+            )
         permission_request_sid_map.pop(request_id, None)
         permission_request_tool_map.pop(request_id, None)
         permission_request_scope_map.pop(request_id, None)
+        ack = {"ok": True, "request_id": request_id}
+        permission_request_resolved_map[request_id] = (sid, ack)
+        while len(permission_request_resolved_map) > 256:
+            permission_request_resolved_map.pop(next(iter(permission_request_resolved_map)))
+        return ack
 
     sio.on(SystemEvents.PERMISSION_RESPONSE, handler=on_permission_response)
 

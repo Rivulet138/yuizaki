@@ -491,11 +491,45 @@ export class SocketClient {
     });
   }
 
-  sendPermissionResponse(requestId: string, allowed: boolean, remember: boolean = false): void {
-    this.emit(SocketEvents.PERMISSION_RESPONSE, {
-      request_id: requestId,
-      allowed,
-      remember,
+  sendPermissionResponse(requestId: string, allowed: boolean, remember: boolean = false): Promise<void> {
+    const socket = this.socket;
+    if (!socket?.connected) {
+      return Promise.reject(new Error('Socket is not connected'));
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const timeout = window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error('Permission response acknowledgement timed out'));
+      }, 10000);
+
+      socket.emit(
+        SocketEvents.PERMISSION_RESPONSE,
+        {
+          request_id: requestId,
+          allowed,
+          remember,
+        },
+        (ack: unknown) => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timeout);
+          if (typeof ack === 'object' && ack !== null && 'ok' in ack && ack.ok === true) {
+            resolve();
+            return;
+          }
+          const payload = typeof ack === 'object' && ack !== null ? ack as Record<string, unknown> : {};
+          const error = new Error(
+            typeof payload.message === 'string'
+              ? payload.message
+              : 'Permission response was rejected by the server',
+          ) as Error & { code?: string };
+          if (typeof payload.code === 'string') error.code = payload.code;
+          reject(error);
+        },
+      );
     });
   }
 

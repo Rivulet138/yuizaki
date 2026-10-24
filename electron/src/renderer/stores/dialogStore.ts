@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 export interface PermissionRequestPayload {
   request_id: string
@@ -19,7 +19,8 @@ export const useDialogStore = defineStore('dialog', () => {
 
   const editCompanionTargetId = ref('default')
 
-  const permissionRequest = ref<PermissionRequestPayload | null>(null)
+  const permissionRequests = ref<PermissionRequestPayload[]>([])
+  const permissionRequest = computed(() => permissionRequests.value[0] ?? null)
 
   const openWorkspaceDrawer = () => {
     workspaceDrawerVisible.value = true
@@ -31,8 +32,15 @@ export const useDialogStore = defineStore('dialog', () => {
   }
 
   const openPermissionRequest = (request: PermissionRequestPayload) => {
-    permissionRequest.value = request
+    if (permissionRequests.value.some((item) => item.request_id === request.request_id)) return
+    permissionRequests.value.push(request)
     permissionDialogVisible.value = true
+  }
+
+  const completePermissionRequest = (requestId: string) => {
+    if (permissionRequests.value[0]?.request_id !== requestId) return
+    permissionRequests.value.shift()
+    permissionDialogVisible.value = permissionRequests.value.length > 0
   }
 
   return {
@@ -41,8 +49,10 @@ export const useDialogStore = defineStore('dialog', () => {
     permissionDialogVisible,
     editCompanionTargetId,
     permissionRequest,
+    permissionRequests,
     openWorkspaceDrawer,
     openEditCompanion,
     openPermissionRequest,
+    completePermissionRequest,
   }
 })

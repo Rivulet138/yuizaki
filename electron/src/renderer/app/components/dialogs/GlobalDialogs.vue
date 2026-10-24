@@ -8,7 +8,6 @@
     aria-labelledby="permission-dialog-title"
     aria-describedby="permission-dialog-description"
     :before-close="dismissPermissionRequest"
-    @closed="handlePermissionDialogClosed"
     @open-auto-focus="focusPermissionDeny"
   >
     <template #header>
@@ -21,10 +20,11 @@
       <p><strong>{{ t('dialogs.permission.reason') }}：</strong>{{ dialogStore.permissionRequest.reason }}</p>
       <pre class="permission-args" :aria-label="t('dialogs.permission.arguments')">{{ JSON.stringify(dialogStore.permissionRequest.args || {}, null, 2) }}</pre>
       <el-checkbox v-model="rememberPermissionDecision">{{ t('dialogs.permission.remember') }}</el-checkbox>
+      <p v-if="permissionResponseError" class="permission-response-error" role="alert">{{ permissionResponseError }}</p>
     </div>
     <template #footer>
-      <el-button ref="permissionDenyButton" data-testid="permission-deny" @click="respondPermission(false)">{{ t('dialogs.permission.deny') }}</el-button>
-      <el-button data-testid="permission-allow" type="primary" @click="respondPermission(true)">{{ t('dialogs.permission.allow') }}</el-button>
+      <el-button ref="permissionDenyButton" data-testid="permission-deny" :loading="respondingPermission" :disabled="respondingPermission" @click="respondPermission(false)">{{ t('dialogs.permission.deny') }}</el-button>
+      <el-button data-testid="permission-allow" type="primary" :loading="respondingPermission" :disabled="respondingPermission" @click="respondPermission(true)">{{ t('dialogs.permission.allow') }}</el-button>
     </template>
   </el-dialog>
 
@@ -80,7 +80,7 @@ import { ElInput } from 'element-plus'
 import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/option/style/css'
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { ElDialog, ElForm, ElFormItem, ElMessage } from 'element-plus'
 import 'element-plus/es/components/dialog/style/css'
 import 'element-plus/es/components/form/style/css'
@@ -108,10 +108,20 @@ const {
 const muted = computed(() => chatStore.chatOptions.tts_enabled === false)
 
 const rememberPermissionDecision = ref(false)
+const permissionResponseError = ref('')
+const respondingPermission = ref(false)
 const permissionDenyButton = ref<HTMLElement | { $el?: HTMLElement } | null>(null)
-const respondingPermissionIds = new Set<string>()
 
 const errorMessage = (error: unknown) => describeFailure(error, t('common.error.unknown'))
+
+watch(
+  () => dialogStore.permissionRequest?.request_id,
+  () => {
+    rememberPermissionDecision.value = false
+    permissionResponseError.value = ''
+  },
+  { immediate: true },
+)
 
 const focusPermissionDeny = () => {
   void nextTick(() => {
@@ -121,31 +131,36 @@ const focusPermissionDeny = () => {
   })
 }
 
-const respondPermission = async (allow: boolean) => {
+const respondPermission = async (allow: boolean): Promise<boolean> => {
   const req = dialogStore.permissionRequest
-  if (!req || respondingPermissionIds.has(req.request_id)) return
-  respondingPermissionIds.add(req.request_id)
+  if (!req || respondingPermission.value) return false
+  respondingPermission.value = true
+  permissionResponseError.value = ''
   try {
-    getSocketClient().sendPermissionResponse(req.request_id, allow, rememberPermissionDecision.value)
+    await getSocketClient().sendPermissionResponse(req.request_id, allow, rememberPermissionDecision.value)
     ElMessage.success(allow ? t('dialogs.permission.allowed') : t('dialogs.permission.denied'))
-  } catch (error) {
-    ElMessage.error(t('dialogs.permission.responseFailed', { message: errorMessage(error) }))
-  } finally {
-    if (dialogStore.permissionRequest?.request_id === req.request_id) {
-      dialogStore.permissionDialogVisible = false
-      dialogStore.permissionRequest = null
-    }
+    dialogStore.completePermissionRequest(req.request_id)
     void publishCompanionRuntimeEvent({ source: 'permission', permission: 'none', requestId: req.request_id })
-    respondingPermissionIds.delete(req.request_id)
+    return true
+  } catch (error) {
+    const message = t('dialogs.permission.responseFailed', { message: errorMessage(error) })
+    permissionResponseError.value = message
+    ElMessage.error(message)
+    return false
+  } finally {
+    respondingPermission.value = false
   }
 }
 
 const dismissPermissionRequest = (done: () => void) => {
-  void respondPermission(false).finally(done)
-}
-
-const handlePermissionDialogClosed = () => {
-  if (dialogStore.permissionRequest) void respondPermission(false)
+  if (respondingPermission.value) return
+  void respondPermission(false).then((success) => {
+    if (!success) return
+    done()
+    void nextTick(() => {
+      if (dialogStore.permissionRequest) dialogStore.permissionDialogVisible = true
+    })
+  })
 }
 
 const handleWorkspaceFieldUpdate = async (field: string, value: string) => {

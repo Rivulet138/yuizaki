@@ -7,6 +7,8 @@ import pytest
 from socket_events import SOCKET_PROTOCOL_VERSION, protocol_version_status
 from socket_handlers.audio import build_audio_chunk_handler
 from socket_handlers.llm import LLMRequestSupport, build_llm_request_handler
+from socket_handlers.system import register_system_handlers
+from socket_server import DesktopPetSocketServer
 
 
 @pytest.mark.parametrize("value", [0, 2, True, 1.5, float("nan"), "1.5", "v1", object()])
@@ -22,9 +24,209 @@ def test_socket_protocol_accepts_only_current_version_forms(value: object) -> No
 class _FakeSio:
     def __init__(self) -> None:
         self.events: list[tuple[str, dict[str, object], str]] = []
+        self.handlers: dict[str, object] = {}
+
+    def on(self, event: str, *, handler: object) -> None:
+        self.handlers[event] = handler
 
     async def emit(self, event: str, payload: dict[str, object], *, to: str) -> None:
         self.events.append((event, payload, to))
+
+
+class _Policy:
+    def __init__(self, result: bool = True, error: Exception | None = None) -> None:
+        self.result = result
+        self.error = error
+        self.calls: list[tuple[object, ...]] = []
+
+    def resolve_pending(self, *args: object) -> bool:
+        self.calls.append(args)
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+def _system_permission_handler(
+    sio: _FakeSio,
+    policy: _Policy,
+    sid_map: dict[str, str],
+    tool_map: dict[str, str],
+    scope_map: dict[str, str],
+    resolved_map: dict[str, tuple[str, dict[str, object]]] | None = None,
+):
+    resolved_map = resolved_map if resolved_map is not None else {}
+    register_system_handlers(
+        sio=sio,
+        generation_manager_provider=lambda: None,
+        experience_metrics=SimpleNamespace(),
+        emit_latency=lambda *_args: None,
+        permission_request_sid_map=sid_map,
+        permission_request_tool_map=tool_map,
+        permission_request_scope_map=scope_map,
+        permission_request_resolved_map=resolved_map,
+        tool_executor=SimpleNamespace(policy_engine=policy),
+    )
+    return sio.handlers["permission:response"]
+
+
+@pytest.mark.asyncio
+async def test_permission_response_returns_ack_and_cleans_request_maps() -> None:
+    sio = _FakeSio()
+    policy = _Policy()
+    sid_map = {"request-1": "sid-1"}
+    tool_map = {"request-1": "tool"}
+    scope_map = {"request-1": "scope"}
+    handler = _system_permission_handler(sio, policy, sid_map, tool_map, scope_map)
+
+    ack = await handler("sid-1", {"request_id": "request-1", "allowed": True, "remember": True})
+
+    assert ack == {"ok": True, "request_id": "request-1"}
+    assert policy.calls == [("request-1", True, True, "tool", "scope")]
+    assert sid_map == tool_map == scope_map == {}
+    assert sio.events == []
+
+
+@pytest.mark.asyncio
+async def test_permission_response_rejects_unknown_and_keeps_request_id_in_error() -> None:
+    sio = _FakeSio()
+    policy = _Policy()
+    handler = _system_permission_handler(sio, policy, {}, {}, {})
+
+    ack = await handler("sid-1", {"request_id": "missing", "allowed": True})
+
+    assert ack == {
+        "ok": False,
+        "request_id": "missing",
+        "code": "PERMISSION_REQUEST_UNKNOWN",
+        "message": "Permission response did not match a pending request",
+    }
+    assert sio.events[-1][1]["request_id"] == "missing"
+
+
+@pytest.mark.asyncio
+async def test_permission_response_rejects_sid_mismatch_without_resolving() -> None:
+    sio = _FakeSio()
+    policy = _Policy()
+    sid_map = {"request-1": "sid-1"}
+    tool_map = {"request-1": "tool"}
+    scope_map = {"request-1": "scope"}
+    handler = _system_permission_handler(sio, policy, sid_map, tool_map, scope_map)
+
+    ack = await handler("sid-2", {"request_id": "request-1", "allowed": True})
+
+    assert ack["code"] == "PERMISSION_SESSION_MISMATCH"
+    assert policy.calls == []
+    assert sid_map == {"request-1": "sid-1"}
+    assert tool_map == {"request-1": "tool"}
+    assert scope_map == {"request-1": "scope"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("policy", "code"),
+    [(_Policy(result=False), "PERMISSION_REQUEST_UNKNOWN"), (_Policy(error=RuntimeError("boom")), "PERMISSION_RESOLUTION_FAILED")],
+)
+async def test_permission_response_acknowledges_resolution_failures_without_cleanup(
+    policy: _Policy,
+    code: str,
+) -> None:
+    sio = _FakeSio()
+    sid_map = {"request-1": "sid-1"}
+    tool_map = {"request-1": "tool"}
+    scope_map = {"request-1": "scope"}
+    handler = _system_permission_handler(sio, policy, sid_map, tool_map, scope_map)
+
+    ack = await handler("sid-1", {"request_id": "request-1", "allowed": False})
+
+    assert ack["code"] == code
+    assert sid_map and tool_map and scope_map
+    assert sio.events[-1][1]["request_id"] == "request-1"
+
+
+@pytest.mark.asyncio
+async def test_permission_response_replays_successful_ack_for_same_sid() -> None:
+    sio = _FakeSio()
+    policy = _Policy()
+    sid_map = {"request-1": "sid-1"}
+    tool_map = {"request-1": "tool"}
+    scope_map = {"request-1": "scope"}
+    resolved_map: dict[str, tuple[str, dict[str, object]]] = {}
+    handler = _system_permission_handler(sio, policy, sid_map, tool_map, scope_map, resolved_map)
+
+    first = await handler("sid-1", {"request_id": "request-1", "allowed": True})
+    replay = await handler("sid-1", {"request_id": "request-1", "allowed": False})
+
+    assert first == {"ok": True, "request_id": "request-1"}
+    assert replay == {"ok": True, "request_id": "request-1", "replayed": True}
+    assert policy.calls == [("request-1", True, False, "tool", "scope")]
+
+
+@pytest.mark.asyncio
+async def test_permission_response_replay_preserves_sid_ownership() -> None:
+    sio = _FakeSio()
+    policy = _Policy()
+    sid_map = {"request-1": "sid-1"}
+    tool_map = {"request-1": "tool"}
+    scope_map = {"request-1": "scope"}
+    resolved_map: dict[str, tuple[str, dict[str, object]]] = {}
+    handler = _system_permission_handler(sio, policy, sid_map, tool_map, scope_map, resolved_map)
+
+    await handler("sid-1", {"request_id": "request-1", "allowed": True})
+    replay = await handler("sid-2", {"request_id": "request-1", "allowed": True})
+
+    assert replay["code"] == "PERMISSION_SESSION_MISMATCH"
+    assert policy.calls == [("request-1", True, False, "tool", "scope")]
+
+
+@pytest.mark.asyncio
+async def test_permission_response_replay_cache_is_bounded() -> None:
+    sio = _FakeSio()
+    policy = _Policy()
+    sid_map: dict[str, str] = {}
+    tool_map: dict[str, str] = {}
+    scope_map: dict[str, str] = {}
+    resolved_map: dict[str, tuple[str, dict[str, object]]] = {}
+    handler = _system_permission_handler(sio, policy, sid_map, tool_map, scope_map, resolved_map)
+
+    for index in range(257):
+        request_id = f"request-{index}"
+        sid_map[request_id] = "sid-1"
+        tool_map[request_id] = "tool"
+        scope_map[request_id] = "scope"
+        await handler("sid-1", {"request_id": request_id, "allowed": True})
+
+    assert len(resolved_map) == 256
+    assert "request-0" not in resolved_map
+    assert "request-1" in resolved_map
+
+
+def test_disconnect_cleanup_removes_permission_state_for_sid() -> None:
+    cancelled: list[str] = []
+
+    class _Policy:
+        def cancel_pending(self, request_id: str) -> bool:
+            cancelled.append(request_id)
+            return True
+
+    server = object.__new__(DesktopPetSocketServer)
+    server.policy_engine = _Policy()
+    server._permission_request_sid_map = {"pending-1": "sid-1", "pending-2": "sid-2"}
+    server._permission_request_tool_map = {"pending-1": "tool-1", "pending-2": "tool-2"}
+    server._permission_request_scope_map = {"pending-1": "scope-1", "pending-2": "scope-2"}
+    server._permission_request_resolved_map = {
+        "done-1": ("sid-1", {"ok": True, "request_id": "done-1"}),
+        "done-2": ("sid-2", {"ok": True, "request_id": "done-2"}),
+    }
+
+    server._clear_permission_requests("sid-1")
+
+    assert cancelled == ["pending-1"]
+    assert server._permission_request_sid_map == {"pending-2": "sid-2"}
+    assert server._permission_request_tool_map == {"pending-2": "tool-2"}
+    assert server._permission_request_scope_map == {"pending-2": "scope-2"}
+    assert server._permission_request_resolved_map == {
+        "done-2": ("sid-2", {"ok": True, "request_id": "done-2"}),
+    }
 
 
 @pytest.mark.asyncio

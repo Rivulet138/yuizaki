@@ -623,6 +623,7 @@ class DesktopPetSocketServer:
         self._permission_request_tool_map: dict[str, str] = {}
         self._permission_request_scope_map: dict[str, str] = {}
         self._permission_request_sid_map: dict[str, str] = {}
+        self._permission_request_resolved_map: dict[str, tuple[str, dict[str, object]]] = {}
         self._tool_cancellation_signals: dict[str, tuple[str, str, asyncio.Event]] = {}
         self._plugins_initialized: bool = False
         self._plugin_init_lock = asyncio.Lock()
@@ -639,6 +640,23 @@ class DesktopPetSocketServer:
             signal.set()
             cancelled = True
         return cancelled
+
+    def _clear_permission_requests(self, sid: str) -> None:
+        request_ids = [
+            request_id
+            for request_id, request_sid in self._permission_request_sid_map.items()
+            if request_sid == sid
+        ]
+        cancel_pending = getattr(self.policy_engine, "cancel_pending", None)
+        for request_id in request_ids:
+            if callable(cancel_pending):
+                cancel_pending(request_id)
+            self._permission_request_sid_map.pop(request_id, None)
+            self._permission_request_tool_map.pop(request_id, None)
+            self._permission_request_scope_map.pop(request_id, None)
+        for request_id, (request_sid, _ack) in list(self._permission_request_resolved_map.items()):
+            if request_sid == sid:
+                self._permission_request_resolved_map.pop(request_id, None)
 
     def _advance_interruption_epoch(self) -> int:
         self._interruption_epoch += 1
@@ -2306,6 +2324,7 @@ class DesktopPetSocketServer:
             permission_request_id = payload.get("request_id")
             tool_name = payload.get("tool_name")
             if isinstance(permission_request_id, str) and tool_name:
+                self._permission_request_resolved_map.pop(permission_request_id, None)
                 self._permission_request_tool_map[permission_request_id] = str(tool_name)
                 self._permission_request_scope_map[permission_request_id] = str(
                     payload.get("permission_scope") or f"socket:{target_sid}"
@@ -2621,6 +2640,7 @@ class DesktopPetSocketServer:
         async def disconnect(sid: str) -> None:
             logger.info("[SIO] Client disconnected: %s", sid)
             _ = self.sessions.pop(sid, None)
+            self._clear_permission_requests(sid)
             self._cancel_direct_tool_calls(sid)
             if self.generation_mgr is not None:
                 for session_id in self._sid_generation_sessions.pop(sid, set()):
@@ -3030,6 +3050,7 @@ class DesktopPetSocketServer:
                     request_id = payload.get("request_id")
                     tool_name = payload.get("tool_name")
                     if isinstance(request_id, str) and tool_name:
+                        self._permission_request_resolved_map.pop(request_id, None)
                         self._permission_request_tool_map[request_id] = str(tool_name)
                         self._permission_request_scope_map[request_id] = str(
                             payload.get("permission_scope") or f"socket:{sid}"

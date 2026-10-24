@@ -296,12 +296,33 @@ class PolicyEngine:
         with self._store_lock:
             self._permission_metadata.pop(request_id, None)
 
-    def resolve_pending(self, request_id: str, allowed: bool, remember: bool = False, tool_name: str | None = None, permission_scope: str | None = None) -> None:
+    def cancel_pending(self, request_id: str) -> bool:
+        """Cancel an unresolved request without creating a user decision."""
+        future = self._pending.pop(request_id, None)
+        with self._store_lock:
+            self._permission_metadata.pop(request_id, None)
+
+        if future is None or future.done():
+            return False
+        future.set_result(False)
+        return True
+
+    def resolve_pending(
+        self,
+        request_id: str,
+        allowed: bool,
+        remember: bool = False,
+        tool_name: str | None = None,
+        permission_scope: str | None = None,
+    ) -> bool:
         future = self._pending.pop(request_id, None)
         with self._store_lock:
             metadata = self._permission_metadata.pop(request_id, {})
-        if future and not future.done():
-            future.set_result(allowed)
+
+        if future is None or future.done():
+            return False
+
+        future.set_result(allowed)
         if remember and tool_name:
             self._remembered[self._build_scope_key(tool_name, permission_scope)] = allowed
         self._append_audit(PermissionAuditRecord(
@@ -319,3 +340,4 @@ class PolicyEngine:
             capability_call_id=metadata.get("capability_call_id"),
             permission_scope=metadata.get("permission_scope") or permission_scope,
         ).to_dict())
+        return True

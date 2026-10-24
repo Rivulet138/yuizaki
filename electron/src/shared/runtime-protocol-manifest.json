@@ -576,6 +576,20 @@
             "type": "object"
           }
         }
+      },
+      "permission:response": {
+        "type": "object",
+        "required": {
+          "request_id": {
+            "type": "string"
+          },
+          "allowed": {
+            "type": "boolean"
+          },
+          "remember": {
+            "type": "boolean"
+          }
+        }
       }
     }
   }
