@@ -6,7 +6,7 @@
 
 # Code quality
 ruff>=0.16.9,<1
-black>=26,<27
+black>=26.10.1,<27
 
 # Type checking
 basedpyright>=1.40.2,<2
