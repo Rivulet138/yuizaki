@@ -3,26 +3,105 @@
 [![Release](https://img.shields.io/github/v/release/Rivulet138/yuizaki)](https://github.com/Rivulet138/yuizaki/releases/latest)
 [![License](https://img.shields.io/github/license/Rivulet138/yuizaki)](LICENSE)
 
-本地优先的 Windows / Linux AI 桌面伴侣 Agent：文字与语音对话、Live2D/VRM 桌宠、长期记忆、按需视觉、工具调用和有限的桌面动作。当前为可用 Alpha。
+本地优先的 Windows / Linux AI 桌面伴侣 Agent，提供文字与语音对话、Live2D/VRM 桌宠、长期记忆、按需视觉、工具调用和有限的桌面动作。当前为可用 Alpha。
+
+## Genie TTS 前置条件
+
+Genie 是本地 **TTS 和角色语音运行时**，不是聊天大模型。要同时使用文字聊天和 Genie 语音，需要分别准备：
+
+1. 一个 OpenAI-compatible 聊天端点，并配置 `LLM_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`。
+2. `full` 安装配置，以安装 Genie TTS、Sherpa ASR 和 Embedding 等完整依赖。
+3. Genie TTS 资源：启动后进入 **设置 → 资源 → Genie TTS 资源 → 预取 Genie 资源**。当前锁定 Genie TTS 2.0.2，下载量约 391 MiB。
+4. Genie 角色包：从 [Genie character models Release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02) 下载并放入角色模型目录。角色包不是根目录 MIT 许可证自动覆盖的源码文件，分发前必须阅读 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+
+源码运行时的默认路径如下；使用打包版时，路径会映射到 Electron `userData` 下的 `python-data`：
+
+| 内容 | 默认路径 |
+| --- | --- |
+| Genie 运行时与缓存 | `python/.cache/GenieData/GenieData` |
+| Genie 角色包 | `python/CharacterModels/v2ProPlus/<character>` |
+| 默认角色 | `普拉琪娜_e15_e8_correct_sampling_v2` |
+
+最小的 Genie 配置可以写入 `python/.env`。`TTS_GENIE_MODEL_DIR` 留空时，后端使用内置包管理运行时；只有在明确使用自定义模型目录时才填写它。
+
+```dotenv
+LLM_PROVIDER=custom
+LLM_BASE_URL=http://127.0.0.1:11434/v1
+LLM_API_KEY=local
+LLM_MODEL=your-chat-model
+
+TTS_PROVIDER=genie-tts
+TTS_GENIE_CHARACTER=普拉琪娜_e15_e8_correct_sampling_v2
+TTS_GENIE_MODEL_DIR=
+TTS_LANG=ja
+TTS_DEVICE=cpu
+TTS_STARTUP_MODE=lazy
+TTS_WARMUP_ENABLED=0
+```
+
+如果只需要文字聊天，可以不下载 Genie；如果需要完整语音，还需要麦克风、Sherpa ASR 资源以及可用的音频输入/输出设备。资源版本、校验和与许可边界以 [`resources.lock.json`](resources.lock.json) 为准。
 
 ## 快速开始
 
-需要 Windows 10/11 x64 或 Linux x86_64 图形桌面、Python 3.11–3.13、Node.js ≥ 22.13、Go 1.27+（仅构建 Launcher），Docker 仅在启用 Qdrant 时需要。
+### 环境
+
+- Windows 10/11 x64 或 x86_64 Linux 图形桌面
+- Python 3.11–3.13
+- Node.js ≥ 22.13 和 npm
+- Go 1.27+，仅在构建 Launcher 时需要
+- Docker，仅在启用 Qdrant 时需要
+
+Launcher 会创建并管理 `python/.venv`。首次安装 Genie、ASR 或 Embedding 时，应使用 `full` profile：
 
 ```powershell
 # Windows
-cd electron; npm ci; npm run prepare:launcher:win; cd ..
+$env:YUIZAKI_INSTALL_PROFILE = "full"
+cd electron
+npm ci
+npm run prepare:launcher:win
+cd ..
 .\YuizakiLauncher.exe setup
+.\YuizakiLauncher.exe start --check
 .\YuizakiLauncher.exe start
 ```
 
 ```bash
 # Linux
-cd electron && npm ci && npm run prepare:launcher:linux && cd ..
-chmod +x YuizakiLauncher && ./YuizakiLauncher setup && ./YuizakiLauncher start
+export YUIZAKI_INSTALL_PROFILE=full
+cd electron
+npm ci
+npm run prepare:launcher:linux
+cd ..
+chmod +x YuizakiLauncher
+./YuizakiLauncher setup
+./YuizakiLauncher start --check
+./YuizakiLauncher start
 ```
 
-默认打开浏览器对话页；加 `--electron-ui` 使用 Electron 控制面板与桌宠，加 `--with-mcp` 启用浏览器自动化工具（MCP 默认关闭）。全部参数、首次验收和故障处理见 [`docs/QUICKSTART.md`](docs/QUICKSTART.md)。
+`setup` 创建 `python/.env` 并配置 LLM；`start --check` 只检查配置，不启动服务。默认打开浏览器对话页；加 `--electron-ui` 使用 Electron 控制面板和桌宠。MCP 默认关闭，需要浏览器自动化工具时才加 `--with-mcp`。
+
+### 首次验收顺序
+
+1. 确认对话页和 Live2D/VRM 模型正常显示。
+2. 配置 OpenAI-compatible LLM，并发送一条文字消息。
+3. 在 **设置 → 资源** 预取 Sherpa、Embedding 和 Genie 资源。
+4. 下载 Genie 角色包，确认角色名与 `TTS_GENIE_CHARACTER` 一致。
+5. 在设置中启用语音，确认 ASR、TTS、音频设备和口型同步。
+6. 最后再按需启用视觉、工具、MCP、桌面动作或消息连接器。
+
+常用 Launcher 命令：
+
+| 命令 | 作用 |
+| --- | --- |
+| `setup` | 初始化配置与依赖 |
+| `start --check` | 检查配置，不启动服务 |
+| `start` | 启动并监管服务 |
+| `status` | 查看进程和端点 |
+| `stop` | 停止服务 |
+| `logs [-f]` | 查看或跟踪日志 |
+| `install-desktop` / `remove-desktop` | 安装或删除桌面快捷方式 |
+
+完整参数、首次验收和故障处理见 [`docs/QUICKSTART.md`](docs/QUICKSTART.md)。
 
 ## 功能
 
@@ -46,7 +125,8 @@ chmod +x YuizakiLauncher && ./YuizakiLauncher setup && ./YuizakiLauncher start
 | 用户配置的 OpenAI-compatible 端点 | 文字 Agent、规划、工具调用 | — |
 | Sherpa SenseVoice / Zipformer2 | 本地 ASR | 178 MiB |
 | Qwen3 Embedding 0.6B | 语义记忆检索 | 1.12 GiB |
-| Genie TTS | 本地语音合成 | 391 MiB |
+| Genie TTS 2.0.2 | 本地语音合成运行时 | 391 MiB |
+| Genie character models | 角色音色与语音模型 | 独立 Release |
 | SoulX Singer / Qdrant / QQ 内置桥 | 音色转换 / 可重建语义索引 / 个人号接入 | 可选 |
 
 Genie 角色模型另行发布：[下载 Release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02)。源码运行从 `python/.cache/GenieData/GenieData` 与 `python/CharacterModels/v2ProPlus/<character>` 读取，打包运行使用 Electron `userData` 下的 `python-data` 对应路径。
@@ -111,9 +191,13 @@ cd electron && npm run type-check && npm run lint && npm run test:unit && npm ru
 
 A local-first Windows/Linux AI desktop companion agent: text and voice chat, Live2D/VRM pet, long-term memory, on-demand vision, tool calls, and limited desktop actions. Currently a usable alpha.
 
+Genie is the local TTS and character-voice runtime, not the chat LLM. To use Genie, install with `YUIZAKI_INSTALL_PROFILE=full`, prefetch **Settings → Resources → Genie TTS Assets → Prefetch Genie Assets**, and download a compatible character bundle from the [Genie character models release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02). Configure an independent OpenAI-compatible chat endpoint for text responses. The default runtime path is `python/.cache/GenieData/GenieData`; character bundles use `python/CharacterModels/v2ProPlus/<character>`.
+
 ```powershell
+$env:YUIZAKI_INSTALL_PROFILE = "full"
 cd electron; npm ci; npm run prepare:launcher:win; cd ..
 .\YuizakiLauncher.exe setup
+.\YuizakiLauncher.exe start --check
 .\YuizakiLauncher.exe start
 ```
 
