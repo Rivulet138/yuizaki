@@ -238,6 +238,66 @@ class ToolExecutor:
             response["reason"] = failed_reason
         return response
 
+    def _validate_retry_request(
+        self,
+        *,
+        tool_name: str,
+        args: dict[str, Any],
+        ctx: Any,
+        request_id: str,
+        run_id: str | None,
+        job_id: str | None,
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        """Validate a retry against the server-owned terminal job record.
+
+        Retry identifiers and retryability are control-plane facts.  They must
+        never be accepted from an untrusted Socket.IO payload merely because
+        the payload says ``retry=true``.
+        """
+        log = self.job_event_log
+        if log is None and ctx is not None:
+            log = getattr(ctx, "extra", {}).get("job_event_log")
+        workspace_id = str(
+            getattr(ctx, "workspace_id", None)
+            or (getattr(ctx, "extra", {}).get("active_workspace_id") if ctx is not None else None)
+            or "default"
+        )
+        if log is None or not job_id or not run_id:
+            return None, "retry_authorization_unavailable"
+        original = log.latest(str(job_id), workspace_id)
+        if original is None:
+            return None, "retry_job_not_found"
+        data = dict(original.get("data") or {})
+        original_args = data.get("args")
+        original_tool = str(data.get("toolName") or "")
+        original_run_id = str(original.get("runId") or "")
+        original_request_id = str(original.get("requestId") or "")
+        effect_outcome = str(data.get("effectOutcome") or "")
+        terminal_status = str(original.get("status") or "")
+        if (
+            original.get("workspaceId") != workspace_id
+            or original_tool != tool_name
+            or original_run_id != str(run_id)
+            or not isinstance(original_args, dict)
+            or original_args != args
+            or data.get("replayArgsAvailable") is not True
+            or terminal_status not in {"completed", "failed", "cancelled", "interrupted", "unknown_effect"}
+        ):
+            return None, "retry_job_identity_mismatch"
+        tool = self.registry.get(tool_name)
+        if tool is None:
+            return None, "retry_tool_not_available"
+        unknown_write = effect_outcome == "unknown_effect" and tool_may_change_state(tool)
+        if data.get("retryable") is not True and not unknown_write:
+            return None, "retry_not_authorized"
+        return {
+            "originalJobId": str(job_id),
+            "originalRunId": original_run_id,
+            "originalRequestId": original_request_id,
+            "originalEffectOutcome": effect_outcome,
+            "forceConfirmation": unknown_write,
+        }, None
+
     @classmethod
     async def _wait_for_cancellation(cls, signal: Any) -> None:
         if isinstance(signal, asyncio.Event):
@@ -406,13 +466,40 @@ class ToolExecutor:
             get_generation = getattr(generation_mgr, "get", None)
             generation = get_generation(getattr(ctx, "session_id", "")) if callable(get_generation) else None
             cancellation_signal = getattr(generation, "cancel", None)
-        retry_of_run_id = str(run_id or extra.get("run_id") or "") or None
-        retry_of_job_id = str(job_id or extra.get("job_id") or "") or None
+        # Explicit retry identifiers are untrusted transport input.  A retry
+        # must be authorized from the server-owned event log before any new
+        # job event, policy evaluation, or handler dispatch occurs.
+        retry_of_run_id = str(run_id or "") or None
+        retry_of_job_id = str(job_id or "") or None
+        retry_authorization: dict[str, Any] | None = None
+        if retry:
+            retry_authorization, retry_error = self._validate_retry_request(
+                tool_name=tool_name,
+                args=args,
+                ctx=ctx,
+                request_id=request_id,
+                run_id=retry_of_run_id,
+                job_id=retry_of_job_id,
+            )
+            if retry_authorization is None:
+                return self._finish(ToolResultEnvelope(
+                    success=False,
+                    content="",
+                    source=tool.source,
+                    tool_name=tool_name,
+                    error=f"Tool retry rejected: {retry_error}",
+                    outcome="known_failure",
+                    retryable=False,
+                    data={"code": "TOOL_RETRY_NOT_AUTHORIZED", "reason": retry_error},
+                ))
+            force_confirmation = force_confirmation or bool(retry_authorization.get("forceConfirmation"))
+        else:
+            retry_of_run_id = str(run_id or extra.get("run_id") or "") or None
+            retry_of_job_id = str(job_id or extra.get("job_id") or "") or None
         run_id = retry_of_run_id or f"run:{uuid.uuid4().hex}"
-        job_id = retry_of_job_id or f"job:{uuid.uuid4().hex}"
+        job_id = f"job:{uuid.uuid4().hex}" if retry else (retry_of_job_id or f"job:{uuid.uuid4().hex}")
         if retry:
             run_id = f"{run_id}:retry:{uuid.uuid4().hex[:8]}"
-            job_id = f"job:{uuid.uuid4().hex}"
         permission_scope = getattr(ctx, 'permission_scope', None) if ctx is not None else None
         event_source = str(getattr(tool, "source", None) or "builtin")
         job_data: dict[str, Any] = {"toolSource": event_source}
@@ -535,6 +622,12 @@ class ToolExecutor:
                 retryable=False,
             )
         redacted_args = receipt.parameters if receipt is not None else args
+        terminal_data = {
+            **job_data,
+            "args": redacted_args,
+            "retryable": not bool(getattr(receipt, "redacted_paths", [])),
+            "replayArgsAvailable": not bool(getattr(receipt, "redacted_paths", [])),
+        }
         if require_confirm and decision_request_id:
             if permission_request_cb is None:
                 discard_permission = getattr(self.policy_engine, "discard_permission", None)
@@ -574,6 +667,7 @@ class ToolExecutor:
                     reason=decision_reason,
                     args=redacted_args,
                 )
+                allowed, cancelled = await self._await_with_cancellation(future, cancellation_signal)
             except asyncio.CancelledError:
                 self.policy_engine.resolve_pending(
                     decision_request_id, False, False, tool.name, permission_scope,
@@ -581,7 +675,7 @@ class ToolExecutor:
                 self._job_event(
                     ctx=ctx, status="cancelled", job_id=job_id, run_id=run_id,
                     request_id=request_id, source=event_source, tool_name=tool_name,
-                    error="cancelled", data={**job_data, "args": redacted_args, "retryable": True},
+                    error="cancelled", data=terminal_data,
                 )
                 self._observe(False)
                 raise
@@ -592,11 +686,10 @@ class ToolExecutor:
                 self._job_event(
                     ctx=ctx, status="failed", job_id=job_id, run_id=run_id,
                     request_id=request_id, source=event_source, tool_name=tool_name,
-                    error=str(exc), data={**job_data, "args": redacted_args, "retryable": True},
+                    error=str(exc), data=terminal_data,
                 )
                 self._observe(False)
                 raise
-            allowed, cancelled = await self._await_with_cancellation(future, cancellation_signal)
             if cancelled:
                 self.policy_engine.resolve_pending(
                     decision_request_id,
@@ -608,7 +701,7 @@ class ToolExecutor:
                 self._job_event(
                     ctx=ctx, status="cancelled", job_id=job_id, run_id=run_id,
                     request_id=request_id, source=event_source, tool_name=tool_name,
-                    error="cancelled", data={**job_data, "args": redacted_args, "retryable": True},
+                    error="cancelled", data=terminal_data,
                 )
                 return self._finish(ToolResultEnvelope(
                     success=False,
@@ -685,12 +778,6 @@ class ToolExecutor:
                 ).to_dict(),
             )
 
-        terminal_data = {
-            **job_data,
-            "args": redacted_args,
-            "retryable": not bool(getattr(receipt, "redacted_paths", [])),
-            "replayArgsAvailable": not bool(getattr(receipt, "redacted_paths", [])),
-        }
         state_changing = tool_may_change_state(tool)
         recheck_capable = (
             state_changing

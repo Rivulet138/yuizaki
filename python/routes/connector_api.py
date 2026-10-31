@@ -37,6 +37,24 @@ def _safe_delivery_failure_reason(value: object, *, fallback: str = "provider_re
     return candidate if candidate in _SAFE_PROVIDER_FAILURE_REASONS else fallback
 
 
+def _delivery_succeeded(delivery: object) -> bool:
+    if not isinstance(delivery, Mapping) or delivery.get("outcome") == "unknown":
+        return False
+    status_code = delivery.get("status_code")
+    http_ok = type(status_code) is int and 200 <= status_code < 300
+    return (
+        (delivery.get("ok") is True or ("ok" not in delivery and http_ok))
+        and delivery.get("sent", True) is not False
+    )
+
+
+def _unknown_delivery_response(row: Mapping[str, Any] | None) -> JSONResponse:
+    return JSONResponse({
+        "ok": False, "error": "delivery_state_unknown", "outcome": "unknown",
+        "status": "sending", "delivery": _public_delivery(row),
+    }, status_code=409)
+
+
 class ConnectorRecoveryController:
     """Discover only expired inbound leases and replay them through retry."""
 
@@ -560,8 +578,57 @@ def create_message_connector_router(
             "recovery": recovery_controller.snapshot() if recovery_controller is not None else None,
         })
 
+    def _admit_qq(message: ConnectorMessage, *, replay: bool, reserve: bool = True) -> tuple[bool, bool]:
+        if message.connector_id != "qq":
+            return True, False
+        # No await between checking and reserving: all ingress paths share
+        # this router's event-loop admission, including retry and recovery.
+        now = registry_provider().current_time()
+        for key, (_session_id, timestamp) in tuple(qq_recent_events.items()):
+            if timestamp <= now - 60:
+                qq_recent_events.pop(key, None)
+        key = f"qq:{message.event_id}"
+        config = registry_provider().config_snapshot("qq") or {}
+        replay = replay or key in qq_recent_events
+        session_count = sum(session_id == message.session_id for session_id, _ in qq_recent_events.values())
+        if key in qq_inflight or len(qq_inflight) >= config["maxConcurrent"] or (
+            not replay and session_count >= config["ratePerMinute"]
+        ):
+            return False, False
+        if reserve:
+            qq_inflight.add(key)
+            if not replay:
+                qq_recent_events[key] = (message.session_id, now)
+        return True, not replay
+
     @router.post("/api/system/connectors/{connector_id}/deliveries/{delivery_key}/retry")
     async def retry_connector_delivery(connector_id: str, delivery_key: str) -> JSONResponse:
+        connector_id = connector_id.strip().lower()
+        store = delivery_store_provider() if delivery_store_provider is not None else None
+        row = store.connector_delivery(delivery_key) if store is not None else None
+        if row is None or row.get("connector_id") != connector_id or row.get("status") == "delivered":
+            return await _retry_connector_delivery(connector_id, delivery_key)
+        if connector_id == "qq" and row.get("status") == "sending":
+            return _unknown_delivery_response(row)
+        registry = registry_provider()
+        if not registry.is_enabled(connector_id):
+            return JSONResponse({"ok": False, "error": "connector_disabled"}, status_code=409)
+        try:
+            message = _message_from_snapshot(json.loads(row.get("message_json") or ""))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return JSONResponse({"ok": False, "error": "delivery_not_retryable"}, status_code=422)
+        if not registry.is_allowlisted(message):
+            return JSONResponse({"ok": True, "accepted": False, "reason": "not_allowlisted"})
+        admitted, _ = _admit_qq(message, replay=True)
+        if not admitted:
+            return JSONResponse({"ok": True, "accepted": False, "reason": "rate_limited"})
+        try:
+            return await _retry_connector_delivery(connector_id, delivery_key)
+        finally:
+            if connector_id == "qq":
+                qq_inflight.discard(f"qq:{message.event_id}")
+
+    async def _retry_connector_delivery(connector_id: str, delivery_key: str) -> JSONResponse:
         store = delivery_store_provider() if delivery_store_provider is not None else None
         if store is None:
             return JSONResponse({"ok": False, "error": "delivery_store_unavailable"}, status_code=503)
@@ -606,6 +673,8 @@ def create_message_connector_router(
                 ),
                 reply_text=reply,
             )
+        if claim.get("status") == "unknown":
+            return _unknown_delivery_response(store.connector_delivery(delivery_key))
         if claim.get("status") == "busy":
             return JSONResponse({"ok": False, "error": "delivery_in_progress", "delivery": _public_delivery(row)}, status_code=409)
         if claim.get("status") == "delivered":
@@ -613,6 +682,7 @@ def create_message_connector_router(
         if claim.get("status") != "claimed":
             return JSONResponse({"ok": False, "error": "delivery_not_retryable", "delivery": _public_delivery(row)}, status_code=422)
         turn_retry_promoted = False
+        provider_send_started = False
         try:
             if retry_turn:
                 turn_service = turn_service_provider()
@@ -640,13 +710,12 @@ def create_message_connector_router(
                 if not store.promote_connector_turn_retry(delivery_key, owner, reply):
                     raise RuntimeError("delivery_retry_claim_lost")
                 turn_retry_promoted = True
+            provider_send_started = True
             delivery = await asyncio.to_thread(registry_provider().send_reply, message, reply)
-            provider_ok = isinstance(delivery, Mapping) and delivery.get("ok") is True
-            if isinstance(delivery, Mapping) and not provider_ok:
-                status_code = delivery.get("status_code")
-                provider_ok = isinstance(status_code, int) and 200 <= status_code < 300
-            sent = not isinstance(delivery, Mapping) or delivery.get("sent", True) is not False
-            if not provider_ok or not sent:
+            if isinstance(delivery, Mapping) and delivery.get("outcome") == "unknown":
+                registry_provider().record_failure(connector_id, "delivery_state_unknown")
+                return _unknown_delivery_response(store.connector_delivery(delivery_key))
+            if not _delivery_succeeded(delivery):
                 reason = _safe_delivery_failure_reason(
                     delivery.get("reason") if isinstance(delivery, Mapping) else None,
                 )
@@ -670,8 +739,10 @@ def create_message_connector_router(
         except asyncio.CancelledError:
             if retry_turn and not turn_retry_promoted:
                 store.release_connector_turn_retry(delivery_key, owner, "connector_retry_cancelled")
-            else:
+            elif connector_id != "qq":
                 store.mark_connector_delivery_failed(delivery_key, owner, "connector_retry_cancelled")
+            # Cancelling to_thread does not stop the provider POST. Keep QQ
+            # sending/unknown so a retry cannot duplicate an in-flight send.
             raise
         except Exception:
             LOGGER.exception(
@@ -680,6 +751,9 @@ def create_message_connector_router(
                 message.event_id,
                 delivery_key,
             )
+            if connector_id == "qq" and provider_send_started:
+                registry_provider().record_failure(connector_id, "delivery_state_unknown")
+                return _unknown_delivery_response(store.connector_delivery(delivery_key))
             reason = "connector_turn_exception" if retry_turn and not turn_retry_promoted else "connector_provider_exception"
             if retry_turn and not turn_retry_promoted:
                 store.release_connector_turn_retry(delivery_key, owner, reason)
@@ -945,22 +1019,9 @@ def create_message_connector_router(
                     "delivery": _public_delivery(existing_delivery),
                 })
         qq_rate_reserved = False
-        qq_replayed_event = False
-        admission_time = registry.current_time()
-        if connector_id == "qq":
-            # Replay/active-task checks above retain their original semantics.
-            # Admission through task registration below has no await, so this
-            # check-and-reserve is atomic within the router's event loop.
-            for key, (_session_id, timestamp) in tuple(qq_recent_events.items()):
-                if timestamp <= admission_time - 60:
-                    qq_recent_events.pop(key, None)
-            qq_config = registry.config_snapshot("qq") or {}
-            qq_replayed_event = existing_delivery is not None or task_key in qq_recent_events
-            session_count = sum(session_id == message.session_id for session_id, _ in qq_recent_events.values())
-            if len(qq_inflight) >= qq_config["maxConcurrent"] or (
-                not qq_replayed_event and session_count >= qq_config["ratePerMinute"]
-            ):
-                return JSONResponse({"ok": True, "accepted": False, "reason": "rate_limited"})
+        admitted, _ = _admit_qq(message, replay=existing_delivery is not None, reserve=False)
+        if not admitted:
+            return JSONResponse({"ok": True, "accepted": False, "reason": "rate_limited"})
         try:
             turn_service = turn_service_provider()
             if turn_service is None:
@@ -995,11 +1056,7 @@ def create_message_connector_router(
                 {"ok": False, "error": "connector_setup_failed", "message": "连接器暂时不可用，请稍后重试"},
                 status_code=503,
             )
-        if connector_id == "qq":
-            qq_inflight.add(task_key)
-            if not qq_replayed_event:
-                qq_recent_events[task_key] = (message.session_id, admission_time)
-                qq_rate_reserved = True
+        _, qq_rate_reserved = _admit_qq(message, replay=existing_delivery is not None)
         queued_store = delivery_store
         queued_owner: str | None = None
         queued_pending_created = False
@@ -1038,6 +1095,7 @@ def create_message_connector_router(
                 delivery_store_provider() if delivery_store_provider is not None else None
             )
             delivery_claimed = False
+            provider_send_started = False
             turn_pending_created = queued_pending_created
 
             async def _converge_discord(status: str) -> None:
@@ -1135,6 +1193,8 @@ def create_message_connector_router(
                             "turn_id": getattr(getattr(commit, "context", None), "turn_id", turn_request.turn_id),
                             "delivery": {"ok": True, "replayed": replayed, "already_sent": True},
                         })
+                    if delivery_claim.get("status") == "unknown":
+                        return _unknown_delivery_response(delivery_store.connector_delivery(delivery_key))
                     if delivery_claim.get("status") == "busy":
                         return JSONResponse({
                             "ok": False,
@@ -1148,21 +1208,22 @@ def create_message_connector_router(
                 reply = str(getattr(result, "reply", "") or "").strip()
                 try:
                     active_phases[task_key] = "sending"
+                    provider_send_started = True
                     delivery = await asyncio.to_thread(registry.send_reply, message, reply)
                 except Exception:
-                    if delivery_store is not None and delivery_claimed:
+                    if connector_id != "qq" and delivery_store is not None and delivery_claimed:
                         delivery_store.mark_connector_delivery_failed(
                             delivery_key,
                             delivery_owner,
                             "connector_provider_exception",
                         )
                     raise
-                provider_ok = isinstance(delivery, Mapping) and delivery.get("ok") is True
-                if isinstance(delivery, Mapping) and not provider_ok:
-                    status_code = delivery.get("status_code")
-                    provider_ok = isinstance(status_code, int) and 200 <= status_code < 300
-                sent = isinstance(delivery, Mapping) and delivery.get("sent", True) is not False
-                delivery_ok = bool(reply) and provider_ok and sent
+                if isinstance(delivery, Mapping) and delivery.get("outcome") == "unknown":
+                    registry.record_failure(connector_id, "delivery_state_unknown")
+                    return _unknown_delivery_response(
+                        delivery_store.connector_delivery(delivery_key) if delivery_store is not None else None
+                    )
+                delivery_ok = bool(reply) and _delivery_succeeded(delivery)
                 if not delivery_ok:
                     reason = "empty_reply" if not reply else (
                         _safe_delivery_failure_reason(
@@ -1218,6 +1279,11 @@ def create_message_connector_router(
                     message.event_id,
                     turn_request.request_id,
                 )
+                if connector_id == "qq" and provider_send_started:
+                    registry.record_failure(connector_id, "delivery_state_unknown")
+                    return _unknown_delivery_response(
+                        delivery_store.connector_delivery(delivery_key) if delivery_store is not None else None
+                    )
                 registry.record_failure(connector_id, "connector_turn_failed")
                 if delivery_store is not None and delivery_claimed:
                     delivery_store.mark_connector_delivery_failed(delivery_key, delivery_owner, "connector_turn_failed")

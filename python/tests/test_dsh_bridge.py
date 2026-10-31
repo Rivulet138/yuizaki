@@ -119,7 +119,7 @@ async def test_safe_argv_env_and_success(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("task", ["", " \n", "--profile evil", " \n--profile evil", "x" * 4001, "a\0b", None, 42])
+@pytest.mark.parametrize("task", ["", " \n", "--profile evil", " \n--profile evil", "-V", "-h", " -", "x" * 4001, "a\0b", None, 42])
 async def test_invalid_task_does_not_spawn(task):
     result = await DshBridge(command=["node", "bin.js"]).run(task)
     assert result.error == "dsh_invalid_task" and not result.ok
@@ -229,6 +229,49 @@ async def test_cancellation_kills_waits_and_releases_slot(monkeypatch):
         await pending
     assert process.kill_calls == 1 and process.reaped_after_kill
     assert dsh_bridge._DSH_SEMAPHORE._value == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["timeout", "io_error"])
+async def test_cancellation_during_failure_cleanup_keeps_slot_until_reaped(monkeypatch, failure):
+    killed = asyncio.Event()
+    finish_reap = asyncio.Event()
+
+    class SlowReapProcess(FakeProcess):
+        def kill(self):
+            super().kill()
+            killed.set()
+
+        async def wait(self):
+            code = await super().wait()
+            await finish_reap.wait()
+            return code
+
+    class BrokenStream:
+        async def read(self, _size):
+            raise ValueError("stream closed")
+
+    process = SlowReapProcess(blocked=True)
+    if failure == "io_error":
+        process.stdout = BrokenStream()
+    calls = fake_spawn(monkeypatch, process, FakeProcess([b"next result"]))
+    bridge = DshBridge(command=["node", "bin.js"], timeout_s=0.02)
+    pending = asyncio.create_task(bridge.run("修改代码"))
+    try:
+        await asyncio.wait_for(killed.wait(), timeout=1)
+        for _ in range(2):
+            pending.cancel()
+            await asyncio.sleep(0)
+        assert not pending.done(), "Cancellation must wait for child cleanup"
+        assert dsh_bridge._DSH_SEMAPHORE._value == 0
+        assert len(calls) == 1
+    finally:
+        finish_reap.set()
+        await asyncio.gather(pending, return_exceptions=True)
+    assert pending.cancelled()
+    assert process.kill_calls == 1 and process.reaped_after_kill
+    assert dsh_bridge._DSH_SEMAPHORE._value == 1
+    assert (await bridge.run("检查状态")).ok
 
 
 @pytest.mark.asyncio
@@ -449,3 +492,181 @@ async def test_combined_context_cannot_bypass_task_limit():
     plugin = DshDelegatePlugin()
     result = await plugin._handle({"task": "x" * 3990, "context": "y" * 30}, None, None, None)
     assert result.error == "dsh_invalid_task" and result.retryable is False
+
+
+@pytest.mark.parametrize("prefix", [
+    "token=", '"api_key": "', "Bearer ", "sk-",
+    "Authorization: Bearer ", '"authorization": "Bearer ',
+])
+def test_stream_redaction_precedes_head_tail_retention(prefix):
+    secret = "SYNTHETIC_CREDENTIAL_VALUE_" * 500
+    raw = "HEAD\n" + "x" * 50 + " " + prefix + secret + "\nTAIL"
+    output = dsh_bridge._BoundedOutput(80)
+    for offset in range(0, len(raw), 17):
+        output.append(raw[offset:offset + 17])
+        assert len(output.head) + len(output.tail) <= 80
+        assert len(output.redactor.pending) <= output.redactor.window
+    text = output.text()
+    assert "SYNTHETIC" not in text and "CREDENTIAL" not in text
+    assert text.startswith("HEAD") and text.endswith("TAIL")
+    assert output.total == len(raw)
+
+
+@pytest.mark.parametrize("split", range(1, 32))
+def test_literal_provider_secret_crossing_read_and_retention_boundaries(monkeypatch, split):
+    secret = "actual-custom-key-without-prefix"
+    monkeypatch.setenv("OPENLUX_API_KEY", secret)
+    output = dsh_bridge._BoundedOutput(64)
+    raw = "HEAD " + "a" * 270 + secret + " tail"
+    for offset in range(0, len(raw), split):
+        output.append(raw[offset:offset + split])
+    text = output.text()
+    assert "actual-custom" not in text and "without-prefix" not in text
+    assert text.startswith("HEAD") and text.endswith("tail")
+
+
+@pytest.mark.asyncio
+async def test_long_split_credential_is_removed_from_stderr_log(monkeypatch, caplog):
+    raw = ("token=" + "private-tail-" * 1000 + "\nfinished").encode()
+    process = FakeProcess([b"ok"], [raw[i:i + 31] for i in range(0, len(raw), 31)])
+    fake_spawn(monkeypatch, process)
+    with caplog.at_level(logging.WARNING, logger=dsh_bridge.__name__):
+        result = await DshBridge(command=["node", "bin.js"], max_output_chars=80).run("inspect")
+    assert result.error == "dsh_output_too_large"
+    assert "private-tail" not in caplog.text and "private-tail" not in result.output
+
+
+@pytest.mark.asyncio
+async def test_timeout_bounds_orphaned_pipe_readers_and_releases_slot(monkeypatch):
+    closed = asyncio.Event()
+
+    class OrphanedPipe:
+        async def read(self, _size):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                closed.set()
+
+    process = FakeProcess()
+    process.stdout = OrphanedPipe()
+    calls = fake_spawn(monkeypatch, process, FakeProcess([b"next result"]))
+    monkeypatch.setattr(dsh_bridge, "_DRAIN_TIMEOUT_S", 0.02)
+    bridge = DshBridge(command=["node", "bin.js"], timeout_s=0.02)
+    result = await asyncio.wait_for(bridge.run("inspect"), timeout=0.5)
+    assert result.error == "dsh_timeout" and closed.is_set()
+    assert process.returncode is not None
+    assert dsh_bridge._DSH_SEMAPHORE._value == 1
+    assert (await bridge.run("inspect again")).ok
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_success_releases_owned_tree_guard(monkeypatch):
+    process = FakeProcess([b"done"])
+    guard = object()
+    terminated = []
+    closed = []
+
+    async def owned_spawn(command, **kwargs):
+        assert command[-1] == "inspect"
+        return process, guard
+
+    async def terminate(root, owner):
+        terminated.append((root, owner))
+
+    monkeypatch.setattr(dsh_bridge, "spawn_process", owned_spawn)
+    monkeypatch.setattr(dsh_bridge, "terminate_process", terminate)
+    monkeypatch.setattr(dsh_bridge, "close_guard", closed.append)
+    result = await DshBridge(command=["node", "bin.js"]).run("inspect")
+    assert result.ok
+    assert terminated == [(process, guard)]
+    assert closed == [guard]
+
+
+@pytest.mark.parametrize("prefix,suffix", [
+    ("Authorization: Bearer ", "\nTAIL"),
+    ('{"authorization": "Bearer ', '"}\nTAIL'),
+    ("{'authorization': 'Bearer ", "'}\nTAIL"),
+])
+def test_authorization_redaction_across_every_prefix_split(prefix, suffix):
+    secret = "synthetic-credential-123"
+    raw = "HEAD\n" + prefix + secret + suffix
+    for split in range(1, len("HEAD\n" + prefix) + 1):
+        output = dsh_bridge._BoundedOutput(1000)
+        output.append(raw[:split])
+        output.append(raw[split:])
+        text = output.text()
+        assert secret not in text, (split, text)
+        assert "<redacted>" in text
+        assert text.startswith("HEAD\n") and text.endswith("TAIL")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+@pytest.mark.parametrize("prefix_chunks", [
+    [b"Authorization: ", b"Bear", b"er "],
+    [b"Authorization: Bearer ", b" \t"],
+])
+async def test_split_authorization_removed_from_result_and_log(monkeypatch, caplog, stream, prefix_chunks):
+    secret = "synthetic-credential-123"
+    chunks = [*prefix_chunks, secret.encode() + b"\nTAIL"]
+    process = FakeProcess(
+        chunks if stream == "stdout" else [b"answer"],
+        chunks if stream == "stderr" else [],
+        code=7,
+    )
+    fake_spawn(monkeypatch, process)
+    with caplog.at_level(logging.WARNING, logger=dsh_bridge.__name__):
+        result = await DshBridge(command=["node", "bin.js"], max_output_chars=1000).run("inspect")
+    assert result.error == "dsh_nonzero_exit"
+    assert secret not in result.output and secret not in caplog.text
+    assert "<redacted>" in result.output and result.output.endswith("TAIL")
+    if stream == "stderr":
+        assert "<redacted>" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_stream", ["stdout", "stderr"])
+@pytest.mark.parametrize("read_error", [OSError, ValueError])
+async def test_io_error_drains_sibling_reader_before_releasing_slot(monkeypatch, failed_stream, read_error):
+    started = asyncio.Event()
+    closed = asyncio.Event()
+    reader_tasks = []
+    slots_on_close = []
+
+    class OrphanedPipe:
+        async def read(self, _size):
+            reader_tasks.append(asyncio.current_task())
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                slots_on_close.append(dsh_bridge._DSH_SEMAPHORE._value)
+                closed.set()
+
+    class BrokenPipe:
+        async def read(self, _size):
+            await started.wait()
+            raise read_error("synthetic read failure")
+
+    process = FakeProcess(blocked=True)
+    process.stdout = BrokenPipe() if failed_stream == "stdout" else OrphanedPipe()
+    process.stderr = BrokenPipe() if failed_stream == "stderr" else OrphanedPipe()
+    calls = fake_spawn(monkeypatch, process, FakeProcess([b"next result"]))
+    monkeypatch.setattr(dsh_bridge, "_DRAIN_TIMEOUT_S", 0.02)
+    bridge = DshBridge(command=["node", "bin.js"], timeout_s=1)
+    try:
+        result = await asyncio.wait_for(bridge.run("inspect"), timeout=0.5)
+        assert result.error == "dsh_io_error"
+        assert closed.is_set()
+        assert all(task.done() for task in reader_tasks)
+        assert slots_on_close == [0]
+        assert process.returncode is not None
+        assert dsh_bridge._DSH_SEMAPHORE._value == 1
+        assert (await bridge.run("inspect again")).ok
+        assert len(calls) == 2
+    finally:
+        for task in reader_tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*reader_tasks, return_exceptions=True)

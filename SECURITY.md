@@ -73,6 +73,12 @@ MCP stdio inherited-environment whitelist plus explicitly allowed DSH provider k
 credentials; keep Yuizaki provider credentials in `YUIZAKI_PROVIDER_CREDENTIALS_JSON`, not in task
 text or committed settings. Timeout or failed execution does not roll back file changes and must
 not cause an automatic retry. DSH session data persists under `~/.dsh/sessions`.
+Its output is scrubbed before retention and capped at the configured head/tail size; progress
+events are a bounded in-memory UI projection, not an audit record. Process timeout/cancellation
+cleans up the owned process tree but does not roll back filesystem writes. For OneBot 11, an async
+submission or a lost action response is an unknown delivery outcome; it is not automatically sent
+again because the bridge may already have applied it. See
+[`docs/DSH_INTEGRATION_HARDENING.md`](docs/DSH_INTEGRATION_HARDENING.md) for contracts and references.
 
 Discord interactions are durably recorded before the deferred acknowledgement, then Agent work runs in the background; terminal delivery
 edits the original response, uses the interaction token only within its local 15-minute deadline, and disables mention parsing.

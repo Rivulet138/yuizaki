@@ -45,4 +45,24 @@ describe('dialog permission queue', () => {
       'request-2',
     ])
   })
+
+  it('removes an invalid request and advances the queue', () => {
+    const store = useDialogStore()
+    store.openPermissionRequest(request('request-1'))
+    store.openPermissionRequest(request('request-2'))
+
+    store.removePermissionRequest('request-1')
+
+    expect(store.permissionRequest?.request_id).toBe('request-2')
+    expect(store.permissionDialogVisible).toBe(true)
+  })
+
+  it('clears queued requests when the socket session is gone', () => {
+    const store = useDialogStore()
+    store.openPermissionRequest(request('request-1'))
+    store.clearPermissionRequests()
+
+    expect(store.permissionRequests).toEqual([])
+    expect(store.permissionDialogVisible).toBe(false)
+  })
 })

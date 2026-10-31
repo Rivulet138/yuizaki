@@ -9,13 +9,15 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from modules.agent.turn_store import TurnCommitStore
-from modules.system.message_connectors import MessageConnectorError, MessageConnectorRegistry
+from modules.system.message_connectors import (
+    MessageConnectorError,
+    MessageConnectorRegistry,
+)
 from routes.connector_api import (
     _message_from_snapshot,
     _message_snapshot,
     create_message_connector_router,
 )
-
 
 DEFAULTS = {
     "mentionRequired": True,
@@ -31,7 +33,7 @@ WEBHOOK = "/api/system/connectors/qq/webhook"
 
 def _registry(**config: object) -> MessageConnectorRegistry:
     registry = MessageConnectorRegistry(
-        env={}, http_post=lambda *_args: {"ok": True, "sent": True},
+        env={}, http_post=lambda *_args: {"status": "ok", "retcode": 0, "ok": True, "sent": True},
     )
     registry.update_config("qq", {
         "bridgeUrl": "http://127.0.0.1:3000", "bridgeToken": "bridge-secret",
@@ -422,3 +424,266 @@ def test_wechat_remains_generic_without_qq_event_filters() -> None:
     registry.send_reply(message, "reply")
     assert calls[0][0] == "http://localhost:3000/send"
     assert registry.config_snapshot("wechat")["bridgeProtocol"] == "generic"
+
+
+@pytest.mark.parametrize("protocol,status,retcode,expected", [
+    ("onebot11", "ok", 0, 200),
+    ("onebot11", "async", 1, 409),
+    ("onebot11", "failed", 100, 502),
+    ("onebot11", "ok", 1, 502),
+    ("onebot11", "async", 0, 502),
+    ("onebot11", "failed", 0, 502),
+    ("onebot11", None, None, 502),
+    ("onebot11", "ok", "0", 502),
+    ("onebot11", "ok", False, 502),
+    ("onebot12", "ok", 0, 200),
+    ("onebot12", "failed", 10001, 502),
+    ("onebot12", "async", 1, 502),
+    ("generic", None, None, 200),
+])
+@pytest.mark.asyncio
+async def test_bridge_application_result_overrides_http_200(tmp_path, protocol, status, retcode, expected) -> None:
+    registry = _registry(bridgeProtocol=protocol)
+    response = {"status_code": 200, "ok": True, "sent": True}
+    if status is not None:
+        response.update(status=status, retcode=retcode)
+    calls = []
+    registry._http_post = lambda *args: calls.append(args) or response
+    store = TurnCommitStore(tmp_path / "turns.sqlite3")
+    async with _client(registry, TurnService(), store) as client:
+        result = await client.post(WEBHOOK, json=_event())
+    assert result.status_code == expected
+    assert store.connector_delivery("connector:qq:1")["status"] == {
+        200: "delivered", 409: "sending", 502: "failed",
+    }[expected]
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("failure", ["read", "json", "async"])
+@pytest.mark.parametrize("via_retry", [False, True])
+@pytest.mark.asyncio
+async def test_uncertain_send_is_never_resent(tmp_path, monkeypatch, failure, via_retry) -> None:
+    import modules.system.message_connectors as connectors
+
+    calls = []
+
+    class Response:
+        status = 200
+
+        def getcode(self):
+            return self.status
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def read(self, _limit):
+            if failure == "read":
+                raise OSError("response read lost")
+            return b'{"status":"async","retcode":1}' if failure == "async" else b'invalid json'
+
+    def post(*_args, **_kwargs):
+        calls.append(1)
+        return Response()
+
+    monkeypatch.setattr(connectors, "urlopen", post)
+    registry = _registry()
+    registry._http_post = connectors._default_http_post
+    clock = [1000.0]
+    store = TurnCommitStore(tmp_path / "turns.sqlite3", wall_clock=lambda: clock[0])
+    service = TurnService()
+    async with _client(registry, service, store) as client:
+        if via_retry:
+            service.error = True
+            assert (await client.post(WEBHOOK, json=_event())).status_code == 502
+            service.error = False
+            result = await client.post("/api/system/connectors/qq/events/1/retry")
+        else:
+            result = await client.post(WEBHOOK, json=_event())
+        assert result.status_code == 409
+        assert result.json()["outcome"] == "unknown"
+        assert store.connector_delivery("connector:qq:1")["status"] == "sending"
+        clock[0] += 2000
+        # Expiry and process restart must not authorize another provider send.
+        restarted = TurnCommitStore(tmp_path / "turns.sqlite3", wall_clock=lambda: clock[0])
+        assert restarted.reset_connector_delivery_for_retry("connector:qq:1") is False
+        assert restarted.claim_connector_delivery(
+            "connector:qq:1", "connector:qq:1", "qq", "1", "new-process",
+        )["status"] != "claimed"
+        assert (await client.post(WEBHOOK, json=_event())).status_code == 409
+        assert (await client.post("/api/system/connectors/qq/events/1/retry")).status_code == 409
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("config", [
+    {"enabled": False}, {"allowedUsers": ["77"]}, {"allowedGroups": ["88"]},
+])
+@pytest.mark.parametrize("reply_available", [False, True])
+@pytest.mark.asyncio
+async def test_retry_rechecks_current_config_before_turn_or_send(tmp_path, config, reply_available) -> None:
+    registry = _registry()
+    service = TurnService()
+    calls = []
+    registry._http_post = lambda *args: calls.append(args) or {"status": "failed", "retcode": 100}
+    store = TurnCommitStore(tmp_path / "turns.sqlite3")
+    service.error = not reply_available
+    async with _client(registry, service, store) as client:
+        assert (await client.post(WEBHOOK, json=_event(group_id=7))).status_code == 502
+        before = store.connector_delivery("connector:qq:1")
+        registry.update_config("qq", config)
+        service.error = False
+        retried = await client.post("/api/system/connectors/qq/events/1/retry")
+        assert retried.json().get("retried") is not True
+        assert len(service.requests) == 1
+        assert len(calls) == int(reply_available)
+        assert store.connector_delivery("connector:qq:1") == before
+
+
+@pytest.mark.asyncio
+async def test_retry_shares_concurrent_admission_with_webhook_and_other_retries(tmp_path) -> None:
+    registry = _registry(maxConcurrent=1)
+    service = TurnService()
+    service.error = True
+    store = TurnCommitStore(tmp_path / "turns.sqlite3")
+    async with _client(registry, service, store) as client:
+        for event_id in (1, 2):
+            assert (await client.post(WEBHOOK, json=_event(event_id))).status_code == 502
+        service.error = False
+        service.release = asyncio.Event()
+        running = asyncio.create_task(client.post("/api/system/connectors/qq/events/1/retry"))
+        try:
+            for _ in range(100):
+                if len(service.requests) == 3:
+                    break
+                await asyncio.sleep(0.01)
+            assert len(service.requests) == 3
+            for path, kwargs in [
+                (WEBHOOK, {"json": _event(3)}),
+                ("/api/system/connectors/qq/events/2/retry", {}),
+            ]:
+                limited = await asyncio.wait_for(client.post(path, **kwargs), timeout=1)
+                assert limited.status_code == 200
+                assert limited.json()["reason"] == "rate_limited"
+            assert store.connector_delivery("connector:qq:3") is None
+        finally:
+            service.release.set()
+            await running
+        assert (await client.post("/api/system/connectors/qq/events/2/retry")).json()["retried"] is True
+
+
+def test_fallback_id_disambiguates_same_second_session_and_content() -> None:
+    registry = _registry()
+    event = {**_event(), "time": 1000}
+    event.pop("message_id")
+    first = registry.parse("qq", event)
+    assert first.event_id == registry.parse("qq", dict(event)).event_id
+    other_user = registry.parse("qq", {**event, "user_id": 43, "sender": {"user_id": 43}})
+    other_text = registry.parse("qq", {**event, "message": "different"})
+    assert len({first.event_id, other_user.event_id, other_text.event_id}) == 3
+
+
+@pytest.mark.parametrize("target,accepted", [("99", True), ("all", False), ("42", False)])
+def test_cq_string_mentions_media_and_escaping(target, accepted) -> None:
+    event = _event(group_id=7)
+    event["message"] = (
+        f"[CQ:at,qq={target}]你好[CQ:image,file=a,bad=x]"
+        "[CQ:record,file=x]&#91;literal&#93;&amp;[CQ:reply,id=a&#44;b]"
+    )
+    message = _registry().parse("qq", event)
+    assert (message is not None) is accepted
+    if message:
+        assert message.text == "你好[图片][语音][literal]&"
+        assert message.metadata["reply_id"] == "a,b"
+    event["message"] = "&#91;CQ:at,qq=99&#93;literal"
+    assert _registry().parse("qq", event) is None
+
+
+@pytest.mark.parametrize("group_id", [None, 7])
+def test_onebot11_reply_cq_codes_remain_literal_text(group_id) -> None:
+    registry = _registry()
+    calls = []
+    registry._http_post = lambda *args: calls.append(args) or {"status": "ok", "retcode": 0}
+    message = registry.parse("qq", _event(group_id=group_id))
+    reply = "Example: [CQ:at,qq=all][CQ:image,file=file:///private.png]"
+    assert registry.send_reply(message, reply)["sent"] is True
+    payload = calls[0][2]
+    assert payload["message"] == reply
+    assert payload["auto_escape"] is True
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_qq_retry_send_keeps_unknown_state(tmp_path) -> None:
+    import threading
+
+    registry = _registry()
+    service = TurnService()
+    service.error = True
+    clock = [1000.0]
+    store = TurnCommitStore(tmp_path / "turns.sqlite3", wall_clock=lambda: clock[0])
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    calls = []
+
+    def post(*args):
+        calls.append(args)
+        started.set()
+        try:
+            assert release.wait(5)
+            return {"status": "ok", "retcode": 0}
+        finally:
+            finished.set()
+
+    async with _client(registry, service, store) as client:
+        assert (await client.post(WEBHOOK, json=_event())).status_code == 502
+        service.error = False
+        registry._http_post = post
+        running = asyncio.create_task(client.post("/api/system/connectors/qq/events/1/retry"))
+        try:
+            assert await asyncio.to_thread(started.wait, 3)
+            running.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await running
+            assert store.connector_delivery("connector:qq:1")["status"] == "sending"
+            clock[0] += 2000
+            assert store.reset_connector_delivery_for_retry("connector:qq:1") is False
+            retry = await client.post("/api/system/connectors/qq/events/1/retry")
+            assert retry.status_code == 409
+            assert retry.json()["outcome"] == "unknown"
+        finally:
+            release.set()
+            await asyncio.to_thread(finished.wait, 3)
+            if not running.done():
+                running.cancel()
+                await asyncio.gather(running, return_exceptions=True)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("via_retry", [False, True])
+@pytest.mark.asyncio
+async def test_qq_delivery_commit_exception_keeps_send_unknown(tmp_path, monkeypatch, via_retry) -> None:
+    registry = _registry()
+    calls = []
+    registry._http_post = lambda *args: calls.append(args) or {"status": "ok", "retcode": 0}
+    service = TurnService()
+    store = TurnCommitStore(tmp_path / "turns.sqlite3")
+
+    def unavailable(*_args):
+        raise OSError("local commit unavailable after provider success")
+
+    monkeypatch.setattr(store, "mark_connector_delivery_sent", unavailable)
+    async with _client(registry, service, store) as client:
+        if via_retry:
+            service.error = True
+            assert (await client.post(WEBHOOK, json=_event())).status_code == 502
+            service.error = False
+            result = await client.post("/api/system/connectors/qq/events/1/retry")
+        else:
+            result = await client.post(WEBHOOK, json=_event())
+        assert result.status_code == 409
+        assert result.json()["outcome"] == "unknown"
+        assert store.connector_delivery("connector:qq:1")["status"] == "sending"
+        assert (await client.post("/api/system/connectors/qq/events/1/retry")).status_code == 409
+    assert len(calls) == 1

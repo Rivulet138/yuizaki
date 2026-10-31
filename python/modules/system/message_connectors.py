@@ -15,11 +15,14 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError
 from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
@@ -913,7 +916,7 @@ class MessageConnectorRegistry:
         raise MessageConnectorError("unknown_connector", "不支持的消息连接器", status_code=404)
 
     def _parse_bridge_message(self, connector_id: str, payload: Mapping[str, Any]) -> ConnectorMessage | None:
-        event_id = _text(payload.get("id") or payload.get("event_id") or payload.get("message_id") or payload.get("time"))
+        event_id = _text(payload.get("id") or payload.get("event_id") or payload.get("message_id"))
         raw_sender = payload.get("sender")
         sender: Mapping[str, Any] = raw_sender if isinstance(raw_sender, Mapping) else {}
         self_id = _text(payload.get("self_id"))
@@ -927,6 +930,25 @@ class MessageConnectorRegistry:
         raw_message = payload.get("message") or payload.get("text") or payload.get("content")
         metadata: dict[str, Any] = {}
         mentioned = False
+        if connector_id == "qq" and isinstance(raw_message, str):
+            # Parse CQ before unescaping: escaped brackets are literal text,
+            # never a synthetic mention or media segment.
+            def unescape(value: str) -> str:
+                return value.replace("&#44;", ",").replace("&#91;", "[").replace("&#93;", "]").replace("&amp;", "&")
+
+            segments: list[dict[str, Any]] = []
+            offset = 0
+            for match in re.finditer(r"\[CQ:([^,\[\]]+)((?:,[^\[\]]*)?)\]", raw_message):
+                segments.append({"type": "text", "data": {"text": unescape(raw_message[offset:match.start()])}})
+                data = {}
+                for parameter in match[2].lstrip(",").split(","):
+                    key, separator, value = parameter.partition("=")
+                    if separator:
+                        data[key] = unescape(value)
+                segments.append({"type": match[1], "data": data})
+                offset = match.end()
+            segments.append({"type": "text", "data": {"text": unescape(raw_message[offset:])}})
+            raw_message = segments
         if connector_id == "qq" and isinstance(raw_message, list):
             parts: list[str] = []
             media = {"image": "[图片]", "record": "[语音]", "voice": "[语音]", "file": "[文件]"}
@@ -965,6 +987,13 @@ class MessageConnectorRegistry:
                     return None
                 text = text[len(prefix):].strip()
         conversation_id = group_id or user_id
+        if not event_id and payload.get("time") is not None:
+            identity = json.dumps(
+                [connector_id, self_id, group_id, user_id, payload.get("time"),
+                 payload.get("message") or payload.get("text") or payload.get("content")],
+                ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            )
+            event_id = "fallback:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
         if not event_id or not text or not conversation_id:
             return None
         return ConnectorMessage(connector_id=connector_id, event_id=event_id, session_id=f"connector:{connector_id}:{'group' if group_id else 'user'}:{conversation_id}", external_user_id=user_id or "unknown", conversation_id=conversation_id, text=text, reply_target={"user_id": user_id, "group_id": group_id, "conversation_id": conversation_id}, metadata=metadata)
@@ -1084,12 +1113,51 @@ class MessageConnectorRegistry:
         if connector_id in {"qq", "wechat"}:
             base_url = self._bridge_url(connector_id).rstrip("/")
             headers = self._bridge_request_headers(connector_id)
-            if connector_id == "qq" and self._bridge_protocol(connector_id) in {"onebot11", "onebot12"}:
+            protocol = self._bridge_protocol(connector_id)
+            if connector_id == "qq" and protocol == "onebot11":
                 group_id = message.reply_target.get("group_id")
                 endpoint = f"{base_url}/send_group_msg" if group_id else f"{base_url}/send_private_msg"
                 payload = {"group_id": group_id, "message": reply} if group_id else {"user_id": message.reply_target.get("user_id") or message.external_user_id, "message": reply}
-                return self._http_post(endpoint, headers, payload)
-            return self._http_post(f"{base_url}/send", headers, {"platform": connector_id, "conversation_id": message.conversation_id, "user_id": message.external_user_id, "text": reply})
+                # Agent output is plain text; never execute generated CQ segments.
+                payload["auto_escape"] = True
+            elif connector_id == "qq" and protocol == "onebot12":
+                group_id = message.reply_target.get("group_id")
+                endpoint = base_url
+                payload = {
+                    "action": "send_message",
+                    "params": {
+                        "detail_type": "group" if group_id else "private",
+                        "group_id" if group_id else "user_id": group_id or message.external_user_id,
+                        "message": [{"type": "text", "data": {"text": reply}}],
+                    },
+                }
+            else:
+                endpoint = f"{base_url}/send"
+                payload = {"platform": connector_id, "conversation_id": message.conversation_id, "user_id": message.external_user_id, "text": reply}
+            try:
+                result = self._http_post(endpoint, headers, payload)
+            except HTTPError:
+                return {"ok": False, "sent": False, "reason": "provider_rejected"}
+            except Exception:
+                if connector_id != "qq":
+                    raise
+                # The transport may have sent the POST before losing the
+                # response. Retrying cannot safely infer the external effect.
+                return {"ok": False, "sent": False, "outcome": "unknown"}
+            if connector_id != "qq" or protocol == "generic":
+                return result
+            if not isinstance(result, Mapping):
+                return {"ok": False, "sent": False, "reason": "provider_rejected"}
+            status_code = result.get("status_code")
+            http_ok = status_code is None or (type(status_code) is int and 200 <= status_code < 300)
+            retcode = result.get("retcode")
+            valid_code = type(retcode) is int
+            ok = http_ok and valid_code and result.get("status") == "ok" and retcode == 0
+            unknown = http_ok and valid_code and protocol == "onebot11" and result.get("status") == "async" and retcode == 1
+            return {
+                **result, "ok": ok, "sent": ok,
+                "outcome": "unknown" if unknown else ("delivered" if ok else "failed"),
+            }
         token = self._token(connector_id)
         if connector_id == "telegram":
             payload: dict[str, Any] = {"chat_id": message.reply_target["chat_id"], "text": reply}

@@ -380,6 +380,16 @@ const handlePermissionRequest = (data: PermissionRequestPayload) => {
   dialogStore.openPermissionRequest(data)
 }
 
+const handleSocketDisconnect = () => {
+  const requestId = dialogStore.permissionRequest?.request_id
+  dialogStore.clearPermissionRequests()
+  void publishCompanionRuntimeEvent({
+    source: 'permission',
+    permission: 'none',
+    ...(requestId ? { requestId } : {}),
+  })
+}
+
 const stopAppRuntime = () => {
   visualCaptureRuntime.stop()
   window.removeEventListener('keydown', handleGlobalKeydown)
@@ -393,6 +403,7 @@ const stopAppRuntime = () => {
   companionRuntime.stopCompanionRuntime()
   const socketClient = getSocketClient()
   socketClient.off(SocketEvents.PERMISSION_REQUEST, handlePermissionRequest)
+  socketClient.off(SocketEvents.DISCONNECT, handleSocketDisconnect)
   socketClient.off(SocketEvents.SCREENSHOT_RESULT, visualCaptureRuntime.handleResult)
   socketClient.off(SocketEvents.SCREENSHOT_CAPTURE_REQUEST, visualCaptureRuntime.handleCaptureRequest)
 }
@@ -434,6 +445,7 @@ onMounted(() => {
     () => socketClient.isConnected(),
   )
   socketClient.on(SocketEvents.PERMISSION_REQUEST, handlePermissionRequest)
+  socketClient.on(SocketEvents.DISCONNECT, handleSocketDisconnect)
   socketClient.on(SocketEvents.SCREENSHOT_RESULT, visualCaptureRuntime.handleResult)
   socketClient.on(SocketEvents.SCREENSHOT_CAPTURE_REQUEST, visualCaptureRuntime.handleCaptureRequest)
   systemStore.setVisualPerceptionEnabled(activeVisionSettings.value.enabled)

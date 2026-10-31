@@ -8,7 +8,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any, AsyncIterator, NoReturn, Optional
 
 import httpx
@@ -122,15 +122,17 @@ def normalize_openai_base_url(base_url: str) -> str:
     return normalize_llm_base_url(base_url, "custom")
 
 
-def _response_excerpt(response: httpx.Response, limit: int = 500) -> str:
+def _response_excerpt(response: httpx.Response) -> str:
     try:
-        return response.text[:limit] if response.text else ""
+        return response.text if response.text else ""
     except httpx.ResponseNotRead:
         return "<stream response body not read>"
 
 
-def redact_error_text(text: str, limit: int | None = None) -> str:
+def redact_error_text(text: str, limit: int | None = None, secrets: Iterable[str] = ()) -> str:
     redacted = str(text or "")
+    for secret in sorted({str(item).strip() for item in secrets if str(item).strip()}, key=len, reverse=True):
+        redacted = redacted.replace(secret, "<redacted>")
     for pattern, replacement in _SECRET_TEXT_PATTERNS:
         redacted = pattern.sub(replacement, redacted)
     if limit is not None:
@@ -138,8 +140,14 @@ def redact_error_text(text: str, limit: int | None = None) -> str:
     return redacted
 
 
-def _safe_response_excerpt(response: httpx.Response, limit: int = 500) -> str:
-    return redact_error_text(_response_excerpt(response, limit=limit), limit=limit)
+def _safe_response_excerpt(response: httpx.Response, limit: int = 500, secrets: Iterable[str] = ()) -> str:
+    request_secrets: list[str] = []
+    request = response.request
+    for name in ("authorization", "x-api-key", "x-goog-api-key"):
+        value = request.headers.get(name)
+        if value:
+            request_secrets.append(value.removeprefix("Bearer "))
+    return redact_error_text(_response_excerpt(response), limit=limit, secrets=[*secrets, *request_secrets])
 
 
 def _raise_llm_http_error(exc: httpx.HTTPStatusError, *, context: str) -> NoReturn:
@@ -1065,8 +1073,8 @@ class LLMClient:
             except httpx.RequestError as exc:
                 self._preconnect_failures += 1
                 self._preconnect_last_ok = False
-                self._preconnect_last_error = str(exc)[:240]
-                logger.debug("LLM preconnect failed: %s", exc)
+                self._preconnect_last_error = redact_error_text(str(exc), limit=240, secrets=[self.api_key])
+                logger.debug("LLM preconnect failed: %s", self._preconnect_last_error)
                 return False
             finally:
                 self._preconnect_last_elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
@@ -1099,7 +1107,7 @@ class LLMClient:
             except asyncio.CancelledError:
                 pass
             except Exception as exc:  # pragma: no cover - defensive task boundary
-                logger.warning("Unexpected LLM preconnect failure: %s", exc)
+                logger.warning("Unexpected LLM preconnect failure: %s", redact_error_text(str(exc), secrets=[self.api_key]))
 
         task.add_done_callback(_consume_result)
         return True
@@ -1240,8 +1248,8 @@ class LLMClient:
                     mgr.record_summary_audit(sid, source="auto", outcome="timeout", detail="background timeout")
                     logger.warning("[%s/%s] summary rewrite timeout", sid, gid)
                 except Exception as exc:
-                    mgr.record_summary_audit(sid, source="auto", outcome="error", detail=str(exc))
-                    logger.warning("[%s/%s] summary rewrite failed: %s", sid, gid, exc)
+                    mgr.record_summary_audit(sid, source="auto", outcome="error", detail=redact_error_text(str(exc), secrets=[self.api_key]))
+                    logger.warning("[%s/%s] summary rewrite failed: %s", sid, gid, redact_error_text(str(exc), secrets=[self.api_key]))
 
             asyncio.create_task(
                 _background_rewrite(),
@@ -1348,7 +1356,7 @@ class LLMClient:
                 })
                 logger.info("[%s/%s] Claude LLM stream done chars=%d", sid, gid, len(final_reply))
             except httpx.HTTPStatusError as exc:
-                body_text = _safe_response_excerpt(exc.response, limit=300)
+                body_text = _safe_response_excerpt(exc.response, limit=300, secrets=[self.api_key])
                 logger.error(
                     "[%s/%s] Claude LLM HTTP %d: %s",
                     sid, gid, exc.response.status_code, body_text,
@@ -1360,12 +1368,12 @@ class LLMClient:
                     "error": f"LLM API {exc.response.status_code}: {body_text}",
                 })
             except (httpx.RequestError, json.JSONDecodeError, RuntimeError) as exc:
-                logger.error("[%s/%s] Claude LLM stream error: %s", sid, gid, exc)
+                logger.error("[%s/%s] Claude LLM stream error: %s", sid, gid, redact_error_text(str(exc), secrets=[self.api_key]))
                 await _safe_send(ws, gen, {
                     "type": "error",
                     "session_id": sid,
                     "generation_id": gid,
-                    "error": str(exc),
+                    "error": redact_error_text(str(exc), secrets=[self.api_key]),
                 })
             return
 
@@ -1409,7 +1417,7 @@ class LLMClient:
                     "content": final_reply,
                 })
             except httpx.HTTPStatusError as exc:
-                body_text = _safe_response_excerpt(exc.response, limit=300)
+                body_text = _safe_response_excerpt(exc.response, limit=300, secrets=[self.api_key])
                 await _safe_send(ws, gen, {
                     "type": "error",
                     "session_id": sid,
@@ -1421,7 +1429,7 @@ class LLMClient:
                     "type": "error",
                     "session_id": sid,
                     "generation_id": gid,
-                    "error": str(exc),
+                    "error": redact_error_text(str(exc), secrets=[self.api_key]),
                 })
             return
 
@@ -1471,7 +1479,7 @@ class LLMClient:
                             await _consume_stream_content(content)
                     break
                 except httpx.HTTPStatusError as exc:
-                    body_text = _response_excerpt(exc.response, limit=300)
+                    body_text = _safe_response_excerpt(exc.response, limit=300, secrets=[self.api_key])
                     retry_body = None
                     if compat_retry_attempts < _GENERATION_COMPAT_MAX_RETRIES and exc.response.status_code in {400, 422}:
                         retry_body = (
@@ -1518,7 +1526,7 @@ class LLMClient:
             logger.info("[%s/%s] LLM done  chars=%d", sid, gid, len(final_reply))
 
         except httpx.HTTPStatusError as exc:
-            body_text = _safe_response_excerpt(exc.response, limit=300)
+            body_text = _safe_response_excerpt(exc.response, limit=300, secrets=[self.api_key])
             logger.error(
                 "[%s/%s] LLM HTTP %d: %s",
                 sid, gid, exc.response.status_code, body_text,
@@ -1530,12 +1538,12 @@ class LLMClient:
                 "error": f"LLM API {exc.response.status_code}: {body_text}",
             })
         except (httpx.RequestError, json.JSONDecodeError) as exc:
-            logger.error("[%s/%s] LLM error: %s", sid, gid, exc)
+            logger.error("[%s/%s] LLM error: %s", sid, gid, redact_error_text(str(exc), secrets=[self.api_key]))
             await _safe_send(ws, gen, {
                 "type": "error",
                 "session_id": sid,
                 "generation_id": gid,
-                "error": str(exc),
+                "error": redact_error_text(str(exc), secrets=[self.api_key]),
             })
 
     async def complete_chat(
@@ -1669,7 +1677,7 @@ class LLMClient:
                     self._tool_calls_supported = True
                 break
             except httpx.HTTPStatusError as exc:
-                body_text = _response_excerpt(exc.response)
+                body_text = _safe_response_excerpt(exc.response, secrets=[self.api_key])
                 fallback_body: dict[str, Any] | None = None
                 if not native_gemini and compat_retry_attempts < _GENERATION_COMPAT_MAX_RETRIES and exc.response.status_code in {400, 422}:
                     fallback_body = (
@@ -1838,9 +1846,9 @@ class LLMClient:
             resp = await self._http.get(llm_models_url(self.base_url, self.provider), headers=headers)
             resp.raise_for_status()
         except httpx.RequestError as exc:
-            logger.warning("LLM models endpoint check failed: %s", exc)
+            logger.warning("LLM models endpoint check failed: %s", redact_error_text(str(exc), secrets=[self.api_key]))
         except httpx.HTTPStatusError as exc:
-            body_text = _safe_response_excerpt(exc.response, limit=200)
+            body_text = _safe_response_excerpt(exc.response, limit=200, secrets=[self.api_key])
             logger.warning("LLM models endpoint HTTP %d: %s", exc.response.status_code, body_text)
 
         try:
@@ -1866,13 +1874,13 @@ class LLMClient:
             resp.raise_for_status()
             return {"ok": True, "message": "LLM connection OK (provider chat endpoint)"}
         except httpx.HTTPStatusError as exc:
-            body_text = _safe_response_excerpt(exc.response, limit=200)
+            body_text = _safe_response_excerpt(exc.response, limit=200, secrets=[self.api_key])
             return {
                 "ok": False,
                 "message": f"LLM API {exc.response.status_code}: {body_text}",
             }
         except httpx.RequestError as exc:
-            return {"ok": False, "message": f"LLM request failed: {exc}"}
+            return {"ok": False, "message": f"LLM request failed: {redact_error_text(str(exc), secrets=[self.api_key])}"}
 
     async def list_models(self) -> list[str]:
         if not self._http:

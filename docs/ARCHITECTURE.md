@@ -99,6 +99,10 @@ process after high-risk policy approval. A single-process semaphore, bounded que
 and the MCP stdio environment whitelist plus explicit DSH provider keys isolate this process boundary; no `YUIZAKI_*` variables
 are inherited. ToolExecutor owns its existing companion job lifecycle projection. DSH is not a
 text-chat prerequisite and does not inherit Yuizaki's file-tool sandbox or provider credentials.
+Output is scrubbed before bounded retention, and timeout/cancellation terminate the owned process
+tree. OneBot delivery separates confirmed success from asynchronous or ambiguous outcomes to avoid
+blind duplicate sends. See [`DSH and OneBot integration`](DSH_INTEGRATION_HARDENING.md) for exact
+contracts and references.
 
 The built-in browser tools run in `node-mcp`, which the launcher starts only when MCP is enabled. Every browser target is resolved and checked against private, loopback, link-local, and metadata ranges before launch and again per request; concurrency, timeouts, body size, and SSE clients are bounded. Local file tools resolve the target under `YUIZAKI_LOCAL_TOOL_ROOTS` (default: the repository root), reject sensitive filenames, suffixes, and directories, and replace files atomically through a temporary sibling. These are hardening measures inside the local trust model, not a sandbox or an authorization grant.
 

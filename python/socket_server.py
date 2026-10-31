@@ -1233,6 +1233,8 @@ class DesktopPetSocketServer:
     ) -> None:
         """将 runtime_context 注入到 AgentRequestContext.extra（消除三处重复）。"""
         bound_workspace_id = ctx.workspace_id or self._active_workspace_id()
+        if not ctx.permission_scope or ctx.permission_scope.startswith('socket:'):
+            ctx.permission_scope = f'workspace:{bound_workspace_id}'
         self._register_projection_runtime_context(bound_workspace_id)
         bindings = {
             "db_repo": self.runtime_context.db_repo,
@@ -2327,7 +2329,7 @@ class DesktopPetSocketServer:
                 self._permission_request_resolved_map.pop(permission_request_id, None)
                 self._permission_request_tool_map[permission_request_id] = str(tool_name)
                 self._permission_request_scope_map[permission_request_id] = str(
-                    payload.get("permission_scope") or f"socket:{target_sid}"
+                    payload.get("permission_scope") or f"workspace:{workspace_id}"
                 )
                 self._permission_request_sid_map[permission_request_id] = target_sid
             await self.sio.emit(SystemEvents.PERMISSION_REQUEST, payload, to=target_sid)
@@ -2360,7 +2362,7 @@ class DesktopPetSocketServer:
                 trace_store=self.trace_store,
                 plugin_manager=self.plugin_manager,
                 permission_request_cb=_permission_request_cb,
-                permission_scope=f"socket:{target_sid}",
+                permission_scope=f"workspace:{workspace_id}",
             )
         self._bind_ctx_runtime(ctx)
         ctx.extra["plugin_id"] = plugin_id
@@ -2915,7 +2917,7 @@ class DesktopPetSocketServer:
                     trace_store=self.trace_store,
                     plugin_manager=self.plugin_manager,
                     autonomy_mode=autonomy_mode,
-                    permission_scope=f"socket:{sid}",
+                    permission_scope=f"workspace:{workspace_id}",
                 )
                 self._bind_ctx_runtime(ctx)
                 turn_service = self._active_turn_service()
@@ -3053,7 +3055,7 @@ class DesktopPetSocketServer:
                         self._permission_request_resolved_map.pop(request_id, None)
                         self._permission_request_tool_map[request_id] = str(tool_name)
                         self._permission_request_scope_map[request_id] = str(
-                            payload.get("permission_scope") or f"socket:{sid}"
+                            payload.get("permission_scope") or f"workspace:{workspace_id}"
                         )
                         self._permission_request_sid_map[request_id] = sid
                     await self.sio.emit(SystemEvents.PERMISSION_REQUEST, payload, to=sid)
@@ -3177,7 +3179,7 @@ class DesktopPetSocketServer:
                     trace_store=self.trace_store,
                     plugin_manager=self.plugin_manager,
                     permission_request_cb=_permission_request_cb,
-                    permission_scope=f"socket:{sid}",
+                    permission_scope=f"workspace:{workspace_id}",
                     autonomy_mode=autonomy_mode,
                 )
                 include_visual = final_visual_request and captured_frame_id is not None

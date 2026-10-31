@@ -188,7 +188,7 @@ def build_tool_call_handler(
             tool_executor=tool_executor,
             trace_store=trace_store,
             plugin_manager=plugin_manager,
-            permission_scope=f"socket:{sid}",
+            permission_scope=f"workspace:{active_workspace_id()}",
         )
         tool_ctx.extra["turn_id"] = f"turn:{tool_request_id}"
         bind_ctx_runtime(tool_ctx)
@@ -198,7 +198,7 @@ def build_tool_call_handler(
             if isinstance(request_id, str):
                 permission_request_ids.add(request_id)
                 permission_request_tool_map[request_id] = call.name
-                permission_request_scope_map[request_id] = str(payload.get("permission_scope") or f"socket:{sid}")
+                permission_request_scope_map[request_id] = str(payload.get("permission_scope") or tool_ctx.permission_scope or "workspace:default")
                 permission_request_sid_map[request_id] = sid
             await sio.emit(SystemEvents.PERMISSION_REQUEST, payload, to=sid)
 
@@ -289,7 +289,7 @@ def build_tool_recheck_handler(
             tool_executor=tool_executor,
             trace_store=trace_store,
             plugin_manager=plugin_manager,
-            permission_scope=f"socket:{sid}",
+            permission_scope=f"workspace:{active_workspace_id()}",
         )
         ctx.extra["turn_id"] = f"turn:{request_id}"
         bind_ctx_runtime(ctx)

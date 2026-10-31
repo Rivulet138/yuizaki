@@ -123,7 +123,8 @@ export const canRetryCompanionJob = (event: CompanionEventEnvelope): boolean => 
   if (isUnknownEffectEvent(event)) return false
   if (event.status !== 'failed' && event.status !== 'cancelled' && event.status !== 'interrupted') return false
   if (isToolCompanionJob(event)) {
-    return event.data?.retryable !== false
+    return event.data?.retryable === true
+      && event.data?.replayArgsAvailable === true
       && companionJobToolArgs(event) !== null
   }
   return event.source === 'scheduler' && typeof event.data?.taskId === 'string'

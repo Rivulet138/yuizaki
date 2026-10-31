@@ -151,6 +151,21 @@ RuntimeUpdates = dict[str, object]
 RuntimeSection = Mapping[str, object]
 RuntimeLifecycleHook = Callable[[], Awaitable[object | None]]
 RuntimeServiceProvider = Callable[[], object | None]
+SECRET_MASK = "********"
+
+
+def _credential_update(
+    current: str, updates: RuntimeSection, field: str, connection_changed: bool,
+    *, clear_empty_credentials: bool = False,
+) -> str | None:
+    if field not in updates or updates[field] is None:
+        return "" if connection_changed else None
+    value = str(updates[field])
+    if value == "" and clear_empty_credentials:
+        return ""
+    if value in {"", SECRET_MASK}:
+        return current if not connection_changed else ""
+    return value
 
 
 def _section(updates: RuntimeUpdates, key: str) -> RuntimeSection | None:
@@ -166,21 +181,33 @@ def _to_float(value: object) -> float:
     return float(str(value))
 
 
-def apply_runtime_config(config: RuntimeConfig, updates: RuntimeUpdates) -> set[str]:
+def apply_runtime_config(
+    config: RuntimeConfig, updates: RuntimeUpdates, *, clear_empty_credentials: bool = False,
+) -> set[str]:
+    """Apply updates; validated settings operations may explicitly clear keys."""
     changed: set[str] = set()
 
     llm_updates = _section(updates, "llm")
     if llm_updates is not None:
-        provider = str(llm_updates.get("provider") or getattr(config.llm, "provider", "custom"))
-        base_for_provider = str(llm_updates.get("base_url") or getattr(config.llm, "base_url", ""))
+        old_provider = str(getattr(config.llm, "provider", "custom"))
+        old_base_url = normalize_llm_base_url(str(getattr(config.llm, "base_url", "")), old_provider)
+        provider = str(llm_updates.get("provider") or old_provider)
+        base_for_provider = str(llm_updates["base_url"] if llm_updates.get("base_url") is not None else getattr(config.llm, "base_url", ""))
+        next_provider = normalize_llm_provider(provider, base_for_provider)
+        next_base_url = normalize_llm_base_url(base_for_provider, next_provider)
+        connection_changed = next_provider != normalize_llm_provider(old_provider, old_base_url) or next_base_url != old_base_url
         if "provider" in llm_updates and llm_updates["provider"] is not None:
-            config.llm.provider = normalize_llm_provider(llm_updates["provider"], base_for_provider)
+            config.llm.provider = next_provider
             changed.add("llm")
         if "base_url" in llm_updates and llm_updates["base_url"] is not None:
-            config.llm.base_url = normalize_llm_base_url(str(llm_updates["base_url"]), provider)
+            config.llm.base_url = next_base_url
             changed.add("llm")
-        if "api_key" in llm_updates and llm_updates["api_key"] is not None:
-            config.llm.api_key = str(llm_updates["api_key"])
+        key = _credential_update(
+            getattr(config.llm, "api_key", ""), llm_updates, "api_key", connection_changed,
+            clear_empty_credentials=clear_empty_credentials,
+        )
+        if key is not None:
+            config.llm.api_key = key
             changed.add("llm")
         if "model" in llm_updates and llm_updates["model"] is not None:
             config.llm.model = str(llm_updates["model"])
@@ -215,19 +242,28 @@ def apply_runtime_config(config: RuntimeConfig, updates: RuntimeUpdates) -> set[
         if "repetition_penalty" in llm_updates and llm_updates["repetition_penalty"] is not None:
             config.llm.repetition_penalty = _to_float(llm_updates["repetition_penalty"])
             changed.add("llm")
-        vision_provider = str(llm_updates.get("vision_provider") or getattr(config.llm, "vision_provider", "custom"))
-        vision_base = str(llm_updates.get("vision_base_url") or getattr(config.llm, "vision_base_url", ""))
+        old_vision_provider = str(getattr(config.llm, "vision_provider", "custom"))
+        old_vision_base = normalize_llm_base_url(str(getattr(config.llm, "vision_base_url", "")), old_vision_provider)
+        vision_provider = str(llm_updates.get("vision_provider") or old_vision_provider)
+        vision_base = str(llm_updates["vision_base_url"] if llm_updates.get("vision_base_url") is not None else getattr(config.llm, "vision_base_url", ""))
+        next_vision_provider = normalize_llm_provider(vision_provider, vision_base)
+        next_vision_base = normalize_llm_base_url(vision_base, next_vision_provider)
+        vision_connection_changed = next_vision_provider != normalize_llm_provider(old_vision_provider, old_vision_base) or next_vision_base != old_vision_base
         if "vision_enabled" in llm_updates and llm_updates["vision_enabled"] is not None:
             config.llm.vision_enabled = bool(llm_updates["vision_enabled"])
             changed.add("llm")
         if "vision_provider" in llm_updates and llm_updates["vision_provider"] is not None:
-            config.llm.vision_provider = normalize_llm_provider(llm_updates["vision_provider"], vision_base)
+            config.llm.vision_provider = next_vision_provider
             changed.add("llm")
         if "vision_base_url" in llm_updates and llm_updates["vision_base_url"] is not None:
-            config.llm.vision_base_url = normalize_llm_base_url(str(llm_updates["vision_base_url"]), vision_provider)
+            config.llm.vision_base_url = next_vision_base
             changed.add("llm")
-        if "vision_api_key" in llm_updates and llm_updates["vision_api_key"] is not None:
-            config.llm.vision_api_key = str(llm_updates["vision_api_key"])
+        vision_key = _credential_update(
+            getattr(config.llm, "vision_api_key", ""), llm_updates, "vision_api_key", vision_connection_changed,
+            clear_empty_credentials=clear_empty_credentials,
+        )
+        if vision_key is not None:
+            config.llm.vision_api_key = vision_key
             changed.add("llm")
         if "vision_model" in llm_updates and llm_updates["vision_model"] is not None:
             config.llm.vision_model = str(llm_updates["vision_model"]).strip()

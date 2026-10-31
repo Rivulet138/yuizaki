@@ -147,6 +147,7 @@ docs/                     快速开始、配置、API、架构、国际化与平
 | --- | --- |
 | [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | 启动、首次验收、Launcher 命令和故障处理 |
 | [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) | 环境变量、Provider、语音、SVC、MCP、视觉、记忆和打包 |
+| [`docs/DSH_INTEGRATION_HARDENING.md`](docs/DSH_INTEGRATION_HARDENING.md) | DSH 委托、OneBot 消息/投递契约及设计参考 |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 进程边界、Agent 阶段、数据流和权限 |
 | [`docs/API.md`](docs/API.md) | HTTP、SSE、Socket.IO、Job、记忆和认证契约 |
 | [`docs/LINUX.md`](docs/LINUX.md) | Linux、X11、Wayland、音频、GPU 和桌面限制 |
@@ -190,4 +191,4 @@ Highlights: streaming chat with isolated workspaces, agent turns with tools/jobs
 
 Model assets are pinned in [`resources.lock.json`](resources.lock.json); Genie character models ship as a [separate release](https://github.com/Rivulet138/yuizaki/releases/tag/genie-models-2026-10-02). Models, voices, characters, fonts, and artwork carry their own licenses — never commit secrets, databases, conversations, screenshots, audio caches, or model weights.
 
-Docs: [Quickstart](docs/QUICKSTART.md) · [Configuration](docs/CONFIGURATION.md) · [Architecture](docs/ARCHITECTURE.md) · [API](docs/API.md) · [Linux](docs/LINUX.md) · [i18n](docs/I18N.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
+Docs: [Quickstart](docs/QUICKSTART.md) · [Configuration](docs/CONFIGURATION.md) · [DSH and OneBot](docs/DSH_INTEGRATION_HARDENING.md) · [Architecture](docs/ARCHITECTURE.md) · [API](docs/API.md) · [Linux](docs/LINUX.md) · [i18n](docs/I18N.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)

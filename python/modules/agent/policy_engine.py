@@ -148,7 +148,9 @@ class PolicyEngine:
             return PolicyDecision(allowed=True)
         scope_key = self._build_scope_key(tool.name, permission_scope)
         remembered = self._remembered.get(scope_key)
-        if remembered is True and not tool.allow_remembered_decision:
+        if remembered is True and (
+            not tool.allow_remembered_decision or tool.risk_level in {"high", "critical"}
+        ):
             remembered = None
         if remembered is not None and (not force_confirm or remembered is False):
             return PolicyDecision(allowed=remembered, reason="remembered")
@@ -315,29 +317,41 @@ class PolicyEngine:
         tool_name: str | None = None,
         permission_scope: str | None = None,
     ) -> bool:
-        future = self._pending.pop(request_id, None)
         with self._store_lock:
-            metadata = self._permission_metadata.pop(request_id, {})
+            future = self._pending.get(request_id)
+            metadata = self._permission_metadata.get(request_id, {})
+            if future is None or future.done():
+                return False
 
-        if future is None or future.done():
-            return False
+            remembered_snapshot = dict(self._remembered)
+            audit_snapshot = list(self._audit)
+            try:
+                if remember and tool_name:
+                    self._remembered[self._build_scope_key(tool_name, permission_scope)] = allowed
+                self._audit.append(PermissionAuditRecord(
+                    timestamp=datetime.now().isoformat(),
+                    request_id=request_id,
+                    tool_name=tool_name,
+                    capability_id=tool_name,
+                    capability_type="tool" if tool_name else None,
+                    capability_kind=None,
+                    remember_scope=(permission_scope or "default").strip() or "default",
+                    decision="allowed" if allowed else "denied",
+                    remember=remember,
+                    agent_request_id=metadata.get("agent_request_id"),
+                    permission_request_id=request_id,
+                    capability_call_id=metadata.get("capability_call_id"),
+                    permission_scope=metadata.get("permission_scope") or permission_scope,
+                ).to_dict())
+                if len(self._audit) > self._audit_max_entries:
+                    self._audit = self._audit[-self._audit_max_entries:]
+                self._save_store()
+            except Exception:
+                self._remembered = remembered_snapshot
+                self._audit = audit_snapshot
+                raise
 
-        future.set_result(allowed)
-        if remember and tool_name:
-            self._remembered[self._build_scope_key(tool_name, permission_scope)] = allowed
-        self._append_audit(PermissionAuditRecord(
-            timestamp=datetime.now().isoformat(),
-            request_id=request_id,
-            tool_name=tool_name,
-            capability_id=tool_name,
-            capability_type="tool" if tool_name else None,
-            capability_kind=None,
-            remember_scope=(permission_scope or "default").strip() or "default",
-            decision="allowed" if allowed else "denied",
-            remember=remember,
-            agent_request_id=metadata.get("agent_request_id"),
-            permission_request_id=request_id,
-            capability_call_id=metadata.get("capability_call_id"),
-            permission_scope=metadata.get("permission_scope") or permission_scope,
-        ).to_dict())
+            self._pending.pop(request_id, None)
+            self._permission_metadata.pop(request_id, None)
+            future.set_result(allowed)
         return True

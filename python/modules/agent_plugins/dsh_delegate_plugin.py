@@ -32,7 +32,7 @@ class DshDelegatePlugin(AgentPlugin):
             )
         # Validate the task itself before appending background; it must not be
         # possible to turn an empty task into a valid one using context alone.
-        if not task.strip() or task.lstrip().startswith("--") or "\0" in task:
+        if not task.strip() or task.lstrip().startswith("-") or "\0" in task:
             return ToolResultEnvelope(
                 success=False, content="", source="plugin", tool_name="ask_dsh",
                 error="dsh_invalid_task", retryable=False, permission_receipt=receipt,

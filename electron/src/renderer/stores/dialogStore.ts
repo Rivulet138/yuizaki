@@ -43,6 +43,18 @@ export const useDialogStore = defineStore('dialog', () => {
     permissionDialogVisible.value = permissionRequests.value.length > 0
   }
 
+  const removePermissionRequest = (requestId: string) => {
+    const index = permissionRequests.value.findIndex((item) => item.request_id === requestId)
+    if (index < 0) return
+    permissionRequests.value.splice(index, 1)
+    permissionDialogVisible.value = permissionRequests.value.length > 0
+  }
+
+  const clearPermissionRequests = () => {
+    permissionRequests.value = []
+    permissionDialogVisible.value = false
+  }
+
   return {
     workspaceDrawerVisible,
     editCompanionDialogVisible,
@@ -54,5 +66,7 @@ export const useDialogStore = defineStore('dialog', () => {
     openEditCompanion,
     openPermissionRequest,
     completePermissionRequest,
+    removePermissionRequest,
+    clearPermissionRequests,
   }
 })

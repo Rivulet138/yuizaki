@@ -19,7 +19,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from ..llm.client import fetch_available_models
+from ..llm.client import fetch_available_models, redact_error_text
 from ..llm.providers import (
     LlmCredentialError,
     normalize_llm_base_url,
@@ -204,10 +204,48 @@ def _changed_runtime_updates(
             key: deepcopy(value)
             for key, value in section_updates.items()
             if current_section.get(key, missing) != value
+            # An explicit clear must reach runtime even if the store is empty.
+            or (key in _SECRET_FIELD_NAMES and value == "")
         }
+        if section == "llm":
+            # A connection switch must retain an explicitly supplied key even
+            # when its value happens to match the previous connection's key.
+            for provider, base_url, credential in (
+                ("provider", "base_url", "api_key"),
+                ("vision_provider", "vision_base_url", "vision_api_key"),
+            ):
+                if (provider in changed_fields or base_url in changed_fields) and credential in section_updates:
+                    changed_fields[credential] = deepcopy(section_updates[credential])
         if changed_fields:
             changed[section] = changed_fields
     return changed
+
+
+def _clear_changed_connection_secrets(
+    current: dict[str, object],
+    candidate: dict[str, object],
+    patch: dict[str, object],
+) -> None:
+    """Drop credentials when a provider connection changes without a new key."""
+    llm_current = current.get("llm")
+    llm_candidate = candidate.get("llm")
+    llm_patch = patch.get("llm", {})
+    if not isinstance(llm_current, dict) or not isinstance(llm_candidate, dict) or not isinstance(llm_patch, dict):
+        return
+
+    def changed(provider_key: str, base_key: str, credential_key: str) -> bool:
+        old_provider = normalize_llm_provider(llm_current.get(provider_key, "custom"), str(llm_current.get(base_key, "")))
+        new_provider = normalize_llm_provider(llm_candidate.get(provider_key, old_provider), str(llm_candidate.get(base_key, "")))
+        old_base = normalize_llm_base_url(str(llm_current.get(base_key, "")), old_provider)
+        new_base = normalize_llm_base_url(str(llm_candidate.get(base_key, "")), new_provider)
+        return (old_provider, old_base) != (new_provider, new_base) and credential_key not in llm_patch
+
+    for provider_key, base_key, credential_key in (
+        ("provider", "base_url", "api_key"),
+        ("vision_provider", "vision_base_url", "vision_api_key"),
+    ):
+        if changed(provider_key, base_key, credential_key):
+            llm_candidate[credential_key] = ""
 
 
 class SettingsStoreProtocol(Protocol):
@@ -466,7 +504,11 @@ class SettingsAPI:
 
         from .runtime_config import apply_runtime_config
 
-        changed = apply_runtime_config(cast(RuntimeConfig, self.config), runtime_updates)
+        # Regular patches discard secret placeholders before reaching this path;
+        # remaining empty credentials represent an authoritative clear.
+        changed = apply_runtime_config(
+            cast(RuntimeConfig, self.config), runtime_updates, clear_empty_credentials=True,
+        )
         self._schedule_runtime_reload(self._runtime_reload_sections(runtime_updates, changed))
         return {"runtime_applied": sorted(changed), "runtime_changed": sorted(changed)}
 
@@ -590,10 +632,12 @@ class SettingsAPI:
                 runtime_applied=[],
                 runtime_changed=[],
             )
-        normalized = self._normalize_set_payload(key, value)
+        normalized = cast(dict[str, object], _drop_secret_placeholders(self._normalize_set_payload(key, value)))
         base = await self._validated_settings_dump_async()
         try:
-            next_settings = validate_persisted_settings(merge_settings(base, normalized)).model_dump()
+            merged = merge_settings(base, normalized)
+            _clear_changed_connection_secrets(base, merged, normalized)
+            next_settings = validate_persisted_settings(merged).model_dump()
             runtime_updates = self._validated_runtime_updates(normalized)
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail=validation_errors_to_detail(exc)) from exc
@@ -610,7 +654,9 @@ class SettingsAPI:
         base = await self._validated_settings_dump_async()
         normalized_updates = cast(dict[str, object], _drop_secret_placeholders(updates))
         try:
-            next_settings = validate_persisted_settings(merge_settings(base, normalized_updates)).model_dump()
+            merged = merge_settings(base, normalized_updates)
+            _clear_changed_connection_secrets(base, merged, normalized_updates)
+            next_settings = validate_persisted_settings(merged).model_dump()
             runtime_updates = self._validated_runtime_updates(normalized_updates)
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail=validation_errors_to_detail(exc)) from exc
@@ -630,9 +676,13 @@ class SettingsAPI:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"Setting {key} not found or cannot be reset") from exc
 
+        if key.rsplit(".", 1)[-1] in _SECRET_FIELD_NAMES:
+            value = ""
         normalized = self._normalize_set_payload(key, value)
         try:
-            next_settings = validate_persisted_settings(merge_settings(base, normalized)).model_dump()
+            merged = merge_settings(base, normalized)
+            _clear_changed_connection_secrets(base, merged, normalized)
+            next_settings = validate_persisted_settings(merged).model_dump()
             runtime_updates = self._validated_runtime_updates(normalized)
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail=validation_errors_to_detail(exc)) from exc
@@ -682,8 +732,9 @@ class SettingsAPI:
         )
         imported: dict[str, object] = merge_settings(await self._validated_settings_dump_async(), dict(raw_imported))
         try:
+            _clear_changed_connection_secrets(await self._validated_settings_dump_async(), imported, raw_imported)
             next_settings = validate_persisted_settings(imported).model_dump()
-            runtime_updates = self._validated_runtime_updates(imported)
+            runtime_updates = self._validated_runtime_updates(next_settings)
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail=validation_errors_to_detail(exc)) from exc
         runtime_result = await self._commit_settings(next_settings, runtime_updates)
@@ -719,6 +770,7 @@ class SettingsAPI:
                 dict[str, object],
                 _preserve_current_secrets(snapshot, previous_settings),
             )
+            _clear_changed_connection_secrets(previous_settings, target, {})
             previous_dynamic = deepcopy(self.dynamic_config.config)
             try:
                 runtime_updates = self._validated_runtime_updates(target)
@@ -740,6 +792,7 @@ class SettingsAPI:
                 _preserve_current_secrets(self.dynamic_config.get_all(), current_settings),
             )
             next_settings = validate_persisted_settings(rolled_back).model_dump()
+            _clear_changed_connection_secrets(current_settings, next_settings, {})
             previous_dynamic = deepcopy(self.dynamic_config.config)
             try:
                 await self._run_store_call(lambda: self._replace_and_save_settings(next_settings))
@@ -800,9 +853,14 @@ class SettingsAPI:
         provider = normalize_llm_provider(request.get("provider") if request.get("provider") is not None else llm_settings.get("provider", ""), raw_base_url)
         base_url = normalize_llm_base_url(raw_base_url, provider)
         requested_api_key = request.get("api_key")
+        current_provider = normalize_llm_provider(llm_settings.get("provider", ""), str(llm_settings.get("base_url", "")))
+        current_base_url = normalize_llm_base_url(str(llm_settings.get("base_url", "")), current_provider)
+        same_connection = (provider, base_url) == (current_provider, current_base_url)
         api_key = str(
             llm_settings.get("api_key", "")
-            if requested_api_key in {None, SETTINGS_SECRET_MASK}
+            if requested_api_key in {None, SETTINGS_SECRET_MASK, ""} and same_connection
+            else ""
+            if requested_api_key in {None, SETTINGS_SECRET_MASK, ""}
             else requested_api_key
         )
         timeout_value = request.get("timeout") if request.get("timeout") is not None else llm_settings.get("timeout", 30.0)
@@ -818,7 +876,7 @@ class SettingsAPI:
         try:
             models = await fetch_available_models(base_url, api_key, timeout, provider)
         except LlmCredentialError as exc:
-            return {"ok": False, "models": [], "message": str(exc)}
+            return {"ok": False, "models": [], "message": redact_error_text(str(exc), secrets=[api_key])}
         except UnicodeError:
             # A non-ASCII credential or endpoint can never be encoded into an
             # HTTP request; report it as a configuration problem instead of
@@ -829,16 +887,16 @@ class SettingsAPI:
                 "message": "LLM request failed: the configured LLM API key or Base URL cannot be encoded for HTTP; please re-enter the LLM API key",
             }
         except ValueError as exc:
-            return {"ok": False, "models": [], "message": str(exc)}
+            return {"ok": False, "models": [], "message": redact_error_text(str(exc), secrets=[api_key])}
         except httpx.HTTPStatusError as exc:
-            body_text = exc.response.text[:200] if exc.response.text else ""
+            body_text = redact_error_text(exc.response.text, limit=200, secrets=[api_key])
             return {
                 "ok": False,
                 "models": [],
                 "message": f"LLM API {exc.response.status_code}: {body_text}",
             }
         except httpx.RequestError as exc:
-            return {"ok": False, "models": [], "message": f"LLM request failed: {exc}"}
+            return {"ok": False, "models": [], "message": f"LLM request failed: {redact_error_text(str(exc), secrets=[api_key])}"}
 
         return {
             "ok": True,

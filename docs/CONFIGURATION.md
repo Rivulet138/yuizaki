@@ -80,13 +80,17 @@ provider key into DSH or modify DSH profiles.
 On Windows the command is Node plus the JS entry, never a directly spawned `dsh.cmd`. An explicit
 override looks like `["node","C:/Users/<user>/AppData/Roaming/npm/node_modules/@deepseek-ai/dsh/lib/bin.js"]`.
 The bridge appends `--profile`, `headless`, and the task as separate argv entries, without a shell.
-Tasks must be nonempty, at most 4000 characters, and must not begin with `--`.
+Tasks must be nonempty, at most 4000 characters, and after leading whitespace
+must not begin with `-` (including `-V`, `-h`, and `--`).
 The child inherits the MCP stdio environment whitelist plus explicitly allowed DSH provider keys
 (`DEEPSEEK_API_KEY`, `OP_API_KEY`, `ROAI_API_KEY`, `OPENLUX_API_KEY`); no `YUIZAKI_*` variable is
-forwarded. One DSH process runs at a time; a queue wait longer than 30 seconds returns `dsh_busy`.
-Timeout and cancellation kill and await the child. A failed or interrupted delegation may already
-have changed files: inspect the result before trying again. Each invocation may consume provider
-tokens and create a persistent session under `~/.dsh/sessions`; manage those sessions with DSH.
+forwarded. DSH is a high-risk write capability and each run requires user confirmation. One DSH
+process runs at a time; a queue wait longer than 30 seconds returns `dsh_busy`. Timeout and
+cancellation terminate the owned process tree and bound output-pipe draining. Output is redacted
+before bounded head/tail retention. A failed or interrupted delegation may already have changed
+files: inspect the result before trying again. Each invocation may consume provider tokens and
+create a persistent session under `~/.dsh/sessions`; manage those sessions with DSH. See
+[DSH and OneBot integration](DSH_INTEGRATION_HARDENING.md) for result semantics and design references.
 
 ## Voice / 语音
 
@@ -277,6 +281,8 @@ Bot-originated events and non-message OneBot events are ignored. Group mentions 
 than disappearing. A prefix does not bypass a required group mention. Denied allowlist or admission checks return HTTP 200 with `accepted: false`
 and `reason: "not_allowlisted"` or `"rate_limited"`, before creating a turn/delivery. The limits
 are process-local admission controls, not durable quotas or a substitute for webhook authentication.
+For OneBot 11 outbound actions, only `status=ok, retcode=0` confirms delivery;
+`async/1` and a lost/unreadable response leave the effect unknown, not safely retryable.
 
 ## Avatars, models, and caches / 角色、模型与缓存
 
