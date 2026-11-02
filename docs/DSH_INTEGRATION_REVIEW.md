@@ -82,5 +82,6 @@
 4. **FastAPI 弃用警告已消除。** SoulX 改用 lifespan，生命周期及相关回归在弃用警告作为错误的设置下通过；完整 Python 回归没有 warnings。
 5. **真实外部链路尚未验证。** 未使用真实 OpenLux 凭据发起模型请求，未运行已认证 DSH headless profile 的真实写文件任务，未向真实 OneBot 桥发送消息。仓库自动化验证不能替代部署环境验收。
 6. **未执行 WP4 / WP5 / WP6。** 本次完成用户明确指定的 WP1 / WP2 / WP3 及其关联修复，未扩大为新协议、技能导入或其他工作包。
+7. **开发/打包工具链仍有 1 个 GitHub moderate 预警。** Electron 的完整 `npm audit --omit=optional` 展开为 27 条 `minimatch` 传递依赖路径（`GHSA-g3hv-75wg-m249`），但 `npm audit --omit=dev --omit=optional` 为 0 vulnerabilities，生产运行时不受该报告影响。补丁版本 `minimatch >=11.0.1` 超出当前上游依赖的兼容范围；未执行 `npm audit fix --force`，也未做全局 override，以避免破坏 Electron builder、ESLint 及其旧版 glob API。后续应跟踪上游兼容升级，并在单独验证构建回归后再收紧完整审计门禁；详细记录见 `SECURITY.md` 的 Dependency maintenance 章节。
 
 原轮次的 WP1 / WP2 / WP3 核心实现保持不变。本轮修改集中于 `python/database/repository.py`、`python/migration_bootstrap.py`、`python/modules/system/qq_bridge.py`、`python/routes/connector_api.py`、`python/socket_server.py`、`services/soulx-svc/server.py`、检查脚本及 Electron 类型契约；回归测试位于 `python/tests/` 与 Electron 相邻测试。配置与安全行为仍以已有 README、SECURITY、ARCHITECTURE、CONFIGURATION 及 DSH 集成说明为准。
