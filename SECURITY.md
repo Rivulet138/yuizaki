@@ -152,6 +152,28 @@ show effects on chat references and the derived index.
 
 Do not expose the backend or Electron control proxy to the public internet without a separate deployment review covering authentication, origin policy, rate limiting, secrets, sandboxing, tool approval, tenant isolation, and audit logging.
 
+## Dependency maintenance (2026-11-02)
+
+The dependency refresh addresses the ten Dependabot alerts numbered 208-212
+and 216-220 without dismissing them: Electron is locked to 44.10.1 (manifest
+floor 44.9.1), Undici to 6.29.1 and 7.30.1, fast-uri to 3.1.9, body-parser to
+2.4.0, and both Python development locks to Black 26.10.1 (also the manifest
+floor). The same refresh updates follow-redirects to 1.16.2 and Joi to 18.3.1
+for the additional high-severity findings from npm audit.
+
+The node-mcp audit and the Electron production-only audit
+(`npm audit --omit=dev --audit-level=low`) report no vulnerabilities at this
+snapshot. The full Electron audit still reports GHSA-g3hv-75wg-m249 in
+minimatch through lint and packaging dependencies: 27 affected package
+entries, not 27 independent advisories. The advisory's patched floor is
+11.0.1, outside the minimatch major-version ranges currently required by
+those upstream packages. Do not use `npm audit fix --force` or a blanket
+override across the older callable API and newer named-export API merely
+to clear the report. Track an upstream-compatible dependency update;
+the full `npm audit --audit-level=low` CI gate remains enabled and currently
+fails on this unresolved advisory. A clean production audit does not mean
+the development and packaging toolchain is vulnerability-free.
+
 ## Issue reporting
 
 Include the commit, OS, runtime versions, launcher flags, and a redacted log. Never include API keys, backend tokens, personal chat history, or captured screens. Report security-sensitive issues privately to the maintainers.
