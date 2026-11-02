@@ -2,9 +2,9 @@
 
 ## 支持范围 / Supported shape
 
-Linux 启动器面向 x86_64，要求 Python 3.11-3.13、Node.js 22.13+、图形桌面会话，以及与 Electron 兼容的 X11 或 Wayland。Wayland 下会自动选择 Chromium Ozone Wayland 后端；全局输入钩子和宿主级桌面动作可能受合成器策略限制，普通窗口和托盘仍可用。
+Linux 启动器面向 x86_64，要求 Python 3.11-3.13、Node.js `^22.18.0 || >=24.11.0`、图形桌面会话，以及与 Electron 兼容的 X11 或 Wayland。Wayland 下会自动选择 Chromium Ozone Wayland 后端；全局输入钩子和宿主级桌面动作可能受合成器策略限制，普通窗口和托盘仍可用。
 
-The Linux launcher targets x86_64 with Python 3.11-3.13, Node.js 22.13+, a graphical desktop session, and an Electron-compatible X11 or Wayland environment. Wayland selects Chromium's Ozone Wayland backend automatically; compositor policy may restrict global hooks and host desktop actions while ordinary windows and the tray remain supported.
+The Linux launcher targets x86_64 with Python 3.11-3.13, Node.js `^22.18.0 || >=24.11.0`, a graphical desktop session, and an Electron-compatible X11 or Wayland environment. Wayland selects Chromium's Ozone Wayland backend automatically; compositor policy may restrict global hooks and host desktop actions while ordinary windows and the tray remain supported.
 
 ## 安装与启动 / Install and start
 

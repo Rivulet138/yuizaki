@@ -161,18 +161,23 @@ floor 44.9.1), Undici to 6.29.1 and 7.30.1, fast-uri to 3.1.9, body-parser to
 floor). The same refresh updates follow-redirects to 1.16.2 and Joi to 18.3.1
 for the additional high-severity findings from npm audit.
 
-The node-mcp audit and the Electron production-only audit
-(`npm audit --omit=dev --audit-level=low`) report no vulnerabilities at this
-snapshot. The full Electron audit still reports GHSA-g3hv-75wg-m249 in
-minimatch through lint and packaging dependencies: 27 affected package
-entries, not 27 independent advisories. The advisory's patched floor is
-11.0.1, outside the minimatch major-version ranges currently required by
-those upstream packages. Do not use `npm audit fix --force` or a blanket
-override across the older callable API and newer named-export API merely
-to clear the report. Track an upstream-compatible dependency update;
-the full `npm audit --audit-level=low` CI gate remains enabled and currently
-fails on this unresolved advisory. A clean production audit does not mean
-the development and packaging toolchain is vulnerability-free.
+The 2026-11-03 follow-up resolves GHSA-g3hv-75wg-m249 (patched floor
+11.0.1) with minimatch 11.0.4 and GHSA-3g3m-2fjr-6pw4 with glob 14.0.3
+for consumers of glob >=9. Electron builder uses asar 4.3.1 and universal
+3.0.6; EJS uses Jake 13.0.3 so its filelist consumer supports the named
+minimatch API. The legacy glob 7 dependency remains in the temp/rimraf cleanup
+chain. Tests cover temp's async and sync cleanup of tracked concrete paths;
+wildcard matching for glob 7 with minimatch 11 is not claimed as compatible.
+Explicit overrides remain necessary until these transitive consumers update
+their declared ranges.
+
+Both the full Electron audit (`npm audit --audit-level=low`) and node-mcp
+audit report zero vulnerabilities at this snapshot. The full audit gate
+remains enabled. No alert was dismissed and no forced audit fix was used.
+Node.js must satisfy `^22.18.0 || >=24.11.0`. TypeScript 7 runs through an
+explicit npm alias; Vue and ESLint retain TypeScript 6's compiler API.
+See `docs/DEPENDENCY_INTEGRATION_2026-11-03.md` for compatibility validation
+and the remaining unrelated lint/type baselines.
 
 ## Issue reporting
 

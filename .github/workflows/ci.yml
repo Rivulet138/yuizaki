@@ -100,7 +100,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
-        node-version: ['22.13', '24.x']
+        node-version: ['22.18.0', '24.11.0']
     runs-on: ${{ matrix.os }}
     defaults:
       run:

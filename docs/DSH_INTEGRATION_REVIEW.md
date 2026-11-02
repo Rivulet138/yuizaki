@@ -61,11 +61,11 @@
 
 | 检查 | 结果 |
 | --- | --- |
-| Python：`cd python; .venv/Scripts/python.exe -m pytest -q` | **872 passed、2 skipped，无 warnings**。两个跳过项为仅适用于 POSIX 的进程组测试；当前为 Windows，Windows 真实进程测试已运行。 |
+| Python：`cd python; .venv/Scripts/python.exe -m pytest -q` | **876 passed、2 skipped，无 warnings**。两个跳过项为仅适用于 POSIX 的进程组测试；当前为 Windows，Windows 真实进程测试已运行。 |
 | Python 编译检查 | `app.py`、`socket_server.py`、`migration_bootstrap.py`、modules、routes、socket_handlers、tests 全部通过。 |
-| 全仓 Ruff：`python/.venv/Scripts/python.exe -m ruff check .` | **0 条诊断**，包含 Python、服务及根目录检查脚本。 |
+| 全仓 Ruff：`python/.venv/Scripts/python.exe -m ruff check .` | **原记录有误，已于 2026-11-03 更正**：Ruff 0.17.3 为 862 条诊断；同一工作树使用原锁定 0.16.9 为 765 条。不能将修改文件的检查通过表述为全仓清零。 |
 | Python basedpyright | Python **3.11 / 3.12 / 3.13** 目标各为 **0 errors、24 warnings，退出码 0**，原报告的 13 个错误已清零。24 条提示均为框架注册函数的静态“未使用”提示，未通过关闭检查消除。 |
-| Electron 单元测试 | **28 个文件、217 项通过**。 |
+| Electron 单元测试 | **31 个文件、232 项通过**。 |
 | Electron 类型门禁与 lint | 通过；渲染器仍有 **25 个已登记类型错误、涉及 9 个文件**，新增错误为 0。 |
 | Electron 构建、renderer bundle 审计及 `start:check` | 通过，运行预检就绪。 |
 | Go Launcher：`go test ./...` | 通过。 |
@@ -76,12 +76,12 @@
 
 ## 仍存在的问题与验证边界
 
-1. **Python 保留 24 条非阻断静态提示。** `app_factory.py` 2 条、`modules/system/http_observability.py` 3 条、`routes/connector_api.py` 19 条，均涉及已通过框架注册的嵌套处理函数。13 个类型错误及全仓 Ruff 诊断已修复；未为消除提示重写路由注册或添加忽略配置。
+1. **静态检查结果已有更新。** 原 basedpyright 的 24 条提示在锁定工具版本 1.40.2 下不再报告，未修改规则或重写路由。全仓 Ruff 仍有存量及升级后新增诊断，详见上表和依赖整合记录。
 2. **本轮回归新增 13 项 Python 测试。** 数据库/迁移/桥接/持久化 8 项、连接器断连 2 项、SoulX 生命周期 3 项。SoulX 使用模拟 runtime 验证应用生命周期，未加载真实模型权重。
 3. **前端类型检查采取基线门禁。** 门禁通过表示没有新增错误，25 个既有错误尚未清零，涉及 9 个文件。
 4. **FastAPI 弃用警告已消除。** SoulX 改用 lifespan，生命周期及相关回归在弃用警告作为错误的设置下通过；完整 Python 回归没有 warnings。
 5. **真实外部链路尚未验证。** 未使用真实 OpenLux 凭据发起模型请求，未运行已认证 DSH headless profile 的真实写文件任务，未向真实 OneBot 桥发送消息。仓库自动化验证不能替代部署环境验收。
 6. **未执行 WP4 / WP5 / WP6。** 本次完成用户明确指定的 WP1 / WP2 / WP3 及其关联修复，未扩大为新协议、技能导入或其他工作包。
-7. **开发/打包工具链仍有 1 个 GitHub moderate 预警。** Electron 的完整 `npm audit --omit=optional` 展开为 27 条 `minimatch` 传递依赖路径（`GHSA-g3hv-75wg-m249`），但 `npm audit --omit=dev --omit=optional` 为 0 vulnerabilities，生产运行时不受该报告影响。补丁版本 `minimatch >=11.0.1` 超出当前上游依赖的兼容范围；未执行 `npm audit fix --force`，也未做全局 override，以避免破坏 Electron builder、ESLint 及其旧版 glob API。后续应跟踪上游兼容升级，并在单独验证构建回归后再收紧完整审计门禁；详细记录见 `SECURITY.md` 的 Dependency maintenance 章节。
+7. **依赖预警修复已于 2026-11-03 落地。** minimatch 统一为 11.0.4，配套升级 asar/universal/Jake，并将 glob >=9 的消费者固定为 14.0.3。temp 的旧 rimraf/glob 7 调用链仅以精确路径清理已跟踪目录；未承诺 glob 7 通配符与 minimatch 11 兼容。完整 Electron 审计为 0 vulnerabilities，未忽略预警或关闭门禁。兼容性回归、工具链拆分和剩余基线见 [依赖整合记录](DEPENDENCY_INTEGRATION_2026-11-03.md) 与 `SECURITY.md`。
 
 原轮次的 WP1 / WP2 / WP3 核心实现保持不变。本轮修改集中于 `python/database/repository.py`、`python/migration_bootstrap.py`、`python/modules/system/qq_bridge.py`、`python/routes/connector_api.py`、`python/socket_server.py`、`services/soulx-svc/server.py`、检查脚本及 Electron 类型契约；回归测试位于 `python/tests/` 与 Electron 相邻测试。配置与安全行为仍以已有 README、SECURITY、ARCHITECTURE、CONFIGURATION 及 DSH 集成说明为准。
