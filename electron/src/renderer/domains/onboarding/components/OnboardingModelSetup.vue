@@ -46,7 +46,7 @@ import { ElInput } from 'element-plus'
 import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/option/style/css'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElForm, ElFormItem } from 'element-plus'
 import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/form-item/style/css'
@@ -61,23 +61,23 @@ const settingsStore = useSettingsStore()
 const busy = ref(false)
 const tested = ref(false)
 const error = ref('')
-const draft = reactive({ provider: 'custom' as LlmProviderPreset, baseUrl: '', apiKey: '', model: '' })
+const draft = ref({ provider: 'custom' as LlmProviderPreset, baseUrl: '', apiKey: '', model: '' })
 const providers = computed(() => getLlmProviderOptions(t('common.custom')))
-const canSubmit = computed(() => Boolean(draft.baseUrl.trim() && draft.model.trim()))
+const canSubmit = computed(() => Boolean(draft.value.baseUrl.trim() && draft.value.model.trim()))
 
 const syncDraft = (): void => {
-  draft.provider = providers.value.some(item => item.value === settingsStore.state.llm.provider)
+  draft.value.provider = providers.value.some(item => item.value === settingsStore.state.llm.provider)
     ? settingsStore.state.llm.provider as LlmProviderPreset
     : 'custom'
-  draft.baseUrl = settingsStore.state.llm.base_url
-  draft.apiKey = settingsStore.state.llm.api_key
-  draft.model = settingsStore.state.llm.model
+  draft.value.baseUrl = settingsStore.state.llm.base_url
+  draft.value.apiKey = settingsStore.state.llm.api_key
+  draft.value.model = settingsStore.state.llm.model
 }
 
 const applyProvider = (value: string | number | boolean): void => {
   const provider = String(value) as LlmProviderPreset
-  draft.provider = provider
-  if (provider !== 'custom') draft.baseUrl = LLM_PROVIDER_BASE_URLS[provider]
+  draft.value.provider = provider
+  if (provider !== 'custom') draft.value.baseUrl = LLM_PROVIDER_BASE_URLS[provider]
   tested.value = false
 }
 
@@ -90,10 +90,10 @@ const saveAndTest = async (): Promise<void> => {
     await settingsStore.saveSettings({
       llm: {
         ...settingsStore.state.llm,
-        provider: draft.provider,
-        base_url: draft.baseUrl.trim(),
-        api_key: draft.apiKey.trim(),
-        model: draft.model.trim(),
+        provider: draft.value.provider,
+        base_url: draft.value.baseUrl.trim(),
+        api_key: draft.value.apiKey.trim(),
+        model: draft.value.model.trim(),
       },
     })
     const result = await settingsClient.testLlm()

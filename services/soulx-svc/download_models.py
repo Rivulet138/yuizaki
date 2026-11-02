@@ -7,7 +7,6 @@ from pathlib import Path
 from huggingface_hub import hf_hub_download, snapshot_download
 from huggingface_hub.errors import EntryNotFoundError
 
-
 RESOURCE_LOCK_PATH = Path(__file__).resolve().parents[2] / "resources.lock.json"
 
 
@@ -24,8 +23,8 @@ def download(repo_id: str, local_dir: Path, revision: str) -> None:
         repo_type="model",
         revision=revision,
         local_dir=str(local_dir),
-        local_dir_use_symlinks=False,
     )
+
 
 def download_soulx_checkpoint(local_dir: Path, revision: str) -> Path:
     local_dir.mkdir(parents=True, exist_ok=True)
@@ -38,7 +37,6 @@ def download_soulx_checkpoint(local_dir: Path, revision: str) -> Path:
                 repo_type="model",
                 revision=revision,
                 local_dir=str(local_dir),
-                local_dir_use_symlinks=False,
             )
             return Path(downloaded_path)
         except EntryNotFoundError:

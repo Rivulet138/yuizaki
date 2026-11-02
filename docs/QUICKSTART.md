@@ -8,7 +8,7 @@ Start Yuizaki from source. Verify text chat first, then enable voice, vision, Qd
 
 - Windows 10/11 x64 或 x86_64 Linux 图形桌面 / Windows 10/11 x64 or x86_64 Linux desktop
 - Python 3.11-3.13
-- Node.js 22.13+、npm / Node.js 22.13+ and npm
+- Node.js `^22.18.0 || >=24.11.0`、npm / Node.js `^22.18.0 || >=24.11.0` and npm
 - Go 1.27+（构建 Launcher / for launcher builds）
 
 Launcher 会创建并管理 `python/.venv`。

@@ -40,7 +40,7 @@ TTS_WARMUP_ENABLED=0
 
 - Windows 10/11 x64 或 x86_64 Linux 图形桌面
 - Python 3.11–3.13
-- Node.js ≥ 22.13 和 npm
+- Node.js `^22.18.0 || >=24.11.0` 和 npm
 - Go 1.27+，仅在构建 Launcher 时需要
 - Docker，仅在启用 Qdrant 时需要
 
@@ -185,7 +185,7 @@ cd electron; npm ci; npm run prepare:launcher:win; cd ..
 .\YuizakiLauncher.exe start
 ```
 
-Requires Windows 10/11 x64 or a Linux x86_64 desktop, Python 3.11–3.13, Node.js ≥ 22.13, and Go 1.27+ to build the launcher. Use `--electron-ui` for the Electron panel and pet, `--with-mcp` for browser-automation tools (MCP stays off by default). The UI ships in Simplified Chinese, English, and Japanese.
+Requires Windows 10/11 x64 or a Linux x86_64 desktop, Python 3.11–3.13, Node.js `^22.18.0 || >=24.11.0`, and Go 1.27+ to build the launcher. Use `--electron-ui` for the Electron panel and pet, `--with-mcp` for browser-automation tools (MCP stays off by default). The UI ships in Simplified Chinese, English, and Japanese.
 
 Highlights: streaming chat with isolated workspaces, agent turns with tools/jobs/MCP/plugins, SQLite-authoritative memory with review and deletion, request-scoped vision, and rollback-able settings snapshots. Desktop control, messaging bridges, and MCP are opt-in and off by default.
 
