@@ -226,7 +226,7 @@ export class RealtimeVoiceSession {
   private outputAudioContext: AudioContext | null = null
   private outputAudioSource: MediaStreamAudioSourceNode | null = null
   private outputAnalyser: AnalyserNode | null = null
-  private outputSamples: Float32Array | null = null
+  private outputSamples: Float32Array<ArrayBuffer> | null = null
   private outputAnalysisFrame: number | null = null
   private outputLipSyncActive = false
   private outputLevelReportedAt = 0
@@ -497,7 +497,7 @@ export class RealtimeVoiceSession {
     this.setStatus('closed')
   }
 
-  private async openConnection(options: { workspaceId: string; sessionId: string }): Promise<void> {
+  private async openConnection(options: { workspaceId: string; sessionId: string; audioInputDeviceId?: string }): Promise<void> {
     const connectStartedAt = performance.now()
     this.disposeConnection()
     this.setStatus('connecting')
@@ -970,6 +970,7 @@ export class RealtimeVoiceSession {
       failed: 'AgentJobFailed',
       cancelled: 'AgentJobCancelled',
       interrupted: 'AgentJobInterrupted',
+      unknown_effect: 'AgentJobUnknownEffect',
     } as const
     job.revision += 1
     this.emit('companion-event', {
@@ -982,8 +983,6 @@ export class RealtimeVoiceSession {
       requestId: job.requestId,
       revision: job.revision,
       interruptionEpoch: job.interruptionEpoch,
-      generationId: this.currentGenerationId,
-      sequence: this.nextSequence(),
       source: 'voice',
       timestamp: Date.now(),
       status,

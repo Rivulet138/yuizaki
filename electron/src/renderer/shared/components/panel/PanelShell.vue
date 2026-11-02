@@ -24,7 +24,7 @@
 withDefaults(defineProps<{
   title: string
   subtitle?: string
-  tone?: 'companion' | 'admin' | 'neutral'
+  tone?: 'companion' | 'admin' | 'neutral' | 'tool'
   density?: 'comfortable' | 'compact'
   minimal?: boolean
 }>(), {

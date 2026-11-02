@@ -1,10 +1,13 @@
 import type {
+  ManagedResourceMetadata,
+  ManagedResourceSummary,
   ManagedModelResourceId,
   ModelResourceStatusPayload,
   ResumableResourceDownload,
   ResourceDownloadProgress,
   ResourceProgressPhase,
   StorageCategoryId,
+  StorageCategoryStatus,
   StorageStatusPayload,
 } from '@/../shared/resource-manager'
 
@@ -83,7 +86,7 @@ export const normalizeResourceStatus = (value: unknown): ModelResourceStatusPayl
         updatedAt: String(download.updatedAt || ''),
       }]
     })
-  const metadata = (source: SettingsRecord) => {
+  const metadata = (source: SettingsRecord): ManagedResourceMetadata => {
     const raw = isPlainRecord(source.metadata) ? source.metadata : {}
     const integrity = raw.integrity === 'sha256' || raw.integrity === 'revision' || raw.integrity === 'package' || raw.integrity === 'package+revision'
       ? raw.integrity
@@ -100,7 +103,7 @@ export const normalizeResourceStatus = (value: unknown): ModelResourceStatusPayl
       inUseBy: Array.isArray(raw.inUseBy) ? raw.inUseBy.map(String) : [],
     }
   }
-  const summary = (source: SettingsRecord, fallbackMessage: string) => ({
+  const summary = (source: SettingsRecord, fallbackMessage: string): ManagedResourceSummary => ({
     ...resourceSummaryFallback(String(source.message || fallbackMessage)),
     ...source,
     ready: Boolean(source.ready),
@@ -167,7 +170,7 @@ const storageCategoryIds = new Set<StorageCategoryId>(['tts_audio', 'runtime_tem
 
 export const normalizeStorageStatus = (value: unknown): StorageStatusPayload | null => {
   if (!isPlainRecord(value) || !Array.isArray(value.categories)) return null
-  const categories = value.categories.flatMap((rawCategory) => {
+  const categories = value.categories.flatMap((rawCategory): StorageCategoryStatus[] => {
     if (!isPlainRecord(rawCategory)) return []
     const id = String(rawCategory.id || '') as StorageCategoryId
     if (!storageCategoryIds.has(id)) return []

@@ -1,4 +1,4 @@
-import type { ScreenCaptureEncodingOptions } from '@/shared/types'
+import type { ScreenCaptureEncodingOptions } from '@/../shared/types'
 import type { VisualAnalysisStatus } from '@/stores/systemStore'
 import {
   isTerminalVisualFrameResult,

@@ -190,7 +190,7 @@ const normalizeWorldBook = (value: Partial<WorkspaceWorldBook> | undefined): Wor
   budgetTokens: Math.max(128, Math.min(32000, Math.round(Number(value?.budgetTokens) || 1200))),
   entries: Array.isArray(value?.entries)
     ? value.entries
-        .filter((entry): entry is Partial<WorkspaceWorldBookEntry> => Boolean(entry && typeof entry === 'object'))
+        .filter((entry): entry is WorkspaceWorldBookEntry => Boolean(entry && typeof entry === 'object'))
         .map(normalizeWorldBookEntry)
         .slice(0, 80)
     : [],

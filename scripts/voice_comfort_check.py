@@ -20,8 +20,6 @@ PYTHON_ROOT = ROOT / "python"
 if str(PYTHON_ROOT) not in sys.path:
     sys.path.insert(0, str(PYTHON_ROOT))
 
-from modules.system.voice_diagnostics import VoiceDiagnostics
-
 SCHEMA_VERSION = "yuizaki.voice-comfort-evaluation.v1"
 
 
@@ -33,6 +31,8 @@ def _case(name: str, callback: Callable[[], dict[str, Any]]) -> dict[str, Any]:
 
 
 def _healthy_run() -> dict[str, Any]:
+    from modules.system.voice_diagnostics import VoiceDiagnostics
+
     diagnostics = VoiceDiagnostics()
     run_id = diagnostics.begin_run("voice-comfort-staging")
     diagnostics.record_comfort_scenario(
@@ -83,6 +83,8 @@ def _healthy_run() -> dict[str, Any]:
 
 
 def _missing_data_fails_closed() -> dict[str, Any]:
+    from modules.system.voice_diagnostics import VoiceDiagnostics
+
     diagnostics = VoiceDiagnostics()
     run_id = diagnostics.begin_run("voice-comfort-incomplete")
     diagnostics.record_comfort_scenario("first_audio", run_id=run_id, first_audio_latency_ms=240)
@@ -93,6 +95,8 @@ def _missing_data_fails_closed() -> dict[str, Any]:
 
 
 def _run_rotation_clears_previous_samples() -> dict[str, Any]:
+    from modules.system.voice_diagnostics import VoiceDiagnostics
+
     diagnostics = VoiceDiagnostics()
     first_run = diagnostics.begin_run("voice-comfort-a")
     diagnostics.record_comfort_scenario("empty_asr", run_id=first_run)

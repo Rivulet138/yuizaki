@@ -1309,14 +1309,17 @@ def create_message_connector_router(
             # Also release if a task is cancelled before its coroutine starts.
             task.add_done_callback(lambda _completed: qq_inflight.discard(task_key))
         active_tasks[task_key] = task
-        if connector_id == "discord" or (connector_id in fast_ack and queued_store is not None):
-            def _cleanup(completed: asyncio.Task[JSONResponse]) -> None:
-                if active_tasks.get(task_key) is completed:
-                    active_tasks.pop(task_key, None)
-                    active_phases.pop(task_key, None)
-                    active_event_ids.pop(task_key, None)
 
-            task.add_done_callback(_cleanup)
+        def _cleanup(completed: asyncio.Task[JSONResponse]) -> None:
+            if active_tasks.get(task_key) is completed:
+                active_tasks.pop(task_key, None)
+                active_phases.pop(task_key, None)
+                active_event_ids.pop(task_key, None)
+
+        # The shielded worker outlives a disconnected HTTP waiter. Keep it
+        # discoverable by cancellation, duplicate admission, and recovery.
+        task.add_done_callback(_cleanup)
+        if connector_id == "discord" or (connector_id in fast_ack and queued_store is not None):
             if connector_id == "discord":
                 return JSONResponse({"type": 5, "data": {"allowed_mentions": {"parse": []}}})
             # The pending delivery row is written before this response. The
@@ -1335,11 +1338,6 @@ def create_message_connector_router(
             return await asyncio.shield(task)
         except asyncio.CancelledError:
             return JSONResponse({"ok": False, "error": "connector_event_cancelled"}, status_code=409)
-        finally:
-            if active_tasks.get(task_key) is task:
-                active_tasks.pop(task_key, None)
-                active_phases.pop(task_key, None)
-                active_event_ids.pop(task_key, None)
 
     recovery_controller = ConnectorRecoveryController(
         store_provider=delivery_store_provider,

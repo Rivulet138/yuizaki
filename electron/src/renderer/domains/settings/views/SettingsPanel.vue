@@ -850,12 +850,12 @@ const form = reactive({
     ref_audio: '',
     ref_text: '',
     lang: 'ja',
-    device: 'cpu',
+    device: 'cpu' as TtsProfile['device'],
     quality: TTS_CONTRACT_VALUES.qualityFirst,
     split: TTS_CONTRACT_VALUES.splitSmart,
     mode: TTS_CONTRACT_VALUES.modeSerial,
     save_mode: TTS_CONTRACT_VALUES.saveModeDisabled,
-    provider: TTS_PROVIDER,
+    provider: TTS_PROVIDER as TtsProviderPreset,
     base_url: '',
     api_key: '',
     model: 'tts-1',
@@ -978,8 +978,8 @@ let saveFailureCount = 0
 let unmounted = false
 let saveIdleResolvers: Array<(value: boolean) => void> = []
 const settingsMetadata = ref<Record<string, unknown> | null>(null)
-const settingsHistory = ref<unknown[]>([])
-const memoryRebuildRequest = useDomainRequest<Record<string, unknown>>()
+const settingsHistory = ref<Record<string, unknown>[]>([])
+const memoryRebuildRequest = useDomainRequest<Awaited<ReturnType<typeof memoryClient.rebuildIndex>>>()
 const rollbackSteps = ref(1)
 const deleteKey = ref('')
 const lookupKey = ref('')
@@ -1554,6 +1554,10 @@ const setTtsFormField = (field: TtsProfileField, value: unknown) => {
     form.tts.save_mode = TTS_CONTRACT_VALUES.saveModeDisabled
     return
   }
+  if (field === 'timeout') {
+    form.tts.timeout = Number(value)
+    return
+  }
   form.tts[field] = String(value ?? '')
 }
 
@@ -1917,8 +1921,8 @@ const handleRebuildMemoryIndex = async () => {
     ElMessage.error(memoryRebuildRequest.error || t('settings.messages.memoryRebuildFailed'))
     return
   }
-  const indexed = Number(result.indexed_count ?? 0)
-  const skipped = Number(result.skipped_count ?? 0)
+  const indexed = Number(result.job.result?.indexed_count ?? result.job.processed_count ?? 0)
+  const skipped = Number(result.job.result?.skipped_count ?? 0)
   ElMessage.success(t('settings.messages.memoryRebuildOk', { count: indexed, skipped }))
 }
 
@@ -2537,7 +2541,7 @@ const loadSettingsAdmin = async () => {
   try {
     settingsMetadata.value = await settingsClient.metadata()
     const history = await settingsClient.history()
-    settingsHistory.value = history.history
+    settingsHistory.value = history.history.filter(isPlainRecord)
   } catch (error) {
     settingsMetadata.value = null
     settingsHistory.value = []

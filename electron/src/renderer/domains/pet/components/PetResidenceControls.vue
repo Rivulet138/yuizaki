@@ -107,7 +107,12 @@ const { t } = useI18n()
 const emitBoolean = (
   event: 'update-click-through' | 'update-locked' | 'update-dnd',
   value: string | number | boolean,
-) => emit(event, Boolean(value))
+) => {
+  const enabled = Boolean(value)
+  if (event === 'update-click-through') emit('update-click-through', enabled)
+  else if (event === 'update-locked') emit('update-locked', enabled)
+  else emit('update-dnd', enabled)
+}
 </script>
 
 <style scoped>

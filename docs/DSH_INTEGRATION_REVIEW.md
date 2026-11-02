@@ -1,6 +1,6 @@
 # WP1 / WP2 / WP3 改进与检查报告
 
-检查日期：2026-10-31。范围为计划中的 WP1、WP2、WP3，以及直接相连的设置历史、凭据、策略确认、作业重试、QQ 恢复与前端状态展示。实施与回归验证已完成；外部服务的真实部署联调尚未执行。
+复查日期：2026-11-02；初次检查日期：2026-10-31。范围为计划中的 WP1、WP2、WP3，以及直接相连的设置历史、凭据、策略确认、作业重试、QQ 恢复与前端状态展示。本轮进一步修复原报告记录的类型、lint 和生命周期问题，并补充回归；外部服务的真实部署联调尚未执行。
 
 ## 最终行为
 
@@ -32,6 +32,18 @@
 
 上述变更复用现有策略、作业日志、凭据与连接器机制，未增加第三方依赖。`CompanionJobEventLog` 为有界内存事件记录，不是持久审计数据库。
 
+## 2026-11-02 复查改进
+
+| 范围 | 本轮修复及回归 |
+| --- | --- |
+| 连接器后台任务 | HTTP waiter 取消后，`asyncio.shield` 内的 worker 仍可能继续执行。原清理逻辑会提前删除活动任务、阶段和事件映射，令取消接口返回 404。现在统一由 worker 完成回调清理，并校验任务身份，避免删除后续任务；新增内存/持久化两种模式的断连、取消及并发槽释放回归。 |
+| 数据库写入 | 幂等键在 workspace 校验前规范化，避免异常处理引用未赋值变量而掩盖原始 `IntegrityError`；workspace 更新使用 ORM 返回的受影响行数，保留原子 revision 条件，明确处理零行更新与提交后记录消失。 |
+| 迁移、QQ 与对话持久化 | 反射列采用 Mapping 契约，唯一约束识别支持子类；PTY 使用明确 Protocol，停止桥接时持有稳定进程引用；对话双消息写入采用可选 callable Protocol，保留旧仓库逐条写入兼容路径。新增 8 项数据库、迁移、桥接与持久化回归。 |
+| SoulX 生命周期 | 使用 FastAPI lifespan 替代弃用的 `on_event`。保留工作目录先于 runtime 初始化、启动失败传播及关闭后 runtime 状态；新增 3 项测试，覆盖不同精度配置、重复启动和初始化失败。 |
+| Python lint | 修复测试中的导入位置、lambda 赋值和无插值 f-string，同时修复根目录扫描发现的 6 个检查脚本导入位置问题；未添加忽略规则。 |
+
+这些修复不改变 DSH 的高风险确认、子进程环境隔离、未知副作用禁止重放及 OneBot 文本转义边界；未增加依赖或扩展到 WP4 / WP5 / WP6。
+
 ## 参考项目和论文如何落到实现
 
 | 一手资料 | 本次采用的结论 |
@@ -45,30 +57,30 @@
 
 ## 验证结果
 
-下列检查均在本次工作中执行。代码变动完成后重新运行了完整 Python 回归和最终静态差异检查；未变动的前端、Launcher、MCP 检查复用本次已通过结果。
+下列结果来自 2026-11-02 本轮复查；Python 完整回归在后端修复完成后重新执行。跳过项、静态提示与外部验收边界分别记录，不把基线门禁通过等同于类型错误清零。
 
 | 检查 | 结果 |
 | --- | --- |
-| Python：`cd python; .venv/Scripts/python.exe -m pytest -q` | **859 passed、2 skipped、2 warnings**。两个跳过项为仅适用于 POSIX 的进程组测试；当前为 Windows，Windows 真实进程测试已运行。 |
-| Python 编译检查 | `app.py`、`socket_server.py`、modules、routes、socket_handlers、tests 全部通过。 |
-| Python Ruff：本次全部修改/新增的 20 个 Python 文件 | **0 条诊断**。 |
-| Python basedpyright 与 HEAD 对比 | 当前 **13 errors、24 warnings**；HEAD 为 **14 errors、24 warnings**；新增诊断 **0**。完整类型检查仍非零退出，不标记为全通过。 |
-| Electron 单元测试 | **27 个文件、215 项通过**。 |
-| Electron 类型门禁与 lint | 通过；渲染器仍有 **169 个已登记类型错误、涉及 35 个文件**，新增错误为 0。 |
+| Python：`cd python; .venv/Scripts/python.exe -m pytest -q` | **872 passed、2 skipped，无 warnings**。两个跳过项为仅适用于 POSIX 的进程组测试；当前为 Windows，Windows 真实进程测试已运行。 |
+| Python 编译检查 | `app.py`、`socket_server.py`、`migration_bootstrap.py`、modules、routes、socket_handlers、tests 全部通过。 |
+| 全仓 Ruff：`python/.venv/Scripts/python.exe -m ruff check .` | **0 条诊断**，包含 Python、服务及根目录检查脚本。 |
+| Python basedpyright | Python **3.11 / 3.12 / 3.13** 目标各为 **0 errors、24 warnings，退出码 0**，原报告的 13 个错误已清零。24 条提示均为框架注册函数的静态“未使用”提示，未通过关闭检查消除。 |
+| Electron 单元测试 | **28 个文件、217 项通过**。 |
+| Electron 类型门禁与 lint | 通过；渲染器仍有 **25 个已登记类型错误、涉及 9 个文件**，新增错误为 0。 |
 | Electron 构建、renderer bundle 审计及 `start:check` | 通过，运行预检就绪。 |
 | Go Launcher：`go test ./...` | 通过。 |
-| Yuizaki MCP：`npm test` | **7 项通过**。 |
+| Yuizaki MCP：`npm test` | **11 项通过**。 |
 | 文档、资源、Python 依赖锁检查 | 通过。 |
 | memory / stream / connector / voice 检查脚本 | 通过；stream 6/6、connector 4/4、voice 3/3。 |
 | `git diff --check` | 通过。 |
 
 ## 仍存在的问题与验证边界
 
-1. **Python 既有类型债务仍在。** `database/repository.py` 涉及可能未绑定变量、SQLAlchemy 返回类型和 Optional；`migration_bootstrap.py` 涉及反射结构类型；`modules/system/qq_bridge.py` 涉及可空进程与工厂类型；`socket_server.py` 涉及 repository Protocol 和多余判空。以上属于静态诊断，不能仅据此宣称每一项都是已触发的运行故障。
-2. **全仓 Ruff 保留 6 条既有测试诊断。** 与 HEAD 相同，涉及导入位置、lambda 赋值和无插值 f-string；此次修改文件无诊断。
-3. **前端类型检查采取基线门禁。** 门禁通过表示没有新增错误，169 个既有错误尚未清零。
-4. **FastAPI 有 2 条弃用警告。** 来自 `services/soulx-svc/server.py` 的 `on_event` 及 FastAPI 对应路径，未影响本次回归。
+1. **Python 保留 24 条非阻断静态提示。** `app_factory.py` 2 条、`modules/system/http_observability.py` 3 条、`routes/connector_api.py` 19 条，均涉及已通过框架注册的嵌套处理函数。13 个类型错误及全仓 Ruff 诊断已修复；未为消除提示重写路由注册或添加忽略配置。
+2. **本轮回归新增 13 项 Python 测试。** 数据库/迁移/桥接/持久化 8 项、连接器断连 2 项、SoulX 生命周期 3 项。SoulX 使用模拟 runtime 验证应用生命周期，未加载真实模型权重。
+3. **前端类型检查采取基线门禁。** 门禁通过表示没有新增错误，25 个既有错误尚未清零，涉及 9 个文件。
+4. **FastAPI 弃用警告已消除。** SoulX 改用 lifespan，生命周期及相关回归在弃用警告作为错误的设置下通过；完整 Python 回归没有 warnings。
 5. **真实外部链路尚未验证。** 未使用真实 OpenLux 凭据发起模型请求，未运行已认证 DSH headless profile 的真实写文件任务，未向真实 OneBot 桥发送消息。仓库自动化验证不能替代部署环境验收。
 6. **未执行 WP4 / WP5 / WP6。** 本次完成用户明确指定的 WP1 / WP2 / WP3 及其关联修复，未扩大为新协议、技能导入或其他工作包。
 
-修改清单以当前工作区为准：核心变动位于 `python/modules/agent/`、`python/modules/agent_plugins/dsh_delegate_plugin.py`、`python/modules/llm/client.py`、`python/modules/system/`、`python/routes/connector_api.py`、`python/socket_handlers/tool.py`、`python/socket_server.py` 和 Electron 作业展示/权限对话。回归测试位于 `python/tests/` 与 Electron 相邻测试；README、SECURITY、ARCHITECTURE、CONFIGURATION 同步更新。
+原轮次的 WP1 / WP2 / WP3 核心实现保持不变。本轮修改集中于 `python/database/repository.py`、`python/migration_bootstrap.py`、`python/modules/system/qq_bridge.py`、`python/routes/connector_api.py`、`python/socket_server.py`、`services/soulx-svc/server.py`、检查脚本及 Electron 类型契约；回归测试位于 `python/tests/` 与 Electron 相邻测试。配置与安全行为仍以已有 README、SECURITY、ARCHITECTURE、CONFIGURATION 及 DSH 集成说明为准。

@@ -86,7 +86,7 @@ export interface ConnectorPaneApi {
   // ---- actions -----------------------------------------------------------
   setSignServerDraft: (value: string) => void
   copyConnectorWebhookPath: (connectorId: MessageConnectorId) => Promise<void>
-  loadConnectorConfig: (connectorId: MessageConnectorId) => Promise<void>
+  loadConnectorConfig: (connectorId: MessageConnectorId) => Promise<MessageConnectorConfigSnapshot | null>
   probeConnectorItem: (connectorId: MessageConnectorId, notify?: boolean) => Promise<unknown>
   saveConnectorConfig: (connectorId: MessageConnectorId) => Promise<void>
   loadConnectorDeliveries: (connectorId: MessageConnectorId) => Promise<unknown>

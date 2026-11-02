@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { useDialogStore, type PermissionRequestPayload } from './dialogStore'
+import { isPermissionRequestPayload, useDialogStore, type PermissionRequestPayload } from './dialogStore'
 
 const request = (requestId: string): PermissionRequestPayload => ({
   request_id: requestId,
@@ -10,6 +10,14 @@ const request = (requestId: string): PermissionRequestPayload => ({
 })
 
 describe('dialog permission queue', () => {
+  it('validates socket permission payloads before queueing them', () => {
+    expect(isPermissionRequestPayload({ ...request('request-1'), args: { path: '/tmp' } })).toBe(true)
+    for (const invalid of [null, [], {}, { ...request(''), reason: 'test' },
+      { ...request('request-1'), risk_level: 3 }, { ...request('request-1'), capability_id: false }]) {
+      expect(isPermissionRequestPayload(invalid)).toBe(false)
+    }
+  })
+
   beforeEach(() => {
     setActivePinia(createPinia())
   })

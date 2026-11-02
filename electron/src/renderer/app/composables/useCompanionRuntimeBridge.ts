@@ -77,7 +77,7 @@ export function useCompanionRuntimeBridge() {
     },
     behavior: (state: Parameters<typeof petControlClient.setBehaviorState>[0], durationMs?: number) =>
       petControlClient.setBehaviorState(state, durationMs, { source: 'automation' as const }),
-    emotion: (emotionId: string, context: { signal: AbortSignal; eventVersion: string }) => {
+    emotion: async (emotionId: string, context: { signal: AbortSignal; eventVersion: string }) => {
       const command = createAutomationAvatarCommand({
         expressionMix: [],
         parameterOverrides: [],
@@ -85,17 +85,18 @@ export function useCompanionRuntimeBridge() {
         durationMs: 1800,
       })
       command.actions.unshift({ type: 'affect', emotion: emotionId, intensity: 1, decayMs: 1800 })
-      return petControlClient.triggerAvatarCommand(command, { source: 'automation' as const, ...context })
+      await petControlClient.triggerAvatarCommand(command, { source: 'automation' as const, ...context })
     },
-    motion: (group: string, context: { signal: AbortSignal; eventVersion: string }) =>
-      petControlClient.triggerAvatarCommand(createAutomationAvatarCommand({
+    motion: async (group: string, context: { signal: AbortSignal; eventVersion: string }) => {
+      await petControlClient.triggerAvatarCommand(createAutomationAvatarCommand({
         expressionMix: [],
         parameterOverrides: [],
         motion: { group, index: 0 },
         intensity: 1,
         durationMs: 1000,
-      }), { source: 'automation' as const, ...context }),
-    advice: (message: string) => chatStore.appendLocalAdvice(message, 'heartbeat'),
+      }), { source: 'automation' as const, ...context })
+    },
+advice: (message: string) => { chatStore.appendLocalAdvice(message, 'heartbeat') },
     notification: (message: string) => chatStore.addNotification(message),
   }
 
@@ -134,11 +135,11 @@ export function useCompanionRuntimeBridge() {
       sinks: runtimeSinks,
       onSinkError: reportCompanionRuntimeSinkError,
       onPollResult: reportCompanionRuntimePollResult,
-      reportOpportunityOutcome: (jobId, requestId, outcome, reason) => systemClient.resolveCompanionOpportunity(jobId, {
+      reportOpportunityOutcome: async (jobId, requestId, outcome, reason) => { await systemClient.resolveCompanionOpportunity(jobId, {
         request_id: requestId,
         outcome,
         ...(reason ? { reason } : {}),
-      }),
+      }) },
     })
     installCompanionRuntimeController(runtimeController)
   }
@@ -236,7 +237,7 @@ export function useCompanionRuntimeBridge() {
     chatStore.setCompanionPersonaPrompt(companion.persona_prompt || null)
 
     if (companion.model_id) {
-      const modelType = typeof companion.model_type === 'string' ? companion.model_type : undefined
+      const modelType = companion.model_type === 'live2d' || companion.model_type === 'vrm' ? companion.model_type : undefined
       try {
         await petControlClient.setModelSelection(companion.model_id, modelType)
       } catch (error) {

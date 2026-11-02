@@ -34,8 +34,9 @@ export const toolActionStatusLabel = (status?: string | null): string => {
   return labels[state as ToolActionStatus] ?? labels.executing
 }
 
-export const toolEvidenceFromRecord = (record: Record<string, unknown>): string[] => {
-  return [record.evidence, record.verificationEvidence, record.verification_evidence, record.postconditionEvidence, record.postcondition_evidence]
+export const toolEvidenceFromRecord = (record: unknown): string[] => {
+  const source = record && typeof record === 'object' ? record as Record<string, unknown> : {}
+  return [source.evidence, source.verificationEvidence, source.verification_evidence, source.postconditionEvidence, source.postcondition_evidence]
     .flatMap(value => Array.isArray(value) ? value : [value])
     .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
     .map(value => redactDiagnosticText(value.trim().replace(/\s+/g, ' ').slice(0, 240)))

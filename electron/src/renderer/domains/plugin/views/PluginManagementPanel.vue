@@ -183,7 +183,7 @@
                   type="danger"
                   :loading="cancellingInvocationIds.has(scope.row.invocationId)"
                   :disabled="!selectedPlugin?.execution.allowCancellation || cancellingInvocationIds.has(scope.row.invocationId)"
-                  @click="handleCancel(selectedPlugin.id, scope.row.routeId, scope.row.invocationId)"
+                  @click="selectedPlugin && handleCancel(selectedPlugin.id, scope.row.routeId, scope.row.invocationId)"
                 >
                   {{ t('pluginPanel.actionCancel') }}
                 </el-button>

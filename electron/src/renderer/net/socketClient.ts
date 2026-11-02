@@ -106,7 +106,7 @@ export class SocketClient {
 
   private async resolveSocketUrl(authToken: string): Promise<string> {
     if (!this.shouldUseRuntimeApiOrigin()) return this.configuredUrl;
-    const headers = authToken ? { Authorization: `Bearer ${authToken}` } : {};
+    const headers: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}` } : {};
     return refreshRuntimeApiOrigin(headers);
   }
 

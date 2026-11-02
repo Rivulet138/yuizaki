@@ -36,7 +36,7 @@ import urllib.request
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Protocol
 
 BRIDGE_RESOURCE_ID = "qq_bridge"
 BRIDGE_VERSION = "nightly-2026-10-22"
@@ -61,6 +61,18 @@ class QqBridgeError(RuntimeError):
         super().__init__(message)
         self.code = code
         self.status_code = status_code
+
+
+class _BridgePty(Protocol):
+    def read(self, size: int, /) -> str | bytes: ...
+
+    def isalive(self) -> bool: ...
+
+    def terminate(self, force: bool = False) -> object: ...
+
+
+class _PtyFactory(Protocol):
+    def spawn(self, command: str, /, *, cwd: str) -> _BridgePty: ...
 
 
 def _free_port() -> int:
@@ -150,7 +162,7 @@ class QqBridgeSupervisor:
         clock: Callable[[], float] = time.time,
         popen: Callable[..., Any] | None = None,
         health_probe: Callable[[], Any] | None = None,
-        pty_factory: Callable[..., Any] | None = None,
+        pty_factory: _PtyFactory | None = None,
         capture: bool = True,
     ) -> None:
         self._data_dir = Path(data_dir)
@@ -162,7 +174,7 @@ class QqBridgeSupervisor:
         self._health_probe = health_probe
         self._pty_factory = pty_factory
         self._capture_enabled = capture
-        self._pty: Any | None = None
+        self._pty: _BridgePty | None = None
         self._pty_buffer = ""
         self._qr_text: str | None = None
         self._login_failure: str | None = None
@@ -416,13 +428,14 @@ class QqBridgeSupervisor:
 
     def stop(self) -> dict[str, Any]:
         self._stop_capture()
-        if self._process_alive():
+        process = self._process
+        if process is not None and self._process_alive():
             try:
-                self._process.terminate()
-                self._process.wait(timeout=10)
+                process.terminate()
+                process.wait(timeout=10)
             except (OSError, subprocess.TimeoutExpired, AttributeError):
                 try:
-                    self._process.kill()
+                    process.kill()
                 except (OSError, AttributeError):
                     pass
         self._process = None
@@ -448,7 +461,7 @@ class QqBridgeSupervisor:
             return False
         return self._pty_factory is not None or _PtyProcess is not None
 
-    def _reader_factory(self):
+    def _reader_factory(self) -> _PtyFactory | None:
         return self._pty_factory or _PtyProcess
 
     def _append_output(self, chunk: str) -> None:
@@ -632,7 +645,7 @@ def detect_login_failure(text: str) -> str | None:
     return None
 
 
-def _pty_is_alive(pty: Any) -> bool:
+def _pty_is_alive(pty: _BridgePty) -> bool:
     try:
         return bool(pty.isalive())
     except Exception:

@@ -14,8 +14,6 @@ _PYTHON_ROOT = Path(__file__).resolve().parents[1] / "python"
 if str(_PYTHON_ROOT) not in sys.path:
     sys.path.insert(0, str(_PYTHON_ROOT))
 
-from modules.system.release_readiness import build_release_readiness_snapshot
-
 
 def _read_json(path: Path | None) -> dict[str, Any] | None:
     if path is None:
@@ -40,6 +38,8 @@ def _write_atomic(path: Path, payload: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from modules.system.release_readiness import build_release_readiness_snapshot
+
     parser = argparse.ArgumentParser(description="Inspect Yuizaki platform release qualification evidence.")
     parser.add_argument("--platform-attestation", type=Path)
     parser.add_argument("--soak-report", type=Path)

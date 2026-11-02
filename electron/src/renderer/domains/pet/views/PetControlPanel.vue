@@ -418,7 +418,7 @@ const modelSourceLabels = {
   local: 'petControl.modelSource.local',
   plugin: 'petControl.modelSource.plugin',
 } as const
-const ratioPercent = (value: number) => `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`
+const ratioPercent = (value: number | null) => `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`
 let refreshSequence = 0
 let readyRetryTimer: number | null = null
 let readyRetryCount = 0

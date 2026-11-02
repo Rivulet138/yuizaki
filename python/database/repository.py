@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import create_engine, func, update
+from sqlalchemy import create_engine, func
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
@@ -249,6 +249,7 @@ class DatabaseRepository:
         """Persist one user/assistant turn atomically and in conversation order."""
         session = self.SessionLocal()
         normalized_workspace_id = self._normalize_workspace_id(workspace_id)
+        normalized_turn_key = str(turn_idempotency_key or "").strip() or None
 
         def load_existing_pair() -> tuple[dict[str, Any], dict[str, Any]] | None:
             existing = session.query(ChatMessage) \
@@ -271,7 +272,6 @@ class DatabaseRepository:
 
         try:
             normalized_workspace_id = self._require_workspace(session, normalized_workspace_id)
-            normalized_turn_key = str(turn_idempotency_key or "").strip() or None
             if normalized_turn_key is not None:
                 existing_pair = load_existing_pair()
                 if existing_pair is not None:
@@ -1151,15 +1151,17 @@ class DatabaseRepository:
                 values["context"] = context
                 values["context_revision"] = int(workspace.context_revision or 0) + 1
             values["updated_at"] = datetime.now(timezone.utc)
-            query = update(Workspace).where(Workspace.id == workspace_id)
+            query = session.query(Workspace).filter(Workspace.id == workspace_id)
             if expected_context_revision is not None:
-                query = query.where(Workspace.context_revision == expected_context_revision)
-            result = session.execute(query.values(**values))
-            if not result.rowcount:
+                query = query.filter(Workspace.context_revision == expected_context_revision)
+            updated_count = query.update({**values})
+            if not updated_count:
                 session.rollback()
                 current = session.query(Workspace).filter_by(id=workspace_id).first()
                 if current is None:
                     raise NotFoundError(f"workspace_not_found: {workspace_id}")
+                if expected_context_revision is None:
+                    raise DatabaseError(f"workspace_update_no_rows: {workspace_id}")
                 raise ContextRevisionConflict(
                     workspace_id,
                     expected_context_revision,
@@ -1168,6 +1170,8 @@ class DatabaseRepository:
                 )
             session.commit()
             updated = session.query(Workspace).filter_by(id=workspace_id).first()
+            if updated is None:
+                raise NotFoundError(f"workspace_not_found: {workspace_id}")
             return self._workspace_to_record(updated)
         except ContextRevisionConflict:
             session.rollback()

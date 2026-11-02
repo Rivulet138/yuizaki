@@ -15,6 +15,7 @@ import {
 } from '../runtime/companionRuntime'
 import { VoiceEventBridge } from '../runtime/voiceEventBridge'
 import { matchesRealtimeVoiceScope, matchesRealtimeVoiceTurnScope, RealtimeVoiceEventBridge } from '../runtime/realtimeVoiceEventBridge'
+import type { RealtimeVoiceScope } from '@/audio/realtime-voice'
 
 interface PetControlPayload {
   emotion_id?: string
@@ -33,6 +34,15 @@ interface PetControlPayload {
   durationMs?: number
   avatar_command?: unknown
 }
+
+type CompleteRealtimeIdentity = Required<Pick<RealtimeVoiceScope, 'requestId' | 'turnId' | 'generationId' | 'interruptionEpoch'>>
+const hasCompleteRealtimeIdentity = (identity: Partial<Pick<RealtimeVoiceScope, 'requestId' | 'turnId' | 'generationId' | 'interruptionEpoch'>> | null | undefined): identity is CompleteRealtimeIdentity => Boolean(
+  identity
+  && typeof identity.requestId === 'string'
+  && typeof identity.turnId === 'string'
+  && typeof identity.generationId === 'string'
+  && Number.isInteger(identity.interruptionEpoch),
+)
 
 const LIVE2D_PARAMETER_CONTEXT = [
   { id: 'ParamAngleX', min: -30, max: 30 },
@@ -339,7 +349,8 @@ export function useVoiceConversationBridge() {
       }
       if (chatStore.chatOptions.voice_mode === 'continuous') {
         activeVoiceTransport = 'realtime'
-        chatStore.setRealtimeRecording(true, realtimeVoiceSession.getCurrentTurnIdentity())
+        const identity = realtimeVoiceSession.getCurrentTurnIdentity()
+        chatStore.setRealtimeRecording(true, hasCompleteRealtimeIdentity(identity) ? identity : undefined)
         if (chatStore.chatOptions.pet_link_enabled !== false) {
           void publishCompanionRuntimeEvent({ source: 'voice', activity: 'listening', interruptionEpoch: voiceRuntimeEpoch })
         }
@@ -405,7 +416,8 @@ export function useVoiceConversationBridge() {
         petControlContext: chatStore.getPetControlContext(),
         })
         activeVoiceTransport = 'realtime'
-        chatStore.setRealtimeRecording(true, realtimeVoiceSession.getCurrentTurnIdentity())
+        const identity = realtimeVoiceSession.getCurrentTurnIdentity()
+        chatStore.setRealtimeRecording(true, hasCompleteRealtimeIdentity(identity) ? identity : undefined)
         if (chatStore.chatOptions.pet_link_enabled !== false) {
           void publishCompanionRuntimeEvent({
             source: 'voice',
@@ -464,7 +476,8 @@ export function useVoiceConversationBridge() {
     realtimeEventBridge.listen('status', ({ status }) => {
       chatStore.setRealtimeStatus(status)
       if (status === 'recording') {
-        chatStore.setRealtimeRecording(true, realtimeVoiceSession.getCurrentTurnIdentity())
+          const identity = realtimeVoiceSession.getCurrentTurnIdentity()
+          chatStore.setRealtimeRecording(true, hasCompleteRealtimeIdentity(identity) ? identity : undefined)
         if (chatStore.chatOptions.pet_link_enabled !== false) {
           void publishCompanionRuntimeEvent({ source: 'voice', activity: 'listening', interruptionEpoch: voiceRuntimeEpoch })
         }
@@ -518,10 +531,10 @@ export function useVoiceConversationBridge() {
     })
     realtimeEventBridge.listen('turn-complete', (turn) => {
       const identity = chatStore.getCurrentRealtimeIdentity()
-      if (!identity || !matchesRealtimeVoiceTurnScope(turn, {
+      if (!hasCompleteRealtimeIdentity(identity) || !hasCompleteRealtimeIdentity(turn)) return
+      if (!matchesRealtimeVoiceTurnScope(turn, {
         workspaceId: chatState.currentWorkspaceId,
         sessionId: chatState.currentSessionId,
-        interruptionEpoch: getCompanionInterruptionEpoch(),
         ...identity,
       })) return
       if (socketClient.isConnected()) {
@@ -667,16 +680,19 @@ export function useVoiceConversationBridge() {
       const petLinkEnabled = chatStore.chatOptions.pet_link_enabled !== false
       if (!petLinkEnabled) {
         if (realtimeLipSyncForwardingActive) {
-          window.petApi?.pet.setRealtimeLipSync(0, false)
+          const pet = window.petApi?.pet
+          if (pet) pet.setRealtimeLipSync(0, false)
           realtimeLipSyncForwardingActive = false
         }
         return
       }
+      const pet = window.petApi?.pet
+      if (!pet) return
       if (active) {
-        window.petApi?.pet.setRealtimeLipSync(level, true)
+        pet.setRealtimeLipSync(level, true)
         realtimeLipSyncForwardingActive = true
       } else if (realtimeLipSyncForwardingActive) {
-        window.petApi?.pet.setRealtimeLipSync(0, false)
+        pet.setRealtimeLipSync(0, false)
         realtimeLipSyncForwardingActive = false
       }
     })
@@ -709,7 +725,8 @@ export function useVoiceConversationBridge() {
     diagnosticsRunId = null
     realtimeEventBridge.setDiagnosticRunId(null)
     if (realtimeLipSyncForwardingActive) {
-      window.petApi?.pet.setRealtimeLipSync(0, false)
+      const pet = window.petApi?.pet
+      if (pet) pet.setRealtimeLipSync(0, false)
       realtimeLipSyncForwardingActive = false
     }
     realtimeEventBridge.detach()

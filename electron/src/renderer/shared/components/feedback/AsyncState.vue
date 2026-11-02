@@ -44,7 +44,7 @@ import { t } from '@/i18n'
 
 const props = withDefaults(defineProps<{
   loading?: boolean
-  error?: string
+  error?: string | null
   empty?: boolean
   emptyText?: string
   loadingText?: string

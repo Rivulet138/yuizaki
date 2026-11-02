@@ -76,7 +76,7 @@ const props = defineProps<{
   visibleDocs: MemoryDoc[]; filteredCount: number; remainingCount: number; selectedDoc: MemoryDoc | null
   viewMode: DocViewMode; sortMode: DocSortMode; filterLayer: string; searchText: string
   viewOptions: Array<{ value: DocViewMode; label: string }>; layers: MemoryLayer[]; sourceOptions: MemoryOption[]
-  loading: boolean; error?: string; hasFilters: boolean; batchDeleteLabel: string
+  loading: boolean; error?: string | null; hasFilters: boolean; batchDeleteLabel: string
   batchActionLoading: boolean; batchActionDisabled: boolean; inspectorDraft: MemoryInspectorDraft; inspectorDraftDirty: boolean
   inspectorDraftSaving: boolean; forgettingDocIds: Set<string>; removingDocIds: Set<string>
   docViewCount: (mode: DocViewMode) => number; isQueryHit: (doc: MemoryDoc) => boolean; layerTagType: (layer?: string) => TagType

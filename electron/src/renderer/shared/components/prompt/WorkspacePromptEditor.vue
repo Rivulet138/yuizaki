@@ -99,7 +99,7 @@
           :model-value="allFilteredWorldEntriesSelected"
           :indeterminate="isWorldEntrySelectionPartial"
           :disabled="filteredWorldEntries.length === 0"
-          @change="toggleFilteredWorldEntrySelection"
+          @change="toggleFilteredWorldEntrySelection($event === true)"
         >
           {{ t('promptPanel.world.selectAllFiltered') }}
         </el-checkbox>
@@ -183,7 +183,7 @@
         <div class="world-entry-list">
           <article v-for="entry in pagedWorldEntries" :key="entry.id" class="world-entry">
             <div class="world-entry-head">
-              <el-checkbox :model-value="isWorldEntrySelected(entry.id)" @change="(checked: boolean) => setWorldEntrySelected(entry.id, checked)" />
+              <el-checkbox :model-value="isWorldEntrySelected(entry.id)" @change="($event) => setWorldEntrySelected(entry.id, $event === true)" />
               <el-switch v-model="entry.enabled" size="small" />
               <el-input v-model="entry.title" size="small" :placeholder="t('promptPanel.world.entryTitlePlaceholder')" />
               <el-input-number v-model="entry.priority" size="small" :min="0" :max="99" controls-position="right" />

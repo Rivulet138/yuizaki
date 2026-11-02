@@ -88,6 +88,12 @@ Per-session rate admission returns HTTP 2xx with `accepted: false` and
 redelivery storms. Recovered/retried work must pass current enablement,
 allowlists, and the same concurrent admission checks as new work.
 
+An HTTP waiter ending does not terminate its shielded connector worker. Keep
+the worker, event identity, and current phase registered until the worker
+actually finishes, including for webhooks without fast acknowledgement. This
+keeps cancellation, duplicate admission, and recovery aware of in-flight work;
+release the concurrent admission slot when that worker terminates.
+
 For OneBot 11 HTTP action responses, only `status="ok", retcode=0` confirms
 success. `status="async", retcode=1` only acknowledges submission; the final
 effect is unknown and must not be marked delivered or blindly retried.

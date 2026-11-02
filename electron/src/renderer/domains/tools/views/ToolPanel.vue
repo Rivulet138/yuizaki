@@ -859,6 +859,7 @@ const mcpRows = computed<MCPRow[]>(() => {
         ...server,
         ...status,
         name,
+        transport: status.transport || server.transport,
         enabled: server.enabled,
         connected: Boolean(status.connected),
         tools_count: status.tools_count ?? 0,
@@ -1978,9 +1979,9 @@ async function configureObs() {
     obsPasswordDraft.value = ''
     await loadStream()
     const probe = await systemClient.probeStream()
-    streamProbe.value = probe.probe ?? probe
-    if (probe.status === 'reachable') ElMessage.success(t('tools.stream.obsConfigured'))
-    else ElMessage.warning(t('tools.stream.obsSavedWithStatus', { status: String(probe.status || 'unknown') }))
+    streamProbe.value = probe.probe ?? null
+    if (probe.probe?.status === 'reachable') ElMessage.success(t('tools.stream.obsConfigured'))
+    else ElMessage.warning(t('tools.stream.obsSavedWithStatus', { status: String(probe.probe?.status || 'unknown') }))
   } catch (error) {
     const message = describeFailure(error, t('tools.log.unknownError'))
     ElMessage.error(t('tools.stream.obsConfigureError', { message }))

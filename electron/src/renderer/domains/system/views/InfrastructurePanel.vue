@@ -584,11 +584,12 @@ const runtimeProcessLabel = (type: string) => ({
 }[type] || type)
 
 const loadRuntimeSnapshot = async () => {
-  if (!runtimeAvailable.value || runtimeLoading.value) return
+  const runtime = window.petApi?.runtime
+  if (!runtime || !runtimeAvailable.value || runtimeLoading.value) return
   runtimeLoading.value = true
   runtimeError.value = ''
   try {
-    runtimeSnapshot.value = await window.petApi.runtime.getResourceSnapshot()
+    runtimeSnapshot.value = await runtime.getResourceSnapshot()
   } catch (error) {
     runtimeError.value = describeFailure(error, t('infrastructure.runtimeUnavailable'))
   } finally {
@@ -597,11 +598,12 @@ const loadRuntimeSnapshot = async () => {
 }
 
 const clearRuntimeCache = async () => {
-  if (!runtimeAvailable.value || runtimeClearing.value) return
+  const runtime = window.petApi?.runtime
+  if (!runtime || !runtimeAvailable.value || runtimeClearing.value) return
   runtimeClearing.value = true
   runtimeError.value = ''
   try {
-    const result = await window.petApi.runtime.clearSessionCache()
+    const result = await runtime.clearSessionCache()
     ElMessage.success(`${t('infrastructure.clearCache')}: ${formatBytes(result.clearedBytes)}`)
     await loadRuntimeSnapshot()
   } catch (error) {

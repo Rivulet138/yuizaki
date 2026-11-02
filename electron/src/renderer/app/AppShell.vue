@@ -16,13 +16,12 @@
         @open-workspace-settings="dialogStore.openWorkspaceDrawer"
       />
 
-      <section class="main" :class="{ 'wallpaper-on': wallpaperMode, 'main--chat': activeTab === 'chat' }">
+      <section class="main" :class="{ 'wallpaper-on': wallpaperMode }">
         <div class="wallpaper-layer" :style="{ backgroundImage: `url(${currentWallpaper})` }"></div>
         <div class="wallpaper-blur" :style="{ backgroundImage: `url(${currentWallpaper})` }"></div>
         <div class="wallpaper-mask"></div>
         <div class="content-frame">
           <AppTopbar
-            v-if="activeTab !== 'chat'"
             :active-workspace="activeWorkspace"
             :companion-id="activeWorkspace.companion_profile_id || companionStore.activeCompanionId"
             :companions="companionOptions"
@@ -41,7 +40,7 @@
             @change-companion="handleCompanionChange"
           />
 
-          <main class="app-main" :class="activeTab === 'chat' ? 'chat-mode' : 'panel-mode'">
+          <main class="app-main panel-mode">
             <div
               class="view-host"
               data-testid="route-view"
@@ -95,7 +94,7 @@ import { yuizakiConfig } from '@/config/yuizaki'
 import { getSocketClient, SocketEvents } from '@/net/socketClient'
 import { useChatStore } from '@/stores/chatStore'
 import { useCompanionStore } from '@/stores/companionStore'
-import { useDialogStore, type PermissionRequestPayload } from '@/stores/dialogStore'
+import { useDialogStore, isPermissionRequestPayload } from '@/stores/dialogStore'
 import { useSystemStore } from '@/stores/systemStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useSettingsStore } from '@/state/settingsStore'
@@ -211,9 +210,9 @@ const visualCaptureRuntime = createVisualCaptureRuntime({
   },
   logger,
 })
-const resolveTheme = () => {
+const resolveTheme = (): 'light' | 'dark' => {
   const preferred = settingsStore.state.system.theme || 'light'
-  if (preferred !== 'system') return preferred
+  if (preferred !== 'system') return preferred === 'dark' ? 'dark' : 'light'
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
@@ -375,7 +374,8 @@ const handleLocaleChange = async (locale: string) => {
   }
 }
 
-const handlePermissionRequest = (data: PermissionRequestPayload) => {
+const handlePermissionRequest = (data: unknown) => {
+  if (!isPermissionRequestPayload(data)) return
   void publishCompanionRuntimeEvent({ source: 'permission', permission: 'waiting', requestId: data.request_id })
   dialogStore.openPermissionRequest(data)
 }

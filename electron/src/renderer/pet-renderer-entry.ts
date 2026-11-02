@@ -1,5 +1,9 @@
 import { logger } from "./logger";
 import { PetRenderer } from "./pet-renderer";
+import {
+	DEFAULT_PET_CONTROL_STATE,
+	type PetControlState,
+} from "../shared/pet-control";
 
 type PetRendererWindow = {
 	live2dApi?: typeof window.live2dApi;
@@ -9,6 +13,7 @@ type PetRendererWindow = {
 const petWindow = window as unknown as PetRendererWindow;
 
 if (!petWindow.live2dApi) {
+	const fallbackState: PetControlState = { ...DEFAULT_PET_CONTROL_STATE };
 	const fallbackApi = {
 		pet: {
 			rendererReady: () => {},
@@ -16,45 +21,11 @@ if (!petWindow.live2dApi) {
 			dragWindow: () => {},
 			endWindowDrag: () => {},
 			setMouseIgnore: () => {},
-			setLocked: async () => ({
-				modelType: "live2d",
-				modelId: null,
-				scale: 0.42,
-				positionX: 0,
-				positionY: 0,
-				placement: "bottom-right",
-				interactMode: false,
-				clickThrough: true,
-				locked: false,
-				opacity: 1,
-				ready: false,
-			}),
-			setClickThrough: async () => ({
-				modelType: "live2d",
-				modelId: null,
-				scale: 0.42,
-				positionX: 0,
-				positionY: 0,
-				placement: "bottom-right",
-				interactMode: false,
-				clickThrough: true,
-				locked: false,
-				opacity: 1,
-				ready: false,
-			}),
-			snapBottomRight: async () => ({
-				modelType: "live2d",
-				modelId: null,
-				scale: 0.42,
-				positionX: 0,
-				positionY: 0,
-				placement: "bottom-right",
-				interactMode: false,
-				clickThrough: true,
-				locked: false,
-				opacity: 1,
-				ready: false,
-			}),
+		setLocked: async () => ({ ...fallbackState }),
+		setClickThrough: async () => ({ ...fallbackState }),
+		completeAdjustment: async () => ({ ...fallbackState }),
+		cancelAdjustment: async () => ({ ...fallbackState }),
+		snapBottomRight: async () => ({ ...fallbackState }),
 			reloadRenderer: async () => ({ success: true }),
 			setExpression: () => {},
 			playAnimation: () => {},
@@ -75,8 +46,8 @@ if (!petWindow.live2dApi) {
 			}),
 		},
 		interact: {
-			enable: () => {},
-			disable: () => {},
+			enable: async () => ({ ...fallbackState }),
+			disable: async () => ({ ...fallbackState }),
 		},
 		on: () => {},
 		off: () => {},

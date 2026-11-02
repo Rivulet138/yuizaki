@@ -63,7 +63,10 @@ async def test_restart_safe_read_recovery_commits_new_turn_and_outbox(tmp_path: 
     calls: list[str] = []
     executor_binding = _ReadExecutor(registry, calls)
     runtime_context = SimpleNamespace(revision=7)
-    binder = lambda ctx: ctx
+
+    def binder(ctx):
+        return ctx
+
     service = TurnService(TurnPorts(
         run=lambda _ctx: None,
         persist=turn_store.persist,

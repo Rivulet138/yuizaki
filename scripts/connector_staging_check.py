@@ -18,19 +18,19 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from fastapi import FastAPI
+
+if TYPE_CHECKING:
+    from modules.agent.turn_store import TurnCommitStore
+    from modules.system.message_connectors import MessageConnectorRegistry
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON_ROOT = ROOT / "python"
 if str(PYTHON_ROOT) not in sys.path:
     sys.path.insert(0, str(PYTHON_ROOT))
-
-from modules.agent.turn_store import TurnCommitStore
-from modules.system.message_connectors import MessageConnectorRegistry
-from routes.connector_api import create_message_connector_router
 
 SCHEMA_VERSION = "yuizaki.connector-staging-evaluation.v1"
 
@@ -62,6 +62,8 @@ def _app(
     store: TurnCommitStore,
     turn_service: StagingTurnService,
 ) -> FastAPI:
+    from routes.connector_api import create_message_connector_router
+
     app = FastAPI()
     app.include_router(create_message_connector_router(
         registry_provider=lambda: registry,
@@ -82,6 +84,9 @@ async def _case(name: str, callback: Callable[[], Awaitable[dict[str, Any]]]) ->
 
 
 async def run_staging_checks() -> dict[str, Any]:
+    from modules.agent.turn_store import TurnCommitStore
+    from modules.system.message_connectors import MessageConnectorRegistry
+
     async def telegram_success_and_duplicate() -> dict[str, Any]:
         provider_calls: list[dict[str, Any]] = []
 

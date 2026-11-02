@@ -155,14 +155,14 @@ export class AudioPlayer {
     this.audioElement = new Audio()
   }
 
-  async play(audioUrl: string, detail: Omit<TtsPlaybackDetail, 'audio_url'> = {}): Promise<void> {
+  async play(audioUrl: string, detail: Omit<TtsPlaybackDetail, 'audio_url'> = { version: 1 }): Promise<void> {
     this.clearQueuedAudio()
     this.releaseCurrentObjectUrl()
     const token = this.nextPlaybackToken()
     await this.startPlayback(audioUrl, detail, token)
   }
 
-  enqueue(audioUrl: string, detail: Omit<TtsPlaybackDetail, 'audio_url'> = {}): void {
+  enqueue(audioUrl: string, detail: Omit<TtsPlaybackDetail, 'audio_url'> = { version: 1 }): void {
     this.enqueueInternal({ audioUrl, detail })
   }
 
@@ -356,7 +356,7 @@ export class AudioPlayer {
         console.debug('[AudioPlayer] media playback failed:', error)
         this.finishCurrentSegment()
       })
-      const startedDetail: AudioStartedDetail = { audio_url: playbackUrl }
+      const startedDetail: AudioStartedDetail = { audio_url: playbackUrl, version: detail.version }
       if (detail.text) {
         startedDetail.text = detail.text
       }

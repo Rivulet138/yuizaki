@@ -243,7 +243,9 @@ async def test_llm_protocol_rejection_happens_before_generation() -> None:
 
     generation = GenerationManager()
 
-    identity = lambda data, session: {"session_id": session, "version": 999}
+    def identity(data, session):
+        return {"session_id": session, "version": 999}
+
     support = LLMRequestSupport(
         request_identity=identity,
         as_text=lambda value, default="": value if isinstance(value, str) else default,

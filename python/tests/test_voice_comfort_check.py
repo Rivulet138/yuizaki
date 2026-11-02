@@ -7,10 +7,10 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.voice_comfort_check import run_checks
-
 
 def test_voice_comfort_replay_is_synthetic_and_fail_closed() -> None:
+    from scripts.voice_comfort_check import run_checks
+
     report = run_checks()
 
     assert report["schemaVersion"] == "yuizaki.voice-comfort-evaluation.v1"

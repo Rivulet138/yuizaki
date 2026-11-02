@@ -342,6 +342,46 @@ async def test_global_concurrency_fast_ack_duplicate_and_slot_release(tmp_path, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("persistent", [False, True])
+async def test_disconnected_webhook_keeps_background_turn_cancellable(tmp_path, persistent) -> None:
+    finished = asyncio.Event()
+
+    class TrackedService(TurnService):
+        async def execute(self, trigger, request):
+            try:
+                return await super().execute(trigger, request)
+            finally:
+                finished.set()
+
+    service = TrackedService()
+    service.release = asyncio.Event()
+    store = TurnCommitStore(tmp_path / "turns.sqlite3") if persistent else None
+    async with _client(_registry(maxConcurrent=1), service, store) as client:
+        request = asyncio.create_task(client.post(WEBHOOK, json=_event()))
+        try:
+            async with asyncio.timeout(2):
+                while not service.requests:
+                    await asyncio.sleep(0)
+            request.cancel()
+            response = await request
+            assert response.status_code == 409
+            assert not finished.is_set()
+            cancelled = await client.post("/api/system/connectors/qq/events/1/cancel")
+            assert cancelled.status_code == 200
+            assert cancelled.json()["cancelled"] is True
+            assert finished.is_set()
+            assert len(service.requests) == 1
+            service.release.set()
+            assert (await client.post(WEBHOOK, json=_event(2))).json()["reply_sent"] is True
+        finally:
+            service.release.set()
+            if not request.done():
+                request.cancel()
+            await asyncio.gather(request, return_exceptions=True)
+            await asyncio.wait_for(finished.wait(), timeout=2)
+
+
+@pytest.mark.asyncio
 async def test_enqueue_failure_releases_slot_and_does_not_consume_rate(tmp_path, monkeypatch) -> None:
     service = TurnService()
     store = TurnCommitStore(tmp_path / "turns.sqlite3")

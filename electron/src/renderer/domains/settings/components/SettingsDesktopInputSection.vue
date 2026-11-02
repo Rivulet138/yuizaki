@@ -75,7 +75,7 @@
           :model-value="state.settings.pushToTalk.mouseButton"
           :disabled="state.loading"
           class="desktop-input-select"
-          @change="$emit('set-push-to-talk-mouse-button', Number($event))"
+          @change="setMouseButton($event)"
         >
           <el-option :label="t('settingsSection.desktopInput.mouseButtonBack')" :value="4" />
           <el-option :label="t('settingsSection.desktopInput.mouseButtonForward')" :value="5" />
@@ -378,7 +378,13 @@ watch(() => state.settings.keyboard, (keyboard) => {
   for (const binding of keyboardBindingRows.value) draftValues[binding.action] = keyboard[binding.action]
 }, { deep: true })
 
-const handleKeydown = (action: KeyboardShortcutAction, event: KeyboardEvent) => {
+const setMouseButton = (value: unknown) => {
+  const button = Number(value)
+  if (button === 4 || button === 5) emit('set-push-to-talk-mouse-button', button)
+}
+
+const handleKeydown = (action: KeyboardShortcutAction, event: Event | KeyboardEvent) => {
+  if (!(event instanceof KeyboardEvent)) return
   if (editingAction.value === action) {
     if (event.key === 'Enter') {
       event.preventDefault()

@@ -13,13 +13,6 @@ _PYTHON_ROOT = Path(__file__).resolve().parents[1] / "python"
 if str(_PYTHON_ROOT) not in sys.path:
     sys.path.insert(0, str(_PYTHON_ROOT))
 
-from modules.agent.proactive_evaluation import (
-    SCHEMA_VERSION,
-    evaluate_proactive_case,
-    load_golden_cases,
-    summarize_proactive_results,
-)
-
 
 def _write_atomic(path: Path, payload: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -58,6 +51,13 @@ def _default_replay_now(cases: list[dict[str, Any]]) -> float:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from modules.agent.proactive_evaluation import (
+        SCHEMA_VERSION,
+        evaluate_proactive_case,
+        load_golden_cases,
+        summarize_proactive_results,
+    )
+
     parser = argparse.ArgumentParser(
         description="Replay redacted Yuizaki proactive policy cases without external side effects."
     )

@@ -293,7 +293,7 @@ def _capturing_supervisor(tmp_path: Path, chunks: list[str]) -> tuple[QqBridgeSu
 
 def test_pty_capture_exposes_the_qr_and_switches_mode(tmp_path: Path, monkeypatch) -> None:
     rows = chr(10).join(["██  ████ ██"] * 12)
-    supervisor, factory = _capturing_supervisor(tmp_path, [f"info: waiting" + chr(10) + rows + chr(10)])
+    supervisor, factory = _capturing_supervisor(tmp_path, ["info: waiting" + chr(10) + rows + chr(10)])
     _install_without_network(supervisor, tmp_path, monkeypatch)
 
     status = supervisor.start()

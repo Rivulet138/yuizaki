@@ -14,7 +14,7 @@ export class Live2DLipSyncController {
   private audioElement: HTMLAudioElement | null = null
   private audioContext: AudioContext | null = null
   private analyser: AnalyserNode | null = null
-  private buffer: Uint8Array | null = null
+  private buffer: Uint8Array<ArrayBuffer> | null = null
   private externalLevel: number | null = null
   private externalVisemeLevel: number | null = null
   private profile: PetLipSyncProfile = normalizePetLipSyncProfile()

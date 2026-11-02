@@ -368,9 +368,9 @@ import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { inferLlmProviderPreset } from '@/domains/settings/llmProviders'
 import { normalizeOpenAiBaseUrl } from '@/domains/settings/llmDiscovery'
 import { systemClient } from '@/api/client'
+import type { AvatarCapabilitySnapshot } from '@/../shared/avatar-command'
 import { petControl } from '@/utils/petControl'
 import type {
-  AvatarCapabilitySnapshot,
   ConnectorRegistrySnapshot,
   PlatformCapabilitySnapshot,
   PlatformCapabilityState,

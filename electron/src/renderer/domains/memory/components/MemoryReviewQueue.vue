@@ -22,7 +22,7 @@ import { computed } from 'vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import { t } from '@/i18n'
 import type { MemoryDoc } from './memory-panel-types'
-const props = defineProps<{ docs: MemoryDoc[]; compactText: (text?: string | null, limit?: number) => string; qualityPercent: (doc: MemoryDoc) => string; processingId: string; loading?: boolean; error?: string }>()
+const props = defineProps<{ docs: MemoryDoc[]; compactText: (text?: string | null, limit?: number) => string; qualityPercent: (doc: MemoryDoc) => string; processingId: string; loading?: boolean; error?: string | null }>()
 const emit = defineEmits<{ review: [doc: MemoryDoc]; decide: [payload: { doc: MemoryDoc; decision: 'approve' | 'reject' }]; retry: [] }>()
 const decide = (doc: MemoryDoc, decision: 'approve' | 'reject') => {
   if (props.processingId) return

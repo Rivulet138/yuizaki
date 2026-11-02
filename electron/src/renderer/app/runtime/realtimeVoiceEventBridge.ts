@@ -220,6 +220,7 @@ export class RealtimeVoiceEventBridge {
     if (
       typeof value.workspaceId !== 'string'
       || typeof value.sessionId !== 'string'
+|| typeof value.interruptionEpoch !== 'number'
       || !Number.isInteger(value.interruptionEpoch)
     ) return undefined
     return {

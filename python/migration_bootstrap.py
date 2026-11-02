@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import UniqueConstraint, create_engine, inspect
 from sqlalchemy.engine import make_url
 
 from alembic import command
@@ -55,7 +56,7 @@ def _column_signature(column: Any) -> tuple[Any, ...]:
     )
 
 
-def _actual_column_signature(column: dict[str, Any]) -> tuple[Any, ...]:
+def _actual_column_signature(column: Mapping[str, object]) -> tuple[Any, ...]:
     return (
         str(column["name"]),
         str(column["type"]).lower(),
@@ -88,7 +89,7 @@ def _expected_schema() -> dict[str, Any]:
             "unique_constraints": tuple(
                 sorted(_unique_signature(column.name for column in constraint.columns)
                        for constraint in table.constraints
-                       if constraint.__class__.__name__ == "UniqueConstraint")
+                       if isinstance(constraint, UniqueConstraint))
             ),
             "foreign_keys": tuple(sorted(
                 (

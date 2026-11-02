@@ -91,7 +91,7 @@ import { yuizakiConfig } from '@/config/yuizaki'
 import { t } from '@/i18n'
 import { buildSidebarNavigation, buildSidebarRoute, isPrimarySidebarMenu } from '@/navigation/sidebarNavigation'
 
-type SidebarMenu = { id: string; title: string; icon: Component; desc?: string }
+type SidebarMenu = { id: string; title: string; icon?: Component; desc?: string }
 
 const props = defineProps<{
   activeWorkspaceId: string

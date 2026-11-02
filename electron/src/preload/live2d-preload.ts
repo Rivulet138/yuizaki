@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { Live2dApi } from '../shared/live2d-api'
 import type { AvatarCapabilitySnapshot, AvatarCommandResult } from '../shared/avatar-command'
 import type { PetControlState, PetRendererStatePayload } from '../shared/pet-control'
 import type { DesktopPetEventDispatchResult, DesktopPetEventRecord } from '../shared/plugin'
@@ -6,7 +7,7 @@ import type { DesktopPetEventDispatchResult, DesktopPetEventRecord } from '../sh
 type ListenerCallback = (...args: unknown[]) => void
 const callbackMap = new WeakMap<ListenerCallback, Map<string, ListenerCallback>>()
 
-const live2dApi = {
+const live2dApi: Live2dApi = {
   pet: {
     rendererReady: () => ipcRenderer.send('pet:renderer-ready'),
     setPosition: (x: number, y: number) =>
@@ -102,6 +103,6 @@ contextBridge.exposeInMainWorld('live2dApi', live2dApi)
 
 declare global {
   interface Window {
-    live2dApi: typeof live2dApi
+    live2dApi: Live2dApi
   }
 }

@@ -653,11 +653,11 @@ export const createCompanionRuntimeController = (initialDependencies: CompanionR
       const events = Array.isArray(snapshot.heartbeat?.behavior_events) ? snapshot.heartbeat.behavior_events : []
       const activeJobIds = snapshot.jobs ? new Set(snapshot.jobs.active_job_ids ?? []) : null
       const candidate = dependencies.authorizeOpportunity
-        ? events.findLast((event) => {
+        ? [...events].reverse().find((event) => {
             const opportunityIdentity = parseProactiveOpportunityIdentity(event)
             return opportunityIdentity !== null && activeJobIds?.has(opportunityIdentity.jobId) === true
           })
-        : events.findLast((event) => !event.job_id || activeJobIds === null || activeJobIds.has(event.job_id))
+        : [...events].reverse().find((event) => !event.job_id || activeJobIds === null || activeJobIds.has(event.job_id))
       if (!candidate) return 'empty'
       activeOpportunityCandidate = candidate
       const identity = eventIdentity(candidate, Boolean(dependencies.authorizeOpportunity))

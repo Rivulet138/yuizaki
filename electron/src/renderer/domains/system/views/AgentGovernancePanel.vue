@@ -415,6 +415,7 @@ import type { ConnectorDraft, ConnectorPaneApi, MessageConnectorId } from '../co
 import { usePluginDomain } from '../../plugin/composables/usePluginDomain'
 import type { ConnectorProbeSnapshot, ConnectorState, ConnectorStatus, MCPHistoryEntry, MCPInventoryItem, MCPServerConfigSnapshot, MCPServerPresetSnapshot, MCPServerStatusSnapshot, MessageConnectorConfigSnapshot, MessageConnectorConfigUpdate, PermissionAuditRecord, RuntimeContributionSummary } from '@/../shared/agent'
 import type { PluginContributionSummary } from '@/../shared/plugin'
+import { countEnabledPlugins } from '../pluginStatus'
 
 type GovernanceViewId = 'connectors' | 'mcp' | 'permissions' | 'extensions'
 
@@ -560,9 +561,10 @@ const mcpRows = computed<MCPRow[]>(() => {
   return Object.entries(mcp.value.servers).map(([name, server]) => {
     const status = mcp.value?.status?.[name]
     return {
-      name,
       ...server,
       ...(status || {}),
+      name,
+      ok: status?.ok ?? false,
       enabled: status?.enabled ?? server.enabled,
       transport: status?.transport || server.transport,
       statusText: status?.message || (status?.ok ? 'ok' : 'offline'),
@@ -832,7 +834,7 @@ const extensionHosts = computed(() => [
   {
     label: t('governance.category.electronPlugins'),
     value: electronPluginSnapshot.value?.plugins.length ?? 0,
-    detail: t('governance.enabledCount', { count: electronPluginSnapshot.value?.plugins.filter((item) => item.enabled).length ?? 0 }),
+    detail: t('governance.enabledCount', { count: countEnabledPlugins(electronPluginSnapshot.value?.pluginStates ?? []) }),
     tone: 'violet',
   },
   {
@@ -1192,7 +1194,8 @@ const loadConnectorConfig = async (connectorId: MessageConnectorId) => {
 const clearConnectorSecret = (connectorId: MessageConnectorId, field: 'botToken' | 'webhookSecret' | 'publicKey' | 'bridgeUrl' | 'bridgeProtocol' | 'bridgeToken') => {
   const draft = connectorDrafts[connectorId]
   draft[field] = ''
-  draft[`clear${field[0].toUpperCase()}${field.slice(1)}` as keyof ConnectorDraft] = true
+  const clearFields = { botToken: 'clearBotToken', webhookSecret: 'clearWebhookSecret', publicKey: 'clearPublicKey', bridgeUrl: 'clearBridgeUrl', bridgeProtocol: 'clearBridgeProtocol', bridgeToken: 'clearBridgeToken' } as const
+  draft[clearFields[field]] = true
 }
 
 const loadConnectorConfigs = async () => {

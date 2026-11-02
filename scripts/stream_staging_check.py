@@ -13,15 +13,15 @@ import json
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from modules.system.stream_runtime import StreamRuntime
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON_ROOT = ROOT / "python"
 if str(PYTHON_ROOT) not in sys.path:
     sys.path.insert(0, str(PYTHON_ROOT))
-
-from modules.system.stream_platforms import InMemoryTwitchSubscriptionProvider
-from modules.system.stream_runtime import StreamRuntime
 
 SCHEMA_VERSION = "yuizaki.stream-staging-evaluation.v1"
 
@@ -101,6 +101,9 @@ def _case(name: str, callback) -> dict[str, Any]:
 
 
 def run_staging_checks() -> dict[str, Any]:
+    from modules.system.stream_platforms import InMemoryTwitchSubscriptionProvider
+    from modules.system.stream_runtime import StreamRuntime
+
     def caption_local() -> dict[str, Any]:
         runtime = StreamRuntime()
         result = _execute(runtime, "stream.caption_draft", {"text": "欢迎来到直播间"})

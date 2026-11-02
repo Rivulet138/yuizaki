@@ -77,7 +77,7 @@ const props = defineProps<{
   layers: MemoryLayer[]
   selectedLayer: string
   loading: boolean
-  error?: string
+  error?: string | null
   restoringDocIds: Set<string>
 }>()
 

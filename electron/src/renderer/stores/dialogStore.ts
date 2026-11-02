@@ -12,6 +12,16 @@ export interface PermissionRequestPayload {
   args?: unknown
 }
 
+export const isPermissionRequestPayload = (value: unknown): value is PermissionRequestPayload => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const payload = value as Record<string, unknown>
+  return ['request_id', 'tool_name', 'risk_level', 'reason'].every((key) => typeof payload[key] === 'string')
+    && typeof payload.request_id === 'string' && payload.request_id.trim().length > 0
+    && ['capability_id', 'capability_type', 'capability_kind'].every((key) => (
+      payload[key] === undefined || typeof payload[key] === 'string'
+    ))
+}
+
 export const useDialogStore = defineStore('dialog', () => {
   const workspaceDrawerVisible = ref(false)
   const editCompanionDialogVisible = ref(false)

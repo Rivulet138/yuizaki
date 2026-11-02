@@ -18,7 +18,7 @@ import os
 import secrets
 import time
 import uuid
-from typing import Any, Protocol, TypeVar, cast, overload
+from typing import Any, Protocol, TypeVar, cast, overload, runtime_checkable
 from urllib.parse import urlsplit
 from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp
@@ -211,6 +211,20 @@ class WorkspaceCompanionRepository(Protocol):
         model: str = "",
         workspace_id: str = "default",
     ) -> dict[str, Any]: ...
+
+
+@runtime_checkable
+class _MessagePairWriter(Protocol):
+    def __call__(
+        self,
+        session_id: str,
+        user_content: str,
+        assistant_content: str,
+        *,
+        model: str,
+        workspace_id: str,
+        turn_idempotency_key: str | None,
+    ) -> tuple[Mapping[str, object], Mapping[str, object]]: ...
 
 
 class JsonSender(Protocol):
@@ -1077,10 +1091,11 @@ class DesktopPetSocketServer:
                 break
 
         try:
-            user_record: dict[str, Any] | None = None
-            assistant_record: dict[str, Any] | None = None
-            if user_text and assistant_text.strip() and callable(getattr(db_repo, "save_message_pair", None)):
-                user_record, assistant_record = db_repo.save_message_pair(
+            user_record: Mapping[str, object] | None = None
+            assistant_record: Mapping[str, object] | None = None
+            save_message_pair = getattr(db_repo, "save_message_pair", None)
+            if user_text and assistant_text.strip() and isinstance(save_message_pair, _MessagePairWriter):
+                user_record, assistant_record = save_message_pair(
                     session_id,
                     user_text,
                     assistant_text,
@@ -3369,7 +3384,7 @@ class DesktopPetSocketServer:
                             messages=original_messages,
                             assistant_text=pipeline_result.reply,
                             model=model,
-                            turn_id=ctx.turn_id if ctx is not None else None,
+                            turn_id=ctx.turn_id,
                         )
                 except Exception:
                     if tts_worker is not None and not tts_worker.done():

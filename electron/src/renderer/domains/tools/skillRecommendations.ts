@@ -1,4 +1,4 @@
-import type { SkillCatalogItem } from '../../../../shared/capability'
+import type { SkillCatalogItem } from '../../../shared/capability'
 import { t } from '@/i18n'
 
 // Descriptions are lazy getters instead of plain strings: the array is built at

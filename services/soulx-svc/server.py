@@ -12,6 +12,8 @@ import shutil
 import sys
 import threading
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -262,16 +264,19 @@ class SoulXSvcRuntime:
         return generated
 
 
-app = FastAPI(title="Yuizaki SoulX-Singer-SVC Service", version="1.0.0")
 runtime: SoulXSvcRuntime | None = None
 runtime_lock = asyncio.Lock()
 
 
-@app.on_event("startup")
-def startup() -> None:
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     global runtime
     WORK_DIR.mkdir(parents=True, exist_ok=True)
     runtime = SoulXSvcRuntime()
+    yield
+
+
+app = FastAPI(title="Yuizaki SoulX-Singer-SVC Service", version="1.0.0", lifespan=lifespan)
 
 
 @app.get("/health")

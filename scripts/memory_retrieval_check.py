@@ -11,23 +11,17 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from modules.memory.vector_store import Document
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON_ROOT = ROOT / "python"
 if str(PYTHON_ROOT) not in sys.path:
     sys.path.insert(0, str(PYTHON_ROOT))
-
-from modules.memory.evaluation import (
-    SCHEMA_VERSION,
-    evaluate_memory_retrieval,
-    load_golden_cases,
-)
-from modules.memory.pipeline import RetrievalPipeline
-from modules.memory.schema import RetrievalRequest
-from modules.memory.vector_store import Document, VectorStore
 
 
 class DeterministicEmbedding:
@@ -45,6 +39,8 @@ class DeterministicEmbedding:
 
 
 def _load_documents(cases: list[dict[str, Any]]) -> list[Document]:
+    from modules.memory.vector_store import Document
+
     documents: dict[str, Document] = {}
     for case in cases:
         for raw in case.get("documents", []):
@@ -59,6 +55,15 @@ def _load_documents(cases: list[dict[str, Any]]) -> list[Document]:
 
 
 def run_fixture(path: Path) -> dict[str, Any]:
+    from modules.memory.evaluation import (
+        SCHEMA_VERSION,
+        evaluate_memory_retrieval,
+        load_golden_cases,
+    )
+    from modules.memory.pipeline import RetrievalPipeline
+    from modules.memory.schema import RetrievalRequest
+    from modules.memory.vector_store import VectorStore
+
     cases = load_golden_cases(path)
 
     def run_query(case: dict[str, Any]) -> dict[str, Any]:
