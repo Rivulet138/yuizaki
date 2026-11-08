@@ -1,10 +1,20 @@
 import { ElMessage } from 'element-plus'
 import { defineStore } from 'pinia'
+import {
+  DEFAULT_LLM_MAX_OUTPUT_TOKENS,
+  DEFAULT_LLM_TEMPERATURE,
+  DEFAULT_LLM_TOP_P,
+  DEFAULT_LLM_TOP_K,
+  DEFAULT_LLM_MIN_P,
+  DEFAULT_LLM_FREQUENCY_PENALTY,
+  DEFAULT_LLM_PRESENCE_PENALTY,
+  DEFAULT_LLM_REPETITION_PENALTY,
+} from '../../shared/runtime-defaults'
 import { computed, onScopeDispose, reactive, ref, watch } from 'vue'
 import { petControl } from '@/utils/petControl'
 import { chatClient } from '@/api/client'
 import { API_ORIGIN, CONTROL_ORIGIN, requestJson } from '@/api/clients/http-client'
-import type { ActionEnvelope, ActionEnvelopeWithTrace, GenerationEnvelope } from '../../shared/agent'
+import type { ActionEnvelope, ActionEnvelopeWithTrace, CharacterAction, GenerationEnvelope } from '../../shared/agent'
 import { isPetLipSyncViseme, type PetSentenceEmotionCue, type PetVisemeCue } from '../../shared/pet-control'
 import { isCompanionEventEnvelope, type CompanionEventEnvelope } from '../../shared/companion-event'
 import type {
@@ -35,6 +45,10 @@ export interface ChatStoreState {
   isGenerating: boolean
   isSpeaking: boolean
   isTTSPlaying: boolean
+  ttsPlaybackText: string
+  ttsPlaybackSegmentId: number | null
+  ttsPlaybackPositionMs: number
+  ttsPlaybackDurationMs: number | null
   currentSessionId: string
   currentWorkspaceId: string
   currentText: string
@@ -79,6 +93,9 @@ export interface ChatSessionRuntime {
 }
 
 type UnknownRecord = Record<string, unknown>
+type RuntimeGenerationEnvelope = GenerationEnvelope & Required<Pick<
+  GenerationEnvelope, 'requestId' | 'generationId' | 'turnId' | 'interruptionEpoch'
+>>
 type SendChatOptions = {
   appendUser?: boolean
   chatOptions?: Partial<ChatOptions>
@@ -140,22 +157,22 @@ const createOperationId = () => `op_${Date.now()}_${Math.random().toString(36).s
 const createAdviceId = () => `advice_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 const CHAT_OPTIONS_STORAGE_KEY = 'yuizaki.chat.options'
 const CHAT_OPTIONS_STORAGE_VERSION_KEY = 'yuizaki.chat.options.version'
-const CHAT_OPTIONS_STORAGE_VERSION = '8'
-const CHAT_OPTIONS_MAX_OUTPUT_TOKENS = 65535
+const CHAT_OPTIONS_STORAGE_VERSION = '9'
+const CHAT_OPTIONS_MAX_OUTPUT_TOKENS = 128000
 const createTtsStopEvent = (detail?: { interrupted?: boolean; petLipSyncHandled?: boolean }) =>
   new CustomEvent('pet:tts-stop', { detail })
 
 const DEFAULT_CHAT_OPTIONS: Required<Pick<ChatOptions, 'temperature' | 'top_p' | 'top_k' | 'min_p' | 'frequency_penalty' | 'presence_penalty' | 'repetition_penalty' | 'max_tokens' | 'reasoning_effort' | 'response_mode' | 'voice_mode' | 'vad_eagerness' | 'audio_input_device_id' | 'mcp_enabled' | 'web_search_enabled' | 'tts_enabled' | 'pet_link_enabled' | 'translation_target' | 'prompt_mode'>> & Pick<ChatOptions, 'model'> = {
   model: '',
-  temperature: 1.2,
-  top_p: 0.9,
-  top_k: 500,
-  min_p: 0,
-  frequency_penalty: 0.2,
-  presence_penalty: 0,
-  repetition_penalty: 1,
-  max_tokens: 8192,
-  reasoning_effort: 'default',
+  temperature: DEFAULT_LLM_TEMPERATURE,
+  top_p: DEFAULT_LLM_TOP_P,
+  top_k: DEFAULT_LLM_TOP_K,
+  min_p: DEFAULT_LLM_MIN_P,
+  frequency_penalty: DEFAULT_LLM_FREQUENCY_PENALTY,
+  presence_penalty: DEFAULT_LLM_PRESENCE_PENALTY,
+  repetition_penalty: DEFAULT_LLM_REPETITION_PENALTY,
+  max_tokens: DEFAULT_LLM_MAX_OUTPUT_TOKENS,
+  reasoning_effort: 'medium',
   response_mode: 'balanced',
   voice_mode: 'push-to-talk',
   vad_eagerness: 'auto',
@@ -187,7 +204,7 @@ const readNumber = (value: unknown, key: string): number | undefined => {
   return undefined
 }
 
-const readGenerationEnvelope = (value: unknown): GenerationEnvelope | null => {
+const readGenerationEnvelope = (value: unknown): RuntimeGenerationEnvelope | null => {
   const requestId = readString(value, 'request_id').trim()
   const generationId = readString(value, 'generation_id').trim()
   const turnId = readString(value, 'turn_id').trim()
@@ -408,9 +425,12 @@ const loadChatOptions = (): ChatOptions => {
     if (version !== CHAT_OPTIONS_STORAGE_VERSION) {
       const migrated = normalizeChatOptions({
         ...normalized,
-        temperature: normalized.temperature === 0.7 ? DEFAULT_CHAT_OPTIONS.temperature : normalized.temperature,
-        top_p: normalized.top_p === 1 ? DEFAULT_CHAT_OPTIONS.top_p : normalized.top_p,
-        max_tokens: normalized.max_tokens === 2048 ? DEFAULT_CHAT_OPTIONS.max_tokens : normalized.max_tokens,
+        temperature: normalized.temperature === 1.2 ? DEFAULT_CHAT_OPTIONS.temperature : normalized.temperature,
+        top_p: normalized.top_p === 0.9 ? DEFAULT_CHAT_OPTIONS.top_p : normalized.top_p,
+        top_k: normalized.top_k === 500 ? DEFAULT_CHAT_OPTIONS.top_k : normalized.top_k,
+        frequency_penalty: normalized.frequency_penalty === 0.2 ? DEFAULT_CHAT_OPTIONS.frequency_penalty : normalized.frequency_penalty,
+        max_tokens: normalized.max_tokens === 8192 ? DEFAULT_CHAT_OPTIONS.max_tokens : normalized.max_tokens,
+        reasoning_effort: normalized.reasoning_effort === 'default' ? DEFAULT_CHAT_OPTIONS.reasoning_effort : normalized.reasoning_effort,
         mcp_enabled: true,
         ...(version === '4' || version === '5' || version === '6' ? {} : { web_search_enabled: false }),
       })
@@ -439,13 +459,17 @@ const normalizeActionEnvelope = (value: unknown): ActionEnvelope | null => {
   const actions = Array.isArray(value.actions)
     ? value.actions
         .filter(isRecord)
-        .map((action) => ({
-          type: typeof action.type === 'string' ? action.type : 'reply',
-          content: typeof action.content === 'string' ? action.content : undefined,
-          payload: action.payload,
-          schema_version: typeof action.schema_version === 'string' ? action.schema_version : undefined,
-          source: typeof action.source === 'string' ? action.source : undefined,
-        }))
+        .flatMap((action): CharacterAction[] => {
+          const type = action.type === undefined ? 'reply' : action.type
+          if (type !== 'reply' && type !== 'pet_control' && type !== 'tool_trace') return []
+          return [{
+            type,
+            content: typeof action.content === 'string' ? action.content : undefined,
+            payload: action.payload,
+            schema_version: typeof action.schema_version === 'string' ? action.schema_version : undefined,
+            source: typeof action.source === 'string' ? action.source : undefined,
+          }]
+        })
     : []
 
   return { version, schema_version, request_id, source, reply, actions }
@@ -460,6 +484,10 @@ export const useChatStore = defineStore('chat', () => {
     isGenerating: false,
     isSpeaking: false,
     isTTSPlaying: false,
+    ttsPlaybackText: '',
+    ttsPlaybackSegmentId: null,
+    ttsPlaybackPositionMs: 0,
+    ttsPlaybackDurationMs: null,
     currentSessionId: 'default',
     currentWorkspaceId: 'default',
     currentText: '',
@@ -474,6 +502,8 @@ export const useChatStore = defineStore('chat', () => {
       generation: null,
     },
   })
+  let activePlaybackGenerationId: string | null = null
+  let activePlaybackUtteranceId: string | null = null
   type TraceMetadata = {
     tool_trace?: unknown[]
     memory_trace?: unknown[]
@@ -604,7 +634,6 @@ export const useChatStore = defineStore('chat', () => {
   const sessionRuntime = reactive<Record<string, ChatSessionRuntime>>({})
   watch(chatOptions, () => persistChatOptions(chatOptions), { deep: true })
   let pendingSentenceEmotionCues: PetSentenceEmotionCue[] = []
-  let lastAssistantText = ''
   let initialized = false
   const pendingUserMessages = new Map<string, { content: string; index: number }>()
   const pendingInterrupts = new Map<string, { startedAt: number; sessionId: string; timeoutId: number }>()
@@ -727,6 +756,12 @@ export const useChatStore = defineStore('chat', () => {
   const stopTtsPlaybackState = () => {
     state.isSpeaking = false
     state.isTTSPlaying = false
+    state.ttsPlaybackText = ''
+    state.ttsPlaybackSegmentId = null
+    state.ttsPlaybackPositionMs = 0
+    state.ttsPlaybackDurationMs = null
+    activePlaybackGenerationId = null
+    activePlaybackUtteranceId = null
     if (isPetLinkEnabled()) {
       void publishCompanionRuntimeEvent({
         source: 'chat',
@@ -746,7 +781,30 @@ export const useChatStore = defineStore('chat', () => {
     state.isSpeaking = true
     state.isTTSPlaying = true
     const detail = (event as CustomEvent<UnknownRecord>).detail
+    const segmentId = readNumber(detail, 'segmentId')
+    const previousSegmentId = state.ttsPlaybackSegmentId
+    state.ttsPlaybackSegmentId = segmentId ?? null
     const generationId = readString(detail, 'generationId')
+    const utteranceId = readString(detail, 'utteranceId')
+    const isNewGeneration = Boolean(generationId && generationId !== activePlaybackGenerationId)
+    const isNewUtterance = isNewGeneration || (utteranceId
+      ? utteranceId !== activePlaybackUtteranceId
+      : segmentId !== undefined && segmentId !== previousSegmentId)
+
+    if (isNewGeneration) {
+      activePlaybackGenerationId = generationId
+      state.ttsPlaybackText = ''
+    }
+    if (isNewUtterance) {
+      activePlaybackUtteranceId = utteranceId || null
+      state.ttsPlaybackPositionMs = 0
+      const startedDurationMs = readNumber(detail, 'durationMs')
+      state.ttsPlaybackDurationMs = startedDurationMs !== undefined && startedDurationMs > 0
+        ? Math.round(startedDurationMs)
+        : null
+    }
+    const startedText = readString(detail, 'text')
+    if (startedText) state.ttsPlaybackText = startedText
     const sequence = readNumber(detail, 'sequence')
     if (generationId && (sequence === undefined || sequence === 0) && !reportedPlaybackGenerations.has(generationId)) {
       reportedPlaybackGenerations.add(generationId)
@@ -759,6 +817,20 @@ export const useChatStore = defineStore('chat', () => {
         generationId,
       })
     }
+  }
+
+  const handleAudioProgress = (event: Event) => {
+    const detail = (event as CustomEvent<UnknownRecord>).detail
+    const segmentId = readNumber(detail, 'segmentId')
+    const utteranceId = readString(detail, 'utteranceId')
+    if (utteranceId
+      ? utteranceId !== activePlaybackUtteranceId
+      : segmentId === undefined || state.ttsPlaybackSegmentId !== segmentId) return
+    if (segmentId !== undefined) state.ttsPlaybackSegmentId = segmentId
+    const positionMs = readNumber(detail, 'currentTimeMs')
+    if (positionMs !== undefined) state.ttsPlaybackPositionMs = Math.max(0, Math.round(positionMs))
+    const durationMs = readNumber(detail, 'durationMs')
+    if (durationMs !== undefined && durationMs > 0) state.ttsPlaybackDurationMs = Math.round(durationMs)
   }
 
   const clearPendingUserMessage = (sessionId = state.currentSessionId) => {
@@ -783,7 +855,7 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     socketClient.on(SocketEvents.ASR_PARTIAL, (data: unknown) => {
-      if (!readGenerationEnvelope(data)) return
+      if (!readGenerationEnvelope(data) || readString(data, 'session_id') !== state.currentSessionId) return
       state.asrPartialText = readString(data, 'text')
       state.lastError = null
     })
@@ -832,6 +904,7 @@ export const useChatStore = defineStore('chat', () => {
     })
 
     socketClient.on(SocketEvents.ASR_FINAL, (data: unknown) => {
+      if (readString(data, 'session_id') !== state.currentSessionId) return
       const text = readString(data, 'text').trim()
       const envelope = readGenerationEnvelope(data)
       state.asrPartialText = ''
@@ -868,7 +941,6 @@ export const useChatStore = defineStore('chat', () => {
       if (runtimeRequest?.llmFinalReceived) return
       if (runtimeRequest) runtimeRequest.llmFinalReceived = true
       const text = readString(data, 'text')
-      const assistantText = text || runtime.currentText
       const userMessageId = readMessageId(data, 'user_message_id')
       const assistantMessageId = readMessageId(data, 'assistant_message_id')
       const pending = pendingUserMessages.get(runtime.sessionId)
@@ -905,7 +977,6 @@ export const useChatStore = defineStore('chat', () => {
         : runtimeRequest?.ttsEnabled
       if (!ttsExpected) completeRuntimeRequest(runtime, responseRequestId || runtime.requestId)
       if (isActiveSession) {
-        lastAssistantText = assistantText
         state.currentText = ''
         state.isGenerating = false
         state.lastError = null
@@ -1025,9 +1096,15 @@ export const useChatStore = defineStore('chat', () => {
       const requestId = runtime.requestId
       const audioUrl = readString(data, 'audio_url')
       const pcmAudio = readPcmAudio(data)
+      const streamComplete = finalEvent && (isRecord(data) ? data.complete === true : true)
       if (!audioUrl && !pcmAudio) {
-        if (finalEvent && isRecord(data) && data.complete === true) {
+        if (streamComplete) {
           pendingSentenceEmotionCues = []
+          if (isActiveSession) {
+            window.dispatchEvent(new CustomEvent('pet:tts-stream-complete', {
+              detail: { generationId: generationId || undefined },
+            }))
+          }
           completeRuntimeRequest(runtime, requestId)
         }
         return
@@ -1044,7 +1121,10 @@ export const useChatStore = defineStore('chat', () => {
         return
       }
       const petLinkEnabled = isPetLinkEnabled()
-      const segmentText = readString(data, 'text') || lastAssistantText
+      // TTS events are generation-scoped. Never label a segment with the last
+      // assistant reply when a provider omitted its text field; that hides
+      // stale/misrouted audio instead of exposing the protocol defect.
+      const segmentText = readString(data, 'text')
       const sequence = readNumber(data, 'sequence')
       const chunkIndex = readNumber(data, 'chunk_index') ?? 0
       const hasFinalField = isRecord(data) && typeof data.is_final === 'boolean'
@@ -1109,7 +1189,12 @@ export const useChatStore = defineStore('chat', () => {
         }))
       }
       if (isFinal) pendingSentenceEmotionCues = []
-      if (finalEvent) completeRuntimeRequest(runtime, requestId)
+      if (streamComplete) {
+        window.dispatchEvent(new CustomEvent('pet:tts-stream-complete', {
+          detail: { generationId: generationId || undefined },
+        }))
+        completeRuntimeRequest(runtime, requestId)
+      }
     }
 
     socketClient.on(SocketEvents.TTS_CHUNK, (data: unknown) => handleTtsAudio(data, false))
@@ -1118,6 +1203,12 @@ export const useChatStore = defineStore('chat', () => {
     socketClient.on(SocketEvents.ERROR, (data: unknown) => {
       const message = readString(data, 'message') || readString(data, 'error') || t('chatStore.serviceErrorFallback')
       const code = readString(data, 'code')
+      if (code.startsWith('ASR_')) {
+        if (readString(data, 'session_id') !== state.currentSessionId) return
+        state.asrPartialText = ''
+        state.lastError = message
+        return
+      }
       const runtime = resolveEventRuntime(data)
       const isActiveSession = !runtime || runtime.sessionId === state.currentSessionId
       const ownedRuntimeError = code.startsWith('LLM') || code.startsWith('GEN') || code.startsWith('AGENT') || code.startsWith('TTS') || code === 'chat_error'
@@ -1148,6 +1239,7 @@ export const useChatStore = defineStore('chat', () => {
 
     if (typeof window !== 'undefined') {
       window.addEventListener('pet:audio-started', handleAudioStarted)
+      window.addEventListener('pet:audio-progress', handleAudioProgress)
       window.addEventListener('pet:audio-ended', stopTtsPlaybackState)
       window.addEventListener('pet:tts-stop', stopTtsPlaybackState)
     }
@@ -1156,6 +1248,7 @@ export const useChatStore = defineStore('chat', () => {
   onScopeDispose(() => {
     if (typeof window === 'undefined') return
     window.removeEventListener('pet:audio-started', handleAudioStarted)
+    window.removeEventListener('pet:audio-progress', handleAudioProgress)
     window.removeEventListener('pet:audio-ended', stopTtsPlaybackState)
     window.removeEventListener('pet:tts-stop', stopTtsPlaybackState)
   })
@@ -1217,6 +1310,14 @@ export const useChatStore = defineStore('chat', () => {
       return false
     }
 
+    // A new text turn supersedes any in-flight generation and queued speech.
+    // Without this, AudioPlayer can continue speaking the previous answer
+    // while the new answer is already rendered in the chat panel.
+    const activeRuntime = sessionRuntime[state.currentSessionId]
+    if (activeRuntime?.isGenerating || state.isTTSPlaying || state.isSpeaking) {
+      interrupt('manual')
+    }
+
     const shouldAppendUser = options.appendUser !== false
     const sessionId = state.currentSessionId
     const workspaceId = state.currentWorkspaceId
@@ -1271,7 +1372,6 @@ export const useChatStore = defineStore('chat', () => {
     state.isGenerating = true
     state.lastError = null
     pendingSentenceEmotionCues = []
-    lastAssistantText = ''
     if (isPetLinkEnabled()) {
       void publishCompanionRuntimeEvent({
         source: 'chat',
@@ -1380,7 +1480,6 @@ export const useChatStore = defineStore('chat', () => {
         state.agentEnvelopeTimeline = state.agentEnvelopeTimeline.slice(0, 10)
         window.dispatchEvent(new CustomEvent('pet:agent-result', { detail: envelope }))
       }
-      lastAssistantText = assistantText
       state.currentText = ''
       state.asrPartialText = ''
       state.isGenerating = false
@@ -1415,13 +1514,15 @@ export const useChatStore = defineStore('chat', () => {
       })
       const userMessage = userIndex >= 0 ? state.messages[userIndex] : undefined
       const assistantMessage = assistantIndex >= 0 ? state.messages[assistantIndex] : undefined
-      if (userMessage && saved.user_message?.id !== undefined) {
-        userMessage.id = saved.user_message.id
-        userMessage.timestamp = saved.user_message.timestamp || userMessage.timestamp
+      const userMessageId = readMessageId(saved.user_message, 'id')
+      const assistantMessageId = readMessageId(saved.assistant_message, 'id')
+      if (userMessage && userMessageId !== undefined) {
+        userMessage.id = userMessageId
+        userMessage.timestamp = saved.user_message?.timestamp || userMessage.timestamp
       }
-      if (assistantMessage && saved.assistant_message?.id !== undefined) {
-        assistantMessage.id = saved.assistant_message.id
-        assistantMessage.timestamp = saved.assistant_message.timestamp || assistantMessage.timestamp
+      if (assistantMessage && assistantMessageId !== undefined) {
+        assistantMessage.id = assistantMessageId
+        assistantMessage.timestamp = saved.assistant_message?.timestamp || assistantMessage.timestamp
       }
     } catch (error) {
       console.warn('[ChatStore] failed to persist realtime transcript:', error)

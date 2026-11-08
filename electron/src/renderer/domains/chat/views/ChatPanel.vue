@@ -138,13 +138,16 @@
               :playing="chatState.isTTSPlaying"
               :speaking="chatState.isSpeaking"
               :pet-link-enabled="chatOptions.pet_link_enabled !== false"
-              :text="playbackText"
+              :text="chatState.ttsPlaybackText"
+              :position-ms="chatState.ttsPlaybackPositionMs"
+              :duration-ms="chatState.ttsPlaybackDurationMs"
               @interrupt="handleInterrupt"
               @toggle-pet-link="togglePetLink"
             />
             <ChatVoiceStatus
               v-if="toolsExpanded"
               v-model:mode="voiceMode"
+              :recording="isRecording"
               :mode-options="voiceModeOptions"
               :hold-active="isHoldActive"
               :connected="socketDomain.isConnected.value"
@@ -623,14 +626,16 @@ const responseModeOptions = computed<Array<{ label: string; value: ResponseModeO
   { label: t('chat.response.deep'), value: 'deep' },
 ])
 
-const lastAssistantMessage = computed(() => [...chatState.messages].reverse().find((message) => message.role === 'assistant') ?? null)
-const playbackText = computed(() => {
-  const text = lastAssistantMessage.value?.content?.replace(/\s+/g, ' ').trim() ?? ''
-  return text.length > 120 ? `${text.slice(0, 120)}…` : text
-})
 const pendingAssistantLabel = computed(() => {
   if (chatOptions.reasoning_effort && !['none', 'default'].includes(chatOptions.reasoning_effort)) return t('chat.status.thinking')
   return t('chat.status.waiting')
+})
+const lastAssistantMessage = computed(() => {
+  for (let index = chatState.messages.length - 1; index >= 0; index -= 1) {
+    const message = chatState.messages[index]
+    if (message?.role === 'assistant') return message
+  }
+  return undefined
 })
 const hasConversationContent = computed(() => Boolean(chatState.messages.length || chatState.currentText || chatState.asrPartialText))
 const workspaceNameMap = computed(() => Object.fromEntries(workspaceStore.workspaces.map((workspace) => [workspace.id, workspace.name])))
@@ -944,7 +949,8 @@ const runComposerTool = (tool: ComposerToolDefinition) => {
   void tool.run()
 }
 
-const handleComposerKeydown = (event: KeyboardEvent) => {
+const handleComposerKeydown = (event: Event | KeyboardEvent) => {
+  if (!(event instanceof KeyboardEvent)) return
   if (quickPanel.visible) {
     if (event.key === 'ArrowDown') {
       event.preventDefault()
@@ -1807,7 +1813,7 @@ onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeydown)
   window.addEventListener('yuizaki:input-action', handleBrowserInputAction)
   scrollToBottom()
-  void settingsStore.fetchSettings().then(refreshModelOptions)
+  void settingsStore.fetchSettings().then(() => refreshModelOptions())
   const warmupTts = () => {
     void settingsClient.warmupTts().catch(() => undefined)
   }

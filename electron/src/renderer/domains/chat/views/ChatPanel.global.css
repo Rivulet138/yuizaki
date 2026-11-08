@@ -13,19 +13,38 @@
   box-shadow: none;
 }
 
+.yuizaki-bg.yuizaki-bg .chat-mode .message-row[data-role='user'] {
+  flex-direction: row;
+  justify-content: flex-end;
+}
+
+.yuizaki-bg.yuizaki-bg .chat-mode .message-bubble {
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 100%;
+}
+
 .yuizaki-bg.yuizaki-bg .chat-mode .message-bubble-user {
-  border-color: var(--yui-chat-border);
+  border-color: transparent;
+  border-radius: 14px;
   background: var(--yui-chat-user-bg);
   color: var(--yui-chat-text);
   box-shadow: none;
+  padding: 9px 13px;
+}
+
+.yuizaki-bg.yuizaki-bg .chat-mode .message-bubble-user .message-footline {
+  justify-content: flex-end;
 }
 
 .yuizaki-bg.yuizaki-bg .chat-mode .message-bubble-assistant,
 .yuizaki-bg.yuizaki-bg .chat-mode .message-bubble-streaming {
-  border-color: var(--yui-chat-border);
-  background: var(--yui-chat-assistant-bg);
+  border-color: transparent;
+  border-radius: 0;
+  background: transparent;
   color: var(--yui-chat-text);
   box-shadow: none;
+  padding: 6px 0;
 }
 
 [data-theme='dark'] .yuizaki-bg.yuizaki-bg .chat-mode .chat-surface {
@@ -44,14 +63,14 @@
 }
 
 [data-theme='dark'] .yuizaki-bg.yuizaki-bg .chat-mode .message-bubble-user {
-  border-color: var(--yui-chat-border);
+  border-color: transparent;
   background: var(--yui-chat-user-bg);
   color: var(--yui-chat-text);
 }
 
 [data-theme='dark'] .yuizaki-bg.yuizaki-bg .chat-mode .message-bubble-assistant,
 [data-theme='dark'] .yuizaki-bg.yuizaki-bg .chat-mode .message-bubble-streaming {
-  border-color: var(--yui-chat-border);
-  background: var(--yui-chat-assistant-bg);
+  border-color: transparent;
+  background: transparent;
   color: var(--yui-chat-text);
 }

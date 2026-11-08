@@ -817,7 +817,9 @@
 }
 
 .messages-pane {
+  box-sizing: border-box;
   width: min(780px, 100%);
+  min-width: 0;
   align-self: center;
   padding: 52px 22px 14px !important;
   background: transparent !important;
@@ -1009,6 +1011,7 @@
   }
 
   .messages-pane {
+    width: 100%;
     padding: 56px 14px 14px !important;
   }
 

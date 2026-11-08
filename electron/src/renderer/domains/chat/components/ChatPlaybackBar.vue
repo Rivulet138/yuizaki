@@ -6,6 +6,17 @@
     <div class="chat-playback-bar__copy">
       <strong>{{ playing ? t('chat.playback.playing') : t('chat.playback.processing') }}</strong>
       <span v-if="text">{{ text }}</span>
+      <div
+        v-if="progress !== null"
+        class="chat-playback-bar__progress"
+        role="progressbar"
+        :aria-label="t('chat.playback.progress')"
+        :aria-valuemin="0"
+        :aria-valuemax="100"
+        :aria-valuenow="progress"
+      >
+        <span :style="{ width: `${progress}%` }" />
+      </div>
     </div>
     <div class="chat-playback-bar__actions">
       <button
@@ -45,6 +56,8 @@ const props = defineProps<{
   speaking: boolean
   petLinkEnabled: boolean
   text?: string
+  positionMs?: number
+  durationMs?: number | null
 }>()
 
 const { t } = useI18n()
@@ -55,6 +68,11 @@ defineEmits<{
 }>()
 
 const visible = computed(() => props.playing || props.speaking)
+const progress = computed(() => {
+  if (!props.durationMs || props.durationMs <= 0 || !Number.isFinite(props.durationMs)) return null
+  const position = props.positionMs !== undefined && Number.isFinite(props.positionMs) ? props.positionMs : 0
+  return Math.min(100, Math.max(0, Math.round((position / props.durationMs) * 100)))
+})
 </script>
 
 <style scoped>
@@ -100,13 +118,28 @@ const visible = computed(() => props.playing || props.speaking)
   line-height: 1.3;
 }
 
-.chat-playback-bar__copy span {
+.chat-playback-bar__copy > span {
   overflow: hidden;
   color: var(--yui-muted);
   font-size: 11px;
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-playback-bar__progress {
+  height: 3px;
+  margin-top: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--yui-border);
+}
+
+.chat-playback-bar__progress span {
+  display: block;
+  height: 100%;
+  background: var(--yui-accent);
+  transition: width 120ms linear;
 }
 
 .chat-playback-bar__actions {

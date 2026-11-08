@@ -5,6 +5,7 @@ export interface AudioPlaybackTarget {
   stop: (options?: TtsStopDetail) => void
   enqueue: (audioUrl: string, detail?: TtsPlaybackDetail) => void
   enqueuePcm: (detail: PcmPlaybackDetail) => void
+  markTtsStreamComplete: (generationId?: string) => void
 }
 
 export interface AudioEventHost {
@@ -41,6 +42,10 @@ export class AudioPlayerEventBridge {
     if (detail?.audio instanceof Uint8Array) this.target.enqueuePcm(detail)
   }
 
+  private readonly handleStreamComplete = (event: Event) => {
+    const detail = (event as CustomEvent<{ generationId?: string }>).detail
+    this.target.markTtsStreamComplete(detail?.generationId)
+  }
   constructor(private readonly target: AudioPlaybackTarget) {}
 
   attach(host: AudioEventHost): void {
@@ -51,6 +56,7 @@ export class AudioPlayerEventBridge {
     host.addEventListener('pet:tts-stop', this.handleStop)
     host.addEventListener('pet:tts-play-url', this.handleUrl)
     host.addEventListener('pet:tts-play-pcm', this.handlePcm)
+    host.addEventListener('pet:tts-stream-complete', this.handleStreamComplete)
   }
 
   detach(host: AudioEventHost | null = this.host): void {
@@ -59,6 +65,8 @@ export class AudioPlayerEventBridge {
     host.removeEventListener('pet:tts-stop', this.handleStop)
     host.removeEventListener('pet:tts-play-url', this.handleUrl)
     host.removeEventListener('pet:tts-play-pcm', this.handlePcm)
+    host.removeEventListener('pet:tts-stream-complete', this.handleStreamComplete)
     if (this.host === host) this.host = null
   }
 }
+

@@ -26,6 +26,8 @@ export interface PcmPlaybackDetail extends Omit<TtsPlaybackDetail, 'audio_url'> 
 
 interface AudioStartedDetail extends TtsPlaybackDetail {
   audio_url: string
+  segmentId: number
+  utteranceId: string
   durationMs?: number
 }
 
@@ -148,8 +150,19 @@ export class AudioPlayer {
   private pcmVisemeCues: PetVisemeCue[] = []
   private lastPcmVisemeKey: string | null = null
   private lipSyncAbortController: AbortController | null = null
+  private nextSegmentId = 0
+  private ttsStreamOpen = false
+  private ttsStreamFinalReceived = false
+  private activeGenerationId: string | null = null
+  private activeSegmentId: number | null = null
+  private activeUtteranceId: string | null = null
+  private utteranceCompletedDurationMs = 0
+  private utteranceKnownDurationMs = 0
+  private activeSegmentDurationMs: number | undefined
   private segmentEndedHandler: (() => void) | null = null
   private segmentErrorHandler: (() => void) | null = null
+  private segmentProgressHandler: (() => void) | null = null
+  private segmentMetadataHandler: (() => void) | null = null
 
   constructor() {
     this.audioElement = new Audio()
@@ -178,15 +191,18 @@ export class AudioPlayer {
       detail: { ...playbackDetail, durationMs },
       ownedObjectUrl: objectUrl,
       lipSyncEnvelope,
-    })
+    // Genie reuses sequence for every PCM chunk in one utterance. Socket.IO
+    // already preserves chunk order, so sequence de-duplication would drop audio.
+    }, false)
   }
 
-  private enqueueInternal(item: QueuedAudio): void {
+  private enqueueInternal(item: QueuedAudio, orderBySequence = true): void {
     const { audioUrl } = item
     if (!audioUrl.trim()) return
     const generationId = item.detail.generationId
+    if (generationId) this.openTtsStream(generationId)
     const sequence = item.detail.sequence
-    if (generationId && sequence !== undefined && Number.isInteger(sequence) && sequence >= 0) {
+    if (orderBySequence && generationId && sequence !== undefined && Number.isInteger(sequence) && sequence >= 0) {
       const nextSequence = this.nextSequenceByGeneration.get(generationId) ?? 0
       if (sequence < nextSequence) {
         if (item.ownedObjectUrl) URL.revokeObjectURL(item.ownedObjectUrl)
@@ -271,6 +287,20 @@ export class AudioPlayer {
 
     try {
       this.detachSegmentListeners()
+      const segmentId = ++this.nextSegmentId
+      const utteranceId = detail.generationId || `segment:${segmentId}`
+      if (utteranceId !== this.activeUtteranceId) {
+        this.activeUtteranceId = utteranceId
+        this.utteranceCompletedDurationMs = 0
+        this.utteranceKnownDurationMs = 0
+      }
+      this.activeSegmentId = segmentId
+      this.activeSegmentDurationMs = detail.durationMs && detail.durationMs > 0
+        ? Math.round(detail.durationMs)
+        : undefined
+      if (this.activeSegmentDurationMs !== undefined) {
+        this.utteranceKnownDurationMs += this.activeSegmentDurationMs
+      }
       const endedHandler = () => {
         if (this.segmentEndedHandler !== endedHandler || token !== this.playbackToken) return
         this.segmentEndedHandler = null
@@ -281,10 +311,22 @@ export class AudioPlayer {
         this.segmentErrorHandler = null
         this.finishCurrentSegment()
       }
+      const progressHandler = () => {
+        if (this.segmentProgressHandler !== progressHandler || token !== this.playbackToken) return
+        this.emitAudioProgress()
+      }
+      const metadataHandler = () => {
+        if (this.segmentMetadataHandler !== metadataHandler || token !== this.playbackToken) return
+        this.emitAudioProgress()
+      }
       this.segmentEndedHandler = endedHandler
       this.segmentErrorHandler = errorHandler
+      this.segmentProgressHandler = progressHandler
+      this.segmentMetadataHandler = metadataHandler
       this.audioElement.addEventListener('ended', endedHandler)
       this.audioElement.addEventListener('error', errorHandler)
+      this.audioElement.addEventListener('timeupdate', progressHandler)
+      this.audioElement.addEventListener('loadedmetadata', metadataHandler)
       this.currentOwnedObjectUrl = ownedObjectUrl ?? null
       this.audioElement.src = playbackUrl
       this.audioElement.load?.()
@@ -356,7 +398,7 @@ export class AudioPlayer {
         console.debug('[AudioPlayer] media playback failed:', error)
         this.finishCurrentSegment()
       })
-      const startedDetail: AudioStartedDetail = { audio_url: playbackUrl, version: detail.version }
+      const startedDetail: AudioStartedDetail = { audio_url: playbackUrl, version: detail.version, segmentId, utteranceId }
       if (detail.text) {
         startedDetail.text = detail.text
       }
@@ -381,11 +423,14 @@ export class AudioPlayer {
       if (detail.sequence !== undefined) startedDetail.sequence = detail.sequence
       if (detail.isFinal !== undefined) startedDetail.isFinal = detail.isFinal
       window.dispatchEvent(new CustomEvent('pet:audio-started', { detail: startedDetail }))
+      this.emitAudioProgress()
       return true
     } catch (err) {
       console.error('Failed to play audio:', err)
       this.detachSegmentListeners()
       this.isPlaying.value = false
+      this.activeSegmentId = null
+      this.activeSegmentDurationMs = undefined
       this.releaseCurrentObjectUrl()
       return false
     }
@@ -394,6 +439,9 @@ export class AudioPlayer {
   stop(options: TtsStopDetail = {}): void {
     this.clearQueuedAudio()
     this.playbackPending = false
+    this.ttsStreamOpen = false
+    this.ttsStreamFinalReceived = false
+    this.activeGenerationId = null
     this.nextPlaybackToken()
     if (this.audioElement) {
       this.audioElement.pause()
@@ -422,14 +470,24 @@ export class AudioPlayer {
         await this.startPlayback(next.audioUrl, next.detail, token, next.ownedObjectUrl, next.lipSyncEnvelope)
       }
       if (!this.isPlaying.value && this.queue.length === 0) {
-        window.dispatchEvent(new CustomEvent('pet:audio-ended'))
+        if (!this.ttsStreamOpen) window.dispatchEvent(new CustomEvent('pet:audio-ended'))
       }
     } finally {
       this.playbackPending = false
+      this.drainTtsStreamIfComplete()
     }
   }
 
   private finishCurrentSegment(): void {
+    const actualDurationMs = this.audioElement && Number.isFinite(this.audioElement.duration) && this.audioElement.duration > 0
+      ? Math.round(this.audioElement.duration * 1000)
+      : undefined
+    if (actualDurationMs !== undefined) {
+      const estimatedDurationMs = this.activeSegmentDurationMs ?? 0
+      this.utteranceKnownDurationMs += actualDurationMs - estimatedDurationMs
+      this.activeSegmentDurationMs = actualDurationMs
+    }
+    this.utteranceCompletedDurationMs += this.activeSegmentDurationMs ?? 0
     const hasNext = this.queue.length > 0
     if (hasNext) {
       // Keep the mouth active across queued PCM segments; the next segment
@@ -440,7 +498,9 @@ export class AudioPlayer {
       void this.playNextQueued()
       return
     }
-    this.finishPlayback(false, {}, true)
+    this.isPlaying.value = false
+    this.drainTtsStreamIfComplete()
+    if (!this.ttsStreamOpen) this.finishPlayback(false, {}, true)
   }
 
   private finishPlayback(force = false, options: TtsStopDetail = {}, emitEnded = true): void {
@@ -465,12 +525,43 @@ export class AudioPlayer {
     }
     this.activeLipSyncMode = 'none'
     this.currentPetLinkEnabled = true
+    this.activeSegmentId = null
+    this.activeUtteranceId = null
+    this.utteranceCompletedDurationMs = 0
+    this.utteranceKnownDurationMs = 0
+    this.activeSegmentDurationMs = undefined
     this.releaseCurrentObjectUrl()
     if (emitEnded) {
       window.dispatchEvent(new CustomEvent('pet:audio-ended'))
     }
   }
 
+  markTtsStreamComplete(generationId?: string): void {
+    if (generationId && this.activeGenerationId && generationId !== this.activeGenerationId) return
+    if (generationId && !this.activeGenerationId) this.activeGenerationId = generationId
+    this.ttsStreamOpen = true
+    this.ttsStreamFinalReceived = true
+    this.drainTtsStreamIfComplete()
+  }
+
+  private openTtsStream(generationId?: string): void {
+    if (!generationId) return
+    if (generationId !== this.activeGenerationId) {
+      this.activeGenerationId = generationId
+      this.ttsStreamFinalReceived = false
+      this.utteranceCompletedDurationMs = 0
+      this.utteranceKnownDurationMs = 0
+    }
+    this.ttsStreamOpen = true
+  }
+
+  private drainTtsStreamIfComplete(): void {
+    if (!this.ttsStreamOpen || !this.ttsStreamFinalReceived || this.isPlaying.value || this.playbackPending || this.queue.length > 0) return
+    const hasBuffered = [...this.sequenceBuffers.values()].some((buffer) => buffer.size > 0)
+    if (hasBuffered) return
+    this.ttsStreamOpen = false
+    this.finishPlayback(true, {}, true)
+  }
   private clearQueuedAudio(): void {
     for (const item of this.queue) {
       if (item.ownedObjectUrl) URL.revokeObjectURL(item.ownedObjectUrl)
@@ -497,6 +588,37 @@ export class AudioPlayer {
       this.audioElement.removeEventListener('error', this.segmentErrorHandler)
       this.segmentErrorHandler = null
     }
+    if (this.segmentProgressHandler) {
+      this.audioElement.removeEventListener('timeupdate', this.segmentProgressHandler)
+      this.segmentProgressHandler = null
+    }
+    if (this.segmentMetadataHandler) {
+      this.audioElement.removeEventListener('loadedmetadata', this.segmentMetadataHandler)
+      this.segmentMetadataHandler = null
+    }
+  }
+
+  private emitAudioProgress(): void {
+    if (!this.audioElement || this.activeSegmentId === null) return
+    const mediaDurationMs = Number.isFinite(this.audioElement.duration) && this.audioElement.duration > 0
+      ? Math.round(this.audioElement.duration * 1000)
+      : undefined
+    const currentSegmentDurationMs = mediaDurationMs ?? this.activeSegmentDurationMs ?? 0
+    const durationMs = this.utteranceKnownDurationMs > 0
+      ? this.utteranceKnownDurationMs
+      : currentSegmentDurationMs || undefined
+    const currentTimeMs = this.utteranceCompletedDurationMs + Math.min(
+      Math.max(0, Math.round(this.audioElement.currentTime * 1000)),
+      currentSegmentDurationMs || Number.MAX_SAFE_INTEGER,
+    )
+    window.dispatchEvent(new CustomEvent('pet:audio-progress', {
+      detail: {
+        segmentId: this.activeSegmentId,
+        utteranceId: this.activeUtteranceId,
+        currentTimeMs,
+        ...(durationMs !== undefined ? { durationMs } : {}),
+      },
+    }))
   }
 
   private releaseCurrentObjectUrl(): void {
