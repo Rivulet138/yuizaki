@@ -2,7 +2,7 @@
 # Direct runtime packages are exact-pinned; run `pip check` after installation.
 fastapi==0.143.2
 pydantic==2.14.1
-uvicorn[standard]==0.52.4
+uvicorn[standard]==0.54.0
 httpx==0.28.1
 aiofiles==25.1.0
 python-multipart==0.0.32
