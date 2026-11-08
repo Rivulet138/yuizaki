@@ -7,7 +7,6 @@ from collections.abc import Iterable
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from modules.system.http_observability import install_backend_http_middleware
 
 

@@ -52,7 +52,7 @@ async def _probe_health(probe: ProviderHealth | None, available: bool) -> tuple[
     try:
         healthy, message = await asyncio.wait_for(probe(), timeout=HEALTH_PROBE_TIMEOUT_SECONDS)
         return bool(healthy), _safe_message(message, "Health probe completed")
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return False, "Health probe timed out"
     except ConnectionError:
         return False, "Provider connection unavailable"

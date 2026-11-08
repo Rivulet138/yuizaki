@@ -5,7 +5,6 @@ import logging
 from pathlib import Path
 from typing import TypeGuard, cast
 
-
 GovernanceAlertState = dict[str, dict[str, object]]
 
 

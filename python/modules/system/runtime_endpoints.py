@@ -58,9 +58,9 @@ __all__ = [
     "build_toggle_mcp_endpoint",
     "build_toggle_schedule_endpoint",
     "build_update_agent_plugin_config_endpoint",
+    "build_voice_diagnostics_begin_endpoint",
     "build_voice_diagnostics_comfort_endpoint",
     "build_voice_diagnostics_comfort_signal_endpoint",
-    "build_voice_diagnostics_begin_endpoint",
     "build_voice_diagnostics_endpoint",
     "build_voice_diagnostics_sample_endpoint",
 ]

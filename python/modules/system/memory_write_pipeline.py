@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable, cast
+from typing import Any, cast
 
-from ..memory.routes import route_memory_write
 from ..memory.expiry import normalize_memory_expiry
+from ..memory.routes import route_memory_write
 from ..memory.vector_store import Document
-
 
 USER_SIGNAL_KIND_SOURCE_MAP: dict[str, str] = {
     "gratitude": "relationship",

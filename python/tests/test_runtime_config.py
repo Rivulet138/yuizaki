@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from modules.system.settings_api import SettingsAPI
 from modules.system.runtime_config import apply_runtime_config
-from modules.system.settings_schema import SummarySettingsPatchModel, SummarySettingsModel
+from modules.system.settings_api import SettingsAPI
+from modules.system.settings_schema import (
+    SummarySettingsModel,
+    SummarySettingsPatchModel,
+)
 
 
 def test_vision_timeout_change_marks_llm_runtime_for_reload() -> None:

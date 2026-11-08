@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from ..memory.schema import RetrievalRequest
 
@@ -12,7 +12,7 @@ def build_style_aware_retrieval_strategy(
     milestone_salience: str | None = None,
     recent_signal_kinds: list[str] | None = None,
     layers: str | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if layers:
         resolved_layers = [item.strip() for item in layers.split(",") if item.strip()]
         return {

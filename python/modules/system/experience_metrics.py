@@ -5,7 +5,7 @@ import threading
 import time
 from collections import OrderedDict, deque
 from collections.abc import Callable, Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 TRACKED_GENERATION_STAGES = (
@@ -305,7 +305,7 @@ class ExperienceMetricsStore:
         visual_completed = sum(visual_analysis_outcomes.values())
         visual_usable = visual_analysis_outcomes["ready"]
         return {
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "window": {
                 "max_entries": self.max_entries,
                 "generation_samples": len(generations),
