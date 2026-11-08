@@ -5,7 +5,7 @@ pydantic==2.14.1
 uvicorn[standard]==0.52.4
 httpx==0.28.1
 aiofiles==25.1.0
-python-multipart==0.0.32
+python-multipart==0.0.33
 python-socketio==5.17.0
 websocket-client==1.9.2
 sqlalchemy==2.1.5
