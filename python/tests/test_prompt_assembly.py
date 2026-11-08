@@ -90,7 +90,10 @@ def test_world_book_disables_regex_keys_without_a_bounded_engine(monkeypatch) ->
 
 
 def test_world_book_caps_compared_keys_per_entry() -> None:
-    from modules.agent.prompt_assembly import _MAX_WORLD_BOOK_KEYS_PER_ENTRY, _world_entry_matches
+    from modules.agent.prompt_assembly import (
+        _MAX_WORLD_BOOK_KEYS_PER_ENTRY,
+        _world_entry_matches,
+    )
 
     entry = {
         "enabled": True,

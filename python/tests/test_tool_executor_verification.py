@@ -4,7 +4,6 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-
 from modules.agent.companion_events import CompanionJobEventLog
 from modules.agent.context import AgentRequestContext
 from modules.agent.policy_engine import PolicyEngine

@@ -16,8 +16,8 @@ import time
 from dataclasses import dataclass
 
 from ..llm.client import redact_error_text
-from .mcp_manager import MCP_STDIO_INHERITED_ENV_KEYS
 from .dsh_process import close_guard, spawn_process, terminate_process
+from .mcp_manager import MCP_STDIO_INHERITED_ENV_KEYS
 
 logger = logging.getLogger(__name__)
 _DSH_SEMAPHORE = asyncio.Semaphore(1)

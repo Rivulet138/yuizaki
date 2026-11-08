@@ -17,7 +17,7 @@ or
 from __future__ import annotations
 
 import os
-from typing import Any, Dict
+from typing import Any
 
 import httpx
 
@@ -33,7 +33,7 @@ def _browser_mcp_base_url() -> str:
     ).rstrip("/")
 
 
-async def call_http_mcp_tool(base_url: str, name: str, args: Dict[str, Any], headers: Dict[str, str] | None = None) -> str:
+async def call_http_mcp_tool(base_url: str, name: str, args: dict[str, Any], headers: dict[str, str] | None = None) -> str:
     """Call a browser automation tool on the MCP server.
 
     Parameters
@@ -66,7 +66,7 @@ async def call_http_mcp_tool(base_url: str, name: str, args: Dict[str, Any], hea
     return str(data.get("output", ""))
 
 
-async def call_browser_tool(name: str, args: Dict[str, Any]) -> str:
+async def call_browser_tool(name: str, args: dict[str, Any]) -> str:
     base_url = _browser_mcp_base_url()
     if not base_url:
         raise MCPToolError("Browser MCP URL is not configured")

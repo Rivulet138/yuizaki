@@ -13,7 +13,7 @@ import math
 import tempfile
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -62,7 +62,7 @@ def _bounded_text(value: Any, field: str, *, default: str, limit: int = 160) -> 
 
 
 def _local_date(timestamp: float) -> str:
-    return datetime.fromtimestamp(timestamp, tz=timezone.utc).date().isoformat()
+    return datetime.fromtimestamp(timestamp, tz=UTC).date().isoformat()
 
 
 def _frame(

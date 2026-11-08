@@ -8,12 +8,13 @@ import os
 import re
 import threading
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from time import monotonic, perf_counter
-from typing import Any, Iterator
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
@@ -916,9 +917,7 @@ class MCPManager:
                 changed = self._merge_builtin_server_configs()
                 self._store_metadata["builtin_preset_version"] = MCP_BUILTIN_PRESET_STORE_VERSION
                 store_changed = store_changed or changed or stored_builtin_version != MCP_BUILTIN_PRESET_STORE_VERSION
-            if self._vault_configured() and self._vault_reference is None:
-                self._save_store_locked()
-            elif store_changed:
+            if self._vault_configured() and self._vault_reference is None or store_changed:
                 self._save_store_locked()
             self._store_pending = False
         except Exception as exc:
@@ -995,7 +994,7 @@ class MCPManager:
             if timeout_seconds is None:
                 return name, await self._check_server_status(server)
             return name, await asyncio.wait_for(self._check_server_status(server), timeout=timeout_seconds)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return name, self._timeout_status(server, timeout_seconds or MCP_STATUS_REFRESH_TIMEOUT_SECONDS)
 
     async def refresh_status(self, timeout_seconds: float | None = None) -> None:
@@ -1687,7 +1686,7 @@ class MCPManager:
             raise MCPToolError("stdio MCP stdout is unavailable")
         try:
             line = await asyncio.wait_for(stdout.readline(), timeout=timeout)
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             raise MCPToolError("stdio MCP response timed out") from exc
         if line:
             return line
@@ -1741,11 +1740,13 @@ class MCPManager:
             try:
                 line = await self._stdio_readline(process, timeout=SSE_TOOL_TIMEOUT_SECONDS)
             except MCPToolError:
-                self._stdio_sessions.pop(server.name, None)
+                if self._stdio_sessions.get(server.name) is session:
+                    self._stdio_sessions.pop(server.name, None)
                 await self._close_stdio_session(session)
                 raise
         if process.returncode not in {None}:
-            self._stdio_sessions.pop(server.name, None)
+            if self._stdio_sessions.get(server.name) is session:
+                self._stdio_sessions.pop(server.name, None)
             raise MCPToolError("mcp_error:stdio_process_exit")
         try:
             data = json.loads(line.decode("utf-8", errors="ignore").strip() or "{}")
@@ -1806,6 +1807,17 @@ class MCPManager:
                 await self._stdio_notification_locked(session, "notifications/initialized", {})
             session["protocol"] = "mcp-jsonrpc"
             session["server_info"] = initialize_result.get("serverInfo") if isinstance(initialize_result, dict) else None
+        except asyncio.CancelledError:
+            # Initialization owns the child until the session is registered.
+            try:
+                process.kill()
+                await asyncio.wait_for(process.wait(), timeout=3.0)
+            except (OSError, TimeoutError) as exc:
+                logger.warning(
+                    "Cancelled MCP stdio initialization cleanup failed (%s)",
+                    self._safe_exception_code(exc),
+                )
+            raise
         except Exception as exc:
             session["protocol"] = "legacy"
             session["initialization_error"] = self._safe_exception_code(exc)
@@ -1834,15 +1846,22 @@ class MCPManager:
             transport="stdio",
             session_id=str(session.get("session_id") or ""),
         )
-        process.terminate()
         try:
+            process.terminate()
             await asyncio.wait_for(process.wait(), timeout=3.0)
-        except Exception:
-            process.kill()
+        except ProcessLookupError:
+            return
+        except (OSError, TimeoutError):
             try:
-                await process.wait()
-            except Exception:
-                pass
+                process.kill()
+                await asyncio.wait_for(process.wait(), timeout=3.0)
+            except ProcessLookupError:
+                return
+            except (OSError, TimeoutError) as exc:
+                logger.warning(
+                    "MCP stdio session cleanup failed (%s)",
+                    self._safe_exception_code(exc),
+                )
 
     async def _call_sse_tool(self, server: MCPServerConfig, tool_name: str, args: dict[str, Any], request_id: str, args_keys: list[str]) -> str:
         session = await self._get_or_create_sse_session(server)
@@ -1863,48 +1882,48 @@ class MCPManager:
             args_keys=args_keys,
         )
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                headers = self._request_headers(server)
-                if headers:
-                    resp = await client.post(
-                        f"{server.base_url.rstrip('/')}/tools",
-                        json={"name": tool_name, "args": args, "requestId": request_id},
-                        headers=headers,
-                    )
-                else:
-                    resp = await client.post(
-                        f"{server.base_url.rstrip('/')}/tools",
-                        json={"name": tool_name, "args": args, "requestId": request_id},
-                    )
-            resp.raise_for_status()
-        except Exception as exc:
-            session["pending"].pop(request_id, None)
-            self._append_history(
-                server.name,
-                "sse_request_dispatch_failed",
-                f"{tool_name} dispatch failed",
-                status="error",
-                transport="sse",
-                tool=tool_name,
-                request_id=request_id,
-                error=self._safe_exception_code(exc),
-                pending_requests=len(session["pending"]),
-                args_keys=args_keys,
-            )
-            raise MCPToolError(self._safe_exception_code(exc)) from None
-        try:
-            data = await asyncio.wait_for(asyncio.shield(future), timeout=SSE_TOOL_TIMEOUT_SECONDS)
-        except asyncio.TimeoutError as exc:
-            reason = "MCP SSE request timed out waiting for event"
-            self._fail_pending(session, reason, only_stale=False)
-            if future.done():
-                try:
-                    future.result()
-                except Exception:
-                    pass
-            raise MCPToolError(reason) from exc
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    headers = self._request_headers(server)
+                    if headers:
+                        resp = await client.post(
+                            f"{server.base_url.rstrip('/')}/tools",
+                            json={"name": tool_name, "args": args, "requestId": request_id},
+                            headers=headers,
+                        )
+                    else:
+                        resp = await client.post(
+                            f"{server.base_url.rstrip('/')}/tools",
+                            json={"name": tool_name, "args": args, "requestId": request_id},
+                        )
+                resp.raise_for_status()
+            except Exception as exc:
+                session["pending"].pop(request_id, None)
+                self._append_history(
+                    server.name,
+                    "sse_request_dispatch_failed",
+                    f"{tool_name} dispatch failed",
+                    status="error",
+                    transport="sse",
+                    tool=tool_name,
+                    request_id=request_id,
+                    error=self._safe_exception_code(exc),
+                    pending_requests=len(session["pending"]),
+                    args_keys=args_keys,
+                )
+                raise MCPToolError(self._safe_exception_code(exc)) from None
+            try:
+                data = await asyncio.wait_for(asyncio.shield(future), timeout=SSE_TOOL_TIMEOUT_SECONDS)
+            except TimeoutError as exc:
+                reason = "MCP SSE request timed out waiting for event"
+                raise MCPToolError(reason) from exc
         finally:
             session["pending"].pop(request_id, None)
+            if not future.done():
+                future.cancel()
+            elif not future.cancelled():
+                # The listener can fail this future while HTTP dispatch is still in flight.
+                future.exception()
         if not data.get("ok", False):
             raise MCPToolError("mcp_error:sse_tool_error")
         return str(data.get("output", ""))
@@ -1915,7 +1934,7 @@ class MCPManager:
             return
         try:
             await asyncio.wait_for(ready.wait(), timeout=timeout_seconds)
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             raise MCPToolError(f"MCP SSE session did not become ready for server {server_name}") from exc
 
     async def _get_or_create_sse_session(self, server: MCPServerConfig) -> dict[str, Any]:
@@ -2002,10 +2021,13 @@ class MCPManager:
                     await asyncio.sleep(session["backoff_seconds"])
                     session["backoff_seconds"] = min(session["backoff_seconds"] * 2, 15.0)
         finally:
-            telemetry["session_id"] = None
-            self._append_history(server_name, "sse_closed", "session closed", status="closed", transport="sse", pending_requests=len(session["pending"]))
+            session_id = str(session["session_id"])
+            self._append_history(server_name, "sse_closed", "session closed", status="closed", transport="sse", session_id=session_id, pending_requests=len(session["pending"]))
             self._fail_pending(session, "MCP SSE session closed", only_stale=False)
-            self._sse_sessions.pop(server_name, None)
+            if telemetry.get("session_id") == session_id:
+                telemetry["session_id"] = None
+            if self._sse_sessions.get(server_name) is session:
+                self._sse_sessions.pop(server_name, None)
 
     def _cleanup_stale_pending(self, session: dict[str, Any], *, ttl_seconds: float = 65.0) -> None:
         self._fail_pending(session, "MCP SSE request timed out waiting for event", only_stale=True, ttl_seconds=ttl_seconds)
@@ -2030,6 +2052,7 @@ class MCPManager:
                     transport="sse",
                     request_id=str(request_id),
                     error=reason,
+                    session_id=session.get("session_id"),
                     pending_requests=len(session["pending"]),
                 )
 
@@ -2041,7 +2064,9 @@ class MCPManager:
             try:
                 await task
             except asyncio.CancelledError:
-                pass
+                closing_task = asyncio.current_task()
+                if closing_task is not None and closing_task.cancelling():
+                    raise
             except Exception:
                 pass
 

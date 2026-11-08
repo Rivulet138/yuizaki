@@ -4,7 +4,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from modules.agent.context import AgentRequestContext
 from modules.agent.planner import ToolStep
 from modules.agent.recovery_store import SQLiteStepRecoveryStore

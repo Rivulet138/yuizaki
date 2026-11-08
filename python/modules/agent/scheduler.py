@@ -515,7 +515,7 @@ class AgentScheduler:
                     await self._wake_event.wait()
                 else:
                     await asyncio.wait_for(self._wake_event.wait(), timeout=delay)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
     async def _run_task(self, task: ScheduledTask, run: _ScheduledRun) -> None:

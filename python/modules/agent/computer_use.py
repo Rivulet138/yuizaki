@@ -7,18 +7,18 @@ explicitly injected before a non-dry-run session can execute an action.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import hashlib
 import json
 import secrets
 import threading
 import time
-from typing import Any, Callable, Literal, Protocol
 import weakref
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any, Literal, Protocol
 
 from .permission_receipt import PermissionReceipt
-from .tool_registry import ToolDefinition, ToolRegistry
-from .tool_registry import _verify_execution_permit
+from .tool_registry import ToolDefinition, ToolRegistry, _verify_execution_permit
 from .tool_result import ToolResultEnvelope
 
 

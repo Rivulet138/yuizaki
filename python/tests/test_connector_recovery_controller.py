@@ -6,7 +6,27 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from routes.connector_api import ConnectorRecoveryController
+from modules.system.message_connectors import MessageConnectorRegistry
+from routes.connector_api import (
+    ConnectorRecoveryController,
+    create_message_connector_router,
+)
+
+
+@pytest.mark.parametrize("interval", [None, 0, 1])
+def test_router_exposes_optional_recovery_controller(interval: float | None) -> None:
+    registry = MessageConnectorRegistry(env={})
+    router = create_message_connector_router(
+        registry_provider=lambda: registry,
+        turn_service_provider=lambda: None,
+        active_workspace_id_provider=lambda: "default",
+        recovery_interval_seconds=interval,
+    )
+    controller = getattr(router, "connector_recovery_controller", ...)
+    if interval is not None and interval > 0:
+        assert isinstance(controller, ConnectorRecoveryController)
+    else:
+        assert controller is None
 
 
 class _Store:

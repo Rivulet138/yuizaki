@@ -17,7 +17,7 @@ import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -276,16 +276,16 @@ def _validate_timezone(timezone_name: str) -> None:
 
 
 def _nth_weekday(year: int, month: int, weekday: int, occurrence: int) -> datetime:
-    first = datetime(year, month, 1, tzinfo=timezone.utc)
+    first = datetime(year, month, 1, tzinfo=UTC)
     day = 1 + (weekday - first.weekday()) % 7 + (occurrence - 1) * 7
-    return datetime(year, month, day, tzinfo=timezone.utc)
+    return datetime(year, month, day, tzinfo=UTC)
 
 
 def _last_weekday(year: int, month: int, weekday: int) -> datetime:
     if month == 12:
-        next_month = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+        next_month = datetime(year + 1, 1, 1, tzinfo=UTC)
     else:
-        next_month = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+        next_month = datetime(year, month + 1, 1, tzinfo=UTC)
     candidate = next_month - timedelta(days=1)
     return candidate - timedelta(days=(candidate.weekday() - weekday) % 7)
 
@@ -310,7 +310,7 @@ def _fallback_offset(now_utc: datetime, timezone_name: str) -> timedelta:
 
 
 def _local_clock(now: float, timezone_name: str) -> tuple[str, int]:
-    utc_value = datetime.fromtimestamp(now, tz=timezone.utc)
+    utc_value = datetime.fromtimestamp(now, tz=UTC)
     try:
         local = utc_value.astimezone(ZoneInfo(timezone_name))
     except ZoneInfoNotFoundError:
@@ -1737,7 +1737,7 @@ class ActivityFrameService:
         event = {
             "type": "completed_turn_followup",
             "tick": max(0, round(frame.source_created_at * 1000)),
-            "at": datetime.fromtimestamp(frame.source_created_at, tz=timezone.utc)
+            "at": datetime.fromtimestamp(frame.source_created_at, tz=UTC)
             .isoformat(timespec="milliseconds")
             .replace("+00:00", "Z"),
             "trigger_reason": "completed_turn_followup",
