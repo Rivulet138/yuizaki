@@ -365,10 +365,10 @@ export const validateAvatarCommandAgainstCapabilities = (
     if (action.type === 'expression' && !capabilities.expressions.includes(action.name)) return [index]
     if (action.type === 'motion') {
       const semantic = action.semantic?.trim().toLowerCase()
+      if (action.group && action.index === undefined) return [index]
       const hasMatchingMotion = capabilities.motions.some((motion) => {
         if (action.group) {
-          return motion.group === action.group
-            && (action.index === undefined || motion.index === action.index)
+          return motion.group === action.group && motion.index === action.index
         }
         return Boolean(semantic && (
           motion.group.toLowerCase() === semantic
@@ -379,9 +379,16 @@ export const validateAvatarCommandAgainstCapabilities = (
     }
     if (action.type === 'parameterPatch') {
       const supported = new Map(capabilities.parameters.map((parameter) => [parameter.id, parameter]))
+      const patchIds = new Set<string>()
       if (action.patches.some((patch) => {
         const parameter = supported.get(patch.id)
-        return !parameter || !parameter.modes.includes(patch.mode ?? 'set')
+        if (patchIds.has(patch.id)) return true
+        patchIds.add(patch.id)
+        return !parameter
+          || !parameter.modes.includes(patch.mode ?? 'set')
+          || !Number.isFinite(patch.value)
+          || patch.value < parameter.min
+          || patch.value > parameter.max
       })) return [index]
     }
     return []
@@ -397,9 +404,8 @@ export const validateAvatarCommandAgainstCapabilities = (
 }
 
 /**
- * Resolve a best-effort action when a model does not expose the requested
- * expression or motion. This keeps the companion responsive while retaining
- * a degraded result so callers can surface the limitation.
+ * Resolve aliases to model capabilities without changing an explicitly
+ * requested expression or motion into a different one.
  */
 export const resolveAvatarActionFallback = (
   action: AvatarAction,
@@ -411,16 +417,21 @@ export const resolveAvatarActionFallback = (
     if (hasRequested && capabilities.actions[action.type]) {
       return { action, degraded: false }
     }
+    if (action.type === 'expression') {
+      return {
+        action: null,
+        degraded: true,
+        message: `Expression '${requested}' unavailable; requested expression was not substituted`,
+      }
+    }
     const fallback = capabilities.expressions[0]
     if (!fallback) return { action: null, degraded: true, message: `No expression fallback available for ${requested}` }
-    const fallbackAction: AvatarExpressionAction = action.type === 'expression'
-      ? { ...action, name: fallback }
-      : {
-        type: 'expression',
-        name: fallback,
-        weight: action.intensity ?? 1,
-        ...(typeof action.decayMs === 'number' ? { fadeOutMs: action.decayMs } : {}),
-      }
+    const fallbackAction: AvatarExpressionAction = {
+      type: 'expression',
+      name: fallback,
+      weight: action.intensity ?? 1,
+      ...(typeof action.decayMs === 'number' ? { fadeOutMs: action.decayMs } : {}),
+    }
     return {
       action: fallbackAction,
       degraded: true,
@@ -430,6 +441,9 @@ export const resolveAvatarActionFallback = (
 
   if (action.type === 'motion') {
     const requested = action.group ?? action.semantic ?? 'motion'
+    if (action.group && action.index === undefined) {
+      return { action: null, degraded: true, message: `Motion '${requested}' requires an explicit index` }
+    }
     const semantic = action.semantic?.trim().toLowerCase()
     const matchingMotion = capabilities.motions.find((motion) => {
       if (action.group) {
@@ -449,12 +463,10 @@ export const resolveAvatarActionFallback = (
         degraded: false,
       }
     }
-    const fallback = capabilities.motions[0]
-    if (!fallback) return { action: null, degraded: true, message: `No motion fallback available for ${requested}` }
     return {
-      action: { ...action, group: fallback.group, index: fallback.index },
+      action: null,
       degraded: true,
-      message: `Motion '${requested}' unavailable; used '${fallback.label ?? fallback.group}'`,
+      message: `Motion '${requested}' unavailable; requested motion was not substituted`,
     }
   }
 

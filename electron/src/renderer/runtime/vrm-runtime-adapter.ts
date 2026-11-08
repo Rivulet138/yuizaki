@@ -330,6 +330,11 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
     this.host.reportState(true)
   }
 
+  cancelPendingLoad(): void {
+    // Late model/animation completions must not publish after a timeout.
+    this.loadGeneration += 1
+  }
+
   applyConfig(_config: PetControlConfigPatch): void {
     if (!this.vrm) {
       return
@@ -401,7 +406,7 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
   }
 
   destroy(): void {
-    this.loadGeneration += 1
+    this.cancelPendingLoad()
     this.renderLoopGeneration += 1
     if (this.rafId !== null) {
       window.cancelAnimationFrame(this.rafId)

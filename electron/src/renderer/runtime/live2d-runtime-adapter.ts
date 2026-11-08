@@ -16,6 +16,7 @@ import type {
   PetExpressionMixPayload,
   PetLipSyncViseme,
   PetParameterOverrideItem,
+  PetPlacement,
   PetRendererStatePayload,
   PetResolvedEmotionTrigger,
 } from '../../shared/pet-control'
@@ -94,7 +95,7 @@ interface Live2DHostContext {
     scale: number
     positionX: number | null
     positionY: number | null
-    placement: 'bottom-right' | 'free'
+    placement: PetPlacement
   }
   showNotice(text: string): void
   hideNotice(): void
@@ -216,19 +217,12 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
       case 'motion':
         if (!action.group) return { status: 'rejected', message: 'Live2D motion group is required' }
         {
-          const requestedGroup = action.group
-          const manifestMotions = this.host.config.modelManifest?.motions ?? {}
-          const motionGroups = Object.entries(manifestMotions).map(([id, motion]) => motion.group ?? id)
-          const requestedAvailable = motionGroups.includes(requestedGroup)
-          const fallbackGroup = requestedAvailable ? requestedGroup : motionGroups[0]
-          if (fallbackGroup) {
-            this.triggerMotion(fallbackGroup, requestedAvailable ? action.index ?? 0 : 0)
-            return requestedAvailable
-              ? { status: 'completed' }
-              : { status: 'degraded', message: `Motion not available: ${requestedGroup}; used ${fallbackGroup}` }
-          }
-          this.triggerRandomMotion()
-          return { status: 'degraded', message: `Motion not available: ${requestedGroup}; used idle fallback` }
+          const motion = this.getCapabilities().motions.find((item) =>
+            item.group === action.group && item.index === action.index,
+          )
+          if (!motion) return { status: 'rejected', message: `Motion not available: ${action.group}:${action.index ?? 'unspecified'}` }
+          this.triggerMotion(motion.group, motion.index)
+          return { status: 'completed' }
         }
       case 'expression':
         if (!this.resolveExpressionName(action.name)) {
@@ -244,11 +238,24 @@ export class Live2DRuntimeAdapter implements PetRuntimeAdapter {
         if (setPatches.length === 0) {
           return { status: 'degraded', message: 'Live2D adapter currently supports set parameter patches only' }
         }
-        this.applyParameterOverrides(setPatches.map((patch) => ({
-          id: patch.id,
-          value: patch.value,
-          weight: patch.weight ?? 1,
-        })))
+        const parameters = new Map(this.getCapabilities().parameters.map((parameter) => [parameter.id, parameter]))
+        const seen = new Set<string>()
+        const invalidPatch = setPatches.some((patch) => {
+          const parameter = parameters.get(patch.id)
+          if (seen.has(patch.id)) return true
+          seen.add(patch.id)
+          return !parameter || !Number.isFinite(patch.value) || patch.value < parameter.min || patch.value > parameter.max
+        })
+        if (invalidPatch) return { status: 'rejected', message: 'Parameter patch is outside the active model capabilities' }
+        this.triggerExpressionMix({
+          expressions: [],
+          durationMs: action.durationMs ?? 1800,
+          parameterOverrides: setPatches.map((patch) => ({
+            id: patch.id,
+            value: patch.value,
+            weight: patch.weight ?? 1,
+          })),
+        })
         return setPatches.length === action.patches.length
           ? { status: 'completed' }
           : { status: 'degraded', message: 'Unsupported parameter blend modes were skipped' }

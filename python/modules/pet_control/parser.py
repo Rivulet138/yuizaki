@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+import math
 import re
-from typing import Any, Optional
-
+from typing import Any
 
 PET_CONTROL_SYSTEM_PROMPT = """
 你是 Yuizaki 本地桌宠 AI 的“回复与桌宠动作控制”模块。
@@ -168,26 +168,36 @@ def _clamp_number(value: Any, minimum: float, maximum: float, default: float | N
         number = float(value)
     except (TypeError, ValueError):
         return default
+    if not math.isfinite(number):
+        return default
     return max(minimum, min(maximum, number))
 
 
-def _parameter_bounds(control_context: Optional[dict[str, Any]]) -> dict[str, tuple[float, float]]:
+def _parameter_bounds(control_context: dict[str, Any] | None) -> dict[str, tuple[float, float]]:
     if not control_context:
         return {}
 
     bounds: dict[str, tuple[float, float]] = {}
-    for item in control_context.get("parameters") or []:
+    parameter_items = control_context.get("parameters")
+    if parameter_items is None:
+        parameter_items = control_context.get("parameterControls") or control_context.get("parameter_controls")
+    for item in parameter_items or []:
         if not isinstance(item, dict) or not item.get("id"):
             continue
-        minimum = _clamp_number(item.get("min"), -1000.0, 1000.0, -1.0)
-        maximum = _clamp_number(item.get("max"), -1000.0, 1000.0, 1.0)
+        minimum = _clamp_number(item.get("min"), -float("inf"), float("inf"), -1.0)
+        maximum = _clamp_number(item.get("max"), -float("inf"), float("inf"), 1.0)
         if minimum is None or maximum is None:
             continue
         bounds[str(item["id"])] = (min(minimum, maximum), max(minimum, maximum))
     return bounds
 
 
-def _allowed_motion_pairs(control_context: Optional[dict[str, Any]]) -> set[tuple[str, int]]:
+def _action_enabled(control_context: dict[str, Any] | None, action: str) -> bool:
+    actions = (control_context or {}).get("actions")
+    return not isinstance(actions, dict) or actions.get(action) is not False
+
+
+def _allowed_motion_pairs(control_context: dict[str, Any] | None) -> set[tuple[str, int]]:
     if not control_context:
         return set()
 
@@ -198,12 +208,14 @@ def _allowed_motion_pairs(control_context: Optional[dict[str, Any]]) -> set[tupl
         try:
             index = int(item.get("index") or 0)
         except (TypeError, ValueError):
-            index = 0
-        pairs.add((str(item["group"]), max(0, index)))
+            continue
+        if index < 0:
+            continue
+        pairs.add((str(item["group"]), index))
     return pairs
 
 
-def _allowed_emotion_values(control_context: Optional[dict[str, Any]]) -> list[str]:
+def _allowed_emotion_values(control_context: dict[str, Any] | None) -> list[str]:
     if not control_context:
         return []
 
@@ -218,7 +230,7 @@ def _allowed_emotion_values(control_context: Optional[dict[str, Any]]) -> list[s
     return values
 
 
-def _allowed_motion_group_values(control_context: Optional[dict[str, Any]]) -> list[str]:
+def _allowed_motion_group_values(control_context: dict[str, Any] | None) -> list[str]:
     if not control_context:
         return []
 
@@ -232,7 +244,7 @@ def _allowed_motion_group_values(control_context: Optional[dict[str, Any]]) -> l
     return list(dict.fromkeys(values))
 
 
-def _motion_option_values(control_context: Optional[dict[str, Any]], *, limit: int = 80) -> list[str]:
+def _motion_option_values(control_context: dict[str, Any] | None, *, limit: int = 80) -> list[str]:
     if not control_context:
         return []
     options: list[str] = []
@@ -240,16 +252,18 @@ def _motion_option_values(control_context: Optional[dict[str, Any]], *, limit: i
         if not isinstance(item, dict) or not item.get("group"):
             continue
         try:
-            index = max(0, int(item.get("index") or 0))
+            index = int(item.get("index") or 0)
         except (TypeError, ValueError):
-            index = 0
+            continue
+        if index < 0:
+            continue
         options.append(f"{item['group']}:{index}")
     return options[:limit]
 
 
 def _nullable_string_schema(values: list[str] | None = None) -> dict[str, Any]:
     schema: dict[str, Any] = {"type": ["string", "null"]}
-    if values:
+    if values is not None:
         schema["enum"] = [*values, None]
     return schema
 
@@ -279,36 +293,38 @@ def _object_schema(properties: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_pet_control_response_format(control_context: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+def build_pet_control_response_format(control_context: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build an OpenAI-compatible strict JSON schema for reply + pet_control output."""
-    emotion_values = _allowed_emotion_values(control_context)
-    motion_group_values = _allowed_motion_group_values(control_context)
-    expression_values = [str(item) for item in (control_context or {}).get("expressions", []) if item]
-    parameter_ids = [
-        str(item.get("id"))
-        for item in (control_context or {}).get("parameters", [])
-        if isinstance(item, dict) and item.get("id")
-    ]
-    allowed_indexes = [
-        index
-        for _group, index in sorted(_allowed_motion_pairs(control_context))
-    ]
-    max_motion_index = max(allowed_indexes) if allowed_indexes else 99
+    emotion_values = _allowed_emotion_values(control_context) if _action_enabled(control_context, "affect") else []
+    motion_enabled = _action_enabled(control_context, "motion")
+    expression_enabled = _action_enabled(control_context, "expression")
+    parameter_patch_enabled = _action_enabled(control_context, "parameterPatch")
+    motion_group_values = _allowed_motion_group_values(control_context) if motion_enabled else []
+    expression_values = [str(item) for item in (control_context or {}).get("expressions", []) if item] if expression_enabled else []
+    parameter_items = (control_context or {}).get("parameters")
+    if parameter_items is None:
+        parameter_items = (control_context or {}).get("parameterControls") or (control_context or {}).get("parameter_controls")
+    parameter_items = [item for item in parameter_items or [] if isinstance(item, dict) and item.get("id")] if parameter_patch_enabled else []
+    motion_group_schema = _nullable_string_schema(motion_group_values)
+    motion_index_schema = {"type": ["integer", "null"]}
 
     expression_mix_item = _object_schema({
         "expression": _nullable_string_schema(expression_values),
         "weight": _nullable_number_schema(0.0, 1.0),
     })
-    parameter_override_item = _object_schema({
-        "id": _nullable_string_schema(parameter_ids),
-        "value": _nullable_number_schema(-1000.0, 1000.0),
-        "weight": _nullable_number_schema(0.0, 1.0),
-    })
+    parameter_override_item = {"anyOf": [
+        _object_schema({
+            "id": {"enum": [str(item["id"])]},
+            "value": _nullable_number_schema(*_parameter_bounds({"parameters": [item]}).get(str(item["id"]), (-1.0, 1.0))),
+            "weight": _nullable_number_schema(0.0, 1.0),
+        })
+        for item in parameter_items
+    ]}
     sentence_emotion_item = _object_schema({
         "sentence_index": _nullable_integer_schema(0, 99),
         "emotion_id": _nullable_string_schema(emotion_values),
         "motion_group": _nullable_string_schema(motion_group_values),
-        "motion_index": _nullable_integer_schema(0, max_motion_index),
+        "motion_index": motion_index_schema,
         "expression_name": _nullable_string_schema(expression_values),
         "intensity": _nullable_number_schema(0.0, 1.0),
         "duration_ms": _nullable_integer_schema(100, 10000),
@@ -316,7 +332,7 @@ def build_pet_control_response_format(control_context: Optional[dict[str, Any]] 
     pet_control_schema = _object_schema({
         "emotion_id": _nullable_string_schema(emotion_values),
         "motion_group": _nullable_string_schema(motion_group_values),
-        "motion_index": _nullable_integer_schema(0, max_motion_index),
+        "motion_index": motion_index_schema,
         "expression_name": _nullable_string_schema(expression_values),
         "intensity": _nullable_number_schema(0.0, 1.0),
         "duration_ms": _nullable_integer_schema(100, 10000),
@@ -327,7 +343,11 @@ def build_pet_control_response_format(control_context: Optional[dict[str, Any]] 
         },
         "parameter_overrides": {
             "type": "array",
-            "items": parameter_override_item,
+            "items": parameter_override_item if parameter_items else _object_schema({
+                "id": {"enum": [None]},
+                "value": _nullable_number_schema(-1.0, 1.0),
+                "weight": _nullable_number_schema(0.0, 1.0),
+            }),
             "maxItems": 8,
         },
         "sentence_emotions": {
@@ -446,15 +466,11 @@ def _normalize_expression_mix(expression_mix: Any) -> list[dict[str, Any]]:
         weight = item.get("weight")
         if not expression:
             continue
-        try:
+        normalized_weight = _clamp_number(weight, 0.0, 1.0, 1.0)
+        if normalized_weight is not None:
             normalized_mix.append({
                 "expression": str(expression),
-                "weight": max(0.0, min(1.0, float(weight if weight is not None else 1.0))),
-            })
-        except (TypeError, ValueError):
-            normalized_mix.append({
-                "expression": str(expression),
-                "weight": 1.0,
+                "weight": normalized_weight,
             })
     return normalized_mix[:3]
 
@@ -472,14 +488,15 @@ def _normalize_parameter_overrides(parameter_overrides: Any) -> list[dict[str, A
         weight = item.get("weight")
         if not parameter_id or value is None:
             continue
-        try:
-            normalized_overrides.append({
-                "id": str(parameter_id),
-                "value": float(value),
-                "weight": max(0.0, min(1.0, float(weight if weight is not None else 1.0))),
-            })
-        except (TypeError, ValueError):
+        normalized_value = _clamp_number(value, -1.0e12, 1.0e12)
+        normalized_weight = _clamp_number(weight, 0.0, 1.0, 1.0)
+        if normalized_value is None or normalized_weight is None:
             continue
+        normalized_overrides.append({
+            "id": str(parameter_id),
+            "value": normalized_value,
+            "weight": normalized_weight,
+        })
     return normalized_overrides[:8]
 
 
@@ -503,7 +520,7 @@ def _normalize_sentence_emotions(sentence_emotions: Any) -> list[dict[str, Any]]
             if value is None:
                 continue
             try:
-                cue[target_key] = max(0, int(value))
+                cue[target_key] = int(value) if target_key == "motion_index" else max(0, int(value))
             except (TypeError, ValueError):
                 pass
 
@@ -535,7 +552,7 @@ def _normalize_sentence_emotions(sentence_emotions: Any) -> list[dict[str, Any]]
     return normalized_cues[:8]
 
 
-def _normalize_pet_control_payload(pet_control: Any) -> Optional[dict[str, Any]]:
+def _normalize_pet_control_payload(pet_control: Any) -> dict[str, Any] | None:
     if not isinstance(pet_control, dict):
         return None
 
@@ -548,7 +565,7 @@ def _normalize_pet_control_payload(pet_control: Any) -> Optional[dict[str, Any]]
     motion_index = pet_control.get("motion_index")
     if motion_index is not None:
         try:
-            normalized["motion_index"] = max(0, int(motion_index))
+            normalized["motion_index"] = int(motion_index)
         except (TypeError, ValueError):
             pass
 
@@ -585,8 +602,8 @@ def legacy_pet_control_to_avatar_command(
     stream_id: str,
     sequence: int,
     issued_at: int,
-    capability_revision: Optional[str] = None,
-) -> Optional[dict[str, Any]]:
+    capability_revision: str | None = None,
+) -> dict[str, Any] | None:
     """Convert the stable LLM-facing payload into AvatarCommand v1.
 
     The LLM contract stays intentionally small; transport code can use this
@@ -614,6 +631,14 @@ def legacy_pet_control_to_avatar_command(
             "type": "expression",
             "name": expression["expression"],
             "weight": expression.get("weight", 1.0),
+            "fadeOutMs": duration_ms,
+        })
+
+    if not normalized.get("expression_mix") and normalized.get("expression_name"):
+        actions.append({
+            "type": "expression",
+            "name": str(normalized["expression_name"]),
+            "weight": intensity,
             "fadeOutMs": duration_ms,
         })
 
@@ -660,7 +685,7 @@ def legacy_pet_control_to_avatar_command(
     return command
 
 
-def build_pet_control_prompt(control_context: Optional[dict[str, Any]] = None) -> str:
+def build_pet_control_prompt(control_context: dict[str, Any] | None = None) -> str:
     if not control_context:
         return "\n\n".join([PET_CONTROL_SYSTEM_PROMPT, PET_CONTROL_DIRECTIVE_PROMPT])
 
@@ -724,7 +749,7 @@ def build_pet_control_prompt(control_context: Optional[dict[str, Any]] = None) -
     return "\n\n".join(prompts)
 
 
-def merge_messages_with_pet_control_prompt(messages: list[dict[str, Any]], control_context: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]:
+def merge_messages_with_pet_control_prompt(messages: list[dict[str, Any]], control_context: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     if not control_context:
         return list(messages)
 
@@ -753,10 +778,26 @@ def merge_messages_with_pet_control_prompt(messages: list[dict[str, Any]], contr
     ]
 
 
-def filter_pet_control_payload(pet_control: Optional[dict[str, Any]], control_context: Optional[dict[str, Any]] = None) -> Optional[dict[str, Any]]:
+def filter_pet_control_payload(pet_control: dict[str, Any] | None, control_context: dict[str, Any] | None = None) -> dict[str, Any] | None:
     filtered = _normalize_pet_control_payload(pet_control)
     if not filtered or not control_context:
         return filtered
+
+    if not _action_enabled(control_context, "affect"):
+        filtered.pop("emotion_id", None)
+    if not _action_enabled(control_context, "motion"):
+        filtered.pop("motion_group", None)
+        filtered.pop("motion_index", None)
+    elif filtered.get("motion_group") and (
+        not isinstance(pet_control, dict) or pet_control.get("motion_index") is None
+    ):
+        filtered.pop("motion_group", None)
+        filtered.pop("motion_index", None)
+    if not _action_enabled(control_context, "expression"):
+        filtered.pop("expression_name", None)
+        filtered.pop("expression_mix", None)
+    if not _action_enabled(control_context, "parameterPatch"):
+        filtered.pop("parameter_overrides", None)
 
     allowed_models = {
         str(item.get("id")): str(item.get("type"))
@@ -780,24 +821,26 @@ def filter_pet_control_payload(pet_control: Optional[dict[str, Any]], control_co
     elif filtered.get("model_type") and str(filtered["model_type"]) not in {"live2d", "vrm"}:
         filtered.pop("model_type", None)
 
-    if filtered.get("emotion_id") and str(filtered["emotion_id"]) not in allowed_emotions:
+    if _action_enabled(control_context, "affect") and filtered.get("emotion_id") and str(filtered["emotion_id"]) not in allowed_emotions:
         filtered.pop("emotion_id", None)
-    if filtered.get("motion_group") and str(filtered["motion_group"]) not in allowed_motion_groups:
+    if _action_enabled(control_context, "motion") and filtered.get("motion_group") and str(filtered["motion_group"]) not in allowed_motion_groups:
         filtered.pop("motion_group", None)
         filtered.pop("motion_index", None)
     if filtered.get("motion_group"):
         try:
-            motion_index = max(0, int(filtered.get("motion_index") or 0))
+            motion_index = int(filtered.get("motion_index") or 0)
         except (TypeError, ValueError):
-            motion_index = 0
-        if allowed_motion_pairs and (str(filtered["motion_group"]), motion_index) not in allowed_motion_pairs:
-            fallback_indexes = sorted(index for group, index in allowed_motion_pairs if group == str(filtered["motion_group"]))
-            motion_index = fallback_indexes[0] if fallback_indexes else 0
-        filtered["motion_index"] = motion_index
-    if filtered.get("expression_name") and str(filtered["expression_name"]) not in allowed_expressions:
+            motion_index = -1
+        group = str(filtered["motion_group"])
+        if (group, motion_index) not in allowed_motion_pairs:
+            filtered.pop("motion_group", None)
+            filtered.pop("motion_index", None)
+        if filtered.get("motion_group"):
+            filtered["motion_index"] = motion_index
+    if _action_enabled(control_context, "expression") and filtered.get("expression_name") and str(filtered["expression_name"]) not in allowed_expressions:
         filtered.pop("expression_name", None)
 
-    if isinstance(filtered.get("expression_mix"), list):
+    if _action_enabled(control_context, "expression") and isinstance(filtered.get("expression_mix"), list):
         filtered_mix = [
             item for item in filtered["expression_mix"]
             if isinstance(item, dict) and str(item.get("expression") or "") in allowed_expressions
@@ -807,7 +850,7 @@ def filter_pet_control_payload(pet_control: Optional[dict[str, Any]], control_co
         else:
             filtered.pop("expression_mix", None)
 
-    if isinstance(filtered.get("parameter_overrides"), list):
+    if _action_enabled(control_context, "parameterPatch") and isinstance(filtered.get("parameter_overrides"), list):
         filtered_overrides = []
         for item in filtered["parameter_overrides"]:
             if not isinstance(item, dict):
@@ -839,24 +882,37 @@ def filter_pet_control_payload(pet_control: Optional[dict[str, Any]], control_co
                 continue
             filtered_cue = dict(cue)
 
-            if filtered_cue.get("emotion_id") and str(filtered_cue["emotion_id"]) not in allowed_emotions:
+            if not _action_enabled(control_context, "affect"):
                 filtered_cue.pop("emotion_id", None)
+            elif filtered_cue.get("emotion_id") and str(filtered_cue["emotion_id"]) not in allowed_emotions:
+                filtered_cue.pop("emotion_id", None)
+            if not _action_enabled(control_context, "motion"):
+                filtered_cue.pop("motion_group", None)
+                filtered_cue.pop("motion_index", None)
+            elif filtered_cue.get("motion_group") and cue.get("motion_index") is None:
+                filtered_cue.pop("motion_group", None)
+                filtered_cue.pop("motion_index", None)
             if filtered_cue.get("motion_group") and str(filtered_cue["motion_group"]) not in allowed_motion_groups:
                 filtered_cue.pop("motion_group", None)
                 filtered_cue.pop("motion_index", None)
             if filtered_cue.get("motion_group"):
                 try:
-                    motion_index = max(0, int(filtered_cue.get("motion_index") or 0))
+                    motion_index = int(filtered_cue.get("motion_index") or 0)
                 except (TypeError, ValueError):
-                    motion_index = 0
-                if allowed_motion_pairs and (str(filtered_cue["motion_group"]), motion_index) not in allowed_motion_pairs:
-                    fallback_indexes = sorted(index for group, index in allowed_motion_pairs if group == str(filtered_cue["motion_group"]))
-                    motion_index = fallback_indexes[0] if fallback_indexes else 0
-                filtered_cue["motion_index"] = motion_index
-            if filtered_cue.get("expression_name") and str(filtered_cue["expression_name"]) not in allowed_expressions:
+                    motion_index = -1
+                group = str(filtered_cue["motion_group"])
+                if (group, motion_index) not in allowed_motion_pairs:
+                    filtered_cue.pop("motion_group", None)
+                    filtered_cue.pop("motion_index", None)
+                if filtered_cue.get("motion_group"):
+                    filtered_cue["motion_index"] = motion_index
+            if not _action_enabled(control_context, "expression"):
+                filtered_cue.pop("expression_name", None)
+                filtered_cue.pop("expression_mix", None)
+            elif filtered_cue.get("expression_name") and str(filtered_cue["expression_name"]) not in allowed_expressions:
                 filtered_cue.pop("expression_name", None)
 
-            if isinstance(filtered_cue.get("expression_mix"), list):
+            if _action_enabled(control_context, "expression") and isinstance(filtered_cue.get("expression_mix"), list):
                 filtered_mix = [
                     item for item in filtered_cue["expression_mix"]
                     if isinstance(item, dict) and str(item.get("expression") or "") in allowed_expressions
@@ -866,7 +922,9 @@ def filter_pet_control_payload(pet_control: Optional[dict[str, Any]], control_co
                 else:
                     filtered_cue.pop("expression_mix", None)
 
-            if isinstance(filtered_cue.get("parameter_overrides"), list):
+            if not _action_enabled(control_context, "parameterPatch"):
+                filtered_cue.pop("parameter_overrides", None)
+            elif isinstance(filtered_cue.get("parameter_overrides"), list):
                 filtered_overrides = []
                 for item in filtered_cue["parameter_overrides"]:
                     if not isinstance(item, dict):
@@ -897,17 +955,10 @@ def filter_pet_control_payload(pet_control: Optional[dict[str, Any]], control_co
         else:
             filtered.pop("sentence_emotions", None)
 
-    filtered = _ensure_default_emotion_motion(
-        filtered,
-        allowed_emotion_values,
-        allowed_motion_group_values,
-        allowed_motion_pairs,
-    )
-
     return filtered or None
 
 
-def _extract_json_candidate(text: str) -> Optional[str]:
+def _extract_json_candidate(text: str) -> str | None:
     stripped = (text or "").strip()
     if not stripped:
         return None
@@ -923,7 +974,7 @@ def _extract_json_candidate(text: str) -> Optional[str]:
     return stripped[first:last + 1]
 
 
-def extract_pet_control_payload(text: str) -> tuple[str, Optional[dict[str, Any]]]:
+def extract_pet_control_payload(text: str) -> tuple[str, dict[str, Any] | None]:
     candidate = _extract_json_candidate(text)
     if not candidate:
         return text.strip(), None
