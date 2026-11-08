@@ -47,7 +47,7 @@
     "pinia": "^4.0.3",
     "pixi.js": "^8.19.0",
     "socket.io-client": "^4.8.3",
-    "three": "^0.186.1",
+    "three": "^0.187.0",
     "uiohook-napi": "^1.5.5",
     "vue": "^3.5.35",
     "vue-router": "^5.4.0",
