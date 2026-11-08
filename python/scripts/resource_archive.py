@@ -13,7 +13,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-
 RESOURCE_LOCK_PATH = Path(__file__).resolve().parents[2] / "resources.lock.json"
 PROGRESS_PREFIX = "YUIZAKI_RESOURCE_PROGRESS "
 
@@ -116,7 +115,7 @@ def download_archive(
                 headers["If-Range"] = str(validator)
         request = urllib.request.Request(url, headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310 - URLs are locked by the caller.
+            with urllib.request.urlopen(request, timeout=60) as response:
                 status = getattr(response, "status", None) or response.getcode()
                 range_info = _content_range(response) if status == 206 else None
                 can_append = existing_size > 0 and status == 206 and range_info is not None and range_info[0] == existing_size

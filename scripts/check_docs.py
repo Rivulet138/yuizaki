@@ -5,7 +5,6 @@ import subprocess
 from pathlib import Path
 from urllib.parse import unquote
 
-
 ROOT = Path(__file__).resolve().parents[1]
 MARKDOWN_LINK = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 IGNORED_SCHEMES = ("http://", "https://", "mailto:", "data:", "app://")
