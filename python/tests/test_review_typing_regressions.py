@@ -6,14 +6,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-import pytest
-from sqlalchemy import Column, Integer, MetaData, Table, UniqueConstraint, event
-from sqlalchemy.exc import IntegrityError
-
 import migration_bootstrap
+import pytest
 from database.models import Base
 from database.repository import DatabaseError, DatabaseRepository, NotFoundError
-from modules.system.qq_bridge import QqBridgeSupervisor
+from modules.system.qq_bridge import QqBridgeError, QqBridgeSupervisor
+from sqlalchemy import Column, Integer, MetaData, Table, UniqueConstraint, event
+from sqlalchemy.exc import IntegrityError
 
 
 @pytest.fixture
@@ -94,11 +93,20 @@ def test_stop_keeps_process_reference_through_timeout(tmp_path: Path) -> None:
     )
     supervisor._process = process
 
-    supervisor.stop()
+    with pytest.raises(QqBridgeError) as excinfo:
+        supervisor.stop()
 
+    assert excinfo.value.code == "qq_bridge_stop_failed"
     process.terminate.assert_called_once_with()
-    process.wait.assert_called_once_with(timeout=10)
+    assert process.wait.call_count == 2
+    assert all(call.kwargs == {"timeout": 10} for call in process.wait.call_args_list)
     process.kill.assert_called_once_with()
+    assert supervisor._process is process
+    assert supervisor.status()["running"] is True
+
+    process.poll.return_value = 0
+    status = supervisor.stop()
+    assert status["running"] is False
     assert supervisor._process is None
 
 
