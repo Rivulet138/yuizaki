@@ -55,7 +55,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@tailwindcss/postcss": "^4.3.0",
+    "@tailwindcss/postcss": "^4.3.4",
     "@types/node": "^26.6.5",
     "@types/yauzl": "^3.4.0",
     "@vitejs/plugin-vue": "^6.0.10",
