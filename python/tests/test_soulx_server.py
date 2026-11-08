@@ -10,7 +10,6 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-
 SERVER_PATH = Path(__file__).resolve().parents[2] / "services" / "soulx-svc" / "server.py"
 SPEC = importlib.util.spec_from_file_location("soulx_service_server", SERVER_PATH)
 assert SPEC is not None and SPEC.loader is not None

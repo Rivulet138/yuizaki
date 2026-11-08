@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-
 from evals.product_metrics_transport import HttpProductEventTransport
-
 
 KEY = "a" * 64
 

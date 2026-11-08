@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
 from modules.system.stream_runtime import StreamRuntime
 from routes.system_api import create_system_router
 
