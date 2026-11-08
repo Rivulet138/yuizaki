@@ -4,11 +4,10 @@ import hashlib
 import hmac
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import Event
 
 import pytest
-
 from modules.system.stream_runtime import StreamRuntime
 from modules.system.twitch_connection import (
     TwitchConnectionSupervisor,
@@ -239,7 +238,7 @@ def test_eventsub_revocation_immediately_stops_irc_reconnect_intent() -> None:
 
     body = json.dumps({"subscription": {"status": "authorization_revoked"}}).encode()
     message_id = "revocation-message-1"
-    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    timestamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     digest = hmac.new(
         b"event-secret",
         message_id.encode() + timestamp.encode() + body,
@@ -288,7 +287,7 @@ def test_runtime_connect_twitch_does_not_reconnect_after_revocation() -> None:
 
     body = json.dumps({"subscription": {"status": "authorization_revoked"}}).encode()
     message_id = "revocation-no-reconnect"
-    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    timestamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     digest = hmac.new(
         b"event-secret",
         message_id.encode() + timestamp.encode() + body,
@@ -337,7 +336,7 @@ def test_revocation_blocks_chat_preview_and_execute_before_provider_call() -> No
 
     body = json.dumps({"subscription": {"status": "authorization_revoked"}}).encode()
     message_id = "revocation-no-chat"
-    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    timestamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     digest = hmac.new(
         b"event-secret",
         message_id.encode() + timestamp.encode() + body,
@@ -426,7 +425,7 @@ def test_full_twitch_reconfigure_clears_revocation_and_allows_reconnect() -> Non
 
     body = json.dumps({"subscription": {"status": "authorization_revoked"}}).encode()
     message_id = "revocation-reconfigure"
-    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    timestamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     digest = hmac.new(
         b"event-secret",
         message_id.encode() + timestamp.encode() + body,

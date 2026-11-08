@@ -12,7 +12,7 @@ import time
 from collections import deque
 from collections.abc import Mapping
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock
 from typing import Any, cast
@@ -823,7 +823,7 @@ class StreamRuntime:
         if action == "stream.chat_send":
             plan["moderation"] = moderation.snapshot()
         request_id = f"stream-preview-{uuid4().hex}"
-        expires_at = datetime.fromtimestamp(time.time() + _PREVIEW_TTL_SECONDS, timezone.utc).isoformat()
+        expires_at = datetime.fromtimestamp(time.time() + _PREVIEW_TTL_SECONDS, UTC).isoformat()
         preview = {
             "requestId": request_id,
             "kind": action,
@@ -1112,7 +1112,7 @@ class StreamRuntime:
                 {
                     "action": action,
                     "requestId": request_id,
-                    "at": datetime.now(timezone.utc).isoformat(),
+                    "at": datetime.now(UTC).isoformat(),
                     "status": "sending",
                     "outcome": "sending",
                     "externalSideEffects": action in _EXTERNAL_ACTIONS,
@@ -1171,7 +1171,7 @@ class StreamRuntime:
         except ValueError:
             raise
         except Exception as exc:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             audit = {
                 "action": action,
                 "requestId": request_id,
@@ -1187,7 +1187,7 @@ class StreamRuntime:
                 self._record_action_locked(audit)
             raise RuntimeError(f"unknown_effect: {type(exc).__name__}") from exc
         if verification_status == "unknown_effect":
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             audit = {
                 "action": action,
                 "requestId": request_id,
@@ -1202,7 +1202,7 @@ class StreamRuntime:
                 self._state["state"] = "error"
                 self._record_action_locked(audit)
             raise RuntimeError("unknown_effect: provider verification did not confirm the requested state")
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         audit = {
             "action": action,
             "requestId": request_id,
@@ -1262,7 +1262,7 @@ class StreamRuntime:
             "kind": kind,
             "text": text.strip(),
             "author": author.strip() or None,
-            "receivedAt": datetime.now(timezone.utc).isoformat(),
+            "receivedAt": datetime.now(UTC).isoformat(),
             "source": source.strip() or "local",
             "delivered": False,
             "draftState": "pending",
@@ -1487,7 +1487,7 @@ class StreamRuntime:
     def set_takeover(self, enabled: bool) -> dict[str, Any]:
         if not isinstance(enabled, bool):
             raise TypeError("enabled must be a boolean")
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         with self._lock:
             self._state["policy"]["humanTakeover"] = enabled
             self._state["lastAction"] = {
