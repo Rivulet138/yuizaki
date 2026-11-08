@@ -6,15 +6,15 @@ import csv
 import io
 import json
 import time
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable
-
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse, StreamingResponse
-from starlette.concurrency import run_in_threadpool
+from typing import Any
 
 from database.repository import DatabaseError, NotFoundError
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse, StreamingResponse
 from modules.system.api_response import error_response
+from starlette.concurrency import run_in_threadpool
 
 
 def create_summary_router(

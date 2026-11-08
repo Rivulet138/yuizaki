@@ -6,7 +6,6 @@ from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
-
 PERMISSION_RECEIPT_SCHEMA_VERSION = "yuizaki.permission-receipt.v1"
 _REDACTED = "[REDACTED]"
 _SECRET_KEY_PARTS = (

@@ -1,6 +1,6 @@
 {
   "_comment": "Explicit, conservative model limits. Python clamps configured budgets only for keys listed here; a missing key keeps existing behavior. Keys are '<provider>:<model>' after lowercasing and stripping a 'models/' prefix. Providers come from python/modules/llm/providers.py. Update values only from the vendor's published limits.",
-  "_capturedAt": "2026-10-19",
+  "_capturedAt": "2026-11-06",
   "deepseek:deepseek-flash": {
     "vision": false,
     "metadata": {
@@ -128,5 +128,21 @@
       "maxOutputTokens": 8192
     },
     "source": "https://help.aliyun.com/zh/model-studio/models"
+  },
+  "chatgpt:gpt-6.1-sol": {
+    "vision": true,
+    "metadata": {
+      "contextWindowTokens": 1050000,
+      "maxOutputTokens": 128000
+    },
+    "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
+  },
+  "custom:gpt-6.1-sol": {
+    "vision": true,
+    "metadata": {
+      "contextWindowTokens": 1050000,
+      "maxOutputTokens": 128000
+    },
+    "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
   }
 }

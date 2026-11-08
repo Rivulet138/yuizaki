@@ -22,7 +22,6 @@ from typing import Annotated
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
 
-
 logger = logging.getLogger("soulx-svc")
 
 SOULX_ROOT = Path(os.getenv("SOULX_ROOT", "/opt/SoulX-Singer")).resolve()

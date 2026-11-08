@@ -8,7 +8,6 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
-
 DEFAULT_PROXY_PREFIXES = ("/api/", "/memory/", "/system/", "/health", "/v1/")
 
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 
 import pytest
-
 from modules.system.runtime_endpoints import (
     build_voice_diagnostics_begin_endpoint,
     build_voice_diagnostics_comfort_endpoint,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from modules.tools.local_tools import LocalToolError, dispatch_tool
 
 

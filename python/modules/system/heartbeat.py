@@ -7,7 +7,7 @@ import time
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 
@@ -101,7 +101,7 @@ class HeartbeatScheduler:
         while self.state.running:
             await asyncio.sleep(self.state.interval_seconds)
             self.state.tick_count += 1
-            self.state.last_tick_at = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+            self.state.last_tick_at = datetime.now(UTC).isoformat().replace('+00:00', 'Z')
             self._sync_companion_defaults()
             self._update_persona_state()
             self._emit_behavior_events()
@@ -404,7 +404,7 @@ class HeartbeatScheduler:
                 'tick': event.get('tick', self.state.tick_count),
                 'at': event.get('at') or datetime.fromtimestamp(
                     common['timestamp'],
-                    tz=timezone.utc,
+                    tz=UTC,
                 ).isoformat().replace('+00:00', 'Z'),
                 'data': data,
                 'lifecycle_phase': 'created',

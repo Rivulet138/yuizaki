@@ -1,8 +1,10 @@
-import { CONTROL_ORIGIN, requestBlob, requestJson } from './http-client'
+import { CONTROL_ORIGIN, requestJson } from './http-client'
 import { resolveLlmModelsClientTimeoutMs } from '../../../shared/llm-models-timeout'
 
-const MODEL_CONNECTION_TIMEOUT_MS = 60_000
+const MODEL_CONNECTION_TIMEOUT_MS = 65_000
+const LOCAL_DISCOVERY_TIMEOUT_MS = 35_000
 const TTS_WARMUP_TIMEOUT_MS = 5 * 60 * 1000
+const TTS_CONNECTION_TEST_TIMEOUT_MS = TTS_WARMUP_TIMEOUT_MS + 5_000
 
 export interface SettingsResponse {
   llm: LlmSettingsResponse
@@ -164,13 +166,6 @@ export interface GenieCharacterResourcesResponse {
 export interface SettingsMutationResponse {
   status: string
   updated?: number
-  runtime_applied?: string[]
-  runtime_changed?: string[]
-}
-
-export interface SettingsImportResponse {
-  status: string
-  filepath: string
   runtime_applied?: string[]
   runtime_changed?: string[]
 }
@@ -339,13 +334,6 @@ const loadSettings = async (): Promise<SettingsResponse> => {
 
 export const settingsClient = {
   load: loadSettings,
-  exportBlob: async () => requestBlob(`${CONTROL_ORIGIN}/api/settings/export`),
-  importPayload: async (payload: Record<string, unknown>) =>
-    requestJson<SettingsImportResponse>(`${CONTROL_ORIGIN}/api/settings/import`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }),
   save: async (payload: Record<string, unknown>) =>
     requestJson<SettingsMutationResponse>(`${CONTROL_ORIGIN}/api/settings/`, {
       method: 'PATCH',
@@ -360,7 +348,7 @@ export const settingsClient = {
     body: JSON.stringify(payload),
     timeoutMs: resolveLlmModelsClientTimeoutMs(payload.timeout),
   }),
-  testTts: async () => requestJson<TestConnectionResponse>(`${CONTROL_ORIGIN}/api/settings/test/tts`, { method: 'POST', timeoutMs: MODEL_CONNECTION_TIMEOUT_MS }),
+  testTts: async () => requestJson<TestConnectionResponse>(`${CONTROL_ORIGIN}/api/settings/test/tts`, { method: 'POST', timeoutMs: TTS_CONNECTION_TEST_TIMEOUT_MS }),
   testSvc: async () => requestJson<TestConnectionResponse>(`${CONTROL_ORIGIN}/api/settings/test/svc`, { method: 'POST', timeoutMs: MODEL_CONNECTION_TIMEOUT_MS }),
   ttsStatus: async () => requestJson<TtsRuntimeStatusResponse>(`${CONTROL_ORIGIN}/api/settings/tts/status`),
   ttsCharacters: async () => requestJson<GenieCharacterResourcesResponse>(`${CONTROL_ORIGIN}/api/settings/tts/characters`),
@@ -375,7 +363,9 @@ export const settingsClient = {
     }
     return warmupTtsRequest
   },
-  discoverLocal: async () => requestJson<LocalRuntimeDiscoveryResponse>(`${CONTROL_ORIGIN}/api/settings/local-discovery`),
+  discoverLocal: async () => requestJson<LocalRuntimeDiscoveryResponse>(`${CONTROL_ORIGIN}/api/settings/local-discovery`, {
+    timeoutMs: LOCAL_DISCOVERY_TIMEOUT_MS,
+  }),
   metadata: async () => requestJson<SettingsMetadataResponse>(`${CONTROL_ORIGIN}/api/settings/metadata`),
   history: async () => requestJson<SettingsHistoryResponse>(`${CONTROL_ORIGIN}/api/settings/history`),
   clearHistory: async () => requestJson<SettingsMutationResponse>(`${CONTROL_ORIGIN}/api/settings/history`, { method: 'DELETE' }),

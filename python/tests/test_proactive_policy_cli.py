@@ -5,7 +5,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "python" / "evals" / "fixtures" / "proactive_policy.json"
 SCRIPT = ROOT / "scripts" / "proactive_policy_check.py"

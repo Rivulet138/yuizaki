@@ -5,15 +5,47 @@ import logging
 
 import httpx
 import pytest
-
 from modules.core.state import Generation, GenerationManager
 from modules.llm.client import LLMClient
 from modules.system.dynamic_config import DynamicConfigManager
 from modules.system.settings_api import SettingsAPI
 from modules.system.settings_store import SettingsStore
 
-
 SECRET = "cust-k7"
+
+
+@pytest.mark.asyncio
+async def test_summary_scoring_error_redacts_audit_and_preserves_rewrite(monkeypatch):
+    client = LLMClient("https://example.test/v1", SECRET, "test-model")
+    manager = GenerationManager()
+    manager.update_summary_policy(24, 8, 140, 6, quality_scorer_mode="llm")
+    manager.append_history("session", "user", "I prefer quiet evenings.")
+    rewritten = "Preference: quiet evenings."
+    scoring_attempts = []
+
+    async def rewrite(**kwargs):
+        return rewritten
+
+    async def fail_scoring(**kwargs):
+        scoring_attempts.append(kwargs["summary_text"])
+        raise RuntimeError(f"upstream echoed {SECRET}")
+
+    monkeypatch.setattr("modules.llm.client._rewrite_summary_with_llm", rewrite)
+    monkeypatch.setattr("modules.llm.client._score_summary_with_llm", fail_scoring)
+    async with httpx.AsyncClient() as http:
+        client._http = http
+        result = await client.rewrite_session_summary(manager, "session")
+
+    assert scoring_attempts == [rewritten]
+    assert result["ok"] is True
+    assert result["summary"] == manager.get_summary("session") == rewritten
+    assert result["stats"]["quality_scorer"] == "rule"
+    audit = manager.get_summary_audit("session")
+    assert len(audit) == 1
+    assert audit[0]["outcome"] == "ok"
+    assert "quality=rule_fallback(" in audit[0]["detail"]
+    assert SECRET not in json.dumps(audit)
+    assert "<redacted>" in audit[0]["detail"]
 
 
 @pytest.mark.asyncio

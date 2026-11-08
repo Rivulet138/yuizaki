@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 SOCKET_PROTOCOL_VERSION = 1
 
@@ -138,15 +138,15 @@ class ASRResultData:
 @dataclass
 class LLMRequestData:
     """LLM 请求"""
-    messages: List[Dict[str, Any]] = field(default_factory=list)
+    messages: list[dict[str, Any]] = field(default_factory=list)
     session_id: str = ""
-    temperature: Optional[float] = None
-    top_p: Optional[float] = None
-    top_k: Optional[int] = None
-    min_p: Optional[float] = None
-    frequency_penalty: Optional[float] = None
-    presence_penalty: Optional[float] = None
-    repetition_penalty: Optional[float] = None
+    temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    min_p: float | None = None
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
+    repetition_penalty: float | None = None
     max_tokens: int = 8192
 
 
@@ -171,23 +171,23 @@ class LLMFinalData:
     session_id: str = ""
     total_tokens: int = 0
     finish_reason: str = "stop"
-    user_message_id: Optional[int] = None
-    assistant_message_id: Optional[int] = None
+    user_message_id: int | None = None
+    assistant_message_id: int | None = None
     generation_id: str = ""
     turn_id: str = ""
     request_id: str = ""
     interruption_epoch: int = 0
     version: int = 1
     sequence: int = 0
-    tts_expected: Optional[bool] = None
+    tts_expected: bool | None = None
 
 
 @dataclass
 class TTSVisemeCueData:
     viseme: str
     offset_ms: float
-    duration_ms: Optional[float] = None
-    weight: Optional[float] = None
+    duration_ms: float | None = None
+    weight: float | None = None
 
 
 @dataclass
@@ -198,7 +198,7 @@ class TTSChunkData:
     sample_rate: int = 32000
     channels: int = 1
     sample_width_bytes: int = 2
-    duration_ms: Optional[float] = None
+    duration_ms: float | None = None
     session_id: str = ""
     generation_id: str = ""
     turn_id: str = ""
@@ -209,7 +209,7 @@ class TTSChunkData:
     chunk_index: int = 0
     is_final: bool = False
     text: str = ""
-    visemes: List[TTSVisemeCueData] = field(default_factory=list)
+    visemes: list[TTSVisemeCueData] = field(default_factory=list)
 
 
 TOOL_PROTOCOL_VERSION = 1
@@ -222,11 +222,11 @@ class ToolCallData:
     """工具调用请求"""
     id: str
     name: str
-    args: Dict[str, Any] = field(default_factory=dict)
-    request_id: Optional[str] = None
-    run_id: Optional[str] = None
-    job_id: Optional[str] = None
-    source: Optional[str] = None
+    args: dict[str, Any] = field(default_factory=dict)
+    request_id: str | None = None
+    run_id: str | None = None
+    job_id: str | None = None
+    source: str | None = None
     retry: bool = False
     version: int = TOOL_PROTOCOL_VERSION
 
@@ -236,34 +236,34 @@ class ToolResultData:
     """工具调用结果"""
     id: str
     output: str = ""
-    error: Optional[str] = None
+    error: str | None = None
     version: int = TOOL_PROTOCOL_VERSION
     status: str = "completed"
     outcome: str = "known_success"
-    effect_outcome: Optional[str] = None
-    verification_status: Optional[str] = None
+    effect_outcome: str | None = None
+    verification_status: str | None = None
     recheck_available: bool = False
     retryable: bool = False
-    data: Optional[Dict[str, Any]] = None
-    request_id: Optional[str] = None
-    run_id: Optional[str] = None
-    job_id: Optional[str] = None
-    source: Optional[str] = None
-    verification_evidence: Optional[List[str]] = None
-    recheck_error: Optional[str] = None
-    result_summary: Optional[str] = None
+    data: dict[str, Any] | None = None
+    request_id: str | None = None
+    run_id: str | None = None
+    job_id: str | None = None
+    source: str | None = None
+    verification_evidence: list[str] | None = None
+    recheck_error: str | None = None
+    result_summary: str | None = None
 
 
 @dataclass
 class ScreenshotRequestData:
-    image: Optional[str] = None
+    image: str | None = None
     display_index: int = 0
-    region: Optional[Dict[str, int]] = None
+    region: dict[str, int] | None = None
     mode: str = "observe"
-    caption: Optional[str] = None
-    source: Optional[str] = None
-    timestamp: Optional[float] = None
-    frame_id: Optional[str] = None
+    caption: str | None = None
+    source: str | None = None
+    timestamp: float | None = None
+    frame_id: str | None = None
 
 
 @dataclass
@@ -297,9 +297,9 @@ class PetMotionTargetData:
 
 @dataclass
 class PetControlDirectiveData:
-    expressionMix: List[PetExpressionMixItemData] = field(default_factory=list)
-    parameterOverrides: List[PetParameterOverrideItemData] = field(default_factory=list)
-    motion: Optional[PetMotionTargetData] = None
+    expressionMix: list[PetExpressionMixItemData] = field(default_factory=list)
+    parameterOverrides: list[PetParameterOverrideItemData] = field(default_factory=list)
+    motion: PetMotionTargetData | None = None
     intensity: float = 1.0
     durationMs: int = 1800
 

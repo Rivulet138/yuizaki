@@ -1,8 +1,9 @@
 """Dynamic reconfiguration - runtime configuration updates."""
 
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from collections.abc import Awaitable, Callable
 from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ def redact_sensitive_config_value(value: Any, key_hint: str = "") -> Any:
 class ConfigChangeListener:
     """Listener for configuration changes."""
 
-    def __init__(self, callback: Callable[[str, Any, Any], Awaitable[None]], keys: Optional[List[str]] = None):
+    def __init__(self, callback: Callable[[str, Any, Any], Awaitable[None]], keys: list[str] | None = None):
         """Initialize listener.
 
         Args:
@@ -55,7 +56,7 @@ class ConfigChangeEvent:
         self.new_value = new_value
         self.timestamp = datetime.now()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "key": self.key,
@@ -70,9 +71,9 @@ class DynamicConfigManager:
 
     def __init__(self):
         """Initialize dynamic config manager."""
-        self.config: Dict[str, Any] = {}
-        self.listeners: List[ConfigChangeListener] = []
-        self.change_history: List[ConfigChangeEvent] = []
+        self.config: dict[str, Any] = {}
+        self.listeners: list[ConfigChangeListener] = []
+        self.change_history: list[ConfigChangeEvent] = []
         self.max_history = 100
 
     def register_listener(self, listener: ConfigChangeListener) -> None:
@@ -134,7 +135,7 @@ class DynamicConfigManager:
 
         return True
 
-    async def update_batch(self, updates: Dict[str, Any]) -> bool:
+    async def update_batch(self, updates: dict[str, Any]) -> bool:
         """Update multiple configuration values.
 
         Args:
@@ -161,7 +162,7 @@ class DynamicConfigManager:
         """
         return self.config.get(key, default)
 
-    def get_all(self) -> Dict[str, Any]:
+    def get_all(self) -> dict[str, Any]:
         """Get all configuration values.
 
         Returns:
@@ -169,7 +170,7 @@ class DynamicConfigManager:
         """
         return self.config.copy()
 
-    def get_history(self, key: Optional[str] = None, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_history(self, key: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
         """Get configuration change history.
 
         Args:

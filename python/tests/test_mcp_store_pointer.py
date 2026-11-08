@@ -4,7 +4,6 @@ import json
 import threading
 
 import pytest
-
 from modules.agent.mcp_manager import MCPManager
 from modules.tools.mcp_bridge import MCPToolError
 

@@ -5,6 +5,14 @@
  * only needs the callable surface exposed by contextBridge.
  */
 import type { DesktopActionResult, DesktopActionStatus } from './desktop-action'
+import type {
+  OnboardingCancelRunRequest,
+  OnboardingDeviceProbeReport,
+  OnboardingProbeRequest,
+  OnboardingReadinessSnapshot,
+  OnboardingRepairRequest,
+  OnboardingRetryRequest,
+} from './onboarding-readiness'
 
 type BridgeFunction = (...args: any[]) => any
 
@@ -18,7 +26,16 @@ export interface PetApi {
     rearm(): Promise<DesktopActionResult<DesktopActionStatus>>
     manageAuthorization(): Promise<DesktopActionResult<DesktopActionStatus>>
   }
-  onboarding?: BridgeNamespace
+  onboarding?: {
+    snapshot(): Promise<OnboardingReadinessSnapshot>
+    startBackend(): Promise<OnboardingReadinessSnapshot>
+    cancelBackend(): Promise<OnboardingReadinessSnapshot>
+    cancelRun(request: OnboardingCancelRunRequest): Promise<OnboardingReadinessSnapshot>
+    reportDeviceProbe(report: OnboardingDeviceProbeReport): Promise<OnboardingReadinessSnapshot>
+    runProbe(request?: OnboardingProbeRequest): Promise<OnboardingReadinessSnapshot>
+    retry(request: OnboardingRetryRequest): Promise<OnboardingReadinessSnapshot>
+    runRepair(request: OnboardingRepairRequest): Promise<OnboardingReadinessSnapshot>
+  }
   pet?: BridgeNamespace
   live2d?: BridgeNamespace
   screen?: BridgeNamespace

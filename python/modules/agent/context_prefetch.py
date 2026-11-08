@@ -240,7 +240,7 @@ class ContextPrefetchCoordinator:
         if task is not None and not task.done():
             try:
                 await asyncio.wait_for(asyncio.shield(task), timeout=RETRIEVAL_PREFETCH_WAIT_SECONDS)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
         cached = self.retrieval_prefetch_cache.pop(cache_key, None)
         if not cached or cached.get("workspace_id") != workspace_id:

@@ -3,9 +3,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 
-import pytest
-
 import app
+import pytest
 
 
 @pytest.mark.asyncio

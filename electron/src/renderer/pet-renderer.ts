@@ -475,6 +475,7 @@ class PetRenderer {
 					() => runtime.loadModel({ modelPath, animationPaths: this.resolveAnimationPaths() }),
 					loadGeneration,
 					"vrm",
+					() => runtime.cancelPendingLoad(),
 				);
 				if (loadGeneration !== this.modelLoadGeneration) {
 					return;
@@ -832,7 +833,7 @@ class PetRenderer {
 		const messages: string[] = [];
 		const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 		command.actions.forEach((action, index) => {
-			let effectiveAction = action;
+			let effectiveAction: AvatarAction;
 			if (unsupported.has(index)) {
 				const fallback = resolveAvatarActionFallback(action, capabilities);
 				degraded = true;
@@ -846,7 +847,12 @@ class PetRenderer {
 				// Semantic motion names are resolved to concrete group/index values
 				// even when the capability check accepted the semantic alias.
 				const resolved = resolveAvatarActionFallback(action, capabilities);
-				if (resolved.action) effectiveAction = resolved.action;
+				if (!resolved.action) {
+					degraded = true;
+					if (resolved.message) messages.push(resolved.message);
+					return;
+				}
+				effectiveAction = resolved.action;
 				if (resolved.degraded) {
 					degraded = true;
 					if (resolved.message) messages.push(resolved.message);

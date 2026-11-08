@@ -358,4 +358,4 @@ class OnboardingReadiness:
         return True, "MCP configuration snapshot captured", {"configured": configured, "healthy": healthy}
 
 
-__all__ = ["OnboardingReadiness", "REQUIRED_TEXT_PROBES", "SCHEMA_VERSION"]
+__all__ = ["REQUIRED_TEXT_PROBES", "SCHEMA_VERSION", "OnboardingReadiness"]

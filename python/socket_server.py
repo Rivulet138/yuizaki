@@ -7,30 +7,29 @@ identity, persistence and recovery are delegated to TurnService; legacy
 handlers remain only behind an explicit compatibility flag.
 """
 from __future__ import annotations
+
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import asdict, dataclass, is_dataclass
 import hashlib
-from importlib import import_module
 import ipaddress
 import logging
 import os
 import secrets
 import time
 import uuid
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import asdict, dataclass, is_dataclass
+from importlib import import_module
 from typing import Any, Protocol, TypeVar, cast, overload, runtime_checkable
 from urllib.parse import urlsplit
-from starlette.concurrency import run_in_threadpool
-from starlette.types import ASGIApp
 
 from modules.agent import (
     AgentRuntime,
     AuthorizedHostPerceptionProvider,
     CallableHostPerceptionCollector,
-    PerceptionProviderRegistry,
-    PerceptionProviderSpec,
     PerceptionConsentAuthority,
     PerceptionEvidence,
+    PerceptionProviderRegistry,
+    PerceptionProviderSpec,
     PerceptionRequest,
     authorized_host_spec,
     create_agent_runtime,
@@ -38,7 +37,10 @@ from modules.agent import (
     register_plugin_tools,
 )
 from modules.agent.agent_trace_store import AgentTraceStore
-from modules.agent.companion_events import CompanionJobCapacityError, CompanionJobEventLog
+from modules.agent.companion_events import (
+    CompanionJobCapacityError,
+    CompanionJobEventLog,
+)
 from modules.agent.context import (
     AgentPipelineResult,
     AgentRequestContext,
@@ -56,42 +58,54 @@ from modules.agent.response_profile import (
     resolve_reasoning_effort,
     resolve_thinking_mode,
 )
-from modules.agent.schedule_store import ScheduleStore, ScheduledTask
+from modules.agent.runtime_context import RuntimeContext
+from modules.agent.schedule_store import ScheduledTask, ScheduleStore
 from modules.agent.scheduler import AgentScheduler
 from modules.agent.step_executor import StepExecutor
 from modules.agent.tool_executor import ToolExecutor
 from modules.agent.tool_registry import ToolRegistry
-from modules.agent.turn_service import TurnIdentityConflictError, is_turn_service_perception_request
-from modules.agent.runtime_context import RuntimeContext
+from modules.agent.turn_service import (
+    TurnIdentityConflictError,
+    is_turn_service_perception_request,
+)
 from modules.agent_plugins.manager import PluginManager
 from modules.asr.transcriber import ASRManager
 from modules.core.state import GenerationManager
+from modules.llm.capabilities import infer_model_vision_support
 from modules.llm.client import LLMClient
 from modules.ocr.payload import MAX_OCR_IMAGE_BYTES, estimate_base64_decoded_bytes
 from modules.ocr.recognizer import OCRClient
-from modules.llm.capabilities import infer_model_vision_support
+from modules.pet_control import legacy_pet_control_to_avatar_command
 from modules.svc.converter import SVCClient
 from modules.system.backend_api_auth import is_loopback_client
 from modules.system.experience_metrics import ExperienceMetricsStore
 from modules.system.memory_write_pipeline import build_user_signal_event
 from modules.tts.synthesizer import StreamingSentenceBuffer, TTSClient
 from modules.tts.visemes import normalize_viseme_cues
-from modules.pet_control import legacy_pet_control_to_avatar_command
-from socket_handlers.audio import build_audio_chunk_handler
-from socket_handlers.perception import build_ocr_request_handler
-from socket_handlers.llm import LLMRequestSupport
 from socket_compositions import chat as chat_composition
 from socket_compositions import memory as memory_composition
 from socket_compositions import system as system_composition
 from socket_compositions import tool as tool_composition
 from socket_compositions import voice as voice_composition
-
 from socket_events import (
-    AudioEvents, LLMEvents, TTSEvents,
-    ScreenshotEvents, PetEvents, SystemEvents, AgentEvents,
-    LLMRequestData, LLMDeltaData, LLMFinalData,
-    SOCKET_PROTOCOL_VERSION, protocol_version_status,
+    SOCKET_PROTOCOL_VERSION,
+    AgentEvents,
+    AudioEvents,
+    LLMDeltaData,
+    LLMEvents,
+    LLMFinalData,
+    LLMRequestData,
+    PetEvents,
+    ScreenshotEvents,
+    SystemEvents,
+    TTSEvents,
+    protocol_version_status,
 )
+from socket_handlers.audio import build_audio_chunk_handler
+from socket_handlers.llm import LLMRequestSupport
+from socket_handlers.perception import build_ocr_request_handler
+from starlette.concurrency import run_in_threadpool
+from starlette.types import ASGIApp
 
 logger = logging.getLogger("socket-server")
 
@@ -130,8 +144,7 @@ def _parse_port(value: str | None, fallback: int) -> int:
 
 def _normalize_socket_origin(value: str) -> str | None:
     origin = value.strip()
-    if origin.endswith("/"):
-        origin = origin[:-1]
+    origin = origin.removesuffix("/")
     try:
         parsed = urlsplit(origin)
         port = parsed.port
@@ -274,6 +287,71 @@ def _coerce_autonomy_mode(value: object) -> AutonomyMode:
 
 def _as_text(value: object, default: str = "") -> str:
     return value if isinstance(value, str) else default
+
+
+def _tts_language_name(client: TTSClient) -> str:
+    configured = _as_text(client.status_snapshot().get("configured_language"), "ja").strip().lower()
+    return {
+        "zh": "Chinese",
+        "cn": "Chinese",
+        "ja": "Japanese",
+        "jp": "Japanese",
+        "en": "English",
+        "ko": "Korean",
+        "auto": "Japanese",
+    }.get(configured, configured or "Japanese")
+
+
+async def _translate_tts_text(
+    llm_client: LLMClient | None,
+    text: str,
+    *,
+    target_language: str,
+    model: str | None = None,
+) -> str:
+    source = text.strip()
+    if not source:
+        return ""
+    if llm_client is None:
+        raise RuntimeError("LLM client is unavailable for TTS translation")
+
+    result = await asyncio.wait_for(
+        llm_client.complete_chat(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        f"You are a speech translation engine. Translate the entire input into natural, accurate {target_language}. "
+                        "Do not summarize or explain. Preserve text that is already in the target language. "
+                        "人名、製品名、数字、URL、コードは必要以上に変更せず、翻訳結果だけを出力してください。"
+                    ),
+                },
+                {"role": "user", "content": source},
+            ],
+            max_output_tokens=min(8192, max(512, len(source) * 2)),
+            model=model,
+            temperature=0.1,
+        ),
+        timeout=45,
+    )
+    translated = _as_text(result.get("reply") if isinstance(result, Mapping) else None).strip()
+    if not translated:
+        raise RuntimeError("TTS translation returned empty text")
+    return translated
+
+
+async def _translate_tts_text_to_japanese(
+    llm_client: LLMClient | None,
+    text: str,
+    *,
+    model: str | None = None,
+) -> str:
+    return await _translate_tts_text(
+        llm_client,
+        text,
+        target_language="Japanese",
+        model=model,
+    )
 
 
 def _as_int(value: object, default: int) -> int:
@@ -1388,7 +1466,7 @@ class DesktopPetSocketServer:
                 'interruptionEpoch': request['interruption_epoch'],
             }, to=sid)
             return await asyncio.wait_for(asyncio.shield(waiter), timeout=_VISUAL_CAPTURE_REQUEST_TIMEOUT_SECONDS)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._complete_visual_job(
                 request,
                 status='cancelled',
@@ -2179,7 +2257,7 @@ class DesktopPetSocketServer:
                             asyncio.shield(task),
                             timeout=_VISUAL_ANALYSIS_REQUEST_WAIT_SECONDS,
                         )
-                    except (asyncio.TimeoutError, asyncio.CancelledError):
+                    except (TimeoutError, asyncio.CancelledError):
                         pass
         return self._with_latest_visual_context(
             sid,
@@ -2630,7 +2708,43 @@ class DesktopPetSocketServer:
         ws_adapter = _TTSWSAdapter(self.sio, target_sid)
 
         async def _run() -> None:
-            await tts_client.synthesize(ws_adapter, gen)
+            try:
+                translated_text = await _translate_tts_text_to_japanese(
+                    self.llm_client,
+                    gen.full_text,
+                    model=_as_text(getattr(gen, "model", "")).strip() or None,
+                )
+                if not self._generation_is_current(gen):
+                    return
+
+                class _TranslatedGeneration:
+                    def __init__(self, source: object, full_text: str):
+                        self._source = source
+                        self.full_text = full_text
+
+                    def __getattr__(self, name: str) -> object:
+                        return getattr(self._source, name)
+
+                await tts_client.synthesize(
+                    ws_adapter,
+                    _TranslatedGeneration(gen, translated_text),
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - fail closed for provider translation errors
+                logger.warning(
+                    "[%s/%s] Japanese TTS translation failed: %s",
+                    gen.session_id,
+                    gen.generation_id,
+                    exc,
+                )
+                if self._generation_is_current(gen):
+                    await self.sio.emit(SystemEvents.ERROR, {
+                        "code": "TTS_TRANSLATION_ERROR",
+                        "message": "日语语音翻译失败，本轮语音未播放。",
+                        "session_id": gen.session_id,
+                        **_generation_identity(gen),
+                    }, to=target_sid)
 
         gen.tts_task = asyncio.create_task(_run(), name=f"tts-sio-{gen.generation_id}")
 
@@ -3227,10 +3341,10 @@ class DesktopPetSocketServer:
                     ctx.extra["prefetched_visual_frame_id"] = voice_prefetch.get("visual_frame_id")
                     ctx.extra["partial_asr_match"] = voice_prefetch.get("partial_match") is True
 
-                sentence_buffer = StreamingSentenceBuffer()
                 tts_queue: asyncio.Queue[str | None] | None = None
                 tts_worker: asyncio.Task[None] | None = None
                 tts_client = self.tts_client if tts_enabled else None
+                sentence_buffer = StreamingSentenceBuffer() if tts_client is not None else None
 
                 class _StreamingTTSAdapter:
                     async def send_json(self, msg: JsonDict) -> None:
@@ -3244,22 +3358,66 @@ class DesktopPetSocketServer:
                         await self_server._forward_tts_message(sid, session_id, msg)
 
                 async def _run_streaming_tts(queue: asyncio.Queue[str | None], client: TTSClient) -> None:
-                    sequence = 0
                     adapter = _StreamingTTSAdapter()
+                    sequence = 0
                     while True:
-                        segment = await queue.get()
-                        if segment is None:
-                            await client.complete_stream(adapter, gen, sequence)
+                        source_text = await queue.get()
+                        if source_text is None:
+                            if sequence > 0 and self_server._generation_is_current(gen):
+                                await client.complete_stream(adapter, gen, sequence)
                             return
-                        generated = await client.synthesize_stream_segment(adapter, gen, segment, sequence)
-                        if generated:
-                            sequence += 1
+                        try:
+                            target_language = _tts_language_name(client)
+                            translated_text = await _translate_tts_text(
+                                self_server.llm_client,
+                                source_text,
+                                target_language=target_language,
+                                model=model,
+                            )
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as exc:  # noqa: BLE001 - provider translation boundary
+                            logger.warning(
+                                "[%s/%s] Japanese TTS translation failed: %s",
+                                session_id,
+                                gen.generation_id,
+                                exc,
+                            )
+                            await self_server.sio.emit(SystemEvents.ERROR, {
+                                "code": "TTS_TRANSLATION_ERROR",
+                                "message": f"{target_language} TTS 翻译失败，本轮语音已停止。",
+                                "session_id": session_id,
+                                **_generation_identity(gen),
+                            }, to=sid)
+                            return
+                        if not self_server._generation_is_current(gen):
+                            return
+                        if hasattr(gen, "mark"):
+                            gen.mark("llm_first_sentence")
+                        generated = await client.synthesize_stream_segment(
+                            adapter, gen, translated_text, sequence,
+                        )
+                        if not generated:
+                            return
+                        sequence += 1
+
+                async def _enqueue_tts_item(item: str | None) -> None:
+                    if tts_queue is None or tts_worker is None or tts_worker.done():
+                        return
+                    put_task = asyncio.create_task(tts_queue.put(item))
+                    done, _ = await asyncio.wait(
+                        (put_task, tts_worker),
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if tts_worker in done and not put_task.done():
+                        put_task.cancel()
+                        await asyncio.gather(put_task, return_exceptions=True)
+                    elif put_task in done:
+                        put_task.result()
 
                 self_server = self
                 if tts_client is not None:
-                    # Bound pending speech so a fast LLM cannot build an unbounded
-                    # audio backlog that continues long after the reply is interrupted.
-                    tts_queue = asyncio.Queue(maxsize=3)
+                    tts_queue = asyncio.Queue(maxsize=2)
                     tts_worker = asyncio.create_task(
                         _run_streaming_tts(tts_queue, tts_client),
                         name=f"tts-stream-sio-{gen.generation_id}",
@@ -3291,19 +3449,17 @@ class DesktopPetSocketServer:
                                     sequence=llm_sequence,
                                 )), to=sid)
                                 llm_sequence += 1
-                                if tts_queue is not None:
-                                    complete_segments = sentence_buffer.feed(token)
-                                    if complete_segments and hasattr(gen, "mark"):
-                                        gen.mark("llm_first_sentence")
-                                    for segment in complete_segments:
-                                        await tts_queue.put(segment)
+                                if sentence_buffer is not None and tts_queue is not None:
+                                    for segment in sentence_buffer.feed(token):
+                                        await _enqueue_tts_item(segment)
                         elif msg_type == "done":
                             terminal_replayed = bool(msg.get("replayed"))
                             if tts_queue is not None:
                                 if gen.full_text.strip():
-                                    for segment in sentence_buffer.flush():
-                                        await tts_queue.put(segment)
-                                    await tts_queue.put(None)
+                                    if sentence_buffer is not None:
+                                        for segment in sentence_buffer.flush():
+                                            await _enqueue_tts_item(segment)
+                                    await _enqueue_tts_item(None)
                                     tts_stream_closed = True
                                 else:
                                     if tts_worker is not None and not tts_worker.done():
@@ -3396,9 +3552,7 @@ class DesktopPetSocketServer:
                     raise
                 persisted_assistant_message_id = message_ids["assistant_message_id"]
                 if tts_queue is not None and not tts_stream_closed:
-                    for segment in sentence_buffer.flush():
-                        await tts_queue.put(segment)
-                    await tts_queue.put(None)
+                    await _enqueue_tts_item(None)
                 if pipeline_result.action_envelope:
                     await run_in_threadpool(
                         self_server._persist_message_metadata,

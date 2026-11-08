@@ -210,7 +210,7 @@ class ConnectorRecoveryController:
                     self._persist_metrics()
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self._interval_seconds)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
 
@@ -1346,6 +1346,7 @@ def create_message_connector_router(
         interval_seconds=recovery_interval_seconds,
         metrics_path=recovery_metrics_path,
     ) if recovery_interval_seconds is not None and recovery_interval_seconds > 0 else None
+    # APIRouter has no typed extension slot; lifespan discovers this controller dynamically.
     setattr(router, "connector_recovery_controller", recovery_controller)
     return router
 

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
+from database.repository import ContextRevisionConflict, DatabaseError, NotFoundError
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from starlette.concurrency import run_in_threadpool
-from database.repository import ContextRevisionConflict, DatabaseError, NotFoundError
 from modules.system.workspace_context_store import validate_context_payload
+from starlette.concurrency import run_in_threadpool
 
 
 def create_workspace_router(

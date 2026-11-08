@@ -52,7 +52,7 @@
             type="checkbox"
             :checked="muted"
             :aria-label="t('workspaceDrawer.runtime.mute')"
-            @change="emitChecked('set-muted', $event)"
+            @change="emitMuted($event)"
           />
         </label>
       </section>
@@ -132,10 +132,9 @@ const proactiveOpportunity = computed(() => {
 })
 const updateField = (field: string, value: string) => emit('update-field', field, value)
 const canonicalRoute = (panel: string) => `/w/${encodeURIComponent(props.workspace.id)}/${panel}`
-const emitChecked = (event: 'set-muted' | 'set-dnd', value: Event) => {
+const emitMuted = (value: Event) => {
   if (!(value.target instanceof HTMLInputElement)) return
-  if (event === 'set-muted') emit('set-muted', value.target.checked)
-  else emit('set-dnd', value.target.checked)
+  emit('set-muted', value.target.checked)
 }
 
 const memoryScopeSummary = computed(() => ({

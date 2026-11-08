@@ -3,9 +3,9 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +33,10 @@ class ComponentHealth:
         self.name = name
         self.status = status
         self.message = ""
-        self.checked_at: Optional[datetime] = None
+        self.checked_at: datetime | None = None
         self.response_time_ms: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "name": self.name,
@@ -52,9 +52,9 @@ class HealthChecker:
 
     def __init__(self, check_timeout_seconds: float = DEFAULT_HEALTH_CHECK_TIMEOUT_SECONDS):
         """Initialize health checker."""
-        self.checks: Dict[str, HealthCheckFunc] = {}
-        self.components: Dict[str, ComponentHealth] = {}
-        self.last_check_time: Optional[datetime] = None
+        self.checks: dict[str, HealthCheckFunc] = {}
+        self.components: dict[str, ComponentHealth] = {}
+        self.last_check_time: datetime | None = None
         self.check_timeout_seconds = check_timeout_seconds
 
     def register_check(self, name: str, check_func: HealthCheckFunc) -> None:
@@ -68,7 +68,7 @@ class HealthChecker:
         self.components[name] = ComponentHealth(name)
         logger.info(f"Registered health check: {name}")
 
-    async def check_all(self) -> Dict[str, Any]:
+    async def check_all(self) -> dict[str, Any]:
         """Run all health checks.
 
         Returns:
@@ -99,7 +99,7 @@ class HealthChecker:
                 HealthStatus.HEALTHY if is_healthy else HealthStatus.DEGRADED
             )
             component.message = message
-        except asyncio.TimeoutError:
+        except TimeoutError:
             component.status = HealthStatus.UNHEALTHY
             component.message = f"Health check timed out after {self.check_timeout_seconds:.1f}s"
             logger.error(f"Health check timed out for {name}")
@@ -113,7 +113,7 @@ class HealthChecker:
             component.checked_at - start_time
         ).total_seconds() * 1000
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get current health status.
 
         Returns:

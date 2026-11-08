@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import pytest
-
 from types import SimpleNamespace
 
+import pytest
 from modules.system.memory_write_pipeline import (
     build_user_signal_event,
     classify_user_signal_kind,

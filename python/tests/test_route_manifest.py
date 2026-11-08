@@ -1,5 +1,4 @@
 from fastapi import FastAPI
-
 from route_manifest import build_route_manifest
 
 

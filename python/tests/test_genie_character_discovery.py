@@ -3,7 +3,6 @@ from pathlib import Path
 
 from modules.system.service_discovery import discover_genie_tts_characters
 
-
 MODEL_FILES = (
     "t2s_encoder_fp32.onnx",
     "t2s_first_stage_decoder_fp32.onnx",

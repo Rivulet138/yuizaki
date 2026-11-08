@@ -13,11 +13,12 @@ import inspect
 import json
 import logging
 import threading
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
 from functools import wraps
-from typing import Any, Callable, Dict, Mapping
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Response
@@ -30,10 +31,10 @@ from .expiry import is_memory_expired, normalize_memory_expiry
 from .metadata import (
   append_memory_version,
   has_prior_version_snapshot,
+  is_auto_admitted_candidate,
   memory_state,
   normalize_memory_metadata,
   normalize_memory_validity,
-  is_auto_admitted_candidate,
   recall_rejection_reason,
 )
 from .operations import MemoryOperationLog, new_operation
@@ -85,7 +86,7 @@ SERVER_OWNED_METADATA_FIELDS = frozenset({
 })
 
 
-def _sanitize_create_metadata(metadata: Mapping[str, Any] | None) -> Dict[str, Any]:
+def _sanitize_create_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
   return {
     key: value
     for key, value in (metadata or {}).items()
@@ -98,7 +99,7 @@ class MemoryDocPayload(BaseModel):
 
   id: str | None = None
   text: str = ''
-  metadata: Dict[str, Any] = Field(default_factory=dict)
+  metadata: dict[str, Any] = Field(default_factory=dict)
   scope: str | None = None
   workspace_id: str | None = None
   session_id: str | None = None
@@ -112,7 +113,7 @@ class MemoryDocPayload(BaseModel):
   source_id: str | None = None
   turn_id: str | None = None
   evidence: Any = None
-  confidence_history: list[Dict[str, Any]] | None = None
+  confidence_history: list[dict[str, Any]] | None = None
   dedupe: bool = True
   dedupe_threshold: float = Field(default=0.92, ge=0, le=1)
 
@@ -141,7 +142,7 @@ class MemoryDocUpdatePayload(BaseModel):
   model_config = ConfigDict(extra='forbid')
 
   text: str | None = None
-  metadata: Dict[str, Any] = Field(default_factory=dict)
+  metadata: dict[str, Any] = Field(default_factory=dict)
   scope: str | None = None
   workspace_id: str | None = None
   session_id: str | None = None
@@ -317,7 +318,7 @@ class MemoryAddPayload(BaseModel):
   memory_role: str | None = None
   layer: str | None = None
   importance: float | None = None
-  metadata: Dict[str, Any] = Field(default_factory=dict)
+  metadata: dict[str, Any] = Field(default_factory=dict)
   session_id: str | None = None
   workspace_id: str | None = None
   scope: str | None = None
@@ -327,7 +328,7 @@ class MemoryAddPayload(BaseModel):
   source_id: str | None = None
   turn_id: str | None = None
   evidence: Any = None
-  confidence_history: list[Dict[str, Any]] | None = None
+  confidence_history: list[dict[str, Any]] | None = None
   dedupe: bool = True
   dedupe_threshold: float = Field(default=0.92, ge=0, le=1)
 
@@ -392,7 +393,7 @@ class MemoryRagQueryPayload(BaseModel):
     return _validate_memory_role(value)
 
 
-def _payload_dict(payload: BaseModel) -> Dict[str, Any]:
+def _payload_dict(payload: BaseModel) -> dict[str, Any]:
   data = payload.model_dump(exclude_none=True)
   if 'session_id' in data:
     data['session_id'] = _normalize_optional_session_id(data['session_id'])
@@ -455,7 +456,7 @@ def _normalize_optional_session_id(value: Any) -> str | None:
   return _normalize_optional_workspace_id(value)
 
 
-def build_memory_metadata(payload: Dict[str, Any], *, layer: str, scope: str, memory_type: str, importance: float) -> Dict[str, Any]:
+def build_memory_metadata(payload: dict[str, Any], *, layer: str, scope: str, memory_type: str, importance: float) -> dict[str, Any]:
   now = datetime.now().isoformat()
   session_id = _normalize_optional_session_id(payload.get('session_id'))
   workspace_id = _normalize_optional_workspace_id(payload.get('workspace_id'))
@@ -490,7 +491,7 @@ def _memory_type_value(value: Any) -> str:
   return raw or MemoryType.FACT.value
 
 
-def _resolve_memory_role(payload: Dict[str, Any]) -> str:
+def _resolve_memory_role(payload: dict[str, Any]) -> str:
   explicit = payload.get('memory_role')
   if explicit is None and isinstance(payload.get('metadata'), dict):
     explicit = payload['metadata'].get('memory_role')
@@ -514,7 +515,7 @@ def _resolve_memory_role(payload: Dict[str, Any]) -> str:
   return 'user_fact'
 
 
-def _apply_memory_role_governance(metadata: Dict[str, Any], role: str) -> Dict[str, Any]:
+def _apply_memory_role_governance(metadata: dict[str, Any], role: str) -> dict[str, Any]:
   """Keep operational permission history review-only and out of normal recall."""
   metadata['memory_role'] = role
   if role == 'tool_permission':
@@ -536,7 +537,7 @@ def _coerce_unit(value: Any, default: float) -> float:
   return min(1.0, max(0.0, number))
 
 
-def _score_memory_quality(payload: Dict[str, Any], metadata: Dict[str, Any], *, importance: float) -> Dict[str, Any]:
+def _score_memory_quality(payload: dict[str, Any], metadata: dict[str, Any], *, importance: float) -> dict[str, Any]:
   explicit_confidence = payload.get('confidence', metadata.get('confidence'))
   source = str(metadata.get('source') or payload.get('source') or 'manual').strip() or 'manual'
   if explicit_confidence is not None:
@@ -562,10 +563,10 @@ def _score_memory_quality(payload: Dict[str, Any], metadata: Dict[str, Any], *, 
   }
 
 
-def _append_audit(metadata: Dict[str, Any], *, action: str, reason: str | None = None, before: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def _append_audit(metadata: dict[str, Any], *, action: str, reason: str | None = None, before: dict[str, Any] | None = None) -> dict[str, Any]:
   history = metadata.get('audit')
   audit = list(history) if isinstance(history, list) else []
-  event: Dict[str, Any] = {
+  event: dict[str, Any] = {
     'at': datetime.now().isoformat(),
     'action': action,
     'actor': 'memory-api',
@@ -590,7 +591,7 @@ def _append_audit(metadata: Dict[str, Any], *, action: str, reason: str | None =
   return metadata
 
 
-def _apply_provenance(metadata: Dict[str, Any], payload: Dict[str, Any], *, preserve: bool = True) -> Dict[str, Any]:
+def _apply_provenance(metadata: dict[str, Any], payload: dict[str, Any], *, preserve: bool = True) -> dict[str, Any]:
   """Normalize provenance fields while keeping the original origin immutable."""
   keys = ('source_kind', 'source_id', 'turn_id', 'evidence')
   for key in keys:
@@ -609,7 +610,7 @@ def _apply_provenance(metadata: Dict[str, Any], payload: Dict[str, Any], *, pres
   return metadata
 
 
-def _timestamp_value(metadata: Dict[str, Any]) -> datetime | None:
+def _timestamp_value(metadata: dict[str, Any]) -> datetime | None:
   raw = metadata.get('updated_at') or metadata.get('timestamp')
   if not isinstance(raw, str) or not raw.strip():
     return None
@@ -619,15 +620,15 @@ def _timestamp_value(metadata: Dict[str, Any]) -> datetime | None:
   except ValueError:
     return None
   if parsed.tzinfo is None:
-    return parsed.replace(tzinfo=timezone.utc)
-  return parsed.astimezone(timezone.utc)
+    return parsed.replace(tzinfo=UTC)
+  return parsed.astimezone(UTC)
 
 
 def _normalized_memory_text(text: str) -> str:
   return ' '.join(str(text or '').lower().split())
 
 
-def _candidate_payload(doc: Document, score: float) -> Dict[str, Any]:
+def _candidate_payload(doc: Document, score: float) -> dict[str, Any]:
   metadata = doc.metadata or {}
   return {
     'id': doc.id,
@@ -643,8 +644,8 @@ def _candidate_payload(doc: Document, score: float) -> Dict[str, Any]:
   }
 
 
-def _memory_role_counts(documents: list[Document]) -> Dict[str, int]:
-  counts: Dict[str, int] = {}
+def _memory_role_counts(documents: list[Document]) -> dict[str, int]:
+  counts: dict[str, int] = {}
   for document in documents:
     metadata = document.metadata or {}
     role = _resolve_memory_role(metadata)
@@ -663,7 +664,7 @@ def _find_merge_candidates(
   memory_role: str | None = None,
   threshold: float,
   exclude_id: str | None = None,
-) -> list[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
   query = text.strip()
   if not query:
     return []
@@ -676,7 +677,7 @@ def _find_merge_candidates(
   )
   results = store.search_with_rerank(query=query, top_k=5, filters=filters, quality_weight=0.0, recency_weight=0.0)
   normalized = ' '.join(query.lower().split())
-  candidates: list[Dict[str, Any]] = []
+  candidates: list[dict[str, Any]] = []
   for doc, score in results:
     if exclude_id and doc.id == exclude_id:
       continue
@@ -691,7 +692,7 @@ def _find_merge_candidates(
   return candidates
 
 
-def _resolve_memory_layer(payload: Dict[str, Any]) -> str:
+def _resolve_memory_layer(payload: dict[str, Any]) -> str:
   explicit = payload.get('layer')
   if isinstance(explicit, str) and explicit.strip() in VALID_MEMORY_LAYERS:
     return explicit.strip()
@@ -724,14 +725,14 @@ def route_memory_write(
   importance: float,
   session_id: str | None,
   workspace_id: str | None,
-  metadata: Dict[str, Any] | None = None,
+  metadata: dict[str, Any] | None = None,
   explicit_layer: str | None = None,
   explicit_scope: str | None = None,
   memory_role: str | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   session_id = _normalize_optional_session_id(session_id)
   workspace_id = _normalize_optional_workspace_id(workspace_id)
-  payload: Dict[str, Any] = {
+  payload: dict[str, Any] = {
     'text': text,
     'type': memory_type,
     'importance': importance,
@@ -757,7 +758,7 @@ def route_memory_write(
   }
 
 
-def _resolve_memory_scope(payload: Dict[str, Any]) -> str:
+def _resolve_memory_scope(payload: dict[str, Any]) -> str:
   explicit = payload.get('scope')
   if isinstance(explicit, str) and explicit.strip() in VALID_MEMORY_SCOPES:
     return explicit.strip()
@@ -776,28 +777,28 @@ class MemoryIndexRebuildJob:
   phase: str
   total_count: int
   processed_count: int = 0
-  started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-  updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+  started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+  updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
   finished_at: str | None = None
   last_error: str | None = None
   recoverable: bool = False
   retry_of: str | None = None
-  result: Dict[str, Any] | None = None
+  result: dict[str, Any] | None = None
   index_generation: str | None = None
   snapshot_revision: int | None = None
   cursor_key: str | None = None
   embedding_config_revision: str | None = None
 
   @classmethod
-  def from_snapshot(cls, snapshot: Mapping[str, Any]) -> "MemoryIndexRebuildJob":
+  def from_snapshot(cls, snapshot: Mapping[str, Any]) -> MemoryIndexRebuildJob:
     return cls(
       job_id=str(snapshot.get("job_id") or ""),
       state=str(snapshot.get("state") or "unknown"),
       phase=str(snapshot.get("phase") or "unknown"),
       total_count=max(0, int(snapshot.get("total_count") or 0)),
       processed_count=max(0, int(snapshot.get("processed_count") or 0)),
-      started_at=str(snapshot.get("started_at") or datetime.now(timezone.utc).isoformat()),
-      updated_at=str(snapshot.get("updated_at") or datetime.now(timezone.utc).isoformat()),
+      started_at=str(snapshot.get("started_at") or datetime.now(UTC).isoformat()),
+      updated_at=str(snapshot.get("updated_at") or datetime.now(UTC).isoformat()),
       finished_at=str(snapshot["finished_at"]) if snapshot.get("finished_at") else None,
       last_error=str(snapshot["last_error"]) if snapshot.get("last_error") else None,
       recoverable=bool(snapshot.get("recoverable")),
@@ -821,7 +822,7 @@ class MemoryIndexRebuildJob:
       ),
     )
 
-  def snapshot(self) -> Dict[str, Any]:
+  def snapshot(self) -> dict[str, Any]:
     return {
       "job_id": self.job_id,
       "state": self.state,
@@ -885,7 +886,7 @@ def create_memory_router(
           if restored_job.state in {"queued", "running", "cancelling"}:
             restored_job.state = "interrupted"
             restored_job.phase = "interrupted"
-            restored_job.finished_at = datetime.now(timezone.utc).isoformat()
+            restored_job.finished_at = datetime.now(UTC).isoformat()
             restored_job.updated_at = restored_job.finished_at
             restored_job.last_error = "memory service restarted before index rebuild completed"
             restored_job.recoverable = True
@@ -973,7 +974,7 @@ def create_memory_router(
     except MemorySearchIncompleteError as exc:
       raise HTTPException(status_code=503, detail=exc.to_detail()) from exc
 
-  async def _run_dedupe_search(**kwargs: Any) -> list[Dict[str, Any]]:
+  async def _run_dedupe_search(**kwargs: Any) -> list[dict[str, Any]]:
     """Fail closed when duplicate evidence is incomplete instead of writing blindly."""
     try:
       return await _run_store_call(_find_merge_candidates, state.store, **kwargs)
@@ -1064,7 +1065,7 @@ def create_memory_router(
       metadata = dict(existing.metadata or {})
       metadata['review_status'] = 'deleted'
       metadata['candidate_deleted'] = True
-      metadata['candidate_deleted_at'] = datetime.now(timezone.utc).isoformat()
+      metadata['candidate_deleted_at'] = datetime.now(UTC).isoformat()
       _append_audit(metadata, action='delete_candidate', reason='candidate_deleted')
       add_metadata = getattr(state.store, 'add_metadata_document', None)
       writer = add_metadata if callable(add_metadata) else state.store.add_document
@@ -1077,7 +1078,7 @@ def create_memory_router(
       return 0
     return int(await run_in_threadpool(lambda: clear_references(doc_ids)))
 
-  def _normalize_expiry_for_write(metadata: Dict[str, Any]) -> Dict[str, Any]:
+  def _normalize_expiry_for_write(metadata: dict[str, Any]) -> dict[str, Any]:
     try:
       return normalize_memory_validity(normalize_memory_expiry(metadata, reject_expired=True))
     except ValueError as exc:
@@ -1143,7 +1144,7 @@ def create_memory_router(
       evidence=evidence,
     )
 
-  async def _compact_storage() -> Dict[str, Any] | None:
+  async def _compact_storage() -> dict[str, Any] | None:
     compact_storage = getattr(state.store, 'compact_storage', None)
     if not callable(compact_storage):
       return None
@@ -1189,8 +1190,8 @@ def create_memory_router(
     *,
     scope: str,
     workspace_id: str | None,
-  ) -> Dict[str, Any]:
-    now = datetime.now(timezone.utc)
+  ) -> dict[str, Any]:
+    now = datetime.now(UTC)
     working_cutoff = now - timedelta(days=payload.working_retention_days)
     scoped_docs = [
       doc for doc in documents
@@ -1201,7 +1202,7 @@ def create_memory_router(
         session_id=payload.session_id,
       )
     ]
-    candidates: dict[str, Dict[str, Any]] = {}
+    candidates: dict[str, dict[str, Any]] = {}
 
     def _add_candidate(doc: Document, reason: str) -> None:
       metadata = doc.metadata or {}
@@ -1260,7 +1261,7 @@ def create_memory_router(
           key=lambda doc: (
             _coerce_unit((doc.metadata or {}).get('quality_score'), 0.72),
             _coerce_unit((doc.metadata or {}).get('importance'), 0.5),
-            (_timestamp_value(doc.metadata or {}) or datetime(1970, 1, 1, tzinfo=timezone.utc)).timestamp(),
+            (_timestamp_value(doc.metadata or {}) or datetime(1970, 1, 1, tzinfo=UTC)).timestamp(),
           ),
           reverse=True,
         )
@@ -1320,7 +1321,7 @@ def create_memory_router(
     session_id: str | None = None,
     layer: str | None = None,
     include_state: str = 'active',
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     session_id = _normalize_optional_session_id(session_id)
     try:
       resolved_scope = _validate_scope(scope) or 'workspace'
@@ -1362,7 +1363,7 @@ def create_memory_router(
     workspace_id: str | None = None,
     session_id: str | None = None,
     limit: int = 100,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """Return the explainable lifecycle ledger for memory mutations."""
     session_id = _normalize_optional_session_id(session_id)
     try:
@@ -1452,7 +1453,7 @@ def create_memory_router(
     payload = {
       'format': 'yuizaki-memory-export',
       'version': 1,
-      'exported_at': datetime.now(timezone.utc).isoformat(),
+      'exported_at': datetime.now(UTC).isoformat(),
       'scope': resolved_scope,
       'workspace_id': resolved_workspace_id,
       'session_id': session_id,
@@ -1470,7 +1471,7 @@ def create_memory_router(
     scope: str | None = None,
     workspace_id: str | None = None,
     session_id: str | None = None,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     session_id = _normalize_optional_session_id(session_id)
     try:
       resolved_scope = _validate_scope(scope) or 'workspace'
@@ -1494,8 +1495,8 @@ def create_memory_router(
     ]
     backend_status = await _run_store_call(state.store.get_status)
 
-    def _counts(key_fn: Callable[[Document], str]) -> Dict[str, int]:
-      counts: Dict[str, int] = {}
+    def _counts(key_fn: Callable[[Document], str]) -> dict[str, int]:
+      counts: dict[str, int] = {}
       for document in scoped:
         key = key_fn(document)
         counts[key] = counts.get(key, 0) + 1
@@ -1549,7 +1550,7 @@ def create_memory_router(
     }
 
   @router.post('/import')
-  async def import_memory(payload: MemoryImportPayload) -> Dict[str, Any]:
+  async def import_memory(payload: MemoryImportPayload) -> dict[str, Any]:
     """Restore safe records from a Yuizaki memory export.
 
     Imported lifecycle metadata is rebuilt by the normal create path. Terminal
@@ -1576,7 +1577,7 @@ def create_memory_router(
       doc.id for doc in await _run_store_call(state.store.list_documents)
     }
     imported: list[str] = []
-    skipped: list[Dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
     restored_count = 0
     for source_doc in payload.docs:
       source_metadata = dict(source_doc.metadata or {})
@@ -1628,7 +1629,7 @@ def create_memory_router(
           restored_count += 1
         except HTTPException as exc:
           skipped.append({'id': imported_id, 'reason': 'restore_state_failed', 'detail': exc.detail})
-    reason_counts: Dict[str, int] = {}
+    reason_counts: dict[str, int] = {}
     for item in skipped:
       reason = str(item.get('reason') or 'unknown')
       reason_counts[reason] = reason_counts.get(reason, 0) + 1
@@ -1651,7 +1652,7 @@ def create_memory_router(
     }
 
   @router.post('/maintenance/preview')
-  async def preview_memory_maintenance(payload: MemoryMaintenancePayload) -> Dict[str, Any]:
+  async def preview_memory_maintenance(payload: MemoryMaintenancePayload) -> dict[str, Any]:
     resolved_scope = payload.scope or 'workspace'
     session_id = _normalize_optional_session_id(payload.session_id)
     try:
@@ -1673,7 +1674,7 @@ def create_memory_router(
 
   @router.post('/maintenance/apply')
   @_serialized_mutation
-  async def apply_memory_maintenance(payload: MemoryMaintenanceApplyPayload) -> Dict[str, Any]:
+  async def apply_memory_maintenance(payload: MemoryMaintenanceApplyPayload) -> dict[str, Any]:
     if payload.confirmation != 'PERMANENT_DELETE':
       raise HTTPException(
         status_code=400,
@@ -1723,7 +1724,7 @@ def create_memory_router(
     *,
     doc_id: str,
     text: str,
-  ) -> tuple[Document, Dict[str, Any]]:
+  ) -> tuple[Document, dict[str, Any]]:
     """Build the canonical document shared by create and compatibility writes."""
     source_metadata = _normalize_expiry_for_write(
       _sanitize_create_metadata(dict(payload_dict.get("metadata") or {}))
@@ -1769,7 +1770,7 @@ def create_memory_router(
 
   @router.post("/docs")
   @_serialized_mutation
-  async def add_doc(payload: MemoryDocPayload) -> Dict[str, Any]:
+  async def add_doc(payload: MemoryDocPayload) -> dict[str, Any]:
     try:
       _validate_write_scope(payload.scope, payload.session_id)
     except ValueError as exc:
@@ -1821,7 +1822,7 @@ def create_memory_router(
   async def batch_delete_docs(
     payload: MemoryDocBatchDeletePayload,
     session_id: str | None = None,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     session_id = _normalize_optional_session_id(session_id)
     doc_ids = payload.ids
     documents = await _run_store_call(state.store.list_documents)
@@ -1846,7 +1847,7 @@ def create_memory_router(
     for doc_id in candidate_ids:
       metadata = dict(docs_by_id[doc_id].metadata or {})
       metadata['review_status'] = 'deleted'
-      metadata['candidate_deleted_at'] = datetime.now(timezone.utc).isoformat()
+      metadata['candidate_deleted_at'] = datetime.now(UTC).isoformat()
       metadata['candidate_deleted'] = True
       _append_audit(metadata, action='delete_candidate', reason='candidate_deleted')
       await _write_memory_document(Document(id=doc_id, text=docs_by_id[doc_id].text, metadata=metadata))
@@ -1864,7 +1865,7 @@ def create_memory_router(
   async def preview_delete_docs(
     payload: MemoryDocBatchDeletePayload,
     session_id: str | None = None,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     session_id = _normalize_optional_session_id(session_id)
     doc_ids = payload.ids
     documents = await _run_store_call(state.store.list_documents)
@@ -1914,7 +1915,7 @@ def create_memory_router(
     payload: MemoryDocUpdatePayload,
     *,
     audit_action: str,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     payload_dict = _payload_dict(payload)
     documents = await _run_store_call(state.store.list_documents)
     existing = next((doc for doc in documents if doc.id == doc_id), None)
@@ -1986,7 +1987,7 @@ def create_memory_router(
     if payload.turn_id or payload.evidence is not None:
       correction_history = metadata.get('correction_history')
       corrections = list(correction_history) if isinstance(correction_history, list) else []
-      correction: Dict[str, Any] = {
+      correction: dict[str, Any] = {
         'at': now,
         'reason': payload.edit_reason or 'memory_update',
       }
@@ -2003,12 +2004,12 @@ def create_memory_router(
 
   @router.put("/docs/{doc_id:path}")
   @_serialized_mutation
-  async def update_doc(doc_id: str, payload: MemoryDocUpdatePayload) -> Dict[str, Any]:
+  async def update_doc(doc_id: str, payload: MemoryDocUpdatePayload) -> dict[str, Any]:
     return await _update_doc_impl(doc_id, payload, audit_action='update')
 
   @router.post("/memory/add")
   @_serialized_mutation
-  async def add_memory(payload: MemoryAddPayload) -> Dict[str, Any]:
+  async def add_memory(payload: MemoryAddPayload) -> dict[str, Any]:
     """Add typed memory with importance filtering (Week 1 Task 1.3)"""
     try:
       _validate_write_scope(payload.scope, payload.session_id)
@@ -2053,7 +2054,7 @@ def create_memory_router(
 
   @router.delete("/docs/{doc_id:path}")
   @_serialized_mutation
-  async def delete_doc(doc_id: str, session_id: str | None = None) -> Dict[str, Any]:
+  async def delete_doc(doc_id: str, session_id: str | None = None) -> dict[str, Any]:
     session_id = _normalize_optional_session_id(session_id)
     documents = await _run_store_call(state.store.list_documents)
     existing = next((doc for doc in documents if doc.id == doc_id), None)
@@ -2067,7 +2068,7 @@ def create_memory_router(
       # deterministic candidate id cannot recreate the rejected record. Use
       # candidate-specific lifecycle keys; legacy ``deleted_at`` is rejected
       # by the normal write contract and remains reserved for old payloads.
-      metadata['candidate_deleted_at'] = datetime.now(timezone.utc).isoformat()
+      metadata['candidate_deleted_at'] = datetime.now(UTC).isoformat()
       metadata['candidate_deleted'] = True
       _append_audit(metadata, action='delete_candidate', reason='candidate_deleted')
       await _write_memory_document(Document(id=doc_id, text=existing.text, metadata=metadata))
@@ -2087,7 +2088,7 @@ def create_memory_router(
 
   @router.post("/docs/{doc_id:path}/feedback")
   @_serialized_mutation
-  async def feedback_doc(doc_id: str, payload: MemoryFeedbackPayload) -> Dict[str, Any]:
+  async def feedback_doc(doc_id: str, payload: MemoryFeedbackPayload) -> dict[str, Any]:
     """Record recall feedback without changing memory text or revision."""
     documents = await _run_store_call(state.store.list_documents)
     existing = next((doc for doc in documents if doc.id == doc_id), None)
@@ -2104,7 +2105,7 @@ def create_memory_router(
     summary.pop('counts', None)
     events = summary.get('events')
     events = list(events) if isinstance(events, list) else []
-    events.append({'feedback': payload.feedback, 'at': datetime.now(timezone.utc).isoformat()})
+    events.append({'feedback': payload.feedback, 'at': datetime.now(UTC).isoformat()})
     summary['events'] = events[-50:]
     metadata['recall_feedback'] = summary
     updater = getattr(state.store, 'update_metadata', None)
@@ -2124,7 +2125,7 @@ def create_memory_router(
 
   @router.post("/docs/{doc_id:path}/correction")
   @_serialized_mutation
-  async def correct_doc(doc_id: str, payload: MemoryCorrectionPayload) -> Dict[str, Any]:
+  async def correct_doc(doc_id: str, payload: MemoryCorrectionPayload) -> dict[str, Any]:
     """Apply a conversational correction while retaining origin provenance and audit history."""
     result = await _update_doc_impl(doc_id, MemoryDocUpdatePayload(
       text=payload.text.strip(),
@@ -2139,7 +2140,7 @@ def create_memory_router(
 
   @router.post("/docs/{doc_id:path}/review")
   @_serialized_mutation
-  async def review_doc(doc_id: str, payload: MemoryReviewPayload) -> Dict[str, Any]:
+  async def review_doc(doc_id: str, payload: MemoryReviewPayload) -> dict[str, Any]:
     """Approve or reject a review-only candidate without changing provenance."""
     documents = await _run_store_call(state.store.list_documents)
     existing = next((doc for doc in documents if doc.id == doc_id), None)
@@ -2153,7 +2154,7 @@ def create_memory_router(
     if metadata.get('candidate_deleted') or review_status in {'deleted', 'rejected'}:
       detail = "deleted memory candidate cannot be reviewed" if review_status == 'deleted' or metadata.get('candidate_deleted') else "rejected memory candidate cannot be reviewed"
       raise HTTPException(status_code=409, detail=detail)
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     metadata['review_status'] = 'approved' if payload.decision == 'approve' else 'rejected'
     metadata['reviewed_at'] = now
     metadata['review_reason'] = payload.reason
@@ -2167,7 +2168,7 @@ def create_memory_router(
     scope: str | None = None,
     workspace_id: str | None = None,
     session_id: str | None = None,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """List review candidates for the active memory scope.
 
     Candidates are separate from recallable documents. The UI must not infer
@@ -2190,7 +2191,7 @@ def create_memory_router(
       raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     documents = await _run_store_call(state.store.list_documents)
-    items: list[Dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
     for doc in documents:
       metadata = dict(doc.metadata or {})
       if not metadata.get('candidate'):
@@ -2212,7 +2213,7 @@ def create_memory_router(
 
   @router.post("/docs/{doc_id:path}/soft-forget")
   @_serialized_mutation
-  async def soft_forget_doc(doc_id: str, payload: MemorySoftForgetPayload) -> Dict[str, Any]:
+  async def soft_forget_doc(doc_id: str, payload: MemorySoftForgetPayload) -> dict[str, Any]:
     """Hide a memory without deleting its immutable record or provenance."""
     documents = await _run_store_call(state.store.list_documents)
     existing = next((doc for doc in documents if doc.id == doc_id), None)
@@ -2231,7 +2232,7 @@ def create_memory_router(
 
   @router.post("/docs/{doc_id:path}/restore")
   @_serialized_mutation
-  async def restore_doc(doc_id: str, payload: MemorySoftForgetPayload) -> Dict[str, Any]:
+  async def restore_doc(doc_id: str, payload: MemorySoftForgetPayload) -> dict[str, Any]:
     documents = await _run_store_call(state.store.list_documents)
     existing = next((doc for doc in documents if doc.id == doc_id), None)
     if existing is None:
@@ -2249,7 +2250,7 @@ def create_memory_router(
 
   @router.post("/docs/{doc_id:path}/rollback")
   @_serialized_mutation
-  async def rollback_doc(doc_id: str, payload: MemoryRollbackPayload) -> Dict[str, Any]:
+  async def rollback_doc(doc_id: str, payload: MemoryRollbackPayload) -> dict[str, Any]:
     """Restore a retained snapshot by appending a new revision."""
     documents = await _run_store_call(state.store.list_documents)
     existing = next((doc for doc in documents if doc.id == doc_id), None)
@@ -2329,7 +2330,7 @@ def create_memory_router(
     }
 
   def _touch_rebuild_job(job: MemoryIndexRebuildJob) -> None:
-    job.updated_at = datetime.now(timezone.utc).isoformat()
+    job.updated_at = datetime.now(UTC).isoformat()
     _persist_rebuild_job(job)
 
   def _rebuild_progress(processed: int, total: int, phase: str) -> None:
@@ -2356,10 +2357,10 @@ def create_memory_router(
   def _invoke_index_rebuild(
     job: MemoryIndexRebuildJob,
     cancel_event: threading.Event,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     rebuild = state.store.rebuild_index
     parameters = inspect.signature(rebuild).parameters
-    kwargs: Dict[str, Any] = {}
+    kwargs: dict[str, Any] = {}
     if "progress_callback" in parameters:
       kwargs["progress_callback"] = _rebuild_progress
     if "should_cancel" in parameters:
@@ -2412,10 +2413,10 @@ def create_memory_router(
       job.recoverable = True
       state.status = "idle" if cancelled else "error"
     finally:
-      job.finished_at = datetime.now(timezone.utc).isoformat()
+      job.finished_at = datetime.now(UTC).isoformat()
       _touch_rebuild_job(job)
 
-  async def _start_index_rebuild(*, retry_of: str | None = None) -> Dict[str, Any]:
+  async def _start_index_rebuild(*, retry_of: str | None = None) -> dict[str, Any]:
     async with state.rebuild_launch_lock:
       if state.rebuild_task is not None and not state.rebuild_task.done():
         current = state.rebuild_job
@@ -2484,7 +2485,7 @@ def create_memory_router(
       }
 
   @router.get("/index/status")
-  async def index_status() -> Dict[str, Any]:
+  async def index_status() -> dict[str, Any]:
     backend_status = await _run_store_call(state.store.get_status)
     documents = await _run_store_call(state.store.list_documents)
     recallable_count = sum(1 for document in documents if is_memory_recallable(document))
@@ -2505,18 +2506,18 @@ def create_memory_router(
     }
 
   @router.post("/index/rebuild")
-  async def rebuild_index() -> Dict[str, Any]:
+  async def rebuild_index() -> dict[str, Any]:
     return await _start_index_rebuild()
 
   @router.get("/index/rebuild/{job_id}")
-  async def rebuild_index_job(job_id: str) -> Dict[str, Any]:
+  async def rebuild_index_job(job_id: str) -> dict[str, Any]:
     job = state.rebuild_job
     if job is None or job.job_id != job_id:
       raise HTTPException(status_code=404, detail="memory index rebuild job not found")
     return {"status": job.state, "index_status": state.status, "job": job.snapshot()}
 
   @router.post("/index/rebuild/{job_id}/cancel")
-  async def cancel_rebuild_index_job(job_id: str) -> Dict[str, Any]:
+  async def cancel_rebuild_index_job(job_id: str) -> dict[str, Any]:
     job = state.rebuild_job
     if job is None or job.job_id != job_id:
       raise HTTPException(status_code=404, detail="memory index rebuild job not found")
@@ -2531,7 +2532,7 @@ def create_memory_router(
     return {"status": "cancelling", "index_status": state.status, "job": job.snapshot()}
 
   @router.post("/index/rebuild/{job_id}/retry")
-  async def retry_rebuild_index_job(job_id: str) -> Dict[str, Any]:
+  async def retry_rebuild_index_job(job_id: str) -> dict[str, Any]:
     job = state.rebuild_job
     if job is None or job.job_id != job_id:
       raise HTTPException(status_code=404, detail="memory index rebuild job not found")
@@ -2539,7 +2540,7 @@ def create_memory_router(
       raise HTTPException(status_code=409, detail="memory index rebuild job is not recoverable")
     return await _start_index_rebuild(retry_of=job_id)
 
-  async def _execute_rag_query(payload: MemoryRagQueryPayload) -> Dict[str, Any]:
+  async def _execute_rag_query(payload: MemoryRagQueryPayload) -> dict[str, Any]:
     query = str(payload.query or "")
     top_k = int(payload.top_k or 5)
     memory_types = payload.memory_types
@@ -2579,12 +2580,12 @@ def create_memory_router(
     return result
 
   @router.post("/query")
-  async def rag_query(payload: MemoryRagQueryPayload) -> Dict[str, Any]:
+  async def rag_query(payload: MemoryRagQueryPayload) -> dict[str, Any]:
     """Canonical memory retrieval endpoint."""
     return await _execute_rag_query(payload)
 
   @router.post("/rag/query", deprecated=True)
-  async def legacy_rag_query(payload: MemoryRagQueryPayload, response: Response) -> Dict[str, Any]:
+  async def legacy_rag_query(payload: MemoryRagQueryPayload, response: Response) -> dict[str, Any]:
     """Compatibility alias for clients migrating to ``/memory/query``."""
     _mark_deprecated(response)
     return await _execute_rag_query(payload)

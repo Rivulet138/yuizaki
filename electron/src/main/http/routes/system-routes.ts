@@ -17,6 +17,7 @@ import {
 } from '../../resource-manager'
 import type { ManagedModelResourceId } from '../../../shared/resource-manager'
 import type { HttpRouteHandler } from '../types'
+import { SETTINGS_SECRET_MASK } from '../../provider-credential-store'
 import { resolvePythonRuntime } from '../../python-runtime'
 import { isPackagedRuntime, resolveRuntimeProjectRoot, resolveWritableRuntimePaths } from '../../runtime-paths'
 import { parseRequestBody, sendJson } from '../utils'
@@ -26,12 +27,12 @@ import type { SkillCatalogItem, SkillCatalogSnapshot } from '../../../shared/cap
 
 const PYTHON_PING_MAX_ATTEMPTS = 3
 
-const proxyPythonJsonRequest = async (
+export const proxyPythonJsonRequest = async (
   target: string,
   init: RequestInit,
   pathname: string,
   timeoutMs: number = resolvePythonProxyRequestTimeout(pathname),
-): Promise<Response> => {
+): Promise<{ ok: boolean; status: number; text: string }> => {
   const attempts = pathname === '/api/ping' ? PYTHON_PING_MAX_ATTEMPTS : 1
   const attemptTimeout = timeoutMs
   let lastError: unknown
@@ -39,7 +40,8 @@ const proxyPythonJsonRequest = async (
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), attemptTimeout)
     try {
-      return await fetch(target, { ...init, signal: controller.signal })
+      const response = await fetch(target, { ...init, signal: controller.signal })
+      return { ok: response.ok, status: response.status, text: await response.text() }
     } catch (error) {
       lastError = error
       if (attempt + 1 < attempts) await new Promise((resolve) => setTimeout(resolve, 150))
@@ -52,6 +54,28 @@ const proxyPythonJsonRequest = async (
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+
+export const restoreVaultedLlmCredential = (
+  body: unknown,
+  credentials: Record<string, string>,
+): unknown => {
+  if (!isRecord(body) || !isRecord(body['llm'])) return body
+  const llm = body['llm']
+  const apiKey = llm['api_key']
+  if (typeof apiKey !== 'string' || (apiKey.trim() && apiKey !== SETTINGS_SECRET_MASK)) return body
+  const provider = typeof llm['provider'] === 'string' ? llm['provider'].trim().toLowerCase() : ''
+  const baseUrl = typeof llm['base_url'] === 'string' ? llm['base_url'].trim() : ''
+  if (provider === 'ollama' || provider === 'lmstudio') return body
+  try {
+    const hostname = new URL(baseUrl).hostname.toLowerCase()
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]') return body
+  } catch {
+    return body
+  }
+  const vaultedKey = credentials['llm.api_key']
+  if (!vaultedKey) return body
+  return { ...body, llm: { ...llm, api_key: vaultedKey } }
+}
 
 const resolveProjectRoot = (): string => resolveRuntimeProjectRoot({
   projectRootOverride: process.env['YUIZAKI_PROJECT_ROOT'],
@@ -91,11 +115,14 @@ const proxyPythonJson = async (
   bodyOverride?: unknown,
   onSuccess?: (body: unknown) => void,
 ) => {
-  const body = bodyOverride !== undefined
+  let body = bodyOverride !== undefined
     ? bodyOverride
     : method === 'GET' || method === 'DELETE'
       ? undefined
       : await parseRequestBody<unknown>(req)
+  if (method === 'PATCH' && url.pathname === '/api/settings/') {
+    body = restoreVaultedLlmCredential(body, ctx.providerCredentialStore.getAll())
+  }
   const init: RequestInit = {
     method,
     headers: buildProxyHeaders(ctx, body !== undefined, String(req.headers['x-trace-id'] || '').trim() || null),
@@ -103,7 +130,7 @@ const proxyPythonJson = async (
   if (body !== undefined) {
     init.body = JSON.stringify(body)
   }
-  let response: Response
+  let response: { ok: boolean; status: number; text: string }
   try {
     response = await proxyPythonJsonRequest(
       `${resolvePythonApiOrigin()}${url.pathname}${url.search}`,
@@ -121,7 +148,7 @@ const proxyPythonJson = async (
     return
   }
 
-  const text = await response.text()
+  const text = response.text
   let payload: unknown = {}
   if (text) {
     try {
@@ -138,11 +165,6 @@ const proxyPythonJson = async (
       return
     }
     if (method === 'PATCH' && url.pathname === '/api/settings/' && body !== undefined) {
-      const changed = ctx.providerCredentialStore.captureSettingsPayload(body)
-      if (changed) {
-        ctx.updatePythonProviderEnvironment?.(ctx.providerCredentialStore.getPythonEnvironment())
-      }
-    } else if (method === 'POST' && url.pathname === '/api/settings/import' && body !== undefined) {
       const changed = ctx.providerCredentialStore.captureSettingsPayload(body)
       if (changed) {
         ctx.updatePythonProviderEnvironment?.(ctx.providerCredentialStore.getPythonEnvironment())
@@ -843,7 +865,6 @@ export const isPythonJsonProxyPath = (pathname: string): boolean =>
   /^\/api\/workspaces\/[^/]+\/effective-preset$/.test(pathname)
 
 export const isPythonBlobProxyPath = (pathname: string): boolean =>
-  pathname === '/api/settings/export' ||
   pathname === '/api/summary/report/csv' ||
   pathname === '/api/export/json' ||
   pathname === '/api/export/csv'

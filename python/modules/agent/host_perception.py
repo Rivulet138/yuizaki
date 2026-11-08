@@ -7,8 +7,8 @@ output remains untrusted evidence and is fully revalidated by the registry.
 from __future__ import annotations
 
 import inspect
-from dataclasses import dataclass
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from .perception import (

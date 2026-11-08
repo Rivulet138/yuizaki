@@ -34,9 +34,10 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Protocol
 
 BRIDGE_RESOURCE_ID = "qq_bridge"
 BRIDGE_VERSION = "nightly-2026-10-22"
@@ -260,7 +261,7 @@ class QqBridgeSupervisor:
         account: dict[str, Any] = {}
         if not self.installed:
             state = "not_installed"
-        elif running:
+        elif running and state != "failed":
             info = self._login_info()
             if info is not None:
                 state = CONNECTED
@@ -356,7 +357,7 @@ class QqBridgeSupervisor:
 
     def _download(self, url: str, target: Path) -> None:
         temporary = target.with_suffix(".part")
-        with urllib.request.urlopen(url, timeout=300) as response, temporary.open("wb") as handle:  # noqa: S310 - pinned https source
+        with urllib.request.urlopen(url, timeout=300) as response, temporary.open("wb") as handle:
             shutil.copyfileobj(response, handle)
         temporary.replace(target)
 
@@ -427,19 +428,29 @@ class QqBridgeSupervisor:
         return self.status()
 
     def stop(self) -> dict[str, Any]:
-        self._stop_capture()
         process = self._process
-        if process is not None and self._process_alive():
-            try:
-                process.terminate()
-                process.wait(timeout=10)
-            except (OSError, subprocess.TimeoutExpired, AttributeError):
+        try:
+            self._stop_capture()
+            if process is not None and self._process_alive():
                 try:
+                    process.terminate()
+                    process.wait(timeout=10)
+                except (OSError, subprocess.TimeoutExpired, AttributeError):
                     process.kill()
-                except (OSError, AttributeError):
-                    pass
+                    process.wait(timeout=10)
+            if self._process_alive():
+                raise QqBridgeError("qq_bridge_stop_failed", "桥进程仍在运行", status_code=502)
+        except (OSError, subprocess.TimeoutExpired, AttributeError, QqBridgeError) as exc:
+            if process is not None:
+                self._process = process
+            self._state = "failed"
+            self._last_error = f"qq_bridge_stop_failed: {exc}"
+            self._save_state()
+            raise QqBridgeError("qq_bridge_stop_failed", f"桥停止失败：{exc}", status_code=502) from exc
         self._process = None
         self._state = "stopped"
+        if self._last_error and self._last_error.startswith("qq_bridge_stop_failed:"):
+            self._last_error = None
         self._save_state()
         return self.status()
 
@@ -532,12 +543,16 @@ class QqBridgeSupervisor:
         return True
 
     def _stop_capture(self) -> None:
-        pty, self._pty = self._pty, None
+        pty = self._pty
         if pty is not None:
             try:
                 pty.terminate(force=True)
-            except Exception:
-                pass
+            except OSError:
+                if pty.isalive():
+                    raise
+            if pty.isalive():
+                raise QqBridgeError("qq_bridge_stop_failed", "桥 PTY 进程仍在运行", status_code=502)
+            self._pty = None
 
     def set_sign_server(self, url: str) -> dict[str, Any]:
         """Configure the sign server this protocol version requires."""
@@ -556,7 +571,8 @@ class QqBridgeSupervisor:
             try:
                 return bool(self._pty.isalive())
             except Exception:
-                return False
+                # An unavailable liveness probe does not confirm process exit.
+                return True
         if self._process is None:
             return False
         poll = getattr(self._process, "poll", None)
@@ -585,7 +601,7 @@ class QqBridgeSupervisor:
         )
         try:
             # Never route a loopback probe through an environment proxy.
-            with _LOOPBACK_OPENER.open(request, timeout=2) as response:  # noqa: S310 - loopback only
+            with _LOOPBACK_OPENER.open(request, timeout=2) as response:
                 payload = json.loads(response.read().decode("utf-8", "replace") or "{}")
         except (urllib.error.URLError, OSError, ValueError):
             return None

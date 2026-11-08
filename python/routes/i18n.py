@@ -1,9 +1,10 @@
 """多语言 API 端点"""
 
+import logging
+
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from i18n import get_i18n, set_locale, t
-import logging
 
 logger = logging.getLogger(__name__)
 

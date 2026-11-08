@@ -2,23 +2,29 @@
 
 from __future__ import annotations
 
+import csv
+import json
+import logging
+from datetime import UTC, datetime, timedelta
+from io import StringIO
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+from modules.core.paths import data_dir_from_env, database_url_from_env
 from sqlalchemy import create_engine, func
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-import json
-import csv
-from io import StringIO
-import logging
-from uuid import uuid4
 
-from typing import Any
-
-from modules.core.paths import data_dir_from_env, database_url_from_env
-
-from .models import ChatMessage, ChatSession, UserStatistics, UserSettings, Workspace, Companion
+from .models import (
+    ChatMessage,
+    ChatSession,
+    Companion,
+    UserSettings,
+    UserStatistics,
+    Workspace,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,17 +38,14 @@ def _isoformat_or_none(value: datetime | None) -> str | None:
 
 class RepositoryError(RuntimeError):
     """仓储层异常基类"""
-    pass
 
 
 class NotFoundError(RepositoryError):
     """资源不存在异常"""
-    pass
 
 
 class DatabaseError(RepositoryError):
     """数据库操作异常"""
-    pass
 
 
 class ContextRevisionConflict(Exception):
@@ -205,7 +208,7 @@ class DatabaseRepository:
                 chat_session = ChatSession(
                     id=session_id,
                     workspace_id=normalized_workspace_id,
-                    title=f"Chat {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}",
+                    title=f"Chat {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')}",
                     pinned=False,
                     message_count=0,
                     total_tokens=0,
@@ -220,7 +223,7 @@ class DatabaseRepository:
 
             chat_session.message_count = (chat_session.message_count or 0) + 1
             chat_session.total_tokens = (chat_session.total_tokens or 0) + tokens
-            chat_session.updated_at = datetime.now(timezone.utc)
+            chat_session.updated_at = datetime.now(UTC)
 
             session.flush()
             saved_message = self._message_to_record(msg)
@@ -281,7 +284,7 @@ class DatabaseRepository:
                 chat_session = ChatSession(
                     id=session_id,
                     workspace_id=normalized_workspace_id,
-                    title=f"Chat {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}",
+                    title=f"Chat {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')}",
                     pinned=False,
                     message_count=0,
                     total_tokens=0,
@@ -315,7 +318,7 @@ class DatabaseRepository:
             )
             session.add_all([user_message, assistant_message])
             chat_session.message_count = (chat_session.message_count or 0) + 2
-            chat_session.updated_at = datetime.now(timezone.utc)
+            chat_session.updated_at = datetime.now(UTC)
             session.flush()
             records = (
                 self._message_to_record(user_message),
@@ -594,7 +597,7 @@ class DatabaseRepository:
             if chat_session:
                 chat_session.message_count = max(0, int(chat_session.message_count or 0) - 1)
                 chat_session.total_tokens = max(0, int(chat_session.total_tokens or 0) - removed_tokens)
-                chat_session.updated_at = datetime.now(timezone.utc)
+                chat_session.updated_at = datetime.now(UTC)
             session.commit()
             logger.info("Message deleted: %s", message_id)
             return {"message_id": message_id, "session_id": session_id}
@@ -624,7 +627,7 @@ class DatabaseRepository:
             message.content = content
             chat_session = session.query(ChatSession).filter_by(id=message.session_id).first()
             if chat_session:
-                chat_session.updated_at = datetime.now(timezone.utc)
+                chat_session.updated_at = datetime.now(UTC)
             session.commit()
             updated = self._message_to_record(message)
             logger.info("Message updated: %s", message_id)
@@ -671,7 +674,7 @@ class DatabaseRepository:
             if chat_session:
                 chat_session.message_count = max(0, int(chat_session.message_count or 0) - deleted_count)
                 chat_session.total_tokens = max(0, int(chat_session.total_tokens or 0) - removed_tokens)
-                chat_session.updated_at = datetime.now(timezone.utc)
+                chat_session.updated_at = datetime.now(UTC)
             session.commit()
             logger.info("Messages after %s deleted: %s", message_id, deleted_count)
             return {"message_id": message_id, "session_id": session_id, "deleted_count": deleted_count}
@@ -699,7 +702,7 @@ class DatabaseRepository:
             deleted_count = session.query(ChatMessage).filter_by(session_id=session_id).delete(synchronize_session=False)
             chat_session.message_count = 0
             chat_session.total_tokens = 0
-            chat_session.updated_at = datetime.now(timezone.utc)
+            chat_session.updated_at = datetime.now(UTC)
             session.commit()
             logger.info("Session messages cleared: %s (%s messages)", session_id, deleted_count)
             return {"session_id": session_id, "deleted_count": int(deleted_count or 0)}
@@ -1150,7 +1153,7 @@ class DatabaseRepository:
             if context is not _CONTEXT_UNSET:
                 values["context"] = context
                 values["context_revision"] = int(workspace.context_revision or 0) + 1
-            values["updated_at"] = datetime.now(timezone.utc)
+            values["updated_at"] = datetime.now(UTC)
             query = session.query(Workspace).filter(Workspace.id == workspace_id)
             if expected_context_revision is not None:
                 query = query.filter(Workspace.context_revision == expected_context_revision)
@@ -1250,7 +1253,7 @@ class DatabaseRepository:
             chat_session = ChatSession(
                 id=session_id,
                 workspace_id=normalized_workspace_id,
-                title=title or f"Chat {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}",
+                title=title or f"Chat {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')}",
                 pinned=False,
             )
             session.add(chat_session)
@@ -1282,7 +1285,7 @@ class DatabaseRepository:
                 chat_session.title = title
             if archived is not None:
                 chat_session.archived = archived
-            chat_session.updated_at = datetime.now(timezone.utc)
+            chat_session.updated_at = datetime.now(UTC)
             session.commit()
             return self._session_to_record(chat_session)
         finally:
@@ -1433,7 +1436,7 @@ class DatabaseRepository:
             for key in ["name", "avatar", "model_type", "model_id", "voice_profile", "persona_prompt", "temperament", "attachment_style", "support_style", "emotion_state", "affinity_state", "energy_state", "trust_state", "intimacy_state", "interruptibility_state", "fatigue_state"]:
                 if key in updates:
                     setattr(companion, key, self._serialize_voice_profile(updates[key]) if key == 'voice_profile' else updates[key])
-            companion.updated_at = datetime.now(timezone.utc)
+            companion.updated_at = datetime.now(UTC)
             session.commit()
             return self._companion_to_dict(companion)
         finally:

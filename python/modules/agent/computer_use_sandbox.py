@@ -11,7 +11,7 @@ import hashlib
 import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 SCHEMA_VERSION = "yuizaki.gui-sandbox.v1"
@@ -42,7 +42,7 @@ def _parse_time(value: Any) -> datetime | None:
         return None
     if parsed.tzinfo is None:
         return None
-    return parsed.astimezone(timezone.utc)
+    return parsed.astimezone(UTC)
 
 
 def _safe_id(value: Any) -> str | None:
@@ -68,7 +68,7 @@ def validate_sandbox_attestation(
         return _failure("sandbox_attestation_task_mismatch", "sandbox attestation taskId does not match GUI task")
     issued_at = _parse_time(attestation.get("issuedAt"))
     expires_at = _parse_time(attestation.get("expiresAt"))
-    reference_now = _parse_time(now) if now is not None else datetime.now(timezone.utc)
+    reference_now = _parse_time(now) if now is not None else datetime.now(UTC)
     if issued_at is None or expires_at is None or reference_now is None:
         return _failure("sandbox_attestation_time_invalid", "issuedAt, expiresAt and now must be timezone-aware timestamps")
     if issued_at >= expires_at:

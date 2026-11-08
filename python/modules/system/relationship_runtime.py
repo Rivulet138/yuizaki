@@ -1,21 +1,24 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Dict
+from typing import Any
 
-from .memory_write_pipeline import normalize_relationship_memory_payload, persist_relationship_memory
 from ..memory.metadata import is_metadata_recallable
+from .memory_write_pipeline import (
+    normalize_relationship_memory_payload,
+    persist_relationship_memory,
+)
 
 __all__ = [
+    "build_companion_relationship_history_endpoint",
+    "build_recent_relationship_history_provider",
+    "build_relationship_history_payload",
+    "build_relationship_memory_writer",
+    "build_relationship_summary_provider",
     "collect_relationship_events",
-    "write_relationship_memory",
     "recent_relationship_history",
     "relationship_evolution_summary",
-    "build_relationship_history_payload",
-    "build_companion_relationship_history_endpoint",
-    "build_relationship_memory_writer",
-    "build_recent_relationship_history_provider",
-    "build_relationship_summary_provider",
+    "write_relationship_memory",
 ]
 
 
@@ -26,9 +29,9 @@ def collect_relationship_events(
     limit: int,
     allowed_scopes: set[str] | None = None,
     workspace_id: str | None = None,
-    ) -> list[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
     docs = memory_store.list_documents()
-    events: list[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
     for doc in reversed(docs):
         meta = doc.metadata or {}
         if not is_metadata_recallable(meta):
@@ -43,7 +46,7 @@ def collect_relationship_events(
             continue
         rel = meta.get("relationship_event")
         if isinstance(rel, dict):
-            payload: Dict[str, Any] = {**rel}
+            payload: dict[str, Any] = {**rel}
             if "text" not in payload:
                 payload["text"] = doc.text
             if "timestamp" not in payload:
@@ -87,7 +90,7 @@ def recent_relationship_history(
     get_db_repo: Callable[[], Any],
     get_memory_store: Callable[[], Any],
     limit: int = 5,
-) -> list[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     db_repo = get_db_repo()
     active_workspace_id = get_active_workspace_id()
     companion = db_repo.get_workspace_companion(active_workspace_id) if db_repo else None
@@ -103,9 +106,9 @@ def recent_relationship_history(
 
 def relationship_evolution_summary(
     *,
-    get_recent_relationship_history: Callable[[], list[Dict[str, Any]]],
-    summarize_relationship_events: Callable[[list[Dict[str, Any]]], Dict[str, Any]],
-) -> Dict[str, Any]:
+    get_recent_relationship_history: Callable[[], list[dict[str, Any]]],
+    summarize_relationship_events: Callable[[list[dict[str, Any]]], dict[str, Any]],
+) -> dict[str, Any]:
     return summarize_relationship_events(get_recent_relationship_history())
 
 
@@ -146,8 +149,8 @@ def build_recent_relationship_history_provider(
     get_db_repo: Callable[[], Any],
     get_memory_store: Callable[[], Any],
     limit: int = 5,
-) -> Callable[[], list[Dict[str, Any]]]:
-    def _provider() -> list[Dict[str, Any]]:
+) -> Callable[[], list[dict[str, Any]]]:
+    def _provider() -> list[dict[str, Any]]:
         return recent_relationship_history(
             get_active_workspace_id=get_active_workspace_id,
             get_db_repo=get_db_repo,
@@ -160,10 +163,10 @@ def build_recent_relationship_history_provider(
 
 def build_relationship_summary_provider(
     *,
-    get_recent_relationship_history: Callable[[], list[Dict[str, Any]]],
-    summarize_relationship_events: Callable[[list[Dict[str, Any]]], Dict[str, Any]],
-) -> Callable[[], Dict[str, Any]]:
-    def _provider() -> Dict[str, Any]:
+    get_recent_relationship_history: Callable[[], list[dict[str, Any]]],
+    summarize_relationship_events: Callable[[list[dict[str, Any]]], dict[str, Any]],
+) -> Callable[[], dict[str, Any]]:
+    def _provider() -> dict[str, Any]:
         return relationship_evolution_summary(
             get_recent_relationship_history=get_recent_relationship_history,
             summarize_relationship_events=summarize_relationship_events,
@@ -175,12 +178,12 @@ def build_relationship_summary_provider(
 def build_relationship_history_payload(
     *,
     companion_id: str,
-    events: list[Dict[str, Any]],
+    events: list[dict[str, Any]],
     summarize_relationship_events,
     is_relationship_milestone,
-) -> Dict[str, Any]:
-    grouped: Dict[str, Dict[str, list[Dict[str, Any]]]] = {}
-    milestones: list[Dict[str, Any]] = []
+) -> dict[str, Any]:
+    grouped: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    milestones: list[dict[str, Any]] = []
     summary = summarize_relationship_events(events)
     for item in events:
         scope = str(item.get("scope") or "workspace")
@@ -204,8 +207,8 @@ def build_companion_relationship_history_endpoint(
     memory_store_provider: Callable[[], Any],
     summarize_relationship_events,
     is_relationship_milestone,
-) -> Callable[[str, int], Dict[str, Any]]:
-    def _endpoint(companion_id: str, limit: int = 20) -> Dict[str, Any]:
+) -> Callable[[str, int], dict[str, Any]]:
+    def _endpoint(companion_id: str, limit: int = 20) -> dict[str, Any]:
         events = collect_relationship_events(
             memory_store=memory_store_provider(),
             companion_id=companion_id,

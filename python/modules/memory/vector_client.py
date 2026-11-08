@@ -5,7 +5,7 @@ import ipaddress
 import logging
 import uuid
 from collections.abc import Callable, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -72,15 +72,15 @@ class QdrantVectorStore(VectorStore):
         )
         qdrant_client_module = importlib.import_module("qdrant_client")
         qdrant_models_module = importlib.import_module("qdrant_client.models")
-        qdrant_client_cls = getattr(qdrant_client_module, "QdrantClient")
-        self._distance = getattr(qdrant_models_module, "Distance")
-        self._point_ids_list = getattr(qdrant_models_module, "PointIdsList")
-        self._point_struct = getattr(qdrant_models_module, "PointStruct")
-        self._vector_params = getattr(qdrant_models_module, "VectorParams")
-        self._filter = getattr(qdrant_models_module, "Filter")
-        self._field_condition = getattr(qdrant_models_module, "FieldCondition")
-        self._match_value = getattr(qdrant_models_module, "MatchValue")
-        self._match_any = getattr(qdrant_models_module, "MatchAny")
+        qdrant_client_cls = qdrant_client_module.QdrantClient
+        self._distance = qdrant_models_module.Distance
+        self._point_ids_list = qdrant_models_module.PointIdsList
+        self._point_struct = qdrant_models_module.PointStruct
+        self._vector_params = qdrant_models_module.VectorParams
+        self._filter = qdrant_models_module.Filter
+        self._field_condition = qdrant_models_module.FieldCondition
+        self._match_value = qdrant_models_module.MatchValue
+        self._match_any = qdrant_models_module.MatchAny
         self._qdrant_url = qdrant_url.strip().rstrip("/")
         if not self._qdrant_url:
             raise ValueError("qdrant_url_required")
@@ -403,7 +403,7 @@ class QdrantVectorStore(VectorStore):
                     with_payload=True,
                 ).points
             else:
-                search_method = getattr(self.client, "search")
+                search_method = self.client.search
                 results = search_method(
                     collection_name=self.collection_name,
                     query_vector=vector,
@@ -489,7 +489,7 @@ class QdrantVectorStore(VectorStore):
                 learned_enabled = False
                 logger.warning("Learned Qdrant reranker unavailable; using hybrid scores: %s", exc)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         scored: list[tuple[float, Document]] = []
         allowed_types = _memory_type_filter_values(memory_types)
         score_components = self._score_component_cache()

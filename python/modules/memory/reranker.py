@@ -9,7 +9,6 @@ from typing import Protocol
 
 import numpy as np
 
-
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff]")
 
 
@@ -52,7 +51,7 @@ class LazyCrossEncoderReranker:
     def _ensure_model(self):
         if self._model is None:
             module = importlib.import_module("sentence_transformers")
-            cross_encoder = getattr(module, "CrossEncoder")
+            cross_encoder = module.CrossEncoder
             self._model = cross_encoder(self.model_name, device=self.device)
         return self._model
 

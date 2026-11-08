@@ -14,9 +14,9 @@ class StepConditionRecord:
     status_not_in: list[str] = field(default_factory=list)
     content_contains: list[str] = field(default_factory=list)
     error_contains: list[str] = field(default_factory=list)
-    all_of: list["StepConditionRecord"] = field(default_factory=list)
-    any_of: list["StepConditionRecord"] = field(default_factory=list)
-    none_of: list["StepConditionRecord"] = field(default_factory=list)
+    all_of: list[StepConditionRecord] = field(default_factory=list)
+    any_of: list[StepConditionRecord] = field(default_factory=list)
+    none_of: list[StepConditionRecord] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

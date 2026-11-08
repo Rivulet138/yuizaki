@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from modules.system.voice_diagnostics import VoiceDiagnostics
 from modules.tts.openai_compatible import OpenAICompatibleTTSClient
 from modules.tts.provider import TTSProviderClient
 from modules.tts.synthesizer import TTSClient
-from modules.system.voice_diagnostics import VoiceDiagnostics
 
 
 def create_tts_client(

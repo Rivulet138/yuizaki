@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -437,7 +437,7 @@ def test_twitch_revocation_state_survives_restart_until_explicit_reset(tmp_path:
     stream = StreamRuntime(events_path=events_path, twitch_eventsub_secret=secret)
     body = json.dumps({"subscription": {"type": "channel.chat.message"}, "event": {"message": {"text": "hello"}}}).encode()
     message_id = "revocation-1"
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(UTC).isoformat()
     signature = "sha256=" + hmac.new(secret.encode(), message_id.encode() + timestamp.encode() + body, hashlib.sha256).hexdigest()
     headers = {
         "Twitch-Eventsub-Message-Id": message_id,

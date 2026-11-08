@@ -8,7 +8,6 @@ import logging
 from collections.abc import Iterable
 
 import pytest
-
 from modules.agent import dsh_bridge
 from modules.agent.companion_events import CompanionJobEventLog
 from modules.agent.context import AgentRequestContext

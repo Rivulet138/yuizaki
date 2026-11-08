@@ -6,9 +6,23 @@ import tarfile
 from pathlib import Path
 
 try:
-    from .resource_archive import download_archive, emit_progress, locked_archive, remove_download_artifacts, safe_extract, verify_sha256
+    from .resource_archive import (
+        download_archive,
+        emit_progress,
+        locked_archive,
+        remove_download_artifacts,
+        safe_extract,
+        verify_sha256,
+    )
 except ImportError:
-    from resource_archive import download_archive, emit_progress, locked_archive, remove_download_artifacts, safe_extract, verify_sha256
+    from resource_archive import (
+        download_archive,
+        emit_progress,
+        locked_archive,
+        remove_download_artifacts,
+        safe_extract,
+        verify_sha256,
+    )
 
 
 DEFAULT_ASSET_URL, DEFAULT_SHA256 = locked_archive("sherpa")

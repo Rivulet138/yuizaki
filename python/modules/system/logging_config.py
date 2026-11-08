@@ -5,7 +5,6 @@ import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-
 DEFAULT_LOG_MAX_BYTES = 5 * 1024 * 1024
 DEFAULT_LOG_BACKUP_COUNT = 3
 

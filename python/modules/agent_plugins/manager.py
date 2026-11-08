@@ -10,7 +10,6 @@ from typing import Any
 from ..agent.models import PluginSnapshot, PluginTraceRecord
 from ..agent.tool_registry import ToolRegistry
 from ..core.paths import data_dir_from_env
-
 from .base import AgentPlugin
 
 

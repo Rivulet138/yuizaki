@@ -76,7 +76,7 @@ def build_app_runtime_health_providers(
             try:
                 preconnect_call = cast(Callable[..., Awaitable[bool]], preconnect)
                 reached = await asyncio.wait_for(preconnect_call(force=True), timeout=2.5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 return False, "LLM provider health probe timed out"
             except Exception as exc:  # noqa: BLE001 - provider-specific transport failures
                 return False, f"LLM provider unavailable: {exc}"

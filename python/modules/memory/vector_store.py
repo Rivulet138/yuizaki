@@ -12,10 +12,10 @@ import os
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Protocol, Tuple
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -33,7 +33,7 @@ def _normalize_scope_id(value: Any) -> str | None:
   return normalized or None
 
 
-def memory_recency_score(metadata: Dict[str, Any], *, now: datetime | None = None) -> float:
+def memory_recency_score(metadata: dict[str, Any], *, now: datetime | None = None) -> float:
   """Return a stable 30-day recency score using event time before system time."""
   raw = next(
     (
@@ -50,16 +50,16 @@ def memory_recency_score(metadata: Dict[str, Any], *, now: datetime | None = Non
   except ValueError:
     return 0.5
   if instant.tzinfo is None or instant.utcoffset() is None:
-    instant = instant.replace(tzinfo=timezone.utc)
-  current = now or datetime.now(timezone.utc)
+    instant = instant.replace(tzinfo=UTC)
+  current = now or datetime.now(UTC)
   if current.tzinfo is None or current.utcoffset() is None:
-    current = current.replace(tzinfo=timezone.utc)
-  age_days = max(0.0, (current.astimezone(timezone.utc) - instant.astimezone(timezone.utc)).total_seconds() / 86400)
+    current = current.replace(tzinfo=UTC)
+  age_days = max(0.0, (current.astimezone(UTC) - instant.astimezone(UTC)).total_seconds() / 86400)
   return 1.0 / (1.0 + age_days / 30.0)
 
 
 def memory_feedback_quality_score(
-  metadata: Dict[str, Any],
+  metadata: dict[str, Any],
   baseline: float,
   *,
   minimum_samples: int = 3,
@@ -106,7 +106,7 @@ def memory_score_components(
   learned_weight: float,
   recency_weight: float,
   quality_weight: float,
-) -> Dict[str, float]:
+) -> dict[str, float]:
   final = (
     semantic * semantic_weight
     + lexical * lexical_weight
@@ -129,7 +129,7 @@ def memory_score_weights(
   recency_weight: float,
   quality_weight: float,
   learned_enabled: bool,
-) -> Dict[str, float]:
+) -> dict[str, float]:
   weights = {
     "lexical": 0.10,
     "learned": 0.45 if learned_enabled else 0.0,
@@ -229,7 +229,7 @@ class Document:
 
   id: str
   text: str
-  metadata: Dict[str, Any]
+  metadata: dict[str, Any]
 
 
 class MemoryIndexRebuildCancelled(RuntimeError):
@@ -340,7 +340,7 @@ class EmbeddingService:
     """
     try:
       sentence_transformers = importlib.import_module("sentence_transformers")
-      SentenceTransformer = getattr(sentence_transformers, "SentenceTransformer")
+      SentenceTransformer = sentence_transformers.SentenceTransformer
     except ImportError as exc:
       raise RuntimeError(
         "sentence-transformers is required for default EmbeddingService. "
@@ -380,7 +380,7 @@ class EmbeddingService:
       return np.asarray(encode_document(text, convert_to_numpy=True), dtype=np.float32)
     return self.embed(text)
 
-  def embed_batch(self, texts: List[str]) -> np.ndarray:
+  def embed_batch(self, texts: list[str]) -> np.ndarray:
     """Batch embedding for efficiency"""
     return np.asarray(self.model.encode(texts, convert_to_numpy=True), dtype=np.float32)
 
@@ -422,7 +422,7 @@ class LazyEmbeddingService:
       return np.asarray(method(text), dtype=np.float32)
     return service.embed(text)
 
-  def embed_batch(self, texts: List[str]) -> np.ndarray:
+  def embed_batch(self, texts: list[str]) -> np.ndarray:
     return self._ensure_service().embed_batch(texts)
 
 
@@ -440,13 +440,13 @@ class VectorStore:
     self._embedding_service = embedding_service or LazyEmbeddingService()
     self._reranker = reranker
     self._reranker_candidate_count = max(5, min(100, int(reranker_candidate_count)))
-    self._docs: Dict[str, Document] = {}
-    self._vectors: Dict[str, np.ndarray] = {}
+    self._docs: dict[str, Document] = {}
+    self._vectors: dict[str, np.ndarray] = {}
     self._index_lock = threading.RLock()
     self._index_generation = 0
     self._score_context = threading.local()
 
-  def _score_component_cache(self) -> Dict[tuple[str, str, float, float], Dict[str, float]]:
+  def _score_component_cache(self) -> dict[tuple[str, str, float, float], dict[str, float]]:
     context = getattr(self, "_score_context", None)
     if context is None:
       context = threading.local()
@@ -463,7 +463,7 @@ class VectorStore:
     doc_id: str,
     recency_weight: float,
     quality_weight: float,
-  ) -> Dict[str, float] | None:
+  ) -> dict[str, float] | None:
     components = self._score_component_cache().get((query, doc_id, recency_weight, quality_weight))
     return dict(components) if components is not None else None
 
@@ -477,7 +477,7 @@ class VectorStore:
   def add_metadata_document(self, doc: Document) -> None:
     self._docs[doc.id] = doc
 
-  def update_metadata(self, doc_id: str, metadata: Dict[str, Any]) -> None:
+  def update_metadata(self, doc_id: str, metadata: dict[str, Any]) -> None:
     with self._index_lock:
       document = self._docs.get(doc_id)
       if document is None:
@@ -491,7 +491,7 @@ class VectorStore:
       self._vectors.pop(doc_id, None)
       self._index_generation += 1
 
-  def list_documents(self) -> List[Document]:
+  def list_documents(self) -> list[Document]:
     return list(self._docs.values())
 
   def rebuild_index(
@@ -552,7 +552,7 @@ class VectorStore:
     query: str,
     top_k: int = 5,
     filters: MemorySearchFilters | None = None,
-  ) -> List[Tuple[Document, float]]:
+  ) -> list[tuple[Document, float]]:
     if not self._docs:
       return []
     active_ids = [doc_id for doc_id, doc in self._docs.items() if self._doc_matches_filters(doc, filters=filters)]
@@ -581,7 +581,7 @@ class VectorStore:
     recency_weight: float = 0.2,
     quality_weight: float = 0.15,
     filters: MemorySearchFilters | None = None,
-  ) -> List[Tuple[Document, float]]:
+  ) -> list[tuple[Document, float]]:
     """
     Advanced search with type filtering and recency reranking (Task 1.4).
 
@@ -634,7 +634,7 @@ class VectorStore:
         logger.warning("Learned memory reranker unavailable; using hybrid scores: %s", exc)
 
     # Blend semantic relevance with lexical precision and business signals.
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     scored = []
     score_components = self._score_component_cache()
     score_components.clear()

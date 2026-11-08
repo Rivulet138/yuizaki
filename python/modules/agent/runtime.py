@@ -21,6 +21,7 @@ from .computer_use import (
     ComputerUseController,
     register_computer_use_tools,
 )
+from .context import AgentRequestContext, coerce_autonomy_mode
 from .default_tools import register_default_tools
 from .desktop_actions import (
     DesktopActionAdapter,
@@ -29,12 +30,11 @@ from .desktop_actions import (
     register_desktop_action_tools,
 )
 from .mcp_manager import MCPManager
-from .context import AgentRequestContext, coerce_autonomy_mode
 from .perception import PerceptionProviderRegistry
 from .pipeline import AgentPipeline
 from .policy_engine import PolicyEngine
-from .runtime_context import RuntimeContext, RuntimeContextRegistry
 from .recovery_store import SQLiteStepRecoveryStore
+from .runtime_context import RuntimeContext, RuntimeContextRegistry
 from .schedule_store import ScheduleStore
 from .scheduler import AgentScheduler
 from .skill_runtime import SkillRuntimeRegistry

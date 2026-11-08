@@ -5,13 +5,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from alembic.runtime.migration import MigrationContext
-from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, inspect
-
 import migration_bootstrap
 from alembic import command
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from database.models import ChatMessage
+from sqlalchemy import create_engine, inspect
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
 

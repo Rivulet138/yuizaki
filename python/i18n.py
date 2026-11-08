@@ -2,9 +2,9 @@
 
 import contextvars
 import json
-from pathlib import Path
-from typing import Dict, Any, Optional
 import logging
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class I18nManager:
             if locales_dir is not None
             else Path(__file__).resolve().parent / "locales"
         )
-        self.messages: Dict[str, Dict[str, Any]] = {}
+        self.messages: dict[str, dict[str, Any]] = {}
         self._default_locale = "zh-CN"
         self._locale = contextvars.ContextVar("yuizaki_locale", default=self._default_locale)
         self.supported_locales = ["zh-CN", "en-US", "ja-JP"]
@@ -62,7 +62,7 @@ class I18nManager:
             logger.warning(f"Unsupported locale: {locale}")
             return False
 
-    def get(self, key: str, locale: Optional[str] = None, default: str = "") -> str:
+    def get(self, key: str, locale: str | None = None, default: str = "") -> str:
         """获取翻译文本
 
         Args:
@@ -87,7 +87,7 @@ class I18nManager:
             return value if value else default
         return default
 
-    def get_all(self, locale: Optional[str] = None) -> Dict[str, Any]:
+    def get_all(self, locale: str | None = None) -> dict[str, Any]:
         """获取所有翻译
 
         Args:
@@ -115,7 +115,7 @@ class I18nManager:
         """
         return self._locale.get()
 
-    def translate_error(self, error_key: str, locale: Optional[str] = None) -> str:
+    def translate_error(self, error_key: str, locale: str | None = None) -> str:
         """翻译错误消息
 
         Args:
@@ -127,7 +127,7 @@ class I18nManager:
         """
         return self.get(error_key, locale, error_key)
 
-    def translate_message(self, message_key: str, locale: Optional[str] = None) -> str:
+    def translate_message(self, message_key: str, locale: str | None = None) -> str:
         """翻译消息
 
         Args:
@@ -154,7 +154,7 @@ def set_locale(locale: str) -> bool:
     return i18n_manager.set_locale(locale)
 
 
-def t(key: str, locale: Optional[str] = None) -> str:
+def t(key: str, locale: str | None = None) -> str:
     """翻译快捷函数
 
     Args:

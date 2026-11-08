@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 
 def emit_progress(phase: str, message: str) -> None:

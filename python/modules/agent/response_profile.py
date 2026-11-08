@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
-
 ResponseMode = Literal["instant", "balanced", "deep"]
 ThinkingMode = Literal["enabled", "disabled"]
 RESPONSE_MODES: tuple[ResponseMode, ...] = ("instant", "balanced", "deep")

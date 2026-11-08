@@ -17,7 +17,7 @@ import secrets
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from .planner import canonical_json_bytes, strict_json_loads
@@ -87,7 +87,7 @@ class StepFailure:
     status: str | None = None
     cause: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def __post_init__(self) -> None:
         if self.kind not in FAILURE_KINDS:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable
-
+from collections.abc import Iterable
+from typing import Any
 
 GLOBAL_EVENT_KINDS = {"gratitude", "preference_confirmed", "trust_shift"}
 WORKSPACE_EVENT_KINDS = {"tool_success", "support_request", "comfort_event", "care_signal"}
@@ -18,7 +18,7 @@ def resolve_relationship_scope(event_kind: str, explicit_scope: str | None = Non
     return "workspace"
 
 
-def normalize_relationship_importance(event_kind: str, importance: float | int | None) -> float:
+def normalize_relationship_importance(event_kind: str, importance: float | None) -> float:
     resolved = float(importance if importance is not None else 0.8)
     if event_kind in GLOBAL_EVENT_KINDS:
         return max(resolved, 0.92)
@@ -27,12 +27,12 @@ def normalize_relationship_importance(event_kind: str, importance: float | int |
     return resolved
 
 
-def is_relationship_milestone(kind: str, importance: float | int | None) -> bool:
+def is_relationship_milestone(kind: str, importance: float | None) -> bool:
     resolved_importance = float(importance if importance is not None else 0.0)
     return bool(resolved_importance >= 0.92 or kind in MILESTONE_EVENT_KINDS)
 
 
-def derive_relationship_stage(summary: Dict[str, Any]) -> str:
+def derive_relationship_stage(summary: dict[str, Any]) -> str:
     milestone_count = int(summary.get("milestone_count", 0) or 0)
     trust_shift_count = int(summary.get("recent_trust_shift_count", 0) or 0)
     event_count = int(summary.get("event_count", 0) or 0)
@@ -43,7 +43,7 @@ def derive_relationship_stage(summary: Dict[str, Any]) -> str:
     return "warming"
 
 
-def derive_proactive_budget(summary: Dict[str, Any]) -> float:
+def derive_proactive_budget(summary: dict[str, Any]) -> float:
     stage = str(summary.get("relationship_stage") or derive_relationship_stage(summary))
     milestone_count = int(summary.get("milestone_count", 0) or 0)
     gratitude_count = int(summary.get("recent_gratitude_count", 0) or 0)
@@ -61,7 +61,7 @@ def derive_proactive_budget(summary: Dict[str, Any]) -> float:
     return round(min(budget, 1.5), 2)
 
 
-def derive_relationship_trend(summary: Dict[str, Any]) -> str:
+def derive_relationship_trend(summary: dict[str, Any]) -> str:
     trust_shift_count = int(summary.get("recent_trust_shift_count", 0) or 0)
     gratitude_count = int(summary.get("recent_gratitude_count", 0) or 0)
     event_count = int(summary.get("event_count", 0) or 0)
@@ -73,7 +73,7 @@ def derive_relationship_trend(summary: Dict[str, Any]) -> str:
     return "steady"
 
 
-def derive_milestone_salience(summary: Dict[str, Any]) -> str:
+def derive_milestone_salience(summary: dict[str, Any]) -> str:
     milestone_count = int(summary.get("milestone_count", 0) or 0)
     trust_shift_count = int(summary.get("recent_trust_shift_count", 0) or 0)
     gratitude_count = int(summary.get("recent_gratitude_count", 0) or 0)
@@ -84,7 +84,7 @@ def derive_milestone_salience(summary: Dict[str, Any]) -> str:
     return "low"
 
 
-def derive_milestone_reasoning(summary: Dict[str, Any]) -> str:
+def derive_milestone_reasoning(summary: dict[str, Any]) -> str:
     salience = str(summary.get("milestone_salience") or derive_milestone_salience(summary))
     milestone_count = int(summary.get("milestone_count", 0) or 0)
     trust_shift_count = int(summary.get("recent_trust_shift_count", 0) or 0)
@@ -96,8 +96,8 @@ def derive_milestone_reasoning(summary: Dict[str, Any]) -> str:
     return "当前里程碑显著度较低，仍会被保留，但不会过度主导关系节奏或检索策略。"
 
 
-def summarize_relationship_events(events: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
-    summary: Dict[str, Any] = {
+def summarize_relationship_events(events: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    summary: dict[str, Any] = {
         "event_count": 0,
         "high_importance_count": 0,
         "global_count": 0,

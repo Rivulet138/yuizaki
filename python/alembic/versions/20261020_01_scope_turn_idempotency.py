@@ -6,9 +6,8 @@ Revises: 20261020_00
 
 from __future__ import annotations
 
-from sqlalchemy import inspect
-
 from alembic import op
+from sqlalchemy import inspect
 
 revision = "20261020_01"
 down_revision = "20261020_00"

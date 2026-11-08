@@ -30,13 +30,13 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from modules.agent.skill_import import (  # noqa: E402
+from modules.agent.skill_import import (
     collect_skills,
     default_skill_roots,
     merge_catalog,
 )
-from modules.agent.skill_store import SkillCatalogStore  # noqa: E402
-from modules.core.paths import data_dir_from_env  # noqa: E402
+from modules.agent.skill_store import SkillCatalogStore
+from modules.core.paths import data_dir_from_env
 
 
 def _catalog_path() -> Path:
@@ -66,7 +66,7 @@ def _push_to_api(base_url: str, items: list[dict], timeout_s: float = 10.0) -> t
         headers={"content-type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout_s) as response:  # noqa: S310 - loopback only
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
             body = response.read().decode("utf-8", "replace")
             return True, body[:400]
     except (urllib.error.URLError, OSError, ValueError) as exc:

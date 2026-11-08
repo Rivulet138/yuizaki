@@ -204,15 +204,6 @@
   font-weight: 750;
 }
 
-.sr-only-input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-}
-
 .llm-workspace,
 .voice-workspace {
   display: grid;
@@ -378,6 +369,17 @@
 
 .tts-runtime-alert {
   margin-bottom: 12px;
+}
+
+.inference-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inference-title-row .subsection-title {
+  flex: 1;
 }
 
 .subsection-title {

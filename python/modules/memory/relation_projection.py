@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from itertools import pairwise
 from typing import Any
 
@@ -42,7 +42,7 @@ def _timestamp(metadata: dict[str, Any]) -> float | None:
         try:
             parsed = datetime.fromisoformat(raw.replace('Z', '+00:00'))
             if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
+                parsed = parsed.replace(tzinfo=UTC)
             return parsed.timestamp()
         except ValueError:
             continue

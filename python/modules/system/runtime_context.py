@@ -12,10 +12,10 @@ import inspect
 import threading
 import time
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
-from typing import Any, Awaitable, Iterator
+from typing import Any
 
 RuntimeDisposer = Callable[[], Any | Awaitable[Any]]
 _RELEASE_BINDING = "_runtime_context_release"
@@ -70,7 +70,7 @@ class RuntimeContext:
         object.__setattr__(self, "workspace_id", workspace_id)
         object.__setattr__(self, "extras", dict(self.extras))
 
-    def with_revision(self, revision: int) -> "RuntimeContext":
+    def with_revision(self, revision: int) -> RuntimeContext:
         if revision < 1:
             raise ValueError("revision must be positive")
         return replace(

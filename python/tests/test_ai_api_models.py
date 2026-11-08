@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 from routes.ai_api import create_ai_router
 
 

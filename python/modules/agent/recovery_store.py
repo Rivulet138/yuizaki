@@ -21,7 +21,6 @@ from .planner import ToolStep, strict_json_loads, validate_plan
 class RecoverySerializationError(ValueError):
     """Raised when a recovery row cannot be safely serialized or reloaded."""
 
-    pass
 
 
 _MAX_RECOVERY_JSON_BYTES = 256 * 1024

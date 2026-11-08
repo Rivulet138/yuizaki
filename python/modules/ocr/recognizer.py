@@ -6,8 +6,9 @@ import hashlib
 import logging
 import time
 from collections import OrderedDict
+from collections.abc import Sequence
 from importlib import import_module
-from typing import Protocol, Sequence, TypeAlias, cast
+from typing import Protocol, TypeAlias, cast
 
 from .payload import decode_base64_image_payload
 
@@ -61,17 +62,16 @@ class OCRClient:
     @staticmethod
     def _create_engine() -> OCREngine:
         module = import_module("rapidocr_onnxruntime")
-        rapidocr_type = cast("type[OCREngine]", getattr(module, "RapidOCR"))
+        rapidocr_type = cast("type[OCREngine]", module.RapidOCR)
         return rapidocr_type()
 
     async def disconnect(self) -> None:
-        async with self._recognize_lock:
-            async with self._connect_lock:
-                self._ocr = None
-                self._available = False
-                self._initialization_attempted = False
-                self._initialization_error = None
-                self._result_cache.clear()
+        async with self._recognize_lock, self._connect_lock:
+            self._ocr = None
+            self._available = False
+            self._initialization_attempted = False
+            self._initialization_error = None
+            self._result_cache.clear()
         logger.info("OCR engine disconnected")
 
     @property

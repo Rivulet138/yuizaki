@@ -3,9 +3,9 @@
 import logging
 import time
 from collections.abc import Callable
-from typing import Any, Optional
-from enum import Enum
 from datetime import datetime
+from enum import Enum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ class ServiceStatus(Enum):
 class ServiceInfo:
     """Information about a service."""
 
-    def __init__(self, name: str, init_func: Callable[[], Any], cleanup_func: Optional[Callable[[], Any]] = None):
+    def __init__(self, name: str, init_func: Callable[[], Any], cleanup_func: Callable[[], Any] | None = None):
         """Initialize service info.
 
         Args:
@@ -34,8 +34,8 @@ class ServiceInfo:
         self.init_func = init_func
         self.cleanup_func = cleanup_func
         self.status = ServiceStatus.STOPPED
-        self.started_at: Optional[datetime] = None
-        self.error: Optional[str] = None
+        self.started_at: datetime | None = None
+        self.error: str | None = None
         self.startup_ms: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -62,8 +62,8 @@ class ServiceManager:
         self,
         name: str,
         init_func: Callable[[], Any],
-        cleanup_func: Optional[Callable[[], Any]] = None,
-        depends_on: Optional[list[str]] = None,
+        cleanup_func: Callable[[], Any] | None = None,
+        depends_on: list[str] | None = None,
     ) -> None:
         """Register a service.
 
@@ -158,7 +158,7 @@ class ServiceManager:
 
         logger.info("All services stopped")
 
-    def get_status(self, service_name: Optional[str] = None) -> dict[str, Any]:
+    def get_status(self, service_name: str | None = None) -> dict[str, Any]:
         """Get service status.
 
         Args:

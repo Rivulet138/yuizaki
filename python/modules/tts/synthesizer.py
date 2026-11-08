@@ -452,81 +452,48 @@ class TTSClient:
         return self._available
 
     async def synthesize(self, ws: Any, gen: Any) -> None:
+        raw_text = getattr(gen, "full_text", "")
+        text = raw_text.strip() if isinstance(raw_text, str) else ""
+        if text:
+            await self._synthesize_text(ws, gen, text)
+
+    async def _synthesize_text(self, ws: Any, gen: Any, text: str) -> None:
         ready_started = time.perf_counter()
         if hasattr(gen, "mark"):
             gen.mark("tts_requested")
-        if not await self.ensure_ready():
-            return
-        if gen.invalidated or gen.cancel.is_set():
-            return
-        if not gen.full_text:
+        if not await self.ensure_ready() or gen.invalidated or gen.cancel.is_set():
             return
         self._record_ready_wait(gen, ready_started)
-
         sid = gen.session_id
         gid = gen.generation_id
-        text = gen.full_text.strip()
-        segments = _split_tts_segments(text) if self._split_sentence else [text]
-        logger.info("[%s/%s] TTS start chars=%d segments=%d", sid, gid, len(text), len(segments))
-        if hasattr(gen, "mark"):
-            gen.mark("tts_started")
-
         self.audio_cache_dir.mkdir(parents=True, exist_ok=True)
         generation_started = time.perf_counter()
-
         try:
-            for sequence, segment in enumerate(segments):
-                if gen.invalidated or gen.cancel.is_set():
-                    return
-                wav_name = f"{gid}.wav" if len(segments) == 1 else f"{gid}-{sequence:03d}.wav"
-                wav_path = self.audio_cache_dir / wav_name
-                utterance_language = _resolve_utterance_language(
-                    segment,
-                    self._configured_language,
-                    self._language,
-                )
-                await self._run_cancellable_inference(
-                    gen,
-                    segment,
-                    wav_path,
-                    utterance_language,
-                )
-
-                if gen.invalidated or gen.cancel.is_set():
-                    return
-
-                is_final = sequence == len(segments) - 1
-                if sequence == 0 and hasattr(gen, "mark"):
-                    gen.mark("tts_first_chunk")
-                    gen.mark("tts_first_audio_ready")
-                if sequence == 0:
-                    self.diagnostics.record_elapsed("first_audio", generation_started)
-                if is_final and hasattr(gen, "mark"):
-                    gen.mark("tts_completed")
-
-                wav_size = wav_path.stat().st_size if wav_path.exists() else 0
-                logger.info(
-                    "[%s/%s] TTS segment ready sequence=%d final=%s wav=%s size=%d bytes",
-                    sid, gid, sequence, is_final, wav_path.name, wav_size,
-                )
-                payload = {
-                    "type": "tts_audio",
-                    "session_id": sid,
-                    "generation_id": gid,
-                    "audio_url": f"/audio/{wav_path.name}",
-                    "sequence": sequence,
-                    "is_final": is_final,
-                    "text": segment,
-                }
-                if hasattr(gen, "latency_snapshot"):
-                    payload["latency"] = gen.latency_snapshot()
-                await _safe_send(ws, gen, payload)
+            wav_path = self.audio_cache_dir / f"{gid}.wav"
+            language = _resolve_utterance_language(text, self._configured_language, self._language)
+            await self._run_cancellable_inference(gen, text, wav_path, language)
+            if gen.invalidated or gen.cancel.is_set():
+                return
+            if hasattr(gen, "mark"):
+                gen.mark("tts_first_chunk")
+                gen.mark("tts_first_audio_ready")
+                gen.mark("tts_completed")
+            self.diagnostics.record_elapsed("first_audio", generation_started)
             self._last_generation_ms = (time.perf_counter() - generation_started) * 1000
             self._last_error = None
-            _record_latency(
-                _GENERATION_LATENCY_SAMPLES,
-                total=self._last_generation_ms,
-            )
+            _record_latency(_GENERATION_LATENCY_SAMPLES, total=self._last_generation_ms)
+            payload = {
+                "type": "tts_audio",
+                "session_id": sid,
+                "generation_id": gid,
+                "audio_url": f"/audio/{wav_path.name}",
+                "sequence": 0,
+                "is_final": True,
+                "text": text,
+            }
+            if hasattr(gen, "latency_snapshot"):
+                payload["latency"] = gen.latency_snapshot()
+            await _safe_send(ws, gen, payload)
         except Exception as exc:
             self.diagnostics.record_elapsed("tts", generation_started, ok=False, error_kind="generation_failed")
             self._last_generation_ms = (time.perf_counter() - generation_started) * 1000
@@ -539,13 +506,6 @@ class TTSClient:
                 "error": f"TTS generation failed: {exc}",
             })
             return
-
-        logger.info(
-            "[%s/%s] TTS done segments=%d wait=%.1fms gen=%.1fms",
-            sid, gid, len(segments),
-            self._last_ready_wait_ms or 0,
-            self._last_generation_ms or 0,
-        )
 
     async def synthesize_stream_segment(self, ws: Any, gen: Any, text: str, sequence: int) -> bool:
         segment = text.strip()
@@ -578,6 +538,7 @@ class TTSClient:
                     gen,
                     segment,
                     sequence,
+                    utterance_language,
                 )
                 self._last_generation_ms = (time.perf_counter() - started) * 1000
                 self._last_error = None
@@ -655,17 +616,36 @@ class TTSClient:
         gen: Any,
         text: str,
         sequence: int,
+        language: str,
     ) -> bool:
         """Forward Genie async PCM chunks without writing a temporary WAV file."""
         async with self._inference_lock, _genie_runtime_lock():
             async def _consume() -> bool:
-                stream = self._genie.tts_async(
-                    character_name=self._character,
-                    text=text,
-                    play=False,
-                    split_sentence=False,
-                    save_path=None,
-                )
+                try:
+                    stream = self._genie.tts_async(
+                        character_name=self._character,
+                        text=text,
+                        language=language,
+                        play=False,
+                        split_sentence=self._split_sentence,
+                        save_path=None,
+                    )
+                except TypeError as exc:
+                    if 'language' not in str(exc):
+                        raise
+                    logger.warning(
+                        'Genie-TTS async runtime does not support per-utterance language=%s; '
+                        'falling back to the loaded character language for text=%r',
+                        language,
+                        text[:80],
+                    )
+                    stream = self._genie.tts_async(
+                        character_name=self._character,
+                        text=text,
+                        play=False,
+                        split_sentence=self._split_sentence,
+                        save_path=None,
+                    )
                 chunk_index = 0
                 async for raw_chunk in stream:
                     if gen.invalidated or gen.cancel.is_set():
@@ -768,7 +748,7 @@ class TTSClient:
                 self._character,
                 text,
                 str(wav_path),
-                False,
+                self._split_sentence,
                 language,
                 cancellable=True,
                 generation=gen,
@@ -1046,6 +1026,12 @@ def _generate_wav(
     except TypeError as exc:
         if "language" not in str(exc):
             raise
+        logger.warning(
+            "Genie-TTS runtime does not support per-utterance language=%s; "
+            "falling back to the loaded character language for text=%r",
+            language,
+            text[:80],
+        )
         genie_module.tts(**kwargs)
     if hasattr(genie_module, "wait_for_playback_done"):
         genie_module.wait_for_playback_done()

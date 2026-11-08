@@ -13,7 +13,7 @@ import json
 import logging
 from collections.abc import Callable, Mapping
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -263,7 +263,7 @@ class StreamDraftService:
                 return deepcopy(target)
             target["sendStatus"] = normalized_outcome
             target["sent"] = normalized_outcome == "known_success"
-            target["updatedAt"] = datetime.now(timezone.utc).isoformat()
+            target["updatedAt"] = datetime.now(UTC).isoformat()
             self._persist_locked()
             return deepcopy(target)
 
@@ -378,7 +378,7 @@ class StreamDraftService:
             outcome = str(getattr(result, "outcome", "failed") or "failed")
             status = "generated" if outcome == "completed" and reply else "failed"
             error = None if status == "generated" else (str(getattr(result, "failure", None) or outcome)[:400] or "draft_generation_failed")
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             draft = {
                 "draftId": f"stream-draft-{uuid4().hex}",
                 "eventId": event_id,
@@ -402,7 +402,7 @@ class StreamDraftService:
         except StreamDraftError:
             raise
         except Exception:  # noqa: BLE001 - provider failures are returned as draft failures.
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             draft = {
                 "draftId": f"stream-draft-{uuid4().hex}",
                 "eventId": event_id,

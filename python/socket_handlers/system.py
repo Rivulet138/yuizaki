@@ -128,7 +128,7 @@ def register_system_handlers(
                 tool_name,
                 permission_scope,
             )
-        except Exception:  # noqa: BLE001 - keep policy provider details out of the protocol
+        except Exception:
             log.exception("Failed to resolve permission request %s", request_id)
             return await reject(
                 "PERMISSION_RESOLUTION_FAILED",

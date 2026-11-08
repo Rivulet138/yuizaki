@@ -4,7 +4,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-
 from modules.persistence import (
     PersistenceBackend,
     PersistenceClosedError,

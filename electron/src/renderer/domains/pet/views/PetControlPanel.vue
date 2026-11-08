@@ -254,8 +254,8 @@
           </div>
           <label class="field-label">{{ t('petControl.motion.screenDock') }}</label>
           <div class="form-grid compact-grid">
-            <el-select v-model="selectedDisplayId" class="full-field" :placeholder="t('petControl.motion.selectDisplay')">
-              <el-option :label="defaultDisplayLabel" :value="null" />
+            <el-select v-model="selectedDisplayOption" class="full-field" :placeholder="t('petControl.motion.selectDisplay')">
+              <el-option :label="defaultDisplayLabel" value="" />
               <el-option v-for="display in displayOptions" :key="display.id" :label="displayOptionLabel(display)" :value="display.id" />
             </el-select>
             <el-select v-model="selectedPlacement" class="full-field" :placeholder="t('petControl.motion.selectPlacement')">
@@ -392,8 +392,12 @@ const selectedMotionId = ref<string | null>(null)
 const selectedEmotionId = ref<string | null>(null)
 const selectedPlacement = ref<PlacementPreset>('bottom-right')
 const selectedDisplayId = ref<number | null>(null)
+const selectedDisplayOption = computed({
+  get: () => selectedDisplayId.value ?? '',
+  set: (value: number | '') => { selectedDisplayId.value = value === '' ? null : value },
+})
 const selectedBehaviorState = ref<PetBehaviorState>('idle')
-const idleProfileDraft = reactive<Required<Pick<PetCompanionIdleProfile, 'energy' | 'affinity' | 'trust' | 'intimacy'>> & Pick<PetCompanionIdleProfile, 'mood' | 'supportStyle' | 'relationshipStage' | 'relationshipTrend'>>({
+const idleProfileDraft = reactive<Record<'energy' | 'affinity' | 'trust' | 'intimacy', number> & Pick<PetCompanionIdleProfile, 'mood' | 'supportStyle' | 'relationshipStage' | 'relationshipTrend'>>({
   mood: '',
   supportStyle: '',
   relationshipStage: '',
@@ -947,24 +951,27 @@ const deleteCurrentLocalModel = async () => {
 }
 
 const previewExpressionMix = async () => {
-  if (!selectedExpressionId.value) return
+  const expressionId = selectedExpressionId.value
+  if (!expressionId) return
   await runPetOperation(() => petControl.triggerExpressionMix({
-    expressions: [{ expression: selectedExpressionId.value, weight: expressionWeight.value }],
+    expressions: [{ expression: expressionId, weight: expressionWeight.value }],
     intensity: expressionWeight.value,
     durationMs: 1800,
   }), t('petControl.success.expressionMixSent'))
 }
 
 const previewEmotionPreset = async () => {
-  if (!selectedEmotionId.value) return
-  await runPetOperation(() => petControl.triggerEmotion(selectedEmotionId.value), t('petControl.success.emotionPresetSent'))
+  const emotionId = selectedEmotionId.value
+  if (!emotionId) return
+  await runPetOperation(() => petControl.triggerEmotion(emotionId), t('petControl.success.emotionPresetSent'))
 }
 
 const previewParameterOverride = async () => {
-  if (!selectedParameterId.value) return
+  const parameterId = selectedParameterId.value
+  if (!parameterId) return
   await runPetOperation(() => petControl.triggerParameterOverrides({
     expressions: [],
-    parameterOverrides: [{ id: selectedParameterId.value, value: parameterValue.value, weight: 1 }],
+    parameterOverrides: [{ id: parameterId, value: parameterValue.value, weight: 1 }],
     intensity: 1,
     durationMs: 1800,
   }), t('petControl.success.parameterOverrideSent'))

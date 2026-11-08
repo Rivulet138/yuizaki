@@ -14,7 +14,6 @@ class AgentPlugin:
 
     async def initialize(self, ctx: dict[str, Any]) -> None:
         self._proactive_dispatcher = ctx.get("proactive_dispatch")
-        return None
 
     async def terminate(self) -> None:
         return None

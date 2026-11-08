@@ -1,7 +1,10 @@
 from __future__ import annotations
+
 from typing import Any
-from socket_handlers.tool import build_tool_call_handler, build_tool_recheck_handler
+
 from socket_events import ToolEvents
+from socket_handlers.tool import build_tool_call_handler, build_tool_recheck_handler
+
 
 def register(server: Any) -> None:
     sio = server.sio

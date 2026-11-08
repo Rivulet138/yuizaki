@@ -32,11 +32,11 @@ https://docs.python.org/3/library/subprocess.html
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
 import ctypes
 import logging
 import os
 import signal
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Protocol

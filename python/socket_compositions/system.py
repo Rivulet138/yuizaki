@@ -1,7 +1,10 @@
 from __future__ import annotations
+
 from typing import Any
-from socket_handlers.system import register_system_handlers
+
 from socket_handlers.interrupt import register_interrupt_handler
+from socket_handlers.system import register_system_handlers
+
 
 def register(server: Any) -> None:
     register_interrupt_handler(

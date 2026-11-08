@@ -1834,7 +1834,7 @@ class StepExecutor:
             )
             try:
                 outcome = await asyncio.wait_for(call, timeout=step.timeout_seconds) if step.timeout_seconds else await call
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 outcome = ToolResultEnvelope(success=False, content="", source="builtin", tool_name=tool_name, error="tool_timeout")
                 retry_count = attempt
                 break
@@ -2233,7 +2233,7 @@ class StepExecutor:
                 )
                 try:
                     outcome = await asyncio.wait_for(call, timeout=timeout_seconds) if timeout_seconds else await call
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     outcome = ToolResultEnvelope(success=False, content="", source="builtin", tool_name=tool_name, error="tool_timeout")
                     retry_count = attempt
                     break

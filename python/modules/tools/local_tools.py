@@ -12,8 +12,8 @@ These are intentionally conservative and avoid arbitrary shell execution.
 
 from __future__ import annotations
 
-import os
 import json
+import os
 import re
 import secrets
 import subprocess
@@ -23,7 +23,7 @@ import webbrowser
 from html import unescape
 from ipaddress import ip_address
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 from urllib.parse import quote_plus, unquote, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
@@ -319,7 +319,7 @@ def write_file(path: str, content: str) -> str:
         raise LocalToolError(str(exc)) from exc
 
 
-def dispatch_tool(name: str, args: Dict[str, Any]) -> str:
+def dispatch_tool(name: str, args: dict[str, Any]) -> str:
     """Dispatch a tool call by name.
 
     Returns a string output or raises LocalToolError.

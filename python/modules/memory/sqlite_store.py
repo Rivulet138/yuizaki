@@ -9,11 +9,14 @@ from pathlib import Path
 from typing import Any
 
 from .backend import MemoryBackendStatus
-from .metadata import append_memory_version, has_prior_version_snapshot, normalize_memory_metadata
+from .metadata import (
+    append_memory_version,
+    has_prior_version_snapshot,
+    normalize_memory_metadata,
+)
 from .operations import MemoryOperation
 from .schema import MemorySearchFilters
 from .vector_store import Document, EmbeddingProvider, VectorStore
-
 
 _APPEND_ONLY_HISTORY_LIMITS = {
     "audit": 100,

@@ -9,7 +9,6 @@ from typing import Any, Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 
-
 StorageTarget = Literal["tts_audio", "runtime_temp", "memory"]
 
 
@@ -69,7 +68,7 @@ def _resolve_memory_authority(store: Any) -> Any:
     visited: set[int] = set()
     while current is not None and hasattr(current, "authority") and id(current) not in visited:
         visited.add(id(current))
-        current = getattr(current, "authority")
+        current = current.authority
     return current
 
 

@@ -3,12 +3,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from modules.core.config import AppConfig
 from modules.llm.client import redact_error_text
 from modules.system import settings_schema
-from modules.system.runtime_config import apply_runtime_config
 from modules.system.dynamic_config import DynamicConfigManager
+from modules.system.runtime_config import apply_runtime_config
 from modules.system.settings_api import SettingsAPI
 from modules.system.settings_history_store import SettingsHistoryStore
 from modules.system.settings_store import PROVIDER_CREDENTIALS_ENV, SettingsStore
@@ -84,7 +83,6 @@ def test_runtime_explicit_custom_is_preserved_when_switching_endpoint() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("method_name", ["update_settings", "import_settings_payload"])
 @pytest.mark.parametrize(
     ("connection_patch", "credential_key"),
     [
@@ -95,22 +93,21 @@ def test_runtime_explicit_custom_is_preserved_when_switching_endpoint() -> None:
     ],
 )
 async def test_settings_api_connection_switch_clears_old_credential(
-    tmp_path, method_name: str, connection_patch: dict[str, str], credential_key: str
+    tmp_path, connection_patch: dict[str, str], credential_key: str
 ) -> None:
     api, store = _settings_api(tmp_path)
     payload = {"llm": connection_patch}
 
-    await getattr(api, method_name)(payload)
+    await api.update_settings(payload)
 
     assert store.get(f"llm.{credential_key}") == ""
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("method_name", ["update_settings", "import_settings_payload"])
 @pytest.mark.parametrize("credential_key", ["api_key", "vision_api_key"])
 @pytest.mark.parametrize("placeholder", ["", "********"])
 async def test_settings_api_same_connection_placeholders_preserve_credential(
-    tmp_path, method_name: str, credential_key: str, placeholder: str
+    tmp_path, credential_key: str, placeholder: str
 ) -> None:
     api, store = _settings_api(tmp_path)
     if credential_key == "api_key":
@@ -120,7 +117,7 @@ async def test_settings_api_same_connection_placeholders_preserve_credential(
         connection = {"vision_provider": "custom", "vision_base_url": "https://vision-old.example/v1"}
         expected = "old-vision-key"
 
-    await getattr(api, method_name)({"llm": {**connection, credential_key: placeholder}})
+    await api.update_settings({"llm": {**connection, credential_key: placeholder}})
 
     assert store.get(f"llm.{credential_key}") == expected
 

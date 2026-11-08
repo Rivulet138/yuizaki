@@ -14,7 +14,7 @@ import math
 import time
 from collections import deque
 from collections.abc import Callable, Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock
 from typing import Any, Protocol
@@ -559,7 +559,7 @@ class TwitchEventIngress:
             raise RuntimeError(f"subscription sync failed: {type(exc).__name__}") from exc
         with self._seen_lock:
             self._active_subscriptions = active
-            self._last_sync_at = datetime.now(timezone.utc).isoformat()
+            self._last_sync_at = datetime.now(UTC).isoformat()
             self._last_sync_error = None
             self._persist_state_locked()
             snapshot = self.snapshot()
@@ -643,7 +643,7 @@ class TwitchEventIngress:
             with self._seen_lock:
                 self._revoked = True
                 self._revocation_count += 1
-                self._last_event_at = datetime.now(timezone.utc).isoformat()
+                self._last_event_at = datetime.now(UTC).isoformat()
                 self._last_message_id = message_id
                 self._persist_state_locked()
             return {"accepted": True, "revoked": True, "messageId": message_id, "externalSideEffects": False}
@@ -672,7 +672,7 @@ class TwitchEventIngress:
         subscription: Mapping[str, Any] = raw_subscription if isinstance(raw_subscription, Mapping) else {}
         normalized = self._normalize_event(str(subscription.get("type") or ""), event)
         with self._seen_lock:
-            self._last_event_at = datetime.now(timezone.utc).isoformat()
+            self._last_event_at = datetime.now(UTC).isoformat()
             self._last_message_id = message_id
             self._persist_state_locked()
         queued = None
@@ -735,7 +735,7 @@ class TwitchEventIngress:
             }
         queued = self.enqueue_event({"kind": "chat", "text": text.strip(), "author": author, "source": "twitch"})
         with self._seen_lock:
-            self._last_event_at = datetime.now(timezone.utc).isoformat()
+            self._last_event_at = datetime.now(UTC).isoformat()
             self._persist_state_locked()
         return {"accepted": True, "kind": "chat", "queued": True, "event": queued.get("event") if isinstance(queued, dict) else None, "externalSideEffects": False}
 

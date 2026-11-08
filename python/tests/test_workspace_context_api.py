@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from database.repository import ContextRevisionConflict, DatabaseError, NotFoundError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from database.repository import ContextRevisionConflict, DatabaseError, NotFoundError
 from routes.workspace_api import create_workspace_router
 
 _UNSET = object()

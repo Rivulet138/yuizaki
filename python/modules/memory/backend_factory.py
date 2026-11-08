@@ -3,13 +3,12 @@ from __future__ import annotations
 import logging
 
 from ..core.config import MemoryConfig
-
 from .backend import MemoryBackend
 from .indexed_backend import IndexedMemoryBackend
 from .reranker import LazyCrossEncoderReranker
+from .sqlite_store import SQLiteMemoryStore
 from .vector_client import QdrantVectorStore
 from .vector_store import LazyEmbeddingService, VectorStore
-from .sqlite_store import SQLiteMemoryStore
 
 logger = logging.getLogger(__name__)
 

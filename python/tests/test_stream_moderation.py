@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from modules.system.stream_moderation import StreamModerationPolicy
 from modules.system.stream_runtime import StreamRuntime
 from routes.system_api import create_system_router

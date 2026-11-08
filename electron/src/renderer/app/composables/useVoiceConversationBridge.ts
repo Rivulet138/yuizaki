@@ -44,26 +44,6 @@ const hasCompleteRealtimeIdentity = (identity: Partial<Pick<RealtimeVoiceScope, 
   && Number.isInteger(identity.interruptionEpoch),
 )
 
-const LIVE2D_PARAMETER_CONTEXT = [
-  { id: 'ParamAngleX', min: -30, max: 30 },
-  { id: 'ParamAngleY', min: -30, max: 30 },
-  { id: 'ParamAngleZ', min: -30, max: 30 },
-  { id: 'ParamBodyAngleX', min: -15, max: 15 },
-  { id: 'ParamBodyAngleY', min: -10, max: 10 },
-  { id: 'ParamBodyAngleZ', min: -15, max: 15 },
-  { id: 'ParamEyeBallX', min: -1, max: 1 },
-  { id: 'ParamEyeBallY', min: -1, max: 1 },
-  { id: 'ParamBrowLY', min: -1, max: 1 },
-  { id: 'ParamBrowRY', min: -1, max: 1 },
-  { id: 'ParamBrowLAngle', min: -30, max: 30 },
-  { id: 'ParamBrowRAngle', min: -30, max: 30 },
-  { id: 'ParamBrowLForm', min: -1, max: 1 },
-  { id: 'ParamBrowRForm', min: -1, max: 1 },
-  { id: 'ParamCheek', min: 0, max: 1 },
-  { id: 'ParamMouthOpenY', min: 0, max: 1 },
-  { id: 'ParamMouthForm', min: -1, max: 1 },
-]
-
 export function useVoiceConversationBridge() {
   const chatStore = useChatStore()
   const chatState = chatStore.state
@@ -161,36 +141,68 @@ export function useVoiceConversationBridge() {
         petControl.getCatalog(),
         petControl.getAvatarCapabilities().catch(() => null),
       ])
-      const models = catalog.models.map((model) => ({ id: model.id, type: model.type }))
-      const emotions = Array.from(new Set(catalog.models.flatMap((model) => model.emotions.map((emotion) => emotion.id))))
-      const motionGroups = Array.from(new Set(catalog.models.flatMap((model) => model.motions.map((motion) => motion.group))))
-      const motionOptions = catalog.models.flatMap((model) => model.motions.map((motion) => ({ group: motion.group, index: motion.index })))
-      const expressions = Array.from(new Set(catalog.models.flatMap((model) => model.expressions.map((expression) => expression.name))))
-      const activeModel = catalog.models.find((model) => model.id === catalog.activeModelId) ?? catalog.models[0]
+      const activeModel = catalog.models.find((model) => model.id === catalog.activeModelId)
       const capabilities = runtime?.success ? runtime.capabilities : null
-      const runtimeModel = capabilities?.modelId ? { id: capabilities.modelId, type: capabilities.modelType } : null
-      const runtimeModels = runtimeModel && !models.some((model) => model.id === runtimeModel.id) ? [...models, runtimeModel] : models
-      const avatarPrompt = capabilities
-        ? (activeModel?.id === capabilities.modelId ? activeModel.promptContext ?? '' : '')
-        : activeModel?.promptContext ?? ''
+      const hasMatchingRuntime = Boolean(
+        capabilities
+        && catalog.activeModelId
+        && capabilities.modelId === catalog.activeModelId,
+      )
+      // Catalog data is for model selection and display. LLM action capabilities
+      // must come from the one model currently loaded by the runtime.
+      const activeCapabilities = hasMatchingRuntime ? capabilities : null
+      const models = catalog.models.map((model) => ({ id: model.id, type: model.type }))
+      const avatarPrompt = activeCapabilities ? activeModel?.promptContext ?? '' : ''
 
       chatStore.setPetControlContext({
-        models: runtimeModels,
-        emotions,
-        motionGroups: capabilities?.motions.map((motion) => motion.group) ?? motionGroups,
-        motionOptions: capabilities?.motions.map((motion) => ({ group: motion.group, index: motion.index })) ?? motionOptions,
-        expressions: capabilities?.expressions ?? expressions,
-        parameters: capabilities?.parameters.map((parameter) => ({ id: parameter.id, min: parameter.min, max: parameter.max })) ?? LIVE2D_PARAMETER_CONTEXT,
-        ...(capabilities ? {
-          capabilityRevision: capabilities.revision,
-          modelType: capabilities.modelType,
-          modelId: capabilities.modelId,
-          actions: capabilities.actions,
-          viseme: capabilities.actions.viseme,
-        } : {}),
+        models,
+        emotions: activeCapabilities
+          ? (activeModel?.emotions ?? []).map((emotion) => emotion.id)
+          : [],
+        motionGroups: activeCapabilities ? activeCapabilities.motions.map((motion) => motion.group) : [],
+        motionOptions: activeCapabilities
+          ? activeCapabilities.motions.map((motion) => ({ group: motion.group, index: motion.index }))
+          : [],
+        expressions: activeCapabilities?.expressions ?? [],
+        parameters: activeCapabilities?.parameters.map((parameter) => ({ id: parameter.id, min: parameter.min, max: parameter.max })) ?? [],
+        capabilityRevision: activeCapabilities?.revision,
+        modelType: activeCapabilities?.modelType,
+        modelId: activeCapabilities?.modelId ?? null,
+        actions: activeCapabilities?.actions ?? {
+          behavior: false,
+          affect: false,
+          gaze: false,
+          motion: false,
+          expression: false,
+          parameterPatch: false,
+          viseme: false,
+          cancel: false,
+        },
+        viseme: activeCapabilities?.actions.viseme ?? false,
         avatarPrompt,
       })
     } catch (error) {
+      chatStore.setPetControlContext({
+        models: [],
+        emotions: [],
+        motionGroups: [],
+        motionOptions: [],
+        expressions: [],
+        parameters: [],
+        modelId: null,
+        actions: {
+          behavior: false,
+          affect: false,
+          gaze: false,
+          motion: false,
+          expression: false,
+          parameterPatch: false,
+          viseme: false,
+          cancel: false,
+        },
+        viseme: false,
+        avatarPrompt: '',
+      })
       console.warn('[LLM Pet Control] failed to load pet control context:', error)
     }
   }
@@ -330,6 +342,7 @@ export function useVoiceConversationBridge() {
     }
     if (
       chatStore.chatOptions.response_mode !== 'instant' ||
+      chatStore.chatOptions.tts_enabled !== false ||
       realtimeVoiceSession.isConnectedFor(sessionContext) ||
       activeVoiceTransport !== null
     )
@@ -377,6 +390,7 @@ export function useVoiceConversationBridge() {
 
   const retryRealtimeVoice = async () => {
     if (!mounted || chatStore.chatOptions.response_mode !== 'instant') return
+    if (chatStore.chatOptions.tts_enabled !== false) return
     if (audioCapture.getIsRecording().value || chatState.isTTSPlaying) return
     realtimeVoiceSession.close()
     activeVoiceTransport = null
@@ -396,6 +410,7 @@ export function useVoiceConversationBridge() {
 
     if (
       chatStore.chatOptions.response_mode === 'instant' &&
+      chatStore.chatOptions.tts_enabled === false &&
       realtimeVoiceSession.isConnectedFor({
         workspaceId: chatState.currentWorkspaceId,
         sessionId: chatState.currentSessionId,
@@ -496,7 +511,9 @@ export function useVoiceConversationBridge() {
       }
       if (status === 'ready') {
         const continuousListening = realtimeVoiceSession.isContinuousMode() && realtimeVoiceSession.isMicrophoneActive()
-        chatStore.setRealtimeRecording(continuousListening, continuousListening ? realtimeVoiceSession.getCurrentTurnIdentity() : undefined)
+        const identity = continuousListening ? realtimeVoiceSession.getCurrentTurnIdentity() : undefined
+        chatStore.setRealtimeRecording(continuousListening && hasCompleteRealtimeIdentity(identity),
+          hasCompleteRealtimeIdentity(identity) ? identity : undefined)
         chatState.isGenerating = false
         if (chatStore.chatOptions.pet_link_enabled !== false) {
           void publishCompanionRuntimeEvent({
@@ -571,21 +588,21 @@ export function useVoiceConversationBridge() {
         chatStore.setRealtimePlayback(false)
         void publishCompanionRuntimeEvent({ source: 'voice', activity: 'idle' })
         void rotateDiagnosticsRun().then(() => {
-          if (chatStore.chatOptions.response_mode === 'instant') void prewarmRealtimeVoice()
+          if (chatStore.chatOptions.response_mode === 'instant' && chatStore.chatOptions.tts_enabled === false) void prewarmRealtimeVoice()
         })
       },
     )
     watch(
-      () => [chatStore.chatOptions.response_mode, chatStore.chatOptions.voice_mode, chatStore.chatOptions.vad_eagerness, chatStore.chatOptions.audio_input_device_id] as const,
-      ([responseMode, voiceMode, vadEagerness, audioInputDeviceId], [previousResponseMode, previousVoiceMode, previousVadEagerness, previousAudioInputDeviceId]) => {
-        if (responseMode === previousResponseMode && voiceMode === previousVoiceMode && vadEagerness === previousVadEagerness && audioInputDeviceId === previousAudioInputDeviceId) return
+      () => [chatStore.chatOptions.response_mode, chatStore.chatOptions.voice_mode, chatStore.chatOptions.vad_eagerness, chatStore.chatOptions.audio_input_device_id, chatStore.chatOptions.tts_enabled] as const,
+      ([responseMode, voiceMode, vadEagerness, audioInputDeviceId], [previousResponseMode, previousVoiceMode, previousVadEagerness, previousAudioInputDeviceId, previousTtsEnabled]) => {
+        if (responseMode === previousResponseMode && voiceMode === previousVoiceMode && vadEagerness === previousVadEagerness && audioInputDeviceId === previousAudioInputDeviceId && chatStore.chatOptions.tts_enabled === previousTtsEnabled) return
         if (realtimeVoiceSession.isConnected()) realtimeVoiceSession.close()
         activeVoiceTransport = null
         chatStore.setRealtimeRecording(false)
         chatStore.setRealtimePlayback(false)
         void publishCompanionRuntimeEvent({ source: 'voice', activity: 'idle' })
         void rotateDiagnosticsRun().then(() => {
-          if (responseMode === 'instant') void prewarmRealtimeVoice()
+          if (responseMode === 'instant' && chatStore.chatOptions.tts_enabled === false) void prewarmRealtimeVoice()
         })
       },
     )
@@ -708,7 +725,7 @@ export function useVoiceConversationBridge() {
       console.warn('[VoiceBridge] realtime voice error:', message)
     })
     void ensureDiagnosticsRun().then(() => {
-      if (chatStore.chatOptions.response_mode === 'instant') void prewarmRealtimeVoice()
+      if (chatStore.chatOptions.response_mode === 'instant' && chatStore.chatOptions.tts_enabled === false) void prewarmRealtimeVoice()
     })
     voiceEventBridge.attach(window, shortcutClient)
 

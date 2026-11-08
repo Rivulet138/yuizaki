@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import time
 import zipfile
 from pathlib import Path
 
 import pytest
-
-import modules.system.qq_bridge as qq_bridge
+from modules.system import qq_bridge
 from modules.system.message_connectors import MessageConnectorRegistry
 from modules.system.qq_bridge import (
     BRIDGE_EXE,
@@ -348,6 +348,181 @@ def test_stop_terminates_the_captured_process(tmp_path: Path, monkeypatch) -> No
     supervisor.stop()
     assert supervisor.status()["running"] is False
     assert supervisor.status()["captureMode"] == "console"
+
+
+@pytest.mark.parametrize("operation", ["stop", "logout"])
+@pytest.mark.parametrize("failure", ["raises", "still_alive", "unknown_liveness"])
+@pytest.mark.parametrize("connected", [False, True])
+def test_failed_pty_shutdown_retains_ownership_and_session(
+    tmp_path: Path, monkeypatch, operation: str, failure: str, connected: bool
+) -> None:
+    pty = FakePty([])
+    termination_attempts: list[bool] = []
+    shutdown_blocked = True
+
+    def terminate(force: bool = False) -> None:
+        termination_attempts.append(force)
+        if shutdown_blocked:
+            if failure in {"raises", "unknown_liveness"}:
+                raise OSError("PTY termination failed")
+            return
+        pty.terminated = True
+
+    def isalive() -> bool:
+        if shutdown_blocked and failure == "unknown_liveness":
+            raise OSError("PTY liveness unavailable")
+        return not pty.terminated
+
+    supervisor, factory = _capturing_supervisor(tmp_path, [])
+    monkeypatch.setattr(factory, "spawn", lambda command, *, cwd: pty)
+    monkeypatch.setattr(pty, "terminate", terminate)
+    monkeypatch.setattr(pty, "isalive", isalive)
+    monkeypatch.setattr(supervisor, "_health_probe", lambda: connected)
+    _install_without_network(supervisor, tmp_path, monkeypatch)
+    supervisor.start()
+    token = supervisor.current_token
+    config = supervisor.state_file.read_bytes()
+    session = supervisor.root / "data" / "keystore.json"
+    session.parent.mkdir()
+    session.write_text("session secret", encoding="utf-8")
+
+    with pytest.raises(QqBridgeError) as excinfo:
+        getattr(supervisor, operation)()
+
+    assert excinfo.value.code == "qq_bridge_stop_failed"
+    assert excinfo.value.status_code == 502
+    status = supervisor.status()
+    assert status["state"] == "failed"
+    assert status["running"] is True
+    assert status["captureMode"] == "pty"
+    assert "qq_bridge_stop_failed" in status["lastError"]
+    assert supervisor.state_file.read_bytes() == config
+    assert session.read_text(encoding="utf-8") == "session secret"
+    persisted = tmp_path / "qq_bridge_state.json"
+    assert json.loads(persisted.read_text(encoding="utf-8"))["token"] == token
+    assert supervisor.current_token == token
+    assert supervisor.start()["state"] == "failed"
+
+    shutdown_blocked = False
+    result = getattr(supervisor, operation)()
+    assert termination_attempts == [True, True], "retry must use the retained PTY"
+    assert result["running"] is False
+    assert result["captureMode"] == "console"
+    assert result["lastError"] is None
+    if operation == "logout":
+        assert result["state"] == "installed"
+        assert not session.parent.exists()
+        assert not supervisor.state_file.exists()
+        assert not persisted.exists()
+        assert supervisor.current_token == ""
+    else:
+        assert result["state"] == "stopped"
+        assert session.exists()
+        assert supervisor.current_token == token
+
+
+@pytest.mark.parametrize("operation", ["stop", "logout"])
+def test_failed_console_shutdown_retains_process_for_retry(
+    tmp_path: Path, monkeypatch, operation: str
+) -> None:
+    process = FakeProcess()
+    supervisor = _supervisor(tmp_path, spawn=lambda *a, **k: process)
+    _install_without_network(supervisor, tmp_path, monkeypatch)
+    supervisor.start()
+    token = supervisor.current_token
+    session = supervisor.root / "data" / "keystore.json"
+    session.parent.mkdir()
+    session.write_text("session secret", encoding="utf-8")
+    shutdown_blocked = True
+    kill_attempts: list[bool] = []
+
+    def terminate() -> None:
+        if shutdown_blocked:
+            raise OSError("console termination failed")
+        process.returncode = 0
+
+    def kill() -> None:
+        kill_attempts.append(True)
+
+    def wait(timeout: float | None = None) -> int:
+        if process.returncode is None:
+            raise subprocess.TimeoutExpired("bridge", timeout)
+        return process.returncode
+
+    monkeypatch.setattr(process, "terminate", terminate)
+    monkeypatch.setattr(process, "kill", kill)
+    monkeypatch.setattr(process, "wait", wait)
+
+    with pytest.raises(QqBridgeError) as excinfo:
+        getattr(supervisor, operation)()
+
+    assert excinfo.value.code == "qq_bridge_stop_failed"
+    status = supervisor.status()
+    assert status["state"] == "failed"
+    assert status["running"] is True
+    assert status["pid"] == process.pid
+    assert supervisor.current_token == token
+    assert supervisor.state_file.exists()
+    assert session.exists()
+    assert kill_attempts == [True]
+
+    shutdown_blocked = False
+    result = getattr(supervisor, operation)()
+    assert process.returncode == 0, "retry must use the retained process"
+    assert result["running"] is False
+    assert result["state"] == ("installed" if operation == "logout" else "stopped")
+
+
+def test_stop_accepts_pty_exit_even_when_terminate_raises(tmp_path: Path, monkeypatch) -> None:
+    pty = FakePty([])
+    supervisor, factory = _capturing_supervisor(tmp_path, [])
+    monkeypatch.setattr(factory, "spawn", lambda command, *, cwd: pty)
+
+    def terminate(force: bool = False) -> None:
+        pty.terminated = True
+        raise OSError("PTY already exited")
+
+    monkeypatch.setattr(pty, "terminate", terminate)
+    _install_without_network(supervisor, tmp_path, monkeypatch)
+    supervisor.start()
+
+    status = supervisor.stop()
+    assert status["state"] == "stopped"
+    assert status["running"] is False
+    assert status["captureMode"] == "console"
+    assert status["lastError"] is None
+
+
+def test_stop_waits_for_console_exit_after_kill(tmp_path: Path, monkeypatch) -> None:
+    process = FakeProcess()
+    supervisor = _supervisor(tmp_path, spawn=lambda *a, **k: process)
+    _install_without_network(supervisor, tmp_path, monkeypatch)
+    supervisor.start()
+    waits: list[float | None] = []
+
+    def terminate() -> None:
+        process.terminated = True
+
+    def kill() -> None:
+        process.killed = True
+
+    def wait(timeout: float | None = None) -> int:
+        waits.append(timeout)
+        if not process.killed:
+            raise subprocess.TimeoutExpired("bridge", timeout)
+        process.returncode = -9
+        return process.returncode
+
+    monkeypatch.setattr(process, "terminate", terminate)
+    monkeypatch.setattr(process, "kill", kill)
+    monkeypatch.setattr(process, "wait", wait)
+
+    status = supervisor.stop()
+    assert waits == [10, 10]
+    assert process.terminated and process.killed
+    assert process.poll() == -9
+    assert status["state"] == "stopped"
+    assert status["running"] is False
 
 
 def test_load_bridge_resource_reads_lock(tmp_path: Path) -> None:

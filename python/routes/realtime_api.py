@@ -4,20 +4,19 @@ import asyncio
 import hashlib
 import os
 from collections import deque
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from database.repository import DatabaseError
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
-from starlette.concurrency import run_in_threadpool
-
-from database.repository import DatabaseError
 from modules.agent.prompt_assembly import PromptBlock, build_prompt_assembly
 from modules.system.memory_write_pipeline import build_user_signal_event
 from modules.system.rate_limiter import SlidingWindowRateLimiter
-
+from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 
 OPENAI_REALTIME_ORIGIN = "https://api.openai.com"
 DEFAULT_REALTIME_MODEL = "gpt-realtime-2.1"
@@ -129,7 +128,7 @@ def resolve_realtime_safety_identifier(api_key: str) -> str:
     configured = os.getenv("YUIZAKI_OPENAI_SAFETY_IDENTIFIER", "").strip()
     if configured:
         return configured[:128]
-    digest = hashlib.sha256(f"yuizaki-local:{api_key}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"yuizaki-local:{api_key}".encode()).hexdigest()
     return f"yuizaki_{digest[:32]}"
 
 

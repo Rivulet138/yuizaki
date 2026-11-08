@@ -3,14 +3,22 @@ import { resolveLlmModelsTimeoutMs } from '../../shared/llm-models-timeout'
 /** Proxy budgets for requests forwarded from the control server to the Python backend. */
 export const PYTHON_PROXY_TIMEOUT_MS = 12000
 export const PYTHON_LOCAL_DISCOVERY_TIMEOUT_MS = 30000
+export const PYTHON_SERVICE_TEST_TIMEOUT_MS = 60000
 export const PYTHON_SESSION_READ_TIMEOUT_MS = 30000
 export const PYTHON_TTS_WARMUP_TIMEOUT_MS = 5 * 60 * 1000
+export const PYTHON_TTS_CONNECTION_TEST_TIMEOUT_MS = PYTHON_TTS_WARMUP_TIMEOUT_MS
 export const PYTHON_PING_ATTEMPT_TIMEOUT_MS = 4000
 
 export const PYTHON_LLM_MODELS_PATH = '/api/settings/llm/models'
+const PYTHON_SERVICE_TEST_PATHS = new Set([
+  '/api/settings/test/llm',
+  '/api/settings/test/svc',
+])
 
 export const resolvePythonProxyTimeout = (pathname: string): number => {
   if (pathname === '/api/settings/local-discovery') return PYTHON_LOCAL_DISCOVERY_TIMEOUT_MS
+  if (pathname === '/api/settings/test/tts') return PYTHON_TTS_CONNECTION_TEST_TIMEOUT_MS
+  if (PYTHON_SERVICE_TEST_PATHS.has(pathname)) return PYTHON_SERVICE_TEST_TIMEOUT_MS
   if (pathname === '/api/sessions') return PYTHON_SESSION_READ_TIMEOUT_MS
   if (pathname === '/api/settings/tts/warmup') return PYTHON_TTS_WARMUP_TIMEOUT_MS
   if (pathname === '/api/ping') return PYTHON_PING_ATTEMPT_TIMEOUT_MS

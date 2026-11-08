@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -20,7 +30,7 @@ class ChatMessage(Base):
     session_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     role: Mapped[str] = mapped_column(String(20), nullable=False)  # "user" | "assistant"
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False, index=True)
     tokens_used: Mapped[int | None] = mapped_column(Integer, default=0)
     model: Mapped[str | None] = mapped_column(String(100))
     turn_idempotency_key: Mapped[str | None] = mapped_column(String(80))
@@ -52,8 +62,8 @@ class ChatSession(Base):
     archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     parent_session_id: Mapped[str | None] = mapped_column(String(50))
     branched_from_message_id: Mapped[int | None] = mapped_column(Integer)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False)
     message_count: Mapped[int | None] = mapped_column(Integer, default=0)
     total_tokens: Mapped[int | None] = mapped_column(Integer, default=0)
 
@@ -83,10 +93,10 @@ class Workspace(Base):
     # token for optimistic concurrency between renderer and backend.
     context: Mapped[dict | None] = mapped_column(JSON)
     context_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False)
 
-    companion: Mapped["Companion"] = relationship(foreign_keys=[companion_profile_id], lazy="joined", back_populates="workspaces")
+    companion: Mapped[Companion] = relationship(foreign_keys=[companion_profile_id], lazy="joined", back_populates="workspaces")
 
 
 class Companion(Base):
@@ -110,8 +120,8 @@ class Companion(Base):
     intimacy_state: Mapped[float | None] = mapped_column(Float, default=0.5)
     interruptibility_state: Mapped[float | None] = mapped_column(Float, default=0.75)
     fatigue_state: Mapped[float | None] = mapped_column(Float, default=0.0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False)
 
     workspaces: Mapped[list[Workspace]] = relationship(
         foreign_keys="Workspace.companion_profile_id",
@@ -132,7 +142,7 @@ class UserStatistics(Base):
     avg_response_time: Mapped[float | None] = mapped_column(Float, default=0.0)
     ocr_count: Mapped[int | None] = mapped_column(Integer, default=0)
     svc_count: Mapped[int | None] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class UserSettings(Base):
@@ -142,4 +152,4 @@ class UserSettings(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     value: Mapped[str | None] = mapped_column(Text)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))

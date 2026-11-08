@@ -11,7 +11,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 LOCK_MATRIX = {
     "requirements-core-lock-windows.txt": "requirements-core.txt",

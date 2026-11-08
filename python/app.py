@@ -1,89 +1,107 @@
 """Yuizaki Backend - Modularized FastAPI Application with System Architecture, Database & Socket.IO"""
 import asyncio
+import hashlib
+import hmac
 import importlib
 import json
 import logging
 import os
-import hashlib
-import hmac
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, Protocol, cast
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any, Protocol, cast
+
+import modules.system.runtime_composition as system_runtime_composition
+import modules.system.runtime_config as system_runtime_config
+from app_factory import create_app
+from database import DatabaseRepository
+from evals.product_metrics import JsonProductConsentStateStore
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from modules.core import config, GenerationManager, public_config_snapshot
-from modules.core.paths import DEFAULT_RUNTIME_TEMP_DIR, data_dir_from_env, settings_path_from_env
+from lifespan import with_runtime_container
+from middleware_registry import register_http_middleware
+from modules.asr import ASRManager
+from modules.core import GenerationManager, config, public_config_snapshot
+from modules.core.paths import (
+    DEFAULT_RUNTIME_TEMP_DIR,
+    data_dir_from_env,
+    settings_path_from_env,
+)
 from modules.core.settings import SettingsManager
 from modules.llm import LLMClient
-from modules.tts import TTSClient
-from modules.asr import ASRManager
-from modules.svc import SVCClient
+from modules.memory.backend_factory import create_memory_backend
+from modules.memory.pipeline import RetrievalPipeline
 from modules.ocr import OCRClient
+from modules.svc import SVCClient
 from modules.system import (
     DynamicConfigManager,
     HealthChecker,
     ServiceManager,
     SlidingWindowRateLimiter,
 )
-from modules.system.settings_api import SettingsAPI
-from modules.system.workspace_context_store import WorkspaceContextStore
-from modules.system.workspace_context_migration import import_legacy_workspace_contexts
-import modules.system.runtime_config as system_runtime_config
-from modules.system.active_workspace_state import ActiveWorkspaceState
 from modules.system.active_application import read_active_application
+from modules.system.active_workspace_state import ActiveWorkspaceState
 from modules.system.backend_api_auth import HOST_DESKTOP_ACTION_TOKEN_ENV
 from modules.system.cache_janitor import run_audio_cache_janitor
 from modules.system.companion_runtime import build_companion_runtime_snapshot
 from modules.system.governance_alert_state import GovernanceAlertStateStore
-from modules.system.qq_bridge import QqBridgeSupervisor, load_bridge_resource
+from modules.system.health_providers import (
+    build_app_runtime_health_providers,
+    register_app_runtime_health_checks,
+)
+from modules.system.heartbeat import (
+    DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+    HeartbeatScheduler,
+)
+from modules.system.heartbeat_goal_store import HeartbeatGoalStore
+from modules.system.logging_config import configure_application_logging
 from modules.system.memory_query import build_memory_query_request
-from modules.system.runtime_endpoints import build_companion_runtime_endpoint
 from modules.system.message_connectors import MessageConnectorRegistry
-from modules.system.schema_policy import enforce_schema_policy
-from app_factory import create_app
-from lifespan import with_runtime_container
-from middleware_registry import register_http_middleware
-from router_registry import RouterRegistry
-from runtime_container import RuntimeContainer
-from route_manifest import build_route_manifest
-import modules.system.runtime_composition as system_runtime_composition
-from modules.system.runtime_composition import build_runtime_handlers
-from evals.product_metrics import JsonProductConsentStateStore
+from modules.system.onboarding_readiness import OnboardingReadiness
+from modules.system.qq_bridge import QqBridgeSupervisor, load_bridge_resource
 from modules.system.relationship_runtime import (
     build_companion_relationship_history_endpoint,
-    build_relationship_memory_writer,
     build_recent_relationship_history_provider,
+    build_relationship_memory_writer,
     build_relationship_summary_provider,
 )
-from socket_server import DesktopPetSocketServer, _parse_socket_allowed_origins
-from database import DatabaseRepository
+from modules.system.runtime_composition import build_runtime_handlers
+from modules.system.runtime_config import (
+    RuntimeConfig,
+    SocketServiceInjector,
+    apply_runtime_config,
+)
+from modules.system.runtime_endpoints import build_companion_runtime_endpoint
+from modules.system.runtime_services import voice_diagnostics
+from modules.system.schema_policy import enforce_schema_policy
+from modules.system.settings_api import SettingsAPI
+from modules.system.settings_api import router as settings_router
+from modules.system.settings_schema import validate_runtime_patch
+from modules.system.stream_platforms import (
+    InMemoryTwitchSubscriptionProvider,
+    TwitchHelixSubscriptionProvider,
+)
+from modules.system.stream_runtime import ObsWebSocketAdapter, StreamRuntime
+from modules.system.ui_capabilities import build_ui_capabilities
+from modules.system.workspace_context_migration import import_legacy_workspace_contexts
+from modules.system.workspace_context_store import WorkspaceContextStore
+from modules.tts import TTSClient
+from route_manifest import build_route_manifest
+from router_registry import RouterRegistry
 from routes.ai_api import create_ai_router
+from routes.companion_api import create_companion_router
+from routes.connector_api import create_message_connector_router
 from routes.database_api import create_database_router
 from routes.i18n import router as i18n_router
+from routes.realtime_api import create_realtime_router
+from routes.storage_api import create_storage_router
 from routes.summary_api import create_summary_router
 from routes.system_api import create_system_router
 from routes.workspace_api import create_workspace_router
-from routes.companion_api import create_companion_router
-from routes.realtime_api import create_realtime_router
-from routes.connector_api import create_message_connector_router
-from routes.storage_api import create_storage_router
-from modules.system.settings_api import router as settings_router
-from modules.system.logging_config import configure_application_logging
-from modules.memory.pipeline import RetrievalPipeline
-from modules.memory.backend_factory import create_memory_backend
-from modules.system.heartbeat import HeartbeatScheduler, DEFAULT_HEARTBEAT_INTERVAL_SECONDS
-from modules.system.heartbeat_goal_store import HeartbeatGoalStore
-from modules.system.health_providers import build_app_runtime_health_providers, register_app_runtime_health_checks
-from modules.system.onboarding_readiness import OnboardingReadiness
-from modules.system.runtime_services import voice_diagnostics
-from modules.system.ui_capabilities import build_ui_capabilities
-from modules.system.stream_platforms import InMemoryTwitchSubscriptionProvider, TwitchHelixSubscriptionProvider
-from modules.system.stream_runtime import ObsWebSocketAdapter, StreamRuntime
-from modules.system.runtime_config import RuntimeConfig, apply_runtime_config
-from modules.system.settings_schema import validate_runtime_patch
+from runtime_container import RuntimeContainer
+from socket_server import DesktopPetSocketServer, _parse_socket_allowed_origins
 
 LOG_FORMAT = "%(asctime)s  %(levelname)-8s  %(name)s  %(message)s"
 
@@ -356,12 +374,12 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
     async def _reload_runtime_for_settings(changed: set[str]) -> None:
         if "memory" in changed:
             await _reload_memory_runtime()
-        reload_runtime_services = getattr(system_runtime_config, "reload_runtime_services")
+        reload_runtime_services = system_runtime_config.reload_runtime_services
         await reload_runtime_services(
             changed,
-            config,
+            cast(RuntimeConfig, config),
             _generation_mgr,
-            sio_server,
+            cast(SocketServiceInjector, sio_server),
             _llm_client,
             _tts_client,
             _asr_manager,
@@ -563,7 +581,7 @@ async def ping(challenge: str | None = None):
     ):
         payload["runtime_proof"] = hmac.new(
             _BACKEND_API_TOKEN.encode("utf-8"),
-            f"yuizaki-backend-proof-v1:{challenge}".encode("utf-8"),
+            f"yuizaki-backend-proof-v1:{challenge}".encode(),
             hashlib.sha256,
         ).hexdigest()
     return payload
@@ -600,17 +618,22 @@ register_http_middleware(
 router_registry.include(settings_router, name="settings")
 
 # ============ Memory / RAG 路由 ============
-from modules.memory.routes import MemoryState, create_memory_pipeline_router, create_memory_router  # noqa: E402
-from modules.agent.host_control import (  # noqa: E402
+from modules.agent.host_control import (
     create_computer_use_host_router,
     create_desktop_action_host_router,
 )
-from modules.system.relationship_policy import (  # noqa: E402
+from modules.memory.routes import (
+    MemoryState,
+    create_memory_pipeline_router,
+    create_memory_router,
+)
+from modules.system.relationship_policy import (
     is_relationship_milestone,
     normalize_relationship_importance,
     resolve_relationship_scope,
     summarize_relationship_events,
 )
+
 _apply_persisted_memory_config_before_backend_init()
 _memory_state = MemoryState(store=create_memory_backend(config.memory))
 _retrieval_pipeline = RetrievalPipeline(_memory_state.store)
@@ -812,7 +835,7 @@ router_registry.include(create_desktop_action_host_router(
 ))
 
 router_registry.include(
-    cast(Callable[..., Any], getattr(system_runtime_composition, "build_system_router_from_handlers"))(
+    cast(Callable[..., Any], system_runtime_composition.build_system_router_from_handlers)(
         create_system_router=cast(Callable[..., Any], create_system_router),
         handlers=runtime_handlers,
     )
