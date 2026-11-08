@@ -3,10 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine
-
 from database.models import Base
 from database.repository import ContextRevisionConflict, DatabaseRepository
+from sqlalchemy import create_engine
 
 
 def _repo(tmp_path: Path) -> DatabaseRepository:

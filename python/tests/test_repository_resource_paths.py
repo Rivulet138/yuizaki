@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from modules.core.paths import BACKEND_ROOT, resolve_optional_backend_path
 from modules.core.config import normalize_genie_model_dir
+from modules.core.paths import BACKEND_ROOT, resolve_optional_backend_path
 from modules.tts.synthesizer import TTSClient
 
 

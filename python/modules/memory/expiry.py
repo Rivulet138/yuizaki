@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import re
-from typing import Any, Mapping
-
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from typing import Any
 
 _UTC_RFC3339_PATTERN = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$"
@@ -25,7 +25,7 @@ def normalize_expires_at(value: Any) -> str | None:
         parsed = datetime.fromisoformat(f"{raw[:-1]}+00:00")
     except ValueError as exc:
         raise ValueError(_EXPIRY_FORMAT_ERROR) from exc
-    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def normalize_memory_expiry(
@@ -58,7 +58,7 @@ def is_memory_expired(metadata: Mapping[str, Any] | None, *, now: datetime | Non
         return True
     if expires_at is None:
         return False
-    instant = now or datetime.now(timezone.utc)
+    instant = now or datetime.now(UTC)
     if instant.tzinfo is None or instant.utcoffset() is None:
-        instant = instant.replace(tzinfo=timezone.utc)
-    return instant.astimezone(timezone.utc) >= datetime.fromisoformat(expires_at)
+        instant = instant.replace(tzinfo=UTC)
+    return instant.astimezone(UTC) >= datetime.fromisoformat(expires_at)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import RLock
 from typing import Any
 from uuid import uuid4
@@ -33,7 +33,7 @@ class MemoryOperation:
     operation_id: str
     operation: str
     document_id: str
-    at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     actor: str = "memory-api"
     scope: str | None = None
     workspace_id: str | None = None

@@ -4,14 +4,15 @@ Handles Generation lifecycle, session history, and ASR pipeline.
 """
 
 import asyncio
-import uuid
 import logging
 import math
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
+
 import numpy as np
 
 logger = logging.getLogger("yuizaki.state")
@@ -35,10 +36,11 @@ class Generation:
     cancel: asyncio.Event = field(default_factory=asyncio.Event)
     invalidated: bool = False
     tokens: list[str] = field(default_factory=list)
-    llm_task: Optional[asyncio.Task[None]] = None
-    tts_task: Optional[asyncio.Task[None]] = None
+    llm_task: asyncio.Task[None] | None = None
+    tts_task: asyncio.Task[None] | None = None
     started_monotonic: float = field(default_factory=time.perf_counter, repr=False)
     timings_ms: dict[str, float] = field(default_factory=dict)
+    pet_control: dict[str, object] | None = None
 
     def __post_init__(self) -> None:
         self.timings_ms.setdefault("generation_started", 0.0)
@@ -513,14 +515,14 @@ class GenerationManager:
         self._active[session_id] = gen
         return gen
 
-    def get(self, session_id: str) -> Optional[Generation]:
+    def get(self, session_id: str) -> Generation | None:
         return self._active.get(session_id)
 
     def active_session_ids(self) -> tuple[str, ...]:
         """Return an identity-only snapshot for host cancellation."""
         return tuple(self._active)
 
-    def interrupt(self, session_id: str) -> Optional[Generation]:
+    def interrupt(self, session_id: str) -> Generation | None:
         """Interrupt the active generation. Returns it or None."""
         gen = self._active.get(session_id)
         if gen is not None:
@@ -569,7 +571,7 @@ class ASRPipeline:
         self._buffer: list[np.ndarray] = []
         self.is_speaking: bool = False
         self._chunk_count: int = 0
-        self.transcribe_task: Optional[asyncio.Task[None]] = None
+        self.transcribe_task: asyncio.Task[None] | None = None
         self._asr_partial_every = max(1, int(asr_partial_every))
         self._next_partial_chunk = self._asr_partial_every
         self._silence_frames: int = 0
@@ -657,7 +659,7 @@ class ASRPipeline:
             return self._asr_partial_every * 2
         return self._asr_partial_every
 
-    def feed_chunk(self, pcm16_bytes: bytes) -> Optional[str]:
+    def feed_chunk(self, pcm16_bytes: bytes) -> str | None:
         if not pcm16_bytes:
             return None
 
@@ -718,7 +720,7 @@ class ASRPipeline:
                 self._pre_roll = self._pre_roll[-3:]
         return None
 
-    def snapshot_audio(self) -> Optional[np.ndarray]:
+    def snapshot_audio(self) -> np.ndarray | None:
         if not self._buffer:
             return None
         return np.concatenate(self._buffer)

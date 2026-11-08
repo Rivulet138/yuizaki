@@ -22,7 +22,7 @@ import tempfile
 import threading
 import time
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -166,7 +166,7 @@ class WorkspaceContextStore:
 
     def _quarantine_corrupt_store(self) -> None:
         """Keep the damaged file instead of silently overwriting user contexts."""
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         backup = self.storage_path.with_name(f"{self.storage_path.name}.corrupt-{timestamp}")
         try:
             os.replace(self.storage_path, backup)
@@ -260,7 +260,7 @@ class WorkspaceContextStore:
             next_entry = {
                 "context": deepcopy(context),
                 "revision": current_revision + 1,
-                "updatedAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(UTC).isoformat(),
             }
             entries[workspace_id] = next_entry
             self._write(entries)

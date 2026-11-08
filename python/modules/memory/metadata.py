@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Mapping
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from typing import Any
 
 from .expiry import is_memory_expired
 
@@ -20,7 +21,7 @@ PROVENANCE_FIELDS = ("source_kind", "source_id", "source_ids", "turn_id", "evide
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _canonical_timestamp(value: Any) -> str | None:
@@ -32,8 +33,8 @@ def _canonical_timestamp(value: Any) -> str | None:
     except ValueError:
         return raw
     if parsed.tzinfo is None or parsed.utcoffset() is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def normalize_memory_metadata(
@@ -216,18 +217,18 @@ def _parse_instant(value: Any) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None or parsed.utcoffset() is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _has_ended(value: Any, *, now: datetime | None) -> bool:
     instant = _parse_instant(value)
     if instant is None:
         return False
-    current = now or datetime.now(timezone.utc)
+    current = now or datetime.now(UTC)
     if current.tzinfo is None or current.utcoffset() is None:
-        current = current.replace(tzinfo=timezone.utc)
-    return current.astimezone(timezone.utc) >= instant
+        current = current.replace(tzinfo=UTC)
+    return current.astimezone(UTC) >= instant
 
 
 def _has_invalid_validity(metadata: Mapping[str, Any]) -> bool:
@@ -246,7 +247,7 @@ def _starts_later(value: Any, *, now: datetime | None) -> bool:
     instant = _parse_instant(value)
     if instant is None:
         return False
-    current = now or datetime.now(timezone.utc)
+    current = now or datetime.now(UTC)
     if current.tzinfo is None or current.utcoffset() is None:
-        current = current.replace(tzinfo=timezone.utc)
-    return current.astimezone(timezone.utc) < instant
+        current = current.replace(tzinfo=UTC)
+    return current.astimezone(UTC) < instant

@@ -7,7 +7,6 @@ import numpy as np
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 from modules.memory.backend import MemorySearchIncompleteError
 from modules.memory.indexed_backend import IndexedMemoryBackend
 from modules.memory.operations import MemoryOperationLog, new_operation

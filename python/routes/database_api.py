@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
-
-from pydantic import BaseModel, Field
-
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse, StreamingResponse
-from starlette.concurrency import run_in_threadpool
+from collections.abc import Callable
+from typing import Any
 
 from database.repository import DatabaseError, NotFoundError
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 
 class MessageUpdateRequest(BaseModel):

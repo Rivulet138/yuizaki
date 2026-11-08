@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def _timestamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 def _archive_path(storage_path: Path, marker: str, stamp: str) -> Path:
@@ -117,7 +117,7 @@ def import_legacy_workspace_contexts(repo: Any, store: Any) -> dict[str, int]:
             _archive_path(storage_path, "orphaned", stamp),
             {
                 "version": 1,
-                "archivedAt": datetime.now(timezone.utc).isoformat(),
+                "archivedAt": datetime.now(UTC).isoformat(),
                 "workspaces": orphans,
             },
         )

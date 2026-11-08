@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from modules.system.workspace_context_store import (
     MAX_CONTEXT_BYTES,
     WorkspaceContextConflict,

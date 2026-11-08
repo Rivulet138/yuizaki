@@ -1,6 +1,7 @@
-from typing import Optional, List, Literal, Dict
-from pydantic import BaseModel, Field
 from enum import Enum
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 
 class MessageRole(str, Enum):
@@ -31,26 +32,26 @@ class PetControlParameterOption(BaseModel):
 
 
 class PetControlContext(BaseModel):
-    models: List[PetControlModelRef] = Field(default_factory=list)
-    emotions: List[str] = Field(default_factory=list)
-    motionGroups: List[str] = Field(default_factory=list)
-    motionOptions: List[PetControlMotionOption] = Field(default_factory=list)
-    expressions: List[str] = Field(default_factory=list)
-    parameters: List[PetControlParameterOption] = Field(default_factory=list)
-    capabilityRevision: Optional[str] = None
-    modelType: Optional[Literal["live2d", "vrm"]] = None
-    modelId: Optional[str] = None
-    actions: Dict[str, bool] = Field(default_factory=dict)
-    viseme: Optional[bool] = None
-    avatarPrompt: Optional[str] = None
+    models: list[PetControlModelRef] = Field(default_factory=list)
+    emotions: list[str] = Field(default_factory=list)
+    motionGroups: list[str] = Field(default_factory=list)
+    motionOptions: list[PetControlMotionOption] = Field(default_factory=list)
+    expressions: list[str] = Field(default_factory=list)
+    parameters: list[PetControlParameterOption] = Field(default_factory=list)
+    capabilityRevision: str | None = None
+    modelType: Literal["live2d", "vrm"] | None = None
+    modelId: str | None = None
+    actions: dict[str, bool] = Field(default_factory=dict)
+    viseme: bool | None = None
+    avatarPrompt: str | None = None
 
 
 # 入站消息（Renderer → Python）
 
 class ChatRequest(BaseModel):
-    messages: List[ChatMessage]
-    session_id: Optional[str] = None
-    request_id: Optional[str] = None
+    messages: list[ChatMessage]
+    session_id: str | None = None
+    request_id: str | None = None
 
 
 class InterruptRequest(BaseModel):
@@ -72,7 +73,7 @@ class SVCConvertRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     type: Literal["token"] = "token"
-    data: dict[str, object] = Field(default_factory=lambda: {})
+    data: dict[str, object] = Field(default_factory=dict)
 
     def __init__(self, content: str, session_id: str, **kwargs: object):
         super().__init__(
@@ -83,7 +84,7 @@ class TokenResponse(BaseModel):
 
 class DoneResponse(BaseModel):
     type: Literal["done"] = "done"
-    data: dict[str, object] = Field(default_factory=lambda: {})
+    data: dict[str, object] = Field(default_factory=dict)
 
     def __init__(self, session_id: str, total_tokens: int, **kwargs: object):
         super().__init__(
@@ -94,7 +95,7 @@ class DoneResponse(BaseModel):
 
 class TTSAudioResponse(BaseModel):
     type: Literal["tts_audio"] = "tts_audio"
-    data: dict[str, object] = Field(default_factory=lambda: {})
+    data: dict[str, object] = Field(default_factory=dict)
 
     def __init__(self, audio_url: str, duration_ms: int, **kwargs: object):
         super().__init__(
@@ -105,7 +106,7 @@ class TTSAudioResponse(BaseModel):
 
 class ASRPartialResponse(BaseModel):
     type: Literal["asr_partial"] = "asr_partial"
-    data: dict[str, object] = Field(default_factory=lambda: {})
+    data: dict[str, object] = Field(default_factory=dict)
 
     def __init__(self, text: str, **kwargs: object):
         super().__init__(
@@ -116,7 +117,7 @@ class ASRPartialResponse(BaseModel):
 
 class ASRFinalResponse(BaseModel):
     type: Literal["asr_final"] = "asr_final"
-    data: dict[str, object] = Field(default_factory=lambda: {})
+    data: dict[str, object] = Field(default_factory=dict)
 
     def __init__(self, text: str, **kwargs: object):
         super().__init__(
@@ -127,7 +128,7 @@ class ASRFinalResponse(BaseModel):
 
 class SVCAudioResponse(BaseModel):
     type: Literal["svc_audio"] = "svc_audio"
-    data: dict[str, object] = Field(default_factory=lambda: {})
+    data: dict[str, object] = Field(default_factory=dict)
 
     def __init__(self, audio_url: str, **kwargs: object):
         super().__init__(
@@ -138,9 +139,9 @@ class SVCAudioResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     type: Literal["error"] = "error"
-    data: dict[str, object] = Field(default_factory=lambda: {})
+    data: dict[str, object] = Field(default_factory=dict)
 
-    def __init__(self, code: str, message: str, details: Optional[dict[str, object]] = None, **kwargs: object):
+    def __init__(self, code: str, message: str, details: dict[str, object] | None = None, **kwargs: object):
         super().__init__(
             data={"code": code, "message": message, "details": details or {}},
             **kwargs
@@ -160,28 +161,28 @@ class Model(BaseModel):
 
 class ModelsResponse(BaseModel):
     object: Literal["list"]
-    data: List[Model]
+    data: list[Model]
 
 
 class ChatCompletionRequest(BaseModel):
     model: str
-    messages: List[ChatMessage]
-    session_id: Optional[str] = None
-    workspace_id: Optional[str] = None
-    request_id: Optional[str] = None
+    messages: list[ChatMessage]
+    session_id: str | None = None
+    workspace_id: str | None = None
+    request_id: str | None = None
     stream: bool = False
-    temperature: Optional[float] = None
-    top_p: Optional[float] = None
-    top_k: Optional[int] = None
-    min_p: Optional[float] = None
-    frequency_penalty: Optional[float] = None
-    presence_penalty: Optional[float] = None
-    repetition_penalty: Optional[float] = None
-    max_tokens: Optional[int] = None
-    reasoning_effort: Optional[str] = None
-    mcp_enabled: Optional[bool] = None
-    web_search_enabled: Optional[bool] = None
-    pet_control_context: Optional[PetControlContext] = None
+    temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    min_p: float | None = None
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
+    repetition_penalty: float | None = None
+    max_tokens: int | None = None
+    reasoning_effort: str | None = None
+    mcp_enabled: bool | None = None
+    web_search_enabled: bool | None = None
+    pet_control_context: PetControlContext | None = None
     autonomy_mode: Literal["companion", "assistant", "executor", "reflector", "silent"] = "companion"
 
 
@@ -192,5 +193,5 @@ class SVCConvertResponse(BaseModel):
 
 class SVCStatusResponse(BaseModel):
     status: Literal["processing", "done", "failed"]
-    audio_url: Optional[str] = None
-    error: Optional[str] = None
+    audio_url: str | None = None
+    error: str | None = None

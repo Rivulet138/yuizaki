@@ -6,13 +6,11 @@ Revises: None
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from alembic import op
-from sqlalchemy import insert, select
-
 from database.models import Base, Companion, Workspace
-
+from sqlalchemy import insert, select
 
 revision = "20260808_00"
 down_revision = None
@@ -27,7 +25,7 @@ def upgrade() -> None:
     # A fresh install needs the two protected records required by repository APIs.
     companions = Base.metadata.tables[Companion.__tablename__]
     workspaces = Base.metadata.tables[Workspace.__tablename__]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if connection.execute(select(companions.c.id).where(companions.c.id == "default")).first() is None:
         connection.execute(insert(companions).values(
             id="default",

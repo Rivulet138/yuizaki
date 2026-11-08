@@ -4,15 +4,14 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import UniqueConstraint, create_engine, inspect
-from sqlalchemy.engine import make_url
-
-from alembic import command
 from database.models import Base
 from modules.core.paths import database_url_from_env
+from sqlalchemy import UniqueConstraint, create_engine, inspect
+from sqlalchemy.engine import make_url
 
 
 def _project_root() -> Path:
