@@ -1,6 +1,6 @@
-import pytest
 from types import SimpleNamespace
 
+import pytest
 from socket_server import ChatPersistenceError, DesktopPetSocketServer
 
 

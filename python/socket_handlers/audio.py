@@ -7,6 +7,7 @@ coupling the handler to the full SocketServer object.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import logging
@@ -24,6 +25,7 @@ JsonDict = dict[str, object]
 EmitLatency = Callable[[str, Mapping[str, object]], Awaitable[None]]
 MAX_AUDIO_CHUNK_BYTES = 2 * 1024 * 1024
 MAX_AUDIO_CHUNK_B64_LENGTH = ((MAX_AUDIO_CHUNK_BYTES + 2) // 3) * 4
+ASR_FINAL_TIMEOUT_SECONDS = 45
 
 
 def _as_text(value: object, default: str = "") -> str:
@@ -83,7 +85,17 @@ def build_audio_chunk_handler(
         asr_manager = asr_manager_provider()
         generation_mgr = generation_manager_provider()
         if asr_manager is None or generation_mgr is None:
-            log.debug("[SIO] ASR or generation manager not initialized, dropping audio chunk")
+            log.warning("[SIO] ASR or generation manager not initialized; rejecting audio chunk")
+            await sio.emit(SystemEvents.ERROR, {
+                "code": "ASR_UNAVAILABLE",
+                "message": "语音识别服务暂不可用，请稍后重试。",
+                "session_id": _as_text(data.get("session_id"), sid),
+                "generation_id": _as_text(data.get("generation_id")),
+                "turn_id": _as_text(data.get("turn_id")),
+                "request_id": _as_text(data.get("request_id")),
+                "interruption_epoch": _as_int(data.get("interruption_epoch"), 0),
+                "version": version,
+            }, to=sid)
             return
 
         if is_final:
@@ -120,6 +132,7 @@ def build_audio_chunk_handler(
             "interruption_epoch": _as_int(data.get("interruption_epoch"), 0),
             "version": version,
         }
+        final_emitted = False
 
         pipeline = agent_pipeline_provider()
 
@@ -128,6 +141,7 @@ def build_audio_chunk_handler(
                 self._sid = client_sid
 
             async def send_json(self, msg: JsonDict) -> None:
+                nonlocal final_emitted
                 msg_type = msg.get("type")
                 if msg_type == "asr_partial":
                     partial_text = _as_text(msg.get("text"))
@@ -154,6 +168,7 @@ def build_audio_chunk_handler(
                             visual_frame_id=_as_text(latest_frame.get("frame_id")) if latest_frame else None,
                         )
                 elif msg_type == "asr_final":
+                    final_emitted = True
                     final_text = _as_text(msg.get("text"))
                     confirm_speculative = getattr(pipeline, "confirm_speculative_context_prefetch", None)
                     if callable(confirm_speculative):
@@ -186,13 +201,41 @@ def build_audio_chunk_handler(
                 else:
                     log.debug("[SIO] unhandled ASR message: %s", msg_type)
 
-        await asr_manager.handle_audio_chunk(
-            _SocketIOWSAdapter(sid),
-            sid,
-            generation_mgr,
-            pcm16_bytes,
-            is_final=is_final,
-        )
+        try:
+            process_chunk = asr_manager.handle_audio_chunk(
+                _SocketIOWSAdapter(sid),
+                sid,
+                generation_mgr,
+                pcm16_bytes,
+                is_final=is_final,
+            )
+            await asyncio.wait_for(process_chunk, timeout=ASR_FINAL_TIMEOUT_SECONDS)
+            if is_final and not final_emitted:
+                await sio.emit(SystemEvents.ERROR, {
+                    "code": "ASR_EMPTY_RESULT",
+                    "message": "没有识别到语音内容，请再试一次。",
+                    **asr_identity,
+                }, to=sid)
+        except asyncio.TimeoutError:
+            log.warning("[SIO] ASR finalization timed out for session %s", session_id)
+            cleanup = getattr(asr_manager, "cleanup", None)
+            if callable(cleanup):
+                cleanup(sid)
+            await sio.emit(SystemEvents.ERROR, {
+                "code": "ASR_TIMEOUT",
+                "message": "语音识别耗时过长，请重试。",
+                **asr_identity,
+            }, to=sid)
+        except Exception:
+            log.exception("[SIO] ASR processing failed for session %s", session_id)
+            cleanup = getattr(asr_manager, "cleanup", None)
+            if callable(cleanup):
+                cleanup(sid)
+            await sio.emit(SystemEvents.ERROR, {
+                "code": "ASR_FAILED",
+                "message": "语音识别失败，请重试。",
+                **asr_identity,
+            }, to=sid)
 
     return on_audio_chunk
 

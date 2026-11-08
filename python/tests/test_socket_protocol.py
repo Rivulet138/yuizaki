@@ -4,6 +4,7 @@ import logging
 from types import SimpleNamespace
 
 import pytest
+import socket_handlers.audio as audio_handler_module
 from socket_events import SOCKET_PROTOCOL_VERSION, protocol_version_status
 from socket_handlers.audio import build_audio_chunk_handler
 from socket_handlers.llm import LLMRequestSupport, build_llm_request_handler
@@ -304,3 +305,83 @@ async def test_audio_protocol_rejection_happens_before_asr() -> None:
     assert asr_called is False
     assert sio.events[0][1]["code"] == "UNSUPPORTED_PROTOCOL_VERSION"
     assert sio.events[0][1]["version"] == SOCKET_PROTOCOL_VERSION
+
+
+def _audio_handler(sio: _FakeSio, asr_provider):
+    async def emit_latency(*_args, **_kwargs):
+        return None
+
+    return build_audio_chunk_handler(
+        sio=sio,
+        asr_manager_provider=asr_provider,
+        generation_manager_provider=lambda: object(),
+        agent_pipeline_provider=lambda: object(),
+        tool_registry_provider=lambda: object(),
+        active_workspace_id=lambda: "workspace",
+        latest_visual_frame_for_sid=lambda _sid: None,
+        voice_prepared_sessions=set(),
+        schedule_voice_turn_preparation=lambda: None,
+        emit_latency=emit_latency,
+    )
+
+
+@pytest.mark.asyncio
+async def test_audio_reports_asr_unavailable_instead_of_silently_dropping() -> None:
+    sio = _FakeSio()
+    handler = _audio_handler(sio, lambda: None)
+
+    await handler("sid", {"chunk": "", "is_final": True, "session_id": "session-1"})
+
+    assert sio.events[0][0] == "error"
+    assert sio.events[0][1]["code"] == "ASR_UNAVAILABLE"
+    assert sio.events[0][1]["session_id"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_audio_reports_empty_final_result() -> None:
+    sio = _FakeSio()
+
+    class ASR:
+        async def handle_audio_chunk(self, *_args, **_kwargs):
+            return None
+
+    handler = _audio_handler(sio, ASR)
+
+    await handler("sid", {"chunk": "", "is_final": True, "session_id": "session-1"})
+
+    assert sio.events[0][1]["code"] == "ASR_EMPTY_RESULT"
+    assert sio.events[0][1]["session_id"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_audio_reports_asr_processing_failure() -> None:
+    sio = _FakeSio()
+
+    class ASR:
+        async def handle_audio_chunk(self, *_args, **_kwargs):
+            raise RuntimeError("internal detail")
+
+    handler = _audio_handler(sio, ASR)
+
+    await handler("sid", {"chunk": "", "is_final": True, "session_id": "session-1"})
+
+    assert sio.events[0][1]["code"] == "ASR_FAILED"
+    assert sio.events[0][1]["message"] == "语音识别失败，请重试。"
+
+
+@pytest.mark.asyncio
+async def test_audio_times_out_final_asr_and_reports_terminal_error(monkeypatch) -> None:
+    monkeypatch.setattr(audio_handler_module, "ASR_FINAL_TIMEOUT_SECONDS", 0.01)
+    sio = _FakeSio()
+
+    class ASR:
+        async def handle_audio_chunk(self, *_args, **_kwargs):
+            import asyncio
+            await asyncio.sleep(1)
+
+    handler = _audio_handler(sio, ASR)
+
+    await handler("sid", {"chunk": "", "is_final": True, "session_id": "session-1"})
+
+    assert sio.events[0][1]["code"] == "ASR_TIMEOUT"
+    assert sio.events[0][1]["session_id"] == "session-1"

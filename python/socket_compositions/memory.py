@@ -1,7 +1,10 @@
 from __future__ import annotations
+
 from typing import Any
-from socket_handlers.memory import build_memory_query_handler
+
 from socket_events import MemoryEvents
+from socket_handlers.memory import build_memory_query_handler
+
 
 def register(server: Any) -> None:
     handler = build_memory_query_handler(

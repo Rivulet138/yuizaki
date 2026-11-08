@@ -110,7 +110,7 @@ def build_memory_query_handler(
         )
         try:
             result = await run_in_threadpool(memory_pipeline.recall, request)
-        except Exception:  # noqa: BLE001 - keep provider details out of the protocol
+        except Exception:
             log.exception("[SIO] memory recall failed")
             await sio.emit(MemoryEvents.RESULT, {
                 "docs": [],

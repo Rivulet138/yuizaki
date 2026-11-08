@@ -4,7 +4,6 @@ from typing import Any
 
 import numpy as np
 import pytest
-
 from modules.asr.transcriber import ASRManager
 
 
