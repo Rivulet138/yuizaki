@@ -117,14 +117,9 @@ import { Connection, RefreshLeft } from '@element-plus/icons-vue'
 import { t } from '@/i18n'
 import SettingsSectionHeader from './SettingsSectionHeader.vue'
 import SVCPanel from '@/domains/tools/views/SVCPanel.vue'
+import type { SettingsResponse } from '@/api/clients/settings-client'
 
-export type SvcSettings = {
-  provider: string
-  base_url: string
-  speaker_id: number
-  pitch: number
-  timeout: number
-}
+export type SvcSettings = Required<SettingsResponse['svc']>
 
 const props = defineProps<{
   modelValue: SvcSettings

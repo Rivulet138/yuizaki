@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from modules.system import settings_store as settings_store_module
 from modules.system.settings_store import SettingsStore
 

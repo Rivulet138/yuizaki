@@ -6,9 +6,9 @@ import os
 import tempfile
 import time
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from ..core.paths import DEFAULT_SETTINGS_PATH, settings_path_from_env
 from .dynamic_config import redact_sensitive_config_value
@@ -27,7 +27,7 @@ def _is_provider_credential_path(field_path: str) -> bool:
     return len(parts) == 2 and parts[0] in _PROVIDER_CREDENTIAL_SECTIONS and parts[1] in _SECRET_FIELD_NAMES
 
 
-def _set_path(target: Dict[str, Any], field_path: str, value: str) -> None:
+def _set_path(target: dict[str, Any], field_path: str, value: str) -> None:
     parts = [part for part in field_path.split(".") if part]
     if not parts:
         return
@@ -41,7 +41,7 @@ def _set_path(target: Dict[str, Any], field_path: str, value: str) -> None:
     current[parts[-1]] = value
 
 
-def _credential_environment() -> Dict[str, str]:
+def _credential_environment() -> dict[str, str]:
     raw = os.getenv(PROVIDER_CREDENTIALS_ENV, "").strip()
     if not raw:
         return {}
@@ -67,7 +67,7 @@ def _scrub_sensitive_settings(value: Any) -> Any:
         return [_scrub_sensitive_settings(item) for item in value]
     if not isinstance(value, dict):
         return deepcopy(value)
-    result: Dict[str, Any] = {}
+    result: dict[str, Any] = {}
     for key, child in value.items():
         if key in _SECRET_FIELD_NAMES:
             result[key] = ""
@@ -148,22 +148,11 @@ class SettingsStore:
         """
         self.storage_path = Path(storage_path) if storage_path is not None else settings_path_from_env()
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-        self.transfer_dir = self.storage_path.parent / "transfers"
-        self.transfer_dir.mkdir(parents=True, exist_ok=True)
-        self.settings: Dict[str, Any] = self._load_settings()
+        self.settings: dict[str, Any] = self._load_settings()
 
-    def resolve_transfer_path(self, relative_path: str) -> Path:
-        target = (self.transfer_dir / relative_path).resolve()
-        root = self.transfer_dir.resolve()
-        try:
-            target.relative_to(root)
-        except ValueError as exc:
-            raise ValueError("Path escapes managed transfer directory") from exc
-        return target
-
-    def _load_settings(self) -> Dict[str, Any]:
+    def _load_settings(self) -> dict[str, Any]:
         """Load settings from file, quarantining an unparsable payload."""
-        settings: Dict[str, Any] = {}
+        settings: dict[str, Any] = {}
         if self.storage_path.exists():
             try:
                 with open(self.storage_path, "r", encoding="utf-8") as f:
@@ -205,7 +194,7 @@ class SettingsStore:
                 return default
         return value
 
-    def reload_provider_credentials(self, credentials: Dict[str, str]) -> int:
+    def reload_provider_credentials(self, credentials: dict[str, str]) -> int:
         """Replace in-memory provider secrets from an authenticated local sync.
 
         Credentials are deliberately never written to the settings JSON file. The
@@ -214,7 +203,7 @@ class SettingsStore:
         """
         if not isinstance(credentials, dict):
             raise ValueError("credentials must be an object")
-        normalized: Dict[str, str] = {}
+        normalized: dict[str, str] = {}
         for field_path, value in credentials.items():
             if not isinstance(field_path, str) or not _is_provider_credential_path(field_path):
                 raise ValueError("unsupported provider credential field")
@@ -277,7 +266,7 @@ class SettingsStore:
 
     def _quarantine_corrupt_settings(self, error: Exception) -> None:
         """Move an unreadable settings file aside so it is not overwritten."""
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         backup = self.storage_path.with_name(f"{self.storage_path.name}.corrupt-{timestamp}")
         try:
             os.replace(self.storage_path, backup)
@@ -308,14 +297,14 @@ class SettingsStore:
         self.settings = {}
         logger.info("Cleared all settings")
 
-    def get_all(self) -> Dict[str, Any]:
+    def get_all(self) -> dict[str, Any]:
         """Get all settings."""
         return deepcopy(self.settings)
 
-    def replace(self, settings: Dict[str, Any]) -> None:
+    def replace(self, settings: dict[str, Any]) -> None:
         self.settings = deepcopy(settings)
 
-    def update(self, updates: Dict[str, Any]) -> None:
+    def update(self, updates: dict[str, Any]) -> None:
         """Update multiple settings.
 
         Args:
@@ -325,48 +314,7 @@ class SettingsStore:
             self.set(key, value)
         logger.info(f"Updated {len(updates)} settings")
 
-    def export(self, filepath: str) -> None:
-        """Export settings to file.
-
-        Args:
-            filepath: Path to export to.
-        """
-        try:
-            Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-            with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(_scrub_sensitive_settings(self.settings), f, indent=2, ensure_ascii=True)
-            logger.info(f"Exported settings to {filepath}")
-        except Exception as e:
-            logger.error(f"Failed to export settings: {e}")
-
-    def export_managed(self, relative_path: str) -> Path:
-        target = self.resolve_transfer_path(relative_path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with open(target, "w", encoding="utf-8") as f:
-            json.dump(_scrub_sensitive_settings(self.settings), f, indent=2, ensure_ascii=True)
-        logger.info(f"Exported settings to managed path {target}")
-        return target
-
-    def import_settings(self, filepath: str) -> None:
-        """Import settings from file.
-
-        Args:
-            filepath: Path to import from.
-        """
-        try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                imported = json.load(f)
-            self.settings.update(imported)
-            logger.info(f"Imported settings from {filepath}")
-        except Exception as e:
-            logger.error(f"Failed to import settings: {e}")
-
-    def import_managed(self, relative_path: str) -> Path:
-        source = self.resolve_transfer_path(relative_path)
-        logger.info(f"Validated settings source at managed path {source}")
-        return source
-
-    def get_metadata(self) -> Dict[str, Any]:
+    def get_metadata(self) -> dict[str, Any]:
         """Get settings metadata.
 
         Returns:

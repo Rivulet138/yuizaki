@@ -87,20 +87,6 @@
                     </div>
                     <div class="llm-actions">
                       <div class="llm-action-group">
-                        <el-button plain :loading="llmImporting" @click="triggerLlmImport">
-                          <el-icon><Upload /></el-icon>
-                          {{ t('settings.llm.importProfile') }}
-                        </el-button>
-                        <el-button plain @click="downloadLlmProfileTemplate">
-                          <el-icon><Document /></el-icon>
-                          {{ t('settings.llm.templateProfile') }}
-                        </el-button>
-                        <el-button plain :loading="llmExporting" @click="exportLlmProfile">
-                          <el-icon><Download /></el-icon>
-                          {{ t('settings.llm.exportProfile') }}
-                        </el-button>
-                      </div>
-                      <div class="llm-action-group">
                         <el-button plain :loading="localDiscoveryRequest.loading" @click="applyLocalLlmDiscovery">
                           <el-icon><Connection /></el-icon>
                           {{ t('settings.discovery.detectLocal') }}
@@ -122,7 +108,6 @@
                   </div>
                 </div>
               </template>
-              <input ref="llmImportInput" class="sr-only-input" type="file" accept="application/json,.json" @change="handleLlmImportFile" />
               <el-form label-position="top" @submit.prevent>
                 <div class="llm-workspace">
                   <aside class="llm-profile-rail">
@@ -197,7 +182,7 @@
                       @update="applyLlmVisionPatch"
                     />
 
-                    <div class="subsection-title">{{ t('settings.llm.sectionSampling') }}</div>
+                    <div class="inference-title-row"><div class="subsection-title">{{ t('settings.llm.sectionSampling') }}</div><el-button size="small" plain @click="applyRecommendedLlmSettings">{{ t('settings.llm.applyRecommended') }}</el-button></div>
                     <div class="inference-layout">
                       <section class="inference-group">
                         <h3 class="inference-group-title">{{ t('settings.llm.sectionGeneration') }}</h3>
@@ -298,7 +283,7 @@
                               <output>{{ form.llm.default_max_output_tokens }}</output>
                             </div>
                             <el-form-item>
-                              <el-input-number v-model="form.llm.default_max_output_tokens" class="inference-number" :min="256" :max="65535" :step="256" controls-position="right" :aria-label="t('settings.llm.maxOutputTokensName')" @change="saveLlmField('default_max_output_tokens', $event)" />
+                              <el-input-number v-model="form.llm.default_max_output_tokens" class="inference-number" :min="256" :max="128000" :step="256" controls-position="right" :aria-label="t('settings.llm.maxOutputTokensName')" @change="saveLlmField('default_max_output_tokens', $event)" />
                             </el-form-item>
                           </div>
                           <div class="inference-field">
@@ -680,7 +665,7 @@ import 'element-plus/es/components/form-item/style/css'
 import 'element-plus/es/components/tab-pane/style/css'
 import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/option/style/css'
-import { Connection, Document, Download, Upload } from '@element-plus/icons-vue'
+import { Connection } from '@element-plus/icons-vue'
 import { currentLocale, localeLabel, normalizeLocale, setLocale, supportedLocales, t } from '@/i18n'
 import { settingsPanelTtsTokens as TTS_CONTRACT_VALUES } from '@/i18n/settingsPanelMessages'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
@@ -690,6 +675,14 @@ import { useSettingsStore } from '@/state/settingsStore'
 import {
   DEFAULT_LLM_CONTEXT_MAX_TOKENS,
   DEFAULT_LLM_MAX_OUTPUT_TOKENS,
+  DEFAULT_LLM_TEMPERATURE,
+  DEFAULT_LLM_TOP_P,
+  DEFAULT_LLM_TOP_K,
+  DEFAULT_LLM_MIN_P,
+  DEFAULT_LLM_FREQUENCY_PENALTY,
+  DEFAULT_LLM_PRESENCE_PENALTY,
+  DEFAULT_LLM_REPETITION_PENALTY,
+  DEFAULT_LLM_TIMEOUT_SECONDS,
   DEFAULT_QDRANT_DOCKER_IMAGE,
 } from '@/../shared/runtime-defaults'
 import { useInputBindingsStore } from '@/state/inputBindingsStore'
@@ -710,7 +703,7 @@ import SettingsSvcSection, { type SvcSettings } from '../components/SettingsSvcS
 import SettingsDesktopInputSection from '../components/SettingsDesktopInputSection.vue'
 import SettingsInterfaceSection from '../components/SettingsInterfaceSection.vue'
 import SettingsResourcesSection from '../components/SettingsResourcesSection.vue'
-import { isLocalLlmEndpoint, normalizeOpenAiBaseUrl, shouldAutoDiscoverLlmModels } from '../llmDiscovery'
+import { isGpt61SolModel, isLocalLlmEndpoint, migrateLegacyLlmDefaults, normalizeOpenAiBaseUrl, shouldAutoDiscoverLlmModels } from '../llmDiscovery'
 import { LLM_PROVIDER_BASE_URLS, choosePreferredLlmModel, getLlmProviderOptions, inferLlmProviderPreset } from '../llmProviders'
 import type { LlmProviderPreset } from '../llmProviders'
 import { isPlainRecord, normalizeResourceStatus, normalizeStorageStatus } from '../resourceStatus'
@@ -826,14 +819,14 @@ const form = reactive({
     base_url: '',
     api_key: '',
     model: '',
-    temperature: 1.2,
-    top_p: 0.9,
-    top_k: 500,
-    min_p: 0,
-    frequency_penalty: 0.2,
-    presence_penalty: 0,
-    repetition_penalty: 1,
-    timeout: 60,
+    temperature: DEFAULT_LLM_TEMPERATURE,
+    top_p: DEFAULT_LLM_TOP_P,
+    top_k: DEFAULT_LLM_TOP_K,
+    min_p: DEFAULT_LLM_MIN_P,
+    frequency_penalty: DEFAULT_LLM_FREQUENCY_PENALTY,
+    presence_penalty: DEFAULT_LLM_PRESENCE_PENALTY,
+    repetition_penalty: DEFAULT_LLM_REPETITION_PENALTY,
+    timeout: DEFAULT_LLM_TIMEOUT_SECONDS,
     context_max_tokens: DEFAULT_LLM_CONTEXT_MAX_TOKENS,
     default_max_output_tokens: DEFAULT_LLM_MAX_OUTPUT_TOKENS,
     vision_enabled: false,
@@ -879,7 +872,7 @@ const form = reactive({
     asr_partial_every: 15,
   },
   svc: {
-    provider: 'soulx-service',
+    provider: 'soulx-service' as SvcSettings['provider'],
     base_url: '',
     speaker_id: 0,
     pitch: 0,
@@ -1000,9 +993,6 @@ const llmApiKeyStored = ref(false)
 const ttsApiKeyStored = ref(false)
 const asrApiKeyStored = ref(false)
 const memoryApiKeyStored = ref(false)
-const llmImportInput = ref<HTMLInputElement | null>(null)
-const llmImporting = ref(false)
-const llmExporting = ref(false)
 const resourceStatus = ref<ModelResourceStatusPayload | null>(null)
 const resourceLoading = ref(false)
 const resourceActionKey = ref('')
@@ -1279,14 +1269,14 @@ const defaultLlmProfile = (provider: LlmProviderPreset): LlmProfile => ({
   base_url: LLM_PROVIDER_BASE_URLS[provider] || '',
   api_key: '',
   model: '',
-  temperature: 1.2,
-  top_p: 0.9,
-  top_k: 500,
-  min_p: 0,
-  frequency_penalty: 0.2,
-  presence_penalty: 0,
-  repetition_penalty: 1,
-  timeout: 60,
+  temperature: DEFAULT_LLM_TEMPERATURE,
+  top_p: DEFAULT_LLM_TOP_P,
+  top_k: DEFAULT_LLM_TOP_K,
+  min_p: DEFAULT_LLM_MIN_P,
+  frequency_penalty: DEFAULT_LLM_FREQUENCY_PENALTY,
+  presence_penalty: DEFAULT_LLM_PRESENCE_PENALTY,
+  repetition_penalty: DEFAULT_LLM_REPETITION_PENALTY,
+  timeout: DEFAULT_LLM_TIMEOUT_SECONDS,
   context_max_tokens: DEFAULT_LLM_CONTEXT_MAX_TOKENS,
   default_max_output_tokens: DEFAULT_LLM_MAX_OUTPUT_TOKENS,
 })
@@ -1369,6 +1359,24 @@ const saveActiveLlmPatch = (patch: SettingsPatch) => {
   const activeProfile = snapshotLlmProfile()
   llmProfiles[activeProfile.provider] = activeProfile
   debouncedSave({ llm: { ...patch, profiles: cloneLlmProfilesPayload(activeProfile) } })
+}
+
+const applyRecommendedLlmSettings = () => {
+  const isGpt61Sol = isGpt61SolModel(form.llm.model)
+  const recommended = {
+    temperature: DEFAULT_LLM_TEMPERATURE,
+    top_p: DEFAULT_LLM_TOP_P,
+    top_k: DEFAULT_LLM_TOP_K,
+    min_p: DEFAULT_LLM_MIN_P,
+    frequency_penalty: DEFAULT_LLM_FREQUENCY_PENALTY,
+    presence_penalty: DEFAULT_LLM_PRESENCE_PENALTY,
+    repetition_penalty: DEFAULT_LLM_REPETITION_PENALTY,
+    timeout: DEFAULT_LLM_TIMEOUT_SECONDS,
+    context_max_tokens: isGpt61Sol ? 500_000 : DEFAULT_LLM_CONTEXT_MAX_TOKENS,
+    default_max_output_tokens: isGpt61Sol ? 16_384 : DEFAULT_LLM_MAX_OUTPUT_TOKENS,
+  }
+  Object.assign(form.llm, recommended)
+  saveActiveLlmPatch(recommended)
 }
 
 const saveLlmField = (field: LlmProfileField, value: unknown) => {
@@ -1583,7 +1591,8 @@ const getLlmProviderStatus = (provider: LlmProviderPreset): { status: string; st
   if (!profile.base_url.trim()) {
     return { status: t('settings.providerStatus.missing'), statusClass: 'muted' }
   }
-  if (llmProfileNeedsApiKey(profile) && !profile.api_key.trim()) {
+  const hasStoredKey = provider === llmProviderPreset.value && llmApiKeyStored.value
+  if (llmProfileNeedsApiKey(profile) && !profile.api_key.trim() && !hasStoredKey) {
     return { status: t('settings.providerStatus.missingKey'), statusClass: 'warning' }
   }
   if (!profile.model.trim()) {
@@ -2249,23 +2258,6 @@ const llmModelDiscoveryKey = (): string => JSON.stringify([
   form.llm.timeout,
 ])
 
-const firstString = (source: SettingsPatch, keys: string[]): string | undefined => {
-  for (const key of keys) {
-    const value = source[key]
-    if (typeof value === 'string') return value
-  }
-  return undefined
-}
-
-const firstNumber = (source: SettingsPatch, keys: string[]): number | undefined => {
-  for (const key of keys) {
-    const value = source[key]
-    if (typeof value === 'number' && Number.isFinite(value)) return value
-    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value)
-  }
-  return undefined
-}
-
 const normalizeLlmProviderValue = (value: string | undefined, baseUrl = ''): LlmProviderPreset => {
   const normalized = value?.trim().toLowerCase()
   if (normalized && normalized in LLM_PROVIDER_BASE_URLS) return normalized as LlmProviderPreset
@@ -2277,150 +2269,6 @@ const normalizeLlmProviderValue = (value: string | undefined, baseUrl = ''): Llm
   if (normalized === 'lm-studio' || normalized === 'lm_studio') return 'lmstudio'
   if (normalized === 'azure' || normalized === 'azure-compatible' || normalized === 'openai-compatible') return 'custom'
   return inferLlmProviderPreset(baseUrl)
-}
-
-const normalizeLlmProfilePayload = (payload: unknown): SettingsPatch | null => {
-  if (!isPlainRecord(payload)) return null
-  if (isPlainRecord(payload.llm)) return { llm: payload.llm }
-
-  const nestedProfile = ['connectionProfile', 'profile', 'preset', 'api', 'connection']
-    .map((key) => payload[key])
-    .find(isPlainRecord)
-  const source = nestedProfile || payload
-  const llm: SettingsPatch = {}
-  const stringFields: Array<[keyof typeof form.llm, string[]]> = [
-    ['provider', ['provider', 'llmProvider', 'providerPreset']],
-    ['base_url', ['base_url', 'baseUrl', 'api_url', 'apiUrl', 'server_url', 'serverUrl', 'endpoint']],
-    ['api_key', ['api_key', 'apiKey', 'key', 'token', 'secret']],
-    ['model', ['model', 'model_name', 'modelName', 'chat_model', 'chatModel']],
-  ]
-  for (const [target, keys] of stringFields) {
-    const value = firstString(source, keys)
-        if (typeof value === 'string') {
-          llm[target] = target === 'base_url'
-            ? normalizeOpenAiBaseUrl(value)
-            : target === 'provider'
-              ? normalizeLlmProviderValue(value, firstString(source, ['base_url', 'baseUrl', 'endpoint']) || '')
-              : value
-        }
-  }
-
-  const numberFields: Array<[keyof typeof form.llm, string[]]> = [
-    ['timeout', ['timeout', 'request_timeout', 'requestTimeout']],
-    ['context_max_tokens', ['context_max_tokens', 'contextMaxTokens', 'context_size', 'contextSize', 'max_context', 'maxContext', 'openai_max_context', 'openaiMaxContext']],
-    ['default_max_output_tokens', ['default_max_output_tokens', 'max_output_tokens', 'maxOutputTokens', 'max_tokens', 'maxTokens', 'openai_max_tokens', 'openaiMaxTokens']],
-    ['temperature', ['temperature', 'temp']],
-    ['top_p', ['top_p', 'topP']],
-    ['top_k', ['top_k', 'topK']],
-    ['min_p', ['min_p', 'minP']],
-    ['frequency_penalty', ['frequency_penalty', 'frequencyPenalty']],
-    ['presence_penalty', ['presence_penalty', 'presencePenalty']],
-    ['repetition_penalty', ['repetition_penalty', 'repetitionPenalty', 'repeat_penalty', 'repeatPenalty', 'rep_penalty', 'repPenalty']],
-  ]
-  for (const [target, keys] of numberFields) {
-    const value = firstNumber(source, keys)
-    if (typeof value === 'number') llm[target] = value
-  }
-
-  return Object.keys(llm).length ? { llm } : null
-}
-
-const triggerLlmImport = () => {
-  llmImportInput.value?.click()
-}
-
-const saveJsonDownload = (payload: unknown, filename: string) => {
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  window.setTimeout(() => URL.revokeObjectURL(url), 0)
-}
-
-const buildLlmProfilePayload = (useCurrentValues: boolean) => {
-  const profile = useCurrentValues ? snapshotLlmProfile() : defaultLlmProfile('custom')
-  return {
-    kind: 'yuizaki-llm-profile',
-    version: 1,
-    credentialMode: 'provider-profile',
-    provider: profile.provider,
-    connectionProfile: {
-      name: useCurrentValues ? activeLlmProfileLabel.value : t('common.custom'),
-      credentialMode: 'provider-profile',
-      provider: profile.provider,
-      baseUrl: normalizeOpenAiBaseUrl(profile.base_url),
-      apiKey: profile.api_key,
-      modelName: profile.model,
-      timeout: profile.timeout,
-      contextMaxTokens: profile.context_max_tokens,
-      maxTokens: profile.default_max_output_tokens,
-      temperature: profile.temperature,
-      topP: profile.top_p,
-      topK: profile.top_k,
-      minP: profile.min_p,
-      frequencyPenalty: profile.frequency_penalty,
-      presencePenalty: profile.presence_penalty,
-      repetitionPenalty: profile.repetition_penalty,
-    },
-  }
-}
-
-const downloadLlmProfileTemplate = () => {
-  saveJsonDownload(buildLlmProfilePayload(false), 'yuizaki-llm-profile-template.json')
-  ElMessage.success(t('settings.messages.templateOk'))
-}
-
-const applyImportedSettings = async (payload: unknown) => {
-  const normalized = normalizeLlmProfilePayload(payload)
-  if (!normalized) {
-    ElMessage.error(t('settings.messages.importInvalid'))
-    return
-  }
-  llmImporting.value = true
-  try {
-    if (!(await flushPendingSave())) return
-    const result = await settingsClient.importPayload(normalized)
-    lastSavedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
-    lastApplied.value = result.runtime_applied || result.runtime_changed || []
-    await loadSettings()
-    hydrateForm()
-    scheduleLlmModelDiscovery({ manual: false })
-    ElMessage.success(t('settings.messages.importOk'))
-  } catch (error) {
-    ElMessage.error(t('settings.messages.importFailed', { message: describeFailure(error, t('common.error.unknown'))}))
-  } finally {
-    llmImporting.value = false
-  }
-}
-
-const handleLlmImportFile = async (event: Event) => {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-  if (!file) return
-  try {
-    const payload = JSON.parse(await file.text()) as unknown
-    await applyImportedSettings(payload)
-  } catch (error) {
-    ElMessage.error(t('settings.messages.importFailed', { message: describeFailure(error, t('settings.messages.importInvalid'))}))
-  }
-}
-
-const exportLlmProfile = async () => {
-  llmExporting.value = true
-  try {
-    const stamp = new Date().toISOString().slice(0, 10)
-    saveJsonDownload(buildLlmProfilePayload(true), `yuizaki-llm-profile-${stamp}.json`)
-    ElMessage.success(t('settings.messages.exportOk'))
-  } catch (error) {
-    ElMessage.error(t('settings.messages.exportFailed', { message: describeFailure(error, t('common.error.unknown'))}))
-  } finally {
-    llmExporting.value = false
-  }
 }
 
 const refreshBackendTokenStatus = async () => {
@@ -3099,31 +2947,46 @@ const hydrateForm = () => {
   if (!settings.value) return
   const s = settings.value
   suppressModelDiscovery = true
+  const migrationVersionKey = 'yuizaki.llm.inference-defaults-version'
+  const shouldMigrateLegacyDefaults = window.localStorage.getItem(migrationVersionKey) !== 'gpt-6.1-sol-v1'
+  let migratedLegacyDefaults = false
+  let activeMigrationPatch: Partial<LlmProfile> = {}
 
   if (s.llm) {
     clearReactiveRecord(llmProfiles as Record<string, unknown>)
     for (const [key, profile] of Object.entries(s.llm.profiles || {})) {
       const provider = normalizeLlmProviderValue(key, profile?.base_url || '')
-      llmProfiles[provider] = sanitizeLlmProfile(provider, profile as Partial<LlmProfile>)
+      const normalizedProfile = sanitizeLlmProfile(provider, profile as Partial<LlmProfile>)
+      const migrationPatch = shouldMigrateLegacyDefaults
+        ? migrateLegacyLlmDefaults(normalizedProfile as unknown as Record<string, unknown>)
+        : {}
+      Object.assign(normalizedProfile, migrationPatch)
+      migratedLegacyDefaults ||= Object.keys(migrationPatch).length > 0
+      llmProfiles[provider] = normalizedProfile
     }
     const activeProvider = normalizeLlmProviderValue(s.llm.provider, s.llm.base_url)
-    const activeProfile = sanitizeLlmProfile(activeProvider, {
+    const normalizedActiveProfile = sanitizeLlmProfile(activeProvider, {
       ...(llmProfiles[activeProvider] || {}),
       provider: activeProvider,
       base_url: s.llm.base_url ?? '',
       api_key: s.llm.api_key ?? '',
       model: s.llm.model ?? '',
-      temperature: s.llm.temperature ?? 1.2,
-      top_p: s.llm.top_p ?? 0.9,
-      top_k: s.llm.top_k ?? 500,
-      min_p: s.llm.min_p ?? 0,
-      frequency_penalty: s.llm.frequency_penalty ?? 0.2,
-      presence_penalty: s.llm.presence_penalty ?? 0,
-      repetition_penalty: s.llm.repetition_penalty ?? 1,
-      timeout: s.llm.timeout ?? 60,
+      temperature: s.llm.temperature ?? DEFAULT_LLM_TEMPERATURE,
+      top_p: s.llm.top_p ?? DEFAULT_LLM_TOP_P,
+      top_k: s.llm.top_k ?? DEFAULT_LLM_TOP_K,
+      min_p: s.llm.min_p ?? DEFAULT_LLM_MIN_P,
+      frequency_penalty: s.llm.frequency_penalty ?? DEFAULT_LLM_FREQUENCY_PENALTY,
+      presence_penalty: s.llm.presence_penalty ?? DEFAULT_LLM_PRESENCE_PENALTY,
+      repetition_penalty: s.llm.repetition_penalty ?? DEFAULT_LLM_REPETITION_PENALTY,
+      timeout: s.llm.timeout ?? DEFAULT_LLM_TIMEOUT_SECONDS,
       context_max_tokens: s.llm.context_max_tokens ?? DEFAULT_LLM_CONTEXT_MAX_TOKENS,
       default_max_output_tokens: s.llm.default_max_output_tokens ?? DEFAULT_LLM_MAX_OUTPUT_TOKENS,
     })
+    activeMigrationPatch = shouldMigrateLegacyDefaults
+      ? migrateLegacyLlmDefaults(normalizedActiveProfile as unknown as Record<string, unknown>) as Partial<LlmProfile>
+      : {}
+    const activeProfile = { ...normalizedActiveProfile, ...activeMigrationPatch }
+    migratedLegacyDefaults ||= Object.keys(activeMigrationPatch).length > 0
     llmProfiles[activeProvider] = activeProfile
     llmProviderPreset.value = activeProvider
     applyLlmProfileToForm(activeProfile)
@@ -3135,6 +2998,10 @@ const hydrateForm = () => {
     form.llm.vision_timeout = s.llm.vision_timeout ?? 30
     form.llm.vision_detail = s.llm.vision_detail ?? 'low'
     llmModelAutoSelected.value = false
+    if (shouldMigrateLegacyDefaults) {
+      if (migratedLegacyDefaults) saveActiveLlmPatch(activeMigrationPatch)
+      window.localStorage.setItem(migrationVersionKey, 'gpt-6.1-sol-v1')
+    }
   }
 
   if (s.tts) {

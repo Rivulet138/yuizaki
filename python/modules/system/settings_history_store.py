@@ -14,14 +14,14 @@ import os
 import tempfile
 import threading
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ..core.paths import data_dir_from_env
-from .settings_store import scrub_sensitive_settings
-from .settings_schema import PersistedSettingsSchema
 from ..core.file_lock import exclusive_file_lock
+from ..core.paths import data_dir_from_env
+from .settings_schema import PersistedSettingsSchema
+from .settings_store import scrub_sensitive_settings
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,7 @@ class SettingsHistoryStore:
         return snapshots[-MAX_SETTINGS_SNAPSHOTS:]
 
     def _quarantine_corrupt_store(self) -> None:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         backup = self.storage_path.with_name(f"{self.storage_path.name}.corrupt-{timestamp}")
         try:
             os.replace(self.storage_path, backup)

@@ -5,7 +5,6 @@ import json
 
 import pytest
 from fastapi import HTTPException
-
 from modules.system.dynamic_config import DynamicConfigManager
 from modules.system.settings_api import SettingsAPI
 from modules.system.settings_history_store import (

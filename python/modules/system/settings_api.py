@@ -9,14 +9,12 @@ import os
 import socket
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
-from pathlib import Path
-from typing import Annotated, Protocol, TypeGuard, cast
 from ipaddress import ip_address
+from typing import Annotated, Protocol, TypeGuard, cast
 from urllib.parse import urljoin, urlsplit
 
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from ..llm.client import fetch_available_models, redact_error_text
@@ -26,15 +24,16 @@ from ..llm.providers import (
     normalize_llm_provider,
 )
 from ..tts.capabilities import resolve_tts_provider_capabilities
-from .api_security import ensure_safe_relative_json_path
 from .backend_api_auth import verify_backend_api_authorization
 from .dynamic_config import redact_sensitive_config_value
 from .runtime_config import RuntimeConfig
-from .service_discovery import discover_genie_tts_characters, discover_local_runtime_candidates
+from .service_discovery import (
+    discover_genie_tts_characters,
+    discover_local_runtime_candidates,
+)
+from .settings_history_store import SettingsHistoryStore, SettingsHistoryStoreCorrupt
 from .settings_models import (
-    SettingsExportResponse,
     SettingsHistoryResponse,
-    SettingsImportResponse,
     SettingsMetadataResponse,
     SettingsMutationResponse,
     SettingsRollbackResponse,
@@ -48,7 +47,6 @@ from .settings_schema import (
     validation_errors_to_detail,
 )
 from .settings_store import SETTINGS_SECRET_MASK
-from .settings_history_store import SettingsHistoryStore, SettingsHistoryStoreCorrupt
 
 logger = logging.getLogger(__name__)
 
@@ -253,8 +251,6 @@ class SettingsStoreProtocol(Protocol):
     def replace(self, settings: dict[str, object]) -> None: ...
     def save(self) -> None: ...
     def get(self, key: str) -> object | None: ...
-    def export_managed(self, relative_path: str) -> Path: ...
-    def import_managed(self, relative_path: str) -> Path: ...
     def get_metadata(self) -> dict[str, object]: ...
     def reload_provider_credentials(self, credentials: dict[str, str]) -> int: ...
 
@@ -285,99 +281,7 @@ def _is_settings_map(value: object) -> TypeGuard[dict[str, object]]:
     return all(isinstance(key, str) for key in value_map)
 
 
-def _first_string(source: dict[str, object], keys: tuple[str, ...]) -> str | None:
-    for key in keys:
-        value = source.get(key)
-        if isinstance(value, str):
-            return value
-    return None
-
-
-def _first_number(source: dict[str, object], keys: tuple[str, ...]) -> float | int | None:
-    for key in keys:
-        value = source.get(key)
-        if isinstance(value, (int, float)):
-            return value
-        if isinstance(value, str):
-            clean_value = value.strip()
-            if not clean_value:
-                continue
-            try:
-                return float(clean_value)
-            except ValueError:
-                continue
-    return None
-
-
-def normalize_inline_llm_import_payload(payload: dict[str, object]) -> dict[str, object]:
-    known_sections = set(PersistedSettingsSchema.model_fields)
-    if any(isinstance(payload.get(key), dict) for key in known_sections):
-        return payload
-
-    nested_source: dict[str, object] | None = None
-    for key in ("connectionProfile", "profile", "preset", "api", "connection"):
-        value = payload.get(key)
-        if isinstance(value, dict) and all(isinstance(item_key, str) for item_key in value):
-            nested_source = cast(dict[str, object], value)
-            break
-
-    source = nested_source or payload
-    llm: dict[str, object] = {}
-    string_fields: tuple[tuple[str, tuple[str, ...]], ...] = (
-        ("provider", ("provider", "llmProvider", "providerPreset")),
-        ("base_url", ("base_url", "baseUrl", "api_url", "apiUrl", "server_url", "serverUrl", "endpoint")),
-        ("api_key", ("api_key", "apiKey", "key", "token", "secret")),
-        ("model", ("model", "model_name", "modelName", "chat_model", "chatModel")),
-    )
-    for target, keys in string_fields:
-        value = _first_string(source, keys)
-        if value is not None:
-            llm[target] = value
-
-    number_fields: tuple[tuple[str, tuple[str, ...]], ...] = (
-        ("timeout", ("timeout", "request_timeout", "requestTimeout")),
-        (
-            "context_max_tokens",
-            (
-                "context_max_tokens",
-                "contextMaxTokens",
-                "context_size",
-                "contextSize",
-                "max_context",
-                "maxContext",
-                "openai_max_context",
-                "openaiMaxContext",
-            ),
-        ),
-        (
-            "default_max_output_tokens",
-            (
-                "default_max_output_tokens",
-                "max_output_tokens",
-                "maxOutputTokens",
-                "max_tokens",
-                "maxTokens",
-                "openai_max_tokens",
-                "openaiMaxTokens",
-            ),
-        ),
-        ("temperature", ("temperature", "temp")),
-        ("top_p", ("top_p", "topP")),
-        ("top_k", ("top_k", "topK")),
-        ("min_p", ("min_p", "minP")),
-        ("frequency_penalty", ("frequency_penalty", "frequencyPenalty")),
-        ("presence_penalty", ("presence_penalty", "presencePenalty")),
-        ("repetition_penalty", ("repetition_penalty", "repetitionPenalty", "repeat_penalty", "repeatPenalty", "rep_penalty", "repPenalty")),
-    )
-    for target, keys in number_fields:
-        value = _first_number(source, keys)
-        if value is not None:
-            llm[target] = value
-
-    return {"llm": llm} if llm else payload
-
-
-def get_settings_api() -> "SettingsAPI":
+def get_settings_api() -> SettingsAPI:
     if _settings_api is None:
         raise HTTPException(status_code=503, detail="Settings API not initialized")
     return _settings_api
@@ -698,52 +602,6 @@ class SettingsAPI:
     async def get_metadata(self) -> SettingsMetadataResponse:
         metadata = await self._run_store_call(self.settings_store.get_metadata)
         return SettingsMetadataResponse.model_validate(metadata)
-
-    async def export_settings(self, filepath: str) -> SettingsExportResponse:
-        relative_path = ensure_safe_relative_json_path(filepath)
-        async with self._store_lock:
-            def _export() -> Path:
-                self.settings_store.replace(self._validated_settings_dump())
-                return self.settings_store.export_managed(relative_path)
-
-            target = await asyncio.to_thread(_export)
-        return SettingsExportResponse(filepath=str(target), status="exported")
-
-    async def import_settings(self, filepath: str) -> SettingsImportResponse:
-        relative_path = ensure_safe_relative_json_path(filepath)
-        source = cast(Path, await self._run_store_call(lambda: self.settings_store.import_managed(relative_path)))
-
-        def _load_import_payload() -> object:
-            with open(source, "r", encoding="utf-8") as f:
-                return cast(object, json.load(f))
-
-        loaded = await asyncio.to_thread(_load_import_payload)
-        return await self.import_settings_payload(loaded, filepath=str(source))
-
-    async def import_settings_payload(self, loaded: object, filepath: str = "inline-upload") -> SettingsImportResponse:
-        if not isinstance(loaded, dict):
-            raise HTTPException(status_code=422, detail="Settings import payload must be a JSON object")
-        loaded_map = cast(dict[object, object], loaded)
-        if not all(isinstance(key, str) for key in loaded_map):
-            raise HTTPException(status_code=422, detail="Settings import payload must be a JSON object")
-        raw_imported = cast(
-            dict[str, object],
-            _drop_secret_placeholders(normalize_inline_llm_import_payload(cast(dict[str, object], loaded_map))),
-        )
-        imported: dict[str, object] = merge_settings(await self._validated_settings_dump_async(), dict(raw_imported))
-        try:
-            _clear_changed_connection_secrets(await self._validated_settings_dump_async(), imported, raw_imported)
-            next_settings = validate_persisted_settings(imported).model_dump()
-            runtime_updates = self._validated_runtime_updates(next_settings)
-        except ValidationError as exc:
-            raise HTTPException(status_code=422, detail=validation_errors_to_detail(exc)) from exc
-        runtime_result = await self._commit_settings(next_settings, runtime_updates)
-        return SettingsImportResponse(
-            filepath=filepath,
-            status="imported",
-            runtime_applied=runtime_result["runtime_applied"],
-            runtime_changed=runtime_result["runtime_changed"],
-        )
 
     async def get_change_history(self, key: str | None = None, limit: int = 10) -> SettingsHistoryResponse:
         history = self.dynamic_config.get_history(key, limit)
@@ -1095,20 +953,6 @@ async def reload_provider_credentials(request: Request, api: SettingsAPIDependen
 @router.get("/history", response_model=SettingsHistoryResponse)
 async def get_history(api: SettingsAPIDependency, key: str | None = None, limit: int = 10):
     return await api.get_change_history(key, limit)
-
-
-@router.get("/export")
-async def export_current_settings(api: SettingsAPIDependency):
-    settings = await api.get_all_settings()
-    return JSONResponse(
-        content=settings.model_dump(),
-        headers={"Content-Disposition": 'attachment; filename="yuizaki-llm-settings.json"'},
-    )
-
-
-@router.post("/import", response_model=SettingsImportResponse)
-async def import_settings_payload(payload: dict[str, object], api: SettingsAPIDependency):
-    return await api.import_settings_payload(payload)
 
 
 @router.delete("/history", response_model=SettingsMutationResponse)

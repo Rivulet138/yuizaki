@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from modules.llm import client as llm_client_module
 from modules.llm.client import LLMClient
 
@@ -23,7 +22,7 @@ class _RecordingHttp:
     def __init__(self) -> None:
         self.requests: list[dict] = []
 
-    async def post(self, _url: str, *, json: dict, headers: dict) -> _FakeResponse:  # noqa: A002 - mirrors httpx
+    async def post(self, _url: str, *, json: dict, headers: dict) -> _FakeResponse:
         self.requests.append(json)
         return _FakeResponse({
             "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
@@ -136,3 +135,33 @@ async def test_complete_chat_keeps_short_conversations_intact(small_context, mon
     sent = http.requests[-1]["messages"]
     assert [message["role"] for message in sent] == ["system", "user", "assistant", "user"]
     assert json.dumps(sent, ensure_ascii=False).count("hello") == 1
+
+
+def test_gpt_6_models_use_reasoning_defaults_without_sampling_parameters() -> None:
+    body: dict[str, object] = {"temperature": 1.0, "top_p": 1.0}
+    llm_client_module._apply_generation_options(
+        body,
+        model="gpt-6.1-sol",
+        temperature=1.0,
+        top_p=1.0,
+        top_k=40,
+        min_p=0.1,
+        frequency_penalty=0.2,
+        presence_penalty=0.3,
+        repetition_penalty=1.1,
+    )
+
+    assert body["reasoning_effort"] == "medium"
+    assert "temperature" not in body
+    assert "top_p" not in body
+    assert not {"top_k", "min_p", "frequency_penalty", "presence_penalty", "repetition_penalty"}.intersection(body)
+
+
+def test_non_gpt_6_models_keep_sampling_parameters() -> None:
+    body: dict[str, object] = {}
+    llm_client_module._apply_generation_options(
+        body, model="other-model", temperature=0.7, top_p=0.9
+    )
+
+    assert body["temperature"] == 0.7
+    assert body["top_p"] == 0.9

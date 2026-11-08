@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from modules.llm import capabilities
 from modules.llm.capabilities import (
     get_model_capabilities,
@@ -64,6 +63,15 @@ def test_registered_model_reports_limits_and_vision() -> None:
     assert infer_model_vision_support("chatgpt", "gpt-4o") == "supported"
     # OpenAI-style "models/" prefixes are normalized before lookup.
     assert get_model_limits("chatgpt", "models/gpt-4o")["context_window_tokens"] == 128000
+
+
+def test_gpt_6_1_sol_limits_match_published_model_limits() -> None:
+    for provider in ("chatgpt", "custom"):
+        assert get_model_limits(provider, "gpt-6.1-sol") == {
+            "context_window_tokens": 1050000,
+            "max_output_tokens": 128000,
+        }
+        assert infer_model_vision_support(provider, "gpt-6.1-sol") == "supported"
 
 
 def test_legacy_electron_path_is_used_when_the_package_copy_is_absent(monkeypatch, tmp_path) -> None:

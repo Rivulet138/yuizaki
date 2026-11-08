@@ -4,15 +4,24 @@ from copy import deepcopy
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+)
 
 from ..core.config import (
     DEFAULT_QDRANT_DOCKER_CONTAINER,
     DEFAULT_QDRANT_DOCKER_IMAGE,
     DEFAULT_QDRANT_DOCKER_VOLUME,
     DEFAULT_TTS_LANG,
-    config as env_config,
     normalize_qdrant_docker_image,
+)
+from ..core.config import (
+    config as env_config,
 )
 from ..llm.providers import normalize_llm_base_url, normalize_llm_provider
 

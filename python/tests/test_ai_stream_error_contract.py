@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-
 from modules.agent.turn_service import TurnClaimLostError, TurnIdentityConflictError
 from routes.ai_api import _stream_error_contract
 
@@ -21,7 +19,7 @@ def test_stream_error_contract_marks_identity_conflicts_non_retryable() -> None:
 
 def test_stream_error_contract_distinguishes_timeout_and_claim_loss() -> None:
     timeout = _stream_error_contract(
-        asyncio.TimeoutError(), request_id="request-1", turn_id="turn-1"
+        TimeoutError(), request_id="request-1", turn_id="turn-1"
     )
     claim_lost = _stream_error_contract(
         TurnClaimLostError("claim expired"), request_id="request-1", turn_id="turn-1"

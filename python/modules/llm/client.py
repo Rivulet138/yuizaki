@@ -8,33 +8,37 @@ import json
 import logging
 import re
 import time
-from collections.abc import Iterable, Mapping
-from typing import Any, AsyncIterator, NoReturn, Optional
+from collections.abc import AsyncIterator, Iterable, Mapping
+from typing import Any, NoReturn
 
 import httpx
 
 from ..core.config import config
 from ..core.state import Generation, GenerationManager
+from ..pet_control import (
+    IncrementalJsonReplyDecoder,
+    build_pet_control_response_format,
+    extract_pet_control_payload,
+    filter_pet_control_payload,
+    merge_messages_with_pet_control_prompt,
+)
 from ..system.voice_diagnostics import VoiceDiagnostics
+from .capabilities import get_model_limits
+from .context_window import (
+    TokenEstimator,
+    build_and_truncate_layered_context,
+    message_content_to_text,
+)
 from .providers import (
     LlmCredentialError,
     build_llm_auth_headers,
     is_claude_provider,
-    llm_protocol,
-    llm_request_url,
     llm_chat_url,
     llm_models_url,
+    llm_protocol,
+    llm_request_url,
     normalize_llm_base_url,
     normalize_llm_provider,
-)
-from .context_window import TokenEstimator, build_and_truncate_layered_context, message_content_to_text
-from .capabilities import get_model_limits
-from ..pet_control import (
-    build_pet_control_response_format,
-    extract_pet_control_payload,
-    filter_pet_control_payload,
-    IncrementalJsonReplyDecoder,
-    merge_messages_with_pet_control_prompt,
 )
 
 logger = logging.getLogger("yuizaki.llm")
@@ -303,7 +307,7 @@ def _multimodal_compat_retry_body(body: dict[str, Any], response_text: str) -> d
     return retry_body
 
 
-def _apply_pet_control_response_format(body: dict[str, Any], pet_control_context: Optional[dict[str, Any]]) -> None:
+def _apply_pet_control_response_format(body: dict[str, Any], pet_control_context: dict[str, Any] | None) -> None:
     if pet_control_context:
         body["response_format"] = build_pet_control_response_format(pet_control_context)
 
@@ -747,7 +751,7 @@ async def _score_summary_with_llm(
     model: str,
     summary_text: str,
     provider: str = "custom",
-) -> Optional[dict[str, int]]:
+) -> dict[str, int] | None:
     payload: dict[str, Any] = {
         "model": model,
         "messages": _build_quality_score_messages(summary_text),
@@ -792,7 +796,7 @@ async def _score_summary_with_llm(
     return {k: max(0, min(100, int(parsed[k]))) for k in keys}
 
 
-def _parse_sse_data(line: str) -> Optional[str]:
+def _parse_sse_data(line: str) -> str | None:
     """Parse SSE data line. Returns the JSON string or None."""
     if not line.startswith("data:"):
         return None
@@ -826,12 +830,12 @@ async def _iter_claude_text_deltas(resp: httpx.Response) -> AsyncIterator[str]:
             raise RuntimeError(f"Claude stream error: {message}")
 
 
-def _clean_model_override(model: Optional[str]) -> str | None:
+def _clean_model_override(model: str | None) -> str | None:
     value = str(model or "").strip()
     return value or None
 
 
-def _clean_reasoning_effort(reasoning_effort: Optional[str]) -> str | None:
+def _clean_reasoning_effort(reasoning_effort: str | None) -> str | None:
     value = str(reasoning_effort or "").strip().lower()
     if value in {"", "default", "none"}:
         return None
@@ -840,7 +844,7 @@ def _clean_reasoning_effort(reasoning_effort: Optional[str]) -> str | None:
     return None
 
 
-def _clean_thinking_mode(thinking: Optional[str]) -> str | None:
+def _clean_thinking_mode(thinking: str | None) -> str | None:
     value = str(thinking or "").strip().lower()
     return value if value in {"enabled", "disabled"} else None
 
@@ -848,30 +852,41 @@ def _clean_thinking_mode(thinking: Optional[str]) -> str | None:
 def _apply_generation_options(
     body: dict[str, Any],
     *,
-    model: Optional[str] = None,
-    temperature: Optional[float] = None,
-    top_p: Optional[float] = None,
-    top_k: Optional[int] = None,
-    min_p: Optional[float] = None,
-    frequency_penalty: Optional[float] = None,
-    presence_penalty: Optional[float] = None,
-    repetition_penalty: Optional[float] = None,
-    reasoning_effort: Optional[str] = None,
-    thinking: Optional[str] = None,
+    model: str | None = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    top_k: int | None = None,
+    min_p: float | None = None,
+    frequency_penalty: float | None = None,
+    presence_penalty: float | None = None,
+    repetition_penalty: float | None = None,
+    reasoning_effort: str | None = None,
+    thinking: str | None = None,
 ) -> None:
     model_override = _clean_model_override(model)
     if model_override:
         body["model"] = model_override
-    if temperature is not None:
-        body["temperature"] = float(temperature)
-    if top_p is not None:
-        body["top_p"] = float(top_p)
-    _apply_optional_generation_number(body, "top_k", top_k, integer=True)
-    _apply_optional_generation_number(body, "min_p", min_p)
-    _apply_optional_generation_number(body, "frequency_penalty", frequency_penalty)
-    _apply_optional_generation_number(body, "presence_penalty", presence_penalty)
-    _apply_optional_generation_number(body, "repetition_penalty", repetition_penalty)
+    model_name = (model_override or config.llm.model or "").lower().removeprefix("models/")
+    reasoning_model = model_name.startswith("gpt-6.1-sol")
     clean_reasoning = _clean_reasoning_effort(reasoning_effort)
+    if reasoning_model and clean_reasoning is None:
+        clean_reasoning = "medium"
+    if not reasoning_model:
+        if temperature is not None:
+            body["temperature"] = float(temperature)
+        if top_p is not None:
+            body["top_p"] = float(top_p)
+    else:
+        body.pop("temperature", None)
+        body.pop("top_p", None)
+        for field in ("top_k", "min_p", "frequency_penalty", "presence_penalty", "repetition_penalty"):
+            body.pop(field, None)
+    if not reasoning_model:
+        _apply_optional_generation_number(body, "top_k", top_k, integer=True)
+        _apply_optional_generation_number(body, "min_p", min_p)
+        _apply_optional_generation_number(body, "frequency_penalty", frequency_penalty)
+        _apply_optional_generation_number(body, "presence_penalty", presence_penalty)
+        _apply_optional_generation_number(body, "repetition_penalty", repetition_penalty)
     if clean_reasoning:
         body["reasoning_effort"] = clean_reasoning
     clean_thinking = _clean_thinking_mode(thinking)
@@ -938,7 +953,7 @@ def _effective_model_budget(
     return min(value, limit)
 
 
-def _should_retry_empty_reasoning_response(data: dict[str, Any], max_output_tokens: Optional[int]) -> bool:
+def _should_retry_empty_reasoning_response(data: dict[str, Any], max_output_tokens: int | None) -> bool:
     if max_output_tokens is None or int(max_output_tokens) >= _EMPTY_REASONING_RETRY_MIN_TOKENS:
         return False
 
@@ -1002,7 +1017,7 @@ class LLMClient:
         normalized_detail = str(image_detail or "auto").strip().lower()
         self.image_detail = normalized_detail if normalized_detail in {"low", "high", "auto", "original"} else "auto"
         self.diagnostics = diagnostics or VoiceDiagnostics()
-        self._http: Optional[httpx.AsyncClient] = None
+        self._http: httpx.AsyncClient | None = None
         self._tool_calls_supported: bool | None = None
         self._preconnect_lock = asyncio.Lock()
         self._preconnect_task: asyncio.Task[bool] | None = None
@@ -1155,18 +1170,18 @@ class LLMClient:
         gen: Generation,
         mgr: GenerationManager,
         messages: list[dict[str, Any]],
-        max_output_tokens: Optional[int] = None,
-        pet_control_context: Optional[dict[str, Any]] = None,
-        model: Optional[str] = None,
-        temperature: Optional[float] = None,
-        top_p: Optional[float] = None,
-        top_k: Optional[int] = None,
-        min_p: Optional[float] = None,
-        frequency_penalty: Optional[float] = None,
-        presence_penalty: Optional[float] = None,
-        repetition_penalty: Optional[float] = None,
-        reasoning_effort: Optional[str] = None,
-        thinking: Optional[str] = None,
+        max_output_tokens: int | None = None,
+        pet_control_context: dict[str, Any] | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        repetition_penalty: float | None = None,
+        reasoning_effort: str | None = None,
+        thinking: str | None = None,
     ) -> None:
         """
         Stream chat completion from LLM.
@@ -1244,7 +1259,7 @@ class LLMClient:
                         self.rewrite_session_summary(mgr, sid, source="auto"),
                         timeout=1.2,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     mgr.record_summary_audit(sid, source="auto", outcome="timeout", detail="background timeout")
                     logger.warning("[%s/%s] summary rewrite timeout", sid, gid)
                 except Exception as exc:
@@ -1340,7 +1355,7 @@ class LLMClient:
                     mgr.append_history(sid, "assistant", final_reply)
 
                 if pet_control:
-                    setattr(gen, "pet_control", pet_control)
+                    gen.pet_control = pet_control
                     await _safe_send(ws, gen, {
                         "type": "pet_control",
                         "session_id": sid,
@@ -1403,7 +1418,7 @@ class LLMClient:
                     gen.tokens = [final_reply]
                     mgr.append_history(sid, "assistant", final_reply)
                 if pet_control:
-                    setattr(gen, "pet_control", pet_control)
+                    gen.pet_control = pet_control
                     await _safe_send(ws, gen, {
                         "type": "pet_control",
                         "session_id": sid,
@@ -1509,7 +1524,7 @@ class LLMClient:
                 mgr.append_history(sid, "assistant", final_reply)
 
             if pet_control:
-                setattr(gen, "pet_control", pet_control)
+                gen.pet_control = pet_control
                 await _safe_send(ws, gen, {
                     "type": "pet_control",
                     "session_id": sid,
@@ -1550,19 +1565,19 @@ class LLMClient:
         self,
         messages: list[dict[str, Any]],
         *,
-        max_output_tokens: Optional[int] = None,
-        pet_control_context: Optional[dict[str, Any]] = None,
-        tools: Optional[list[dict[str, Any]]] = None,
-        model: Optional[str] = None,
-        temperature: Optional[float] = None,
-        top_p: Optional[float] = None,
-        top_k: Optional[int] = None,
-        min_p: Optional[float] = None,
-        frequency_penalty: Optional[float] = None,
-        presence_penalty: Optional[float] = None,
-        repetition_penalty: Optional[float] = None,
-        reasoning_effort: Optional[str] = None,
-        thinking: Optional[str] = None,
+        max_output_tokens: int | None = None,
+        pet_control_context: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        repetition_penalty: float | None = None,
+        reasoning_effort: str | None = None,
+        thinking: str | None = None,
     ) -> dict[str, Any]:
         if not self._http:
             raise RuntimeError("LLM client not connected")
@@ -1813,7 +1828,8 @@ class LLMClient:
                     else:
                         quality_detail = "quality=rule_fallback(empty_llm_score)"
                 except Exception as exc:
-                    quality_detail = f"quality=rule_fallback({exc})"
+                    error_detail = redact_error_text(str(exc), secrets=[self.api_key])
+                    quality_detail = f"quality=rule_fallback({error_detail})"
 
         mgr.record_summary_audit(
             session_id,

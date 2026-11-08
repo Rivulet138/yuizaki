@@ -4,7 +4,9 @@ import {
   PYTHON_LOCAL_DISCOVERY_TIMEOUT_MS,
   PYTHON_PING_ATTEMPT_TIMEOUT_MS,
   PYTHON_PROXY_TIMEOUT_MS,
+  PYTHON_SERVICE_TEST_TIMEOUT_MS,
   PYTHON_SESSION_READ_TIMEOUT_MS,
+  PYTHON_TTS_CONNECTION_TEST_TIMEOUT_MS,
   resolvePythonProxyRequestTimeout,
   resolvePythonProxyTimeout,
 } from './python-proxy-timeout'
@@ -19,6 +21,12 @@ describe('python proxy timeouts', () => {
     expect(resolvePythonProxyTimeout('/api/settings/local-discovery')).toBe(PYTHON_LOCAL_DISCOVERY_TIMEOUT_MS)
     expect(resolvePythonProxyTimeout('/api/sessions')).toBe(PYTHON_SESSION_READ_TIMEOUT_MS)
     expect(resolvePythonProxyTimeout('/api/ping')).toBe(PYTHON_PING_ATTEMPT_TIMEOUT_MS)
+  })
+
+  it('gives provider connection tests a long proxy budget', () => {
+    expect(resolvePythonProxyTimeout('/api/settings/test/llm')).toBe(PYTHON_SERVICE_TEST_TIMEOUT_MS)
+    expect(resolvePythonProxyTimeout('/api/settings/test/svc')).toBe(PYTHON_SERVICE_TEST_TIMEOUT_MS)
+    expect(resolvePythonProxyTimeout('/api/settings/test/tts')).toBe(PYTHON_TTS_CONNECTION_TEST_TIMEOUT_MS)
   })
 
   it('waits long enough for live model discovery', () => {

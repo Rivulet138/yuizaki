@@ -7,8 +7,7 @@ import logging
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
-from typing import Literal
+from typing import Any, Literal
 
 VisionSupport = Literal["supported", "unsupported", "unknown"]
 CapabilitySupport = Literal["supported", "unsupported", "unknown"]

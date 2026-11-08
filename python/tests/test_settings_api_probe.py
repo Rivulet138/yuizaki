@@ -3,7 +3,6 @@ from __future__ import annotations
 import socket
 
 import pytest
-
 from modules.system.settings_api import _safe_probe_url
 
 

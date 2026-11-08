@@ -15,10 +15,10 @@ modules.core.config so that:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
-from ..system.settings_store import SettingsStore
 from ..system.settings_schema import PersistedSettingsSchema, merge_settings
+from ..system.settings_store import SettingsStore
 from .paths import settings_path_from_env
 
 SettingsSchema = PersistedSettingsSchema
@@ -40,7 +40,7 @@ class SettingsManager:
     # Internal helpers
     # ------------------------------------------------------------------
     def _load_from_store(self) -> SettingsSchema:
-        raw: Dict[str, Any] = self._store.get_all()
+        raw: dict[str, Any] = self._store.get_all()
         if not raw:
             return SettingsSchema()
         known = set(SettingsSchema.model_fields)

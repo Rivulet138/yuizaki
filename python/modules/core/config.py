@@ -5,10 +5,22 @@ Loads from environment variables with sensible defaults.
 
 import os
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from .paths import DEFAULT_AUDIO_CACHE_DIR, audio_cache_dir_from_env, data_dir_from_env
+
 DEFAULT_TTS_LANG = "ja"
+DEFAULT_LLM_CONTEXT_MAX_TOKENS = 500_000
+DEFAULT_LLM_MAX_OUTPUT_TOKENS = 16_384
+DEFAULT_LLM_TEMPERATURE = 1.0
+DEFAULT_LLM_TOP_P = 1.0
+DEFAULT_LLM_TOP_K = 0
+DEFAULT_LLM_MIN_P = 0.0
+DEFAULT_LLM_FREQUENCY_PENALTY = 0.0
+DEFAULT_LLM_PRESENCE_PENALTY = 0.0
+DEFAULT_LLM_REPETITION_PENALTY = 1.0
+DEFAULT_LLM_TIMEOUT_SECONDS = 120.0
 DEFAULT_GENIE_CHARACTER = "普拉琪娜_e15_e8_correct_sampling_v2"
 DEFAULT_GENIE_MODEL_DIR = ""
 LEGACY_BUILTIN_GENIE_MODEL_DIR = "CharacterModels/v2ProPlus/普拉琪娜_e15_e8_correct_sampling_v2"
@@ -50,16 +62,16 @@ class LLMConfig(BaseModel):
     base_url: str = Field(default="")
     api_key: str = Field(default="")
     model: str = Field(default="")
-    timeout: float = Field(default=60.0)
-    context_max_tokens: int = Field(default=131072)
-    default_max_output_tokens: int = Field(default=8192)
-    temperature: float = Field(default=1.2)
-    top_p: float = Field(default=0.9)
-    top_k: int = Field(default=500)
-    min_p: float = Field(default=0.0)
-    frequency_penalty: float = Field(default=0.2)
-    presence_penalty: float = Field(default=0.0)
-    repetition_penalty: float = Field(default=1.0)
+    timeout: float = Field(default=DEFAULT_LLM_TIMEOUT_SECONDS)
+    context_max_tokens: int = Field(default=DEFAULT_LLM_CONTEXT_MAX_TOKENS)
+    default_max_output_tokens: int = Field(default=DEFAULT_LLM_MAX_OUTPUT_TOKENS)
+    temperature: float = Field(default=DEFAULT_LLM_TEMPERATURE)
+    top_p: float = Field(default=DEFAULT_LLM_TOP_P)
+    top_k: int = Field(default=DEFAULT_LLM_TOP_K)
+    min_p: float = Field(default=DEFAULT_LLM_MIN_P)
+    frequency_penalty: float = Field(default=DEFAULT_LLM_FREQUENCY_PENALTY)
+    presence_penalty: float = Field(default=DEFAULT_LLM_PRESENCE_PENALTY)
+    repetition_penalty: float = Field(default=DEFAULT_LLM_REPETITION_PENALTY)
     vision_enabled: bool = Field(default=False)
     vision_provider: str = Field(default="custom")
     vision_base_url: str = Field(default="")
@@ -206,16 +218,16 @@ def _load_config_from_env() -> AppConfig:
             base_url=os.getenv("LLM_BASE_URL", "").rstrip("/"),
             api_key=os.getenv("LLM_API_KEY", ""),
             model=os.getenv("LLM_MODEL", ""),
-            timeout=float(os.getenv("LLM_TIMEOUT", "60")),
-            context_max_tokens=int(os.getenv("LLM_CONTEXT_MAX_TOKENS", "131072")),
-            default_max_output_tokens=int(os.getenv("LLM_DEFAULT_MAX_OUTPUT_TOKENS", "8192")),
-            temperature=float(os.getenv("LLM_TEMPERATURE", "1.2")),
-            top_p=float(os.getenv("LLM_TOP_P", "0.9")),
-            top_k=int(os.getenv("LLM_TOP_K", "500")),
-            min_p=float(os.getenv("LLM_MIN_P", "0")),
-            frequency_penalty=float(os.getenv("LLM_FREQUENCY_PENALTY", "0.2")),
-            presence_penalty=float(os.getenv("LLM_PRESENCE_PENALTY", "0")),
-            repetition_penalty=float(os.getenv("LLM_REPETITION_PENALTY", "1")),
+            timeout=float(os.getenv("LLM_TIMEOUT", str(DEFAULT_LLM_TIMEOUT_SECONDS))),
+            context_max_tokens=int(os.getenv("LLM_CONTEXT_MAX_TOKENS", str(DEFAULT_LLM_CONTEXT_MAX_TOKENS))),
+            default_max_output_tokens=int(os.getenv("LLM_DEFAULT_MAX_OUTPUT_TOKENS", str(DEFAULT_LLM_MAX_OUTPUT_TOKENS))),
+            temperature=float(os.getenv("LLM_TEMPERATURE", str(DEFAULT_LLM_TEMPERATURE))),
+            top_p=float(os.getenv("LLM_TOP_P", str(DEFAULT_LLM_TOP_P))),
+            top_k=int(os.getenv("LLM_TOP_K", str(DEFAULT_LLM_TOP_K))),
+            min_p=float(os.getenv("LLM_MIN_P", str(DEFAULT_LLM_MIN_P))),
+            frequency_penalty=float(os.getenv("LLM_FREQUENCY_PENALTY", str(DEFAULT_LLM_FREQUENCY_PENALTY))),
+            presence_penalty=float(os.getenv("LLM_PRESENCE_PENALTY", str(DEFAULT_LLM_PRESENCE_PENALTY))),
+            repetition_penalty=float(os.getenv("LLM_REPETITION_PENALTY", str(DEFAULT_LLM_REPETITION_PENALTY))),
             vision_enabled=_env_bool("VISION_LLM_ENABLED", False),
             vision_provider=os.getenv("VISION_LLM_PROVIDER", "custom").strip().lower(),
             vision_base_url=os.getenv("VISION_LLM_BASE_URL", "").rstrip("/"),

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 from ..core.config import (
     DEFAULT_EMBEDDING_MODEL,
@@ -137,13 +137,13 @@ class SocketServiceInjector(Protocol):
     def inject_services(
         self,
         *,
-        llm_client: object | None,
-        vision_llm_client: object | None,
-        tts_client: object | None,
-        asr_manager: object | None,
-        svc_client: object | None,
+        llm_client: Any | None,
+        vision_llm_client: Any | None,
+        tts_client: Any | None,
+        asr_manager: Any | None,
+        svc_client: Any | None,
         generation_mgr: SummaryPolicyUpdater | None,
-        ocr_client: object | None,
+        ocr_client: Any | None,
     ) -> None: ...
 
 
