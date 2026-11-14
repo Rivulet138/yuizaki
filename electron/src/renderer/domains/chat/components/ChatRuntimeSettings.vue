@@ -1,121 +1,132 @@
 <template>
-  <el-popover placement="top-end" :width="380" trigger="click" popper-class="chat-runtime-popper" @show="emit('refresh-audio-devices')">
-    <template #reference>
-      <button class="runtime-settings-button" type="button" :aria-label="t('chatPanel.runtime.openAria')" :title="t('chatPanel.runtime.openAria')">
-        <el-icon><Operation /></el-icon>
+  <div class="runtime-controls">
+    <el-select
+      class="runtime-model-select"
+      :model-value="modelValue.model"
+      size="small"
+      filterable
+      :aria-label="t('chatPanel.runtime.model')"
+      :title="modelLabel"
+      :placeholder="modelLabel"
+      :loading="modelsLoading"
+      @visible-change="(visible: boolean) => visible && emit('refresh-models')"
+      @update:model-value="emitField('model', $event)"
+    >
+      <el-option :label="t('chatPanel.runtime.defaultModel')" value="" />
+      <el-option v-for="model in modelOptions" :key="model" :label="model" :value="model" />
+    </el-select>
+    <el-select
+      class="runtime-response-select"
+      :model-value="modelValue.response_mode"
+      size="small"
+      :aria-label="t('chatPanel.runtime.responseSpeedAria')"
+      :title="t('chatPanel.runtime.responseSpeedAria')"
+      @update:model-value="emitField('response_mode', $event)"
+    >
+      <el-option v-for="mode in responseModeOptions" :key="mode.value" :label="mode.label" :value="mode.value" />
+    </el-select>
+    <el-tooltip :content="t('chatPanel.runtime.voiceReply')" placement="top">
+      <button
+        class="runtime-settings-button"
+        :class="{ active: modelValue.tts_enabled }"
+        type="button"
+        :aria-label="t('chatPanel.runtime.voiceReply')"
+        :aria-pressed="modelValue.tts_enabled"
+        @click="emit('toggle-tts', !modelValue.tts_enabled)"
+      >
+        <el-icon><Headset v-if="modelValue.tts_enabled" /><MuteNotification v-else /></el-icon>
       </button>
-    </template>
-
-    <div class="runtime-settings">
-      <header class="runtime-settings__header">
-        <strong>{{ t('chatPanel.runtime.title') }}</strong>
-        <span :title="modelLabel">{{ modelLabel }}</span>
-      </header>
-
-      <el-segmented
-        :model-value="modelValue.response_mode"
-        :options="responseModeOptions"
-        size="small"
-        class="runtime-settings__modes"
-        :aria-label="t('chatPanel.runtime.responseSpeedAria')"
-        @update:model-value="emitField('response_mode', $event)"
-      />
-
-      <label class="runtime-field">
-        <span>{{ t('chatPanel.runtime.voice') }}</span>
-        <el-segmented
-          :model-value="modelValue.voice_mode"
-          :options="voiceModeOptions"
-          size="small"
-          @update:model-value="emitField('voice_mode', $event)"
-        />
-      </label>
-
-      <label class="runtime-field">
-        <span>{{ t('chatPanel.runtime.vadEagerness') }}</span>
-        <el-segmented
-          :model-value="modelValue.vad_eagerness"
-          :options="vadEagernessOptions"
-          size="small"
-          @update:model-value="emitField('vad_eagerness', $event)"
-        />
-      </label>
-
-      <label class="runtime-field">
-        <span>{{ t('chatPanel.runtime.microphone') }}</span>
-        <el-select
-          :model-value="modelValue.audio_input_device_id"
-          size="small"
-          clearable
-          :loading="audioDevicesLoading"
-          :placeholder="t('chatPanel.runtime.systemDefault')"
-          @update:model-value="emitField('audio_input_device_id', $event)"
-        >
-          <el-option :label="t('chatPanel.runtime.systemDefault')" value="" />
-          <el-option v-for="device in audioInputDevices" :key="device.deviceId" :label="device.label" :value="device.deviceId" />
-        </el-select>
-      </label>
-
-      <label class="runtime-field">
-        <span>{{ t('chatPanel.runtime.model') }}</span>
-        <el-select
-          :model-value="modelValue.model"
-          size="small"
-          clearable
-          filterable
-          :placeholder="t('chatPanel.runtime.defaultModel')"
-          :loading="modelsLoading"
-          @visible-change="(visible: boolean) => visible && emit('refresh-models')"
-          @update:model-value="emitField('model', $event)"
-        >
-          <el-option :label="t('chatPanel.runtime.defaultModel')" value="" />
-          <el-option v-for="model in modelOptions" :key="model" :label="model" :value="model" />
-        </el-select>
-      </label>
-
-      <label class="runtime-field">
-        <span>{{ t('chatPanel.runtime.reasoning') }}</span>
-        <el-select
-          :model-value="modelValue.reasoning_effort"
-          size="small"
-          @update:model-value="emitField('reasoning_effort', $event)"
-        >
-          <el-option v-for="item in reasoningOptions" :key="item.value" :label="item.label" :value="item.value" />
-        </el-select>
-      </label>
-
-      <div class="runtime-toggles">
-        <label>
-          <span>{{ t('chatPanel.runtime.mcpTools') }}</span>
-          <el-switch :model-value="modelValue.mcp_enabled" @update:model-value="emitField('mcp_enabled', $event)" />
-        </label>
-        <label>
-          <span>{{ t('chatPanel.runtime.petLink') }}</span>
-          <el-switch :model-value="modelValue.pet_link_enabled" @update:model-value="emitField('pet_link_enabled', $event)" />
-        </label>
-        <label>
-          <span>{{ t('chatPanel.runtime.voiceReply') }}</span>
-          <el-switch :model-value="modelValue.tts_enabled" @update:model-value="emitTts" />
-        </label>
-      </div>
-
-      <footer class="runtime-settings__footer">
-        <button class="runtime-link-button" :class="{ active: promptActive }" type="button" @click="emit('open-prompt')">
-          <el-icon><Tickets /></el-icon>
-          <span>{{ t('chatPanel.runtime.prompt') }}</span>
+    </el-tooltip>
+    <el-popover placement="top-end" width="min(380px, calc(100vw - 24px))" trigger="click" popper-class="chat-runtime-popper" @show="emit('refresh-audio-devices')">
+      <template #reference>
+        <button class="runtime-settings-button" type="button" :aria-label="t('chatPanel.runtime.openAria')" :title="t('chatPanel.runtime.openAria')">
+          <el-icon><Operation /></el-icon>
         </button>
-        <ChatAdvancedOptions
-          :model-value="modelValue"
-          :max-output-tokens="maxOutputTokens"
-          @update-field="(field, value) => emit('update-field', field, value)"
-        />
-      </footer>
-    </div>
-  </el-popover>
+      </template>
+
+      <div class="runtime-settings">
+        <header class="runtime-settings__header">
+          <strong>{{ t('chatPanel.runtime.title') }}</strong>
+          <span :title="modelLabel">{{ modelLabel }}</span>
+        </header>
+
+        <label class="runtime-field">
+          <span>{{ t('chatPanel.runtime.voice') }}</span>
+          <el-segmented
+            :model-value="modelValue.voice_mode"
+            :options="voiceModeOptions"
+            size="small"
+            @update:model-value="emitField('voice_mode', $event)"
+          />
+        </label>
+
+        <label class="runtime-field">
+          <span>{{ t('chatPanel.runtime.vadEagerness') }}</span>
+          <el-segmented
+            :model-value="modelValue.vad_eagerness"
+            :options="vadEagernessOptions"
+            size="small"
+            @update:model-value="emitField('vad_eagerness', $event)"
+          />
+        </label>
+
+        <label class="runtime-field">
+          <span>{{ t('chatPanel.runtime.microphone') }}</span>
+          <el-select
+            :model-value="modelValue.audio_input_device_id"
+            size="small"
+            clearable
+            :loading="audioDevicesLoading"
+            :placeholder="t('chatPanel.runtime.systemDefault')"
+            @update:model-value="emitField('audio_input_device_id', $event)"
+          >
+            <el-option :label="t('chatPanel.runtime.systemDefault')" value="" />
+            <el-option v-for="device in audioInputDevices" :key="device.deviceId" :label="device.label" :value="device.deviceId" />
+          </el-select>
+        </label>
+
+        <label v-if="reasoningOptions.length > 1" class="runtime-field">
+          <span>{{ t('chatPanel.runtime.reasoning') }}</span>
+          <el-select
+            :model-value="modelValue.reasoning_effort"
+            size="small"
+            @update:model-value="emitField('reasoning_effort', $event)"
+          >
+            <el-option v-for="item in reasoningOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </label>
+
+        <div class="runtime-toggles">
+          <label>
+            <span>{{ t('chatPanel.runtime.mcpTools') }}</span>
+            <el-switch :model-value="modelValue.mcp_enabled" @update:model-value="emitField('mcp_enabled', $event)" />
+          </label>
+          <label>
+            <span>{{ t('chatPanel.runtime.petLink') }}</span>
+            <el-switch :model-value="modelValue.pet_link_enabled" @update:model-value="emitField('pet_link_enabled', $event)" />
+          </label>
+        </div>
+
+        <footer class="runtime-settings__footer">
+          <button class="runtime-link-button" :class="{ active: promptActive }" type="button" @click="emit('open-prompt')">
+            <el-icon><Tickets /></el-icon>
+            <span>{{ t('chatPanel.runtime.prompt') }}</span>
+          </button>
+          <ChatAdvancedOptions
+            :model-value="modelValue"
+            :max-output-tokens="maxOutputTokens"
+            :capabilities="capabilities"
+            @update-field="(field, value) => emit('update-field', field, value)"
+          />
+        </footer>
+      </div>
+    </el-popover>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ElIcon, ElPopover } from 'element-plus'
+import { ElIcon, ElPopover, ElTooltip } from 'element-plus'
+import 'element-plus/es/components/tooltip/style/css'
 import 'element-plus/es/components/icon/style/css'
 import 'element-plus/es/components/popover/style/css'
 import { ElSegmented, ElSwitch } from 'element-plus'
@@ -124,8 +135,9 @@ import 'element-plus/es/components/switch/style/css'
 import { ElOption, ElSelect } from 'element-plus'
 import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/option/style/css'
-import { Operation, Tickets } from '@element-plus/icons-vue'
+import { Headset, MuteNotification, Operation, Tickets } from '@element-plus/icons-vue'
 import { computed } from 'vue'
+import type { GenerationCapabilities } from '@/../shared/llm-generation-parameters'
 import ChatAdvancedOptions, { type ChatAdvancedOptionsModel } from './ChatAdvancedOptions.vue'
 import { t } from '@/i18n'
 
@@ -158,6 +170,7 @@ const vadEagernessOptions = computed(() => [
 
 defineProps<{
   modelValue: ChatRuntimeSettingsModel
+  capabilities: GenerationCapabilities
   modelOptions: string[]
   modelsLoading?: boolean
   reasoningOptions: SelectOption[]
@@ -183,10 +196,37 @@ const emitField = (field: keyof ChatRuntimeSettingsModel, value: unknown) => {
   }
 }
 
-const emitTts = (value: unknown) => emit('toggle-tts', value === true)
 </script>
 
 <style scoped>
+.runtime-controls {
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.runtime-model-select {
+  width: 154px;
+}
+
+.runtime-response-select {
+  width: 82px;
+}
+
+.runtime-controls :deep(.el-select__wrapper) {
+  min-height: 30px;
+  border-radius: 8px;
+}
+
+.runtime-settings-button.active {
+  background: var(--yui-chat-focus, var(--yui-accent-soft));
+  color: var(--yui-accent);
+}
+
 .runtime-settings-button {
   display: inline-flex;
   width: 30px;
@@ -241,10 +281,6 @@ const emitTts = (value: unknown) => emit('toggle-tts', value === true)
   white-space: nowrap;
 }
 
-.runtime-settings__modes {
-  width: 100%;
-}
-
 .runtime-field,
 .runtime-toggles label {
   display: flex;
@@ -266,7 +302,7 @@ const emitTts = (value: unknown) => emit('toggle-tts', value === true)
 
 .runtime-toggles {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   border-top: 1px solid var(--yui-border);
   border-bottom: 1px solid var(--yui-border);
@@ -316,6 +352,10 @@ const emitTts = (value: unknown) => emit('toggle-tts', value === true)
 }
 
 @media (max-width: 900px) {
+  .runtime-controls :deep(.el-select__wrapper) {
+    min-height: 44px;
+  }
+
   .runtime-settings-button {
     width: 44px;
     height: 44px;

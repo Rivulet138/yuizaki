@@ -163,11 +163,25 @@ export interface GenieCharacterResourcesResponse {
   characters: GenieCharacterResource[]
 }
 
+export interface RuntimeReloadSection {
+  state: 'pending' | 'applying' | 'applied' | 'failed' | 'unavailable'
+  target_revision: number
+  applied_revision: number | null
+  error?: string | null
+}
+
+export interface RuntimeReloadStatusResponse {
+  sections: Record<string, RuntimeReloadSection>
+}
+
 export interface SettingsMutationResponse {
+  /** Canonical settings with the same credential redaction as GET; absent on older backends. */
+  normalized_settings?: SettingsResponse
   status: string
   updated?: number
   runtime_applied?: string[]
   runtime_changed?: string[]
+  runtime_reload?: RuntimeReloadStatusResponse
 }
 
 export interface LlmModelsRequest {
@@ -282,7 +296,10 @@ export interface TtsLatencySummary {
 }
 
 export interface TestConnectionResponse {
+  /** Model ready; reachability alone is not readiness. */
   ok?: boolean
+  ready?: boolean
+  reachable?: boolean
   status?: string
   message?: string
   runtime?: TtsRuntimeStatusResponse
@@ -322,7 +339,8 @@ export interface LocalRuntimeDiscoveryResponse {
 let loadSettingsRequest: Promise<SettingsResponse> | null = null
 let warmupTtsRequest: Promise<TtsWarmupResponse> | null = null
 
-const loadSettings = async (): Promise<SettingsResponse> => {
+const loadSettings = async (fresh = false): Promise<SettingsResponse> => {
+  if (fresh) return requestJson<SettingsResponse>(`${CONTROL_ORIGIN}/api/settings/`)
   if (!loadSettingsRequest) {
     loadSettingsRequest = requestJson<SettingsResponse>(`${CONTROL_ORIGIN}/api/settings/`)
       .finally(() => {
@@ -334,6 +352,12 @@ const loadSettings = async (): Promise<SettingsResponse> => {
 
 export const settingsClient = {
   load: loadSettings,
+  runtimeStatus: async () => requestJson<RuntimeReloadStatusResponse>(`${CONTROL_ORIGIN}/api/settings/runtime/status`),
+  retryRuntime: async (targets: Record<string, number>) => requestJson<RuntimeReloadStatusResponse>(`${CONTROL_ORIGIN}/api/settings/runtime/retry`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targets }),
+  }),
   save: async (payload: Record<string, unknown>) =>
     requestJson<SettingsMutationResponse>(`${CONTROL_ORIGIN}/api/settings/`, {
       method: 'PATCH',

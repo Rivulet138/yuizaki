@@ -37,6 +37,44 @@ def _canonical_timestamp(value: Any) -> str | None:
     return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
+def memory_scope_rejection_reason(
+    metadata: Mapping[str, Any] | None,
+    *,
+    scope: str | None,
+    workspace_id: str | None,
+    session_id: str | None,
+) -> str | None:
+    """Share ownership rules across route selection and both recall filters.
+
+    Session IDs are local to a workspace. Missing session ownership is never
+    inferred from the caller. Unassigned workspace records retain their legacy
+    visibility, while global records remain independent of workspace context.
+    """
+    values = metadata or {}
+    document_scope = str(values.get("scope") or "workspace")
+    document_workspace = str(values.get("workspace_id") or "").strip() or None
+    requested_workspace = str(workspace_id or "").strip() or None
+    document_session = str(values.get("session_id") or "").strip() or None
+    requested_session = str(session_id or "").strip() or None
+    if scope == "global":
+        return None if document_scope == "global" else "scope"
+    if scope and document_scope != scope:
+        return "scope"
+    if scope == "session":
+        if not requested_session or document_session != requested_session:
+            return "session"
+        return None if document_workspace == requested_workspace else "workspace"
+    if scope == "workspace":
+        return None if document_workspace in (requested_workspace, None) else "workspace"
+    if requested_session and document_session not in (requested_session, None):
+        return "session"
+    if requested_workspace:
+        allowed = (requested_workspace,) if document_scope == "session" else (requested_workspace, None)
+        if document_workspace not in allowed:
+            return "workspace"
+    return None
+
+
 def normalize_memory_metadata(
     metadata: Mapping[str, Any] | None,
     *,
@@ -111,6 +149,26 @@ def normalize_memory_validity(metadata: Mapping[str, Any] | None) -> dict[str, A
     ):
         raise ValueError("valid_to must be later than valid_from")
     return normalized
+
+
+
+def candidate_tombstone_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Retain replay identity and routing, never erased content or its history."""
+    original = metadata or {}
+    retained = {
+        key: original[key]
+        for key in ("candidate_id", "scope", "workspace_id", "session_id", "layer", "type", "memory_role", "created_at", "updated_at", "revision")
+        if original.get(key) is not None
+    }
+    retained.update({
+        "candidate": True,
+        "candidate_deleted": True,
+        "candidate_deleted_at": original.get("candidate_deleted_at") or utc_now(),
+        "review_status": "deleted",
+        "review_required": False,
+        "importance": 0.0,
+    })
+    return normalize_memory_metadata(retained)
 
 
 def is_auto_admitted_candidate(metadata: Mapping[str, Any] | None) -> bool:

@@ -1,22 +1,27 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 from collections.abc import Sequence
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from .backend import MemoryBackendStatus
 from .metadata import (
     append_memory_version,
+    candidate_tombstone_metadata,
     has_prior_version_snapshot,
     normalize_memory_metadata,
 )
 from .operations import MemoryOperation
 from .schema import MemorySearchFilters
 from .vector_store import Document, EmbeddingProvider, VectorStore
+
+logger = logging.getLogger(__name__)
 
 _APPEND_ONLY_HISTORY_LIMITS = {
     "audit": 100,
@@ -241,6 +246,12 @@ class SQLiteMemoryStore(VectorStore):
     def record_operation(self, operation: MemoryOperation) -> None:
         """Persist an operation without changing the document authority revision."""
         with self._db_lock, self._connection() as connection:
+            row = connection.execute(
+                "SELECT metadata_json FROM memory_documents WHERE id = ?", (operation.document_id,)
+            ).fetchone()
+            if row is not None and json.loads(row[0]).get("candidate_deleted"):
+                # A delayed writer must not refill the ledger after a purge.
+                operation = replace(operation, reason=None, evidence=None, details={})
             connection.execute(
                 """
                 INSERT OR IGNORE INTO memory_operations (
@@ -267,6 +278,13 @@ class SQLiteMemoryStore(VectorStore):
                 ),
             )
 
+    def clear_document_payloads(self, document_id: str) -> None:
+        with self._db_lock, self._connection() as connection:
+            connection.execute(
+                "UPDATE memory_operations SET reason = NULL, evidence_json = NULL, details_json = '{}' WHERE document_id = ?",
+                (document_id,),
+            )
+
     def list_operations(
         self,
         *,
@@ -290,6 +308,8 @@ class SQLiteMemoryStore(VectorStore):
         if workspace_id:
             clauses.append("workspace_id = ?")
             params.append(workspace_id)
+        if scope == "session" and workspace_id is None:
+            clauses.append("(workspace_id IS NULL OR workspace_id = '')")
         if session_id:
             clauses.append("session_id = ?")
             params.append(session_id)
@@ -537,37 +557,53 @@ class SQLiteMemoryStore(VectorStore):
 
     def _migrate_legacy_metadata(self) -> None:
         with self._db_lock, self._connection() as connection:
-            rows = connection.execute("SELECT id, metadata_json FROM memory_documents").fetchall()
+            rows = connection.execute("SELECT id, text, metadata_json FROM memory_documents").fetchall()
             migrated = False
-            for doc_id, metadata_json in rows:
+            for doc_id, text, metadata_json in rows:
                 try:
                     legacy = json.loads(metadata_json)
                 except (TypeError, json.JSONDecodeError):
                     legacy = {}
-                normalized = normalize_memory_metadata(legacy)
-                if normalized != legacy:
+                deleted_candidate = bool(legacy.get("candidate_deleted")) or (
+                    bool(legacy.get("candidate")) and legacy.get("review_status") == "deleted"
+                )
+                normalized = candidate_tombstone_metadata(legacy) if deleted_candidate else normalize_memory_metadata(legacy)
+                normalized_text = "" if deleted_candidate else text
+                if deleted_candidate:
                     connection.execute(
-                        "UPDATE memory_documents SET metadata_json = ? WHERE id = ?",
-                        (json.dumps(normalized, ensure_ascii=False, sort_keys=True, default=str), doc_id),
+                        "UPDATE memory_operations SET reason = NULL, evidence_json = NULL, details_json = '{}' WHERE document_id = ?",
+                        (doc_id,),
+                    )
+                if normalized != legacy or normalized_text != text:
+                    connection.execute(
+                        "UPDATE memory_documents SET text = ?, metadata_json = ? WHERE id = ?",
+                        (normalized_text, json.dumps(normalized, ensure_ascii=False, sort_keys=True, default=str), doc_id),
                     )
                     migrated = True
             if migrated:
                 self._increment_authority_revision(connection)
 
     def _persist(self, doc: Document) -> None:
+        if doc.metadata.get("candidate_deleted"):
+            doc.text = ""
+            doc.metadata = candidate_tombstone_metadata(doc.metadata)
         with self._db_lock, self._connection() as connection:
             row = connection.execute(
                 "SELECT text, metadata_json FROM memory_documents WHERE id = ?",
                 (doc.id,),
             ).fetchone()
             existing = None
-            if row is not None:
+            if row is not None and not doc.metadata.get("candidate_deleted"):
                 try:
                     existing_metadata = json.loads(row[1])
                 except (TypeError, json.JSONDecodeError):
                     existing_metadata = {}
                 existing = Document(id=doc.id, text=str(row[0]), metadata=existing_metadata)
 
+            if existing is not None and existing.metadata.get("candidate_deleted"):
+                doc.text = ""
+                doc.metadata = candidate_tombstone_metadata(existing.metadata)
+                existing = None
             metadata = normalize_memory_metadata(doc.metadata)
             if existing is not None:
                 metadata = _merge_append_only_metadata(existing.metadata, metadata)
@@ -608,35 +644,51 @@ class SQLiteMemoryStore(VectorStore):
                 """,
                 (doc.id, doc.text, metadata_json),
             )
+            if metadata.get("candidate_deleted"):
+                connection.execute(
+                    "UPDATE memory_operations SET reason = NULL, evidence_json = NULL, details_json = '{}' WHERE document_id = ?",
+                    (doc.id,),
+                )
             self._increment_authority_revision(connection)
         doc.metadata = metadata
 
     def add_document(self, doc: Document) -> None:
         with self._db_lock:
             self._persist(doc)
-            super().add_document(doc)
+            # The committed SQLite record is authoritative even when embedding fails.
+            super().add_metadata_document(doc)
+            try:
+                super().add_document(doc)
+            except Exception as exc:  # noqa: BLE001 - storage is committed; preserve it and expose recoverable index failure
+                self._last_index_error = str(exc)
+                self._index_errors[doc.id] = str(exc)
+                self._index_ready = False
+                logger.warning("Memory %s saved; embedding needs retry: %s", doc.id, exc)
 
     def add_metadata_document(self, doc: Document) -> None:
         with self._db_lock:
             self._persist(doc)
             super().add_metadata_document(doc)
+            self._index_ready = False
 
     def update_metadata(self, doc_id: str, metadata: dict[str, Any]) -> None:
         normalized = normalize_memory_metadata(metadata)
-        with self._db_lock, self._connection() as connection:
-            row = connection.execute(
-                "SELECT 1 FROM memory_documents WHERE id = ?", (doc_id,)
-            ).fetchone()
-            if row is None:
-                raise KeyError(doc_id)
-            connection.execute(
-                "UPDATE memory_documents SET metadata_json = ? WHERE id = ?",
-                (json.dumps(normalized, ensure_ascii=False, sort_keys=True, default=str), doc_id),
-            )
-            self._increment_authority_revision(connection)
-        document = next((item for item in self._docs.values() if item.id == doc_id), None)
-        if document is not None:
-            document.metadata = normalized
+        with self._db_lock:
+            with self._connection() as connection:
+                row = connection.execute(
+                    "SELECT metadata_json FROM memory_documents WHERE id = ?", (doc_id,)
+                ).fetchone()
+                if row is None:
+                    raise KeyError(doc_id)
+                existing = json.loads(row[0])
+                if existing.get("candidate_deleted"):
+                    normalized = candidate_tombstone_metadata(existing)
+                connection.execute(
+                    "UPDATE memory_documents SET metadata_json = ? WHERE id = ?",
+                    (json.dumps(normalized, ensure_ascii=False, sort_keys=True, default=str), doc_id),
+                )
+                self._increment_authority_revision(connection)
+            super().update_metadata(doc_id, normalized)
 
     def delete_document(self, doc_id: str) -> None:
         with self._db_lock:
@@ -667,7 +719,7 @@ class SQLiteMemoryStore(VectorStore):
     def _ensure_index(self) -> None:
         if self._index_ready:
             return
-        super().rebuild_index()
+        self._ensure_document_vectors()
         self._index_ready = True
 
     def rebuild_index(
@@ -680,6 +732,8 @@ class SQLiteMemoryStore(VectorStore):
             should_cancel=should_cancel,
         )
         self._index_ready = True
+        self._index_errors.clear()
+        self._last_index_error = None
         return result
 
     def search(self, query: str, top_k: int = 5, filters: MemorySearchFilters | None = None):
@@ -710,13 +764,20 @@ class SQLiteMemoryStore(VectorStore):
         metadata = dict(status.metadata or {})
         metadata.update({
             "database_path": str(self.db_path),
-            "index_ready": self._index_ready,
+            "authority_revision": self.get_authority_revision(),
+            # Local vectors are rebuilt in-process, so their generation is
+            # deliberately identified as local rather than a durable snapshot.
+            "index_generation": f"local:{self._index_generation}",
+            "index_snapshot_revision": None,
+            "index_ready": self._index_ready and not any(self.get_document_index_status(doc.id) in {"pending", "failed"} for doc in self._docs.values()),
+            "pending_index_count": sum(1 for doc in self._docs.values() if self.get_document_index_status(doc.id) in {"pending", "failed"}),
+            "last_index_error": getattr(self, "_last_index_error", None),
             "authority": "sqlite",
         })
         return MemoryBackendStatus(
             backend=self.backend_name,
             healthy=True,
-            message="SQLite memory authority ready",
+            message="SQLite memory saved; index needs recovery" if metadata["pending_index_count"] else "SQLite memory authority ready",
             document_count=len(self._docs),
             metadata=metadata,
         )

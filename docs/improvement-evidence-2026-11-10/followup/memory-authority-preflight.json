@@ -1,0 +1,27 @@
+{
+  "observedAt": "2026-11-10T06:36:18.623343+00:00",
+  "mode": "read_only_existing_authority",
+  "changedRows": 0,
+  "runtimeStatus": {
+    "backend": "sqlite",
+    "healthy": true,
+    "document_count": null
+  },
+  "runtimeMetadata": {
+    "authority": "sqlite",
+    "database_path": "E:\\yuizaki\\python\\data\\memory.db",
+    "index_ready": false
+  },
+  "counts": {
+    "total": 2,
+    "deletedCandidates": 0,
+    "deletedCandidatesWithRetainedPayload": 0,
+    "sessionScopeWithoutSessionId": 0,
+    "workspaceScopeWithoutWorkspaceId": 0,
+    "malformedMetadata": 0,
+    "scopeCounts": {
+      "workspace": 2
+    }
+  },
+  "preflight": "completed"
+}

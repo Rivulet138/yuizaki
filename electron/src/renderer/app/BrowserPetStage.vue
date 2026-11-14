@@ -1,6 +1,6 @@
 <template>
-  <div class="browser-pet-stage" :data-model-type="modelType" :aria-label="t('browserPet.modelAriaLabel', { model: modelLabel })">
-    <img v-if="!ready && modelType === 'live2d'" class="browser-pet-fallback" src="/live2d/llm-live2d/yumi/yumi-stage.png" alt="" />
+  <div class="browser-pet-stage" :data-model-type="modelType" :data-fit-scale="fittedScale" :aria-label="t('browserPet.modelAriaLabel', { model: modelLabel })">
+    <img v-if="!ready && modelType === 'live2d'" class="browser-pet-fallback" :src="fallbackImageUrl" alt="" />
     <div
       ref="mountEl"
       class="browser-pet-canvas"
@@ -9,12 +9,12 @@
       aria-hidden="true"
     ></div>
     <div v-if="loading" class="browser-pet-status">{{ t('browserPet.loading', { model: modelLabel }) }}</div>
-    <div v-else-if="error" class="browser-pet-status browser-pet-status--error">{{ t('browserPet.unavailable', { model: modelLabel }) }}</div>
+    <button v-else-if="error" type="button" class="browser-pet-status browser-pet-status--error" @click="refreshModel">{{ t('browserPet.unavailable', { model: modelLabel }) }} · {{ t('shell.retry') }}</button>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import type { PetRenderer as PetRendererInstance } from '@/pet-renderer'
 import { petControl } from '@/utils/petControl'
 import type {
@@ -28,6 +28,7 @@ import type { AvatarCommand } from '@/../shared/avatar-command'
 import { resolveBackendUrl } from '@/api/clients/http-client'
 import { t } from '@/i18n'
 
+const fallbackImageUrl = '/live2d/llm-live2d/yumi/yumi-stage.png'
 const mountEl = ref<HTMLElement | null>(null)
 const loading = ref(true)
 const error = ref(false)
@@ -36,14 +37,40 @@ const modelType = ref<PetModelType>('live2d')
 const modelLabel = ref('Live2D')
 const browserInteractMode = ref(false)
 const browserLocked = ref(false)
-const zoomBounds = { min: 1.2, max: 3 }
-const zoomScale = ref(typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches ? 1.48 : 1.7)
+const zoomBounds = { min: 0.7, max: 1.8 }
+const zoomScale = ref(1)
+const fittedScale = ref(1)
 const emit = defineEmits<{ 'zoom-change': [scale: number] }>()
 let renderer: PetRendererInstance | null = null
 let resizeObserver: ResizeObserver | null = null
-let refreshTimer: ReturnType<typeof setInterval> | null = null
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+let fitTimer: ReturnType<typeof setTimeout> | null = null
 let currentModelKey = ''
+let pendingModelKey = ''
+let modelGeneration = 0
+let disposed = false
+let active = false
+let stageActivated = false
+let refreshing = false
+let refreshGeneration = 0
+let pendingRenderer: PetRendererInstance | null = null
+let pendingMount: HTMLElement | null = null
+let activeMount: HTMLElement | null = null
 let ttsPlaybackToken = 0
+let ttsGenerationId: string | undefined
+
+const fitModelToViewport = (): void => {
+  fitTimer = null
+  if (!active || disposed) return
+  const fit = renderer?.fitEmbeddedModelToViewport()
+  if (fit != null) fittedScale.value = fit
+}
+const scheduleModelFit = (): void => {
+  if (fitTimer) clearTimeout(fitTimer)
+  fitTimer = null
+  if (!active || disposed) return
+  fitTimer = setTimeout(fitModelToViewport, 200)
+}
 
 const modelAssetUrl = (model: PetModelDefinition | undefined): string => {
   if (!model?.assetPath) return '/live2d/llm-live2d/yumi/yumi.model3.json'
@@ -58,11 +85,12 @@ const adjustZoom = (delta: number): void => {
 }
 
 const resetZoom = (): void => {
-  zoomScale.value = typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches ? 1.48 : 1.7
+  zoomScale.value = 1
   emit('zoom-change', zoomScale.value)
 }
 
 const handleInputAction = (event: Event): void => {
+  if (!active) return
   const action = (event as CustomEvent<{ action?: string }>).detail?.action
   if (action === 'interact') browserInteractMode.value = !browserInteractMode.value
   if (action === 'lock') browserLocked.value = !browserLocked.value
@@ -188,16 +216,19 @@ const handleTtsPlayUrl = (event: Event): void => {
   if (!renderer || shouldDriveEmbeddedLipSync()) return
   const detail = (event as CustomEvent<{
     audio_url?: unknown
+    generationId?: string
     petLinkEnabled?: unknown
   }>).detail
   if (detail?.petLinkEnabled === false) return
   const audioUrl = typeof detail?.audio_url === 'string' ? detail.audio_url.trim() : ''
   if (!audioUrl) return
+  const targetRenderer = renderer
+  ttsGenerationId = detail?.generationId
   const token = ++ttsPlaybackToken
   void resolveBackendUrl(audioUrl)
     .then((resolvedUrl) => {
-      if (!renderer || token !== ttsPlaybackToken) return
-      return renderer.startLipSync(resolvedUrl)
+      if (disposed || !active || renderer !== targetRenderer || token !== ttsPlaybackToken) return
+      return targetRenderer.startLipSync(resolvedUrl)
     })
     .catch((error: unknown) => {
       console.debug('[BrowserPetStage] failed to start lip sync:', error)
@@ -206,12 +237,22 @@ const handleTtsPlayUrl = (event: Event): void => {
 
 const handleTtsStop = (event: Event): void => {
   ttsPlaybackToken += 1
+  ttsGenerationId = undefined
   const detail = (event as CustomEvent<{ interrupted?: unknown }>).detail
   renderer?.stopLipSync({ interrupted: detail?.interrupted === true })
 }
 
-const handleAudioEnded = (): void => {
+const handleAudioStarted = (event: Event): void => {
+  const generationId = (event as CustomEvent<{ generationId?: string }>).detail?.generationId
+  if (generationId !== ttsGenerationId) ttsPlaybackToken += 1
+  ttsGenerationId = generationId
+}
+
+const handleAudioEnded = (event: Event): void => {
+  const generationId = (event as CustomEvent<{ generationId?: string }>).detail?.generationId
+  if (generationId && generationId !== ttsGenerationId) return
   ttsPlaybackToken += 1
+  ttsGenerationId = undefined
   renderer?.stopLipSync()
 }
 
@@ -231,115 +272,233 @@ const handleLipSyncViseme = (event: Event): void => {
 
 defineExpose({ adjustZoom, resetZoom, zoomScale, zoomBounds })
 
-onMounted(async () => {
-  if (!mountEl.value) return
-  window.addEventListener('yuizaki:input-action', handleInputAction)
-  window.addEventListener('pet:llm-control', handleLlmControl)
-  window.addEventListener('pet:tts-play-url', handleTtsPlayUrl)
-  window.addEventListener('pet:tts-stop', handleTtsStop)
-  window.addEventListener('pet:audio-ended', handleAudioEnded)
-  window.addEventListener('pet:lipsync-level', handleLipSyncLevel)
-  window.addEventListener('pet:lipsync-viseme', handleLipSyncViseme)
-  emit('zoom-change', zoomScale.value)
-  const mountId = `browser-pet-stage-${Math.random().toString(36).slice(2)}`
-  mountEl.value.id = mountId
+// Load into a separate mount so a failed replacement leaves the working model intact.
+const loadModel = async (model: PetModelDefinition | undefined): Promise<void> => {
+  const nextType = model?.type || 'live2d'
+  const nextPath = modelAssetUrl(model)
+  const nextKey = `${nextType}:${model?.id || 'yumi'}:${nextPath}`
+  if (disposed || !active || document.hidden || nextKey === pendingModelKey) return
+  if (nextKey === currentModelKey) {
+    if (pendingModelKey) {
+      modelGeneration += 1
+      pendingRenderer?.destroy()
+      pendingRenderer = null
+      pendingMount?.remove()
+      pendingMount = null
+      pendingModelKey = ''
+    }
+    loading.value = false
+    error.value = false
+    return
+  }
+  const generation = ++modelGeneration
+  const isCurrent = () => !disposed && active && !document.hidden && generation === modelGeneration
+  pendingRenderer?.destroy()
+  pendingMount?.remove()
+  pendingRenderer = null
+  pendingMount = null
+  pendingModelKey = nextKey
+  loading.value = true
+  error.value = false
+  let candidate: PetRendererInstance | null = null
+  let candidateMount: HTMLElement | null = null
   try {
-    let model: PetModelDefinition | undefined
-    try {
-      const [state, catalog] = await Promise.all([petControl.getState(), petControl.getCatalog()])
-      const modelId = state.modelId || catalog.activeModelId
-      model = catalog.models.find((item) => item.id === modelId) || catalog.models[0]
-    } catch (cause) {
-      console.warn('[BrowserPetStage] model catalog unavailable, using bundled Live2D', cause)
-    }
-
-    if (model) {
-      modelType.value = model.type
-      modelLabel.value = model.type === 'vrm' ? 'VRM' : 'Live2D'
-    }
-    const selectedType = model?.type || 'live2d'
-    const selectedPath = modelAssetUrl(model)
-
     const { ensureCubismCore } = await import('@/pet-renderer-core')
-    await ensureCubismCore()
+    if (!isCurrent()) return
+    if (nextType === 'live2d') await ensureCubismCore()
+    if (!isCurrent()) return
     const { PetRenderer } = await import('@/pet-renderer')
-    renderer = new PetRenderer(mountId)
-    await renderer.init()
-    const resizeRenderer = (): void => {
-      const rect = mountEl.value?.getBoundingClientRect()
-      if (rect && rect.width > 0 && rect.height > 0) {
-        renderer?.resizeTo(rect.width, rect.height)
-      }
-    }
-    resizeObserver = new ResizeObserver(resizeRenderer)
-    resizeObserver.observe(mountEl.value)
-    resizeRenderer()
-    await renderer.applyBrowserConfig({
-      modelType: selectedType,
+    if (!isCurrent() || !mountEl.value) return
+    candidateMount = document.createElement('div')
+    candidateMount.id = `browser-pet-stage-${generation}-${Math.random().toString(36).slice(2)}`
+    Object.assign(candidateMount.style, { position: 'absolute', inset: '0', visibility: 'hidden', pointerEvents: 'none' })
+    mountEl.value.appendChild(candidateMount)
+    pendingMount = candidateMount
+    candidate = new PetRenderer(candidateMount.id)
+    pendingRenderer = candidate
+    candidate.setEmbeddedActive(active)
+    await candidate.init()
+    if (!isCurrent()) return
+    const rect = mountEl.value?.getBoundingClientRect()
+    if (rect && rect.width > 0 && rect.height > 0) candidate.resizeTo(rect.width, rect.height)
+    await candidate.applyBrowserConfig({
+      modelType: nextType,
       modelId: model?.id || 'yumi',
-      modelPath: selectedPath,
-      // The backend signs avatar commands with a capability revision that
-      // includes emotion presets; without them every command is rejected.
+      modelPath: nextPath,
       emotionPresets: model?.emotions ?? [],
-      scale: selectedType === 'vrm' ? 0.96 : 0.9,
+      scale: nextType === 'vrm' ? 0.96 : 0.9,
       clickThrough: false,
       locked: browserLocked.value,
       interactMode: browserInteractMode.value,
       opacity: 1,
       placement: 'center',
     })
-    currentModelKey = `${selectedType}:${model?.id || 'yumi'}:${selectedPath}`
+    if (!isCurrent()) return
+    // Input actions can change while assets are loading.
+    await candidate.applyBrowserConfig({ locked: browserLocked.value, interactMode: browserInteractMode.value })
+    if (!isCurrent()) return
+    ttsPlaybackToken += 1
+    ttsGenerationId = undefined
+    renderer?.destroy()
+    activeMount?.remove()
+    renderer = candidate
+    activeMount = candidateMount
+    candidateMount.style.visibility = 'visible'
+    candidateMount.style.pointerEvents = ''
+    pendingRenderer = null
+    pendingMount = null
+    currentModelKey = nextKey
+    modelType.value = nextType
+    modelLabel.value = nextType === 'vrm' ? 'VRM' : 'Live2D'
+    fittedScale.value = 1
     ready.value = true
-    refreshTimer = setInterval(async () => {
-      if (!renderer) return
-      try {
-        const [state, catalog] = await Promise.all([petControl.getState(), petControl.getCatalog()])
-        const nextModel = catalog.models.find((item) => item.id === (state.modelId || catalog.activeModelId)) || catalog.models[0]
-        const nextType = nextModel?.type || 'live2d'
-        const nextPath = modelAssetUrl(nextModel)
-        const nextKey = `${nextType}:${nextModel?.id || 'yumi'}:${nextPath}`
-        if (nextKey === currentModelKey) return
-        currentModelKey = nextKey
-        modelType.value = nextType
-        modelLabel.value = nextType === 'vrm' ? 'VRM' : 'Live2D'
-        ready.value = false
-        await renderer.applyBrowserConfig({ modelType: nextType, modelId: nextModel?.id || 'yumi', modelPath: nextPath, emotionPresets: nextModel?.emotions ?? [], scale: nextType === 'vrm' ? 0.96 : 0.9, clickThrough: false, locked: false, opacity: 1, placement: 'center' })
-        ready.value = true
-      } catch (cause) {
-        console.warn('[BrowserPetStage] model refresh failed', cause)
-      }
-    }, 2500)
+    scheduleModelFit()
   } catch (cause) {
-    console.warn('[BrowserPetStage] Live2D unavailable', cause)
-    error.value = true
+    if (isCurrent()) {
+      console.warn('[BrowserPetStage] model load failed', cause)
+      error.value = true
+    }
   } finally {
-    loading.value = false
+    if (renderer !== candidate) {
+      candidate?.destroy()
+      candidateMount?.remove()
+    }
+    if (isCurrent()) {
+      pendingRenderer = null
+      pendingMount = null
+      pendingModelKey = ''
+      loading.value = false
+    }
   }
-})
+}
 
-onBeforeUnmount(() => {
+const refreshModel = async (): Promise<void> => {
+  if (disposed || !active || document.hidden || refreshing) return
+  refreshing = true
+  const generation = ++refreshGeneration
+  const isCurrent = () => !disposed && active && !document.hidden && generation === refreshGeneration
+  if (refreshTimer) clearTimeout(refreshTimer)
+  refreshTimer = null
+  try {
+    const [state, catalog] = await Promise.all([petControl.getState(), petControl.getCatalog()])
+    if (!isCurrent()) return
+    const model = catalog.models.find((item) => item.id === (state.modelId || catalog.activeModelId)) || catalog.models[0]
+    void loadModel(model)
+  } catch (cause) {
+    if (!isCurrent()) return
+    console.warn('[BrowserPetStage] model catalog unavailable', cause)
+    if (!currentModelKey && !pendingModelKey) void loadModel(undefined)
+    else if (!pendingModelKey) error.value = true
+  } finally {
+    if (generation === refreshGeneration) {
+      refreshing = false
+      if (!disposed && active && !document.hidden) refreshTimer = setTimeout(refreshModel, 2500)
+    }
+  }
+}
+
+const resizeStage = (): void => {
+  if (!active || disposed) return
+  const rect = mountEl.value?.getBoundingClientRect()
+  if (rect && rect.width > 0 && rect.height > 0) {
+    renderer?.resizeTo(rect.width, rect.height)
+    pendingRenderer?.resizeTo(rect.width, rect.height)
+    scheduleModelFit()
+  }
+}
+
+const activateStage = (): void => {
+  if (active || disposed || !stageActivated || document.hidden || !mountEl.value) return
+  active = true
+  window.addEventListener('yuizaki:input-action', handleInputAction)
+  window.addEventListener('pet:llm-control', handleLlmControl)
+  window.addEventListener('pet:tts-play-url', handleTtsPlayUrl)
+  window.addEventListener('pet:tts-stop', handleTtsStop)
+  window.addEventListener('pet:audio-started', handleAudioStarted)
+  window.addEventListener('pet:audio-ended', handleAudioEnded)
+  window.addEventListener('pet:lipsync-level', handleLipSyncLevel)
+  window.addEventListener('pet:lipsync-viseme', handleLipSyncViseme)
+  renderer?.setEmbeddedActive(true)
+  resizeObserver?.observe(mountEl.value)
+  void nextTick(resizeStage)
+  void refreshModel()
+}
+
+const deactivateStage = (): void => {
+  if (!active) return
+  active = false
+  refreshGeneration += 1
+  refreshing = false
+  modelGeneration += 1
+  ttsPlaybackToken += 1
+  ttsGenerationId = undefined
+  renderer?.stopLipSync()
+  renderer?.setEmbeddedActive(false)
+  pendingRenderer?.setEmbeddedActive(false)
+  pendingRenderer?.destroy()
+  pendingRenderer = null
+  pendingMount?.remove()
+  pendingMount = null
+  pendingModelKey = ''
+  loading.value = false
   window.removeEventListener('yuizaki:input-action', handleInputAction)
   window.removeEventListener('pet:llm-control', handleLlmControl)
   window.removeEventListener('pet:tts-play-url', handleTtsPlayUrl)
   window.removeEventListener('pet:tts-stop', handleTtsStop)
+  window.removeEventListener('pet:audio-started', handleAudioStarted)
   window.removeEventListener('pet:audio-ended', handleAudioEnded)
   window.removeEventListener('pet:lipsync-level', handleLipSyncLevel)
   window.removeEventListener('pet:lipsync-viseme', handleLipSyncViseme)
-  resizeObserver?.disconnect()
-  resizeObserver = null
-  if (refreshTimer) clearInterval(refreshTimer)
+  if (fitTimer) clearTimeout(fitTimer)
+  fitTimer = null
+  if (refreshTimer) clearTimeout(refreshTimer)
   refreshTimer = null
+  resizeObserver?.disconnect()
+}
+
+// KeepAlive activation and document visibility can resume in either order.
+// The active guard owns the single refresh/polling chain for both hooks.
+const handleVisibilityChange = (): void => {
+  if (document.hidden) deactivateStage()
+  else activateStage()
+}
+
+const resumeStage = (): void => {
+  stageActivated = true
+  activateStage()
+}
+
+onMounted(() => {
+  emit('zoom-change', zoomScale.value)
+  resizeObserver = new ResizeObserver(resizeStage)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  resumeStage()
+})
+onActivated(resumeStage)
+onDeactivated(() => {
+  stageActivated = false
+  deactivateStage()
+})
+onBeforeUnmount(() => {
+  disposed = true
+  stageActivated = false
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  deactivateStage()
+  resizeObserver = null
   renderer?.destroy()
   renderer = null
+  activeMount?.remove()
+  activeMount = null
 })
 </script>
 
 <style scoped>
 .browser-pet-stage {
   position: relative;
-  width: min(100%, 840px);
-  height: min(82vh, 840px);
-  min-height: 480px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
   margin: 0 auto;
 }
 
@@ -360,14 +519,15 @@ onBeforeUnmount(() => {
 }
 
 .browser-pet-canvas.is-ready :deep(canvas) {
-  transform: translateY(18%) scale(var(--browser-model-scale, 1.7));
+  transform: scale(var(--browser-model-scale, 1));
   transform-origin: center center;
 }
 
 .browser-pet-fallback {
   object-fit: contain;
   object-position: center bottom;
-  transform: translateY(12%) scale(1.42);
+  box-sizing: border-box;
+  padding: 24px 12px;
   transform-origin: center center;
   filter: drop-shadow(0 28px 30px rgba(39, 49, 84, 0.25));
 }
@@ -390,20 +550,4 @@ onBeforeUnmount(() => {
   color: #7c3aed;
 }
 
-@media (max-width: 760px) {
-  .browser-pet-stage {
-    width: 100%;
-    height: min(66vh, 580px);
-    min-height: 300px;
-  }
-
-  .browser-pet-canvas.is-ready :deep(canvas) {
-    transform: translateY(14%) scale(var(--browser-model-scale, 1.48));
-  }
-
-  .browser-pet-fallback {
-    transform: translateY(8%) scale(1.22);
-  }
-
-}
 </style>

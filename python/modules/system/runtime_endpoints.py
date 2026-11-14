@@ -71,40 +71,41 @@ def build_activity_frame_endpoints(
     service_provider: Callable[[], Any],
     active_workspace_id_provider: Callable[[], str],
 ) -> dict[str, Callable[..., Any]]:
+    """Bind each operation to its explicit workspace; retain the provider for constructor compatibility."""
     def _service() -> Any:
         service = service_provider()
         if service is None:
             raise RuntimeError("activity frame service is not initialized")
         return service
 
-    def get_settings() -> dict[str, Any]:
-        return _service().get_settings(active_workspace_id_provider())
+    def get_settings(workspace_id: str) -> dict[str, Any]:
+        return _service().get_settings(workspace_id)
 
-    def patch_settings(payload: dict[str, Any]) -> dict[str, Any]:
-        return _service().patch_settings(active_workspace_id_provider(), payload)
+    def patch_settings(workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return _service().patch_settings(workspace_id, payload)
 
-    def list_frames(limit: int = 50) -> dict[str, Any]:
-        return _service().list_frames(active_workspace_id_provider(), limit)
+    def list_frames(workspace_id: str, limit: int = 50) -> dict[str, Any]:
+        return _service().list_frames(workspace_id, limit)
 
-    def rebuild(payload: dict[str, Any]) -> dict[str, Any]:
+    def rebuild(workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         extra = set(payload) - {"limit"}
         if extra:
             raise ValueError(f"unknown rebuild fields: {', '.join(sorted(extra))}")
         limit = payload.get("limit", 1000)
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10000:
             raise ValueError("limit must be an integer between 1 and 10000")
-        return _service().rebuild(active_workspace_id_provider(), limit)
+        return _service().rebuild(workspace_id, limit)
 
-    def delete_frame(frame_id: str) -> dict[str, Any]:
-        if not _service().delete_frame(active_workspace_id_provider(), frame_id):
+    def delete_frame(workspace_id: str, frame_id: str) -> dict[str, Any]:
+        if not _service().delete_frame(workspace_id, frame_id):
             raise LookupError("activity frame was not found")
         return {"ok": True, "frameId": frame_id}
 
-    def feedback(payload: dict[str, Any]) -> dict[str, Any]:
-        return _service().feedback(active_workspace_id_provider(), payload)
+    def feedback(workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return _service().feedback(workspace_id, payload)
 
-    def feedback_summary() -> dict[str, Any]:
-        return _service().feedback_summary(active_workspace_id_provider())
+    def feedback_summary(workspace_id: str) -> dict[str, Any]:
+        return _service().feedback_summary(workspace_id)
 
     return {
         "get_settings": get_settings,

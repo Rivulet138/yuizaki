@@ -119,18 +119,21 @@ async def test_provider_exception_is_redacted_from_delivery_state_and_response(t
         turn_service_provider=lambda: FakeTurnService(),
         active_workspace_id_provider=lambda: "default",
         delivery_store_provider=lambda: store,
-        fast_ack_connectors={"telegram"},
     ))
     payload = {"update_id": 99, "message": {"chat": {"id": 123}, "from": {"id": 456}, "text": "你好"}}
     headers = {"X-Telegram-Bot-Api-Secret-Token": "webhook-secret"}
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post("/api/system/connectors/telegram/webhook", json=payload, headers=headers)
-        assert response.status_code == 200
+        assert response.status_code == 409
+        assert response.json()["outcome"] == "unknown"
         assert secret_url not in response.text
-        row = await _wait_for_status(store, "connector:telegram:99", "failed")
+        row = store.connector_delivery("connector:telegram:99")
 
-    assert row["last_error"] == "connector_provider_exception"
+    assert row["status"] == "sending"
+    assert row["claimed_by"] is not None
+    assert row["claim_expires_at"] is not None
+    assert row["last_error"] is None
     assert secret_url not in str(row)
 
 

@@ -6,37 +6,37 @@
       </button>
     </template>
     <div class="advanced-options">
-      <label>
+      <label v-if="capabilities.parameters.temperature">
         <span>{{ t('chatPanel.advanced.temperature', { value: modelValue.temperature?.toFixed(2) }) }}</span>
-        <el-slider :model-value="modelValue.temperature" :min="0" :max="2" :step="0.05" @update:model-value="emitField('temperature', $event)" />
+        <el-slider v-if="capabilities.parameters.temperature!.min < capabilities.parameters.temperature!.max" :model-value="modelValue.temperature" :min="capabilities.parameters.temperature!.min" :max="capabilities.parameters.temperature!.max" :step="0.05" @update:model-value="emitField('temperature', $event)" />
       </label>
-      <label>
+      <label v-if="capabilities.parameters.top_p">
         <span>Top P {{ modelValue.top_p?.toFixed(2) }}</span>
-        <el-slider :model-value="modelValue.top_p" :min="0" :max="1" :step="0.05" @update:model-value="emitField('top_p', $event)" />
+        <el-slider v-if="capabilities.parameters.top_p!.min < capabilities.parameters.top_p!.max" :model-value="modelValue.top_p" :min="capabilities.parameters.top_p!.min" :max="capabilities.parameters.top_p!.max" :step="0.05" @update:model-value="emitField('top_p', $event)" />
       </label>
-      <div class="advanced-options-grid">
-        <label>
+      <div v-if="capabilities.parameters.top_k || capabilities.parameters.min_p" class="advanced-options-grid">
+        <label v-if="capabilities.parameters.top_k">
           <span>Top K</span>
-          <el-input-number :model-value="modelValue.top_k" :min="0" :max="2000" :step="50" size="small" @update:model-value="emitField('top_k', $event)" />
+          <el-input-number :model-value="modelValue.top_k" :min="0" :max="capabilities.parameters.top_k!.max" :step="1" size="small" @update:model-value="emitField('top_k', $event)" />
         </label>
-        <label>
+        <label v-if="capabilities.parameters.min_p">
           <span>Min P {{ modelValue.min_p?.toFixed(2) }}</span>
-          <el-slider :model-value="modelValue.min_p" :min="0" :max="1" :step="0.01" @update:model-value="emitField('min_p', $event)" />
+          <el-slider v-if="capabilities.parameters.min_p!.min < capabilities.parameters.min_p!.max" :model-value="modelValue.min_p" :min="capabilities.parameters.min_p!.min" :max="capabilities.parameters.min_p!.max" :step="0.01" @update:model-value="emitField('min_p', $event)" />
         </label>
       </div>
-      <div class="advanced-options-grid">
-        <label>
+      <div v-if="capabilities.parameters.frequency_penalty || capabilities.parameters.presence_penalty" class="advanced-options-grid">
+        <label v-if="capabilities.parameters.frequency_penalty">
           <span>{{ t('chatPanel.advanced.frequencyPenalty', { value: modelValue.frequency_penalty?.toFixed(2) }) }}</span>
-          <el-slider :model-value="modelValue.frequency_penalty" :min="-2" :max="2" :step="0.05" @update:model-value="emitField('frequency_penalty', $event)" />
+          <el-slider v-if="capabilities.parameters.frequency_penalty!.min < capabilities.parameters.frequency_penalty!.max" :model-value="modelValue.frequency_penalty" :min="capabilities.parameters.frequency_penalty!.min" :max="capabilities.parameters.frequency_penalty!.max" :step="0.05" @update:model-value="emitField('frequency_penalty', $event)" />
         </label>
-        <label>
+        <label v-if="capabilities.parameters.presence_penalty">
           <span>{{ t('chatPanel.advanced.presencePenalty', { value: modelValue.presence_penalty?.toFixed(2) }) }}</span>
-          <el-slider :model-value="modelValue.presence_penalty" :min="-2" :max="2" :step="0.05" @update:model-value="emitField('presence_penalty', $event)" />
+          <el-slider v-if="capabilities.parameters.presence_penalty!.min < capabilities.parameters.presence_penalty!.max" :model-value="modelValue.presence_penalty" :min="capabilities.parameters.presence_penalty!.min" :max="capabilities.parameters.presence_penalty!.max" :step="0.05" @update:model-value="emitField('presence_penalty', $event)" />
         </label>
       </div>
-      <label>
+      <label v-if="capabilities.parameters.repetition_penalty">
         <span>{{ t('chatPanel.advanced.repetitionPenalty', { value: modelValue.repetition_penalty?.toFixed(2) }) }}</span>
-        <el-slider :model-value="modelValue.repetition_penalty" :min="0" :max="2" :step="0.05" @update:model-value="emitField('repetition_penalty', $event)" />
+        <el-slider v-if="capabilities.parameters.repetition_penalty!.min < capabilities.parameters.repetition_penalty!.max" :model-value="modelValue.repetition_penalty" :min="capabilities.parameters.repetition_penalty!.min" :max="capabilities.parameters.repetition_penalty!.max" :step="0.05" @update:model-value="emitField('repetition_penalty', $event)" />
       </label>
       <label>
         <span>{{ t('chatPanel.advanced.maxReplyLength') }}</span>
@@ -70,6 +70,7 @@ import { ElInputNumber } from 'element-plus'
 import 'element-plus/es/components/input-number/style/css'
 import { Timer } from '@element-plus/icons-vue'
 import { t } from '@/i18n'
+import type { GenerationCapabilities } from '@/../shared/llm-generation-parameters'
 
 export type ChatAdvancedOptionsModel = {
   temperature: number
@@ -85,6 +86,7 @@ export type ChatAdvancedOptionsModel = {
 
 defineProps<{
   modelValue: ChatAdvancedOptionsModel
+  capabilities: GenerationCapabilities
   maxOutputTokens: number
 }>()
 

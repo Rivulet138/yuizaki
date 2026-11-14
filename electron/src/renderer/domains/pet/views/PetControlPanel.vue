@@ -1,5 +1,7 @@
 <template>
   <PanelShell :title="t('petControl.title')" tone="companion">
+    <el-alert v-if="catalogLoadError" :title="catalogLoadError" type="warning" :closable="false" />
+    <el-alert v-if="displayLoadError" :title="`显示器不可用：${displayLoadError}；模型列表仍可使用。`" type="warning" :closable="false" />
     <template #actions>
       <el-button :icon="Clock" plain @click="relationshipHistoryVisible = true">{{ t('petControl.relationshipHistory') }}</el-button>
     </template>
@@ -19,6 +21,8 @@
           v-model:local-model-type="localModelType"
           v-model:source-path="localModelSourcePath"
           :models="catalog.models"
+          :picker-available="modelPickerCapability.available"
+          :picker-hint="modelPickerCapability.reason"
           :current-model="currentModel"
           :source-label="currentModelSourceLabel"
           :capabilities="avatarCapabilities"
@@ -100,14 +104,14 @@
           <div class="button-row">
             <el-button
               plain
-              :disabled="!avatarCapabilities?.actions.gaze || operationLoading"
+              :disabled="!avatarReady || !avatarCapabilities?.actions.gaze || operationLoading"
               @click="previewGaze"
             >
               {{ t('petControl.capability.gazeCenter') }}
             </el-button>
             <el-button
               plain
-              :disabled="!avatarCapabilities?.actions.cancel || operationLoading"
+              :disabled="!avatarReady || !avatarCapabilities?.actions.cancel || operationLoading"
               @click="cancelAvatarActions"
             >
               {{ t('petControl.capability.stopAction') }}
@@ -182,7 +186,7 @@
             />
           </el-select>
           <div class="button-row">
-            <el-button type="primary" plain :disabled="!selectedEmotionId" @click="previewEmotionPreset">{{ t('petControl.expression.playEmotionPreset') }}</el-button>
+            <el-button type="primary" plain :disabled="!avatarReady || !avatarCapabilities?.actions.affect || !selectedEmotionId || operationLoading" @click="previewEmotionPreset">{{ t('petControl.expression.playEmotionPreset') }}</el-button>
           </div>
 
           <label class="field-label">{{ t('petControl.expression.mix') }}</label>
@@ -197,7 +201,7 @@
           <label class="field-label">{{ t('petControl.expression.weight', { value: ratioPercent(expressionWeight) }) }}</label>
           <el-slider v-model="expressionWeight" :min="0" :max="1" :step="0.05" />
           <div class="button-row">
-            <el-button type="primary" :disabled="!selectedExpressionId" @click="previewExpressionMix">{{ t('petControl.expression.preview') }}</el-button>
+            <el-button type="primary" :disabled="!avatarReady || !avatarCapabilities?.actions.expression || !selectedExpressionId || operationLoading" @click="previewExpressionMix">{{ t('petControl.expression.preview') }}</el-button>
           </div>
 
           <label class="field-label">{{ t('petControl.expression.parameterOverride') }}</label>
@@ -212,7 +216,7 @@
           <label class="field-label">{{ t('petControl.expression.parameterValue', { value: parameterValue.toFixed(2) }) }}</label>
           <el-slider v-model="parameterValue" :min="selectedParameterRange.min" :max="selectedParameterRange.max" :step="selectedParameterStep" />
           <div class="button-row">
-            <el-button plain :disabled="!selectedParameterId" @click="previewParameterOverride">{{ t('petControl.expression.previewParameter') }}</el-button>
+            <el-button plain :disabled="!avatarReady || !avatarCapabilities?.actions.parameterPatch || !selectedParameterId || operationLoading" @click="previewParameterOverride">{{ t('petControl.expression.previewParameter') }}</el-button>
           </div>
         </el-card>
         </details>
@@ -234,7 +238,7 @@
             />
           </el-select>
           <div class="button-row">
-            <el-button plain :disabled="!selectedMotionId" @click="previewMotion">{{ t('petControl.motion.play') }}</el-button>
+            <el-button plain :disabled="!avatarReady || !avatarCapabilities?.actions.motion || !selectedMotionId || operationLoading" @click="previewMotion">{{ t('petControl.motion.play') }}</el-button>
           </div>
 
           <label class="field-label">{{ t('petControl.motion.anchor') }}</label>
@@ -347,7 +351,9 @@ import 'element-plus/es/components/tag/style/css'
 import { ElOption, ElSelect } from 'element-plus'
 import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/option/style/css'
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
+import { usePanelLifecycle } from '@/app/composables/usePanelLifecycle'
+import { useUiCapabilities } from '@/app/composables/useUiCapabilities'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Clock } from '@element-plus/icons-vue'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
@@ -423,13 +429,21 @@ const modelSourceLabels = {
   plugin: 'petControl.modelSource.plugin',
 } as const
 const ratioPercent = (value: number | null) => `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`
+const uiCapabilities = useUiCapabilities()
+const hostCapability = computed(() => uiCapabilities.capability('hostHttp'))
+const modelPickerCapability = computed(() => window.petApi?.pet?.importLocalModelFromPicker
+  ? uiCapabilities.capability('electronIpc', 'localFilePicker', true)
+  : uiCapabilities.capability('hostHttp'))
+const displayLoadError = ref('')
+const catalogLoadError = ref('')
 let refreshSequence = 0
+let stateWriteSequence = 0
 let readyRetryTimer: number | null = null
 let readyRetryCount = 0
 
 const currentModel = computed(() => {
   const activeId = state.modelId ?? catalog.activeModelId
-  return catalog.models.find((model) => model.id === activeId) ?? catalog.models[0] ?? null
+  return catalog.models.find((model) => model.id === activeId) ?? null
 })
 const activeSizePreset = computed(() =>
   sizePresetOptions.reduce((best, option) =>
@@ -476,16 +490,18 @@ const behaviorStateOptions = computed<Array<{ label: string; value: PetBehaviorS
   { label: t('petControl.behaviorState.reacting'), value: 'reacting' },
   { label: t('petControl.behaviorState.interrupted'), value: 'interrupted' },
 ])
+const avatarReady = computed(() => Boolean(state.ready && state.modelId && avatarCapabilities.value
+  && avatarCapabilities.value.modelId === state.modelId && avatarCapabilities.value.modelType === state.modelType))
 const capabilityRows = computed(() => {
   const actions = avatarCapabilities.value?.actions
   return [
-    { key: 'behavior', label: t('petControl.capabilityRow.behavior'), enabled: Boolean(actions?.behavior) },
-    { key: 'affect', label: t('petControl.capabilityRow.affect'), enabled: Boolean(actions?.affect) },
-    { key: 'gaze', label: t('petControl.capabilityRow.gaze'), enabled: Boolean(actions?.gaze) },
-    { key: 'motion', label: t('petControl.capabilityRow.motion'), enabled: Boolean(actions?.motion) },
-    { key: 'expression', label: t('petControl.capabilityRow.expression'), enabled: Boolean(actions?.expression) },
-    { key: 'parameterPatch', label: t('petControl.capabilityRow.parameterPatch'), enabled: Boolean(actions?.parameterPatch) },
-    { key: 'viseme', label: t('petControl.capabilityRow.viseme'), enabled: Boolean(actions?.viseme) },
+    { key: 'behavior', label: t('petControl.capabilityRow.behavior'), enabled: Boolean(avatarReady.value && actions?.behavior) },
+    { key: 'affect', label: t('petControl.capabilityRow.affect'), enabled: Boolean(avatarReady.value && actions?.affect) },
+    { key: 'gaze', label: t('petControl.capabilityRow.gaze'), enabled: Boolean(avatarReady.value && actions?.gaze) },
+    { key: 'motion', label: t('petControl.capabilityRow.motion'), enabled: Boolean(avatarReady.value && actions?.motion) },
+    { key: 'expression', label: t('petControl.capabilityRow.expression'), enabled: Boolean(avatarReady.value && actions?.expression) },
+    { key: 'parameterPatch', label: t('petControl.capabilityRow.parameterPatch'), enabled: Boolean(avatarReady.value && actions?.parameterPatch) },
+    { key: 'viseme', label: t('petControl.capabilityRow.viseme'), enabled: Boolean(avatarReady.value && actions?.viseme) },
   ]
 })
 const sizePresetOptions = [
@@ -600,7 +616,19 @@ const statusCards = computed(() => [
   },
 ])
 
-const syncDrafts = () => {
+const draftBindings: Record<string, { value: unknown }> = {
+  selectedModelId, scaleDraft, opacityDraft, positionXDraft, positionYDraft,
+  selectedExpressionId, selectedParameterId, parameterValue, selectedMotionId,
+  selectedEmotionId, selectedPlacement, selectedDisplayId,
+}
+let draftBaseline: Record<string, unknown> | null = null
+let lipSyncBaseline = ''
+const syncDrafts = (reset = false) => {
+  const dirty = Object.fromEntries(Object.entries(draftBindings).filter(([key, binding]) =>
+    !reset && draftBaseline && JSON.stringify(binding.value) !== JSON.stringify(draftBaseline[key]),
+  ).map(([key, binding]) => [key, binding.value]))
+  const lipSyncBefore = { ...lipSyncDraft }
+  const lipSyncDirty = !reset && lipSyncBaseline && JSON.stringify(lipSyncDraft) !== lipSyncBaseline
   const anchor = resolveAnchorDraft()
   selectedModelId.value = currentModel.value?.id ?? state.modelId ?? catalog.activeModelId
   scaleDraft.value = Number(state.scale.toFixed(2))
@@ -617,6 +645,10 @@ const syncDrafts = () => {
     : emotionOptions.value[0]?.id ?? null
   selectedPlacement.value = state.placement === 'free' ? 'bottom-right' : state.placement
   selectedDisplayId.value = state.displayId ?? displays.activeDisplayId
+  draftBaseline = Object.fromEntries(Object.entries(draftBindings).map(([key, binding]) => [key, binding.value]))
+  lipSyncBaseline = JSON.stringify(lipSyncDraft)
+  for (const [key, value] of Object.entries(dirty)) draftBindings[key].value = value
+  if (lipSyncDirty) Object.assign(lipSyncDraft, lipSyncBefore)
 }
 
 const resolveAnchorDraft = () => {
@@ -652,13 +684,22 @@ const clearReadyRetry = () => {
 
 const scheduleReadyRetry = () => {
   clearReadyRetry()
-  if (state.ready || readyRetryCount >= 4) return
-  readyRetryCount += 1
+  if (!pageLifecycle.active.value || operationLoading.value || avatarReady.value || readyRetryCount >= 4) return
+  const requestId = refreshSequence
   readyRetryTimer = window.setTimeout(async () => {
     readyRetryTimer = null
+    if (!pageLifecycle.active.value || operationLoading.value || requestId !== refreshSequence) return
+    const stateRequestId = stateWriteSequence
     try {
-      applyState(await petControl.getState())
-      if (state.ready) {
+      const [next, capabilities] = await Promise.allSettled([petControl.getState(), petControl.getAvatarCapabilities()])
+      if (!pageLifecycle.active.value || requestId !== refreshSequence) return
+      // Writes invalidate only the state read; capabilities remain independently useful.
+      if (stateRequestId === stateWriteSequence && !operationLoading.value) {
+        readyRetryCount += 1
+        if (next.status === 'fulfilled') applyState(next.value)
+      }
+      if (capabilities.status === 'fulfilled') avatarCapabilities.value = capabilities.value.capabilities
+      if (avatarReady.value) {
         readyRetryCount = 0
       } else {
         scheduleReadyRetry()
@@ -710,8 +751,17 @@ const runPetOperation = async <T,>(
   successMessage?: string,
   failureMessage = t('petControl.error.operationFailed'),
   action = 'other',
+  capability = hostCapability.value,
 ): Promise<T | null> => {
-  if (operationLoading.value) return null
+  if (!pageLifecycle.active.value || operationLoading.value) return null
+  if (!capability.available) { ElMessage.warning(capability.reason); return null }
+  stateWriteSequence += 1
+  // Model mutations also change the catalog and invalidate the whole snapshot.
+  if (['model-apply', 'model-import', 'model-delete'].includes(action)) {
+    refreshSequence += 1
+    refreshingPet.value = false
+    clearReadyRetry()
+  }
   operationLoading.value = true
   pendingAction.value = action
   operationMessage.value = ''
@@ -730,6 +780,7 @@ const runPetOperation = async <T,>(
   } finally {
     operationLoading.value = false
     pendingAction.value = null
+    if (readyRetryTimer === null) scheduleReadyRetry()
   }
 }
 
@@ -751,61 +802,54 @@ const applyModelImportResult = (result: {
     localModelType.value = result.modelType
   }
   localModelSourcePath.value = ''
-  syncDrafts()
+  avatarCapabilities.value = null
+  syncDrafts(true)
 }
 
 const showPetLayerAfterModelChange = async (failureMessage = t('petControl.error.showLayerFailed')) => {
+  if (!pageLifecycle.active.value) return false
   try {
     await petControl.setVisible(true)
+    return true
   } catch (error) {
     operationAlertType.value = 'warning'
     operationMessage.value = errorMessage(error, failureMessage)
     ElMessage.warning(operationMessage.value)
+    return false
   }
 }
 
 const refresh = async () => {
+  if (!pageLifecycle.active.value || operationLoading.value || refreshingPet.value) return
   const requestId = ++refreshSequence
+  const stateRequestId = stateWriteSequence
   refreshingPet.value = true
   try {
-    const [nextState, nextCatalog, nextDisplays, nextPresets, nextCapabilities] = await Promise.all([
-      petControl.getState(),
-      petControl.getCatalog(),
-      petControl.getDisplays(),
-      typeof petControl.getPlacementPresets === 'function'
-        ? petControl.getPlacementPresets().catch((error) => {
-            console.warn(t('petControl.log.loadPresetsFailed'), error)
-            return null
-          })
-        : Promise.resolve(null),
-      typeof petControl.getAvatarCapabilities === 'function'
-        ? petControl.getAvatarCapabilities().catch(() => null)
-        : Promise.resolve(null),
+    const [nextState, nextCatalog, nextDisplays, nextPresets, nextCapabilities] = await Promise.allSettled([
+      petControl.getState(), petControl.getCatalog(), petControl.getDisplays(),
+      petControl.getPlacementPresets(), petControl.getAvatarCapabilities(),
     ])
-    if (requestId !== refreshSequence) return
-    Object.assign(state, nextState)
-    catalog.activeModelId = nextCatalog.activeModelId
-    catalog.models = nextCatalog.models
-    displays.activeDisplayId = nextDisplays.activeDisplayId
-    displays.items = nextDisplays.displays
-    avatarCapabilities.value = nextCapabilities?.capabilities ?? null
+    if (requestId !== refreshSequence || !pageLifecycle.active.value) return
+    catalogLoadError.value = nextCatalog.status === 'rejected' ? errorMessage(nextCatalog.reason, '模型列表读取失败') : ''
+    displayLoadError.value = nextDisplays.status === 'rejected' ? errorMessage(nextDisplays.reason, '显示器读取失败') : ''
     hasLoadedState.value = true
-    if (nextPresets) {
-      placementPresets.value = nextPresets.presets
+    if (stateRequestId === stateWriteSequence && !operationLoading.value) {
+      if (nextState.status === 'fulfilled') applyState(nextState.value)
+      else { operationAlertType.value = 'error'; operationMessage.value = errorMessage(nextState.reason, t('petControl.error.stateReadFailed')) }
     }
+    if (nextCatalog.status === 'fulfilled') {
+      catalog.activeModelId = nextCatalog.value.activeModelId
+      catalog.models = nextCatalog.value.models
+    }
+    if (nextDisplays.status === 'fulfilled') {
+      displays.activeDisplayId = nextDisplays.value.activeDisplayId
+      displays.items = nextDisplays.value.displays
+    }
+    avatarCapabilities.value = nextCapabilities.status === 'fulfilled' ? nextCapabilities.value.capabilities : null
+    if (nextPresets.status === 'fulfilled') placementPresets.value = nextPresets.value.presets
     syncDrafts()
-    if (state.ready) {
-      readyRetryCount = 0
-      clearReadyRetry()
-    } else {
-      scheduleReadyRetry()
-    }
-  } catch (error) {
-    if (requestId !== refreshSequence) return
-    hasLoadedState.value = true
-    operationAlertType.value = 'error'
-    operationMessage.value = errorMessage(error, t('petControl.error.stateReadFailed'))
-    ElMessage.error(operationMessage.value)
+    if (avatarReady.value) { readyRetryCount = 0; clearReadyRetry() }
+    else scheduleReadyRetry()
   } finally {
     if (requestId === refreshSequence) refreshingPet.value = false
   }
@@ -821,6 +865,8 @@ const applyModel = async () => {
   )
   if (!result) return
   applyState(result)
+  avatarCapabilities.value = null
+  syncDrafts(true)
   await showPetLayerAfterModelChange()
   await refresh()
 }
@@ -889,16 +935,19 @@ const importLocalModel = async (sourceOverride?: string, modelTypeOverride?: Pet
 }
 
 const oneClickImportModelFolder = async () => {
+  if (!modelPickerCapability.value.available) { ElMessage.warning(modelPickerCapability.value.reason); return }
   const result = await runPetOperation(
     () => petControl.importLocalModelFromPicker('auto'),
     undefined,
     t('petControl.error.modelFolderImportFailed'),
     'model-import',
+    modelPickerCapability.value,
   )
   if (!result || result.canceled) return
   applyModelImportResult(result)
-  await showPetLayerAfterModelChange()
+  const shown = await showPetLayerAfterModelChange()
   await refresh()
+  if (!shown) return
   operationAlertType.value = 'success'
   operationMessage.value = result.modelType === 'vrm'
     ? t('petControl.success.vrmImportedAndShown')
@@ -907,11 +956,13 @@ const oneClickImportModelFolder = async () => {
 }
 
 const pickAndImportLocalModel = async () => {
+  if (!modelPickerCapability.value.available) { ElMessage.warning(modelPickerCapability.value.reason); return }
   const picked = await runPetOperation(
     () => petControl.pickLocalModel(localModelType.value),
     undefined,
     t('petControl.error.pickerFailed'),
     'model-browse',
+    window.petApi?.pet?.pickLocalModel ? uiCapabilities.capability('electronIpc', 'localFilePicker', true) : hostCapability.value,
   )
   if (!picked || picked.canceled || !picked.sourcePath) return
   localModelSourcePath.value = picked.sourcePath
@@ -942,45 +993,41 @@ const deleteCurrentLocalModel = async () => {
     'model-delete',
   )
   if (!result) return
+  refreshSequence += 1
+  clearReadyRetry()
+  avatarCapabilities.value = null
+  catalogLoadError.value = ''
   applyState(result.state)
   catalog.activeModelId = result.catalog.activeModelId
   catalog.models = result.catalog.models
-  syncDrafts()
+  syncDrafts(true)
   await showPetLayerAfterModelChange(t('petControl.error.modelDeletedShowFailed'))
   await refresh()
 }
 
 const previewExpressionMix = async () => {
   const expressionId = selectedExpressionId.value
-  if (!expressionId) return
-  await runPetOperation(() => petControl.triggerExpressionMix({
-    expressions: [{ expression: expressionId, weight: expressionWeight.value }],
-    intensity: expressionWeight.value,
-    durationMs: 1800,
-  }), t('petControl.success.expressionMixSent'))
+  if (!expressionId || !avatarCapabilities.value?.expressions.includes(expressionId)) return
+  await sendAvatarAction({ type: 'expression', name: expressionId, weight: expressionWeight.value }, t('petControl.success.expressionMixSent'))
 }
 
 const previewEmotionPreset = async () => {
   const emotionId = selectedEmotionId.value
   if (!emotionId) return
-  await runPetOperation(() => petControl.triggerEmotion(emotionId), t('petControl.success.emotionPresetSent'))
+  await sendAvatarAction({ type: 'affect', emotion: emotionId }, t('petControl.success.emotionPresetSent'))
 }
 
 const previewParameterOverride = async () => {
   const parameterId = selectedParameterId.value
-  if (!parameterId) return
-  await runPetOperation(() => petControl.triggerParameterOverrides({
-    expressions: [],
-    parameterOverrides: [{ id: parameterId, value: parameterValue.value, weight: 1 }],
-    intensity: 1,
-    durationMs: 1800,
-  }), t('petControl.success.parameterOverrideSent'))
+  const parameter = avatarCapabilities.value?.parameters.find((item) => item.id === parameterId)
+  if (!parameter || !Number.isFinite(parameterValue.value) || parameterValue.value < parameter.min || parameterValue.value > parameter.max) return
+  await sendAvatarAction({ type: 'parameterPatch', patches: [{ id: parameter.id, value: parameterValue.value, weight: 1 }], durationMs: 1800 }, t('petControl.success.parameterOverrideSent'))
 }
 
 const previewMotion = async () => {
   const motion = motionOptions.value.find((item) => item.id === selectedMotionId.value)
-  if (!motion) return
-  await runPetOperation(() => petControl.triggerMotion(motion.group, motion.index), t('petControl.success.motionSent'))
+  if (!motion || !avatarCapabilities.value?.motions.some((item) => item.group === motion.group && item.index === motion.index)) return
+  await sendAvatarAction({ type: 'motion', group: motion.group, index: motion.index }, t('petControl.success.motionSent'))
 }
 
 const buildAvatarCommand = (action: AvatarAction): AvatarCommand => {
@@ -1003,17 +1050,29 @@ const buildAvatarCommand = (action: AvatarAction): AvatarCommand => {
 
 const sendAvatarAction = async (action: AvatarAction, successMessage: string) => {
   const capability = avatarCapabilities.value?.actions[action.type]
-  if (!capability) {
+  if (!avatarReady.value || !capability) {
     ElMessage.info(t('petControl.error.capabilityUnsupported'))
     return
   }
+  const command = buildAvatarCommand(action)
   const result = await runPetOperation(
-    () => petControl.triggerAvatarCommand(buildAvatarCommand(action)),
-    successMessage,
+    async () => {
+      const response = await petControl.triggerAvatarCommand(command)
+      if (!response || response.commandId !== command.id) throw new Error('动作响应身份不匹配；结果未知，请同步模型状态。')
+      return response
+    },
+    undefined,
     t('petControl.error.avatarActionFailed'),
     `avatar-${action.type}`,
   )
-  if (result && result.status !== 'completed' && result.status !== 'started' && result.status !== 'accepted') {
+  if (!result) return
+  if (result.status === 'completed') {
+    operationAlertType.value = 'success'
+    operationMessage.value = `${successMessage} · 已完成`
+  } else if (result.status === 'accepted' || result.status === 'started') {
+    operationAlertType.value = 'info'
+    operationMessage.value = '动作请求已接受；渲染完成以舞台反馈为准。'
+  } else {
     operationAlertType.value = 'warning'
     operationMessage.value = result.message ?? t('petControl.avatar.status', { status: result.status })
   }
@@ -1148,11 +1207,11 @@ const hidePet = async () => {
   if (result !== null) await refresh()
 }
 
-onMounted(() => {
-  void refresh()
-})
-
-onBeforeUnmount(() => {
+const pageLifecycle = usePanelLifecycle(async () => {
+  await Promise.all([refresh(), uiCapabilities.refresh()])
+}, () => {
+  refreshSequence += 1
+  refreshingPet.value = false
   clearReadyRetry()
 })
 </script>
@@ -1388,15 +1447,6 @@ onBeforeUnmount(() => {
   color: var(--yui-text);
   font-size: 13px;
   font-weight: 700;
-}
-
-.field-hint {
-  display: block;
-  margin-top: 6px;
-}
-
-.warning-hint {
-  color: #a16207;
 }
 
 .preset-row {

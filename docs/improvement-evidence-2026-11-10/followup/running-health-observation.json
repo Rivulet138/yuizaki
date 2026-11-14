@@ -1,0 +1,43 @@
+{
+  "source": "native subagent HTTP inspection stdout; main archived summary without rerunning provider probes",
+  "observedAt": "2026-11-10T06:16:44.467342+00:00",
+  "runningCode": "existing process started before current patches",
+  "requests": [
+    {
+      "port": 8001,
+      "path": "/health",
+      "status": 200,
+      "health": "healthy",
+      "elapsed_ms": 1759.4,
+      "llm_ms": 1747.894,
+      "tts_ms": 0.209,
+      "database_ms": 5.751
+    },
+    {
+      "port": 38945,
+      "path": "/health",
+      "status": 200,
+      "health": "healthy",
+      "elapsed_ms": 2489.1,
+      "llm_ms_approx": 2467
+    },
+    {
+      "port": 8001,
+      "path": "/api/ping",
+      "status": 200,
+      "elapsed_ms": 7.1
+    },
+    {
+      "port": 38945,
+      "path": "/api/ping",
+      "status": 200,
+      "elapsed_ms": 8.4
+    }
+  ],
+  "conclusion": "Historic >8 second timeout did not reproduce. LLM dominates this measurement; this does not establish the cause of the historic timeout.",
+  "accessLog": "logs/dev/backend.supervisor.log",
+  "logLines": [
+    "[14:16:46] [backend] INFO:     127.0.0.1:53733 - \"GET /health HTTP/1.1\" 200 OK",
+    "[14:16:46] [backend] INFO:     127.0.0.1:53735 - \"GET /health HTTP/1.1\" 200 OK"
+  ]
+}

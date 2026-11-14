@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from time import monotonic
 from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass
 from typing import Protocol, cast, runtime_checkable
+
+logger = logging.getLogger(__name__)
 
 HealthResult = tuple[bool, str]
 HealthProvider = Callable[[], Coroutine[object, object, HealthResult]]
@@ -65,6 +69,30 @@ def build_app_runtime_health_providers(
     database_repository_provider: Callable[[], DatabaseHealthRepository | None],
     memory_state_provider: Callable[[], object | None],
 ) -> RuntimeHealthProviders:
+    snapshot_tasks: dict[str, tuple[Callable[[], object], asyncio.Task[object]]] = {}
+
+    async def _status_snapshot(name: str, provider: Callable[[], object]) -> object:
+        # A timed-out waiter cannot stop a worker thread. Reuse its in-flight
+        # snapshot so repeated health requests cannot accumulate blocked workers.
+        previous = snapshot_tasks.get(name)
+        # A bound method compares by its function and owning instance. Reuse is
+        # valid only while the provider itself is unchanged.
+        task = previous[1] if previous is not None and previous[0] == provider else None
+        if task is None or task.done():
+            def measured_snapshot() -> object:
+                started = monotonic()
+                try:
+                    return provider()
+                finally:
+                    elapsed_ms = (monotonic() - started) * 1000
+                    if elapsed_ms >= 250:
+                        logger.warning("Health slow function %s duration_ms=%.1f", name, elapsed_ms)
+
+            task = asyncio.create_task(asyncio.to_thread(measured_snapshot))
+            snapshot_tasks[name] = (provider, task)
+            task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+        return await asyncio.shield(task)
+
     async def _check_llm_health() -> HealthResult:
         client = llm_client_provider()
         if client is None:
@@ -81,7 +109,7 @@ def build_app_runtime_health_providers(
             except Exception as exc:  # noqa: BLE001 - provider-specific transport failures
                 return False, f"LLM provider unavailable: {exc}"
             snapshot_provider = getattr(client, "status_snapshot", None)
-            snapshot = snapshot_provider() if callable(snapshot_provider) else {}
+            snapshot = await _status_snapshot("llm.status_snapshot", snapshot_provider) if callable(snapshot_provider) else {}
             if isinstance(snapshot, Mapping) and snapshot.get("last_preconnect_ok") is False:
                 return False, "LLM provider unavailable"
             if not reached:
@@ -89,7 +117,7 @@ def build_app_runtime_health_providers(
             return True, "LLM service healthy"
         snapshot_provider = getattr(client, "status_snapshot", None)
         if callable(snapshot_provider):
-            snapshot = snapshot_provider()
+            snapshot = await _status_snapshot("llm.status_snapshot", snapshot_provider)
             if isinstance(snapshot, Mapping) and snapshot.get("last_preconnect_ok") is False:
                 return False, "LLM provider unavailable"
         return True, "LLM service healthy"
@@ -101,7 +129,7 @@ def build_app_runtime_health_providers(
         snapshot_provider = getattr(tts_client, "status_snapshot", None)
         if callable(snapshot_provider):
             try:
-                snapshot = snapshot_provider()
+                snapshot = await _status_snapshot("tts.status_snapshot", snapshot_provider)
             except Exception as exc:  # noqa: BLE001 - status adapters are provider-defined
                 return False, f"TTS status error: {exc}"
             if not isinstance(snapshot, Mapping):

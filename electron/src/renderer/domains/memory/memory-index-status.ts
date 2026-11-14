@@ -20,23 +20,26 @@ export const getMemoryIndexUiStatus = (
   const runtimeStatus = status.status.toLowerCase()
   const rebuildState = status.job?.state
   const indexDirty = status.metadata?.index_dirty === true
-  const indexReady = status.healthy !== false
+  const indexReady = (status.metadata?.index_ready === true || status.metadata?.index_healthy === true || status.healthy === true)
+    && status.metadata?.index_ready !== false
+    && status.healthy !== false
     && status.metadata?.index_healthy !== false
     && !indexDirty
 
   if (status.healthy === false) {
-    return { label: t('memoryView.indexBackendError'), availabilityLabel: t('memoryView.indexAuthorityError'), tone: 'danger' }
+    return { label: t('memoryView.indexBackendError'), availabilityLabel: t(status.metadata?.authority === 'sqlite' ? 'memoryView.indexAuthorityAvailable' : 'memoryView.indexAuthorityError'), tone: 'danger' }
   }
-  if (rebuildState === 'failed' || rebuildState === 'interrupted' || runtimeStatus.includes('error') || runtimeStatus.includes('fail')) {
+  if (runtimeStatus === 'indexing' || rebuildState === 'queued' || rebuildState === 'running' || rebuildState === 'cancelling') {
+    return { label: t('memoryView.indexRebuilding'), availabilityLabel: t('memoryView.indexRebuildingAvailability'), tone: 'info' }
+  }
+  if (status.metadata?.last_index_error || rebuildState === 'failed' || rebuildState === 'interrupted' || runtimeStatus.includes('error') || runtimeStatus.includes('fail')) {
     return { label: t('memoryView.indexRebuildFailed'), availabilityLabel: t('memoryView.indexAuthorityAvailable'), tone: 'warning' }
   }
   if (rebuildState === 'cancelled') {
     return { label: t('memoryView.indexCancelled'), availabilityLabel: t('memoryView.indexAuthorityAvailable'), tone: 'info' }
   }
-  if (runtimeStatus === 'indexing' || rebuildState === 'queued' || rebuildState === 'running' || rebuildState === 'cancelling') {
-    return { label: t('memoryView.indexRebuilding'), availabilityLabel: t('memoryView.indexRebuildingAvailability'), tone: 'info' }
-  }
-  if (indexDirty) {
+
+  if (indexDirty || Number(status.metadata?.pending_index_count || 0) > 0) {
     return { label: t('memoryView.indexNeedsRebuild'), availabilityLabel: t('memoryView.indexNeedsRebuildAvailability'), tone: 'warning' }
   }
   if (!indexReady) {

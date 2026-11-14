@@ -54,6 +54,7 @@ export type ChatReasoningEffort =
   | 'medium'
   | 'high'
   | 'xhigh'
+  | 'max'
   | 'auto';
 
 export type ChatPromptMode = 'auto' | 'work' | 'daily';
@@ -64,10 +65,14 @@ export type ChatVadEagerness = 'low' | 'medium' | 'high' | 'auto';
 export interface ChatPromptRoleCard {
   enabled?: boolean;
   name?: string;
+  description?: string;
   personality?: string;
   scenario?: string;
   instructions?: string;
   firstMessage?: string;
+  exampleDialogue?: string;
+  alternateGreetings?: string[];
+  greetingIndex?: number;
 }
 
 export interface ChatPromptEngineering {

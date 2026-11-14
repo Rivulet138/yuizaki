@@ -11,11 +11,12 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from modules.core.paths import data_dir_from_env, database_url_from_env
 from sqlalchemy import create_engine, func
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+
+from modules.core.paths import data_dir_from_env, database_url_from_env
 
 from .models import (
     ChatMessage,
@@ -74,6 +75,23 @@ class ContextRevisionConflict(Exception):
 # Distinguishes "leave the stored context untouched" from an explicit null,
 # which means "clear the stored context".
 _CONTEXT_UNSET: Any = object()
+_PERSONA_OVERRIDES_UNSET: Any = object()
+
+
+def validate_persona_overrides(value: Any) -> dict[str, str] | None:
+    """Validate the complete session override; empty strings explicitly clear fields."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise TypeError("persona_overrides_must_be_object_or_null")
+    if value.keys() - {"scenario", "exampleDialogue"}:
+        raise ValueError("persona_overrides_unknown_fields")
+    for field, text in value.items():
+        if not isinstance(text, str):
+            raise TypeError(f"persona_overrides_{field}_must_be_string")
+        if len(text) > 1600:
+            raise ValueError(f"persona_overrides_{field}_too_long")
+    return dict(value)
 
 
 class DatabaseRepository:
@@ -161,6 +179,7 @@ class DatabaseRepository:
             "workspace_id": chat_session.workspace_id,
             "title": chat_session.title,
             "summary": chat_session.summary,
+            "persona_overrides": chat_session.persona_overrides,
             "pinned": bool(chat_session.pinned),
             "archived": bool(chat_session.archived),
             "parent_session_id": chat_session.parent_session_id,
@@ -1245,7 +1264,20 @@ class DatabaseRepository:
         finally:
             session.close()
 
-    def create_chat_session(self, workspace_id: str, title: str | None = None) -> dict[str, Any]:
+    def get_chat_session(self, session_id: str, *, workspace_id: str) -> dict[str, Any] | None:
+        """Read one session, rejecting use from a different workspace."""
+        with self.SessionLocal() as session:
+            chat_session = session.query(ChatSession).filter_by(id=session_id).first()
+            if chat_session is None:
+                return None
+            if chat_session.workspace_id != self._normalize_workspace_id(workspace_id):
+                raise DatabaseError("session_workspace_mismatch")
+            return self._session_to_record(chat_session)
+
+    def create_chat_session(
+        self, workspace_id: str, title: str | None = None, *, persona_overrides: Any = None,
+    ) -> dict[str, Any]:
+        persona_overrides = validate_persona_overrides(persona_overrides)
         session = self.SessionLocal()
         try:
             normalized_workspace_id = self._require_workspace(session, workspace_id)
@@ -1253,6 +1285,7 @@ class DatabaseRepository:
             chat_session = ChatSession(
                 id=session_id,
                 workspace_id=normalized_workspace_id,
+                persona_overrides=persona_overrides,
                 title=title or f"Chat {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')}",
                 pinned=False,
             )
@@ -1268,7 +1301,9 @@ class DatabaseRepository:
         finally:
             session.close()
 
-    def update_chat_session(self, session_id: str, *, summary: str | None = None, pinned: bool | None = None, title: str | None = None, archived: bool | None = None, workspace_id: str | None = None) -> dict[str, Any]:
+    def update_chat_session(self, session_id: str, *, summary: str | None = None, pinned: bool | None = None, title: str | None = None, archived: bool | None = None, workspace_id: str | None = None, persona_overrides: Any = _PERSONA_OVERRIDES_UNSET) -> dict[str, Any]:
+        if persona_overrides is not _PERSONA_OVERRIDES_UNSET:
+            persona_overrides = validate_persona_overrides(persona_overrides)
         session = self.SessionLocal()
         try:
             query = session.query(ChatSession).filter_by(id=session_id)
@@ -1277,6 +1312,8 @@ class DatabaseRepository:
             chat_session = query.first()
             if not chat_session:
                 raise NotFoundError(f"session_not_found: {session_id}")
+            if persona_overrides is not _PERSONA_OVERRIDES_UNSET:
+                chat_session.persona_overrides = persona_overrides
             if summary is not None:
                 chat_session.summary = summary
             if pinned is not None:
@@ -1323,6 +1360,7 @@ class DatabaseRepository:
                 title=title or f"{source.title or 'Chat'} branch",
                 pinned=False,
                 archived=False,
+                persona_overrides=dict(source.persona_overrides) if source.persona_overrides is not None else None,
                 parent_session_id=source_session_id,
                 branched_from_message_id=message_id,
                 message_count=len(source_messages),

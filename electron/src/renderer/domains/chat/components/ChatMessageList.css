@@ -6,7 +6,7 @@
 }
 
 .message-row[data-role='user'] {
-  flex-direction: row-reverse;
+  flex-direction: row;
   justify-content: flex-end;
 }
 
@@ -17,17 +17,22 @@
 
 .message-stack {
   display: flex;
+  min-width: 0;
   max-width: min(82%, 720px);
   flex-direction: column;
   gap: 6px;
 }
 
 .message-row[data-role='user'] .message-stack {
+  align-items: flex-end;
+  margin-left: auto;
   max-width: min(72%, 640px);
 }
 
 .message-row[data-role='assistant'] .message-stack {
-  max-width: min(88%, 760px);
+  align-items: flex-start;
+  margin-right: auto;
+  max-width: min(82%, 760px);
 }
 
 .message-row[data-role='system'] .message-stack {
@@ -90,6 +95,9 @@
 }
 
 .message-bubble-user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   border-color: var(--yui-chat-border);
   border-top-right-radius: 4px;
   background: var(--yui-chat-user-bg);
@@ -390,10 +398,13 @@
 
 @media (max-width: 900px) {
   .message-stack,
-  .message-row[data-role='user'] .message-stack,
   .message-row[data-role='assistant'] .message-stack,
   .message-row[data-role='system'] .message-stack {
-    max-width: 92%;
+    max-width: 88%;
+  }
+
+  .message-row[data-role='user'] .message-stack {
+    max-width: 82%;
   }
 }
 

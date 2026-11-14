@@ -1,0 +1,8 @@
+{
+  "settings_retained_across_chat": true,
+  "stage_retained_across_panels": true,
+  "hidden_stage_catalog_polling": false,
+  "loading_feedback": "正在加载数据…",
+  "compact_overflow": 0,
+  "pageerrors": []
+}

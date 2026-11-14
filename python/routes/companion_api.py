@@ -5,11 +5,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Literal
 
-from database.repository import DatabaseError, NotFoundError
 from fastapi import APIRouter
-from modules.system.api_response import error_response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
+
+from database.repository import DatabaseError, NotFoundError
+from modules.system.api_response import error_response
 
 
 class CompanionVoiceProfile(BaseModel):
@@ -130,7 +131,13 @@ def create_companion_router(
                 legacy_error="Database not initialized",
             )
         try:
-            return await run_in_threadpool(db_repo.update_companion, companion_id, payload.model_dump(exclude_none=True))
+            # Only persona_prompt has an explicit null-clears contract.
+            updates = {
+                key: value
+                for key, value in payload.model_dump(exclude_unset=True).items()
+                if value is not None or key == "persona_prompt"
+            }
+            return await run_in_threadpool(db_repo.update_companion, companion_id, updates)
         except NotFoundError as exc:
             return error_response(code="companion_not_found", message=str(exc), status_code=404, legacy_error=str(exc))
         except DatabaseError as exc:

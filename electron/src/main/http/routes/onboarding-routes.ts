@@ -1,6 +1,7 @@
 import type { OnboardingReadinessCoordinator } from '../../onboarding-readiness-coordinator'
 import {
   isOnboardingProbeId,
+  isOnboardingDeviceProbeReport,
   isOnboardingRepairActionId,
   type OnboardingProbeRequest,
   type OnboardingRetryRequest,
@@ -33,6 +34,12 @@ export const handleOnboardingRoutes = async (
   if (!url.pathname.startsWith('/api/onboarding/')) return false
   if (method === 'GET' && url.pathname === '/api/onboarding/snapshot') {
     sendJson(res, 200, coordinator.snapshot())
+    return true
+  }
+  if (method === 'POST' && url.pathname === '/api/onboarding/device-probe') {
+    const body = await parseRequestBody<unknown>(req)
+    if (!isOnboardingDeviceProbeReport(body)) return invalid(res, 'Invalid device probe report')
+    sendJson(res, 200, coordinator.reportDeviceProbe(body))
     return true
   }
   if (method === 'POST' && url.pathname === '/api/onboarding/backend/start') {

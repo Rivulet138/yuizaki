@@ -1,0 +1,368 @@
+{
+  "settings": {
+    "text": "对话\n长期记忆\n系统设置\n高级\n当前工作区\n系统设置\n随时可以陪你\n简体中文\nDefault Companion\n系统设置\n连接\n访问\nLLM\n语音\nTTS\nASR\nSVC 配置\n记忆\n记忆\n摘要\n应用\n资源\n系统\n运行引导\n模型服务\n已配置\nAPI Key 已设置\n上游已连通\n自动检测并填入\n检测模型\n读取运行状态\n测试 LLM\n提供商\nDeepSeek\n缺少 Key\nQwen\n缺少 Key\nGemini\n缺少 Key\nChatGPT\n缺少 Key\nClaude\n缺少 Key\nGrok\n缺少 Key\nOllama\n待选模型\nLM Studio\n待选模型\n自定义\n可用\n重置当前提供商\n连接参数\n基础 URL\n当前连接 API Key\n清除\n模型名称\nagy-gemini-3.5-flash-lite\n\n检测到 27 个模型\n\n实时视觉模型\n使用独立视觉模型\n推理参数\n应用推荐值\n生成风格\n随机度（Temperature）\n1.00\n候选范围（Top P）\n1.00\n候选筛选\n最低概率（Min P）\n0.00\n候选数量（Top K）\n0\n重复控制\n频率惩罚\n0.00\n存在惩罚\n0.00\n重复惩罚\n1.00\n上下文与限制\n上下文上限\n500000\n输出上限\n16384\n请求超时（秒）\n120",
+    "tabs": [
+      "访问",
+      "LLM",
+      "TTS",
+      "ASR",
+      "SVC 配置",
+      "记忆",
+      "摘要",
+      "资源",
+      "系统",
+      "运行引导",
+      "访问",
+      "LLM",
+      "TTS",
+      "ASR",
+      "记忆",
+      "摘要",
+      "SVC 配置",
+      "资源",
+      "系统",
+      "运行引导"
+    ],
+    "async": [],
+    "host": "settings"
+  },
+  "runtime": [
+    {
+      "path": "/api/ping",
+      "status": 200,
+      "keys": [
+        "ok",
+        "runtime"
+      ],
+      "ping": {
+        "ok": true,
+        "runtime": {
+          "service": "yuizaki-python-backend",
+          "version": "dev",
+          "instance_id": "d3d452d8b72646950c70809578705f3c",
+          "generation": "1794236418487563900",
+          "startup_nonce": "47e5f1f2a251f56ad3ee6f8dcfa84d5a",
+          "pid": 21792
+        }
+      }
+    },
+    {
+      "path": "/api/health",
+      "status": 200,
+      "keys": [
+        "status"
+      ]
+    },
+    {
+      "path": "/api/onboarding/snapshot",
+      "status": 200,
+      "keys": [
+        "schemaVersion",
+        "runId",
+        "revision",
+        "state",
+        "operation",
+        "readyForText",
+        "startedAt",
+        "completedAt",
+        "probes"
+      ],
+      "snapshot": {
+        "operation": "idle",
+        "readyForText": false,
+        "probes": [
+          {
+            "id": "llm.provider",
+            "status": "ready",
+            "message": "LLM provider configured",
+            "messageCode": null
+          },
+          {
+            "id": "llm.model_chat",
+            "status": "ready",
+            "message": "LLM connection OK (provider chat endpoint)",
+            "messageCode": null
+          },
+          {
+            "id": "tts.status",
+            "status": "degraded",
+            "message": "TTS runtime unavailable (optional)",
+            "messageCode": null
+          },
+          {
+            "id": "asr.runtime",
+            "status": "ready",
+            "message": "ASR runtime available",
+            "messageCode": null
+          },
+          {
+            "id": "database.status",
+            "status": "ready",
+            "message": "Database available",
+            "messageCode": null
+          },
+          {
+            "id": "memory.status",
+            "status": "ready",
+            "message": "SQLite memory authority ready",
+            "messageCode": null
+          },
+          {
+            "id": "mcp.snapshot",
+            "status": "ready",
+            "message": "MCP configuration snapshot captured",
+            "messageCode": null
+          },
+          {
+            "id": "host.runtime",
+            "status": "ready",
+            "message": "Desktop runtime is supported",
+            "messageCode": null
+          },
+          {
+            "id": "host.avatar",
+            "status": "ready",
+            "message": "Avatar is visible",
+            "messageCode": null
+          },
+          {
+            "id": "host.microphone",
+            "status": "needs_user",
+            "message": "Microphone check requires a user gesture",
+            "messageCode": null
+          },
+          {
+            "id": "host.speaker",
+            "status": "needs_user",
+            "message": "Speaker check requires a user gesture",
+            "messageCode": null
+          },
+          {
+            "id": "backend.service",
+            "status": "failed",
+            "message": "timeout of 2000ms exceeded",
+            "messageCode": null
+          }
+        ]
+      }
+    },
+    {
+      "path": "/api/ui-capabilities",
+      "status": 404,
+      "keys": [
+        "error"
+      ]
+    },
+    {
+      "path": "/api/route-manifest",
+      "status": 404,
+      "keys": [
+        "error"
+      ]
+    }
+  ],
+  "responses": [
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/pet/visibility",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/pet/behavior-state",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/pet/catalog",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/pet/state",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/pet/behavior-state",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/pet/avatar-capabilities",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/pet/catalog",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/system/env-check",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/health",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/system/backend-token",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/companions",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/ping",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/system/voice-diagnostics/run",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/settings/",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/pet/visibility",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/pet/behavior-state",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/workspaces",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/settings/metadata",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/settings/history",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/system/active-workspace",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/system/resources",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/settings/tts/characters",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/settings/tts/status",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/settings/llm/status",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/system/companion-runtime",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/system/storage",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/workspaces/default",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/pet/companion-idle-profile",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/sessions",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/pet/behavior-state",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/pet/behavior-state",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/pet/behavior-state",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/history/sess_d85dd96bef504311bf3d",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/system/voice-diagnostics/run",
+      "status": 200
+    },
+    {
+      "host": "localhost:38945",
+      "path": "/api/settings/llm/models",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/health",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/onboarding/snapshot",
+      "status": 200
+    },
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/ui-capabilities",
+      "status": 404
+    },
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/route-manifest",
+      "status": 404
+    },
+    {
+      "host": "127.0.0.1:38945",
+      "path": "/api/ping",
+      "status": 200
+    }
+  ],
+  "requestFailed": [],
+  "pageerrors": []
+}

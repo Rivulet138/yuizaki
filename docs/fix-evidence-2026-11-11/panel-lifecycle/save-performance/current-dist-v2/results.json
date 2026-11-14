@@ -1,0 +1,108 @@
+{
+  "run_label": "current-dist-v2",
+  "started_utc": "2026-11-11T06:39:31.585360+00:00",
+  "python": "3.13.2",
+  "origin": "http://localhost:48949",
+  "cases": [
+    {
+      "name": "discovery",
+      "passed": true,
+      "purpose": "DOM reconnaissance and direct-summary negative control",
+      "expected_token_requests": 0,
+      "http_counts": {
+        "settings_GET": 2,
+        "settings_PATCH": 0,
+        "backend_token_GET": 0,
+        "runtime_status_GET": 1
+      },
+      "pageerrors": [],
+      "console_errors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "[CompanionRuntime] sink delivery failed {event: companion_runtime.sink_failure, sink: behavior, message: R5_blocks_nonfixture_network}",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "[CompanionRuntime] sink delivery failed {event: companion_runtime.sink_failure, sink: behavior, message: R5_blocks_nonfixture_network}",
+        "WebSocket connection to 'ws://localhost:48949/socket.io/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 404",
+        "WebSocket connection to 'ws://localhost:48949/socket.io/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 404",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "WebSocket connection to 'ws://localhost:48949/socket.io/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 404",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)"
+      ],
+      "blocked_browser_requests": [
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/behavior-state"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/system/voice-diagnostics/run"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/behavior-state"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "PATCH",
+          "url": "http://localhost:48949/api/workspaces/default"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/system/active-workspace"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        }
+      ],
+      "host_rejected_mutations": [],
+      "token_started": 0,
+      "token_completed": 0,
+      "first_settings_get_at": 153440.3100271
+    }
+  ],
+  "passed": false,
+  "fixture_settings_delay_ms": 150,
+  "fixture_patch_delay_ms": 150,
+  "token_delay": "explicit release gate; 20s timeout is a failure",
+  "limitations": [
+    "Synthetic HTTP fixture and Chromium; no real backend or Electron IPC",
+    "Timings include browser/UI automation and injected fixture latency; one sample per case",
+    "Evidence applies only to the captured renderer fingerprint; rerun after mainline rebuild"
+  ],
+  "fixture_pid": 31840,
+  "chromium": "151.0.7922.34",
+  "error": "Traceback (most recent call last):\n  File \"E:\\yuizaki\\docs\\fix-evidence-2026-11-11\\panel-lifecycle\\save-performance\\measure_save.py\", line 319, in main\n    case = run()\n  File \"E:\\yuizaki\\docs\\fix-evidence-2026-11-11\\panel-lifecycle\\save-performance\\measure_save.py\", line 317, in <lambda>\n    for run in (lambda: discover(browser), lambda: token_case(browser),\n                                                   ~~~~~~~~~~^^^^^^^^^\n  File \"E:\\yuizaki\\docs\\fix-evidence-2026-11-11\\panel-lifecycle\\save-performance\\measure_save.py\", line 195, in token_case\n    assert state[\"token_started\"] == 1, \"frontend did not start exactly one token GET\"\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: frontend did not start exactly one token GET\n",
+  "fixture_exit_code": 1,
+  "fixture_port_closed": true,
+  "finished_utc": "2026-11-11T06:39:53.088671+00:00"
+}

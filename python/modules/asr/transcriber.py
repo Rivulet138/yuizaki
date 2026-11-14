@@ -289,7 +289,7 @@ class ASRManager:
             )
         except asyncio.CancelledError:
             self.diagnostics.record_elapsed("asr_final" if is_final else "asr", started_at, ok=False, error_kind="cancelled")
-            return
+            raise
 
         if not text:
             self.diagnostics.record_elapsed("asr_final" if is_final else "asr", started_at, ok=False, error_kind="empty_result")

@@ -53,7 +53,7 @@ class OpenAICompatibleTTSClient:
         self.diagnostics = diagnostics or VoiceDiagnostics()
         self._client: httpx.AsyncClient | None = None
         self._available = False
-        self._active_request: asyncio.Task[bytes] | None = None
+        self._active_requests: set[asyncio.Task[bytes]] = set()
         self._last_generation_ms: float | None = None
         self._last_cancel_ms: float | None = None
         self._cancel_count = 0
@@ -85,7 +85,7 @@ class OpenAICompatibleTTSClient:
         return self._available
 
     async def disconnect(self) -> None:
-        await self._cancel_active_request()
+        await asyncio.gather(*(self._cancel_request(request) for request in tuple(self._active_requests)))
         if self._client is not None:
             await self._client.aclose()
         self._client = None
@@ -103,7 +103,7 @@ class OpenAICompatibleTTSClient:
             "warming_up": False,
             "warmup_running": False,
             "warmup_done": self._available,
-            "inference_running": self._active_request is not None and not self._active_request.done(),
+            "inference_running": any(not request.done() for request in self._active_requests),
             "model": self._model,
             "voice": self._voice,
             "endpoint_configured": bool(self._endpoint),
@@ -151,7 +151,7 @@ class OpenAICompatibleTTSClient:
         request: asyncio.Task[bytes] | None = None
         try:
             request = asyncio.create_task(self._request_audio(segment))
-            self._active_request = request
+            self._active_requests.add(request)
             audio = await request
             if _generation_cancelled(gen):
                 return False
@@ -186,7 +186,7 @@ class OpenAICompatibleTTSClient:
             await _safe_send(ws, gen, payload)
             return True
         except asyncio.CancelledError:
-            await self._cancel_active_request()
+            await self._cancel_request(request)
             if _generation_cancelled(gen):
                 return False
             raise
@@ -209,8 +209,8 @@ class OpenAICompatibleTTSClient:
             })
             return False
         finally:
-            if request is not None and self._active_request is request and request.done():
-                self._active_request = None
+            if request is not None:
+                self._active_requests.discard(request)
 
     async def complete_stream(self, ws: Any, gen: Any, sequence: int) -> None:
         if _generation_cancelled(gen):
@@ -264,9 +264,11 @@ class OpenAICompatibleTTSClient:
             raise RuntimeError("TTS provider returned empty audio")
         return response.content
 
-    async def _cancel_active_request(self) -> None:
-        request = self._active_request
-        if request is None or request.done():
+    async def _cancel_request(self, request: asyncio.Task[bytes] | None) -> None:
+        if request is None or request not in self._active_requests:
+            return
+        self._active_requests.discard(request)
+        if request.done() and not request.cancelled():
             return
         started = time.perf_counter()
         request.cancel()
@@ -280,7 +282,6 @@ class OpenAICompatibleTTSClient:
             recovered=True,
             recovery_latency_ms=self._last_cancel_ms,
         )
-        self._active_request = None
 
 
 def _generation_cancelled(gen: Any) -> bool:

@@ -1,0 +1,187 @@
+{
+  "passed": true,
+  "runtimeData": "E:\\yuizaki\\artifacts\\panel-fix-runtime-1794567052865092200",
+  "scope": "Real isolated Python + Vite + headless Chromium. Electron host and real providers not running.",
+  "results": [
+    {
+      "scenario": "new workspace with null updatedAt loads while optional summary is still pending",
+      "passed": true
+    },
+    {
+      "scenario": "real browser A PATCH held until global active switches to B, write and readback remain A",
+      "passed": true,
+      "A": {
+        "dnd": true,
+        "revision": 1
+      },
+      "B": {
+        "dnd": false,
+        "revision": 0
+      }
+    },
+    {
+      "scenario": "successful save survives full page reload",
+      "passed": true
+    },
+    {
+      "scenario": "A to B to A without page reload restores workspace settings",
+      "passed": true
+    },
+    {
+      "scenario": "SPA navigation pet",
+      "passed": true,
+      "actual_hash": "#/w/audit-a/pet",
+      "scope": "entry render assertion; host/provider functions covered by controlled regression tests, not live here"
+    },
+    {
+      "scenario": "SPA navigation chat",
+      "passed": true,
+      "actual_hash": "#/w/audit-a/chat",
+      "scope": "entry render assertion; host/provider functions covered by controlled regression tests, not live here"
+    },
+    {
+      "scenario": "SPA navigation prompt",
+      "passed": true,
+      "actual_hash": "#/w/audit-a/prompt",
+      "scope": "entry render assertion; host/provider functions covered by controlled regression tests, not live here"
+    },
+    {
+      "scenario": "SPA navigation svc",
+      "passed": true,
+      "actual_hash": "#/w/audit-a/svc",
+      "scope": "entry render assertion; host/provider functions covered by controlled regression tests, not live here"
+    },
+    {
+      "scenario": "SPA navigation tool",
+      "passed": true,
+      "actual_hash": "#/w/audit-a/tool",
+      "scope": "entry render assertion; host/provider functions covered by controlled regression tests, not live here"
+    },
+    {
+      "scenario": "SPA navigation plugins",
+      "passed": true,
+      "actual_hash": "#/w/audit-a/plugins",
+      "scope": "entry render assertion; host/provider functions covered by controlled regression tests, not live here"
+    },
+    {
+      "scenario": "SPA navigation infrastructure",
+      "passed": true,
+      "actual_hash": "#/w/audit-a/infrastructure",
+      "scope": "entry render assertion; host/provider functions covered by controlled regression tests, not live here"
+    },
+    {
+      "scenario": "SPA navigation agent-governance",
+      "passed": true,
+      "actual_hash": "#/w/audit-a/agent-governance",
+      "scope": "entry render assertion; host/provider functions covered by controlled regression tests, not live here"
+    },
+    {
+      "scenario": "SPA navigation agent-trace",
+      "passed": true,
+      "actual_hash": "#/w/audit-a/agent-trace",
+      "scope": "entry render assertion; host/provider functions covered by controlled regression tests, not live here"
+    },
+    {
+      "scenario": "SPA navigation persona-memory",
+      "passed": true,
+      "actual_hash": "#/w/audit-a/persona-memory",
+      "scope": "entry render assertion; host/provider functions covered by controlled regression tests, not live here"
+    },
+    {
+      "scenario": "SPA navigation settings",
+      "passed": true,
+      "actual_hash": "#/w/audit-a/settings",
+      "scope": "entry render assertion; host/provider functions covered by controlled regression tests, not live here"
+    },
+    {
+      "scenario": "SPA navigation i18n",
+      "passed": true,
+      "actual_hash": "#/w/audit-a/i18n",
+      "scope": "entry render assertion; host/provider functions covered by controlled regression tests, not live here"
+    },
+    {
+      "scenario": "SPA navigation memory",
+      "passed": true,
+      "actual_hash": "#/w/audit-a/memory",
+      "scope": "entry render assertion; host/provider functions covered by controlled regression tests, not live here"
+    },
+    {
+      "scenario": "SPA navigation deploy",
+      "passed": true,
+      "actual_hash": "#/w/audit-a/infrastructure",
+      "scope": "entry render assertion; host/provider functions covered by controlled regression tests, not live here"
+    },
+    {
+      "scenario": "unscoped PATCH rejected and no page JavaScript exceptions",
+      "passed": true
+    }
+  ],
+  "pageErrors": [],
+  "proactiveResponses": [
+    {
+      "method": "GET",
+      "url": "http://localhost:48011/api/system/proactive/settings?workspace_id=audit-a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:48011/api/system/activity-frames?workspace_id=audit-a",
+      "status": 200
+    },
+    {
+      "method": "PATCH",
+      "url": "http://localhost:48011/api/system/proactive/settings?workspace_id=audit-a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:48011/api/system/proactive/feedback-summary?workspace_id=audit-a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:48011/api/system/proactive/settings?workspace_id=audit-a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:48011/api/system/activity-frames?workspace_id=audit-a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:48011/api/system/proactive/feedback-summary?workspace_id=audit-a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:48011/api/system/proactive/settings?workspace_id=audit-b",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:48011/api/system/activity-frames?workspace_id=audit-b",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:48011/api/system/proactive/feedback-summary?workspace_id=audit-b",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:48011/api/system/proactive/settings?workspace_id=audit-a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:48011/api/system/activity-frames?workspace_id=audit-a",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "url": "http://localhost:48011/api/system/proactive/feedback-summary?workspace_id=audit-a",
+      "status": 200
+    }
+  ]
+}

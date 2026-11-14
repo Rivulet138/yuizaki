@@ -1,0 +1,147 @@
+{
+  "origin": "http://127.0.0.1:48957/",
+  "browser": "151.0.7922.34",
+  "edit_open": {
+    "route": "memory",
+    "memoryInBody": true,
+    "visibleDialogs": 1,
+    "visibleDrawers": 0,
+    "visibleOverlays": 1,
+    "bodyClass": "el-popup-parent--hidden",
+    "bodyOverflow": "hidden",
+    "bodyWidth": "",
+    "activeTag": "TEXTAREA",
+    "activeId": "el-id-1306-87",
+    "focusInMemoryOverlay": true,
+    "otherClicks": 0,
+    "atOtherButton": null
+  },
+  "edit_deactivated": {
+    "route": "other",
+    "memoryInBody": false,
+    "visibleDialogs": 0,
+    "visibleDrawers": 0,
+    "visibleOverlays": 0,
+    "bodyClass": "",
+    "bodyOverflow": "visible",
+    "bodyWidth": "",
+    "activeTag": "BODY",
+    "activeId": "",
+    "focusInMemoryOverlay": false,
+    "otherClicks": 0,
+    "atOtherButton": {
+      "hit": "",
+      "covered": false
+    }
+  },
+  "edit_other_pointer_and_keyboard": {
+    "route": "other",
+    "memoryInBody": false,
+    "visibleDialogs": 0,
+    "visibleDrawers": 0,
+    "visibleOverlays": 0,
+    "bodyClass": "",
+    "bodyOverflow": "visible",
+    "bodyWidth": "",
+    "activeTag": "BUTTON",
+    "activeId": "other-action",
+    "focusInMemoryOverlay": false,
+    "otherClicks": 2,
+    "atOtherButton": {
+      "hit": "",
+      "covered": false
+    }
+  },
+  "edit_return_draft": "UNSAVED DIALOG DRAFT",
+  "advanced_open": {
+    "route": "memory",
+    "memoryInBody": true,
+    "visibleDialogs": 0,
+    "visibleDrawers": 1,
+    "visibleOverlays": 1,
+    "bodyClass": "el-popup-parent--hidden",
+    "bodyOverflow": "hidden",
+    "bodyWidth": "",
+    "activeTag": "INPUT",
+    "activeId": "el-id-1306-105",
+    "focusInMemoryOverlay": true,
+    "otherClicks": 2,
+    "atOtherButton": null
+  },
+  "advanced_deactivated": {
+    "route": "other",
+    "memoryInBody": false,
+    "visibleDialogs": 0,
+    "visibleDrawers": 0,
+    "visibleOverlays": 0,
+    "bodyClass": "",
+    "bodyOverflow": "visible",
+    "bodyWidth": "",
+    "activeTag": "LI",
+    "activeId": "",
+    "focusInMemoryOverlay": false,
+    "otherClicks": 2,
+    "atOtherButton": {
+      "hit": "",
+      "covered": false
+    }
+  },
+  "advanced_other_pointer_and_keyboard": {
+    "route": "other",
+    "memoryInBody": false,
+    "visibleDialogs": 0,
+    "visibleDrawers": 0,
+    "visibleOverlays": 0,
+    "bodyClass": "",
+    "bodyOverflow": "visible",
+    "bodyWidth": "",
+    "activeTag": "BUTTON",
+    "activeId": "other-action",
+    "focusInMemoryOverlay": false,
+    "otherClicks": 4,
+    "atOtherButton": {
+      "hit": "",
+      "covered": false
+    }
+  },
+  "advanced_return_draft": "UNSAVED RECALL QUERY",
+  "advanced_second_cycle_deactivated": {
+    "route": "other",
+    "memoryInBody": false,
+    "visibleDialogs": 0,
+    "visibleDrawers": 0,
+    "visibleOverlays": 0,
+    "bodyClass": "",
+    "bodyOverflow": "visible",
+    "bodyWidth": "",
+    "activeTag": "BODY",
+    "activeId": "",
+    "focusInMemoryOverlay": false,
+    "otherClicks": 4,
+    "atOtherButton": {
+      "hit": "",
+      "covered": false
+    }
+  },
+  "advanced_second_cycle_other_pointer_and_keyboard": {
+    "route": "other",
+    "memoryInBody": false,
+    "visibleDialogs": 0,
+    "visibleDrawers": 0,
+    "visibleOverlays": 0,
+    "bodyClass": "",
+    "bodyOverflow": "visible",
+    "bodyWidth": "",
+    "activeTag": "BUTTON",
+    "activeId": "other-action",
+    "focusInMemoryOverlay": false,
+    "otherClicks": 6,
+    "atOtherButton": {
+      "hit": "",
+      "covered": false
+    }
+  },
+  "pageerrors": [],
+  "blocked_requests": [],
+  "passed": true
+}

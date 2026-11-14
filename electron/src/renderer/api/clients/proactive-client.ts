@@ -31,43 +31,48 @@ const requireFrames = (value: unknown): ActivityFrameSummary[] => {
   return parsed
 }
 
+const scopedUrl = (path: string, workspaceId: string): string => {
+  if (!workspaceId.trim()) throw new Error('workspace_id_required')
+  return `${CONTROL_ORIGIN}${path}?workspace_id=${encodeURIComponent(workspaceId)}`
+}
+
 export const proactiveClient = {
-  settings: async (): Promise<ProactiveSettings> => requireSettings(
-    await requestJson<unknown>(`${CONTROL_ORIGIN}/api/system/proactive/settings`),
+  settings: async (workspaceId: string): Promise<ProactiveSettings> => requireSettings(
+    await requestJson<unknown>(scopedUrl('/api/system/proactive/settings', workspaceId)),
   ),
-  updateSettings: async (patch: ProactiveSettingsPatch, expectedRevision: number): Promise<ProactiveSettings> => requireSettings(
-    await requestJson<unknown>(`${CONTROL_ORIGIN}/api/system/proactive/settings`, {
+  updateSettings: async (patch: ProactiveSettingsPatch, expectedRevision: number, workspaceId: string): Promise<ProactiveSettings> => requireSettings(
+    await requestJson<unknown>(scopedUrl('/api/system/proactive/settings', workspaceId), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(serializeProactiveSettingsPatch(patch, expectedRevision)),
     }),
   ),
-  frames: async (): Promise<ActivityFrameSummary[]> => requireFrames(
-    await requestJson<unknown>(`${CONTROL_ORIGIN}/api/system/activity-frames`),
+  frames: async (workspaceId: string): Promise<ActivityFrameSummary[]> => requireFrames(
+    await requestJson<unknown>(scopedUrl('/api/system/activity-frames', workspaceId)),
   ),
-  rebuildFrames: async (limit = 1000): Promise<ActivityFrameRebuildResult> => requestJson<ActivityFrameRebuildResult>(
-    `${CONTROL_ORIGIN}/api/system/activity-frames/rebuild`,
+  rebuildFrames: async (limit: number, workspaceId: string): Promise<ActivityFrameRebuildResult> => requestJson<ActivityFrameRebuildResult>(
+    scopedUrl('/api/system/activity-frames/rebuild', workspaceId),
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ limit }),
     },
   ),
-  deleteFrame: async (frameId: string): Promise<{ ok: boolean }> => requestJson<{ ok: boolean }>(
-    `${CONTROL_ORIGIN}/api/system/activity-frames/${encodeURIComponent(frameId)}`,
+  deleteFrame: async (frameId: string, workspaceId: string): Promise<{ ok: boolean }> => requestJson<{ ok: boolean }>(
+    scopedUrl(`/api/system/activity-frames/${encodeURIComponent(frameId)}`, workspaceId),
     { method: 'DELETE' },
   ),
-  feedback: async (payload: ProactiveFeedbackRequest): Promise<{ ok: boolean }> => requestJson<{ ok: boolean }>(
-    `${CONTROL_ORIGIN}/api/system/proactive/feedback`,
+  feedback: async (payload: ProactiveFeedbackRequest, workspaceId: string): Promise<{ ok: boolean }> => requestJson<{ ok: boolean }>(
+    scopedUrl('/api/system/proactive/feedback', workspaceId),
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(serializeProactiveFeedback(payload)),
     },
   ),
-  feedbackSummary: async (): Promise<ProactiveFeedbackSummary> => {
+  feedbackSummary: async (workspaceId: string): Promise<ProactiveFeedbackSummary> => {
     const parsed = parseProactiveFeedbackSummary(
-      await requestJson<unknown>(`${CONTROL_ORIGIN}/api/system/proactive/feedback-summary`),
+      await requestJson<unknown>(scopedUrl('/api/system/proactive/feedback-summary', workspaceId)),
     )
     if (!parsed) throw new Error('invalid_proactive_feedback_summary')
     return parsed

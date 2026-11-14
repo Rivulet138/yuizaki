@@ -7,6 +7,7 @@ export interface DomainRequestState<T> {
   loading: boolean
   error: string | null
   execute: (task: () => Promise<T>) => Promise<T | null>
+  isCurrent: (result: T | null) => boolean
   reset: () => void
 }
 
@@ -22,6 +23,7 @@ export function useDomainRequest<T>(): DomainRequestState<T> {
   const error = ref<string | null>(null)
   let requestSequence = 0
   const activeRequestIds = new Set<number>()
+  let acceptedResult: { sequence: number; result: T } | null = null
 
   const execute = async (task: () => Promise<T>) => {
     const requestId = ++requestSequence
@@ -31,9 +33,9 @@ export function useDomainRequest<T>(): DomainRequestState<T> {
 
     try {
       const result = await task()
-      if (requestId === requestSequence) {
-        data.value = result
-      }
+      if (requestId !== requestSequence) return null
+      data.value = result
+      acceptedResult = { sequence: requestId, result }
       return result
     } catch (err: unknown) {
       const httpError = err as Partial<HttpClientError>
@@ -47,13 +49,14 @@ export function useDomainRequest<T>(): DomainRequestState<T> {
       return null
     } finally {
       activeRequestIds.delete(requestId)
-      loading.value = activeRequestIds.size > 0
+      loading.value = activeRequestIds.has(requestSequence)
     }
   }
 
   const reset = () => {
     requestSequence += 1
     activeRequestIds.clear()
+    acceptedResult = null
     data.value = null
     error.value = null
     loading.value = false
@@ -70,6 +73,7 @@ export function useDomainRequest<T>(): DomainRequestState<T> {
       return error.value
     },
     execute,
+    isCurrent: (result) => result !== null && acceptedResult?.sequence === requestSequence && acceptedResult.result === result,
     reset,
   }
 }

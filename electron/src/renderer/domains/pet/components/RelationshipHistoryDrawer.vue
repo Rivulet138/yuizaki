@@ -69,7 +69,8 @@ import { ElDrawer } from 'element-plus'
 import 'element-plus/es/components/drawer/style/css'
 import { Refresh } from '@element-plus/icons-vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
-import { t } from '@/i18n'
+import { currentLocale, t } from '@/i18n'
+import { usePanelLifecycle } from '@/app/composables/usePanelLifecycle'
 import {
   companionClient,
   type RelationshipHistoryEvent,
@@ -100,7 +101,7 @@ const visibleEvents = computed(() => mode.value === 'milestones'
   : payload.value?.events ?? [])
 
 const load = async () => {
-  if (!props.modelValue || loading.value) return
+  if (!props.modelValue || !pageLifecycle.active.value || loading.value) return
   const currentRequest = ++requestId
   loading.value = true
   error.value = ''
@@ -176,15 +177,23 @@ const formatTime = (value: string | null | undefined) => {
   const date = new Date(value)
   return Number.isNaN(date.getTime())
     ? value
-    : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' }).format(date)
+    : new Intl.DateTimeFormat(currentLocale.value, { dateStyle: 'short', timeStyle: 'short' }).format(date)
 }
 const eventKey = (event: RelationshipHistoryEvent, index: number) =>
   `${event.timestamp || 'unknown'}:${event.kind || 'event'}:${index}`
 
+const invalidateHistory = () => {
+  requestId += 1
+  loading.value = false
+}
+const pageLifecycle = usePanelLifecycle(async () => {
+  if (!loading.value) await load()
+}, invalidateHistory)
 watch(() => [props.modelValue, activeCompanionId.value] as const, ([visible]) => {
-  if (visible) void load()
-  else requestId += 1
-}, { immediate: true })
+  invalidateHistory()
+  payload.value = null
+  if (visible && pageLifecycle.active.value) void load()
+})
 </script>
 
 <style scoped>

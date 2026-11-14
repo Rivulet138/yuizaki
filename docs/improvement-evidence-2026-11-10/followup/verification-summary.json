@@ -1,0 +1,17 @@
+{
+  "sourceBuildHashesMatch": true,
+  "hashedFiles": 56,
+  "electronUnitPassed": 392,
+  "rendererTypeErrors": 0,
+  "browserRoutes": 14,
+  "browserTabs": 26,
+  "settingsSubpages": 10,
+  "pageErrors": 0,
+  "readOnlyFixtureHTTP409": 55,
+  "pendingCleanupFeedbackVerified": true,
+  "syntheticDeleteRequests": 1,
+  "realMemoryWritesDuringAcceptance": 0,
+  "chat390FocusAndUncovered": true,
+  "reportsHaveNoPendingPlaceholder": true,
+  "remainingLiveValidation": "Existing backend/control have not been restarted; provider, audio hardware, Qdrant and platform sends not proven in live environment"
+}

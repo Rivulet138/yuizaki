@@ -69,6 +69,8 @@ describe('chat store boundary regressions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.listeners.clear()
+    mocks.sendAgentChat.mockReturnValue({ status: 'accepted' })
+    mocks.sendInterrupt.mockReturnValue({ status: 'accepted' })
     mocks.requestJson.mockResolvedValue({ status: 'ok' })
     vi.stubGlobal('window', Object.assign(new EventTarget(), {
       localStorage: { getItem: () => null, setItem: vi.fn() },
@@ -105,6 +107,168 @@ describe('chat store boundary regressions', () => {
       chatOptions: { tts_enabled: false },
     })).toBe(true)
   }
+
+  it.each(['delete', 'trim', 'regenerate', 'clear'] as const)('keeps the newly selected conversation intact after a late %s response', async (operation) => {
+    store.setWorkspaceContext('workspace-a', 'session-a')
+    store.state.messages = [
+      { id: 1, role: 'user', content: 'A question' },
+      { id: 2, role: 'assistant', content: 'A answer' },
+    ]
+    let resolve!: (value: unknown) => void
+    mocks.requestJson.mockReturnValueOnce(new Promise(done => { resolve = done }))
+    const pending = operation === 'delete' ? store.deleteMessage(0, 'workspace-a')
+      : operation === 'trim' ? store.trimMessagesAfter(0, 'workspace-a')
+      : operation === 'regenerate' ? store.regenerateFromMessage(0, 'workspace-a')
+      : store.clearConversationMessages('workspace-a')
+    store.setWorkspaceContext('workspace-b', 'session-b')
+    store.state.messages = [
+      { id: 3, role: 'user', content: 'B question' },
+      { id: 4, role: 'assistant', content: 'B answer' },
+    ]
+    resolve({ status: 'ok', deleted_count: 1 })
+    await pending
+    expect(store.state.messages.map(message => message.content)).toEqual(['B question', 'B answer'])
+    expect(mocks.sendAgentChat).not.toHaveBeenCalled()
+  })
+
+  it.each([true, false])('sends all role card fields with enabled=%s after setPromptProfile', (enabled) => {
+    const roleCard = {
+      enabled,
+      name: 'Yuizaki',
+      description: '  A local companion.\nHer story.  ',
+      personality: 'Curious',
+      scenario: 'At home',
+      instructions: 'Keep answers clear.',
+      firstMessage: 'Hello, {{user}}!',
+      exampleDialogue: '<START>\n{{user}}: Hi\n{{char}}: Hello!\n',
+      alternateGreetings: ['Another greeting'],
+      greetingIndex: 0,
+    }
+    store.setPromptProfile({ mode: 'daily', roleCard })
+
+    startRequest()
+
+    expect(mocks.sendAgentChat).toHaveBeenCalledTimes(1)
+    const requestOptions = mocks.sendAgentChat.mock.calls[0]?.[5]
+    expect(requestOptions).toMatchObject({ prompt_mode: 'daily', prompt_profile: { mode: 'daily' } })
+    expect(requestOptions.prompt_profile.roleCard).toEqual(roleCard)
+    expect(requestOptions.tts_enabled).toBe(false)
+  })
+
+  it('does not transmit imported card metadata or extension instructions in the chat profile', () => {
+    store.setPromptProfile({ roleCard: {
+      name: 'A', enabled: true, firstMessage: 'Primary', alternateGreetings: ['Alternate'], greetingIndex: 0,
+      sourceCard: { data: { creator_notes: 'Private author note', extensions: { executable: 'inert' } } },
+    } } as any)
+    startRequest()
+    const sent = mocks.sendAgentChat.mock.calls[0]?.[5]?.prompt_profile?.roleCard
+    expect(sent.alternateGreetings).toEqual(['Alternate'])
+    expect(sent.greetingIndex).toBe(0)
+    expect(sent).not.toHaveProperty('sourceCard')
+    expect(JSON.stringify(sent)).not.toContain('Private author note')
+  })
+
+  it('sends old role cards without requiring description or exampleDialogue', () => {
+    const roleCard = {
+      enabled: false, name: 'Legacy', personality: 'Kind', scenario: 'Town',
+      instructions: 'Be helpful.', firstMessage: 'Welcome!',
+    }
+    store.setPromptProfile({ roleCard })
+
+    startRequest()
+
+    const sentRoleCard = mocks.sendAgentChat.mock.calls[0]?.[5]?.prompt_profile?.roleCard
+    expect(sentRoleCard).toEqual({ ...roleCard, description: undefined, exampleDialogue: undefined })
+    expect(JSON.parse(JSON.stringify(sentRoleCard))).toEqual(roleCard)
+  })
+
+  it.each(['offline', 'rejected'])('keeps the local message and clears busy when transport returns %s', (status) => {
+    mocks.sendAgentChat.mockReturnValueOnce({ status })
+    expect(store.sendChat('unsent draft')).toBe(false)
+    expect(store.state.isGenerating).toBe(false)
+    expect(store.state.messages.at(-1)?.content).toBe('unsent draft')
+    expect(store.runningSessionIds).toEqual([])
+  })
+
+  it('restores a failed draft once without deleting the local message', () => {
+    const restore = vi.fn()
+    expect(store.sendChat('failed draft', { envelope: { version: 1, ...identity }, onFailure: restore })).toBe(true)
+    emit(SocketEvents.ERROR, { ...eventEnvelope, code: 'AGENT_FAILED', message: 'upstream failed' })
+    emit(SocketEvents.ERROR, { ...eventEnvelope, code: 'AGENT_FAILED', message: 'duplicate error' })
+    expect(restore).toHaveBeenCalledTimes(1)
+    expect(store.state.messages[0]?.content).toBe('failed draft')
+    expect(store.state.isGenerating).toBe(false)
+  })
+
+  it('clears old subtitles on a session switch and ignores late playback for that generation', () => {
+    startRequest()
+    emitPlaybackEvent('pet:audio-started', { generationId: identity.generationId, sessionId: 'default', segmentId: 1, text: 'old speech' })
+    store.setWorkspaceContext('default', 'session-b')
+    expect(store.state.ttsPlaybackText).toBe('')
+    expect(store.state.isTTSPlaying).toBe(false)
+    expect(store.state.messages).toEqual([])
+    emitPlaybackEvent('pet:audio-started', { generationId: identity.generationId, sessionId: 'default', segmentId: 2, text: 'late old speech' })
+    expect(store.state.ttsPlaybackText).toBe('')
+    emitPlaybackEvent('pet:audio-started', { generationId: 'generation-b', sessionId: 'session-b', segmentId: 3, text: 'new speech' })
+    emitPlaybackEvent('pet:audio-ended', { generationId: identity.generationId })
+    expect(store.state.ttsPlaybackText).toBe('new speech')
+    expect(store.state.isTTSPlaying).toBe(true)
+  })
+
+  it('restores a background session draft on disconnect without moving its text into the active session', () => {
+    const restore = vi.fn()
+    store.sendChat('background draft', { onFailure: restore })
+    store.clearLocalMessages()
+    store.setWorkspaceContext('default', 'session-b')
+    emit(SocketEvents.DISCONNECT, {})
+    expect(restore).toHaveBeenCalledTimes(1)
+    expect(store.state.currentSessionId).toBe('session-b')
+    expect(store.state.currentText).toBe('')
+    expect(store.state.ttsPlaybackText).toBe('')
+  })
+
+  it('binds delayed transcript persistence to the originating message objects', async () => {
+    let save!: (value: unknown) => void
+    mocks.requestJson.mockImplementationOnce(() => new Promise(resolve => { save = resolve }))
+    store.setRealtimeRecording(true, identity)
+    const saving = store.completeRealtimeTurn(realtimeTurn)
+    store.setWorkspaceContext('default', 'session-b')
+    store.state.messages.push({ role: 'user', content: 'B user' }, { role: 'assistant', content: 'B assistant' })
+    save({ user_message: { id: 'A-user' }, assistant_message: { id: 'A-assistant' } })
+    await saving
+    expect(store.state.messages.map(message => message.id)).toEqual([undefined, undefined])
+  })
+
+  it('does not stop active speech when a background session reports a TTS error', () => {
+    store.sendChat('A turn', { envelope: { version: 1, ...identity } })
+    store.setWorkspaceContext('default', 'session-b')
+    emitPlaybackEvent('pet:audio-started', { generationId: 'B-generation', sessionId: 'session-b', segmentId: 9, text: 'B speech' })
+    const stop = vi.fn()
+    window.addEventListener('pet:tts-stop', stop)
+    emit(SocketEvents.ERROR, { ...eventEnvelope, code: 'TTS_FAILED', message: 'A audio failed' })
+    expect(stop).not.toHaveBeenCalled()
+    expect(store.state.ttsPlaybackText).toBe('B speech')
+    expect(store.state.isTTSPlaying).toBe(true)
+  })
+
+  it('keeps the current draft after a rejected send without including its duplicate in the next payload', () => {
+    mocks.sendAgentChat.mockReturnValueOnce({ status: 'offline' })
+    expect(store.sendChat('same draft')).toBe(false)
+    expect(store.sendChat('same draft')).toBe(true)
+    const messages = mocks.sendAgentChat.mock.calls.at(-1)?.[0] as Array<{ content: string }>
+    expect(messages.filter(message => message.content === 'same draft')).toHaveLength(1)
+  })
+
+  it('preserves a new reply when an older history snapshot finishes loading', async () => {
+    let release!: (value: unknown) => void
+    mocks.requestJson.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    const history = store.loadHistory('default', 'default')
+    startRequest()
+    emit(SocketEvents.LLM_FINAL, { ...eventEnvelope, sequence: 0, text: 'new reply', tts_expected: false, user_message_id: 1, assistant_message_id: 2 })
+    release({ history: [{ id: 0, role: 'assistant', content: 'older history' }] })
+    await history
+    expect(store.state.messages.map(message => message.content)).toEqual(['older history', 'Hello', 'new reply'])
+  })
 
   it('filters unsupported action types while preserving supported actions and absent-type replies', () => {
     startRequest()

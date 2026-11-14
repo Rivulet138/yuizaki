@@ -22,6 +22,15 @@
           <span>{{ statusLabel(probe) }}</span>
         </div>
         <p>{{ probeMessage(probe) }}</p>
+        <details v-if="probe.message.trim() && probeMessage(probe) !== probe.message.trim()">
+          <summary>{{ probe.id }}</summary>
+          <p>{{ probe.message }}</p>
+        </details>
+        <small class="readiness-duration">
+          {{ probe.evidence['source'] || probe.id }} ·
+          {{ probe.evidence['checkedAt'] ? `checkedAt: ${probe.evidence['checkedAt']}` : probe.evidence['reportedAt'] ? `reportedAt: ${probe.evidence['reportedAt']}` : probe.evidence['receivedAt'] ? `receivedAt: ${probe.evidence['receivedAt']}` : '—' }} ·
+          {{ probe.durationMs ?? '—' }}ms / {{ probe.timeoutMs || '—' }}ms
+        </small>
         <div v-if="repairAction(probe) || settingsAction(probe)" class="readiness-item-actions">
           <el-button
             v-if="repairAction(probe)"
@@ -101,7 +110,7 @@ const probeLabel = (probe: OnboardingProbeResult): string => {
 const GENERIC_EVIDENCE_CATEGORIES = new Set(['transport', 'timeout', 'blocked_by_dependency'])
 const probeMessage = (probe: OnboardingProbeResult): string => {
   if (isOnboardingProbeMessageKey(probe.messageKey)) return t(probe.messageKey)
-  if (currentLocale.value === 'en-US' && probe.message.trim()) return probe.message.trim().slice(0, 500)
+  if (probe.message.trim() && (currentLocale.value === 'en-US' || needsAction(probe))) return probe.message.trim().slice(0, 500)
   const category = typeof probe.evidence?.['category'] === 'string' ? probe.evidence['category'] : ''
   if (GENERIC_EVIDENCE_CATEGORIES.has(category)) return t(`onboarding.message.category.${category}`)
   return t(`onboarding.message.status.${probe.status}`)

@@ -1,0 +1,62 @@
+{
+  "hidden_memory_rebuild_reads_in_1700ms": 3,
+  "reads_while_returning_cached_memory": 0,
+  "edit_deep_link_opened_dialog": false,
+  "pageerrors": [],
+  "polls": [
+    {
+      "hash": "/w/default/memory"
+    },
+    {
+      "hash": "/w/default/memory"
+    },
+    {
+      "hash": "/w/default/settings?section=summary"
+    },
+    {
+      "hash": "/w/default/settings?section=summary"
+    },
+    {
+      "hash": "/w/default/settings?section=summary"
+    },
+    {
+      "hash": "/w/default/settings?section=summary"
+    },
+    {
+      "hash": "/w/default/settings?section=summary"
+    },
+    {
+      "hash": "/w/default/settings?section=summary"
+    },
+    {
+      "hash": "/w/default/settings?section=summary"
+    },
+    {
+      "hash": "/w/default/settings?section=summary"
+    },
+    {
+      "hash": "/w/default/settings?section=summary"
+    },
+    {
+      "hash": "/w/default/settings?section=summary"
+    },
+    {
+      "hash": "/w/default/settings?section=summary"
+    },
+    {
+      "hash": "/w/default/settings?section=summary"
+    },
+    {
+      "hash": "/w/default/settings?section=summary"
+    },
+    {
+      "hash": "/w/default/settings?section=summary"
+    },
+    {
+      "hash": "/w/default/settings?section=summary"
+    },
+    {
+      "hash": "/w/default/memory?edit=review-doc"
+    }
+  ]
+}

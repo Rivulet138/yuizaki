@@ -1,0 +1,350 @@
+{
+  "tabs": [
+    {
+      "route": "settings",
+      "tab": "访问",
+      "headings": [
+        "系统设置"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "settings",
+      "tab": "LLM",
+      "headings": [
+        "系统设置",
+        "生成风格",
+        "候选筛选",
+        "重复控制",
+        "上下文与限制"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "settings",
+      "tab": "TTS",
+      "headings": [
+        "系统设置"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "settings",
+      "tab": "ASR",
+      "headings": [
+        "系统设置",
+        "语音识别"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "settings",
+      "tab": "SVC 配置",
+      "headings": [
+        "系统设置",
+        "SVC 服务"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "settings",
+      "tab": "记忆",
+      "headings": [
+        "系统设置",
+        "长期记忆与 RAG"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "settings",
+      "tab": "摘要",
+      "headings": [
+        "系统设置",
+        "何时压缩",
+        "摘要更新"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "settings",
+      "tab": "资源",
+      "headings": [
+        "系统设置"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "settings",
+      "tab": "系统",
+      "headings": [
+        "系统设置"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "settings",
+      "tab": "运行引导",
+      "headings": [
+        "系统设置",
+        "运行引导"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "memory",
+      "tab": "记忆库0",
+      "headings": [
+        "长期记忆",
+        "记忆库"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "memory",
+      "tab": "需要检查0",
+      "headings": [
+        "长期记忆",
+        "需要检查"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "memory",
+      "tab": "使用情况",
+      "headings": [
+        "长期记忆",
+        "使用情况"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "tool",
+      "tab": "状态",
+      "headings": [
+        "能力与工具"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "tool",
+      "tab": "直播",
+      "headings": [
+        "能力与工具",
+        "直播能力"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "tool",
+      "tab": "能力",
+      "headings": [
+        "能力与工具",
+        "全部能力 · 全部风险 · 全部权限",
+        "打开应用"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "tool",
+      "tab": "技能",
+      "headings": [
+        "能力与工具",
+        "项目技能"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "tool",
+      "tab": "记录",
+      "headings": [
+        "能力与工具",
+        "插件工具",
+        "最近调用"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "agent-governance",
+      "tab": "连接器",
+      "headings": [
+        "权限审计"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "agent-governance",
+      "tab": "MCP",
+      "headings": [
+        "权限审计"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "agent-governance",
+      "tab": "授权",
+      "headings": [
+        "权限审计"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "agent-governance",
+      "tab": "扩展",
+      "headings": [
+        "权限审计"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "agent-trace",
+      "tab": "状态",
+      "headings": [
+        "任务追踪",
+        "运行指标"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "agent-trace",
+      "tab": "后台任务",
+      "headings": [
+        "任务追踪",
+        "后台任务",
+        "最近执行阶段"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "agent-trace",
+      "tab": "计划任务",
+      "headings": [
+        "任务追踪",
+        "计划任务"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "agent-trace",
+      "tab": "追踪",
+      "headings": [
+        "任务追踪",
+        "全部运行 · 全部状态",
+        "运行详情"
+      ],
+      "errors": [],
+      "overflow": 0,
+      "loading": 0
+    }
+  ],
+  "responsive": [
+    {
+      "route": "chat",
+      "width": 768,
+      "scrollWidth": 768,
+      "overflow": 0,
+      "offscreen": []
+    },
+    {
+      "route": "memory",
+      "width": 768,
+      "scrollWidth": 768,
+      "overflow": 0,
+      "offscreen": []
+    },
+    {
+      "route": "settings",
+      "width": 768,
+      "scrollWidth": 768,
+      "overflow": 0,
+      "offscreen": []
+    },
+    {
+      "route": "chat",
+      "width": 390,
+      "scrollWidth": 390,
+      "overflow": 0,
+      "offscreen": [
+        {
+          "tag": "DIV",
+          "class": "el-select el-select--small runtime-model-select",
+          "x": 452,
+          "right": 606,
+          "width": 154
+        },
+        {
+          "tag": "DIV",
+          "class": "el-select el-select--small runtime-response-select",
+          "x": 612,
+          "right": 694,
+          "width": 82
+        }
+      ]
+    },
+    {
+      "route": "memory",
+      "width": 390,
+      "scrollWidth": 390,
+      "overflow": 0,
+      "offscreen": []
+    },
+    {
+      "route": "settings",
+      "width": 390,
+      "scrollWidth": 390,
+      "overflow": 0,
+      "offscreen": []
+    }
+  ],
+  "failedResponses": [],
+  "pageerrors": []
+}

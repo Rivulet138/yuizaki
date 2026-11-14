@@ -118,7 +118,7 @@ advice: (message: string) => { chatStore.appendLocalAdvice(message, 'heartbeat')
       authorizeOpportunity: async (candidate, snapshot) => {
         const identity = parseProactiveOpportunityIdentity(candidate)
         if (!identity || snapshot.active_workspace_id !== workspaceStore.activeWorkspaceId) return false
-        if (!await proactiveControls.load()) return false
+        if (!await proactiveControls.load() || snapshot.active_workspace_id !== workspaceStore.activeWorkspaceId) return false
         if (!proactiveControls.allows(identity.sourceKind)) return false
         const frame = proactiveControls.visibleFrames.value.find((item) =>
           item.frameId === identity.frameId

@@ -7,6 +7,7 @@ import type {
   PlatformCapabilitySnapshot,
   VoiceDiagnosticsSnapshot,
   ConnectorDeliverySnapshot,
+  ConnectorDeliveryLookup,
   ConnectorDeliveryItem,
   ConnectorAccountSnapshot,
   QqBridgeSnapshot,
@@ -31,7 +32,7 @@ import type {
   ConnectorRecoverySnapshot,
   ConnectorProbeSnapshot,
 } from '@/../shared/agent'
-import type { CapabilitiesSnapshot, SkillCatalogItem, SkillCatalogSnapshot, StreamActionsSnapshot, StreamDraftConsumeResponse, StreamDraftConsumerSnapshot, StreamDraftGenerateResponse, StreamDraftsSnapshot, StreamEventsSnapshot, StreamExecuteResponse, StreamModerationPolicySnapshot, StreamObsProfilesResponse, StreamPreviewResponse, StreamProbeResponse, StreamRuntimeSnapshot, StreamTakeoverResponse } from '@/../shared/capability'
+import type { CapabilitiesSnapshot, SkillCatalogItem, SkillCatalogSnapshot, StreamActionLookup, StreamActionsSnapshot, StreamDraftConsumeResponse, StreamDraftConsumerSnapshot, StreamDraftGenerateResponse, StreamDraftsSnapshot, StreamEventsSnapshot, StreamExecuteResponse, StreamModerationPolicySnapshot, StreamObsProfilesResponse, StreamPreviewResponse, StreamProbeResponse, StreamRuntimeSnapshot, StreamTakeoverResponse } from '@/../shared/capability'
 import type { OrchestrationSnapshot } from '@/../shared/orchestration'
 
 const SYSTEM_MAINTENANCE_TIMEOUT_MS = 30 * 60 * 1000
@@ -118,8 +119,8 @@ const normalizeConnectorRecovery = (value: unknown): ConnectorRecoverySnapshot |
 const normalizeConnectorDelivery = (row: RawConnectorDelivery): ConnectorDeliveryItem => {
   const status = boundedText(row.status || 'unknown', 40)
   return {
-  deliveryKey: boundedText(row.delivery_key, 256),
-  idempotencyKey: boundedText(row.idempotency_key, 256),
+  deliveryKey: boundedText(row.delivery_key, 512),
+  idempotencyKey: boundedText(row.idempotency_key, 512),
   connectorId: boundedText(row.connector_id, 80),
   eventId: boundedText(row.event_id, 256),
   status,
@@ -205,10 +206,10 @@ export const systemClient = {
   logs: async () => requestJson<SystemLogsSnapshot>(`${CONTROL_ORIGIN}/api/system/logs`),
   backupTargets: async () => requestJson<BackupTargetsSnapshot>(`${CONTROL_ORIGIN}/api/system/backup/targets`),
   createBackup: async () => requestJson<{ ok: boolean; backupDir: string }>(`${CONTROL_ORIGIN}/api/system/backup/create`, { method: 'POST', timeoutMs: SYSTEM_MAINTENANCE_TIMEOUT_MS }),
-  restoreBackup: async (backupDir: string, dryRun = true) => requestJson<BackupRestoreResponse>(`${CONTROL_ORIGIN}/api/system/backup/restore`, {
+  restoreBackup: async (backupDir: string, dryRun = true, planId?: string) => requestJson<BackupRestoreResponse>(`${CONTROL_ORIGIN}/api/system/backup/restore`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ backupDir, dryRun }),
+    body: JSON.stringify({ backupDir, dryRun, planId }),
     timeoutMs: SYSTEM_MAINTENANCE_TIMEOUT_MS,
   }),
   heartbeat: async () => requestJson<HeartbeatSnapshot>(`${CONTROL_ORIGIN}/api/system/heartbeat`),
@@ -232,6 +233,10 @@ export const systemClient = {
   }),
   streamEvents: async (limit = 20) => requestJson<StreamEventsSnapshot>(`${CONTROL_ORIGIN}/api/system/stream/events?limit=${encodeURIComponent(String(limit))}`),
   streamActions: async (limit = 20) => requestJson<StreamActionsSnapshot>(`${CONTROL_ORIGIN}/api/system/stream/actions?limit=${encodeURIComponent(String(limit))}`),
+  streamAction: async (requestId: string) => requestJson<StreamActionLookup>(`${CONTROL_ORIGIN}/api/system/stream/actions?request_id=${encodeURIComponent(requestId)}`),
+  resolveStreamAction: async (payload: { request_id: string; action: string; outcome: 'known_success' | 'failed'; confirmed: true }) => requestJson<StreamActionLookup>(`${CONTROL_ORIGIN}/api/system/stream/actions`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  }),
   twitchConfig: async () => requestJson<{
     ok: boolean
     schemaVersion: string
@@ -369,6 +374,17 @@ export const systemClient = {
   connectorDeliveries: async (connectorId: MessageConnectorConfigSnapshot['id'], limit = 20) => {
     const result = await requestJson<{ ok: boolean; connector_id: string; items: RawConnectorDelivery[]; recovery?: RawConnectorRecovery | null }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/deliveries?limit=${encodeURIComponent(String(limit))}`)
     return { ok: result.ok, connectorId: result.connector_id, items: (result.items || []).map(normalizeConnectorDelivery), recovery: normalizeConnectorRecovery(result.recovery) } satisfies ConnectorDeliverySnapshot
+  },
+  connectorDelivery: async (connectorId: MessageConnectorConfigSnapshot['id'], deliveryKey: string): Promise<ConnectorDeliveryLookup> => {
+    const result = await requestJson<{ ok: boolean; connector_id: string; delivery_key: string; found: boolean; status: string; delivery: RawConnectorDelivery | null; external_side_effects: boolean }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/deliveries?delivery_key=${encodeURIComponent(deliveryKey)}`)
+    if (!result.ok || result.connector_id !== connectorId || result.delivery_key !== deliveryKey || typeof result.found !== 'boolean' || result.external_side_effects !== false) {
+      throw new Error('宿主未返回原 delivery 的精确只读状态；保持未知')
+    }
+    const delivery = result.delivery ? normalizeConnectorDelivery(result.delivery) : null
+    if ((result.found && (!delivery || delivery.deliveryKey !== deliveryKey || delivery.connectorId !== connectorId || delivery.status !== result.status)) || (!result.found && (delivery || result.status !== 'unknown'))) {
+      throw new Error('原 delivery 状态或身份不一致；保持未知')
+    }
+    return { ok: true, connectorId, deliveryKey, found: result.found, status: result.status, delivery, externalSideEffects: false }
   },
   retryConnectorDelivery: async (connectorId: MessageConnectorConfigSnapshot['id'], deliveryKey: string) => {
     const result = await requestJson<{ ok: boolean; already_sent?: boolean; delivery?: RawConnectorDelivery }>(`${CONTROL_ORIGIN}/api/system/connectors/${encodeURIComponent(connectorId)}/deliveries/${encodeURIComponent(deliveryKey)}/retry`, { method: 'POST' })

@@ -1,0 +1,398 @@
+{
+  "run_label": "current-dist-v3",
+  "started_utc": "2026-11-11T06:40:27.812988+00:00",
+  "python": "3.13.2",
+  "origin": "http://localhost:48949",
+  "cases": [
+    {
+      "name": "discovery",
+      "passed": true,
+      "purpose": "DOM reconnaissance and direct-summary negative control",
+      "expected_token_requests": 0,
+      "http_counts": {
+        "settings_GET": 2,
+        "settings_PATCH": 0,
+        "backend_token_GET": 0,
+        "runtime_status_GET": 1
+      },
+      "pageerrors": [],
+      "console_errors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "[CompanionRuntime] sink delivery failed {event: companion_runtime.sink_failure, sink: behavior, message: R5_blocks_nonfixture_network}",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "[CompanionRuntime] sink delivery failed {event: companion_runtime.sink_failure, sink: behavior, message: R5_blocks_nonfixture_network}",
+        "WebSocket connection to 'ws://localhost:48949/socket.io/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 404",
+        "WebSocket connection to 'ws://localhost:48949/socket.io/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 404",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "WebSocket connection to 'ws://localhost:48949/socket.io/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 404",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)"
+      ],
+      "blocked_browser_requests": [
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/behavior-state"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/system/voice-diagnostics/run"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/behavior-state"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "PATCH",
+          "url": "http://localhost:48949/api/workspaces/default"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/system/active-workspace"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        }
+      ],
+      "host_rejected_mutations": [],
+      "token_started": 0,
+      "token_completed": 0,
+      "first_settings_get_at": 153498.7093217
+    },
+    {
+      "name": "token-access-summary",
+      "passed": true,
+      "token_request_started": true,
+      "summary_ready_while_token_pending": true,
+      "completion_verified_in_browser_and_ui": true,
+      "form_ready_from_settings_get_ms": 1772.21,
+      "token_start_to_summary_ready_ms": 440.56,
+      "token_pending_total_ms": 1185.06,
+      "release_to_token_presented_ms": 33.71,
+      "flow": "navigate access -> click summary -> click access while pending -> release fixture gate -> UI preview",
+      "http_counts": {
+        "settings_GET": 2,
+        "settings_PATCH": 0,
+        "backend_token_GET": 1,
+        "runtime_status_GET": 1
+      },
+      "pageerrors": [],
+      "console_errors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "[CompanionRuntime] sink delivery failed {event: companion_runtime.sink_failure, sink: behavior, message: R5_blocks_nonfixture_network}",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "[CompanionRuntime] sink delivery failed {event: companion_runtime.sink_failure, sink: behavior, message: R5_blocks_nonfixture_network}",
+        "WebSocket connection to 'ws://localhost:48949/socket.io/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 404",
+        "WebSocket connection to 'ws://localhost:48949/socket.io/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 404",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "WebSocket connection to 'ws://localhost:48949/socket.io/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 404",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)"
+      ],
+      "blocked_browser_requests": [
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/behavior-state"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/system/voice-diagnostics/run"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/behavior-state"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "PATCH",
+          "url": "http://localhost:48949/api/workspaces/default"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/system/active-workspace"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        }
+      ],
+      "host_rejected_mutations": [],
+      "token_started": 1,
+      "token_completed": 1,
+      "first_settings_get_at": 153508.5555844
+    },
+    {
+      "name": "save-normalized",
+      "passed": true,
+      "normalized_response": true,
+      "save_PATCH": 1,
+      "save_readbacks": 0,
+      "initial_settings_reads": 2,
+      "edit_to_request_ms": 754.54,
+      "edit_to_saved_ms": 1018.87,
+      "duplicate_request_observation_ms": 1100,
+      "http_counts": {
+        "settings_GET": 2,
+        "settings_PATCH": 1,
+        "backend_token_GET": 0,
+        "runtime_status_GET": 1
+      },
+      "pageerrors": [],
+      "console_errors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "[CompanionRuntime] sink delivery failed {event: companion_runtime.sink_failure, sink: behavior, message: R5_blocks_nonfixture_network}",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "[CompanionRuntime] sink delivery failed {event: companion_runtime.sink_failure, sink: behavior, message: R5_blocks_nonfixture_network}",
+        "WebSocket connection to 'ws://localhost:48949/socket.io/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 404",
+        "WebSocket connection to 'ws://localhost:48949/socket.io/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 404",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "WebSocket connection to 'ws://localhost:48949/socket.io/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 404",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ],
+      "blocked_browser_requests": [
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/behavior-state"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/system/voice-diagnostics/run"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/behavior-state"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "PATCH",
+          "url": "http://localhost:48949/api/workspaces/default"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/system/active-workspace"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        }
+      ],
+      "host_rejected_mutations": [],
+      "token_started": 0,
+      "token_completed": 0,
+      "first_settings_get_at": 153519.0682655
+    },
+    {
+      "name": "save-legacy",
+      "passed": true,
+      "normalized_response": false,
+      "save_PATCH": 1,
+      "save_readbacks": 1,
+      "initial_settings_reads": 2,
+      "edit_to_request_ms": 985.41,
+      "edit_to_saved_ms": 2035.43,
+      "duplicate_request_observation_ms": 1100,
+      "http_counts": {
+        "settings_GET": 3,
+        "settings_PATCH": 1,
+        "backend_token_GET": 0,
+        "runtime_status_GET": 1
+      },
+      "pageerrors": [],
+      "console_errors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "[CompanionRuntime] sink delivery failed {event: companion_runtime.sink_failure, sink: behavior, message: R5_blocks_nonfixture_network}",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "[CompanionRuntime] sink delivery failed {event: companion_runtime.sink_failure, sink: behavior, message: R5_blocks_nonfixture_network}",
+        "WebSocket connection to 'ws://localhost:48949/socket.io/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 404",
+        "WebSocket connection to 'ws://localhost:48949/socket.io/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 404",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "WebSocket connection to 'ws://localhost:48949/socket.io/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 404",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 409 (Conflict)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ],
+      "blocked_browser_requests": [
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/behavior-state"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/system/voice-diagnostics/run"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/behavior-state"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "PATCH",
+          "url": "http://localhost:48949/api/workspaces/default"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/system/active-workspace"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        },
+        {
+          "method": "POST",
+          "url": "http://localhost:48949/api/pet/visibility"
+        }
+      ],
+      "host_rejected_mutations": [],
+      "token_started": 0,
+      "token_completed": 0,
+      "first_settings_get_at": 153531.1942799
+    }
+  ],
+  "passed": true,
+  "fixture_settings_delay_ms": 150,
+  "fixture_patch_delay_ms": 150,
+  "token_delay": "explicit release gate; 20s timeout is a failure",
+  "limitations": [
+    "Synthetic HTTP fixture and Chromium; no real backend or Electron IPC",
+    "Timings include browser/UI automation and injected fixture latency; one sample per case",
+    "Evidence applies only to the captured renderer fingerprint; rerun after mainline rebuild"
+  ],
+  "fixture_pid": 44844,
+  "chromium": "151.0.7922.34",
+  "renderer_sha256": "8dd9c3937513651d523961eed6ef2407129c5d0091ba584a4c7ef52cdc69e039",
+  "renderer_unchanged_during_run": true,
+  "fixture_exit_code": 1,
+  "fixture_port_closed": true,
+  "finished_utc": "2026-11-11T06:41:19.292291+00:00"
+}

@@ -10,7 +10,7 @@ import socket
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from ipaddress import ip_address
-from typing import Annotated, Protocol, TypeGuard, cast
+from typing import Annotated, Protocol, TypedDict, TypeGuard, cast
 from urllib.parse import urljoin, urlsplit
 
 import httpx
@@ -33,6 +33,9 @@ from .service_discovery import (
 )
 from .settings_history_store import SettingsHistoryStore, SettingsHistoryStoreCorrupt
 from .settings_models import (
+    RuntimeReloadRetryRequest,
+    RuntimeReloadSection,
+    RuntimeReloadStatusResponse,
     SettingsHistoryResponse,
     SettingsMetadataResponse,
     SettingsMutationResponse,
@@ -51,7 +54,7 @@ from .settings_store import SETTINGS_SECRET_MASK
 logger = logging.getLogger(__name__)
 
 
-def _safe_probe_url(value: str) -> str:
+def _safe_probe_url(value: str, *, allow_loopback: bool = False) -> str:
     parsed = urlsplit(value if "://" in value else f"http://{value}")
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
         raise ValueError("SVC Base URL must be an HTTP(S) URL")
@@ -75,6 +78,8 @@ def _safe_probe_url(value: str) -> str:
     if local_hostname:
         if not addresses or not all(address.is_loopback for address in addresses):
             raise ValueError("SVC Base URL localhost resolution is unsafe")
+    elif allow_loopback and addresses and all(address.is_loopback for address in addresses):
+        pass
     elif any(not address.is_global for address in addresses):
         raise ValueError("SVC Base URL must not target a private or local address")
     normalized = parsed._replace(fragment="").geturl()
@@ -274,6 +279,16 @@ ClientProvider = Callable[[], TestableClientProtocol | None]
 RuntimeApplyResult = dict[str, list[str]]
 
 
+class SettingsSaveResponse(SettingsMutationResponse):
+    normalized_settings: PersistedSettingsSchema
+
+
+class SettingsCommitResult(TypedDict):
+    runtime_applied: list[str]
+    runtime_changed: list[str]
+    normalized_settings: PersistedSettingsSchema
+
+
 def _is_settings_map(value: object) -> TypeGuard[dict[str, object]]:
     if not isinstance(value, dict):
         return False
@@ -311,9 +326,15 @@ class SettingsAPI:
             settings_history_store if settings_history_store is not None else SettingsHistoryStore()
         )
         self._pending_runtime_reload: set[str] = set()
+        self._pending_runtime_updates: dict[str, object] = {}
         self._runtime_reload_task: asyncio.Task[None] | None = None
         self._store_lock = asyncio.Lock()
         self._commit_lock = asyncio.Lock()
+        # The reload callback consumes the shared runtime config. Keep its
+        # target stable across awaits without blocking status queries.
+        self._runtime_lock = asyncio.Lock()
+        self._reload_revision = 0
+        self._reload_status: dict[str, RuntimeReloadSection] = {}
 
     def _validated_settings_dump(self) -> dict[str, object]:
         return validate_persisted_settings(self.settings_store.get_all()).model_dump()
@@ -374,47 +395,167 @@ class SettingsAPI:
                 sections.add(section)
         return sections
 
-    def _schedule_runtime_reload(self, changed: set[str]) -> None:
-        if not changed or self.reload_runtime_services is None:
+    def _schedule_runtime_reload(
+        self, changed: set[str], *, new_target: bool = True, reload_required: bool = True,
+    ) -> None:
+        if not changed:
             return
-        self._pending_runtime_reload.update(changed)
+        if new_target:
+            self._reload_revision += 1
+        for section in changed:
+            previous = self._reload_status.get(section)
+            self._reload_status[section] = RuntimeReloadSection(
+                state="pending" if self.reload_runtime_services is not None or not reload_required else "unavailable",
+                target_revision=previous.target_revision if not new_target and previous is not None else self._reload_revision,
+                applied_revision=previous.applied_revision if previous else None,
+            )
+        if reload_required:
+            self._pending_runtime_reload.update(changed)
+        if self.reload_runtime_services is None and not self._pending_runtime_updates:
+            return
         if self._runtime_reload_task is None or self._runtime_reload_task.done():
             self._runtime_reload_task = asyncio.create_task(self._run_runtime_reload_queue())
 
+    async def get_runtime_reload_status(self) -> RuntimeReloadStatusResponse:
+        return RuntimeReloadStatusResponse(sections=deepcopy(self._reload_status))
+
+    async def retry_runtime_reload(self, targets: dict[str, int]) -> RuntimeReloadStatusResponse:
+        async with self._commit_lock:
+            for section, revision in targets.items():
+                status = self._reload_status.get(section)
+                if status is None or status.target_revision != revision:
+                    raise HTTPException(status_code=409, detail="runtime_reload_target_changed")
+            if self.reload_runtime_services is None:
+                raise HTTPException(status_code=503, detail="runtime_reload_unavailable")
+            retry = {section for section in targets if self._reload_status[section].state in {"failed", "unavailable"}}
+            self._schedule_runtime_reload(retry, new_target=False)
+            return await self.get_runtime_reload_status()
+
     async def _run_runtime_reload_queue(self) -> None:
-        while self._pending_runtime_reload:
-            changed = set(self._pending_runtime_reload)
-            self._pending_runtime_reload.clear()
-            reload_runtime_services = self.reload_runtime_services
-            if reload_runtime_services is None:
-                continue
-            try:
-                await reload_runtime_services(changed)
-                logger.info("Settings runtime reload completed for sections: %s", sorted(changed))
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("Settings runtime reload failed for sections: %s", sorted(changed))
-        self._runtime_reload_task = None
+        from .runtime_config import apply_runtime_config
+
+        try:
+            while self._pending_runtime_reload or self._pending_runtime_updates:
+                async with self._runtime_lock:
+                    reload_sections = set(self._pending_runtime_reload)
+                    self._pending_runtime_reload.clear()
+                    updates = self._pending_runtime_updates
+                    self._pending_runtime_updates = {}
+                    changed = reload_sections | updates.keys()
+                    # Saves can supersede these targets while the callback is
+                    # suspended. Never attribute its outcome to a newer target.
+                    revisions = {section: self._reload_status[section].target_revision for section in changed}
+                    for section in changed:
+                        self._reload_status[section].state = "applying"
+                        self._reload_status[section].error = None
+                    config_applied = False
+                    try:
+                        if updates and self.config is not None:
+                            apply_runtime_config(cast(RuntimeConfig, self.config), updates, clear_empty_credentials=True)
+                        config_applied = True
+                        for section in changed - reload_sections:
+                            status = self._reload_status[section]
+                            status.state = "applied"
+                            status.applied_revision = revisions[section]
+                            status.error = None
+                        if not reload_sections:
+                            continue
+                        reload_runtime_services = self.reload_runtime_services
+                        if reload_runtime_services is None:
+                            for section in reload_sections:
+                                self._reload_status[section].state = "unavailable"
+                            continue
+                        await reload_runtime_services(reload_sections)
+                    except asyncio.CancelledError:
+                        # Cancellation stops the queue as well as this callback.
+                        # Leave queued intents retryable rather than pending forever.
+                        for section in changed | self._pending_runtime_reload | self._pending_runtime_updates.keys():
+                            status = self._reload_status[section]
+                            if status.target_revision == revisions.get(section) or section in self._pending_runtime_reload or section in self._pending_runtime_updates:
+                                status.state = "failed"
+                                status.error = "runtime_reload_cancelled"
+                        raise
+                    except Exception:  # noqa: BLE001 - isolate asynchronous provider failures
+                        failed = reload_sections if config_applied else changed
+                        for section in failed:
+                            status = self._reload_status[section]
+                            if status.target_revision == revisions[section]:
+                                status.state = "failed"
+                                status.error = "runtime_reload_failed"
+                        logger.warning("Settings runtime reload failed for sections: %s", sorted(failed))
+                        if not config_applied:
+                            # Keep the committed snapshot for an explicit retry;
+                            # do not spin on a synchronous config-application error.
+                            self._pending_runtime_updates = {**updates, **self._pending_runtime_updates}
+                            self._pending_runtime_reload.update(reload_sections)
+                            break
+                    else:
+                        for section in reload_sections:
+                            status = self._reload_status[section]
+                            status.applied_revision = revisions[section]
+                            if status.target_revision == revisions[section]:
+                                status.state = "applied"
+                                status.error = None
+        finally:
+            self._runtime_reload_task = None
 
     async def wait_for_runtime_reload_idle(self) -> None:
-        task = self._runtime_reload_task
-        if task is not None:
-            await task
+        while self._runtime_reload_task is not None:
+            await self._runtime_reload_task
 
-    async def _apply_runtime(self, runtime_updates: dict[str, object]) -> RuntimeApplyResult:
+    async def _apply_runtime(
+        self, runtime_updates: dict[str, object], *, committed_settings: dict[str, object] | None = None,
+    ) -> RuntimeApplyResult:
         if self.config is None:
             return {"runtime_applied": [], "runtime_changed": []}
 
         from .runtime_config import apply_runtime_config
 
-        # Regular patches discard secret placeholders before reaching this path;
-        # remaining empty credentials represent an authoritative clear.
-        changed = apply_runtime_config(
-            cast(RuntimeConfig, self.config), runtime_updates, clear_empty_credentials=True,
+        deferred = self._runtime_lock.locked() or bool(self._pending_runtime_updates)
+        if deferred:
+            # Calculate the same changed sections without mutating the config
+            # that an in-flight provider callback is still reading.
+            changed = apply_runtime_config(
+                cast(RuntimeConfig, deepcopy(self.config)), runtime_updates, clear_empty_credentials=True,
+            )
+            snapshot = committed_settings if committed_settings is not None else runtime_updates
+            # An update of an already queued section supersedes that intent,
+            # even when it restores the config currently being reloaded (A->B->A).
+            changed.update(
+                section for section, values in runtime_updates.items()
+                if values and section in self._pending_runtime_updates
+            )
+            # Replace whole committed sections, not partial patches: otherwise
+            # a queued connection switch could inherit the previous key.
+            pending = self._validated_runtime_updates({section: snapshot[section] for section in changed})
+            self._pending_runtime_updates.update(pending)
+        else:
+            async with self._runtime_lock:
+                changed = apply_runtime_config(
+                    cast(RuntimeConfig, self.config), runtime_updates, clear_empty_credentials=True,
+                )
+        reload_sections = self._runtime_reload_sections(runtime_updates, changed)
+        # A changed field supersedes a failed/pending target, including
+        # fields normally applied without reconstructing the service.
+        reload_sections.update(
+            section for section in changed
+            if section in self._reload_status and self._reload_status[section].state != "applied"
         )
-        self._schedule_runtime_reload(self._runtime_reload_sections(runtime_updates, changed))
-        return {"runtime_applied": sorted(changed), "runtime_changed": sorted(changed)}
+        self._schedule_runtime_reload(reload_sections)
+        if deferred:
+            self._schedule_runtime_reload(changed - reload_sections, reload_required=False)
+        # Saving the same failed configuration is an explicit retry, even
+        # when neither persisted nor in-memory values change this time.
+        retry = {
+            section for section in runtime_updates
+            if section not in reload_sections and section in self._reload_status
+            and self._reload_status[section].state in {"failed", "unavailable"}
+        }
+        self._schedule_runtime_reload(retry, new_target=False)
+        return {
+            "runtime_applied": [] if deferred else sorted(changed - reload_sections - retry),
+            "runtime_changed": sorted(changed | retry),
+        }
 
     def _apply_persisted_runtime_config(self) -> None:
         if self.config is None:
@@ -426,11 +567,27 @@ class SettingsAPI:
         if runtime_updates:
             apply_runtime_config(cast(RuntimeConfig, self.config), runtime_updates)
 
-    async def _commit_settings(self, next_settings: dict[str, object], runtime_updates: dict[str, object]) -> RuntimeApplyResult:
-        # Serialize commits so the persisted snapshot order matches the order in
-        # which settings were actually stored; rollback(steps) relies on it.
+    async def _commit_settings(self, patch: dict[str, object]) -> SettingsCommitResult:
+        # Read, merge, validate and write under the same lock. Callers pass
+        # intent, never a snapshot assembled before another writer commits.
         async with self._commit_lock:
-            return await self._commit_settings_locked(next_settings, runtime_updates)
+            base = await self._validated_settings_dump_async()
+            try:
+                merged = merge_settings(base, patch)
+                _clear_changed_connection_secrets(base, merged, patch)
+                next_settings = validate_persisted_settings(merged).model_dump()
+                runtime_updates = self._validated_runtime_updates(patch)
+            except ValidationError as exc:
+                raise HTTPException(status_code=422, detail=validation_errors_to_detail(exc)) from exc
+            # Capture this transaction's public snapshot before releasing the
+            # commit lock; a later GET could already observe another writer.
+            normalized_settings = self._public_settings(next_settings)
+            runtime_result = await self._commit_settings_locked(next_settings, runtime_updates)
+            return {
+                "runtime_applied": runtime_result["runtime_applied"],
+                "runtime_changed": runtime_result["runtime_changed"],
+                "normalized_settings": normalized_settings,
+            }
 
     async def _commit_settings_locked(self, next_settings: dict[str, object], runtime_updates: dict[str, object]) -> RuntimeApplyResult:
         async with self._store_lock:
@@ -447,10 +604,12 @@ class SettingsAPI:
                 await self._discard_pending_snapshot()
                 raise
         effective_runtime_updates = _changed_runtime_updates(previous_settings, runtime_updates)
+        for section in runtime_updates:
+            effective_runtime_updates.setdefault(section, {})
         previous_dynamic = deepcopy(self.dynamic_config.config)
         try:
             _ = await self.dynamic_config.update_batch(runtime_updates)
-            runtime_result = await self._apply_runtime(effective_runtime_updates)
+            runtime_result = await self._apply_runtime(effective_runtime_updates, committed_settings=next_settings)
         except Exception:
             async with self._store_lock:
                 await asyncio.to_thread(self._replace_and_save_settings, previous_settings)
@@ -478,33 +637,43 @@ class SettingsAPI:
         ready state. Secrets remain memory-only; this method never saves the
         settings JSON file.
         """
-        changed = await self._run_store_call(
-            lambda: self.settings_store.reload_provider_credentials(credentials)
-        )
-        if not changed:
-            return 0
-        settings = await self._validated_settings_dump_async()
-        runtime_updates = self._validated_runtime_updates(settings)
-        try:
-            await self.dynamic_config.update_batch(runtime_updates)
-            if self.config is not None:
-                from .runtime_config import apply_runtime_config
+        async with self._commit_lock:
+            return await self._reload_provider_credentials_locked(credentials)
 
-                changed_sections = apply_runtime_config(
-                    cast(RuntimeConfig, self.config), runtime_updates
-                )
-            else:
-                changed_sections = {
-                    str(field).split(".", 1)[0]
-                    for field in credentials
-                    if isinstance(field, str) and "." in field
-                }
-            sections = self._runtime_reload_sections(runtime_updates, changed_sections)
-            if self.reload_runtime_services is not None and sections:
-                await self.reload_runtime_services(sections)
-        except Exception as exc:
-            logger.error("Provider credential runtime reload failed: %s", type(exc).__name__)
-            raise RuntimeError("provider credential runtime reload failed") from exc
+    async def _reload_provider_credentials_locked(self, credentials: dict[str, str]) -> int:
+        async with self._runtime_lock:
+            changed = await self._run_store_call(
+                lambda: self.settings_store.reload_provider_credentials(credentials)
+            )
+            if not changed:
+                return 0
+            settings = await self._validated_settings_dump_async()
+            runtime_updates = self._validated_runtime_updates(settings)
+            try:
+                await self.dynamic_config.update_batch(runtime_updates)
+                if self.config is not None:
+                    from .runtime_config import apply_runtime_config
+
+                    changed_sections = apply_runtime_config(
+                        cast(RuntimeConfig, self.config), runtime_updates, clear_empty_credentials=True,
+                    )
+                else:
+                    changed_sections = {
+                        str(field).split(".", 1)[0]
+                        for field in credentials
+                        if isinstance(field, str) and "." in field
+                    }
+                # The full current store (including vault credentials) is now
+                # applied. Do not replay older queued snapshots over its keys.
+                self._pending_runtime_updates.clear()
+                sections = self._runtime_reload_sections(runtime_updates, changed_sections)
+                self._schedule_runtime_reload(sections)
+            except Exception as exc:
+                logger.error("Provider credential runtime reload failed: %s", type(exc).__name__)
+                raise RuntimeError("provider credential runtime reload failed") from exc
+        await self.wait_for_runtime_reload_idle()
+        if any(self._reload_status[section].state == "failed" for section in sections):
+            raise RuntimeError("provider credential runtime reload failed")
         if isinstance(changed, bool) or not isinstance(changed, (int, float, str)):
             return 0
         try:
@@ -517,9 +686,12 @@ class SettingsAPI:
         self._apply_persisted_runtime_config()
         _settings_api = self
 
+    def _public_settings(self, settings: dict[str, object]) -> PersistedSettingsSchema:
+        return PersistedSettingsSchema.model_validate(_mask_sensitive_settings(settings))
+
     async def get_all_settings(self) -> PersistedSettingsSchema:
         settings = await self._validated_settings_dump_async()
-        return PersistedSettingsSchema.model_validate(_mask_sensitive_settings(settings))
+        return self._public_settings(settings)
 
     async def get_setting(self, key: str) -> SettingValueResponse:
         value = await self._run_store_call(lambda: self.settings_store.get(key))
@@ -527,53 +699,43 @@ class SettingsAPI:
             raise HTTPException(status_code=404, detail=f"Setting {key} not found")
         return SettingValueResponse(key=key, value=redact_sensitive_config_value(value, key))
 
-    async def set_setting(self, key: str, value: object) -> SettingsMutationResponse:
+    async def set_setting(self, key: str, value: object) -> SettingsSaveResponse:
         if key.rsplit(".", 1)[-1] in _SECRET_FIELD_NAMES and (value == SETTINGS_SECRET_MASK or value == ""):
-            return SettingsMutationResponse(
-                key=key,
-                value=SETTINGS_SECRET_MASK,
-                status="unchanged",
-                runtime_applied=[],
-                runtime_changed=[],
-            )
+            async with self._commit_lock:
+                return SettingsSaveResponse(
+                    key=key,
+                    value=SETTINGS_SECRET_MASK,
+                    status="unchanged",
+                    runtime_applied=[],
+                    runtime_changed=[],
+                    runtime_reload=await self.get_runtime_reload_status(),
+                    normalized_settings=await self.get_all_settings(),
+                )
         normalized = cast(dict[str, object], _drop_secret_placeholders(self._normalize_set_payload(key, value)))
-        base = await self._validated_settings_dump_async()
-        try:
-            merged = merge_settings(base, normalized)
-            _clear_changed_connection_secrets(base, merged, normalized)
-            next_settings = validate_persisted_settings(merged).model_dump()
-            runtime_updates = self._validated_runtime_updates(normalized)
-        except ValidationError as exc:
-            raise HTTPException(status_code=422, detail=validation_errors_to_detail(exc)) from exc
-        runtime_result = await self._commit_settings(next_settings, runtime_updates)
-        return SettingsMutationResponse(
+        runtime_result = await self._commit_settings(normalized)
+        return SettingsSaveResponse(
             key=key,
             value=redact_sensitive_config_value(value, key),
             status="updated",
             runtime_applied=runtime_result["runtime_applied"],
             runtime_changed=runtime_result["runtime_changed"],
+            runtime_reload=await self.get_runtime_reload_status(),
+            normalized_settings=runtime_result["normalized_settings"],
         )
 
-    async def update_settings(self, updates: dict[str, object]) -> SettingsMutationResponse:
-        base = await self._validated_settings_dump_async()
+    async def update_settings(self, updates: dict[str, object]) -> SettingsSaveResponse:
         normalized_updates = cast(dict[str, object], _drop_secret_placeholders(updates))
-        try:
-            merged = merge_settings(base, normalized_updates)
-            _clear_changed_connection_secrets(base, merged, normalized_updates)
-            next_settings = validate_persisted_settings(merged).model_dump()
-            runtime_updates = self._validated_runtime_updates(normalized_updates)
-        except ValidationError as exc:
-            raise HTTPException(status_code=422, detail=validation_errors_to_detail(exc)) from exc
-        runtime_result = await self._commit_settings(next_settings, runtime_updates)
-        return SettingsMutationResponse(
+        runtime_result = await self._commit_settings(normalized_updates)
+        return SettingsSaveResponse(
             updated=len(updates),
             status="success",
             runtime_applied=runtime_result["runtime_applied"],
             runtime_changed=runtime_result["runtime_changed"],
+            runtime_reload=await self.get_runtime_reload_status(),
+            normalized_settings=runtime_result["normalized_settings"],
         )
 
     async def delete_setting(self, key: str) -> SettingsMutationResponse:
-        base = await self._validated_settings_dump_async()
         defaults = PersistedSettingsSchema().model_dump()
         try:
             value = self._value_for_key(defaults, key)
@@ -583,20 +745,14 @@ class SettingsAPI:
         if key.rsplit(".", 1)[-1] in _SECRET_FIELD_NAMES:
             value = ""
         normalized = self._normalize_set_payload(key, value)
-        try:
-            merged = merge_settings(base, normalized)
-            _clear_changed_connection_secrets(base, merged, normalized)
-            next_settings = validate_persisted_settings(merged).model_dump()
-            runtime_updates = self._validated_runtime_updates(normalized)
-        except ValidationError as exc:
-            raise HTTPException(status_code=422, detail=validation_errors_to_detail(exc)) from exc
-        runtime_result = await self._commit_settings(next_settings, runtime_updates)
+        runtime_result = await self._commit_settings(normalized)
         return SettingsMutationResponse(
             key=key,
             value=redact_sensitive_config_value(value, key),
             status="reset",
             runtime_applied=runtime_result["runtime_applied"],
             runtime_changed=runtime_result["runtime_changed"],
+            runtime_reload=await self.get_runtime_reload_status(),
         )
 
     async def get_metadata(self) -> SettingsMetadataResponse:
@@ -772,17 +928,29 @@ class SettingsAPI:
     async def test_svc_connection(self) -> dict[str, object]:
         settings = await self._validated_settings_dump_async()
         svc_settings = cast(dict[str, object], settings.get("svc", {}))
-        provider = str(svc_settings.get("provider", "")).strip().lower()
-        if provider == "disabled":
-            return {"ok": False, "message": "SVC is disabled"}
+        provider = str(svc_settings.get("provider", "")).strip().lower() or "soulx-service"
+
+        def result(ready: bool = False, *, reachable: bool = False, **details: object) -> dict[str, object]:
+            return {"ok": ready, "ready": ready, "reachable": reachable, **details}
+
+        if provider in {"disabled", "none", "off"}:
+            return result(message="SVC is disabled")
+        if provider != "soulx-service":
+            return result(message=f"Unsupported SVC provider: {provider}")
 
         base_url = str(svc_settings.get("base_url", "")).strip().rstrip("/")
         if not base_url:
-            return {"ok": False, "message": "SVC Base URL is required"}
+            return result(message="SVC Base URL is required")
+        # Only the configured SoulX loopback literal gets the local-service
+        # exception. Private DNS targets and redirects to other origins do not.
         try:
-            base_url = _safe_probe_url(base_url)
+            parsed = urlsplit(base_url if "://" in base_url else f"http://{base_url}")
+            allow_loopback = parsed.hostname in {"127.0.0.1", "::1"}
+            base_url = _safe_probe_url(base_url, allow_loopback=allow_loopback)
         except ValueError as exc:
-            return {"ok": False, "message": str(exc)}
+            return result(message=str(exc))
+        origin = urlsplit(base_url)
+        health_url = origin._replace(path=origin.path.rstrip("/").removesuffix("/convert") + "/health").geturl()
 
         try:
             raw_timeout = svc_settings.get("timeout", 120)
@@ -790,9 +958,11 @@ class SettingsAPI:
         except (TypeError, ValueError):
             configured_timeout = 120.0
         probe_timeout = max(1.0, min(configured_timeout, 10.0))
+        reachable = False
         try:
             async with httpx.AsyncClient(timeout=probe_timeout, follow_redirects=False) as client:
-                response = await client.get(base_url)
+                response = await client.get(health_url)
+                reachable = True
                 for _ in range(3):
                     if response.status_code not in {301, 302, 303, 307, 308}:
                         break
@@ -800,22 +970,32 @@ class SettingsAPI:
                     if not location:
                         break
                     next_url = urljoin(str(response.url), location)
-                    _safe_probe_url(next_url)
+                    target = urlsplit(next_url)
+                    same_origin = (target.scheme, target.hostname, target.port) == (origin.scheme, origin.hostname, origin.port)
+                    next_url = _safe_probe_url(next_url, allow_loopback=allow_loopback and same_origin)
                     response = await client.get(next_url)
         except (httpx.RequestError, ValueError) as exc:
-            return {"ok": False, "message": f"SVC service unreachable: {exc}"}
+            return result(reachable=reachable, message=f"SVC health probe failed: {exc}")
 
-        if response.status_code >= 500:
-            return {
-                "ok": False,
-                "status_code": response.status_code,
-                "message": f"SVC service returned HTTP {response.status_code}",
-            }
-        return {
-            "ok": True,
-            "status_code": response.status_code,
-            "message": f"SVC service reachable (HTTP {response.status_code})",
-        }
+        if not 200 <= response.status_code < 300:
+            return result(
+                reachable=True,
+                status_code=response.status_code,
+                message=f"SVC health endpoint returned HTTP {response.status_code}",
+            )
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        if not isinstance(payload, dict) or payload.get("provider") != provider or not isinstance(payload.get("ok"), bool):
+            return result(reachable=True, status_code=response.status_code, message="SVC health response has an invalid schema")
+        ready = payload["ok"] is True and payload.get("ready", True) is True
+        return result(
+            ready,
+            reachable=True,
+            status_code=response.status_code,
+            message="SVC service ready" if ready else "SVC service is not ready",
+        )
 
     async def warmup_tts(self) -> dict[str, object]:
         tts_client = self.tts_client_provider() if self.tts_client_provider is not None else None
@@ -1010,17 +1190,27 @@ async def rollback_changes(api: SettingsAPIDependency, steps: int = 1):
     return await api.rollback_changes(steps)
 
 
+@router.get("/runtime/status", response_model=RuntimeReloadStatusResponse)
+async def get_runtime_reload_status(api: SettingsAPIDependency):
+    return await api.get_runtime_reload_status()
+
+
+@router.post("/runtime/retry", response_model=RuntimeReloadStatusResponse)
+async def retry_runtime_reload(request: RuntimeReloadRetryRequest, api: SettingsAPIDependency):
+    return await api.retry_runtime_reload(request.targets)
+
+
 @router.get("/{key}", response_model=SettingValueResponse)
 async def get_setting(key: str, api: SettingsAPIDependency):
     return await api.get_setting(key)
 
 
-@router.post("/{key}", response_model=SettingsMutationResponse)
+@router.post("/{key}", response_model=SettingsSaveResponse)
 async def set_setting(key: str, value: SettingBody, api: SettingsAPIDependency):
     return await api.set_setting(key, value)
 
 
-@router.patch("/", response_model=SettingsMutationResponse)
+@router.patch("/", response_model=SettingsSaveResponse)
 async def update_settings(updates: dict[str, object], api: SettingsAPIDependency):
     return await api.update_settings(updates)
 

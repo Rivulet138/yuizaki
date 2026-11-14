@@ -5,7 +5,6 @@
       class="onboarding-shell"
       minimal
       :title="t('onboarding.title')"
-      :subtitle="t('onboarding.subtitle')"
     >
       <header class="onboarding-header drag">
         <div class="onboarding-heading">
@@ -64,9 +63,18 @@
                 </div>
               </div>
 
+              <p v-if="snapshot.startedAt" class="scan-time">
+                {{ snapshot.state }} · {{ snapshot.startedAt }} → {{ snapshot.completedAt || '…' }}
+              </p>
+              <p v-if="previousOutcome" class="scan-time" role="status">
+                {{ t(previousOutcome.outcome === 'passed' ? 'onboarding.textReady' : 'onboarding.skipAndContinue') }} · {{ previousOutcome.recordedAt }}
+              </p>
               <OnboardingReadinessRail :probes="visibleProbes" @repair="runRepair" />
 
               <div class="readiness-actions">
+                <el-button :disabled="runActive || Boolean(action)" :loading="action === 'scan'" @click="runFreshScan">
+                  <el-icon><Refresh /></el-icon>{{ t('deploy.refresh') }}
+                </el-button>
                 <el-button
                   v-if="backendNeedsStart"
                   type="primary"
@@ -123,7 +131,7 @@
 
           <footer class="onboarding-footer">
             <p v-if="actionError" role="alert">{{ actionError }}</p>
-            <el-button plain @click="continueWithoutSetup">
+            <el-button plain @click="continueWithoutSetup()">
               {{ t(snapshot.readyForText ? 'onboarding.closeCheck' : 'onboarding.skipAndContinue') }}
             </el-button>
             <el-button type="primary" :disabled="!snapshot.readyForText" @click="startChatting">
@@ -158,13 +166,20 @@ import { enumerateAudioDevices } from '@/audio/audio-capture'
 import { CONTROL_ORIGIN, requestJson } from '@/api/clients/http-client'
 
 const COMPLETION_KEY = 'yuizaki.onboarding.completed.v1'
+const OUTCOME_KEY = 'yuizaki.onboarding.outcome.v1'
+type CompletionOutcome = { outcome: 'passed' | 'skipped'; recordedAt: string; runId: string | null; optionalSkipped: boolean }
+const previousOutcome = ref<CompletionOutcome | null>(null)
+try {
+  const stored = JSON.parse(window.localStorage.getItem(OUTCOME_KEY) || 'null') as CompletionOutcome | null
+  if (stored && ['passed', 'skipped'].includes(stored.outcome)) previousOutcome.value = stored
+} catch { /* Older installs have no recorded scan outcome. */ }
 const OPTIONAL_PROBES: OnboardingProbeId[] = ['tts.status', 'asr.runtime', 'database.status', 'memory.status', 'host.avatar']
 
 const snapshot = ref<OnboardingReadinessSnapshot | null>(null)
 const loading = ref(false)
 const loadError = ref('')
 const actionError = ref('')
-const action = ref<'backend' | 'cancel' | 'retry' | 'optional' | 'voice' | 'microphone' | 'speaker' | ''>('')
+const action = ref<'scan' | 'backend' | 'cancel' | 'retry' | 'optional' | 'voice' | 'microphone' | 'speaker' | ''>('')
 const optionalSkipped = ref(false)
 const showAllProbes = ref(false)
 const deviceResults = ref({ microphone: '', speaker: '' })
@@ -173,6 +188,7 @@ const completed = ref(window.localStorage.getItem(COMPLETION_KEY) === 'true')
 const backendStartPending = ref(false)
 let pollTimer: ReturnType<typeof window.setTimeout> | null = null
 let backendStartGeneration = 0
+let disposed = false
 let emptyIdlePollCount = 0
 const MAX_EMPTY_IDLE_POLLS = 10
 
@@ -182,21 +198,25 @@ const onboardingBackgroundStyle = computed(() => ({
 
 const browserOnboardingApi = {
   snapshot: () => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/snapshot`),
-  startBackend: () => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/backend/start`, { method: 'POST', body: '{}' }),
+  startBackend: () => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/backend/start`, { method: 'POST', body: '{}', timeoutMs: 180_000 }),
   cancelBackend: () => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/backend/cancel`, { method: 'POST', body: '{}' }),
   cancelRun: (request: { runId: string }) => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/cancel`, { method: 'POST', body: JSON.stringify(request) }),
-  // Device probes are browser-local; the control service has no matching HTTP route.
-  reportDeviceProbe: async (_report: OnboardingDeviceProbeReport) => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/snapshot`),
-  runProbe: (request: { probeIds?: OnboardingProbeId[] } = {}) => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/run`, { method: 'POST', body: JSON.stringify(request) }),
-  retry: (request: { runId: string; probeIds?: OnboardingProbeId[] }) => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/retry`, { method: 'POST', body: JSON.stringify(request) }),
-  runRepair: (request: { actionId: OnboardingRepairActionId }) => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/repair`, { method: 'POST', body: JSON.stringify(request) }),
+  reportDeviceProbe: (report: OnboardingDeviceProbeReport) => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/device-probe`, {
+    method: 'POST', body: JSON.stringify(report),
+  }),
+  runProbe: (request: { probeIds?: OnboardingProbeId[] } = {}) => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/run`, { method: 'POST', body: JSON.stringify(request), timeoutMs: 35_000 }),
+  retry: (request: { runId: string; probeIds?: OnboardingProbeId[] }) => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/retry`, { method: 'POST', body: JSON.stringify(request), timeoutMs: 35_000 }),
+  runRepair: (request: { actionId: OnboardingRepairActionId }) => requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/repair`, {
+    method: 'POST', body: JSON.stringify(request),
+    timeoutMs: request.actionId === 'backend.retry' ? 180_000 : request.actionId.startsWith('probe.retry:') ? 35_000 : undefined,
+  }),
 }
 const onboardingApi = computed(() => window.petApi?.onboarding ?? browserOnboardingApi)
 const isElectronPanel = computed(() => Boolean(window.petApi?.window))
 const showApplication = computed(() => completed.value && !reopened.value)
 const backendStartActive = computed(() => snapshot.value?.operation === 'backend_start' ||
   (snapshot.value?.operation !== 'probe_scan' && backendStartPending.value))
-const runActive = computed(() => backendStartActive.value ||
+const runActive = computed(() => ['scan', 'retry', 'optional', 'voice'].includes(action.value) || backendStartActive.value ||
   snapshot.value?.operation === 'backend_start' || snapshot.value?.operation === 'probe_scan')
 const backendProbe = computed(() => snapshot.value?.probes.find(probe => probe.id === 'backend.service'))
 const backendAvailable = computed(() => backendProbe.value?.status === 'ready')
@@ -224,6 +244,7 @@ const readinessSummary = computed(() => snapshot.value?.readyForText
 const messageFrom = (cause: unknown, fallback: string): string => cause instanceof Error ? cause.message : fallback
 
 const schedulePoll = (): void => {
+  if (disposed) return
   const waitingForInitialState = snapshot.value?.operation === 'idle' &&
     snapshot.value.probes.length === 0 && emptyIdlePollCount < MAX_EMPTY_IDLE_POLLS
   if ((!runActive.value && !waitingForInitialState) || pollTimer !== null) return
@@ -234,6 +255,8 @@ const schedulePoll = (): void => {
 }
 
 const applySnapshot = (next: OnboardingReadinessSnapshot): void => {
+  if (disposed) return
+  if (snapshot.value && snapshot.value.revision > next.revision) return
   snapshot.value = next
   if (next.operation === 'idle' && next.probes.length === 0) emptyIdlePollCount += 1
   schedulePoll()
@@ -250,6 +273,7 @@ const loadSnapshot = async (showLoading = true): Promise<void> => {
     loadError.value = messageFrom(cause, t('onboarding.loadFailed'))
   } finally {
     loading.value = false
+    schedulePoll()
   }
 }
 
@@ -260,6 +284,7 @@ const runAction = async (
   if (action.value) return
   action.value = name
   actionError.value = ''
+  schedulePoll()
   try {
     applySnapshot(await operation())
   } catch (cause) {
@@ -310,6 +335,7 @@ const cancelActiveOperation = async (): Promise<void> => {
     action.value = ''
   }
 }
+const runFreshScan = (): Promise<void> => runAction('scan', () => onboardingApi.value!.runProbe({}))
 const retryFailed = (): Promise<void> => {
   const current = snapshot.value
   if (!current) return Promise.resolve()
@@ -429,10 +455,16 @@ const changeLanguage = async (value: string): Promise<void> => {
 
 const startChatting = (): void => {
   if (!snapshot.value?.readyForText) return
-  continueWithoutSetup()
+  continueWithoutSetup('passed')
 }
 
-const continueWithoutSetup = (): void => {
+const continueWithoutSetup = (outcome: 'passed' | 'skipped' = 'skipped'): void => {
+  const record: CompletionOutcome = {
+    outcome: outcome === 'passed' && snapshot.value?.readyForText ? 'passed' : 'skipped',
+    recordedAt: new Date().toISOString(), runId: snapshot.value?.runId ?? null, optionalSkipped: optionalSkipped.value,
+  }
+  window.localStorage.setItem(OUTCOME_KEY, JSON.stringify(record))
+  previousOutcome.value = record
   window.localStorage.setItem(COMPLETION_KEY, 'true')
   completed.value = true
   reopened.value = false
@@ -454,6 +486,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   window.removeEventListener(ONBOARDING_OPEN_EVENT, handleOpen)
   if (pollTimer !== null) window.clearTimeout(pollTimer)
 })
@@ -573,6 +606,7 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
+.scan-time { overflow-wrap: anywhere; color: var(--yui-text-muted); font-size: 12px; }
 .readiness-actions { margin-top: 8px; padding-left: 36px; }
 .optional-section { padding-top: 0; }
 .optional-skipped { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--yui-text-muted, #526176); font-size: 13px; }
@@ -600,7 +634,8 @@ onBeforeUnmount(() => {
   .section-heading { align-items: stretch; flex-direction: column; }
   .overall-status { align-self: flex-start; }
   .readiness-heading-actions { align-items: flex-start; }
-  .readiness-actions { padding-left: 0; }
+  .scan-time { overflow-wrap: anywhere; color: var(--yui-text-muted); font-size: 12px; }
+.readiness-actions { padding-left: 0; }
   .readiness-actions :deep(.el-button), .optional-actions :deep(.el-button) { flex: 1 1 100%; margin-left: 0; }
   .mcp-note { width: 100%; margin: 4px 0 0; }
   .onboarding-footer :deep(.el-button) { flex: 1 1 auto; margin-left: 0; }

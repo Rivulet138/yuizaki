@@ -30,15 +30,15 @@
     </div>
 
     <label class="control-row">
-      <span><strong>{{ t('proactive.enabled') }}</strong><small>{{ t('proactive.enabledHint') }}</small></span>
+      <span><strong>{{ t('proactive.enabled') }}</strong></span>
       <input data-testid="proactive-enabled" type="checkbox" :checked="settings.enabled" :disabled="busy" @change="setBoolean('enabled', $event)" />
     </label>
     <label class="control-row">
-      <span><strong>{{ t('proactive.dnd') }}</strong><small>{{ t('proactive.dndHint') }}</small></span>
+      <span><strong>{{ t('proactive.dnd') }}</strong></span>
       <input data-testid="proactive-dnd" type="checkbox" :checked="settings.dnd" :disabled="busy" @change="setBoolean('dnd', $event)" />
     </label>
     <label class="control-row">
-      <span><strong>{{ t('proactive.source.completed_turn_followup') }}</strong><small>{{ t('proactive.sourceHint') }}</small></span>
+      <span><strong>{{ t('proactive.source.completed_turn_followup') }}</strong></span>
       <input data-testid="proactive-source-completed-turn" type="checkbox" :checked="settings.sourceEnabled.completed_turn_followup" :disabled="busy" @change="setSource($event)" />
     </label>
 
@@ -71,7 +71,7 @@
           <div><dt>{{ t('proactive.opportunity.expires') }}</dt><dd>{{ formatDate(opportunity.expiresAt) }}</dd></div>
         </dl>
         <div class="feedback-actions" role="group" :aria-label="t('proactive.opportunity.title')">
-          <button v-for="kind in feedbackKinds" :key="kind" type="button" :data-testid="`proactive-feedback-${kind}`" :disabled="feedbackPending" @click="sendFeedback(kind)">
+          <button v-for="kind in feedbackKinds" :key="kind" type="button" :data-testid="`proactive-feedback-${kind}`" :disabled="feedbackPending || (kind === 'never_source' && controls.saving.value)" @click="sendFeedback(kind)">
             {{ t(`proactive.feedback.${kind}`) }}
           </button>
         </div>
@@ -85,7 +85,7 @@
           type="button"
           class="text-action"
           data-testid="proactive-frames-rebuild"
-          :disabled="controls.rebuilding.value"
+          :disabled="controls.loading.value || controls.saving.value || controls.rebuilding.value"
           @click="rebuildFrames"
         >
           {{ t(controls.rebuilding.value ? 'proactive.frames.rebuilding' : 'proactive.frames.rebuild') }}
@@ -128,7 +128,7 @@ const props = defineProps<{
 const controls = useProactiveControls()
 const { locale, t } = useI18n()
 const settings = computed(() => controls.settings.value)
-const busy = computed(() => controls.loading.value || controls.saving.value)
+const busy = computed(() => !controls.loaded.value || controls.loading.value || controls.saving.value || controls.rebuilding.value)
 const feedbackKinds = [...PROACTIVE_FEEDBACK_KINDS, 'snoozed'] as const
 const limits = PROACTIVE_SETTINGS_LIMITS
 const feedbackPending = computed(() => props.opportunity ? controls.isFeedbackPending(props.opportunity) : false)
@@ -163,16 +163,18 @@ const sendFeedback = async (kind: ProactiveFeedbackKind) => {
 }
 
 const rebuildFrames = async () => {
+  const workspaceId = props.workspaceId
   const rebuilt = await controls.rebuildFrames()
+  if (!props.visible || workspaceId !== props.workspaceId) return
   if (rebuilt) ElMessage.success(t('proactive.frames.rebuilt'))
   else ElMessage.error(t('proactive.frames.rebuildFailed'))
 }
 
 watch(() => [props.visible, props.workspaceId] as const, ([visible], previous) => {
-  if (!visible) return
   if (previous && previous[1] !== props.workspaceId) controls.invalidate()
+  if (!visible) return
   void load()
-}, { immediate: true })
+}, { immediate: true, flush: 'sync' })
 
 onBeforeUnmount(() => controls.invalidate())
 </script>

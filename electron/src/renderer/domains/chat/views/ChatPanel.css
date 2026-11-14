@@ -672,8 +672,9 @@
 
 .chat-top-corner {
   position: absolute;
-  top: 14px;
+  top: 10px;
   right: 18px;
+  left: 18px;
   z-index: 20;
   display: flex;
   align-items: center;
@@ -685,10 +686,10 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 3px;
-  border: 1px solid var(--yui-chat-border);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--yui-chat-surface) 88%, transparent);
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .chat-top-group--settings {
@@ -818,10 +819,9 @@
 
 .messages-pane {
   box-sizing: border-box;
-  width: min(780px, 100%);
+  width: 100%;
   min-width: 0;
-  align-self: center;
-  padding: 52px 22px 14px !important;
+  padding: 52px max(18px, calc((100% - 780px) / 2)) 14px !important;
   background: transparent !important;
 }
 
@@ -833,7 +833,10 @@
 }
 
 .composer-panel > * {
-  width: min(880px, 100%);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 780px;
+  min-width: 0;
 }
 
 .composer-box {
@@ -861,8 +864,8 @@
 
 .composer-toolbar {
   display: flex;
-  align-items: flex-start;
-  flex-wrap: wrap;
+  align-items: center;
+  flex-wrap: nowrap;
   justify-content: space-between;
   gap: 8px;
   min-height: 32px;
@@ -880,8 +883,9 @@
 }
 
 .composer-tools-left {
-  flex: 1 1 280px;
-  overflow: visible;
+  flex: 1 1 auto;
+  overflow-x: auto;
+  scroll-padding-inline: 4px;
   padding: 2px 0;
 }
 
@@ -894,7 +898,7 @@
 }
 
 .composer-tools-right {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   justify-content: flex-end;
   overflow: visible;
 }
@@ -1026,7 +1030,7 @@
   }
 
   .composer-panel {
-    padding: 0 10px 10px;
+    padding: 0 14px 10px;
   }
 
   .composer-toolbar {
@@ -1045,14 +1049,14 @@
   }
 
   .composer-tools-left {
-    flex: 0 1 36%;
+    flex: 1 1 auto;
     width: auto;
   }
 
   .composer-tools-right {
-    flex: 1 1 64%;
+    flex: 0 0 auto;
     width: auto;
-    justify-content: flex-start;
+    justify-content: flex-end;
   }
 
   .composer-tools-right::-webkit-scrollbar {
@@ -1065,5 +1069,29 @@
   .search-nav-button {
     width: 44px;
     height: 44px;
+  }
+}
+
+/* Runtime selectors must remain visible even when the stage narrows the composer. */
+.composer-panel {
+  container-type: inline-size;
+}
+
+@container (max-width: 620px) {
+  .composer-toolbar {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .composer-tools-left {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    overflow: visible;
+    width: 100%;
+  }
+
+  .composer-tools-right {
+    margin-left: auto;
+    overflow: visible;
   }
 }

@@ -20,7 +20,7 @@
     </dl>
 
     <details class="overview-section overview-disclosure" open aria-labelledby="memory-layer-title">
-      <summary class="section-heading"><h4 id="memory-layer-title">{{ t('memoryView.layersTitle') }}</h4><span>{{ t('memoryView.layersHint') }}</span></summary>
+      <summary class="section-heading"><h4 id="memory-layer-title">{{ t('memoryView.layersTitle') }}</h4></summary>
       <div class="layer-list">
         <button v-for="layer in layers" :key="layer.value" type="button" :aria-pressed="selectedLayer === layer.value" @click="emit('select-layer', layer.value)">
           <strong>{{ layer.label }}</strong><span>{{ layer.desc }}</span><b>{{ layer.count ?? 0 }}</b>

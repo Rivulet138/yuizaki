@@ -1,0 +1,146 @@
+[
+  {
+    "normalized_response": true,
+    "ready_before_unrelated_token": true,
+    "form_ready_from_first_read_ms": 1661.2,
+    "edit_to_saved_ms": 591.1,
+    "edit_to_request_ms": 404.7,
+    "save_readbacks": 0,
+    "save_posts": 1,
+    "pageerrors": [],
+    "blocked_real_mutations": [
+      {
+        "method": "POST",
+        "path": "/api/pet/visibility"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "path": "/api/system/voice-diagnostics/run"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/visibility"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "path": "/api/system/active-workspace"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/companion-idle-profile"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/companion-idle-profile"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/visibility"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "path": "/api/system/voice-diagnostics/run"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/workspaces/default"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/visibility"
+      }
+    ]
+  },
+  {
+    "normalized_response": false,
+    "ready_before_unrelated_token": true,
+    "form_ready_from_first_read_ms": 1007.4,
+    "edit_to_saved_ms": 737.4,
+    "edit_to_request_ms": 400.7,
+    "save_readbacks": 1,
+    "save_posts": 1,
+    "pageerrors": [],
+    "blocked_real_mutations": [
+      {
+        "method": "POST",
+        "path": "/api/pet/visibility"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "path": "/api/system/voice-diagnostics/run"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "path": "/api/system/active-workspace"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/companion-idle-profile"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/visibility"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/companion-idle-profile"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/workspaces/default"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/visibility"
+      }
+    ]
+  }
+]

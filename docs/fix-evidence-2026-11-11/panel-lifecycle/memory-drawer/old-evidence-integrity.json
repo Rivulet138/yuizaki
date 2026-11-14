@@ -1,0 +1,21 @@
+{
+  "unchanged": true,
+  "before": {
+    "browser-output.log": "49d7263a1d7f80f21ff6320236d5db2dab644464bc651207f4fcc2ed88307496",
+    "browser-result.json": "49d7263a1d7f80f21ff6320236d5db2dab644464bc651207f4fcc2ed88307496",
+    "fixture-harness.stdin.mjs": "005505bc20f3ba55e5adfb5a032b393249b8c5aa3f1af74e9035b9a27ad87067",
+    "memory-deactivated-drawer.png": "6fce1bb4439dd3f1981561d35b4fec1e1ad7d0299601729e6ad80872fed2f710",
+    "README.md": "5f176b1dde57b743000efda7556d7692635b485e485e7d812fa86d791d6923e9",
+    "reproduce-memory-drawer.py": "7f8c66908b0f17b7938ee02a0832db90600c62bbbf2750ebacd6f762af02f24b",
+    "SHA256SUMS.txt": "1f002ab2072390f428d25eaa7558bc0afce71c9610a809bed62a8a3f039a0767"
+  },
+  "after": {
+    "browser-output.log": "49d7263a1d7f80f21ff6320236d5db2dab644464bc651207f4fcc2ed88307496",
+    "browser-result.json": "49d7263a1d7f80f21ff6320236d5db2dab644464bc651207f4fcc2ed88307496",
+    "fixture-harness.stdin.mjs": "005505bc20f3ba55e5adfb5a032b393249b8c5aa3f1af74e9035b9a27ad87067",
+    "memory-deactivated-drawer.png": "6fce1bb4439dd3f1981561d35b4fec1e1ad7d0299601729e6ad80872fed2f710",
+    "README.md": "5f176b1dde57b743000efda7556d7692635b485e485e7d812fa86d791d6923e9",
+    "reproduce-memory-drawer.py": "7f8c66908b0f17b7938ee02a0832db90600c62bbbf2750ebacd6f762af02f24b",
+    "SHA256SUMS.txt": "1f002ab2072390f428d25eaa7558bc0afce71c9610a809bed62a8a3f039a0767"
+  }
+}

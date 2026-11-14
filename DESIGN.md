@@ -184,3 +184,20 @@ This document defines the design boundary for the Yuizaki desktop companion, cha
 - [ ] Decide whether automatic candidate extraction should default to review-only for sensitive categories / product owner / privacy and trust
 - [ ] Add an optional temporal graph projection only after LongMemEval-style local tests show a measurable multi-hop benefit / engineering / dependency and migration cost
 - [ ] Define export and backup deletion semantics before claiming full regulatory erasure across user-managed backups / product and legal / external data lifecycle
+
+
+## Persona editor / 人格设定（2026-11-10）
+
+- Route `/w/:workspaceId/prompt` opens the structured character card first. Three keyboard-accessible sections separate Character, Lorebook, and Behavior. The identity heading and Review section are removed at the user’s request; there is no review entry point, local prompt preview or interview UI. JSON editing is explicit and secondary. Identity/background, personality/values, relationship/scenario, behavior, example dialogue, and greeting reference remain distinct fields.
+- Reuse Vue 3, Element Plus and existing Yuizaki surfaces, spacing, typography and focus tokens. Keep the background visible around the editor; do not add introductory banners or instructional footnotes. At 1180px the overview moves below the editor; structured fields stack at 1060px. Controls remain usable from an 800px window.
+- Workspace role-card/context edits use the existing debounced revision-aware save queue. Companion persona and workspace system prompt retain explicit save and conflict recovery. Existing drafts remain scoped by record ID and survive late responses. Save errors remain visible with retry.
+- Lorebook trigger preview is approximate and labeled accordingly. Greeting and example dialogue are reference text, never fabricated prior conversation.
+- Character Card JSON imports retain an inert copy of their V1/V2/V3 source. Exports preserve the imported wrapper, unknown metadata/extensions and unchanged instruction splits; new cards use V2. Explicit edits to the combined instructions replace prior rule sources. Embedded worldbook edits merge recognized fields while retaining matched entry metadata. This does not promise PNG embedding or external asset packaging. Source metadata never enters the chat profile. Persona edits do not create factual memories or run a model.
+- Acceptance: source-field persistence through the actual chat payload, saved-context backend fallback, distinct role-card blocks, null persona clearing, draft/concurrency regressions, invalid JSON isolation, keyboard navigation, desktop/compact screenshots, renderer type gate and build. Evidence and upstream references: `docs/persona-editor-evidence-2026-11-10.md`.
+
+### Persona editor follow-up（2026-11-11）
+
+- Alternate greetings live in a collapsed list with add/remove/reorder and an explicit reference selection. The selected reference survives reorder; removing it restores the main greeting. A greeting is a style reference only and never creates chat history.
+- Behavior includes a collapsed current-session editor. The selected session belongs to the current workspace; scenario and example dialogue override independently. Unchecked fields inherit; checked empty text explicitly clears. Save affects only that session; restore inheritance PATCHes null. Dirty drafts and save results remain owned by the captured workspace/session pair.
+- Session overrides persist on chat_sessions via Alembic revision 20261111_00. Runtime resolves workspace/request profile first, then applies session fields without enabling disabled/null role cards. Branches copy overrides without altering the source session.
+- Verification: source-card JSON round trips, no metadata in model requests, selected-greeting behavior, session null/empty semantics, concurrent drafts, workspace/session isolation, database migration, browser behavior and responsive layout. Implementation evidence: docs/persona-editor-implementation-2026-11-11.md.

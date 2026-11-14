@@ -5,6 +5,7 @@ import json
 import logging
 import threading
 from collections.abc import Callable, Sequence
+from copy import deepcopy
 from typing import Any, cast
 
 from .backend import MemoryBackend, MemoryBackendStatus
@@ -159,6 +160,11 @@ class IndexedMemoryBackend:
             logger.warning("Memory index %s failed; SQLite authority remains valid: %s", operation, exc)
 
     def _write_index_document(self, doc: Document) -> None:
+        # Projections may mutate their inputs; authority objects stay private.
+        doc = deepcopy(doc)
+        if doc.metadata.get("candidate_deleted"):
+            # Erase the old payload before any fallible empty-body embedding.
+            self.index.delete_document(doc.id)
         writer = getattr(self.index, "add_document_for_generation", None)
         get_active = getattr(self.authority, "get_active_index_generation", None)
         if callable(writer) and callable(get_active):
@@ -196,9 +202,14 @@ class IndexedMemoryBackend:
         with self._mutation_lock:
             previous_revision = self._prepare_authority_mutation()
             self.authority.update_metadata(doc_id, metadata)
+            document = next(item for item in self.authority.list_documents() if item.id == doc_id)
             self._sync_index(
                 "update_metadata",
-                lambda: self.index.update_metadata(doc_id, metadata),
+                lambda: (
+                    self._write_index_document(document)
+                    if document.metadata.get("candidate_deleted")
+                    else self.index.update_metadata(doc_id, deepcopy(document.metadata))
+                ),
                 previous_revision=previous_revision,
             )
 
@@ -211,6 +222,20 @@ class IndexedMemoryBackend:
                 lambda: self.index.delete_document(doc_id),
                 previous_revision=previous_revision,
             )
+
+    def get_index_cleanup_status(self) -> str:
+        """Read local projection confirmation without contacting the index.
+
+        Dirty is conservatively pending, even if caused by another mutation.
+        A successful existing rebuild confirms the projection again.
+        """
+        return "pending" if self._index_dirty else "complete"
+
+    def get_document_index_status(self, doc_id: str) -> str:
+        get_status = getattr(self.authority, "get_document_index_status", None)
+        if callable(get_status) and get_status(doc_id) == "excluded":
+            return "excluded"
+        return "failed" if self._index_dirty else "indexed"
 
     def list_documents(self) -> list[Document]:
         return self.authority.list_documents()
@@ -226,6 +251,11 @@ class IndexedMemoryBackend:
         if not callable(recorder):
             raise TypeError("memory authority does not support operation recording")
         cast(Callable[[MemoryOperation], None], recorder)(operation)
+
+    def clear_document_payloads(self, document_id: str) -> None:
+        clear = getattr(self.authority, "clear_document_payloads", None)
+        if callable(clear):
+            clear(document_id)
 
     def list_operations(
         self,
@@ -380,9 +410,9 @@ class IndexedMemoryBackend:
                 break
             for document in page:
                 if write_generation is not None and read_generation_ids is not None:
-                    write_generation(document, index_generation)
+                    write_generation(deepcopy(document), index_generation)
                 else:
-                    self.index.add_document(document)
+                    self.index.add_document(deepcopy(document))
                 indexed_count += 1
                 current_cursor = document.id
                 if checkpoint_callback is not None:
@@ -492,14 +522,14 @@ class IndexedMemoryBackend:
                     )
                 if current_document is None:
                     continue
-                self.index.add_document(current_document)
+                self.index.add_document(deepcopy(current_document))
                 with self._mutation_lock:
                     latest_document = next(
                         (item for item in self.authority.list_documents() if item.id == document.id),
                         None,
                     )
                 if latest_document is not None and latest_document != current_document:
-                    self.index.add_document(latest_document)
+                    self.index.add_document(deepcopy(latest_document))
                 indexed_count += 1
                 if progress_callback is not None:
                     progress_callback(indexed_count, total, "indexing")
@@ -526,7 +556,7 @@ class IndexedMemoryBackend:
                         total=len(changed_documents),
                         phase="reconciling",
                     )
-                    self.index.add_document(document)
+                    self.index.add_document(deepcopy(document))
                     if progress_callback is not None:
                         progress_callback(reconciled_count, len(changed_documents), "reconciling")
                     _raise_if_rebuild_cancelled(
@@ -708,6 +738,9 @@ class IndexedMemoryBackend:
         if index_available and actual_index_count != expected_index_count:
             self._index_dirty = True
         index_healthy = index_available and not self._index_dirty
+        read_generation = getattr(self.authority, "get_active_index_generation", None)
+        active_generation = read_generation() if callable(read_generation) else None
+        active_generation = active_generation if isinstance(active_generation, dict) else {}
         return MemoryBackendStatus(
             backend=self.backend_name,
             healthy=authority_status.healthy,
@@ -719,6 +752,9 @@ class IndexedMemoryBackend:
             document_count=authority_status.document_count,
             metadata={
                 "authority": authority_status.backend,
+                "authority_revision": (authority_status.metadata or {}).get("authority_revision"),
+                "index_generation": active_generation.get("generation"),
+                "index_snapshot_revision": active_generation.get("snapshot_revision"),
                 "index": index_status.backend if index_status else self.index.backend_name,
                 "index_healthy": index_healthy,
                 "index_dirty": self._index_dirty,

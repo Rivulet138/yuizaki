@@ -1,16 +1,27 @@
 <template>
   <div class="yuizaki-bg" :class="{ 'browser-mode': !isElectronPanel }" :style="browserWallpaperStyle">
-    <BrowserStageView
-      v-if="activeTab === 'chat'"
-      :current-wallpaper="currentWallpaper"
-      :menus="menus"
-      :active-workspace="activeWorkspace"
-      @change-locale="handleLocaleChange"
-      @open-workspace-settings="dialogStore.openWorkspaceDrawer"
-    />
+    <div v-if="pendingNavigation" class="navigation-progress" role="status" aria-live="polite">{{ t('ui.loading') }}</div>
+    <keep-alive :max="1">
+      <BrowserStageView
+        v-if="activeTab === 'chat'"
+        :key="activeWorkspace.id"
+        :current-wallpaper="currentWallpaper"
+        :menus="menus"
+        :active-workspace="activeWorkspace"
+        @open-workspace-settings="dialogStore.openWorkspaceDrawer"
+      >
+        <template #status>
+          <div v-if="workspaceSaveError || workspaceStore.syncError" role="status" aria-live="polite" class="workspace-save-status">
+            <span>{{ workspaceSaveError || workspaceStore.syncError }}</span>
+            <button v-if="['conflict', 'failed'].includes(workspaceStore.contextSaveStatus[activeWorkspace.id] || '')" type="button" @click="workspaceStore.retryContextSave(activeWorkspace.id)">{{ t('settings.status.retrySave') }}</button>
+          </div>
+        </template>
+      </BrowserStageView>
+    </keep-alive>
 
-    <div v-else class="shell cherry-shell">
+    <div v-if="panelShellMounted" v-show="activeTab !== 'chat'" class="shell cherry-shell">
       <AppSidebar
+        v-if="activeTab !== 'chat'"
         :active-workspace-id="activeWorkspace.id"
         :menus="menus"
         @open-workspace-settings="dialogStore.openWorkspaceDrawer"
@@ -28,7 +39,7 @@
             :title="activeModuleTitle"
             :companion-state="companionRuntime.presentationState.value"
             :companion-state-label="companionStateLabel"
-            :is-electron-panel="isElectronPanel"
+            :is-electron-panel="windowControlsCapability.available"
             :notification-count="notifications.length"
             :theme="resolvedTheme"
             @toggle-theme="toggleTheme"
@@ -40,6 +51,10 @@
             @change-companion="handleCompanionChange"
           />
 
+          <div v-if="workspaceSaveError || workspaceStore.syncError" role="status" aria-live="polite" class="workspace-save-status">
+            <span>{{ workspaceSaveError || workspaceStore.syncError }}</span>
+            <button v-if="['conflict', 'failed'].includes(workspaceStore.contextSaveStatus[activeWorkspace.id] || '')" type="button" @click="workspaceStore.retryContextSave(activeWorkspace.id)">{{ t('settings.status.retrySave') }}</button>
+          </div>
           <main class="app-main panel-mode">
             <div
               class="view-host"
@@ -47,8 +62,8 @@
               :data-route-name="activeTab"
             >
               <router-view v-slot="{ Component, route }">
-                <keep-alive>
-                  <component :is="Component" v-if="Component" :key="route.name" class="view-component" />
+                <keep-alive :max="12">
+                  <component :is="Component" v-if="Component && route.name !== 'chat'" :key="`${route.params.workspaceId || 'default'}:${String(route.name)}`" class="view-component" />
                 </keep-alive>
               </router-view>
             </div>
@@ -115,7 +130,9 @@ import { publishCompanionRuntimeEvent } from './runtime/companionRuntime'
 import { createAppRuntimeTeardown } from './runtime/appRuntimeTeardown'
 import { createVisualCaptureRuntime } from './runtime/visualCaptureRuntime'
 import { petControl } from '@/utils/petControl'
+import { useUiCapabilities } from './composables/useUiCapabilities'
 
+const uiCapabilities = useUiCapabilities()
 const systemStore = useSystemStore()
 const workspaceStore = useWorkspaceStore()
 const companionStore = useCompanionStore()
@@ -130,13 +147,36 @@ useClientPerformanceMetrics()
 const route = useRoute()
 const router = useRouter()
 const petApi = window.petApi
+const pendingNavigation = ref('')
+const stopNavigationStart = router.beforeEach((to) => { pendingNavigation.value = to.fullPath })
+const stopNavigationEnd = router.afterEach((to) => {
+  if (pendingNavigation.value === to.fullPath) pendingNavigation.value = ''
+})
+const stopNavigationError = router.onError((_error, to) => {
+  if (pendingNavigation.value === to.fullPath) pendingNavigation.value = ''
+})
+onUnmounted(() => {
+  stopNavigationStart()
+  stopNavigationEnd()
+  stopNavigationError()
+})
 
 const activeTab = computed<NavigationModuleId>(() => {
   const segments = route.path.replace(/^\//, '').split('/')
   return (segments[2] || 'chat') as NavigationModuleId
 })
 
+// Keep the panel cache alive across chat navigation; mount it on first use.
+const panelShellMounted = ref(activeTab.value !== 'chat')
+watch(activeTab, (tab) => { if (tab !== 'chat') panelShellMounted.value = true })
+
 const activeWorkspace = computed(() => workspaceStore.activeWorkspace)
+const workspaceSaveError = computed(() => {
+  const status = workspaceStore.contextSaveStatus[activeWorkspace.value.id]
+  if (status !== 'conflict' && status !== 'failed') return ''
+  const labels = { conflict: t('shell.workspaceSave.conflict'), failed: t('shell.workspaceSave.failed') }
+  return [labels[status], workspaceStore.contextSaveError[activeWorkspace.value.id]].filter(Boolean).join(' · ')
+})
 const wallpaperMode = ref(true)
 const currentWallpaper = ref(yuizakiConfig.slides[0] || '')
 const localMenus = computed(() => [...primaryNavigationModules(), ...adminNavigationModules()])
@@ -157,7 +197,8 @@ const companionOptions = computed(() => {
     .filter((item) => item && item.id && item.name)
     .map((item) => ({ id: item.id, name: item.name }))
 })
-const isElectronPanel = computed(() => Boolean(petApi?.window))
+const isElectronPanel = uiCapabilities.isElectron
+const windowControlsCapability = computed(() => uiCapabilities.capability('electronIpc', 'windowControls', Boolean(petApi?.window)))
 const browserWallpaperStyle = computed(() => ({
   '--browser-wallpaper': currentWallpaper.value ? `url("${currentWallpaper.value}")` : 'none',
 }))
@@ -345,11 +386,12 @@ const handleToggleVisionShortcut = () => {
 
 const callWindowAction = (action: 'minimize' | 'maximize' | 'close') => {
   const winApi = petApi?.window
-  if (!winApi) {
-    ElMessage.info(t('window.electronOnly'))
+  const capability = uiCapabilities.capability('electronIpc', 'windowControls', typeof winApi?.[action] === 'function')
+  if (!capability.available) {
+    ElMessage.info(capability.reason)
     return
   }
-  winApi[action]?.()
+  winApi?.[action]?.()
 }
 
 const minimize = () => {
@@ -420,6 +462,7 @@ watch(() => chatState.value.isGenerating, (generating) => {
 })
 
 onMounted(() => {
+  void uiCapabilities.refresh()
   applyTheme()
   themeMediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)') ?? null
   themeMediaQuery?.addEventListener('change', applyTheme)
@@ -611,6 +654,20 @@ watch(
   display: none;
 }
 
+.navigation-progress {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  padding: 6px 18px;
+  border-radius: 0 0 8px 8px;
+  background: var(--yui-chat-surface, #fff);
+  color: var(--yui-text);
+  box-shadow: var(--yui-panel-shadow);
+  pointer-events: none;
+}
+
 .view-host {
   position: relative;
   flex: 1;
@@ -733,6 +790,8 @@ watch(
   }
 
 }
+.workspace-save-status { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 16px; font-size: 12px; color: var(--yui-muted); }
+.workspace-save-status button { color: var(--yui-text); background: var(--yui-surface-raised); border: 1px solid var(--yui-border); border-radius: 6px; cursor: pointer; }
 </style>
 
 <style>
@@ -847,7 +906,7 @@ watch(
   --yui-browser-card-surface: rgba(255, 255, 255, 0.74);
   --yui-browser-card-border: rgba(15, 23, 42, 0.14);
   --yui-browser-card-shadow: 0 12px 28px rgba(15, 23, 42, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.66);
-  --yui-browser-composer-surface: #fff;
+  --yui-browser-composer-surface: rgba(255, 255, 255, 0.88);
   --yui-browser-composer-shadow: 0 10px 24px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.56);
   --yui-chat-surface: rgba(255, 255, 255, 0.78);
   --yui-chat-surface-muted: rgba(255, 255, 255, 0.68);
@@ -877,7 +936,7 @@ watch(
   --yui-browser-card-surface: rgba(15, 23, 42, 0.82);
   --yui-browser-card-border: rgba(203, 213, 225, 0.32);
   --yui-browser-card-shadow: 0 12px 28px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  --yui-browser-composer-surface: rgba(15, 23, 42, 0.86);
+  --yui-browser-composer-surface: rgba(15, 23, 42, 0.8);
   --yui-browser-composer-shadow: 0 12px 28px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   --yui-chat-surface: rgba(17, 24, 39, 0.82);
   --yui-chat-surface-muted: rgba(30, 41, 59, 0.72);

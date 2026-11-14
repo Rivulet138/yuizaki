@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+import fastapi.routing as fastapi_routing
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
@@ -18,8 +19,11 @@ def build_route_manifest(
 ) -> dict[str, Any]:
     prefixes = tuple(proxy_prefixes)
     routes: list[dict[str, Any]] = []
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
+    iter_contexts = getattr(fastapi_routing, "iter_route_contexts", None)
+    # Older FastAPI versions already flatten include_router() into APIRoutes.
+    effective_routes = iter_contexts(app.routes) if callable(iter_contexts) else app.routes
+    for route in effective_routes:
+        if not isinstance(getattr(route, "original_route", route), APIRoute):
             continue
         path = str(route.path)
         if not any(

@@ -8,10 +8,10 @@ type SessionDraftMap = Record<string, string>
 
 const normalizeSessionId = (sessionId?: string | null) => sessionId?.trim() || 'default'
 
-const loadDrafts = (): SessionDraftMap => {
-  if (typeof window === 'undefined') return {}
+const loadDrafts = (storage?: Storage): SessionDraftMap => {
+  if (!storage) return {}
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(SESSION_DRAFTS_STORAGE_KEY) || '{}')
+    const parsed = JSON.parse(storage.getItem(SESSION_DRAFTS_STORAGE_KEY) || '{}')
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
     return Object.fromEntries(
       Object.entries(parsed)
@@ -24,15 +24,15 @@ const loadDrafts = (): SessionDraftMap => {
   }
 }
 
-export const useSessionDrafts = () => {
-  const drafts = ref<SessionDraftMap>(loadDrafts())
+const createDraftState = (storage?: Storage) => {
+  const drafts = ref<SessionDraftMap>(loadDrafts(storage))
   let persistTimer: number | null = null
 
   const flushDrafts = () => {
-    if (typeof window === 'undefined') return
+    if (!storage) return
     if (persistTimer !== null) window.clearTimeout(persistTimer)
     persistTimer = null
-    window.localStorage.setItem(SESSION_DRAFTS_STORAGE_KEY, JSON.stringify(drafts.value))
+    storage.setItem(SESSION_DRAFTS_STORAGE_KEY, JSON.stringify(drafts.value))
   }
 
   const schedulePersist = () => {
@@ -63,17 +63,42 @@ export const useSessionDrafts = () => {
     schedulePersist()
   }
 
-  const clearDraft = (sessionId?: string | null) => setDraft(sessionId, '')
-  const hasDraft = (sessionId?: string | null) => Boolean(getDraft(sessionId).trim())
-  const draftSessionIds = computed(() => Object.keys(drafts.value).filter((sessionId) => hasDraft(sessionId)))
+  return { drafts, getDraft, setDraft, flushDrafts }
+}
 
-  return {
-    drafts,
-    draftSessionIds,
-    getDraft,
-    setDraft,
-    clearDraft,
-    hasDraft,
-    flushDrafts,
+// All cached panels writing to the same storage share one map and debounce queue.
+const draftStates = new WeakMap<Storage, ReturnType<typeof createDraftState>>()
+
+export const useSessionDrafts = (workspaceId: () => string = () => 'default') => {
+  const storage = typeof window === 'undefined' ? undefined : window.localStorage
+  let state = storage ? draftStates.get(storage) : undefined
+  if (!state) {
+    state = createDraftState(storage)
+    if (storage) draftStates.set(storage, state)
   }
+  const { drafts, flushDrafts } = state
+  const shared = state
+  const defaultKey = (workspace: string) => JSON.stringify(['default', workspace.trim() || 'default'])
+  const draftKey = (sessionId: string | null | undefined, workspace: string) => {
+    const id = normalizeSessionId(sessionId)
+    return id === 'default' ? defaultKey(workspace) : id
+  }
+
+  // The legacy default draft had no workspace. Claim it once for the first workspace opened.
+  const legacyDefault = shared.getDraft('default')
+  if (legacyDefault) {
+    const key = defaultKey(workspaceId())
+    shared.setDraft('default', '')
+    if (!shared.getDraft(key)) shared.setDraft(key, legacyDefault)
+  }
+
+  const getDraft = (sessionId?: string | null, workspace = workspaceId()) => shared.getDraft(draftKey(sessionId, workspace))
+  const setDraft = (sessionId: string | null | undefined, value: string, workspace = workspaceId()) => shared.setDraft(draftKey(sessionId, workspace), value)
+  const clearDraft = (sessionId?: string | null, workspace = workspaceId()) => setDraft(sessionId, '', workspace)
+  const hasDraft = (sessionId?: string | null) => Boolean(getDraft(sessionId).trim())
+  const draftSessionIds = computed(() => Object.keys(drafts.value)
+    .filter((key) => !key.startsWith('["default",') || key === defaultKey(workspaceId()))
+    .map((key) => key === defaultKey(workspaceId()) ? 'default' : key))
+
+  return { drafts, draftSessionIds, getDraft, setDraft, clearDraft, hasDraft, flushDrafts }
 }

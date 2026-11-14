@@ -28,7 +28,11 @@
         <el-input :model-value="modelValue.baseUrl" @update:model-value="update('baseUrl', String($event))" />
       </el-form-item>
       <el-form-item v-if="!keylessProviders.has(modelValue.provider)" :label="t('settingsSection.vision.apiKey')">
-        <el-input :model-value="modelValue.apiKey" type="password" show-password @update:model-value="update('apiKey', String($event))" />
+        <el-input :model-value="modelValue.apiKey" :disabled="apiKeyDeleting" :placeholder="apiKeyStored ? t('settings.llm.apiKeyPlaceholder') : ''" type="password" show-password @update:model-value="update('apiKey', String($event))">
+          <template #append>
+            <el-button v-if="modelValue.apiKey || apiKeyStored" text type="danger" :loading="apiKeyDeleting" @click="emit('clear-api-key')">{{ t('settings.apiKeyClear') }}</el-button>
+          </template>
+        </el-input>
       </el-form-item>
     </div>
     <p v-if="modelValue.enabled && (!modelValue.baseUrl.trim() || !modelValue.model.trim())" class="field-hint error">
@@ -38,7 +42,8 @@
 </template>
 
 <script setup lang="ts">
-import { ElSwitch } from 'element-plus'
+import { ElSwitch, ElButton } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
 import 'element-plus/es/components/switch/style/css'
 import { ElInput } from 'element-plus'
 import 'element-plus/es/components/input/style/css'
@@ -66,12 +71,15 @@ interface LlmVisionSettings {
 }
 
 defineProps<{
+  apiKeyStored?: boolean
+  apiKeyDeleting?: boolean
   modelValue: LlmVisionSettings
   providerOptions: Array<{ label: string; value: LlmProviderPreset }>
 }>()
 
 const emit = defineEmits<{
   update: [patch: Partial<LlmVisionSettings>]
+  'clear-api-key': []
 }>()
 
 const keylessProviders = new Set<LlmProviderPreset>(['ollama', 'lmstudio'])

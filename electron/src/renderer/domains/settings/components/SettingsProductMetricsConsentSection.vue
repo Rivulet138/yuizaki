@@ -125,7 +125,6 @@ defineExpose({ consented, scope, transport, load, handleChange })
   color: var(--yui-text-primary);
 }
 
-.consent-copy p,
 .consent-status {
   margin: 6px 0 0;
   color: var(--yui-text-secondary);

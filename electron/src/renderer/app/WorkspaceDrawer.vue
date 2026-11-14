@@ -45,7 +45,6 @@
         <label class="toggle-row">
           <span>
             <strong>{{ t('workspaceDrawer.runtime.mute') }}</strong>
-            <small>{{ t('workspaceDrawer.runtime.muteHint') }}</small>
           </span>
           <input
             data-testid="workspace-mute"
@@ -283,7 +282,6 @@ const toolSummary = computed(() => {
   gap: 3px;
 }
 
-.toggle-row small,
 .preset-row small {
   color: var(--yui-muted);
   line-height: 1.4;

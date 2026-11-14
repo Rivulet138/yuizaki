@@ -6,10 +6,11 @@ import type { DesktopPetPlugin, PluginAuditRecord, PluginLoadFailure, PluginRegi
 export function usePluginDomain() {
   const payload = ref<PluginRegistrySnapshot | null>(null)
   const selectedPluginId = ref('')
+  const cancellationStates = ref<Record<string, string>>({})
   const cancellingInvocationIds = ref(new Set<string>())
 
   const pluginsRequest = useDomainRequest<PluginRegistrySnapshot>()
-  const cancelRequest = useDomainRequest<{ ok: boolean; invocationId: string; status: string }>()
+  const cancellationErrors = ref<Record<string, string>>({})
 
   const plugins = computed(() => payload.value?.plugins ?? [])
   const pluginStates = computed(() => payload.value?.pluginStates ?? [])
@@ -50,22 +51,30 @@ export function usePluginDomain() {
 
   const loadPlugins = async () => {
     const result = await pluginsRequest.execute(() => pluginClient.list())
-    if (result) {
+    if (result && pluginsRequest.isCurrent(result)) {
       payload.value = result
       ensureSelectedPlugin()
     }
   }
 
   const cancelExecution = async (pluginId: string, routeId: string, invocationId: string) => {
+    if (cancellingInvocationIds.value.has(invocationId)) return false
+    pluginsRequest.reset()
     const next = new Set(cancellingInvocationIds.value)
     next.add(invocationId)
     cancellingInvocationIds.value = next
 
     try {
-      const result = await cancelRequest.execute(() => pluginClient.cancelExecution(pluginId, routeId, invocationId))
+      // Each invocation owns its result; parallel cancellations must not supersede one another.
+      const request = useDomainRequest<{ ok: boolean; invocationId: string; status: string }>()
+      delete cancellationErrors.value[invocationId]
+      const result = await request.execute(() => pluginClient.cancelExecution(pluginId, routeId, invocationId))
+      if (request.error) cancellationErrors.value[invocationId] = request.error
       if (!result?.ok) {
         return false
       }
+      cancellationStates.value[invocationId] = result.status
+      pluginsRequest.reset()
       await loadPlugins()
       return true
     } finally {
@@ -79,8 +88,9 @@ export function usePluginDomain() {
     payload,
     selectedPluginId,
     cancellingInvocationIds,
+    cancellationStates,
+    cancellationErrors,
     pluginsRequest,
-    cancelRequest,
     plugins,
     pluginStates,
     loadFailures,

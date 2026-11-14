@@ -1,0 +1,2183 @@
+{
+  "result": {
+    "name": "discovery",
+    "passed": true,
+    "purpose": "DOM reconnaissance and direct-summary negative control",
+    "expected_token_requests": 0,
+    "http_counts": {
+      "settings_GET": 0,
+      "settings_PATCH": 0,
+      "backend_token_GET": 0,
+      "runtime_status_GET": 0
+    },
+    "pageerrors": [],
+    "console_errors": [
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "WebSocket connection to 'ws://localhost:48949/socket.io/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 404",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "[CompanionRuntime] sink delivery failed {event: companion_runtime.sink_failure, sink: behavior, message: R5_blocks_nonfixture_network}",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "[CompanionRuntime] sink delivery failed {event: companion_runtime.sink_failure, sink: behavior, message: R5_blocks_nonfixture_network}",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "Fetch settings error: Error: R5_blocks_nonfixture_network\n    at x (http://127.0.0.1:48949/assets/preload-helper-Djh5A-AB.js:1:6945)\n    at Le (http://127.0.0.1:48949/assets/preload-helper-Djh5A-AB.js:1:6983)\n    at He (http://127.0.0.1:48949/assets/preload-helper-Djh5A-AB.js:1:9231)\n    at async Object.Yt [as fetchSettings] (http://127.0.0.1:48949/assets/preload-helper-Djh5A-AB.js:1:65380)",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "[DomainRequest Error] /api/settings/: Error: R5_blocks_nonfixture_network\n    at x (http://127.0.0.1:48949/assets/preload-helper-Djh5A-AB.js:1:6945)\n    at Le (http://127.0.0.1:48949/assets/preload-helper-Djh5A-AB.js:1:6983)\n    at He (http://127.0.0.1:48949/assets/preload-helper-Djh5A-AB.js:1:9231)\n    at async Object.execute (http://127.0.0.1:48949/assets/useDomainRequest-BJUAfbHd.js:1:329)\n    at async y (http://127.0.0.1:48949/assets/SettingsPanel-CRSqHWJ0.js:1:4456)\n    at async wc (http://127.0.0.1:48949/assets/SettingsPanel-CRSqHWJ0.js:1:129835)\n    at async http://127.0.0.1:48949/assets/SettingsPanel-CRSqHWJ0.js:1:131248",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)",
+      "WebSocket connection to 'ws://localhost:48949/socket.io/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 404",
+      "Failed to load resource: the server responded with a status of 409 (Conflict)"
+    ],
+    "blocked_browser_requests": [
+      {
+        "method": "GET",
+        "url": "http://localhost:48949/api/system/env-check"
+      },
+      {
+        "method": "POST",
+        "url": "http://127.0.0.1:48949/api/pet/visibility"
+      },
+      {
+        "method": "POST",
+        "url": "http://127.0.0.1:48949/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "url": "http://127.0.0.1:48949/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "url": "http://localhost:48949/api/system/voice-diagnostics/run"
+      },
+      {
+        "method": "GET",
+        "url": "http://localhost:48949/api/companions"
+      },
+      {
+        "method": "GET",
+        "url": "http://localhost:48949/api/system/ui-capabilities"
+      },
+      {
+        "method": "GET",
+        "url": "http://localhost:48949/api/settings/"
+      },
+      {
+        "method": "GET",
+        "url": "http://localhost:48949/api/health"
+      },
+      {
+        "method": "GET",
+        "url": "http://localhost:48949/api/ping"
+      },
+      {
+        "method": "GET",
+        "url": "http://localhost:48949/api/system/env-check"
+      },
+      {
+        "method": "GET",
+        "url": "http://localhost:48949/api/workspaces"
+      },
+      {
+        "method": "GET",
+        "url": "http://localhost:48949/api/system/env-check"
+      },
+      {
+        "method": "POST",
+        "url": "http://127.0.0.1:48949/api/pet/visibility"
+      },
+      {
+        "method": "GET",
+        "url": "http://localhost:48949/api/settings/"
+      },
+      {
+        "method": "GET",
+        "url": "http://localhost:48949/api/system/env-check"
+      },
+      {
+        "method": "POST",
+        "url": "http://localhost:48949/api/system/active-workspace"
+      },
+      {
+        "method": "GET",
+        "url": "http://localhost:48949/api/system/env-check"
+      },
+      {
+        "method": "GET",
+        "url": "http://localhost:48949/api/sessions?scope=all"
+      },
+      {
+        "method": "GET",
+        "url": "http://localhost:48949/api/system/env-check"
+      },
+      {
+        "method": "PATCH",
+        "url": "http://localhost:48949/api/workspaces/default"
+      },
+      {
+        "method": "POST",
+        "url": "http://127.0.0.1:48949/api/pet/visibility"
+      },
+      {
+        "method": "POST",
+        "url": "http://127.0.0.1:48949/api/pet/visibility"
+      }
+    ],
+    "host_rejected_mutations": [],
+    "token_started": 0,
+    "token_completed": 0,
+    "first_settings_get_at": null
+  },
+  "browser_requests": [
+    {
+      "method": "GET",
+      "path": "/api/system/env-check",
+      "resource_type": "fetch",
+      "at": 153387.5575926
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility",
+      "resource_type": "fetch",
+      "at": 153387.6591022
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/behavior-state",
+      "resource_type": "fetch",
+      "at": 153387.6768055
+    },
+    {
+      "method": "GET",
+      "path": "/api/pet/state",
+      "resource_type": "fetch",
+      "at": 153387.7086367
+    },
+    {
+      "method": "GET",
+      "path": "/api/pet/catalog",
+      "resource_type": "fetch",
+      "at": 153387.7144185
+    },
+    {
+      "method": "GET",
+      "path": "/api/pet/catalog",
+      "resource_type": "fetch",
+      "at": 153387.719661
+    },
+    {
+      "method": "GET",
+      "path": "/api/pet/avatar-capabilities",
+      "resource_type": "fetch",
+      "at": 153387.7272938
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/behavior-state",
+      "resource_type": "fetch",
+      "at": 153387.733619
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/voice-diagnostics/run",
+      "resource_type": "fetch",
+      "at": 153388.0306591
+    },
+    {
+      "method": "GET",
+      "path": "/api/companions",
+      "resource_type": "fetch",
+      "at": 153388.047907
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/ui-capabilities",
+      "resource_type": "fetch",
+      "at": 153388.0541171
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/",
+      "resource_type": "fetch",
+      "at": 153388.0625215
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "resource_type": "fetch",
+      "at": 153388.0703945
+    },
+    {
+      "method": "GET",
+      "path": "/api/ping",
+      "resource_type": "fetch",
+      "at": 153388.0803591
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/env-check",
+      "resource_type": "fetch",
+      "at": 153388.1721205
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces",
+      "resource_type": "fetch",
+      "at": 153388.4229784
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/env-check",
+      "resource_type": "fetch",
+      "at": 153388.5237116
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility",
+      "resource_type": "fetch",
+      "at": 153388.5312467
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/",
+      "resource_type": "fetch",
+      "at": 153388.6924478
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/env-check",
+      "resource_type": "fetch",
+      "at": 153388.7622938
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/active-workspace",
+      "resource_type": "fetch",
+      "at": 153388.9758407
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/env-check",
+      "resource_type": "fetch",
+      "at": 153388.9926522
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions",
+      "resource_type": "fetch",
+      "at": 153389.0008212
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/env-check",
+      "resource_type": "fetch",
+      "at": 153389.007919
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspaces/default",
+      "resource_type": "fetch",
+      "at": 153389.0215299,
+      "patch": {
+        "context": {
+          "activeTab": "settings",
+          "modelType": "live2d",
+          "modelId": null,
+          "wallpaperMode": true,
+          "heroHeight": 460,
+          "menuOrder": [],
+          "recentTabs": [
+            "settings",
+            "chat"
+          ],
+          "layoutPreset": "balanced",
+          "promptVersion": 2,
+          "promptMode": "auto",
+          "promptEngineering": {
+            "workPrompt": "当前处于工作模式。你处于任务协助模式。\n- 先用一句话确认用户真正要得到的结果；仅在结果、权限或破坏性风险无法判断时提问。\n- 把事实、推断和未知分开。涉及文件、屏幕、工具结果或系统状态时，只使用本轮可验证证据。\n- 对可安全执行的本地任务，先完成最小必要操作，再核验结果；没有执行成功时不得声称已经完成。\n- 涉及写入、删除、发送、安装、授权或隐私数据时，说明影响范围并遵守既有权限策略。\n- 回答先给结论，再给必要依据和下一步。普通问题保持简洁，复杂任务才使用分段结构。\n- 使用自然中文；代码、命令、路径、字段名和专有名词保持原样。",
+            "dailyPrompt": "当前处于日常模式。你处于日常陪伴模式。\n- 先回应用户当下的情绪和意图，再决定是否提供建议；不要把闲聊改写成任务清单。\n- 语气温暖、自然、有分寸。可以表达关心和好奇，但不占有、不施压、不连续追问。\n- 不假装拥有未提供的记忆、感官或现实经历。只有收到实时画面、工具结果或明确上下文时，才据此描述。\n- 用户需要严肃协助时，自然切换为清晰、可执行的表达，并保持陪伴感。\n- 默认短句和短段落，适合 TTS；只有用户要求或问题复杂时再展开。\n- 使用自然中文，避免模板化客服语气和过度卖萌。"
+          },
+          "roleCard": {
+            "enabled": true,
+            "name": "",
+            "description": "",
+            "personality": "",
+            "scenario": "",
+            "instructions": "",
+            "firstMessage": "",
+            "exampleDialogue": "",
+            "alternateGreetings": [],
+            "greetingIndex": -1
+          },
+          "worldBook": {
+            "enabled": false,
+            "scanDepth": 8,
+            "maxEntries": 8,
+            "budgetTokens": 1200,
+            "entries": []
+          },
+          "vision": {
+            "enabled": false,
+            "displayIndex": 0,
+            "captureMode": "display",
+            "region": {
+              "x": 0,
+              "y": 0,
+              "width": 1280,
+              "height": 720
+            },
+            "privacyMasks": []
+          },
+          "memoryPolicy": {
+            "workingRetentionDays": 14,
+            "lowQualityThreshold": 0.55,
+            "includeStaleWorking": true,
+            "includeLowQuality": true,
+            "includeExactDuplicates": true
+          }
+        },
+        "contextRevision": 0
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility",
+      "resource_type": "fetch",
+      "at": 153389.253337
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility",
+      "resource_type": "fetch",
+      "at": 153390.3912887
+    }
+  ],
+  "timeline": [
+    {
+      "event": "request_finished",
+      "at": 153386.1706995,
+      "ms": 576.9,
+      "method": "GET",
+      "path": "/"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.1084343,
+      "ms": 1514.64,
+      "method": "GET",
+      "path": "/assets/rolldown-runtime-XKyaHtl9.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.1187781,
+      "ms": 1524.98,
+      "method": "GET",
+      "path": "/assets/element-plus~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControl~c82lkcp2-cyJZB4WD.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.132334,
+      "ms": 1538.54,
+      "method": "GET",
+      "path": "/assets/element-plus~main~ChatPanel~MemoryPanel~PetControlPanel-Wv38huFO.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.1414156,
+      "ms": 1547.62,
+      "method": "GET",
+      "path": "/assets/element-plus~main-C8_oi_vx.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.1548372,
+      "ms": 1561.04,
+      "method": "GET",
+      "path": "/assets/element-plus~main~MemoryPanel~PetControlPanel~PluginManagementPanel~PromptPanel~SettingsPan~bgkiqfly-S7fQQ3B8.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.1602021,
+      "ms": 1566.4,
+      "method": "GET",
+      "path": "/assets/vue-vendor~main~pet-DnF2n8b0.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.169653,
+      "ms": 1575.86,
+      "method": "GET",
+      "path": "/assets/main-FjLxoSVb.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2108204,
+      "ms": 1617.02,
+      "method": "GET",
+      "path": "/assets/vue-vendor~main~ChatPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~PromptPanel~Infras~en9ul8ap-CFeNlzlJ.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2146525,
+      "ms": 1620.86,
+      "method": "GET",
+      "path": "/assets/vue-vendor~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControlPa~5m0qdmke-C0b4-2zM.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2285677,
+      "ms": 1634.77,
+      "method": "GET",
+      "path": "/assets/vendor~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~~kdqof5ka-BsqHuujB.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2310228,
+      "ms": 1637.23,
+      "method": "GET",
+      "path": "/assets/element-icons~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetContro~e8dkzn6i-BtvMrHX9.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2345219,
+      "ms": 1640.72,
+      "method": "GET",
+      "path": "/assets/vendor~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~~jfhs9cx4-kT8zvrs2.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2399181,
+      "ms": 1646.12,
+      "method": "GET",
+      "path": "/assets/main-DBm8cDrz.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2434096,
+      "ms": 1649.61,
+      "method": "GET",
+      "path": "/assets/element-plus~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControl~c82lkcp2-D2UH2yeL.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2448247,
+      "ms": 1651.03,
+      "method": "GET",
+      "path": "/assets/vendor~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~~gp2r08i9-Da2e7s38.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2555655,
+      "ms": 1661.77,
+      "method": "GET",
+      "path": "/assets/companionDiagnosticExport-BN3RKWzb.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2569638,
+      "ms": 1663.17,
+      "method": "GET",
+      "path": "/assets/vendor~main-CJIdMKlc.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2609873,
+      "ms": 1667.19,
+      "method": "GET",
+      "path": "/assets/companionJobProjection-DKXIBKM4.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2669031,
+      "ms": 1673.11,
+      "method": "GET",
+      "path": "/assets/describe-error-BGs_0JEO.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2779902,
+      "ms": 1684.19,
+      "method": "GET",
+      "path": "/assets/companionStore-XEWbOko8.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2853466,
+      "ms": 1691.55,
+      "method": "GET",
+      "path": "/assets/element-plus~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControl~jbikrlxr-Bac_-Vi1.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2871539,
+      "ms": 1693.36,
+      "method": "GET",
+      "path": "/assets/vendor~main~ChatPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~PluginManagementPanel~~hie4e87e-DcQRwhPj.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2899882,
+      "ms": 1696.19,
+      "method": "GET",
+      "path": "/assets/vendor~main~ChatPanel~PersonaMemoryPanel~PetControlPanel~PluginManagementPanel~PromptPanel~~mwzxcjvr-Dyt46IEe.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2939167,
+      "ms": 1700.12,
+      "method": "GET",
+      "path": "/assets/vendor~main~ChatPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~PluginManage~j5gjnhwd-DnK8ny5-.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.2991594,
+      "ms": 1705.36,
+      "method": "GET",
+      "path": "/assets/vendor~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PetControlPanel~PluginManagementPan~fz3njrh9-DEtt3q6Y.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.3042818,
+      "ms": 1710.48,
+      "method": "GET",
+      "path": "/assets/vendor~main~MemoryPanel~PromptPanel~SettingsPanel~AgentTracePanel~SVCPanel-36_vbueH.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.3184585,
+      "ms": 1724.66,
+      "method": "GET",
+      "path": "/assets/element-plus~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PetControlPanel~PluginManagem~onwvw4ll-gVf7G00E.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.3205599,
+      "ms": 1726.76,
+      "method": "GET",
+      "path": "/assets/element-plus~main~ChatPanel~DeployPanel~MemoryPanel~PetControlPanel~SettingsPanel~AgentGove~mrbinph2-TeC89SvR.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.3214759,
+      "ms": 1727.68,
+      "method": "GET",
+      "path": "/assets/element-plus~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControl~m9dxcfcs-DWZIxVTi.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.3247733,
+      "ms": 1730.98,
+      "method": "GET",
+      "path": "/assets/element-plus~main~ChatPanel~MemoryPanel~PetControlPanel-CsRa1IXK.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.3257664,
+      "ms": 1731.97,
+      "method": "GET",
+      "path": "/assets/vendor~main~pet-B15zdzFB.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.3268168,
+      "ms": 1733.02,
+      "method": "GET",
+      "path": "/assets/element-plus~main-BST1P3wT.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.3275373,
+      "ms": 1733.74,
+      "method": "GET",
+      "path": "/assets/element-plus~main~MemoryPanel~PetControlPanel~PluginManagementPanel~PromptPanel~SettingsPan~bgkiqfly-GynY9Tg7.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.3294879,
+      "ms": 1735.69,
+      "method": "GET",
+      "path": "/assets/element-plus~main~MemoryPanel~PersonaMemoryPanel~PetControlPanel~PluginManagementPanel~Prom~hv4plx48-DLJmx3tF.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.3314122,
+      "ms": 1737.62,
+      "method": "GET",
+      "path": "/live2d/live2dcubismcore.min.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.3918723,
+      "ms": 1798.08,
+      "method": "GET",
+      "path": "/assets/transport-vendor~main~pet-BYMdO4gC.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153387.4115509,
+      "ms": 1817.75,
+      "method": "GET",
+      "path": "/assets/preload-helper-Djh5A-AB.js"
+    },
+    {
+      "event": "request_started",
+      "at": 153387.5575998,
+      "ms": 1963.8,
+      "method": "GET",
+      "path": "/api/system/env-check"
+    },
+    {
+      "event": "request_started",
+      "at": 153387.659123,
+      "ms": 2065.33,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "event": "request_started",
+      "at": 153387.676815,
+      "ms": 2083.02,
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "event": "request_started",
+      "at": 153387.7086431,
+      "ms": 2114.85,
+      "method": "GET",
+      "path": "/api/pet/state"
+    },
+    {
+      "event": "request_started",
+      "at": 153387.7144313,
+      "ms": 2120.63,
+      "method": "GET",
+      "path": "/api/pet/catalog"
+    },
+    {
+      "event": "request_started",
+      "at": 153387.7196711,
+      "ms": 2125.87,
+      "method": "GET",
+      "path": "/api/pet/catalog"
+    },
+    {
+      "event": "request_started",
+      "at": 153387.7273037,
+      "ms": 2133.51,
+      "method": "GET",
+      "path": "/api/pet/avatar-capabilities"
+    },
+    {
+      "event": "request_started",
+      "at": 153387.733624,
+      "ms": 2139.83,
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.018278,
+      "ms": 2424.48,
+      "method": "GET",
+      "path": "/api/system/env-check"
+    },
+    {
+      "event": "request_started",
+      "at": 153388.0306703,
+      "ms": 2436.87,
+      "method": "POST",
+      "path": "/api/system/voice-diagnostics/run"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.0408054,
+      "ms": 2447.01,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "event": "request_started",
+      "at": 153388.0479158,
+      "ms": 2454.12,
+      "method": "GET",
+      "path": "/api/companions"
+    },
+    {
+      "event": "request_started",
+      "at": 153388.0541235,
+      "ms": 2460.33,
+      "method": "GET",
+      "path": "/api/system/ui-capabilities"
+    },
+    {
+      "event": "request_started",
+      "at": 153388.0625304,
+      "ms": 2468.73,
+      "method": "GET",
+      "path": "/api/settings/"
+    },
+    {
+      "event": "request_started",
+      "at": 153388.0704049,
+      "ms": 2476.61,
+      "method": "GET",
+      "path": "/api/health"
+    },
+    {
+      "event": "request_started",
+      "at": 153388.0803649,
+      "ms": 2486.57,
+      "method": "GET",
+      "path": "/api/ping"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.0856144,
+      "ms": 2491.82,
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.0928249,
+      "ms": 2499.03,
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.100491,
+      "ms": 2506.69,
+      "method": "POST",
+      "path": "/api/system/voice-diagnostics/run"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1040809,
+      "ms": 2510.28,
+      "method": "GET",
+      "path": "/assets/player-BrPbUOY1.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1047306,
+      "ms": 2510.93,
+      "method": "GET",
+      "path": "/api/companions"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1049795,
+      "ms": 2511.18,
+      "method": "GET",
+      "path": "/api/pet/state"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1173339,
+      "ms": 2523.54,
+      "method": "GET",
+      "path": "/assets/yuizaki-wordmark-CuVY6nfg.png"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1269641,
+      "ms": 2533.17,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/yumi-stage.png"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1295616,
+      "ms": 2535.76,
+      "method": "GET",
+      "path": "/assets/element-plus~ChatPanel~MemoryPanel~PetControlPanel~PromptPanel~SettingsPanel~AgentTracePane~o1l3jqdv-DExoAqKP.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1340492,
+      "ms": 2540.25,
+      "method": "GET",
+      "path": "/api/pet/catalog"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1344553,
+      "ms": 2540.66,
+      "method": "GET",
+      "path": "/api/system/ui-capabilities"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1347292,
+      "ms": 2540.93,
+      "method": "GET",
+      "path": "/api/pet/catalog"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1349443,
+      "ms": 2541.15,
+      "method": "GET",
+      "path": "/api/settings/"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1409101,
+      "ms": 2547.11,
+      "method": "GET",
+      "path": "/assets/element-plus~ChatPanel~MemoryPanel~PetControlPanel~SettingsPanel-KlqpaRgh.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1424026,
+      "ms": 2548.61,
+      "method": "GET",
+      "path": "/assets/element-plus~ChatPanel~MemoryPanel~PetControlPanel~PluginManagementPanel~SettingsPanel-x1XGuNl0.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1433891,
+      "ms": 2549.59,
+      "method": "GET",
+      "path": "/assets/element-plus~DeployPanel~I18nPanel~PersonaMemoryPanel~PetControlPanel~PluginManagementPanel~mpw00y6d-BAyktVMS.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1442561,
+      "ms": 2550.46,
+      "method": "GET",
+      "path": "/assets/element-plus~SettingsPanel~InfrastructurePanel-BvmEG8Qn.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1569855,
+      "ms": 2563.19,
+      "method": "GET",
+      "path": "/api/health"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1577262,
+      "ms": 2563.93,
+      "method": "GET",
+      "path": "/api/ping"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1598579,
+      "ms": 2566.06,
+      "method": "GET",
+      "path": "/assets/element-plus~SettingsPanel~AgentGovernancePanel-BAqbG0fR.css"
+    },
+    {
+      "event": "request_started",
+      "at": 153388.1721269,
+      "ms": 2578.33,
+      "method": "GET",
+      "path": "/api/system/env-check"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.1782975,
+      "ms": 2584.5,
+      "method": "GET",
+      "path": "/assets/element-plus~DeployPanel~I18nPanel~PetControlPanel~PluginManagementPanel~SettingsPanel~Agen~ewziw03k-B6UgayC7.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.178888,
+      "ms": 2585.09,
+      "method": "GET",
+      "path": "/assets/element-plus~PluginManagementPanel~SettingsPanel-CvO7mB41.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.2499105,
+      "ms": 2656.11,
+      "method": "GET",
+      "path": "/assets/element-plus~ChatPanel~MemoryPanel~PetControlPanel~PromptPanel~SettingsPanel~AgentGovernanc~b7or8p4q-4sOBTGxz.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.2510929,
+      "ms": 2657.3,
+      "method": "GET",
+      "path": "/assets/element-plus~PetControlPanel~SettingsPanel-DAXkR9ib.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.2521288,
+      "ms": 2658.33,
+      "method": "GET",
+      "path": "/assets/element-plus~MemoryPanel~SettingsPanel~AgentTracePanel~SVCPanel-B7X4OvaL.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.2536655,
+      "ms": 2659.87,
+      "method": "GET",
+      "path": "/assets/element-plus~SettingsPanel~SVCPanel-Bit6Pm_l.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.2546081,
+      "ms": 2660.81,
+      "method": "GET",
+      "path": "/assets/SVCPanel-uTe-inMZ.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.2552972,
+      "ms": 2661.5,
+      "method": "GET",
+      "path": "/assets/element-plus~ChatPanel~PetControlPanel~SettingsPanel-D5SemeSH.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.2558841,
+      "ms": 2662.09,
+      "method": "GET",
+      "path": "/assets/element-plus~SettingsPanel~ToolPanel-D_6SYB2i.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.2565091,
+      "ms": 2662.71,
+      "method": "GET",
+      "path": "/assets/SettingsPanel-CDK5pYah.css"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.2572723,
+      "ms": 2663.48,
+      "method": "GET",
+      "path": "/api/pet/avatar-capabilities"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.2604149,
+      "ms": 2666.62,
+      "method": "GET",
+      "path": "/assets/__kafuu_chino_kyoka_jouga_maya_natsu_megumi_misogi_and_4_more_princess_connect_and_1_more_drawn_by_yuizaki_kazuya__sample-9d4dc80bfceae29433f29c010368e4be-LQowpGFB.jpg"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.2620094,
+      "ms": 2668.21,
+      "method": "GET",
+      "path": "/assets/SettingsPanel-CRSqHWJ0.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.2634078,
+      "ms": 2669.61,
+      "method": "GET",
+      "path": "/assets/echobot-reference-bg.jpg"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.2707889,
+      "ms": 2676.99,
+      "method": "GET",
+      "path": "/assets/element-plus~DeployPanel~I18nPanel~PersonaMemoryPanel~PetControlPanel~PluginManagementPanel~pdnve8w0-DXWJErVg.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.2713391,
+      "ms": 2677.54,
+      "method": "GET",
+      "path": "/assets/vendor~ChatPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~PluginManagementPanel~SettingsPanel-CKgoR2_W.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.2724655,
+      "ms": 2678.67,
+      "method": "GET",
+      "path": "/assets/element-plus~ChatPanel~MemoryPanel~PetControlPanel~PluginManagementPanel~SettingsPanel-DPj-9TeP.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.2730422,
+      "ms": 2679.25,
+      "method": "GET",
+      "path": "/assets/element-plus~ChatPanel~MemoryPanel~PetControlPanel~PromptPanel~SettingsPanel~AgentTracePane~o1l3jqdv-C56KX2eo.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.2744683,
+      "ms": 2680.67,
+      "method": "GET",
+      "path": "/assets/element-plus~ChatPanel~MemoryPanel~PetControlPanel~SettingsPanel-CtucLJlt.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.3874126,
+      "ms": 2793.62,
+      "method": "GET",
+      "path": "/assets/element-plus~DeployPanel~I18nPanel~PersonaMemoryPanel~PetControlPanel~PluginManagementPanel~mpw00y6d-BYHvDsB6.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.3881483,
+      "ms": 2794.35,
+      "method": "GET",
+      "path": "/assets/element-plus~ChatPanel~DeployPanel~MemoryPanel~PetControlPanel~PromptPanel~SettingsPanel~Ag~hy2qv8rq-dUSLAdNB.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.3889304,
+      "ms": 2795.13,
+      "method": "GET",
+      "path": "/assets/element-plus~SettingsPanel~InfrastructurePanel-Cjn-9er-.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.3897722,
+      "ms": 2795.98,
+      "method": "GET",
+      "path": "/assets/element-plus~ChatPanel~DeployPanel~MemoryPanel~PetControlPanel~SettingsPanel~AgentGovernanc~oxtkfpml-HbesipL3.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.3916305,
+      "ms": 2797.83,
+      "method": "GET",
+      "path": "/assets/element-plus~SettingsPanel~AgentGovernancePanel-NLEYK4wC.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.3922114,
+      "ms": 2798.41,
+      "method": "GET",
+      "path": "/assets/element-plus~DeployPanel~I18nPanel~PetControlPanel~PluginManagementPanel~SettingsPanel~Agen~ewziw03k--4pE6Hwm.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.3927852,
+      "ms": 2798.99,
+      "method": "GET",
+      "path": "/assets/element-plus~PluginManagementPanel~SettingsPanel-DEIx6L1P.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.3933922,
+      "ms": 2799.6,
+      "method": "GET",
+      "path": "/assets/useDomainRequest-BJUAfbHd.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.3952039,
+      "ms": 2801.41,
+      "method": "GET",
+      "path": "/assets/vendor~PersonaMemoryPanel~PluginManagementPanel~SettingsPanel-rPkc_1SD.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.3974013,
+      "ms": 2803.6,
+      "method": "GET",
+      "path": "/assets/llm-generation-parameters-RlKYq-pV.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4004848,
+      "ms": 2806.69,
+      "method": "GET",
+      "path": "/assets/element-plus~PersonaMemoryPanel~PluginManagementPanel~SettingsPanel-BG7SbLm2.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4023551,
+      "ms": 2808.56,
+      "method": "GET",
+      "path": "/assets/element-plus~ChatPanel~MemoryPanel~PetControlPanel~PromptPanel~SettingsPanel~AgentGovernanc~b7or8p4q-WE4SZY6z.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.404009,
+      "ms": 2810.21,
+      "method": "GET",
+      "path": "/assets/element-plus~PetControlPanel~SettingsPanel-BZW9wM8h.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4049662,
+      "ms": 2811.17,
+      "method": "GET",
+      "path": "/assets/element-plus~MemoryPanel~SettingsPanel~AgentTracePanel~SVCPanel-Df1uRClR.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4057165,
+      "ms": 2811.92,
+      "method": "GET",
+      "path": "/assets/SVCPanel-Dc2uWEny.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4065978,
+      "ms": 2812.8,
+      "method": "GET",
+      "path": "/assets/element-plus~SettingsPanel~SVCPanel-rEBZNCwq.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4070736,
+      "ms": 2813.28,
+      "method": "GET",
+      "path": "/assets/usePanelLifecycle-C0R6kVeH.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4076489,
+      "ms": 2813.85,
+      "method": "GET",
+      "path": "/assets/element-plus~ChatPanel~PetControlPanel~SettingsPanel-BRQrcNgU.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4081978,
+      "ms": 2814.4,
+      "method": "GET",
+      "path": "/assets/element-plus~SettingsPanel~ToolPanel-C4hBmMBL.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4091913,
+      "ms": 2815.39,
+      "method": "GET",
+      "path": "/assets/pet-renderer-core-DHt38IpD.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4103948,
+      "ms": 2816.6,
+      "method": "GET",
+      "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~BitmapFont~CanvasRenderer~webworkerAll~browserAll-BeKTPYj6.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4123348,
+      "ms": 2818.54,
+      "method": "GET",
+      "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~BitmapFont~CanvasRenderer~WebGLRenderer~WebG~teaequki-BZPM4mlf.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4140533,
+      "ms": 2820.26,
+      "method": "GET",
+      "path": "/assets/vendor~pet~pet-renderer~pet-renderer-core~BitmapFont~CanvasRenderer~WebGLRenderer~WebGPURen~b2vd7bvo-CsW2DEYw.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4148741,
+      "ms": 2821.08,
+      "method": "GET",
+      "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~BitmapFont~webworkerAll~browserAll-D9DOpGFF.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4162712,
+      "ms": 2822.47,
+      "method": "GET",
+      "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~CanvasRenderer~WebGLRenderer~WebGPURenderer~~l1m7s8pd-DGnU8-Jt.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4170188,
+      "ms": 2823.22,
+      "method": "GET",
+      "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~CanvasRenderer~WebGLRenderer~WebGPURenderer-BGbpCnJd.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4178085,
+      "ms": 2824.01,
+      "method": "GET",
+      "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~BitmapFont~CanvasRenderer~WebGLRenderer~WebG~ldiilk0j-B7vN1z7c.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4185443,
+      "ms": 2824.75,
+      "method": "GET",
+      "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~BitmapFont~CanvasRenderer~WebGPURenderer-BaZYAEi_.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4192156,
+      "ms": 2825.42,
+      "method": "GET",
+      "path": "/assets/vendor~pet~pet-renderer~pet-renderer-core~BitmapFont~CanvasRenderer-CU6vSnBX.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.420166,
+      "ms": 2826.37,
+      "method": "GET",
+      "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~BitmapFont~CanvasRenderer-CTo7a9RW.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4210603,
+      "ms": 2827.26,
+      "method": "GET",
+      "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~WebGLRenderer~WebGPURenderer-mwgTWB1g.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.4219759,
+      "ms": 2828.18,
+      "method": "GET",
+      "path": "/assets/vendor~pet~pet-renderer~pet-renderer-core-mDOMfkxh.js"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.422375,
+      "ms": 2828.58,
+      "method": "GET",
+      "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core-BfeGzp4m.js"
+    },
+    {
+      "event": "request_started",
+      "at": 153388.4229823,
+      "ms": 2829.19,
+      "method": "GET",
+      "path": "/api/workspaces"
+    },
+    {
+      "event": "request_started",
+      "at": 153388.5237169,
+      "ms": 2929.92,
+      "method": "GET",
+      "path": "/api/system/env-check"
+    },
+    {
+      "event": "request_started",
+      "at": 153388.5312526,
+      "ms": 2937.46,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.6789091,
+      "ms": 3085.11,
+      "method": "GET",
+      "path": "/assets/font/ZenMaruGothic-Medium.ttf"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.6824169,
+      "ms": 3088.62,
+      "method": "GET",
+      "path": "/api/workspaces"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.6828549,
+      "ms": 3089.06,
+      "method": "GET",
+      "path": "/api/system/env-check"
+    },
+    {
+      "event": "request_started",
+      "at": 153388.6924524,
+      "ms": 3098.66,
+      "method": "GET",
+      "path": "/api/settings/"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.742777,
+      "ms": 3148.98,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.7514708,
+      "ms": 3157.67,
+      "method": "GET",
+      "path": "/api/settings/"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.7517753,
+      "ms": 3157.98,
+      "method": "GET",
+      "path": "/api/system/env-check"
+    },
+    {
+      "event": "request_started",
+      "at": 153388.7622986,
+      "ms": 3168.5,
+      "method": "GET",
+      "path": "/api/system/env-check"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.9587292,
+      "ms": 3364.93,
+      "method": "GET",
+      "path": "/assets/font/loli.ttf"
+    },
+    {
+      "event": "request_started",
+      "at": 153388.9758793,
+      "ms": 3382.08,
+      "method": "POST",
+      "path": "/api/system/active-workspace"
+    },
+    {
+      "event": "request_finished",
+      "at": 153388.9854166,
+      "ms": 3391.62,
+      "method": "POST",
+      "path": "/api/system/active-workspace"
+    },
+    {
+      "event": "request_started",
+      "at": 153388.9926573,
+      "ms": 3398.86,
+      "method": "GET",
+      "path": "/api/system/env-check"
+    },
+    {
+      "event": "request_started",
+      "at": 153389.0008261,
+      "ms": 3407.03,
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "event": "request_started",
+      "at": 153389.0079234,
+      "ms": 3414.13,
+      "method": "GET",
+      "path": "/api/system/env-check"
+    },
+    {
+      "event": "request_finished",
+      "at": 153389.0125732,
+      "ms": 3418.78,
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "event": "request_started",
+      "at": 153389.0217857,
+      "ms": 3427.99,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "event": "request_finished",
+      "at": 153389.0296788,
+      "ms": 3435.88,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "event": "request_finished",
+      "at": 153389.0298475,
+      "ms": 3436.05,
+      "method": "GET",
+      "path": "/api/system/env-check"
+    },
+    {
+      "event": "request_finished",
+      "at": 153389.0516669,
+      "ms": 3457.87,
+      "method": "GET",
+      "path": "/api/system/env-check"
+    },
+    {
+      "event": "request_finished",
+      "at": 153389.0686439,
+      "ms": 3474.85,
+      "method": "GET",
+      "path": "/api/system/env-check"
+    },
+    {
+      "event": "request_started",
+      "at": 153389.253343,
+      "ms": 3659.55,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "event": "request_finished",
+      "at": 153389.2652553,
+      "ms": 3671.46,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "event": "request_started",
+      "at": 153390.3912951,
+      "ms": 4797.5,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "event": "request_finished",
+      "at": 153390.4503209,
+      "ms": 4856.52,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    }
+  ],
+  "token_initiators": [],
+  "fixture_state": {
+    "name": "discovery",
+    "normalized": true,
+    "settings": {
+      "llm": {
+        "provider": "custom",
+        "base_url": "",
+        "api_key": "",
+        "model": "",
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "top_k": 0,
+        "min_p": 0,
+        "frequency_penalty": 0,
+        "presence_penalty": 0,
+        "repetition_penalty": 1,
+        "timeout": 60,
+        "context_max_tokens": 32768,
+        "default_max_output_tokens": 2048,
+        "profiles": {}
+      },
+      "tts": {
+        "genie_character": "",
+        "genie_model_dir": "",
+        "lang": "ja",
+        "ref_audio": "",
+        "ref_text": "",
+        "device": "cpu",
+        "quality": "quality",
+        "split": "auto",
+        "mode": "serial",
+        "save_mode": "disabled",
+        "provider": "genie-tts",
+        "base_url": "",
+        "api_key": "",
+        "model": "tts-1",
+        "voice": "alloy",
+        "timeout": 60
+      },
+      "asr": {
+        "provider": "disabled",
+        "base_url": "",
+        "api_key": "",
+        "timeout": 60,
+        "sensevoice_model": "iic/SenseVoiceSmall",
+        "sensevoice_device": "cpu",
+        "sherpa_model_path": "",
+        "sherpa_tokens_path": "",
+        "sherpa_num_threads": 2,
+        "sherpa_provider": "cpu",
+        "language": "zh",
+        "vad_threshold": 0.5,
+        "vad_min_silence_ms": 400,
+        "asr_partial_every": 15
+      },
+      "svc": {
+        "provider": "disabled",
+        "base_url": "",
+        "speaker_id": 0,
+        "pitch": 0,
+        "timeout": 120
+      },
+      "summary": {
+        "trigger_messages": 24,
+        "keep_recent_messages": 8,
+        "item_max_chars": 140,
+        "rewrite_interval_messages": 6,
+        "quality_scorer_mode": "rule",
+        "quality_score_cooldown_seconds": 300,
+        "quality_score_budget_per_hour": 20
+      },
+      "system": {
+        "language": "zh",
+        "theme": "light"
+      },
+      "memory": {
+        "backend": "sqlite",
+        "sqlite_path": "",
+        "qdrant_url": "",
+        "qdrant_api_key": "",
+        "qdrant_collection": "memories",
+        "qdrant_timeout": 10,
+        "qdrant_auto_start": false,
+        "embedding_model": "fixture",
+        "reranker_enabled": false,
+        "reranker_model": "fixture",
+        "reranker_candidate_count": 32
+      }
+    },
+    "requests": [
+      {
+        "method": "GET",
+        "path": "/",
+        "started": 153386.1295191,
+        "finished": 153386.130238
+      },
+      {
+        "method": "GET",
+        "path": "/assets/main-DBm8cDrz.js",
+        "started": 153386.1791972,
+        "finished": 153387.1803365
+      },
+      {
+        "method": "GET",
+        "path": "/assets/rolldown-runtime-XKyaHtl9.js",
+        "started": 153386.1878825,
+        "finished": 153387.1010881
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vue-vendor~main~pet-DnF2n8b0.js",
+        "started": 153386.1919989,
+        "finished": 153387.1436771
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vendor~main~pet-B15zdzFB.js",
+        "started": 153386.1993743,
+        "finished": 153387.2883519
+      },
+      {
+        "method": "GET",
+        "path": "/assets/transport-vendor~main~pet-BYMdO4gC.js",
+        "started": 153386.2152781,
+        "finished": 153387.3840873
+      },
+      {
+        "method": "GET",
+        "path": "/assets/preload-helper-Djh5A-AB.js",
+        "started": 153386.2208069,
+        "finished": 153387.3709588
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControl~c82lkcp2-cyJZB4WD.css",
+        "started": 153387.1102754,
+        "finished": 153387.1132225
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~main~ChatPanel~MemoryPanel~PetControlPanel-Wv38huFO.css",
+        "started": 153387.1243234,
+        "finished": 153387.1288679
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~main-C8_oi_vx.css",
+        "started": 153387.1316883,
+        "finished": 153387.134796
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~main~MemoryPanel~PetControlPanel~PluginManagementPanel~PromptPanel~SettingsPan~bgkiqfly-S7fQQ3B8.css",
+        "started": 153387.1398984,
+        "finished": 153387.1422351
+      },
+      {
+        "method": "GET",
+        "path": "/assets/main-FjLxoSVb.css",
+        "started": 153387.1540675,
+        "finished": 153387.1567291
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vue-vendor~main~ChatPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~PromptPanel~Infras~en9ul8ap-CFeNlzlJ.js",
+        "started": 153387.1613769,
+        "finished": 153387.1639211
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vue-vendor~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControlPa~5m0qdmke-C0b4-2zM.js",
+        "started": 153387.1671977,
+        "finished": 153387.1737597
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vendor~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~~kdqof5ka-BsqHuujB.js",
+        "started": 153387.1747872,
+        "finished": 153387.1803926
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-icons~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetContro~e8dkzn6i-BtvMrHX9.js",
+        "started": 153387.184024,
+        "finished": 153387.1922289
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControl~c82lkcp2-D2UH2yeL.js",
+        "started": 153387.1931105,
+        "finished": 153387.1981929
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vendor~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~~jfhs9cx4-kT8zvrs2.js",
+        "started": 153387.1975255,
+        "finished": 153387.2014607
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vendor~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~~gp2r08i9-Da2e7s38.js",
+        "started": 153387.2011744,
+        "finished": 153387.2042873
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vendor~main-CJIdMKlc.js",
+        "started": 153387.2116724,
+        "finished": 153387.2137047
+      },
+      {
+        "method": "GET",
+        "path": "/assets/companionDiagnosticExport-BN3RKWzb.js",
+        "started": 153387.2146134,
+        "finished": 153387.2171564
+      },
+      {
+        "method": "GET",
+        "path": "/assets/companionJobProjection-DKXIBKM4.js",
+        "started": 153387.2174968,
+        "finished": 153387.2218715
+      },
+      {
+        "method": "GET",
+        "path": "/assets/describe-error-BGs_0JEO.js",
+        "started": 153387.2217382,
+        "finished": 153387.2253288
+      },
+      {
+        "method": "GET",
+        "path": "/assets/companionStore-XEWbOko8.js",
+        "started": 153387.223529,
+        "finished": 153387.227238
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControl~jbikrlxr-Bac_-Vi1.js",
+        "started": 153387.2279614,
+        "finished": 153387.2306819
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vendor~main~ChatPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~PluginManagementPanel~~hie4e87e-DcQRwhPj.js",
+        "started": 153387.2342978,
+        "finished": 153387.241374
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vendor~main~ChatPanel~PersonaMemoryPanel~PetControlPanel~PluginManagementPanel~PromptPanel~~mwzxcjvr-Dyt46IEe.js",
+        "started": 153387.2404192,
+        "finished": 153387.2427463
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vendor~main~ChatPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~PluginManage~j5gjnhwd-DnK8ny5-.js",
+        "started": 153387.2475015,
+        "finished": 153387.2524774
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vendor~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PetControlPanel~PluginManagementPan~fz3njrh9-DEtt3q6Y.js",
+        "started": 153387.2511844,
+        "finished": 153387.2553006
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vendor~main~MemoryPanel~PromptPanel~SettingsPanel~AgentTracePanel~SVCPanel-36_vbueH.js",
+        "started": 153387.2550554,
+        "finished": 153387.2577004
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PetControlPanel~PluginManagem~onwvw4ll-gVf7G00E.js",
+        "started": 153387.2568096,
+        "finished": 153387.259015
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~main~ChatPanel~DeployPanel~MemoryPanel~PetControlPanel~SettingsPanel~AgentGove~mrbinph2-TeC89SvR.js",
+        "started": 153387.2599865,
+        "finished": 153387.2617956
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControl~m9dxcfcs-DWZIxVTi.js",
+        "started": 153387.2632834,
+        "finished": 153387.2663095
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~main~ChatPanel~MemoryPanel~PetControlPanel-CsRa1IXK.js",
+        "started": 153387.2745519,
+        "finished": 153387.2809339
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~main-BST1P3wT.js",
+        "started": 153387.2840624,
+        "finished": 153387.2892433
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~main~MemoryPanel~PersonaMemoryPanel~PetControlPanel~PluginManagementPanel~Prom~hv4plx48-DLJmx3tF.js",
+        "started": 153387.2937612,
+        "finished": 153387.3053012
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~main~MemoryPanel~PetControlPanel~PluginManagementPanel~PromptPanel~SettingsPan~bgkiqfly-GynY9Tg7.js",
+        "started": 153387.2978161,
+        "finished": 153387.3004372
+      },
+      {
+        "method": "GET",
+        "path": "/live2d/live2dcubismcore.min.js",
+        "started": 153387.3014886,
+        "finished": 153387.303272
+      },
+      {
+        "method": "GET",
+        "path": "/socket.io/",
+        "started": 153387.9743007,
+        "finished": 153387.9746688
+      },
+      {
+        "method": "GET",
+        "path": "/assets/player-BrPbUOY1.js",
+        "started": 153388.0312274,
+        "finished": 153388.0353716
+      },
+      {
+        "method": "GET",
+        "path": "/assets/yuizaki-wordmark-CuVY6nfg.png",
+        "started": 153388.0384388,
+        "finished": 153388.0431231
+      },
+      {
+        "method": "GET",
+        "path": "/live2d/llm-live2d/yumi/yumi-stage.png",
+        "started": 153388.0398666,
+        "finished": 153388.0445715
+      },
+      {
+        "method": "GET",
+        "path": "/api/pet/state",
+        "started": 153388.040214,
+        "finished": 153388.0408929
+      },
+      {
+        "method": "GET",
+        "path": "/api/pet/catalog",
+        "started": 153388.0405813,
+        "finished": 153388.0407907
+      },
+      {
+        "method": "GET",
+        "path": "/api/pet/catalog",
+        "started": 153388.0441562,
+        "finished": 153388.04471
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~ChatPanel~MemoryPanel~PetControlPanel~PromptPanel~SettingsPanel~AgentTracePane~o1l3jqdv-DExoAqKP.css",
+        "started": 153388.0467729,
+        "finished": 153388.0490993
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~ChatPanel~MemoryPanel~PetControlPanel~PluginManagementPanel~SettingsPanel-x1XGuNl0.css",
+        "started": 153388.0610684,
+        "finished": 153388.0640574
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~ChatPanel~MemoryPanel~PetControlPanel~SettingsPanel-KlqpaRgh.css",
+        "started": 153388.0613696,
+        "finished": 153388.064803
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~DeployPanel~I18nPanel~PersonaMemoryPanel~PetControlPanel~PluginManagementPanel~mpw00y6d-BAyktVMS.css",
+        "started": 153388.0616702,
+        "finished": 153388.0648349
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~SettingsPanel~InfrastructurePanel-BvmEG8Qn.css",
+        "started": 153388.0619846,
+        "finished": 153388.0643613
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~SettingsPanel~AgentGovernancePanel-BAqbG0fR.css",
+        "started": 153388.0722516,
+        "finished": 153388.0752399
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~DeployPanel~I18nPanel~PetControlPanel~PluginManagementPanel~SettingsPanel~Agen~ewziw03k-B6UgayC7.css",
+        "started": 153388.0726416,
+        "finished": 153388.074775
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~PluginManagementPanel~SettingsPanel-CvO7mB41.css",
+        "started": 153388.0856017,
+        "finished": 153388.0884314
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~ChatPanel~MemoryPanel~PetControlPanel~PromptPanel~SettingsPanel~AgentGovernanc~b7or8p4q-4sOBTGxz.css",
+        "started": 153388.0872881,
+        "finished": 153388.0897354
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~PetControlPanel~SettingsPanel-DAXkR9ib.css",
+        "started": 153388.0911464,
+        "finished": 153388.0957677
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~MemoryPanel~SettingsPanel~AgentTracePanel~SVCPanel-B7X4OvaL.css",
+        "started": 153388.0925977,
+        "finished": 153388.0974886
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~SettingsPanel~SVCPanel-Bit6Pm_l.css",
+        "started": 153388.0942799,
+        "finished": 153388.0966337
+      },
+      {
+        "method": "GET",
+        "path": "/assets/SVCPanel-uTe-inMZ.css",
+        "started": 153388.0979247,
+        "finished": 153388.1002312
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~ChatPanel~PetControlPanel~SettingsPanel-D5SemeSH.css",
+        "started": 153388.1014813,
+        "finished": 153388.1049927
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~SettingsPanel~ToolPanel-D_6SYB2i.css",
+        "started": 153388.1026218,
+        "finished": 153388.1062372
+      },
+      {
+        "method": "GET",
+        "path": "/assets/SettingsPanel-CDK5pYah.css",
+        "started": 153388.110248,
+        "finished": 153388.1124996
+      },
+      {
+        "method": "GET",
+        "path": "/api/pet/avatar-capabilities",
+        "started": 153388.1133518,
+        "finished": 153388.1141024
+      },
+      {
+        "method": "GET",
+        "path": "/assets/__kafuu_chino_kyoka_jouga_maya_natsu_megumi_misogi_and_4_more_princess_connect_and_1_more_drawn_by_yuizaki_kazuya__sample-9d4dc80bfceae29433f29c010368e4be-LQowpGFB.jpg",
+        "started": 153388.1208542,
+        "finished": 153388.1269008
+      },
+      {
+        "method": "GET",
+        "path": "/assets/echobot-reference-bg.jpg",
+        "started": 153388.1220668,
+        "finished": 153388.1677614
+      },
+      {
+        "method": "GET",
+        "path": "/assets/SettingsPanel-CRSqHWJ0.js",
+        "started": 153388.1257142,
+        "finished": 153388.1307839
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~DeployPanel~I18nPanel~PersonaMemoryPanel~PetControlPanel~PluginManagementPanel~pdnve8w0-DXWJErVg.js",
+        "started": 153388.1297944,
+        "finished": 153388.1362182
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~ChatPanel~MemoryPanel~PetControlPanel~SettingsPanel-CtucLJlt.js",
+        "started": 153388.1331403,
+        "finished": 153388.1371368
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vendor~ChatPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~PluginManagementPanel~SettingsPanel-CKgoR2_W.js",
+        "started": 153388.1344974,
+        "finished": 153388.1451886
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~ChatPanel~MemoryPanel~PetControlPanel~PromptPanel~SettingsPanel~AgentTracePane~o1l3jqdv-C56KX2eo.js",
+        "started": 153388.1482997,
+        "finished": 153388.1517311
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~ChatPanel~MemoryPanel~PetControlPanel~PluginManagementPanel~SettingsPanel-DPj-9TeP.js",
+        "started": 153388.1522882,
+        "finished": 153388.1568364
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~DeployPanel~I18nPanel~PersonaMemoryPanel~PetControlPanel~PluginManagementPanel~mpw00y6d-BYHvDsB6.js",
+        "started": 153388.1591837,
+        "finished": 153388.16098
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~SettingsPanel~InfrastructurePanel-Cjn-9er-.js",
+        "started": 153388.1665166,
+        "finished": 153388.1689405
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~ChatPanel~DeployPanel~MemoryPanel~PetControlPanel~SettingsPanel~AgentGovernanc~oxtkfpml-HbesipL3.js",
+        "started": 153388.1669597,
+        "finished": 153388.1688984
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~ChatPanel~DeployPanel~MemoryPanel~PetControlPanel~PromptPanel~SettingsPanel~Ag~hy2qv8rq-dUSLAdNB.js",
+        "started": 153388.1741947,
+        "finished": 153388.1769957
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~SettingsPanel~AgentGovernancePanel-NLEYK4wC.js",
+        "started": 153388.1808915,
+        "finished": 153388.1828158
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~PersonaMemoryPanel~PluginManagementPanel~SettingsPanel-BG7SbLm2.js",
+        "started": 153388.1853773,
+        "finished": 153388.1885311
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vendor~PersonaMemoryPanel~PluginManagementPanel~SettingsPanel-rPkc_1SD.js",
+        "started": 153388.1866922,
+        "finished": 153388.1893409
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~DeployPanel~I18nPanel~PetControlPanel~PluginManagementPanel~SettingsPanel~Agen~ewziw03k--4pE6Hwm.js",
+        "started": 153388.1926976,
+        "finished": 153388.1952476
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~PluginManagementPanel~SettingsPanel-DEIx6L1P.js",
+        "started": 153388.1930669,
+        "finished": 153388.195178
+      },
+      {
+        "method": "GET",
+        "path": "/assets/useDomainRequest-BJUAfbHd.js",
+        "started": 153388.1934262,
+        "finished": 153388.1956118
+      },
+      {
+        "method": "GET",
+        "path": "/assets/llm-generation-parameters-RlKYq-pV.js",
+        "started": 153388.1975273,
+        "finished": 153388.199797
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~ChatPanel~MemoryPanel~PetControlPanel~PromptPanel~SettingsPanel~AgentGovernanc~b7or8p4q-WE4SZY6z.js",
+        "started": 153388.2056732,
+        "finished": 153388.2103231
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~PetControlPanel~SettingsPanel-BZW9wM8h.js",
+        "started": 153388.2060351,
+        "finished": 153388.2101524
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~SettingsPanel~SVCPanel-rEBZNCwq.js",
+        "started": 153388.2062875,
+        "finished": 153388.2102794
+      },
+      {
+        "method": "GET",
+        "path": "/assets/SVCPanel-Dc2uWEny.js",
+        "started": 153388.2065391,
+        "finished": 153388.2102176
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~MemoryPanel~SettingsPanel~AgentTracePanel~SVCPanel-Df1uRClR.js",
+        "started": 153388.2068873,
+        "finished": 153388.2119822
+      },
+      {
+        "method": "GET",
+        "path": "/assets/usePanelLifecycle-C0R6kVeH.js",
+        "started": 153388.2108515,
+        "finished": 153388.2145304
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~ChatPanel~PetControlPanel~SettingsPanel-BRQrcNgU.js",
+        "started": 153388.2181588,
+        "finished": 153388.2203107
+      },
+      {
+        "method": "GET",
+        "path": "/assets/element-plus~SettingsPanel~ToolPanel-C4hBmMBL.js",
+        "started": 153388.2184017,
+        "finished": 153388.2202592
+      },
+      {
+        "method": "GET",
+        "path": "/assets/pet-renderer-core-DHt38IpD.js",
+        "started": 153388.265414,
+        "finished": 153388.2701663
+      },
+      {
+        "method": "GET",
+        "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core-BfeGzp4m.js",
+        "started": 153388.2658459,
+        "finished": 153388.2720764
+      },
+      {
+        "method": "GET",
+        "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~BitmapFont~CanvasRenderer~WebGLRenderer~WebG~teaequki-BZPM4mlf.js",
+        "started": 153388.2661271,
+        "finished": 153388.2726469
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vendor~pet~pet-renderer~pet-renderer-core~BitmapFont~CanvasRenderer~WebGLRenderer~WebGPURen~b2vd7bvo-CsW2DEYw.js",
+        "started": 153388.2666295,
+        "finished": 153388.2712303
+      },
+      {
+        "method": "GET",
+        "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~CanvasRenderer~WebGLRenderer~WebGPURenderer~~l1m7s8pd-DGnU8-Jt.js",
+        "started": 153388.267157,
+        "finished": 153388.2719194
+      },
+      {
+        "method": "GET",
+        "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~BitmapFont~CanvasRenderer~webworkerAll~browserAll-BeKTPYj6.js",
+        "started": 153388.2675959,
+        "finished": 153388.2715438
+      },
+      {
+        "method": "GET",
+        "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~BitmapFont~webworkerAll~browserAll-D9DOpGFF.js",
+        "started": 153388.275404,
+        "finished": 153388.2775193
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vendor~pet~pet-renderer~pet-renderer-core-mDOMfkxh.js",
+        "started": 153388.2758394,
+        "finished": 153388.2786222
+      },
+      {
+        "method": "GET",
+        "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~CanvasRenderer~WebGLRenderer~WebGPURenderer-BGbpCnJd.js",
+        "started": 153388.2764667,
+        "finished": 153388.2786661
+      },
+      {
+        "method": "GET",
+        "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~BitmapFont~CanvasRenderer~WebGLRenderer~WebG~ldiilk0j-B7vN1z7c.js",
+        "started": 153388.2824401,
+        "finished": 153388.2842765
+      },
+      {
+        "method": "GET",
+        "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~BitmapFont~CanvasRenderer-CTo7a9RW.js",
+        "started": 153388.2839884,
+        "finished": 153388.2858859
+      },
+      {
+        "method": "GET",
+        "path": "/assets/vendor~pet~pet-renderer~pet-renderer-core~BitmapFont~CanvasRenderer-CU6vSnBX.js",
+        "started": 153388.2873105,
+        "finished": 153388.2894351
+      },
+      {
+        "method": "GET",
+        "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~BitmapFont~CanvasRenderer~WebGPURenderer-BaZYAEi_.js",
+        "started": 153388.2928083,
+        "finished": 153388.295778
+      },
+      {
+        "method": "GET",
+        "path": "/assets/pixi-vendor~pet~pet-renderer~pet-renderer-core~WebGLRenderer~WebGPURenderer-mwgTWB1g.js",
+        "started": 153388.2954662,
+        "finished": 153388.2974898
+      },
+      {
+        "method": "GET",
+        "path": "/assets/font/ZenMaruGothic-Medium.ttf",
+        "started": 153388.5307619,
+        "finished": 153388.549744
+      },
+      {
+        "method": "GET",
+        "path": "/assets/font/loli.ttf",
+        "started": 153388.6982312,
+        "finished": 153388.7613426
+      },
+      {
+        "method": "GET",
+        "path": "/socket.io/",
+        "started": 153389.2843089,
+        "finished": 153389.2845154
+      }
+    ],
+    "rejected": [],
+    "token_pending": false,
+    "token_started": 0,
+    "token_completed": 0,
+    "token_timeouts": 0
+  }
+}

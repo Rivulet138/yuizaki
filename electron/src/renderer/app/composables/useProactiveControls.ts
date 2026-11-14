@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { proactiveClient } from '@/api/client'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 import {
   createFailClosedProactiveSettings,
   isProactiveQuietHoursClear,
@@ -54,7 +55,10 @@ const migrateLegacyPreset = () => {
   }
 }
 
-export const createProactiveControls = (api: ProactiveApi = proactiveClient) => {
+export const createProactiveControls = (
+  api: ProactiveApi = proactiveClient,
+  getWorkspaceId: () => string = () => 'default',
+) => {
   const settings = ref<ProactiveSettings>(createFailClosedProactiveSettings())
   const frames = ref<ActivityFrameSummary[]>([])
   const loaded = ref(false)
@@ -68,52 +72,87 @@ export const createProactiveControls = (api: ProactiveApi = proactiveClient) => 
   const feedbackSummary = ref<ProactiveFeedbackSummary | null>(null)
   const hiddenFrameIds = ref(new Set<string>())
   const feedbackIds = new Map<string, string>()
-  let requestGeneration = 0
+  let contextGeneration = 0
+  let workspaceId = getWorkspaceId()
+  let loadSequence = 0
+  let summarySequence = 0
+  const pendingSettingsWrites = new Set<string>()
 
   const visibleFrames = computed(() => frames.value.filter((frame) =>
     !hiddenFrameIds.value.has(frame.frameId),
   ))
 
-  const beginRequest = (): number => {
-    requestGeneration += 1
-    return requestGeneration
-  }
-
-  const isCurrent = (generation: number): boolean => generation === requestGeneration
-
   const invalidate = () => {
-    requestGeneration += 1
+    contextGeneration += 1
+    loadSequence += 1
+    summarySequence += 1
+    workspaceId = getWorkspaceId()
+    loading.value = false
+    saving.value = pendingSettingsWrites.has(workspaceId)
+    rebuilding.value = false
     policyClosed.value = true
     loaded.value = false
+    settings.value = createFailClosedProactiveSettings()
+    frames.value = []
+    feedbackSummary.value = null
+    error.value = null
+    hiddenFrameIds.value = new Set()
+    pendingFeedback.value = new Set()
+    acknowledgedFeedback.value = new Map()
+    feedbackIds.clear()
+  }
+
+  const context = () => {
+    if (workspaceId !== getWorkspaceId()) invalidate()
+    return { workspaceId, generation: contextGeneration }
+  }
+  type RequestContext = ReturnType<typeof context>
+  const isCurrent = (target: RequestContext): boolean =>
+    target.generation === contextGeneration && target.workspaceId === getWorkspaceId()
+
+  const refreshSummary = async (target: RequestContext) => {
+    if (!api.feedbackSummary) return
+    const sequence = ++summarySequence
+    try {
+      const candidate = await api.feedbackSummary(target.workspaceId)
+      if (isCurrent(target) && sequence === summarySequence && candidate.workspaceId === target.workspaceId) {
+        feedbackSummary.value = candidate
+      }
+    } catch {
+      // Optional telemetry cannot close policy or delay the main operation.
+    }
   }
 
   const load = async (): Promise<boolean> => {
-    const generation = beginRequest()
+    const target = context()
+    // Authorization stays closed during a write; background reads must not
+    // replace its restrictive local policy or discard its confirmation.
+    if (pendingSettingsWrites.has(target.workspaceId)) {
+      saving.value = true
+      return false
+    }
+    const sequence = ++loadSequence
+    const current = () => isCurrent(target) && sequence === loadSequence
     loading.value = true
     policyClosed.value = true
     error.value = null
     try {
-      const [nextSettings, nextFrames] = await Promise.all([api.settings(), api.frames()])
-      if (!isCurrent(generation)) return false
-      let nextFeedbackSummary: ProactiveFeedbackSummary | null = null
-      if (api.feedbackSummary) {
-        try {
-          const candidate = await api.feedbackSummary()
-          if (candidate.workspaceId === nextSettings.workspaceId) nextFeedbackSummary = candidate
-        } catch {
-          // A telemetry summary is advisory; policy and activity frames remain usable.
-        }
+      const [nextSettings, nextFrames] = await Promise.all([
+        api.settings(target.workspaceId), api.frames(target.workspaceId),
+      ])
+      if (!current()) return false
+      if (nextSettings.workspaceId !== target.workspaceId || nextFrames.some(frame => frame.workspaceId !== target.workspaceId)) {
+        throw new Error('proactive_workspace_mismatch')
       }
-      if (!isCurrent(generation)) return false
       settings.value = nextSettings
       frames.value = nextFrames
-      feedbackSummary.value = nextFeedbackSummary
       loaded.value = true
       policyClosed.value = false
       migrateLegacyPreset()
+      void refreshSummary(target)
       return true
     } catch (loadError) {
-      if (!isCurrent(generation)) return false
+      if (!current()) return false
       settings.value = createFailClosedProactiveSettings()
       frames.value = []
       feedbackSummary.value = null
@@ -122,42 +161,66 @@ export const createProactiveControls = (api: ProactiveApi = proactiveClient) => 
       error.value = loadError instanceof Error ? loadError.message : 'proactive_load_failed'
       return false
     } finally {
-      if (isCurrent(generation)) loading.value = false
+      if (current()) loading.value = false
     }
   }
 
+  const finishSettingsWrite = (target: RequestContext, readback = false) => {
+    pendingSettingsWrites.delete(target.workspaceId)
+    if (target.workspaceId !== getWorkspaceId()) return
+    const returnedToWorkspace = !isCurrent(target)
+    context()
+    saving.value = false
+    // Returning to a workspace must reconcile a write whose old view was
+    // invalidated, including requests that timed out after the server committed.
+    if (readback || returnedToWorkspace) void load()
+  }
+
   const updateSettings = async (patch: ProactiveSettingsPatch): Promise<boolean> => {
-    const generation = beginRequest()
+    const target = context()
+    if (pendingSettingsWrites.has(target.workspaceId) || rebuilding.value || !loaded.value || settings.value.workspaceId !== target.workspaceId) return false
+    loadSequence += 1
+    loading.value = false
+    pendingSettingsWrites.add(target.workspaceId)
     saving.value = true
     policyClosed.value = true
+    const revision = settings.value.revision
     settings.value = applyRestrictivePatch(settings.value, patch)
     error.value = null
     try {
-      const next = await api.updateSettings(patch, settings.value.revision)
-      if (!isCurrent(generation)) return false
+      const next = await api.updateSettings(patch, revision, target.workspaceId)
+      if (!isCurrent(target)) return false
+      if (next.workspaceId !== target.workspaceId) throw new Error('proactive_workspace_mismatch')
       settings.value = next
       loaded.value = true
       policyClosed.value = false
       return true
     } catch (updateError) {
-      if (!isCurrent(generation)) return false
+      if (!isCurrent(target)) return false
       loaded.value = false
       policyClosed.value = true
       error.value = updateError instanceof Error ? updateError.message : 'proactive_update_failed'
       return false
     } finally {
-      if (isCurrent(generation)) saving.value = false
+      finishSettingsWrite(target)
     }
   }
 
   const deleteFrame = async (frameId: string): Promise<boolean> => {
+    const target = context()
+    if (hiddenFrameIds.value.has(frameId)) return false
     hiddenFrameIds.value = new Set(hiddenFrameIds.value).add(frameId)
     try {
-      const result = await api.deleteFrame(frameId)
+      const result = await api.deleteFrame(frameId, target.workspaceId)
+      if (!isCurrent(target)) return false
       if (!result.ok) throw new Error('activity_frame_delete_rejected')
       frames.value = frames.value.filter((frame) => frame.frameId !== frameId)
       return true
     } catch (deleteError) {
+      if (!isCurrent(target)) return false
+      const next = new Set(hiddenFrameIds.value)
+      next.delete(frameId)
+      hiddenFrameIds.value = next
       policyClosed.value = true
       loaded.value = false
       error.value = deleteError instanceof Error ? deleteError.message : 'activity_frame_delete_failed'
@@ -166,18 +229,22 @@ export const createProactiveControls = (api: ProactiveApi = proactiveClient) => 
   }
 
   const rebuildFrames = async (limit = 1000): Promise<boolean> => {
-    if (rebuilding.value) return false
+    const target = context()
+    if (rebuilding.value || saving.value) return false
     rebuilding.value = true
     error.value = null
     try {
-      await api.rebuildFrames(limit)
+      const result = await api.rebuildFrames(limit, target.workspaceId)
+      if (!isCurrent(target)) return false
+      if (result.workspaceId !== target.workspaceId) throw new Error('proactive_workspace_mismatch')
       hiddenFrameIds.value = new Set()
       return await load()
     } catch (rebuildError) {
+      if (!isCurrent(target)) return false
       error.value = rebuildError instanceof Error ? rebuildError.message : 'activity_frame_rebuild_failed'
       return false
     } finally {
-      rebuilding.value = false
+      if (isCurrent(target)) rebuilding.value = false
     }
   }
 
@@ -185,14 +252,25 @@ export const createProactiveControls = (api: ProactiveApi = proactiveClient) => 
     opportunity: ProactiveOpportunityIdentity,
     feedback: ProactiveFeedbackKind,
   ): Promise<boolean> => {
+    const target = context()
     const identity = feedbackIdentity(opportunity, feedback)
-    if (pendingFeedback.value.has(identity)) return false
+    const changesSettings = feedback === 'never_source'
+    if (pendingFeedback.value.has(identity) || (changesSettings && pendingSettingsWrites.has(target.workspaceId))) return false
+    let readbackSettings = false
+    if (changesSettings) {
+      loadSequence += 1
+      loading.value = false
+      pendingSettingsWrites.add(target.workspaceId)
+      saving.value = true
+      policyClosed.value = true
+    }
     const feedbackId = feedbackIds.get(identity) ?? createFeedbackId()
     feedbackIds.set(identity, feedbackId)
     pendingFeedback.value = new Set(pendingFeedback.value).add(identity)
     error.value = null
     try {
-      const result = await api.feedback({ ...opportunity, feedback, feedbackId })
+      const result = await api.feedback({ ...opportunity, feedback, feedbackId }, target.workspaceId)
+      if (!isCurrent(target)) return false
       if (!result.ok) throw new Error('proactive_feedback_rejected')
       acknowledgedFeedback.value = new Map(acknowledgedFeedback.value).set(
         `${opportunity.jobId}:${opportunity.requestId}`,
@@ -203,24 +281,31 @@ export const createProactiveControls = (api: ProactiveApi = proactiveClient) => 
           ...settings.value,
           sourceEnabled: { ...settings.value.sourceEnabled, [opportunity.sourceKind]: false },
         }
-      }
-      if (api.feedbackSummary) {
-        try {
-          const candidate = await api.feedbackSummary()
-          if (candidate.workspaceId === settings.value.workspaceId) feedbackSummary.value = candidate
-        } catch {
-          // Keep the last known summary when the optional refresh is unavailable.
-        }
+        // This feedback also changes the server settings revision. Read it back
+        // before permitting another edit against the old revision.
+        loaded.value = false
+        policyClosed.value = true
+        readbackSettings = true
+      } else {
+        void refreshSummary(target)
       }
       feedbackIds.delete(identity)
       return true
     } catch (feedbackError) {
+      if (!isCurrent(target)) return false
+      if (changesSettings) {
+        loaded.value = false
+        policyClosed.value = true
+      }
       error.value = feedbackError instanceof Error ? feedbackError.message : 'proactive_feedback_failed'
       return false
     } finally {
-      const next = new Set(pendingFeedback.value)
-      next.delete(identity)
-      pendingFeedback.value = next
+      if (changesSettings) finishSettingsWrite(target, readbackSettings)
+      if (isCurrent(target)) {
+        const next = new Set(pendingFeedback.value)
+        next.delete(identity)
+        pendingFeedback.value = next
+      }
     }
   }
 
@@ -230,8 +315,10 @@ export const createProactiveControls = (api: ProactiveApi = proactiveClient) => 
   }
 
   const allows = (source: ProactiveSource, epochMillis: number = Date.now()): boolean =>
-    loaded.value
+    settings.value.workspaceId === getWorkspaceId()
+    && loaded.value
     && !policyClosed.value
+    && !pendingSettingsWrites.has(getWorkspaceId())
     && settings.value.enabled
     && !settings.value.dnd
     && settings.value.sourceEnabled[source]
@@ -263,6 +350,9 @@ export const createProactiveControls = (api: ProactiveApi = proactiveClient) => 
 let proactiveControls: ReturnType<typeof createProactiveControls> | null = null
 
 export const useProactiveControls = () => {
-  proactiveControls ??= createProactiveControls()
+  if (!proactiveControls) {
+    const workspaceStore = useWorkspaceStore()
+    proactiveControls = createProactiveControls(proactiveClient, () => workspaceStore.activeWorkspaceId)
+  }
   return proactiveControls
 }

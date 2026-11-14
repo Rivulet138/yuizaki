@@ -1,0 +1,88 @@
+{
+  "runtime_feedback_fits_390px_and_retry_focusable": true,
+  "initial_failure_visible_on_summary": true,
+  "retry_error_visible": true,
+  "read_error_visible": true,
+  "retry_payloads": [
+    {
+      "targets": {
+        "svc": 7
+      }
+    },
+    {
+      "targets": {
+        "svc": 7
+      }
+    }
+  ],
+  "recovered_to_applied": true,
+  "blocked_mutations": [
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/voice-diagnostics/run"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/active-workspace"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    }
+  ],
+  "status_reads": [
+    "failed",
+    "applied",
+    "read_error",
+    "applied"
+  ],
+  "pageerrors": []
+}

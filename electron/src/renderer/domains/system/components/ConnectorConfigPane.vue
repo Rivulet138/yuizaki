@@ -64,24 +64,18 @@
         </div>
       </div>
       <div class="connector-bridge-box">
-        <el-alert :title="t('connectorPane.bridge.manualIntro')" type="warning" :closable="false" show-icon />
         <div v-if="!(connectorId === 'qq' && qqBridge?.installed)" class="connector-secret-row">
           <el-input v-model="connectorDrafts[connectorId].bridgeUrl" :placeholder="t('connectorPane.bridge.urlPlaceholder')" />
           <el-input v-model="connectorDrafts[connectorId].bridgeToken" type="password" show-password :placeholder="t('connectorPane.bridge.tokenPlaceholder')" />
         </div>
-        <p v-if="connectorId === 'qq' && qqBridge?.installed" class="connector-hint">
-          {{ t('connectorPane.bridge.managedHint', { url: qqBridge?.bridgeUrl || t('connectorPane.bridge.managedHintNoUrl') }) }}
-        </p>
+        <code v-if="connectorId === 'qq' && qqBridge?.installed && qqBridge?.bridgeUrl">{{ qqBridge.bridgeUrl }}</code>
         <div class="connector-config-actions">
           <el-select v-model="connectorDrafts[connectorId].bridgeProtocol" size="small" :placeholder="t('connectorPane.bridge.protocolPlaceholder')">
             <el-option :label="t('connectorPane.bridge.protocolGeneric')" value="generic" />
             <el-option v-if="connectorId === 'qq'" label="OneBot 11" value="onebot11" />
             <el-option v-if="connectorId === 'qq'" label="OneBot 12" value="onebot12" />
           </el-select>
-          <template v-if="connectorId === 'qq' && qqBridge?.installed">
-            <span class="connector-hint">{{ t('connectorPane.bridge.managedLoginHint') }}</span>
-          </template>
-          <template v-else>
+          <template v-if="!(connectorId === 'qq' && qqBridge?.installed)">
             <el-button type="primary" size="small" :loading="accountBusyIds.has(connectorId)" @click="loginPersonalAccount(connectorId)">{{ t('connectorPane.account.start') }}</el-button>
             <el-button plain size="small" :loading="accountBusyIds.has(connectorId)" @click="refreshPersonalAccount(connectorId)">{{ t('connectorPane.account.refresh') }}</el-button>
             <el-button type="danger" plain size="small" :disabled="accountBusyIds.has(connectorId)" @click="logoutPersonalAccount(connectorId)">{{ t('connectorPane.account.logout') }}</el-button>

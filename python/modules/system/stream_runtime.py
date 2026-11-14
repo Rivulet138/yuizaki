@@ -359,6 +359,7 @@ class StreamRuntime:
             else None
         )
         self._previews: dict[str, dict[str, Any]] = {}
+        self._inflight_requests: set[str] = set()
         self._load_events()
         self._load_actions()
         self._moderation_policy = self._load_moderation_policy(moderation)
@@ -596,7 +597,7 @@ class StreamRuntime:
             return None
         allowed = {
             "action", "requestId", "at", "status", "outcome",
-            "externalSideEffects", "verificationStatus", "errorCode", "confirmed",
+            "externalSideEffects", "verificationStatus", "errorCode", "confirmed", "draftId",
         }
         if set(raw) - allowed:
             return None
@@ -623,6 +624,9 @@ class StreamRuntime:
         error_code = raw.get("errorCode")
         if error_code is not None and (not isinstance(error_code, str) or len(error_code) > _MAX_ACTION_ERROR):
             return None
+        draft_id = raw.get("draftId")
+        if draft_id is not None and (not isinstance(draft_id, str) or not draft_id.strip() or len(draft_id) > 200):
+            return None
         return {
             "action": action,
             "requestId": request_id,
@@ -631,6 +635,7 @@ class StreamRuntime:
             "outcome": status,
             "externalSideEffects": raw.get("externalSideEffects", False),
             **({"confirmed": confirmed} if confirmed is not None else {}),
+            **({"draftId": draft_id} if draft_id is not None else {}),
             **({"verificationStatus": verification_status} if verification_status is not None else {}),
             **({"errorCode": error_code} if error_code is not None else {}),
         }
@@ -917,20 +922,89 @@ class StreamRuntime:
                 "externalSideEffects": False,
             }
 
-    def actions(self, limit: int = 50) -> dict[str, Any]:
-        """Return bounded action history without provider payloads or secrets."""
+    @staticmethod
+    def _action_request_id(value: Any) -> str:
+        if not isinstance(value, str) or not value.strip() or len(value) > _MAX_ACTION_REQUEST_ID:
+            raise ValueError("request_id must be a nonempty string of at most 160 characters")
+        return value.strip()
+
+    def _action_lookup_locked(self, request_id: str) -> dict[str, Any]:
+        # Search the entire authoritative retained journal, never a UI page.
+        action = next((item for item in reversed(self._actions) if item["requestId"] == request_id), None)
+        active = request_id in self._inflight_requests
+        status = action["status"] if action is not None else "unknown"
+        if status == "sending" and not active:
+            status = "unknown_effect"
+        terminal = status in {"known_success", "failed"} and not active
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "ok": True,
+            "requestId": request_id,
+            "found": action is not None,
+            "status": status,
+            "terminal": terminal,
+            "reason": "in_flight" if active else "not_retained_or_never_executed" if action is None else "interrupted_or_unconfirmed" if action["status"] == "sending" else None,
+            "action": deepcopy(action),
+            "recovery": {
+                "canResolve": action is not None and not active and status in {"sending", "unknown_effect"},
+                "humanTakeover": bool(self._state["policy"].get("humanTakeover")),
+                "requiresHumanTakeover": True,
+                "retryAllowed": False,
+                "requiresNewPreview": True,
+            },
+            "externalSideEffects": False,
+        }
+
+    def actions(self, limit: int = 50, request_id: str | None = None) -> dict[str, Any]:
+        """List audit history or return the exact request's authoritative state."""
+        if request_id is not None:
+            normalized_id = self._action_request_id(request_id)
+            with self._lock:
+                return self._action_lookup_locked(normalized_id)
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
             raise ValueError("limit must be between 1 and 100")
         with self._lock:
             items = list(self._actions)[-limit:]
+            latest = {item["requestId"]: item for item in self._actions if item["requestId"]}
+            unresolved = [key for key, item in latest.items() if item["status"] in {"sending", "unknown_effect"}]
             return {
                 "schemaVersion": SCHEMA_VERSION,
                 "ok": True,
                 "count": len(items),
                 "limit": limit,
                 "actions": list(reversed(deepcopy(items))),
+                "unresolvedRequestIds": unresolved,
                 "externalSideEffects": False,
             }
+
+    def resolve_action(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Record an explicit human observation; never invoke or replay a provider."""
+        request_id = self._action_request_id(payload.get("request_id"))
+        outcome = payload.get("outcome")
+        if payload.get("confirmed") is not True or outcome not in {"known_success", "failed"}:
+            raise ValueError("confirmed=true and outcome=known_success|failed are required")
+        with self._lock:
+            snapshot = self._action_lookup_locked(request_id)
+            action = snapshot["action"]
+            if action is None or payload.get("action") != action["action"]:
+                raise RuntimeError("stream action identity is unknown or mismatched")
+            if request_id in self._inflight_requests:
+                raise RuntimeError("stream action is still executing; query its outcome first")
+            if snapshot["terminal"]:
+                if snapshot["status"] != outcome:
+                    raise RuntimeError("a terminal stream action cannot be overwritten")
+                return {**snapshot, "alreadyResolved": True}
+            if not snapshot["recovery"]["humanTakeover"]:
+                raise RuntimeError("enable human takeover before confirming an unknown effect")
+            self._record_action_locked({
+                **action,
+                "at": datetime.now(UTC).isoformat(),
+                "status": outcome,
+                "outcome": outcome,
+                "confirmed": True,
+                "verificationStatus": "human_confirmed",
+            }, require_persistence=True)
+            return {**self._action_lookup_locked(request_id), "alreadyResolved": False}
 
     def moderation(self) -> dict[str, Any]:
         """Return the local outbound chat moderation policy."""
@@ -1051,6 +1125,8 @@ class StreamRuntime:
             raise ValueError("execute action does not match preview")
         adapter = self._obs_adapter
         action = str(ticket["action"])
+        draft_id = params.get("draftId")
+        draft_identity = {"draftId": draft_id} if action == "stream.chat_send" and isinstance(draft_id, str) else {}
         if action == "stream.chat_send":
             if not self._twitch_chat_adapter.configured:
                 raise RuntimeError("Twitch chat sender is not configured")
@@ -1115,127 +1191,134 @@ class StreamRuntime:
                     "at": datetime.now(UTC).isoformat(),
                     "status": "sending",
                     "outcome": "sending",
+                    **draft_identity,
                     "externalSideEffects": action in _EXTERNAL_ACTIONS,
                 },
                 require_persistence=action in _EXTERNAL_ACTIONS,
             )
+            self._inflight_requests.add(request_id)
             if chat_send_at is not None:
                 self._chat_send_times.append(chat_send_at)
         try:
-            if action == "stream.caption_draft":
-                text = params.get("text", "")
-                if not isinstance(text, str) or not text.strip():
-                    raise ValueError("text is required")
-                if len(text) > _MAX_EVENT_TEXT:
-                    raise ValueError(f"text must be {_MAX_EVENT_TEXT} characters or less")
-                response = {"draft": text.strip()}
-                verification_status = "local_only"
-            elif action == "stream.chat_send":
-                text = params.get("text")
-                if not isinstance(text, str) or not text.strip():
-                    raise ValueError("text is required")
-                response = self._twitch_chat_adapter.send_message(text)
-                verification_status = "provider_acknowledged" if response.get("sent") is True else "unknown_effect"
-            elif action == "stream.twitch_subscriptions_sync":
-                response = self._twitch_ingress.sync_subscription_plan()
-                verification_status = "provider_acknowledged" if response.get("subscriptionPlan", {}).get("status") == "synced" else "unknown_effect"
-            elif action == "stream.status":
-                response = obs_adapter.get_stream_status()
-                verification_status = "provider_acknowledged"
-            elif action == "stream.scene_preview":
-                response = obs_adapter.get_scene_list()
-                verification_status = "provider_acknowledged"
-            elif action == "stream.scene_switch":
-                assert scene_name is not None
-                response = obs_adapter.set_current_program_scene(scene_name.strip())
-                verification = obs_adapter.get_current_program_scene()
-                verification_status = "provider_acknowledged" if verification.get("currentProgramSceneName") == scene_name.strip() else "unknown_effect"
-            elif action == "stream.profile_preview":
-                response = obs_adapter.get_profile_list()
-                verification_status = "provider_acknowledged"
-            elif action == "stream.profile_switch":
-                assert profile_name is not None
-                response = obs_adapter.set_current_profile(profile_name.strip())
-                verification = obs_adapter.get_current_profile()
-                verification_status = "provider_acknowledged" if verification.get("currentProfileName") == profile_name.strip() else "unknown_effect"
-            elif action == "stream.broadcast_start":
-                response = obs_adapter.start_stream()
-                verification = obs_adapter.get_stream_status()
-                verification_status = "provider_acknowledged" if verification.get("outputActive") is True else "unknown_effect"
-            elif action == "stream.broadcast_stop":
-                response = obs_adapter.stop_stream()
-                verification = obs_adapter.get_stream_status()
-                verification_status = "provider_acknowledged" if verification.get("outputActive") is False else "unknown_effect"
-            else:
-                raise ValueError(f"action cannot be executed: {action}")
-        except ValueError:
-            raise
-        except Exception as exc:
+            try:
+                if action == "stream.caption_draft":
+                    text = params.get("text", "")
+                    if not isinstance(text, str) or not text.strip():
+                        raise ValueError("text is required")
+                    if len(text) > _MAX_EVENT_TEXT:
+                        raise ValueError(f"text must be {_MAX_EVENT_TEXT} characters or less")
+                    response = {"draft": text.strip()}
+                    verification_status = "local_only"
+                elif action == "stream.chat_send":
+                    text = params.get("text")
+                    if not isinstance(text, str) or not text.strip():
+                        raise ValueError("text is required")
+                    response = self._twitch_chat_adapter.send_message(text)
+                    verification_status = "provider_acknowledged" if response.get("sent") is True else "unknown_effect"
+                elif action == "stream.twitch_subscriptions_sync":
+                    response = self._twitch_ingress.sync_subscription_plan()
+                    verification_status = "provider_acknowledged" if response.get("subscriptionPlan", {}).get("status") == "synced" else "unknown_effect"
+                elif action == "stream.status":
+                    response = obs_adapter.get_stream_status()
+                    verification_status = "provider_acknowledged"
+                elif action == "stream.scene_preview":
+                    response = obs_adapter.get_scene_list()
+                    verification_status = "provider_acknowledged"
+                elif action == "stream.scene_switch":
+                    assert scene_name is not None
+                    response = obs_adapter.set_current_program_scene(scene_name.strip())
+                    verification = obs_adapter.get_current_program_scene()
+                    verification_status = "provider_acknowledged" if verification.get("currentProgramSceneName") == scene_name.strip() else "unknown_effect"
+                elif action == "stream.profile_preview":
+                    response = obs_adapter.get_profile_list()
+                    verification_status = "provider_acknowledged"
+                elif action == "stream.profile_switch":
+                    assert profile_name is not None
+                    response = obs_adapter.set_current_profile(profile_name.strip())
+                    verification = obs_adapter.get_current_profile()
+                    verification_status = "provider_acknowledged" if verification.get("currentProfileName") == profile_name.strip() else "unknown_effect"
+                elif action == "stream.broadcast_start":
+                    response = obs_adapter.start_stream()
+                    verification = obs_adapter.get_stream_status()
+                    verification_status = "provider_acknowledged" if verification.get("outputActive") is True else "unknown_effect"
+                elif action == "stream.broadcast_stop":
+                    response = obs_adapter.stop_stream()
+                    verification = obs_adapter.get_stream_status()
+                    verification_status = "provider_acknowledged" if verification.get("outputActive") is False else "unknown_effect"
+                else:
+                    raise ValueError(f"action cannot be executed: {action}")
+            except Exception as exc:
+                now = datetime.now(UTC).isoformat()
+                audit = {
+                    "action": action,
+                    **draft_identity,
+                    "requestId": request_id,
+                    "at": now,
+                    "status": "unknown_effect",
+                    "confirmed": True,
+                    "outcome": "unknown_effect",
+                    "externalSideEffects": action in _EXTERNAL_ACTIONS,
+                    "errorCode": type(exc).__name__,
+                }
+                with self._lock:
+                    self._state["state"] = "error"
+                    self._record_action_locked(audit)
+                raise RuntimeError(f"unknown_effect: {type(exc).__name__}") from exc
+            if verification_status == "unknown_effect":
+                now = datetime.now(UTC).isoformat()
+                audit = {
+                    "action": action,
+                    **draft_identity,
+                    "requestId": request_id,
+                    "at": now,
+                    "status": "unknown_effect",
+                    "confirmed": True,
+                    "outcome": "unknown_effect",
+                    "externalSideEffects": action in _EXTERNAL_ACTIONS,
+                    "errorCode": "verification_mismatch",
+                }
+                with self._lock:
+                    self._state["state"] = "error"
+                    self._record_action_locked(audit)
+                raise RuntimeError("unknown_effect: provider verification did not confirm the requested state")
             now = datetime.now(UTC).isoformat()
             audit = {
                 "action": action,
+                **draft_identity,
                 "requestId": request_id,
                 "at": now,
-                "status": "unknown_effect",
+                "status": "known_success",
                 "confirmed": True,
-                "outcome": "unknown_effect",
+                "outcome": "known_success",
                 "externalSideEffects": action in _EXTERNAL_ACTIONS,
-                "errorCode": type(exc).__name__,
+                "verificationStatus": verification_status,
             }
             with self._lock:
-                self._state["state"] = "error"
+                if action == "stream.broadcast_start":
+                    self._state["state"] = "live"
+                elif action == "stream.broadcast_stop":
+                    self._state["state"] = "ended"
+                elif action in {"stream.status", "stream.scene_preview", "stream.scene_switch"}:
+                    self._state["state"] = "live" if response.get("outputActive") is True else "ready"
                 self._record_action_locked(audit)
-            raise RuntimeError(f"unknown_effect: {type(exc).__name__}") from exc
-        if verification_status == "unknown_effect":
-            now = datetime.now(UTC).isoformat()
-            audit = {
+            snapshot = self.snapshot()
+            return {
+                "schemaVersion": SCHEMA_VERSION,
+                "ok": True,
+                "executed": True,
+                "requestId": request_id,
                 "action": action,
-                "requestId": request_id,
-                "at": now,
-                "status": "unknown_effect",
-                "confirmed": True,
-                "outcome": "unknown_effect",
+                "result": response,
+                "outcome": "known_success",
+                "verificationStatus": verification_status,
+                "audit": deepcopy(audit),
+                "auditEvent": deepcopy(audit),
                 "externalSideEffects": action in _EXTERNAL_ACTIONS,
-                "errorCode": "verification_mismatch",
+                "state": snapshot,
             }
+        finally:
             with self._lock:
-                self._state["state"] = "error"
-                self._record_action_locked(audit)
-            raise RuntimeError("unknown_effect: provider verification did not confirm the requested state")
-        now = datetime.now(UTC).isoformat()
-        audit = {
-            "action": action,
-            "requestId": request_id,
-            "at": now,
-            "status": "known_success",
-            "confirmed": True,
-            "outcome": "known_success",
-            "externalSideEffects": action in _EXTERNAL_ACTIONS,
-            "verificationStatus": verification_status,
-        }
-        with self._lock:
-            if action == "stream.broadcast_start":
-                self._state["state"] = "live"
-            elif action == "stream.broadcast_stop":
-                self._state["state"] = "ended"
-            elif action in {"stream.status", "stream.scene_preview", "stream.scene_switch"}:
-                self._state["state"] = "live" if response.get("outputActive") is True else "ready"
-            self._record_action_locked(audit)
-        snapshot = self.snapshot()
-        return {
-            "schemaVersion": SCHEMA_VERSION,
-            "ok": True,
-            "executed": True,
-            "requestId": request_id,
-            "action": action,
-            "result": response,
-            "outcome": "known_success",
-            "verificationStatus": verification_status,
-            "audit": deepcopy(audit),
-            "auditEvent": deepcopy(audit),
-            "externalSideEffects": action in _EXTERNAL_ACTIONS,
-            "state": snapshot,
-        }
+                self._inflight_requests.discard(request_id)
 
     def enqueue_event(self, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
         body = dict(payload or {})

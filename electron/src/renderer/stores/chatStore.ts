@@ -98,6 +98,7 @@ type RuntimeGenerationEnvelope = GenerationEnvelope & Required<Pick<
 >>
 type SendChatOptions = {
   appendUser?: boolean
+  onFailure?: () => void
   chatOptions?: Partial<ChatOptions>
   envelope?: GenerationEnvelope
 }
@@ -334,10 +335,17 @@ const normalizePromptProfile = (value: unknown): ChatPromptProfile | undefined =
     ? {
         enabled: typeof value.roleCard.enabled === 'boolean' ? value.roleCard.enabled : undefined,
         name: typeof value.roleCard.name === 'string' ? value.roleCard.name : undefined,
+        description: typeof value.roleCard.description === 'string' ? value.roleCard.description : undefined,
         personality: typeof value.roleCard.personality === 'string' ? value.roleCard.personality : undefined,
         scenario: typeof value.roleCard.scenario === 'string' ? value.roleCard.scenario : undefined,
         instructions: typeof value.roleCard.instructions === 'string' ? value.roleCard.instructions : undefined,
         firstMessage: typeof value.roleCard.firstMessage === 'string' ? value.roleCard.firstMessage : undefined,
+        exampleDialogue: typeof value.roleCard.exampleDialogue === 'string' ? value.roleCard.exampleDialogue : undefined,
+        alternateGreetings: Array.isArray(value.roleCard.alternateGreetings)
+          ? value.roleCard.alternateGreetings.filter((item): item is string => typeof item === 'string')
+          : undefined,
+        greetingIndex: typeof value.roleCard.greetingIndex === 'number' && Number.isInteger(value.roleCard.greetingIndex)
+          ? value.roleCard.greetingIndex : undefined,
       }
     : undefined
   const worldBook = isRecord(value.worldBook)
@@ -393,7 +401,7 @@ const normalizeChatOptions = (value: unknown): ChatOptions => {
     presence_penalty: clampNumber(readNumber(source, 'presence_penalty') ?? DEFAULT_CHAT_OPTIONS.presence_penalty, -2, 2),
     repetition_penalty: clampNumber(readNumber(source, 'repetition_penalty') ?? DEFAULT_CHAT_OPTIONS.repetition_penalty, 0, 2),
     max_tokens: Math.max(128, Math.min(CHAT_OPTIONS_MAX_OUTPUT_TOKENS, Math.round(readNumber(source, 'max_tokens') ?? DEFAULT_CHAT_OPTIONS.max_tokens))),
-    reasoning_effort: ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'auto'].includes(reasoningEffort)
+    reasoning_effort: ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'auto'].includes(reasoningEffort)
       ? reasoningEffort as ChatOptions['reasoning_effort']
       : DEFAULT_CHAT_OPTIONS.reasoning_effort,
     response_mode: ['instant', 'balanced', 'deep'].includes(String(source.response_mode || ''))
@@ -635,7 +643,8 @@ export const useChatStore = defineStore('chat', () => {
   watch(chatOptions, () => persistChatOptions(chatOptions), { deep: true })
   let pendingSentenceEmotionCues: PetSentenceEmotionCue[] = []
   let initialized = false
-  const pendingUserMessages = new Map<string, { content: string; index: number }>()
+  const pendingUserMessages = new Map<string, { content: string; message: ChatMessage; onFailure?: () => void }>()
+  const failedUserMessages = new WeakSet<ChatMessage>()
   const pendingInterrupts = new Map<string, { startedAt: number; sessionId: string; timeoutId: number }>()
   const runtimeRequests = new Map<string, RuntimeRequest>()
   const completedRuntimeRequests = new Map<string, RuntimeRequest>()
@@ -778,9 +787,12 @@ export const useChatStore = defineStore('chat', () => {
       window.dispatchEvent(createTtsStopEvent())
       return
     }
+    const detail = (event as CustomEvent<UnknownRecord>).detail
+    const eventGenerationId = readString(detail, 'generationId')
+    const eventSessionId = readString(detail, 'sessionId')
+    if ((eventSessionId && eventSessionId !== state.currentSessionId) || blockedTtsGenerations.has(eventGenerationId)) return
     state.isSpeaking = true
     state.isTTSPlaying = true
-    const detail = (event as CustomEvent<UnknownRecord>).detail
     const segmentId = readNumber(detail, 'segmentId')
     const previousSegmentId = state.ttsPlaybackSegmentId
     state.ttsPlaybackSegmentId = segmentId ?? null
@@ -822,6 +834,8 @@ export const useChatStore = defineStore('chat', () => {
   const handleAudioProgress = (event: Event) => {
     const detail = (event as CustomEvent<UnknownRecord>).detail
     const segmentId = readNumber(detail, 'segmentId')
+    const generationId = readString(detail, 'generationId')
+    if (generationId && generationId !== activePlaybackGenerationId) return
     const utteranceId = readString(detail, 'utteranceId')
     if (utteranceId
       ? utteranceId !== activePlaybackUtteranceId
@@ -831,6 +845,19 @@ export const useChatStore = defineStore('chat', () => {
     if (positionMs !== undefined) state.ttsPlaybackPositionMs = Math.max(0, Math.round(positionMs))
     const durationMs = readNumber(detail, 'durationMs')
     if (durationMs !== undefined && durationMs > 0) state.ttsPlaybackDurationMs = Math.round(durationMs)
+  }
+
+  const handleAudioEnded = (event: Event) => {
+    const generationId = readString((event as CustomEvent<UnknownRecord>).detail, 'generationId')
+    if (generationId && generationId !== activePlaybackGenerationId) return
+    stopTtsPlaybackState()
+  }
+
+  const restorePendingDraft = (sessionId: string) => {
+    const pending = pendingUserMessages.get(sessionId)
+    pendingUserMessages.delete(sessionId)
+    if (pending) failedUserMessages.add(pending.message)
+    pending?.onFailure?.()
   }
 
   const clearPendingUserMessage = (sessionId = state.currentSessionId) => {
@@ -874,7 +901,7 @@ export const useChatStore = defineStore('chat', () => {
     socketClient.on(SocketEvents.INTERRUPT_ACK, (data: unknown) => {
       const requestId = readString(data, 'request_id')
       const pending = pendingInterrupts.get(requestId)
-      if (pending === undefined) return
+      if (pending === undefined || readString(data, 'session_id') !== pending.sessionId) return
       window.clearTimeout(pending.timeoutId)
       pendingInterrupts.delete(requestId)
       const generationId = readString(data, 'generation_id')
@@ -899,7 +926,10 @@ export const useChatStore = defineStore('chat', () => {
       }
       state.isGenerating = false
       state.currentText = ''
-      pendingUserMessages.clear()
+      for (const sessionId of [...pendingUserMessages.keys()]) restorePendingDraft(sessionId)
+      stopTtsPlaybackState()
+      pendingSentenceEmotionCues = []
+      window.dispatchEvent(createTtsStopEvent({ interrupted: true }))
       state.lastError = t('chatStore.channelDisconnected')
     })
 
@@ -946,7 +976,7 @@ export const useChatStore = defineStore('chat', () => {
       const pending = pendingUserMessages.get(runtime.sessionId)
       const isActiveSession = runtime.sessionId === state.currentSessionId
       if (userMessageId !== undefined && pending && isActiveSession) {
-        const message = state.messages[pending.index]
+        const message = pending.message
         if (
           message?.role === 'user' &&
           message.id === undefined &&
@@ -1091,6 +1121,7 @@ export const useChatStore = defineStore('chat', () => {
         hasPendingInterruptForSession(sessionId) ||
         (generationId && blockedTtsGenerations.has(generationId))
       ) {
+        if (finalEvent && isRecord(data) && data.complete === true) completeRuntimeRequest(runtime)
         return
       }
       const requestId = runtime.requestId
@@ -1222,7 +1253,7 @@ export const useChatStore = defineStore('chat', () => {
           runtime.isGenerating = false
           runtime.currentText = ''
           completeRuntimeRequest(runtime)
-          clearPendingUserMessage(runtime.sessionId)
+          restorePendingDraft(runtime.sessionId)
         }
         if (isActiveSession) {
           state.isGenerating = false
@@ -1230,8 +1261,10 @@ export const useChatStore = defineStore('chat', () => {
         }
       }
       if (code.startsWith('TTS')) {
-        stopTtsPlaybackState()
-        window.dispatchEvent(createTtsStopEvent())
+        if (isActiveSession) {
+          stopTtsPlaybackState()
+          window.dispatchEvent(createTtsStopEvent())
+        }
         if (runtime) completeRuntimeRequest(runtime)
       }
       if (isActiveSession) ElMessage.error(explained)
@@ -1240,16 +1273,18 @@ export const useChatStore = defineStore('chat', () => {
     if (typeof window !== 'undefined') {
       window.addEventListener('pet:audio-started', handleAudioStarted)
       window.addEventListener('pet:audio-progress', handleAudioProgress)
-      window.addEventListener('pet:audio-ended', stopTtsPlaybackState)
+      window.addEventListener('pet:audio-ended', handleAudioEnded)
       window.addEventListener('pet:tts-stop', stopTtsPlaybackState)
     }
   }
 
   onScopeDispose(() => {
+    for (const pending of pendingInterrupts.values()) window.clearTimeout(pending.timeoutId)
+    pendingInterrupts.clear()
     if (typeof window === 'undefined') return
     window.removeEventListener('pet:audio-started', handleAudioStarted)
     window.removeEventListener('pet:audio-progress', handleAudioProgress)
-    window.removeEventListener('pet:audio-ended', stopTtsPlaybackState)
+    window.removeEventListener('pet:audio-ended', handleAudioEnded)
     window.removeEventListener('pet:tts-stop', stopTtsPlaybackState)
   })
 
@@ -1322,7 +1357,11 @@ export const useChatStore = defineStore('chat', () => {
     const sessionId = state.currentSessionId
     const workspaceId = state.currentWorkspaceId
     let pendingUserIndex: number | null = null
-    if (shouldAppendUser) {
+    const lastMessage = state.messages.at(-1)
+    if (shouldAppendUser && lastMessage?.content === trimmed && failedUserMessages.has(lastMessage)) {
+      pendingUserIndex = state.messages.length - 1
+      failedUserMessages.delete(lastMessage)
+    } else if (shouldAppendUser) {
       pendingUserIndex = state.messages.push({ role: 'user', content: trimmed, timestamp: new Date().toISOString() }) - 1
     } else {
       const lastIndex = state.messages.length - 1
@@ -1334,7 +1373,8 @@ export const useChatStore = defineStore('chat', () => {
     if (pendingUserIndex !== null) {
       pendingUserMessages.set(sessionId, {
         content: trimmed,
-        index: pendingUserIndex,
+        message: state.messages[pendingUserIndex],
+        onFailure: options.onFailure,
       })
     }
 
@@ -1386,7 +1426,7 @@ export const useChatStore = defineStore('chat', () => {
     const dispatchAgentChat = () => {
       const pendingRuntime = sessionRuntime[sessionId]
       if (pendingRuntime?.requestId !== requestId || !pendingRuntime.isGenerating) return
-      socketClient.sendAgentChat(
+      const result = socketClient.sendAgentChat(
         contextMessages,
         sessionId,
         petContext,
@@ -1403,9 +1443,21 @@ export const useChatStore = defineStore('chat', () => {
           runId: runtimeRequest.runId || undefined,
         },
       )
+      if (result.status !== 'accepted') {
+        pendingRuntime.isGenerating = false
+        pendingRuntime.currentText = ''
+        completeRuntimeRequest(pendingRuntime, requestId)
+        const pending = pendingUserMessages.get(sessionId)
+        if (pending) failedUserMessages.add(pending.message)
+        clearPendingUserMessage(sessionId)
+        state.isGenerating = false
+        state.currentText = ''
+        state.lastError = t('chatStore.channelNotConnected')
+        return false
+      }
+      return true
     }
-    dispatchAgentChat()
-    return true
+    return dispatchAgentChat() === true
   }
 
   const applyRealtimeInputPartial = (text: string) => {
@@ -1498,6 +1550,9 @@ export const useChatStore = defineStore('chat', () => {
       runtime.unread = true
     }
 
+    // Keep references to the originating messages across session/history changes.
+    const userMessage = userIndex >= 0 ? state.messages[userIndex] : undefined
+    const assistantMessage = assistantIndex >= 0 ? state.messages[assistantIndex] : undefined
     try {
       const saved = await requestJson<RealtimeTranscriptResponse>(`${API_ORIGIN}/api/realtime/transcript`, {
         method: 'POST',
@@ -1512,8 +1567,6 @@ export const useChatStore = defineStore('chat', () => {
           memory_trace: traces?.memory_trace,
         }),
       })
-      const userMessage = userIndex >= 0 ? state.messages[userIndex] : undefined
-      const assistantMessage = assistantIndex >= 0 ? state.messages[assistantIndex] : undefined
       const userMessageId = readMessageId(saved.user_message, 'id')
       const assistantMessageId = readMessageId(saved.assistant_message, 'id')
       if (userMessage && userMessageId !== undefined) {
@@ -1548,7 +1601,7 @@ export const useChatStore = defineStore('chat', () => {
     window.dispatchEvent(new CustomEvent('pet:realtime-interrupt', { detail: { source } }))
     const socketClient = chatClient.getSocketClient()
     if (socketClient.isConnected()) {
-      const requestId = `interrupt_${createRequestId()}`
+      const requestId = sessionRuntime[state.currentSessionId]?.requestId || `interrupt_${createRequestId()}`
       const sessionId = state.currentSessionId
       const timeoutId = window.setTimeout(() => pendingInterrupts.delete(requestId), 2000)
       pendingInterrupts.set(requestId, {
@@ -1556,7 +1609,12 @@ export const useChatStore = defineStore('chat', () => {
         sessionId,
         timeoutId,
       })
-      socketClient.sendInterrupt(state.currentSessionId, requestId, source)
+      const result = socketClient.sendInterrupt(state.currentSessionId, requestId, source)
+      if (result.status !== 'accepted') {
+        window.clearTimeout(timeoutId)
+        pendingInterrupts.delete(requestId)
+        ElMessage.info(t('chatStore.interruptLocalOnly'))
+      }
     } else {
       ElMessage.info(t('chatStore.interruptLocalOnly'))
     }
@@ -1566,8 +1624,13 @@ export const useChatStore = defineStore('chat', () => {
     const runtime = ensureSessionRuntime(state.currentSessionId, state.currentWorkspaceId)
     runtime.isGenerating = false
     runtime.currentText = ''
-    if (runtime.requestId) runtimeRequests.delete(runtime.requestId)
+    if (runtime.requestId) {
+      const request = runtimeRequests.get(runtime.requestId)
+      if (request) rememberBlockedTtsGeneration(request.generationId)
+      runtimeRequests.delete(runtime.requestId)
+    }
     runtime.requestId = null
+    currentRuntimeRequest = null
     clearPendingUserMessage(runtime.sessionId)
     stopTtsPlaybackState()
     pendingSentenceEmotionCues = []
@@ -1593,6 +1656,22 @@ export const useChatStore = defineStore('chat', () => {
 
   const setWorkspaceContext = (workspaceId: string, sessionId: string) => {
     historyLoadEpoch += 1
+    if (state.currentSessionId !== sessionId || state.currentWorkspaceId !== workspaceId) {
+      const previous = sessionRuntime[state.currentSessionId]
+      const previousRequest = previous ? requestForRuntime(previous) : undefined
+      if (previousRequest) rememberBlockedTtsGeneration(previousRequest.generationId)
+      if (activePlaybackGenerationId) rememberBlockedTtsGeneration(activePlaybackGenerationId)
+      stopTtsPlaybackState()
+      pendingSentenceEmotionCues = []
+      currentRealtimeRuntimeRequest = null
+      state.isRecording = false
+      window.dispatchEvent(new CustomEvent('pet:realtime-interrupt', { detail: { source: 'manual' } }))
+      window.dispatchEvent(createTtsStopEvent({ interrupted: true }))
+      state.messages = []
+      state.contextStartIndex = 0
+      state.lastAgentEnvelope = null
+      state.agentEnvelopeTimeline = []
+    }
     state.currentWorkspaceId = workspaceId
     state.currentSessionId = sessionId
     const runtime = ensureSessionRuntime(sessionId, workspaceId)
@@ -1605,14 +1684,15 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   const loadHistory = async (sessionId: string, workspaceId?: string) => {
+    setWorkspaceContext(workspaceId || state.currentWorkspaceId, sessionId)
     const requestEpoch = ++historyLoadEpoch
-    state.currentSessionId = sessionId
-    if (workspaceId) state.currentWorkspaceId = workspaceId
+    const messagesAtStart = new Set(state.messages)
     const payload = await requestJson<{ history: ChatHistoryRecord[] }>(
       withWorkspaceQuery(`${CONTROL_ORIGIN}/api/history/${encodeURIComponent(sessionId)}?limit=50`, workspaceId),
     )
     if (requestEpoch !== historyLoadEpoch || state.currentSessionId !== sessionId) return
-    state.messages = Array.isArray(payload.history)
+    const localMessages = state.messages.filter((message) => message.id === undefined || !messagesAtStart.has(message))
+    const historyMessages: ChatMessage[] = Array.isArray(payload.history)
       ? payload.history.map((message) => ({
           id: message.id ?? undefined,
           role: message.role,
@@ -1625,6 +1705,8 @@ export const useChatStore = defineStore('chat', () => {
           ...(message.memorySources ? { memorySources: message.memorySources } : {}),
         }))
       : []
+    const persistedIds = new Set(historyMessages.flatMap((message) => message.id === undefined ? [] : [message.id]))
+    state.messages = [...historyMessages, ...localMessages.filter((message) => message.id === undefined || !persistedIds.has(message.id))]
     state.contextStartIndex = 0
     const runtime = ensureSessionRuntime(sessionId, workspaceId || state.currentWorkspaceId)
     state.currentText = runtime.currentText
@@ -1633,7 +1715,6 @@ export const useChatStore = defineStore('chat', () => {
     state.lastError = null
     state.lastAgentEnvelope = null
     state.agentEnvelopeTimeline = []
-    pendingMessageTraces.clear()
     markSessionRead(sessionId)
   }
 
@@ -1696,12 +1777,16 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   const deleteMessage = async (index: number, workspaceId?: string) => {
-    const message = state.messages[index]
+    const messages = state.messages
+    const message = messages[index]
     if (!message) return false
     if (message.id !== undefined && message.id !== null && String(message.id).trim()) {
       await requestJson<{ status: string }>(withWorkspaceQuery(`${CONTROL_ORIGIN}/api/messages/${encodeURIComponent(String(message.id))}`, workspaceId), { method: 'DELETE' })
     }
-    removeLocalMessageAt(index)
+    if (state.messages === messages) {
+      const currentIndex = messages.indexOf(message)
+      if (currentIndex >= 0) removeLocalMessageAt(currentIndex)
+    }
     return true
   }
 
@@ -1724,7 +1809,8 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   const trimMessagesAfter = async (index: number, workspaceId?: string) => {
-    const message = state.messages[index]
+    const messages = state.messages
+    const message = messages[index]
     if (!message) return 0
     const trailingMessages = state.messages.slice(index + 1)
     const persistedRemoved = trailingMessages.filter((item) => item.id !== undefined && item.id !== null).length
@@ -1732,7 +1818,10 @@ export const useChatStore = defineStore('chat', () => {
     if (hasPersistedBoundary) {
       await requestJson<{ status: string; deleted_count: number }>(withWorkspaceQuery(`${CONTROL_ORIGIN}/api/messages/${encodeURIComponent(String(message.id))}/after`, workspaceId), { method: 'DELETE' })
     }
-    state.messages.splice(index + 1)
+    if (state.messages !== messages) return persistedRemoved
+    const currentIndex = messages.indexOf(message)
+    if (currentIndex < 0) return persistedRemoved
+    state.messages.splice(currentIndex + 1)
     if (state.contextStartIndex > state.messages.length) {
       state.contextStartIndex = state.messages.length
     }
@@ -1740,14 +1829,18 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   const regenerateFromMessage = async (index: number, workspaceId?: string) => {
-    const message = state.messages[index]
+    const messages = state.messages
+    const message = messages[index]
     if (!message || message.role !== 'user') return 0
     const persistedRemoved = await trimMessagesAfter(index, workspaceId)
-    sendChat(message.content, { appendUser: false })
+    if (state.messages === messages && messages.includes(message)) {
+      sendChat(message.content, { appendUser: false })
+    }
     return persistedRemoved
   }
 
   const clearConversationMessages = async (workspaceId?: string) => {
+    const messages = state.messages
     if (!state.currentSessionId) {
       clearLocalMessages()
       return false
@@ -1757,7 +1850,7 @@ export const useChatStore = defineStore('chat', () => {
       return false
     }
     await requestJson<{ status: string }>(withWorkspaceQuery(`${CONTROL_ORIGIN}/api/sessions/${encodeURIComponent(state.currentSessionId)}/messages`, workspaceId), { method: 'DELETE' })
-    clearLocalMessages()
+    if (state.messages === messages) clearLocalMessages()
     return true
   }
 
@@ -1800,6 +1893,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   const clearLocalMessages = () => {
+    historyLoadEpoch += 1
     state.messages = []
     state.contextStartIndex = 0
     state.currentText = ''
@@ -1807,8 +1901,6 @@ export const useChatStore = defineStore('chat', () => {
     state.lastError = null
     state.lastAgentEnvelope = null
     state.agentEnvelopeTimeline = []
-    pendingMessageTraces.clear()
-    clearPendingUserMessage()
   }
 
   const clearContext = () => {

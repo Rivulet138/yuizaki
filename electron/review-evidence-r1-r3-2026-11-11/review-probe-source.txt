@@ -1,0 +1,176 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { effectScope, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount, onUnmounted, type EffectScope } from 'vue'
+import SettingsPanel from '@/domains/settings/views/SettingsPanel.vue'
+import { settingsClient } from '@/api/clients/settings-client'
+import { resourceClient } from '@/api/clients/resource-client'
+import { memoryClient } from '@/api/clients/memory-client'
+import { ElMessage } from 'element-plus'
+import { t } from '@/i18n'
+import { settingsSaveState } from '@/domains/settings/settingsSaveState'
+
+vi.mock('element-plus/es/components/alert/style/css', () => ({}))
+vi.mock('element-plus/es/components/icon/style/css', () => ({}))
+vi.mock('element-plus/es/components/button/style/css', () => ({}))
+vi.mock('element-plus/es/components/slider/style/css', () => ({}))
+vi.mock('element-plus/es/components/input/style/css', () => ({}))
+vi.mock('element-plus/es/components/input-number/style/css', () => ({}))
+vi.mock('element-plus/es/components/card/style/css', () => ({}))
+vi.mock('element-plus/es/components/tag/style/css', () => ({}))
+vi.mock('element-plus/es/components/table/style/css', () => ({}))
+vi.mock('element-plus/es/components/table-column/style/css', () => ({}))
+vi.mock('element-plus/es/components/collapse/style/css', () => ({}))
+vi.mock('element-plus/es/components/collapse-item/style/css', () => ({}))
+vi.mock('element-plus/es/components/tabs/style/css', () => ({}))
+vi.mock('element-plus/es/components/form/style/css', () => ({}))
+vi.mock('element-plus/es/components/form-item/style/css', () => ({}))
+vi.mock('element-plus/es/components/tab-pane/style/css', () => ({}))
+vi.mock('element-plus/es/components/select/style/css', () => ({}))
+vi.mock('element-plus/es/components/option/style/css', () => ({}))
+vi.mock('@/shared/components/panel/PanelShell.vue', () => ({ default: {} }))
+vi.mock('@/shared/components/feedback/AsyncState.vue', () => ({ default: {} }))
+vi.mock('@/domains/settings/components/SettingsAsrSection.vue', () => ({ default: {} }))
+vi.mock('@/domains/settings/components/SettingsAccessSection.vue', () => ({ default: {} }))
+vi.mock('@/domains/settings/components/SettingsLlmVisionSection.vue', () => ({ default: {} }))
+vi.mock('@/domains/settings/components/SettingsMemorySection.vue', () => ({ default: {} }))
+vi.mock('@/domains/settings/components/SettingsSummarySection.vue', () => ({ default: {} }))
+vi.mock('@/domains/settings/components/SettingsDesktopInputSection.vue', () => ({ default: {} }))
+vi.mock('@/domains/settings/components/SettingsInterfaceSection.vue', () => ({ default: {} }))
+vi.mock('@/domains/settings/components/SettingsResourcesSection.vue', () => ({ default: {} }))
+
+vi.mock('vue', async (original) => ({ ...await original<typeof import('vue')>(), useSSRContext: () => ({ modules: new Set() }), onActivated: vi.fn(), onDeactivated: vi.fn(), onMounted: vi.fn(), onBeforeUnmount: vi.fn(), onUnmounted: vi.fn() }))
+vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }) }))
+vi.mock('element-plus', async (original) => ({
+  ...await original<typeof import('element-plus')>(),
+  ElMessage: { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() },
+  ElMessageBox: { confirm: vi.fn().mockResolvedValue('confirm') },
+}))
+vi.mock('@/domains/settings/components/SettingsSvcSection.vue', () => ({ default: {} }))
+vi.mock('@/api/clients/settings-client', () => ({ settingsClient: {
+  runtimeStatus: vi.fn(), retryRuntime: vi.fn(), load: vi.fn(), save: vi.fn(), listLlmModels: vi.fn(), discoverLocal: vi.fn(),
+  backendTokenStatus: vi.fn(), ttsCharacters: vi.fn(), warmupTts: vi.fn(), testLlm: vi.fn(), testTts: vi.fn(), testSvc: vi.fn(),
+  llmStatus: vi.fn(), ttsStatus: vi.fn(), deleteSetting: vi.fn(), setSetting: vi.fn(), metadata: vi.fn(), history: vi.fn(),
+} }))
+vi.mock('@/api/client', async () => ({ settingsClient: (await import('@/api/clients/settings-client')).settingsClient }))
+vi.mock('@/api/clients/resource-client', () => ({ resourceClient: {
+  storageStatus: vi.fn(), status: vi.fn(), progress: vi.fn(), prepare: vi.fn(), cancel: vi.fn(), remove: vi.fn(),
+} }))
+vi.mock('@/state/inputBindingsStore', () => ({ useInputBindingsStore: () => ({ state: {}, load: vi.fn() }) }))
+vi.mock('@/api/clients/memory-client', () => ({ memoryClient: { getIndexStatus: vi.fn(), rebuildIndex: vi.fn(), getIndexRebuildJob: vi.fn(), cancelIndexRebuild: vi.fn() } }))
+
+const deferred = <T>() => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => { resolve = done })
+  return { promise, resolve }
+}
+let scope: EffectScope
+let logging: ReturnType<typeof vi.spyOn>
+let state: any
+let saved: any
+const emptyResources = () => ({ activeDownloads: [], resumableDownloads: [] })
+
+beforeEach(() => {
+  settingsSaveState.pending.value = null
+  settingsSaveState.failed.value = null
+  settingsSaveState.pendingFields = new Map()
+  settingsSaveState.failedFields = new Map()
+  settingsSaveState.activeFields = new Map()
+  settingsSaveState.pendingRecoveries = new Set()
+  settingsSaveState.failedRecoveries = new Set()
+  settingsSaveState.active.value = null
+  settingsSaveState.inFlight.value = false
+  settingsSaveState.readbackFailed.value = false
+  settingsSaveState.deletingKeys.value = new Set()
+  settingsSaveState.completion.value = null
+  settingsSaveState.queuedAt = null
+  settingsSaveState.timeout = null
+  settingsSaveState.failures = 0
+  settingsSaveState.idleResolvers = []
+  settingsSaveState.adminInFlight = false
+  settingsSaveState.adminResolvers = []
+  vi.clearAllMocks()
+  vi.useFakeTimers()
+  logging = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  vi.stubGlobal('window', { localStorage: { getItem: () => 'gpt-6.1-sol-v1' }, setInterval, clearInterval, setTimeout, clearTimeout })
+  vi.stubGlobal('document', { hidden: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })
+  scope = effectScope()
+  state = scope.run(() => (SettingsPanel as any).setup({}, { expose: vi.fn() }))
+  saved = structuredClone(JSON.parse(JSON.stringify(state.form)))
+  state.settings.value = structuredClone(saved)
+  vi.mocked(settingsClient.load).mockImplementation(async () => structuredClone(saved))
+  vi.mocked(settingsClient.save).mockResolvedValue({ status: 'ok' })
+  vi.mocked(settingsClient.backendTokenStatus).mockResolvedValue(null as any)
+  vi.mocked(settingsClient.ttsCharacters).mockResolvedValue({ characters: [] } as any)
+  vi.mocked(settingsClient.ttsStatus).mockResolvedValue(null as any)
+  vi.mocked(resourceClient.status).mockResolvedValue(emptyResources() as any)
+  vi.mocked(resourceClient.progress).mockResolvedValue({ activeDownloads: [] })
+})
+afterEach(() => {
+  scope.stop()
+  logging.mockRestore()
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
+
+// Review evidence only. Reuses the existing regression fixture without changing it.
+describe('R1-R3 review probes', () => {
+  it('CONFIRMS a credential-only failed patch loses its recovery identity when deleted by another panel', async () => {
+    state.hydratePreservingDraft(state.captureFormDraft(), saved)
+    vi.mocked(settingsClient.save).mockRejectedValueOnce(new Error('credential save failed'))
+    state.saveAsrField('api_key', 'synthetic-review-key')
+    expect(await state.flushPendingSave()).toBe(false)
+    const secondScope = effectScope()
+    try {
+      const second: any = secondScope.run(() => (SettingsPanel as any).setup({}, { expose: vi.fn() }))
+      second.settings.value = structuredClone(saved)
+      second.hydratePreservingDraft(second.captureFormDraft(), saved)
+      vi.mocked(settingsClient.deleteSetting).mockImplementationOnce(async () => {
+        saved.asr.api_key = ''
+        return { status: 'ok' }
+      })
+      await second.clearAsrApiKey()
+      await nextTick()
+      const observed = {
+        failedPatch: settingsSaveState.failed.value,
+        pendingPatch: settingsSaveState.pending.value,
+        failedRecoveries: settingsSaveState.failedRecoveries.size,
+        originalError: state.updateRequest.error,
+        originalLabel: state.saveStatusLabel.value,
+        originalKey: state.form.asr.api_key,
+        deleteCalls: vi.mocked(settingsClient.deleteSetting).mock.calls.length,
+      }
+      console.log('CREDENTIAL_DELETE_RECOVERY', JSON.stringify(observed))
+      expect(observed.failedPatch).toBeNull()
+      expect(observed.pendingPatch).toBeNull()
+      expect(observed.originalKey).toBe('')
+      expect(observed.deleteCalls).toBe(1)
+      expect(observed.failedRecoveries).toBe(1)
+      expect(observed.originalError).toContain('credential save failed')
+      expect(observed.originalLabel).toBe(t('settings.status.saveFailed'))
+      second.retryFailedSave()
+      await second.waitForSaveIdle()
+      expect(state.updateRequest.error).toContain('credential save failed')
+    } finally { secondScope.stop() }
+  })
+
+  it('CHECKS a pre-existing panel returning an unsubmitted slider draft to baseline during another save', async () => {
+    state.hydratePreservingDraft(state.captureFormDraft(), saved)
+    const secondScope = effectScope()
+    const response = deferred<any>()
+    try {
+      const second: any = secondScope.run(() => (SettingsPanel as any).setup({}, { expose: vi.fn() }))
+      second.settings.value = structuredClone(saved)
+      second.hydratePreservingDraft(second.captureFormDraft(), saved)
+      const baseline = second.form.llm.temperature
+      vi.mocked(settingsClient.save).mockReturnValueOnce(response.promise)
+      state.form.llm.temperature = 1.2
+      state.saveLlmField('temperature', 1.2)
+      const saving = state.flushPendingSave()
+      second.updateLlmParameter('temperature', baseline === 0.8 ? 0.9 : 0.8)
+      second.updateLlmParameter('temperature', baseline)
+      response.resolve({ status: 'ok', normalized_settings: { ...saved, llm: { ...saved.llm, temperature: 1.2, profiles: { custom: { ...saved.llm, temperature: 1.2 } } } } })
+      await saving
+      console.log('BASELINE_SLIDER_DRAFT', JSON.stringify({ baseline, form: second.form.llm.temperature, settings: second.settings.value.llm.temperature }))
+      expect(second.form.llm.temperature).toBe(1.2)
+    } finally { response.resolve({ status: 'ok', normalized_settings: saved }); secondScope.stop() }
+  })
+})

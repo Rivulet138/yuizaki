@@ -42,11 +42,12 @@ def register_interrupt_handler(
     log = logger or logging.getLogger("socket-server.interrupt")
 
     async def on_interrupt(sid: str, data: JsonDict) -> None:
-        # Advance first so in-flight perception/generation work becomes stale
-        # before any cancellation result is acknowledged to the client.
-        advance_interruption_epoch()
         session_id = _as_text(data.get("session_id"), sid)
         request_id = _as_text(data.get("request_id")) or None
+        # Only a general interrupt advances the server-wide epoch. A targeted
+        # job cancellation must not stale unrelated sessions or a newer turn.
+        if request_id is None:
+            advance_interruption_epoch()
         source = _as_text(data.get("source"), "manual").strip().lower()
         source = source if source in {"manual", "voice"} else "other"
         started = clock()
@@ -56,7 +57,11 @@ def register_interrupt_handler(
         generation_mgr = generation_manager_provider()
         interrupted_generation = None
         if generation_mgr is not None:
-            interrupted_generation = generation_mgr.interrupt(session_id)
+            interrupted_generation = (
+                generation_mgr.interrupt(session_id, request_id=request_id)
+                if request_id is not None
+                else generation_mgr.interrupt(session_id)
+            )
         record_interrupt(interrupted_generation is not None or interrupted_tool, source)
 
         try:

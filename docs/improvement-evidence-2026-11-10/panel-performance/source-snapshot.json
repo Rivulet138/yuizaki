@@ -1,0 +1,62 @@
+[
+  {
+    "path": "electron/src/renderer/app/AppShell.vue",
+    "sha256": "7fff7bf820098a7a7407d4a7cbaacf9a98c4e5d3fc140b1d461830ba359f7935"
+  },
+  {
+    "path": "electron/src/renderer/app/BrowserStageView.vue",
+    "sha256": "00475068e3f25af0a658692a3ecfa423f10327cc0d7b1c37751c150a48d2a66f"
+  },
+  {
+    "path": "electron/src/renderer/app/BrowserPetStage.vue",
+    "sha256": "ec527eb4044d59b16f73be820bed925fa9e5a3e1f220eaffbf5879b3a8072bf3"
+  },
+  {
+    "path": "electron/src/renderer/app/BrowserPetStage.test.ts",
+    "sha256": "a1276109e7cb1e6212650bec83757b37c1c0ceceeeea6b9c9043dfbcbea0c71b"
+  },
+  {
+    "path": "electron/src/renderer/pet-renderer.ts",
+    "sha256": "d5ae4a63a844b4e717351960c12766b788f342afe86415dc21bdec08aac1e332"
+  },
+  {
+    "path": "electron/src/renderer/pet-renderer.performance.test.ts",
+    "sha256": "b51a81236b9f57a33d0ffa75ec7df8bb495c016733134358e313f27844b800ff"
+  },
+  {
+    "path": "electron/src/renderer/domains/settings/views/SettingsPanel.vue",
+    "sha256": "2f6bec2e14cf9598922f53400a76493291bc63d9ea65138076a367ea96feefe7"
+  },
+  {
+    "path": "electron/src/renderer/domains/settings/views/SettingsPanel.regression.test.ts",
+    "sha256": "bcd3409eeca676cec8db39ca974d05a39439bda40524476de55fc371a16f82c2"
+  },
+  {
+    "path": "electron/src/renderer/domains/settings/composables/useSettingsDomain.ts",
+    "sha256": "aed7a9f89e675d21f28a98967a32638a8039fe56892ea4518e44febd79bdd26b"
+  },
+  {
+    "path": "electron/src/renderer/domains/settings/composables/useSettingsDomain.test.ts",
+    "sha256": "671c5a4964fd14579afe000dca0dc4d219d6013785fb0211c2e28473ab514b02"
+  },
+  {
+    "path": "electron/src/renderer/api/clients/settings-client.ts",
+    "sha256": "e13a633e3528951491e174d0689f91618538d90763becde064e10a9f02814f83"
+  },
+  {
+    "path": "electron/src/renderer/i18n/settingsPanelMessages.ts",
+    "sha256": "a1951421a45354950801892ab185757f6351731d7cc53fea3c1ae5dc14a17a66"
+  },
+  {
+    "path": "python/modules/system/settings_api.py",
+    "sha256": "0ceab8420a1da29087180dd310096a8fc43c96ae9c926ff570a25d4d3fb957be"
+  },
+  {
+    "path": "python/tests/test_settings_transactions.py",
+    "sha256": "8adb28d1b3b41f6d54f125fc02a85a7f6564963aa88fa4b214a8ee5ae8f9d482"
+  },
+  {
+    "path": "electron/dist/renderer/assets/main-Bz_-t5m8.js",
+    "sha256": "79617c656b60b41ee0c141f15533d26b85e6b9e2582e884fe7932bc491b2eb3e"
+  }
+]

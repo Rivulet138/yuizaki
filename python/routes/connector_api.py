@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable, Collection, Mapping
 from pathlib import Path
 from threading import Lock
 from typing import Any
+from urllib.error import HTTPError
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -45,6 +46,20 @@ def _delivery_succeeded(delivery: object) -> bool:
     return (
         (delivery.get("ok") is True or ("ok" not in delivery and http_ok))
         and delivery.get("sent", True) is not False
+    )
+
+
+def _delivery_definitely_failed(delivery: object) -> bool:
+    if not isinstance(delivery, Mapping) or delivery.get("outcome") == "unknown":
+        return False
+    if delivery.get("sent") is True:
+        return False
+    status_code = delivery.get("status_code")
+    return (
+        delivery.get("sent") is False
+        or delivery.get("ok") is False
+        or delivery.get("outcome") == "failed"
+        or (type(status_code) is int and 400 <= status_code < 500)
     )
 
 
@@ -532,6 +547,25 @@ def create_message_connector_router(
         connector_id = connector_id.strip().lower()
         if connector_id not in {"telegram", "discord", "qq", "wechat"}:
             return JSONResponse({"ok": False, "error": "unknown_connector"}, status_code=404)
+        # Exact recovery inspection is read-only: do not recover a lease or
+        # infer an absent record from the bounded recent-deliveries window.
+        if "delivery_key" in request.query_params:
+            delivery_key = request.query_params["delivery_key"].strip()
+            if not delivery_key or len(delivery_key) > 512:
+                return JSONResponse({"ok": False, "error": "invalid_delivery_key"}, status_code=422)
+            row = store.connector_delivery(delivery_key)
+            if row is not None and row.get("connector_id") != connector_id:
+                row = None
+            delivery = _public_delivery(row, now=current_time())
+            return JSONResponse({
+                "ok": True,
+                "connector_id": connector_id,
+                "delivery_key": delivery_key,
+                "found": delivery is not None,
+                "status": delivery["status"] if delivery is not None else "unknown",
+                "delivery": delivery,
+                "external_side_effects": False,
+            })
         try:
             limit = int(request.query_params.get("limit", "50"))
         except ValueError:
@@ -608,7 +642,7 @@ def create_message_connector_router(
         row = store.connector_delivery(delivery_key) if store is not None else None
         if row is None or row.get("connector_id") != connector_id or row.get("status") == "delivered":
             return await _retry_connector_delivery(connector_id, delivery_key)
-        if connector_id == "qq" and row.get("status") == "sending":
+        if row.get("status") == "sending":
             return _unknown_delivery_response(row)
         registry = registry_provider()
         if not registry.is_enabled(connector_id):
@@ -655,6 +689,7 @@ def create_message_connector_router(
                 "connector_turn_failed",
                 "connector_turn_exception",
                 "connector_turn_interrupted",
+                "connector_retry_cancelled",
             }
             if not reply and not retry_turn:
                 raise ValueError("delivery reply is unavailable")
@@ -711,8 +746,13 @@ def create_message_connector_router(
                     raise RuntimeError("delivery_retry_claim_lost")
                 turn_retry_promoted = True
             provider_send_started = True
-            delivery = await asyncio.to_thread(registry_provider().send_reply, message, reply)
-            if isinstance(delivery, Mapping) and delivery.get("outcome") == "unknown":
+            try:
+                delivery = await asyncio.to_thread(registry_provider().send_reply, message, reply)
+            except HTTPError as exc:
+                if not 400 <= exc.code < 500:
+                    raise
+                delivery = {"ok": False, "sent": False, "reason": "provider_rejected"}
+            if not _delivery_succeeded(delivery) and not _delivery_definitely_failed(delivery):
                 registry_provider().record_failure(connector_id, "delivery_state_unknown")
                 return _unknown_delivery_response(store.connector_delivery(delivery_key))
             if not _delivery_succeeded(delivery):
@@ -737,12 +777,14 @@ def create_message_connector_router(
             registry_provider().record_success(connector_id)
             return JSONResponse({"ok": True, "retried": True, "delivery": _public_delivery(store.connector_delivery(delivery_key))})
         except asyncio.CancelledError:
-            if retry_turn and not turn_retry_promoted:
+            # Cancelling to_thread does not stop the provider call. Preserve
+            # ownership and sending/unknown for every possibly completed send.
+            if provider_send_started:
+                registry_provider().record_failure(connector_id, "delivery_state_unknown")
+            elif retry_turn and not turn_retry_promoted:
                 store.release_connector_turn_retry(delivery_key, owner, "connector_retry_cancelled")
-            elif connector_id != "qq":
+            else:
                 store.mark_connector_delivery_failed(delivery_key, owner, "connector_retry_cancelled")
-            # Cancelling to_thread does not stop the provider POST. Keep QQ
-            # sending/unknown so a retry cannot duplicate an in-flight send.
             raise
         except Exception:
             LOGGER.exception(
@@ -751,7 +793,7 @@ def create_message_connector_router(
                 message.event_id,
                 delivery_key,
             )
-            if connector_id == "qq" and provider_send_started:
+            if provider_send_started:
                 registry_provider().record_failure(connector_id, "delivery_state_unknown")
                 return _unknown_delivery_response(store.connector_delivery(delivery_key))
             reason = "connector_turn_exception" if retry_turn and not turn_retry_promoted else "connector_provider_exception"
@@ -1206,19 +1248,15 @@ def create_message_connector_router(
                     delivery_claimed = delivery_claim.get("status") == "claimed"
                 result = getattr(commit, "result", None)
                 reply = str(getattr(result, "reply", "") or "").strip()
+                active_phases[task_key] = "sending"
+                provider_send_started = True
                 try:
-                    active_phases[task_key] = "sending"
-                    provider_send_started = True
                     delivery = await asyncio.to_thread(registry.send_reply, message, reply)
-                except Exception:
-                    if connector_id != "qq" and delivery_store is not None and delivery_claimed:
-                        delivery_store.mark_connector_delivery_failed(
-                            delivery_key,
-                            delivery_owner,
-                            "connector_provider_exception",
-                        )
-                    raise
-                if isinstance(delivery, Mapping) and delivery.get("outcome") == "unknown":
+                except HTTPError as exc:
+                    if not 400 <= exc.code < 500:
+                        raise
+                    delivery = {"ok": False, "sent": False, "reason": "provider_rejected"}
+                if not _delivery_succeeded(delivery) and not _delivery_definitely_failed(delivery):
                     registry.record_failure(connector_id, "delivery_state_unknown")
                     return _unknown_delivery_response(
                         delivery_store.connector_delivery(delivery_key) if delivery_store is not None else None
@@ -1267,6 +1305,11 @@ def create_message_connector_router(
                     "delivery": {"ok": True, "provider": connector_id},
                 })
             except asyncio.CancelledError:
+                if provider_send_started:
+                    # A deferred Discord PATCH may still complete too. Do not
+                    # race it with a cancellation status PATCH.
+                    registry.record_failure(connector_id, "delivery_state_unknown")
+                    raise
                 if delivery_store is not None and turn_pending_created and not delivery_claimed:
                     delivery_store.discard_connector_turn_pending(delivery_key, delivery_owner)
                 registry.record_failure(connector_id, "事件已取消")
@@ -1279,7 +1322,7 @@ def create_message_connector_router(
                     message.event_id,
                     turn_request.request_id,
                 )
-                if connector_id == "qq" and provider_send_started:
+                if provider_send_started:
                     registry.record_failure(connector_id, "delivery_state_unknown")
                     return _unknown_delivery_response(
                         delivery_store.connector_delivery(delivery_key) if delivery_store is not None else None

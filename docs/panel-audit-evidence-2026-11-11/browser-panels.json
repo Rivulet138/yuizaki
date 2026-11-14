@@ -1,0 +1,3905 @@
+{
+  "scope": "real isolated Python backend; Electron host not running",
+  "results": [
+    {
+      "label": "chat",
+      "hash": "#/w/default/chat",
+      "headings": [],
+      "tabs": [],
+      "loading": 0,
+      "messages": [],
+      "overflow": 0,
+      "bodyText": "对话\n长期记忆\n系统设置\n高级\n当前工作区\n对话\n语音模式\n默认模型\n均衡\nLive2D 暂不可用 · 重试\n等待对话",
+      "entry_ms": 14832,
+      "subtabs": [],
+      "responsive": [
+        {
+          "label": "768",
+          "hash": "#/w/default/chat",
+          "headings": [],
+          "tabs": [],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "对话\n语音模式\n默认模型\n均衡\nLive2D 暂不可用 · 重试\n等待对话"
+        },
+        {
+          "label": "390",
+          "hash": "#/w/default/chat",
+          "headings": [],
+          "tabs": [],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "对话\n语音模式\n默认模型\n均衡\nLive2D 暂不可用 · 重试\n等待对话"
+        }
+      ]
+    },
+    {
+      "label": "memory",
+      "hash": "#/w/default/memory",
+      "headings": [
+        "长期记忆",
+        "长期记忆",
+        "记忆库"
+      ],
+      "tabs": [
+        {
+          "text": "记忆库3",
+          "selected": "true"
+        },
+        {
+          "text": "需要检查0",
+          "selected": "false"
+        },
+        {
+          "text": "使用情况",
+          "selected": "false"
+        }
+      ],
+      "loading": 0,
+      "messages": [],
+      "overflow": 0,
+      "bodyText": "对话\n长期记忆\n系统设置\n高级\n当前工作区\n长期记忆\n当前离线\n简体中文\nDefault Companion\n长期记忆\n使用范围\n当前工作区\n高级工具\n记忆库\n3\n需要检查\n0\n使用情况\n记忆库\n3 条\n筛选与排序\n事件\n可用于对话\n\n結崎 Default Companion 产生了一次关系事件: kind=state_snapshot, mood=curious, affinity=0.530, energy=0.850\n\n偏好与称呼\n用户资料\n2026-11-11 14:11\n事件\n可用于对话\n\n結崎 Default Companion 产生了一次关系事件: kind=state_snapshot, mood=curious, affinity=0.520, energy=0.900\n\n偏好与称呼\n用户资料\n2026-11-11 14:06\n事件\n可用于对话\n\n結崎 Default Companion 产生了一次关系事件: kind=mood_shift, mood=curious, affinity=0.510, energy=0.950\n\n偏好与称呼\n用户资料\n2026-11-11 14:01\n记忆详情\nevent\n\n当前工作区 · 用户资料 · 更新于 2026/11/11\n\n任务经验\n可用于对话\n\n权威数据已保存 · 权威数据已保存，索引待处理\n\n记住的内容\n归类\n偏好与称呼\n可靠程度\n89%\n已保存\n保存修改\n重置\n暂停使用\n调整分类和有效期\n这条记忆的来源（1）\n更多调整\n记录与技术信息\n永久删除（不可恢复）",
+      "entry_ms": 1029,
+      "subtabs": [
+        {
+          "label": "记忆库\n3",
+          "hash": "#/w/default/memory",
+          "headings": [
+            "长期记忆",
+            "长期记忆",
+            "记忆库"
+          ],
+          "tabs": [
+            {
+              "text": "记忆库3",
+              "selected": "true"
+            },
+            {
+              "text": "需要检查0",
+              "selected": "false"
+            },
+            {
+              "text": "使用情况",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n当前工作区\n长期记忆\n当前离线\n简体中文\nDefault Companion\n长期记忆\n使用范围\n当前工作区\n高级工具\n记忆库\n3\n需要检查\n0\n使用情况\n记忆库\n3 条\n筛选与排序\n事件\n可用于对话\n\n結崎 Default Companion 产生了一次关系事件: kind=state_snapshot, mood=curious, affinity=0.530, energy=0.850\n\n偏好与称呼\n用户资料\n2026-11-11 14:11\n事件\n可用于对话\n\n結崎 Default Companion 产生了一次关系事件: kind=state_snapshot, mood=curious, affinity=0.520, energy=0.900\n\n偏好与称呼\n用户资料\n2026-11-11 14:06\n事件\n可用于对话\n\n結崎 Default Companion 产生了一次关系事件: kind=mood_shift, mood=curious, affinity=0.510, energy=0.950\n\n偏好与称呼\n用户资料\n2026-11-11 14:01\n记忆详情\nevent\n\n当前工作区 · 用户资料 · 更新于 2026/11/11\n\n任务经验\n可用于对话\n\n权威数据已保存 · 权威数据已保存，索引待处理\n\n记住的内容\n归类\n偏好与称呼\n可靠程度\n89%\n已保存\n保存修改\n重置\n暂停使用\n调整分类和有效期\n这条记忆的来源（1）\n更多调整\n记录与技术信息\n永久删除（不可恢复）"
+        },
+        {
+          "label": "需要检查\n0",
+          "hash": "#/w/default/memory",
+          "headings": [
+            "长期记忆",
+            "长期记忆",
+            "需要检查"
+          ],
+          "tabs": [
+            {
+              "text": "记忆库3",
+              "selected": "false"
+            },
+            {
+              "text": "需要检查0",
+              "selected": "true"
+            },
+            {
+              "text": "使用情况",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n当前工作区\n长期记忆\n当前离线\n简体中文\nDefault Companion\n长期记忆\n使用范围\n当前工作区\n高级工具\n记忆库\n3\n需要检查\n0\n使用情况\n需要检查\n0 条\n\n目前没有需要你检查的记录"
+        },
+        {
+          "label": "使用情况",
+          "hash": "#/w/default/memory",
+          "headings": [
+            "长期记忆",
+            "长期记忆",
+            "使用情况"
+          ],
+          "tabs": [
+            {
+              "text": "记忆库3",
+              "selected": "false"
+            },
+            {
+              "text": "需要检查0",
+              "selected": "false"
+            },
+            {
+              "text": "使用情况",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n当前工作区\n长期记忆\n当前离线\n简体中文\nDefault Companion\n长期记忆\n使用范围\n当前工作区\n高级工具\n记忆库\n3\n需要检查\n0\n使用情况\n使用情况\n已保存\n3\n可用于对话\n3\n需要检查\n0\n暂停使用\n0\n按内容类别\n偏好与称呼\n喜欢什么、希望怎样称呼你\n3\n当前事项\n正在推进的项目或短期目标\n0\n发生过的事\n具体事件、约定或经历\n0\n相处方式\n互动边界和重要关系事件\n0\n经验总结\n系统整理的复盘内容\n0\n稳定事实\n长期成立的背景信息\n0\n最近活动\n3 条\n更新了一条记忆\n結崎 Default Companion 产生了一次关系事件: , , ,\n当前工作区\n2026-11-11 14:11\n更新了一条记忆\n結崎 Default Companion 产生了一次关系事件: , , ,\n当前工作区\n2026-11-11 14:06\n更新了最近状态\n結崎 Default Companion 产生了一次关系事件: , , ,\n当前工作区\n2026-11-11 14:01\n暂停使用的记忆\n0 条"
+        }
+      ],
+      "responsive": [
+        {
+          "label": "768",
+          "hash": "#/w/default/memory",
+          "headings": [
+            "长期记忆",
+            "长期记忆",
+            "使用情况"
+          ],
+          "tabs": [
+            {
+              "text": "记忆库3",
+              "selected": "false"
+            },
+            {
+              "text": "需要检查0",
+              "selected": "false"
+            },
+            {
+              "text": "使用情况",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "长期记忆\n当前离线\n简体中文\nDefault Companion\n长期记忆\n使用范围\n当前工作区\n高级工具\n记忆库\n3\n需要检查\n0\n使用情况\n使用情况\n已保存\n3\n可用于对话\n3\n需要检查\n0\n暂停使用\n0\n按内容类别\n偏好与称呼\n喜欢什么、希望怎样称呼你\n3\n当前事项\n正在推进的项目或短期目标\n0\n发生过的事\n具体事件、约定或经历\n0\n相处方式\n互动边界和重要关系事件\n0\n经验总结\n系统整理的复盘内容\n0\n稳定事实\n长期成立的背景信息\n0\n最近活动\n3 条\n更新了一条记忆\n結崎 Default Companion 产生了一次关系事件: , , ,\n当前工作区\n2026-11-11 14:11\n更新了一条记忆\n結崎 Default Companion 产生了一次关系事件: , , ,\n当前工作区\n2026-11-11 14:06\n更新了最近状态\n結崎 Default Companion 产生了一次关系事件: , , ,\n当前工作区\n2026-11-11 14:01\n暂停使用的记忆\n0 条"
+        },
+        {
+          "label": "390",
+          "hash": "#/w/default/memory",
+          "headings": [
+            "长期记忆",
+            "长期记忆",
+            "使用情况"
+          ],
+          "tabs": [
+            {
+              "text": "记忆库3",
+              "selected": "false"
+            },
+            {
+              "text": "需要检查0",
+              "selected": "false"
+            },
+            {
+              "text": "使用情况",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "长期记忆\n当前离线\n简体中文\nDefault Companion\n长期记忆\n当前工作区\n高级工具\n记忆库\n3\n需要检查\n0\n使用情况\n使用情况\n已保存\n3\n可用于对话\n3\n需要检查\n0\n暂停使用\n0\n按内容类别\n偏好与称呼\n喜欢什么、希望怎样称呼你\n3\n当前事项\n正在推进的项目或短期目标\n0\n发生过的事\n具体事件、约定或经历\n0\n相处方式\n互动边界和重要关系事件\n0\n经验总结\n系统整理的复盘内容\n0\n稳定事实\n长期成立的背景信息\n0\n最近活动\n3 条\n更新了一条记忆\n結崎 Default Companion 产生了一次关系事件: , , ,\n当前工作区\n2026-11-11 14:11\n更新了一条记忆\n結崎 Default Companion 产生了一次关系事件: , , ,\n当前工作区\n2026-11-11 14:06\n更新了最近状态\n結崎 Default Companion 产生了一次关系事件: , , ,\n当前工作区\n2026-11-11 14:01\n暂停使用的记忆\n0 条"
+        }
+      ]
+    },
+    {
+      "label": "settings",
+      "hash": "#/w/default/settings",
+      "headings": [
+        "系统设置",
+        "系统设置",
+        "生成风格",
+        "候选筛选",
+        "重复控制",
+        "上下文与限制"
+      ],
+      "tabs": [
+        {
+          "text": "访问",
+          "selected": "false"
+        },
+        {
+          "text": "LLM",
+          "selected": "true"
+        },
+        {
+          "text": "TTS",
+          "selected": "false"
+        },
+        {
+          "text": "ASR",
+          "selected": "false"
+        },
+        {
+          "text": "SVC 配置",
+          "selected": "false"
+        },
+        {
+          "text": "记忆",
+          "selected": "false"
+        },
+        {
+          "text": "摘要",
+          "selected": "false"
+        },
+        {
+          "text": "资源",
+          "selected": "false"
+        },
+        {
+          "text": "系统",
+          "selected": "false"
+        },
+        {
+          "text": "运行引导",
+          "selected": "false"
+        }
+      ],
+      "loading": 1,
+      "messages": [],
+      "overflow": 0,
+      "bodyText": "对话\n长期记忆\n系统设置\n高级\n当前工作区\n系统设置\n当前离线\n简体中文\nDefault Companion\n系统设置\n服务应用状态\n\n正在加载数据…\n\n刷新应用状态\n连接\n访问\nLLM\n语音\nTTS\nASR\nSVC 配置\n记忆\n记忆\n摘要\n应用\n资源\n系统\n运行引导\n模型服务\n未设置\n读取运行态\n检测模型\n读取运行状态\n测试 LLM\n提供商\nDeepSeek\n缺少 Key\nQwen\n缺少 Key\nGemini\n缺少 Key\nChatGPT\n缺少 Key\nClaude\n缺少 Key\nGrok\n缺少 Key\nOllama\n待选模型\nLM Studio\n待选模型\n自定义\n未配置\n重置当前提供商\n连接参数\n基础 URL\n当前连接 API Key\n模型名称\nSelect\n实时视觉模型\n使用独立视觉模型\n推理参数\n应用推荐值\n生成风格\n随机度（Temperature）\n1.00\n候选范围（Top P）\n1.00\n候选筛选\n最低概率（Min P）\n0.00\n候选数量（Top K）\n0\n重复控制\n频率惩罚\n0.00\n存在惩罚\n0.00\n重复惩罚\n1.00\n上下文与限制\n上下文上限\n500000\n输出上限\n16384\n请求超时（秒）\n120",
+      "entry_ms": 666,
+      "subtabs": [
+        {
+          "label": "访问",
+          "hash": "#/w/default/settings",
+          "headings": [
+            "系统设置",
+            "系统设置"
+          ],
+          "tabs": [
+            {
+              "text": "访问",
+              "selected": "true"
+            },
+            {
+              "text": "LLM",
+              "selected": "false"
+            },
+            {
+              "text": "TTS",
+              "selected": "false"
+            },
+            {
+              "text": "ASR",
+              "selected": "false"
+            },
+            {
+              "text": "SVC 配置",
+              "selected": "false"
+            },
+            {
+              "text": "记忆",
+              "selected": "false"
+            },
+            {
+              "text": "摘要",
+              "selected": "false"
+            },
+            {
+              "text": "资源",
+              "selected": "false"
+            },
+            {
+              "text": "系统",
+              "selected": "false"
+            },
+            {
+              "text": "运行引导",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n当前工作区\n系统设置\n当前离线\n简体中文\nDefault Companion\n系统设置\n连接\n访问\nLLM\n语音\nTTS\nASR\nSVC 配置\n记忆\n记忆\n摘要\n应用\n资源\n系统\n运行引导\nBackend API Token\n保存\n生成新令牌\n未设置"
+        },
+        {
+          "label": "LLM",
+          "hash": "#/w/default/settings",
+          "headings": [
+            "系统设置",
+            "系统设置",
+            "生成风格",
+            "候选筛选",
+            "重复控制",
+            "上下文与限制"
+          ],
+          "tabs": [
+            {
+              "text": "访问",
+              "selected": "false"
+            },
+            {
+              "text": "LLM",
+              "selected": "true"
+            },
+            {
+              "text": "TTS",
+              "selected": "false"
+            },
+            {
+              "text": "ASR",
+              "selected": "false"
+            },
+            {
+              "text": "SVC 配置",
+              "selected": "false"
+            },
+            {
+              "text": "记忆",
+              "selected": "false"
+            },
+            {
+              "text": "摘要",
+              "selected": "false"
+            },
+            {
+              "text": "资源",
+              "selected": "false"
+            },
+            {
+              "text": "系统",
+              "selected": "false"
+            },
+            {
+              "text": "运行引导",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n当前工作区\n系统设置\n当前离线\n简体中文\nDefault Companion\n系统设置\n连接\n访问\nLLM\n语音\nTTS\nASR\nSVC 配置\n记忆\n记忆\n摘要\n应用\n资源\n系统\n运行引导\n模型服务\n未设置\n未连通上游\n检测模型\n读取运行状态\n测试 LLM\n提供商\nDeepSeek\n缺少 Key\nQwen\n缺少 Key\nGemini\n缺少 Key\nChatGPT\n缺少 Key\nClaude\n缺少 Key\nGrok\n缺少 Key\nOllama\n待选模型\nLM Studio\n待选模型\n自定义\n未配置\n重置当前提供商\n连接参数\n基础 URL\n当前连接 API Key\n模型名称\nSelect\n实时视觉模型\n使用独立视觉模型\n推理参数\n应用推荐值\n生成风格\n随机度（Temperature）\n1.00\n候选范围（Top P）\n1.00\n候选筛选\n最低概率（Min P）\n0.00\n候选数量（Top K）\n0\n重复控制\n频率惩罚\n0.00\n存在惩罚\n0.00\n重复惩罚\n1.00\n上下文与限制\n上下文上限\n500000\n输出上限\n16384\n请求超时（秒）\n120"
+        },
+        {
+          "label": "TTS",
+          "hash": "#/w/default/settings",
+          "headings": [
+            "系统设置",
+            "系统设置"
+          ],
+          "tabs": [
+            {
+              "text": "访问",
+              "selected": "false"
+            },
+            {
+              "text": "LLM",
+              "selected": "false"
+            },
+            {
+              "text": "TTS",
+              "selected": "true"
+            },
+            {
+              "text": "ASR",
+              "selected": "false"
+            },
+            {
+              "text": "SVC 配置",
+              "selected": "false"
+            },
+            {
+              "text": "记忆",
+              "selected": "false"
+            },
+            {
+              "text": "摘要",
+              "selected": "false"
+            },
+            {
+              "text": "资源",
+              "selected": "false"
+            },
+            {
+              "text": "系统",
+              "selected": "false"
+            },
+            {
+              "text": "运行引导",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n当前工作区\n系统设置\n当前离线\n简体中文\nDefault Companion\n系统设置\n连接\n访问\nLLM\n语音\nTTS\nASR\nSVC 配置\n记忆\n记忆\n摘要\n应用\n资源\n系统\n运行引导\n文本转语音\n未加载\n就绪\n刷新状态\n检测角色资源\n预热语音引擎\n自动检测并填入\n重置当前提供商\n测试 TTS\n运行详情\n角色与语言\n提供方\nGenie TTS\nGenie 角色\n普拉琪娜_e15_e8_correct_sampling_v2\nGenie 模型目录（可选）\n语言\n日语\n参考音频\n参考音频\n参考文本\n推理参数\n推理设备\nCPU\n推理需求\n质量优先\n分句方式\n智能切分\n推理模式\n串行推理"
+        },
+        {
+          "label": "ASR",
+          "hash": "#/w/default/settings",
+          "headings": [
+            "系统设置",
+            "系统设置",
+            "语音识别"
+          ],
+          "tabs": [
+            {
+              "text": "访问",
+              "selected": "false"
+            },
+            {
+              "text": "LLM",
+              "selected": "false"
+            },
+            {
+              "text": "TTS",
+              "selected": "false"
+            },
+            {
+              "text": "ASR",
+              "selected": "true"
+            },
+            {
+              "text": "SVC 配置",
+              "selected": "false"
+            },
+            {
+              "text": "记忆",
+              "selected": "false"
+            },
+            {
+              "text": "摘要",
+              "selected": "false"
+            },
+            {
+              "text": "资源",
+              "selected": "false"
+            },
+            {
+              "text": "系统",
+              "selected": "false"
+            },
+            {
+              "text": "运行引导",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "当前状态不允许该操作：刷新后按提示重试。（后端说明：Audit blocked host or provider mutation）（audit_read_only）"
+          ],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n当前工作区\n系统设置\n当前离线\n简体中文\nDefault Companion\n系统设置\n连接\n访问\nLLM\n语音\nTTS\nASR\nSVC 配置\n记忆\n记忆\n摘要\n应用\n资源\n系统\n运行引导\n语音识别\n禁用\n自动检测并填入\n禁用\nASR 提供方\n禁用\n\n当前状态不允许该操作：刷新后按提示重试。（后端说明：Audit blocked host or provider mutation）（audit_read_only）"
+        },
+        {
+          "label": "SVC 配置",
+          "hash": "#/w/default/settings",
+          "headings": [
+            "系统设置",
+            "系统设置",
+            "SVC 服务"
+          ],
+          "tabs": [
+            {
+              "text": "访问",
+              "selected": "false"
+            },
+            {
+              "text": "LLM",
+              "selected": "false"
+            },
+            {
+              "text": "TTS",
+              "selected": "false"
+            },
+            {
+              "text": "ASR",
+              "selected": "false"
+            },
+            {
+              "text": "SVC 配置",
+              "selected": "true"
+            },
+            {
+              "text": "记忆",
+              "selected": "false"
+            },
+            {
+              "text": "摘要",
+              "selected": "false"
+            },
+            {
+              "text": "资源",
+              "selected": "false"
+            },
+            {
+              "text": "系统",
+              "selected": "false"
+            },
+            {
+              "text": "运行引导",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "请先填写 SVC 基础 URL，再开始转换。",
+            "当前状态不允许该操作：刷新后按提示重试。（后端说明：Audit blocked host or provider mutation）（audit_read_only）"
+          ],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n当前工作区\n系统设置\n当前离线\n简体中文\nDefault Companion\n系统设置\n连接\n访问\nLLM\n语音\nTTS\nASR\nSVC 配置\n记忆\n记忆\n摘要\n应用\n资源\n系统\n运行引导\nSVC 服务\n缺少端点\n检测服务\n自动检测并填入\nSVC 提供方\nSoulX-Singer-SVC\nSVC 基础 URL\n音色 ID\n音高偏移\n服务超时（秒）\n连接\nLLM\nTTS\nASR\n未选择音频\nSoulX-Singer-SVC\n缺少端点\n拖入音频文件，或点击选择\n开始 SVC 转换\n请先填写 SVC 基础 URL，再开始转换。\n\n当前状态不允许该操作：刷新后按提示重试。（后端说明：Audit blocked host or provider mutation）（audit_read_only）"
+        },
+        {
+          "label": "记忆",
+          "hash": "#/w/default/settings",
+          "headings": [
+            "系统设置",
+            "系统设置",
+            "长期记忆与 RAG"
+          ],
+          "tabs": [
+            {
+              "text": "访问",
+              "selected": "false"
+            },
+            {
+              "text": "LLM",
+              "selected": "false"
+            },
+            {
+              "text": "TTS",
+              "selected": "false"
+            },
+            {
+              "text": "ASR",
+              "selected": "false"
+            },
+            {
+              "text": "SVC 配置",
+              "selected": "false"
+            },
+            {
+              "text": "记忆",
+              "selected": "true"
+            },
+            {
+              "text": "摘要",
+              "selected": "false"
+            },
+            {
+              "text": "资源",
+              "selected": "false"
+            },
+            {
+              "text": "系统",
+              "selected": "false"
+            },
+            {
+              "text": "运行引导",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "当前状态不允许该操作：刷新后按提示重试。（后端说明：Audit blocked host or provider mutation）（audit_read_only）"
+          ],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n当前工作区\n系统设置\n当前离线\n简体中文\nDefault Companion\n系统设置\n连接\n访问\nLLM\n语音\nTTS\nASR\nSVC 配置\n记忆\n记忆\n摘要\n应用\n资源\n系统\n运行引导\n长期记忆与 RAG\n本机权威存储\nSQLite\n自动检测并填入\n重建向量索引\n实际运行后端: sqlite\n后端健康\n文档数：3\n刷新\n存储修订: 3索引代次: local:3快照修订: 未提供／尚未激活\n\nSQLite memory saved; index needs recovery\n\n本地权威存储\n记忆后端\nSQLite\n仅本次运行\nSQLite + 向量检索\nSQLite 存储文件\n语义检索\nEmbedding 模型\n\n当前状态不允许该操作：刷新后按提示重试。（后端说明：Audit blocked host or provider mutation）（audit_read_only）"
+        },
+        {
+          "label": "摘要",
+          "hash": "#/w/default/settings",
+          "headings": [
+            "系统设置",
+            "系统设置",
+            "何时压缩",
+            "摘要更新"
+          ],
+          "tabs": [
+            {
+              "text": "访问",
+              "selected": "false"
+            },
+            {
+              "text": "LLM",
+              "selected": "false"
+            },
+            {
+              "text": "TTS",
+              "selected": "false"
+            },
+            {
+              "text": "ASR",
+              "selected": "false"
+            },
+            {
+              "text": "SVC 配置",
+              "selected": "false"
+            },
+            {
+              "text": "记忆",
+              "selected": "false"
+            },
+            {
+              "text": "摘要",
+              "selected": "true"
+            },
+            {
+              "text": "资源",
+              "selected": "false"
+            },
+            {
+              "text": "系统",
+              "selected": "false"
+            },
+            {
+              "text": "运行引导",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "当前状态不允许该操作：刷新后按提示重试。（后端说明：Audit blocked host or provider mutation）（audit_read_only）"
+          ],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n当前工作区\n系统设置\n当前离线\n简体中文\nDefault Companion\n系统设置\n连接\n访问\nLLM\n语音\nTTS\nASR\nSVC 配置\n记忆\n记忆\n摘要\n应用\n资源\n系统\n运行引导\n会话摘要\n自动维护\n高级设置（默认无需修改）\n\n当前状态不允许该操作：刷新后按提示重试。（后端说明：Audit blocked host or provider mutation）（audit_read_only）"
+        },
+        {
+          "label": "资源",
+          "hash": "#/w/default/settings",
+          "headings": [
+            "系统设置",
+            "系统设置"
+          ],
+          "tabs": [
+            {
+              "text": "访问",
+              "selected": "false"
+            },
+            {
+              "text": "LLM",
+              "selected": "false"
+            },
+            {
+              "text": "TTS",
+              "selected": "false"
+            },
+            {
+              "text": "ASR",
+              "selected": "false"
+            },
+            {
+              "text": "SVC 配置",
+              "selected": "false"
+            },
+            {
+              "text": "记忆",
+              "selected": "false"
+            },
+            {
+              "text": "摘要",
+              "selected": "false"
+            },
+            {
+              "text": "资源",
+              "selected": "true"
+            },
+            {
+              "text": "系统",
+              "selected": "false"
+            },
+            {
+              "text": "运行引导",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "当前状态不允许该操作：刷新后按提示重试。（后端说明：Audit blocked host or provider mutation）（audit_read_only）",
+            "目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+          ],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n当前工作区\n系统设置\n当前离线\n简体中文\nDefault Companion\n系统设置\n连接\n访问\nLLM\n语音\nTTS\nASR\nSVC 配置\n记忆\n记忆\n摘要\n应用\n资源\n系统\n运行引导\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n刷新资源状态\n存储清理\n48.0 KiB\n清理缓存\n分类\n\t\n文件\n\t\n占用\n\t\n存储\n\t\n操作\nTTS 音频\n\t\n0\n\t\n0 B\n\t\n磁盘\n\t\n永久清理\n\n\n运行临时文件\n\t\n0\n\t\n0 B\n\t\n磁盘\n\t\n永久清理\n\n\n长期记忆\n\t\n1\n\t\n48.0 KiB\n\t\n磁盘\n\t\n压缩\n\n\n实时视觉 / OCR\n\t\n0\n\t\n0 B\n\t\n内存\n\t\n无\n\n尚未加载资源状态\n\n当前状态不允许该操作：刷新后按提示重试。（后端说明：Audit blocked host or provider mutation）（audit_read_only）\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+        },
+        {
+          "label": "系统",
+          "hash": "#/w/default/settings",
+          "headings": [
+            "系统设置",
+            "系统设置"
+          ],
+          "tabs": [
+            {
+              "text": "访问",
+              "selected": "false"
+            },
+            {
+              "text": "LLM",
+              "selected": "false"
+            },
+            {
+              "text": "TTS",
+              "selected": "false"
+            },
+            {
+              "text": "ASR",
+              "selected": "false"
+            },
+            {
+              "text": "SVC 配置",
+              "selected": "false"
+            },
+            {
+              "text": "记忆",
+              "selected": "false"
+            },
+            {
+              "text": "摘要",
+              "selected": "false"
+            },
+            {
+              "text": "资源",
+              "selected": "false"
+            },
+            {
+              "text": "系统",
+              "selected": "true"
+            },
+            {
+              "text": "运行引导",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "浏览器快捷键和本页鼠标侧键正在监听；全局桌面动作需要桌面应用。",
+            "当前状态不允许该操作：刷新后按提示重试。（后端说明：Audit blocked host or provider mutation）（audit_read_only）",
+            "目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+          ],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n当前工作区\n系统设置\n当前离线\n简体中文\nDefault Companion\n系统设置\n连接\n访问\nLLM\n语音\nTTS\nASR\nSVC 配置\n记忆\n记忆\n摘要\n应用\n资源\n系统\n运行引导\n界面\n主题\n浅色\n深色\n跟随系统\n界面语言\n简体中文\nEnglish\n日本語\n桌面输入\n鼠标输入未启用\n浏览器快捷键和本页鼠标侧键正在监听；全局桌面动作需要桌面应用。\n本页输入\n按住说话\n鼠标侧键 2（前进）\n桌面动作\n不可用\n紧急停止\n本页监听中\n切换拖动模式\n本页监听中\n锁定桌宠位置\n本页监听中\n打开陪伴面板\n本页监听中\n暂停或恢复视觉\n本页监听中\n高级设置工具\n元数据、历史记录与键值编辑器\n\n当前状态不允许该操作：刷新后按提示重试。（后端说明：Audit blocked host or provider mutation）（audit_read_only）\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+        },
+        {
+          "label": "运行引导",
+          "hash": "#/w/default/settings",
+          "headings": [
+            "系统设置",
+            "系统设置",
+            "运行引导"
+          ],
+          "tabs": [
+            {
+              "text": "访问",
+              "selected": "false"
+            },
+            {
+              "text": "LLM",
+              "selected": "false"
+            },
+            {
+              "text": "TTS",
+              "selected": "false"
+            },
+            {
+              "text": "ASR",
+              "selected": "false"
+            },
+            {
+              "text": "SVC 配置",
+              "selected": "false"
+            },
+            {
+              "text": "记忆",
+              "selected": "false"
+            },
+            {
+              "text": "摘要",
+              "selected": "false"
+            },
+            {
+              "text": "资源",
+              "selected": "false"
+            },
+            {
+              "text": "系统",
+              "selected": "false"
+            },
+            {
+              "text": "运行引导",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+          ],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n当前工作区\n系统设置\n当前离线\n简体中文\nDefault Companion\n系统设置\n连接\n访问\nLLM\n语音\nTTS\nASR\nSVC 配置\n记忆\n记忆\n摘要\n应用\n资源\n系统\n运行引导\n运行引导\n打开运行引导\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+        }
+      ],
+      "responsive": [
+        {
+          "label": "768",
+          "hash": "#/w/default/settings",
+          "headings": [
+            "系统设置",
+            "系统设置",
+            "运行引导"
+          ],
+          "tabs": [
+            {
+              "text": "访问",
+              "selected": "false"
+            },
+            {
+              "text": "LLM",
+              "selected": "false"
+            },
+            {
+              "text": "TTS",
+              "selected": "false"
+            },
+            {
+              "text": "ASR",
+              "selected": "false"
+            },
+            {
+              "text": "SVC 配置",
+              "selected": "false"
+            },
+            {
+              "text": "记忆",
+              "selected": "false"
+            },
+            {
+              "text": "摘要",
+              "selected": "false"
+            },
+            {
+              "text": "资源",
+              "selected": "false"
+            },
+            {
+              "text": "系统",
+              "selected": "false"
+            },
+            {
+              "text": "运行引导",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+          ],
+          "overflow": 0,
+          "bodyText": "系统设置\n当前离线\n简体中文\nDefault Companion\n系统设置\n访问\nLLM\nTTS\nASR\nSVC 配置\n记忆\n摘要\n资源\n系统\n运行引导\n运行引导\n打开运行引导\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+        },
+        {
+          "label": "390",
+          "hash": "#/w/default/settings",
+          "headings": [
+            "系统设置",
+            "系统设置",
+            "运行引导"
+          ],
+          "tabs": [
+            {
+              "text": "访问",
+              "selected": "false"
+            },
+            {
+              "text": "LLM",
+              "selected": "false"
+            },
+            {
+              "text": "TTS",
+              "selected": "false"
+            },
+            {
+              "text": "ASR",
+              "selected": "false"
+            },
+            {
+              "text": "SVC 配置",
+              "selected": "false"
+            },
+            {
+              "text": "记忆",
+              "selected": "false"
+            },
+            {
+              "text": "摘要",
+              "selected": "false"
+            },
+            {
+              "text": "资源",
+              "selected": "false"
+            },
+            {
+              "text": "系统",
+              "selected": "false"
+            },
+            {
+              "text": "运行引导",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+          ],
+          "overflow": 0,
+          "bodyText": "系统设置\n当前离线\n简体中文\nDefault Companion\n系统设置\n访问\nLLM\nTTS\nASR\nSVC 配置\n记忆\n摘要\n资源\n系统\n运行引导\n运行引导\n打开运行引导\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+        }
+      ]
+    },
+    {
+      "label": "prompt",
+      "hash": "#/w/default/prompt",
+      "headings": [
+        "人格设定",
+        "人格设定",
+        "工作区角色卡",
+        "桌宠人格提示词",
+        "设定概览"
+      ],
+      "tabs": [
+        {
+          "text": "角色档案",
+          "selected": "true"
+        },
+        {
+          "text": "世界书",
+          "selected": "false"
+        },
+        {
+          "text": "行为规则",
+          "selected": "false"
+        }
+      ],
+      "loading": 0,
+      "messages": [
+        "目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+      ],
+      "overflow": 0,
+      "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n人格设定\n当前离线\n简体中文\nDefault Companion\n人格设定\n角色档案\n世界书\n行为规则\n工作区角色卡\n导入\n导出\n角色名称\n身份与背景\n0 / 1600\n性格与价值观\n0 / 1600\n关系与情境\n0 / 1600\n表达与行为边界\n0 / 1600\n对话示例\n0 / 1600\n开场白参考\n0 / 500\n备用开场白 0\nJSON 编辑\n桌宠人格补充\nDefault Companion\n设定概览\n自动\n角色卡\n启用\n角色名称\n未填写\n身份与背景\n未填写\n性格与价值观\n未填写\n关系与情境\n未填写\n表达与行为边界\n未填写\n对话示例\n未填写\n世界书\n停用\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+      "entry_ms": 679,
+      "subtabs": [
+        {
+          "label": "角色档案",
+          "hash": "#/w/default/prompt",
+          "headings": [
+            "人格设定",
+            "人格设定",
+            "工作区角色卡",
+            "桌宠人格提示词",
+            "设定概览"
+          ],
+          "tabs": [
+            {
+              "text": "角色档案",
+              "selected": "true"
+            },
+            {
+              "text": "世界书",
+              "selected": "false"
+            },
+            {
+              "text": "行为规则",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+          ],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n人格设定\n当前离线\n简体中文\nDefault Companion\n人格设定\n角色档案\n世界书\n行为规则\n工作区角色卡\n导入\n导出\n角色名称\n身份与背景\n0 / 1600\n性格与价值观\n0 / 1600\n关系与情境\n0 / 1600\n表达与行为边界\n0 / 1600\n对话示例\n0 / 1600\n开场白参考\n0 / 500\n备用开场白 0\nJSON 编辑\n桌宠人格补充\nDefault Companion\n设定概览\n自动\n角色卡\n启用\n角色名称\n未填写\n身份与背景\n未填写\n性格与价值观\n未填写\n关系与情境\n未填写\n表达与行为边界\n未填写\n对话示例\n未填写\n世界书\n停用\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+        },
+        {
+          "label": "世界书",
+          "hash": "#/w/default/prompt",
+          "headings": [
+            "人格设定",
+            "人格设定",
+            "世界书",
+            "设定概览"
+          ],
+          "tabs": [
+            {
+              "text": "角色档案",
+              "selected": "false"
+            },
+            {
+              "text": "世界书",
+              "selected": "true"
+            },
+            {
+              "text": "行为规则",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n人格设定\n当前离线\n简体中文\nDefault Companion\n人格设定\n角色档案\n世界书\n行为规则\n世界书\n关\n扫描深度\n条目上限\n预算\n全部\n启用\n停用\n0 / 0\n替换\n追加\n导入文件\n导入 JSON\n导出文件\n清空\n添加\n\n暂无条目\n\n设定概览\n自动\n角色卡\n启用\n角色名称\n未填写\n身份与背景\n未填写\n性格与价值观\n未填写\n关系与情境\n未填写\n表达与行为边界\n未填写\n对话示例\n未填写\n世界书\n停用"
+        },
+        {
+          "label": "行为规则",
+          "hash": "#/w/default/prompt",
+          "headings": [
+            "人格设定",
+            "人格设定",
+            "提示词模式",
+            "基础提示词",
+            "工作区补充规则",
+            "设定概览"
+          ],
+          "tabs": [
+            {
+              "text": "角色档案",
+              "selected": "false"
+            },
+            {
+              "text": "世界书",
+              "selected": "false"
+            },
+            {
+              "text": "行为规则",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n人格设定\n当前离线\n简体中文\nDefault Companion\n人格设定\n角色档案\n世界书\n行为规则\n提示词模式\n自动\n任务\n日常陪伴\n基础提示词\n恢复默认\n任务模式\n日常陪伴\n当前会话设定\n选择会话\n工作区补充规则\nDefault Workspace\n保存工作区提示词\n设定概览\n自动\n角色卡\n启用\n角色名称\n未填写\n身份与背景\n未填写\n性格与价值观\n未填写\n关系与情境\n未填写\n表达与行为边界\n未填写\n对话示例\n未填写\n世界书\n停用"
+        }
+      ],
+      "responsive": [
+        {
+          "label": "768",
+          "hash": "#/w/default/prompt",
+          "headings": [
+            "人格设定",
+            "人格设定",
+            "提示词模式",
+            "基础提示词",
+            "工作区补充规则",
+            "设定概览"
+          ],
+          "tabs": [
+            {
+              "text": "角色档案",
+              "selected": "false"
+            },
+            {
+              "text": "世界书",
+              "selected": "false"
+            },
+            {
+              "text": "行为规则",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n人格设定\n当前离线\n简体中文\nDefault Companion\n人格设定\n角色档案\n世界书\n行为规则\n提示词模式\n自动\n任务\n日常陪伴\n基础提示词\n恢复默认\n任务模式\n日常陪伴\n当前会话设定\n选择会话\n工作区补充规则\nDefault Workspace\n保存工作区提示词\n设定概览\n自动\n角色卡\n启用\n角色名称\n未填写\n身份与背景\n未填写\n性格与价值观\n未填写\n关系与情境\n未填写\n表达与行为边界\n未填写\n对话示例\n未填写\n世界书\n停用"
+        },
+        {
+          "label": "390",
+          "hash": "#/w/default/prompt",
+          "headings": [
+            "人格设定",
+            "人格设定",
+            "提示词模式",
+            "基础提示词",
+            "工作区补充规则",
+            "设定概览"
+          ],
+          "tabs": [
+            {
+              "text": "角色档案",
+              "selected": "false"
+            },
+            {
+              "text": "世界书",
+              "selected": "false"
+            },
+            {
+              "text": "行为规则",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n人格设定\n当前离线\n简体中文\nDefault Companion\n人格设定\n角色档案\n世界书\n行为规则\n提示词模式\n自动\n任务\n日常陪伴\n基础提示词\n恢复默认\n任务模式\n日常陪伴\n当前会话设定\n选择会话\n工作区补充规则\nDefault Workspace\n保存工作区提示词\n设定概览\n自动\n角色卡\n启用\n角色名称\n未填写\n身份与背景\n未填写\n性格与价值观\n未填写\n关系与情境\n未填写\n表达与行为边界\n未填写\n对话示例\n未填写\n世界书\n停用"
+        }
+      ]
+    },
+    {
+      "label": "pet",
+      "hash": "#/w/default/pet",
+      "headings": [
+        "桌宠控制",
+        "桌宠控制",
+        "角色模型",
+        "桌面驻留"
+      ],
+      "tabs": [],
+      "loading": 0,
+      "messages": [
+        "Not Found",
+        "显示器不可用：Not Found；模型列表仍可使用。",
+        "Not Found"
+      ],
+      "overflow": 0,
+      "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n桌宠控制\n当前离线\n简体中文\nDefault Companion\n桌宠控制\n关系历史\nNot Found\n显示器不可用：Not Found；模型列表仍可使用。\n桌宠层\n未就绪\n等待模型清单\n鼠标策略\n等待模型\n渲染未就绪\n外观参数\n0.42 × 100%\n锚点 X 自动 · Y 自动\n停靠位置\n右下角\n默认屏幕\nNot Found\n角色模型\n0 个可用模型\n导入\n暂无可用模型\n导入\n从本地路径导入\nLive2D\nVRM\n浏览\n导入\n桌面驻留\n默认屏幕\n常驻中\n全屏调整位置\n恢复右下常驻\n鼠标穿透\n启用\n锁定位置\n未锁定\n免打扰\n禁用\n外观参数\n0.42 × 100%\n缩放 0.42\nS\nM\nL\nXL\n透明度 100%\n模型能力与诊断\n等待渲染器\nLIVE2D · 未选择模型\n状态：未就绪\n注视中心\n停止当前动作\n同步能力\n高级模型与口型控制\n动作与位置\n右下角\n动作预览\n请选择\n播放\n模型锚点\nX\nY\n保存锚点\n刷新桌宠状态\n屏幕停靠\n选择屏幕\n右下角\n应用停靠\n高级行为与恢复控制",
+      "entry_ms": 648,
+      "subtabs": [],
+      "responsive": [
+        {
+          "label": "768",
+          "hash": "#/w/default/pet",
+          "headings": [
+            "桌宠控制",
+            "桌宠控制",
+            "角色模型",
+            "桌面驻留"
+          ],
+          "tabs": [],
+          "loading": 0,
+          "messages": [
+            "Not Found",
+            "显示器不可用：Not Found；模型列表仍可使用。",
+            "Not Found"
+          ],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n桌宠控制\n当前离线\n简体中文\nDefault Companion\n桌宠控制\n关系历史\nNot Found\n显示器不可用：Not Found；模型列表仍可使用。\n桌宠层\n未就绪\n等待模型清单\n鼠标策略\n等待模型\n渲染未就绪\n外观参数\n0.42 × 100%\n锚点 X 自动 · Y 自动\n停靠位置\n右下角\n默认屏幕\nNot Found\n角色模型\n0 个可用模型\n导入\n暂无可用模型\n导入\n从本地路径导入\nLive2D\nVRM\n浏览\n导入\n桌面驻留\n默认屏幕\n常驻中\n全屏调整位置\n恢复右下常驻\n鼠标穿透\n启用\n锁定位置\n未锁定\n免打扰\n禁用\n外观参数\n0.42 × 100%\n缩放 0.42\nS\nM\nL\nXL\n透明度 100%\n模型能力与诊断\n等待渲染器\nLIVE2D · 未选择模型\n状态：未就绪\n注视中心\n停止当前动作\n同步能力\n高级模型与口型控制\n动作与位置\n右下角\n动作预览\n请选择\n播放\n模型锚点\nX\nY\n保存锚点\n刷新桌宠状态\n屏幕停靠\n选择屏幕\n右下角\n应用停靠\n高级行为与恢复控制"
+        },
+        {
+          "label": "390",
+          "hash": "#/w/default/pet",
+          "headings": [
+            "桌宠控制",
+            "桌宠控制",
+            "角色模型",
+            "桌面驻留"
+          ],
+          "tabs": [],
+          "loading": 0,
+          "messages": [
+            "Not Found",
+            "显示器不可用：Not Found；模型列表仍可使用。",
+            "Not Found"
+          ],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n桌宠控制\n当前离线\n简体中文\nDefault Companion\n桌宠控制\n关系历史\nNot Found\n显示器不可用：Not Found；模型列表仍可使用。\n桌宠层\n未就绪\n等待模型清单\n鼠标策略\n等待模型\n渲染未就绪\n外观参数\n0.42 × 100%\n锚点 X 自动 · Y 自动\n停靠位置\n右下角\n默认屏幕\nNot Found\n角色模型\n0 个可用模型\n导入\n暂无可用模型\n导入\n从本地路径导入\nLive2D\nVRM\n浏览\n导入\n桌面驻留\n默认屏幕\n常驻中\n全屏调整位置\n恢复右下常驻\n鼠标穿透\n启用\n锁定位置\n未锁定\n免打扰\n禁用\n外观参数\n0.42 × 100%\n缩放 0.42\nS\nM\nL\nXL\n透明度 100%\n模型能力与诊断\n等待渲染器\nLIVE2D · 未选择模型\n状态：未就绪\n注视中心\n停止当前动作\n同步能力\n高级模型与口型控制\n动作与位置\n右下角\n动作预览\n请选择\n播放\n模型锚点\nX\nY\n保存锚点\n刷新桌宠状态\n屏幕停靠\n选择屏幕\n右下角\n应用停靠\n高级行为与恢复控制"
+        }
+      ]
+    },
+    {
+      "label": "svc",
+      "hash": "#/w/default/svc",
+      "headings": [
+        "結崎 · 本地桌宠 Agent",
+        "歌声转换"
+      ],
+      "tabs": [],
+      "loading": 0,
+      "messages": [
+        "请先填写 SVC 基础 URL，再开始转换。"
+      ],
+      "overflow": 0,
+      "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n結崎 · 本地桌宠 Agent\n当前离线\n简体中文\nDefault Companion\n歌声转换\n未选择音频\n打开 SVC 配置\nSoulX-Singer-SVC\n缺少端点\n拖入音频文件，或点击选择\n开始 SVC 转换\n请先填写 SVC 基础 URL，再开始转换。",
+      "entry_ms": 668,
+      "subtabs": [],
+      "responsive": [
+        {
+          "label": "768",
+          "hash": "#/w/default/svc",
+          "headings": [
+            "結崎 · 本地桌宠 Agent",
+            "歌声转换"
+          ],
+          "tabs": [],
+          "loading": 0,
+          "messages": [
+            "请先填写 SVC 基础 URL，再开始转换。"
+          ],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n結崎 · 本地桌宠 Agent\n当前离线\n简体中文\nDefault Companion\n歌声转换\n未选择音频\n打开 SVC 配置\nSoulX-Singer-SVC\n缺少端点\n拖入音频文件，或点击选择\n开始 SVC 转换\n请先填写 SVC 基础 URL，再开始转换。"
+        },
+        {
+          "label": "390",
+          "hash": "#/w/default/svc",
+          "headings": [
+            "結崎 · 本地桌宠 Agent",
+            "歌声转换"
+          ],
+          "tabs": [],
+          "loading": 0,
+          "messages": [
+            "请先填写 SVC 基础 URL，再开始转换。"
+          ],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n結崎 · 本地桌宠 Agent\n当前离线\n简体中文\nDefault Companion\n歌声转换\n未选择音频\n打开 SVC 配置\nSoulX-Singer-SVC\n缺少端点\n拖入音频文件，或点击选择\n开始 SVC 转换\n请先填写 SVC 基础 URL，再开始转换。"
+        }
+      ]
+    },
+    {
+      "label": "tool",
+      "hash": "#/w/default/tool",
+      "headings": [
+        "本地能力",
+        "能力与工具"
+      ],
+      "tabs": [
+        {
+          "text": "状态",
+          "selected": "true"
+        },
+        {
+          "text": "直播",
+          "selected": "false"
+        },
+        {
+          "text": "能力",
+          "selected": "false"
+        },
+        {
+          "text": "技能",
+          "selected": "false"
+        },
+        {
+          "text": "记录",
+          "selected": "false"
+        }
+      ],
+      "loading": 0,
+      "messages": [
+        "插件刷新失败：目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+        "Twitch 配置刷新失败：Method Not Allowed（http_405）"
+      ],
+      "overflow": 0,
+      "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n本地能力\n当前离线\n简体中文\nDefault Companion\n能力与工具\n\n插件刷新失败：目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\nTwitch 配置刷新失败：Method Not Allowed（http_405）\n\n状态\n直播\n能力\n技能\n记录\n可执行\n40\n低风险\n需确认\n6\n执行前确认\nMCP 异常\n0\n连接/清单\n插件异常\n0\n加载/阻断\n调用记录\n1\n最近链路",
+      "entry_ms": 641,
+      "subtabs": [
+        {
+          "label": "状态",
+          "hash": "#/w/default/tool",
+          "headings": [
+            "本地能力",
+            "能力与工具"
+          ],
+          "tabs": [
+            {
+              "text": "状态",
+              "selected": "true"
+            },
+            {
+              "text": "直播",
+              "selected": "false"
+            },
+            {
+              "text": "能力",
+              "selected": "false"
+            },
+            {
+              "text": "技能",
+              "selected": "false"
+            },
+            {
+              "text": "记录",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "插件刷新失败：目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "Twitch 配置刷新失败：Method Not Allowed（http_405）"
+          ],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n本地能力\n当前离线\n简体中文\nDefault Companion\n能力与工具\n\n插件刷新失败：目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\nTwitch 配置刷新失败：Method Not Allowed（http_405）\n\n状态\n直播\n能力\n技能\n记录\n可执行\n40\n低风险\n需确认\n6\n执行前确认\nMCP 异常\n0\n连接/清单\n插件异常\n0\n加载/阻断\n调用记录\n1\n最近链路"
+        },
+        {
+          "label": "直播",
+          "hash": "#/w/default/tool",
+          "headings": [
+            "本地能力",
+            "能力与工具",
+            "直播能力"
+          ],
+          "tabs": [
+            {
+              "text": "状态",
+              "selected": "false"
+            },
+            {
+              "text": "直播",
+              "selected": "true"
+            },
+            {
+              "text": "能力",
+              "selected": "false"
+            },
+            {
+              "text": "技能",
+              "selected": "false"
+            },
+            {
+              "text": "记录",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "插件刷新失败：目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "Twitch 配置刷新失败：Method Not Allowed（http_405）"
+          ],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n本地能力\n当前离线\n简体中文\nDefault Companion\n能力与工具\n\n插件刷新失败：目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\nTwitch 配置刷新失败：Method Not Allowed（http_405）\n\n状态\n直播\n能力\n技能\n记录\n直播能力\n未连接\n探测适配器\n刷新\n适配器：未连接\n未配置\nTwitch EventSub：未配置\nTwitch 出站聊天：未配置\nTwitch IRC：未配置\n连接 IRC\nTwitch 凭据\n读取配置状态失败\n仅本地计划\n保存并重配置\n只读检查\n清除凭据\nOBS WebSocket\n密码未配置 · 临时保存\n允许非本机 endpoint\n保存并探测\nOBS 配置档\n未读取\n配置档名称\n读取配置档\n预览切换\nEventSub 本地订阅计划\n缺少 Secret\n聊天消息\n关注事件\n订阅事件\n保存计划\n本地人工接管\n已启用 · 需确认\n关闭接管\n聊天内容治理\n0 词 · 无慢 · 30/分\n保存治理\n自动生成本地草稿\n已关闭\n启用自动草稿\n读取直播状态\n需配置 OBS · 低风险\n预览\n预览直播场景\n需配置 OBS · 低风险\n预览\n切换直播场景\n需配置 OBS · 中风险\n预览\n读取 OBS 配置档\n需配置 OBS · 低风险\n预览\n切换 OBS 配置档\n需配置 OBS · 中风险\n预览\n开始直播\n需配置 OBS · 高风险\n预览\n结束直播\n需配置 OBS · 中风险\n预览\n生成字幕草稿\n可执行 · 低风险\n预览\n发送直播聊天\n未连接 · 中风险\n预览\n同步 Twitch 事件订阅（staging）\n未连接 · 高风险\n预览\n直播动作审计\n刷新审计\n\n暂无直播动作审计\n\n最近本地事件\n生成未处理草稿\n刷新事件\n\n暂无本地事件\n\n回复草稿\n刷新草稿\n\n暂无草稿"
+        },
+        {
+          "label": "能力",
+          "hash": "#/w/default/tool",
+          "headings": [
+            "本地能力",
+            "能力与工具",
+            "全部能力 · 全部风险 · 全部权限",
+            "打开应用"
+          ],
+          "tabs": [
+            {
+              "text": "状态",
+              "selected": "false"
+            },
+            {
+              "text": "直播",
+              "selected": "false"
+            },
+            {
+              "text": "能力",
+              "selected": "true"
+            },
+            {
+              "text": "技能",
+              "selected": "false"
+            },
+            {
+              "text": "记录",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "插件刷新失败：目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "Twitch 配置刷新失败：Method Not Allowed（http_405）"
+          ],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n本地能力\n当前离线\n简体中文\nDefault Companion\n能力与工具\n\n插件刷新失败：目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\nTwitch 配置刷新失败：Method Not Allowed（http_405）\n\n状态\n直播\n能力\n技能\n记录\n全部能力 · 全部风险 · 全部权限\n刷新能力\n能力来源\n风险级别\n全部\n打开应用\n内置\n低风险\n\n按名称启动本地桌面应用。\n\n可直接执行\n记录调用\n超时 默认\n打开链接\n内置\n低风险\n\n使用默认浏览器打开链接。\n\n可直接执行\n记录调用\n超时 默认\n读取文件\n内置\n低风险\n\n读取本地文本文件内容。\n\n可直接执行\n记录调用\n超时 默认\n写入文件\n内置\n高风险\n\n将文本内容写入本地文件。\n\n执行前确认\n记录调用\n超时 默认\n联网搜索\n内置\n低风险\n\n搜索当前公开网络信息，并返回带链接的简明结果。\n\n可直接执行\n记录调用\n超时 默认\ndesktop.list_windows\n内置\n安全\n\nList visible desktop windows as short-lived opaque target leases.\n\n可直接执行\n记录调用\n超时 默认\ndesktop.preview_action\n内置\n安全\n\nCreate a pure digest-bound preview for focus or graceful close.\n\n可直接执行\n记录调用\n超时 默认\ndesktop.focus_window\n内置\n低风险\n\nFocus one previewed target lease after explicit application permission.\n\n执行前确认\n记录调用\n超时 默认\ndesktop.request_close\n内置\n高风险\n\nRequest a graceful application close for one previewed target lease.\n\n执行前确认\n记录调用\n超时 默认\ndesktop.close_window\n内置\n高风险\n\nRequest a graceful application close for one previewed target lease.\n\n执行前确认\n记录调用\n超时 默认\ncomputer.preview_action\n内置\n安全\n\nValidate and preview one scoped mouse or keyboard action without native input.\n\n可直接执行\n记录调用\n超时 默认\ncomputer.perform_action\n内置\n高风险\n\nExecute one host-authorized scoped mouse or keyboard action.\n\n执行前确认\n记录调用\n超时 默认\nbrowser.open_page\nMCP\n中风险\n\n通过 Playwright MCP 服务打开浏览器页面。\n\n启用即授权\n记录调用\n超时 默认\nask_dsh\n插件\n高风险\n\n把用户明确要求的复杂编码、跑测试、改文件或仓库分析任务交给 DSH。可能修改文件，失败勿自动重试。\n\n执行前确认\n记录调用\n超时 默认\n当前时间\n内置\n安全\n\n获取当前本地时间。\n\n可直接执行\n记录调用\n超时 默认\nObserve / Recall Loop\nSkill\n低风险\n\n收集运行时输入，召回相关记忆，并送入桌宠智能体链路。\n\n可直接执行\n记录调用\n超时 默认\nCapability Routing\nSkill\n低风险\n\n通过统一能力快照选择内置工具、插件工具或 MCP 工具。\n\n可直接执行\n记录调用\n超时 默认\nVoice Dialogue Chain\nSkill\n低风险\n\n把麦克风输入整理成文本，交给 LLM 生成回复，再触发 TTS 和桌宠动作。\n\n可直接执行\n记录调用\n超时 默认\nLong Dialogue Summary\nSkill\n低风险\n\n把长聊天、语音转写和会话记录整理成摘要、决定、待办和风险。\n\n可直接执行\n记录调用\n超时 默认\nCompanion Reflection\nSkill\n低风险\n\n分析对话里的情绪、沟通模式和可改进点，用于长期桌宠记忆和关系反馈。\n\n可直接执行\n记录调用\n超时 默认\nMemory Capture\nSkill\n低风险\n\n把事实、偏好、项目决定和待办沉淀到可检索记忆。\n\n可直接执行\n记录调用\n超时 默认\nRealtime Screen Vision\nSkill\n低风险\n\n把桌面截图作为短时视觉帧交给桌宠理解，OCR 仅用于需要精确读字的场景。\n\n可直接执行\n记录调用\n超时 默认\nLocal File Organizer\nSkill\n低风险\n\n识别本机文件、素材和导入资源用途，给出整理、重命名和归档建议。\n\n可直接执行\n记录调用\n超时 默认\nOCR Document Organizer\nSkill\n低风险\n\n读取截图、票据或扫描文档里的关键信息，生成结构化条目并建议归档位置。\n\n可直接执行\n记录调用\n超时 默认\nWebapp Testing\nSkill\n低风险\n\n用 Playwright 检查本地 Electron/Vite 页面、交互、截图和控制台错误。\n\n可直接执行\n记录调用\n超时 默认\nFrontend Design Polish\nSkill\n低风险\n\n优化桌宠面板、设置页、本地能力页和调试页的布局、文案、状态和响应式细节。\n\n可直接执行\n记录调用\n超时 默认\nInterface Hardening\nSkill\n低风险\n\n检查空状态、错误提示、长文本溢出、中文文案、深色模式和失败降级。\n\n可直接执行\n记录调用\n超时 默认\nCode Review\nSkill\n低风险\n\n按缺陷、回归风险、缺失测试和行为变化审查改动。\n\n可直接执行\n记录调用\n超时 默认\nRepository Analysis\nSkill\n低风险\n\n只读梳理代码结构、调用关系和风险点，用于复杂改动前建立事实图。\n\n可直接执行\n记录调用\n超时 默认\nBest Practice Research\nSkill\n低风险\n\n优先查官方文档和上游资料，适合接新模型、TTS、ASR、MCP、Ollama、LM Studio 或 SDK 前使用。\n\n可直接执行\n记录调用\n超时 默认\nMCP Service Builder\nSkill\n低风险\n\n把本地工具、资源读取、浏览器控制或外部服务包装成标准 MCP 工具。\n\n可直接执行\n记录调用\n超时 默认\nSkill Authoring\nSkill\n低风险\n\n把常用链路沉淀成可复用 Skill，包括触发条件、输入、流程、校验和失败兜底。\n\n可直接执行\n记录调用\n超时 默认\nImage Generation\nSkill\n低风险\n\n生成或编辑头像、背景、UI 参考图和透明素材。\n\n可直接执行\n记录调用\n超时 默认\nImage Enhancement\nSkill\n低风险\n\n提升截图清晰度和可读性，适合 UI 验收、反馈图和文档插图。\n\n可直接执行\n记录调用\n超时 默认\nDocument Export\nSkill\n低风险\n\n把摘要、报告和会话结果导出为 PDF、DOCX、PPTX 或 XLSX。\n\n可直接执行\n记录调用\n超时 默认\nSpreadsheet Helper\nSkill\n低风险\n\n编写和调试 Excel/表格公式，适合导入数据、统计结果和批量整理。\n\n可直接执行\n记录调用\n超时 默认\nTask Triage\nSkill\n低风险\n\n把用户反馈、长对话或问题清单拆成优先级、复现步骤、下一步动作和回复草稿。\n\n可直接执行\n记录调用\n超时 默认\nAgent Trace Debug\nSkill\n低风险\n\n分析模型、工具调用、记忆召回和插件钩子的执行轨迹，用于排查输出问题。\n\n可直接执行\n记录调用\n超时 默认\nRelease Notes\nSkill\n低风险\n\n把技术改动整理成用户可读的更新说明。\n\n可直接执行\n记录调用\n超时 默认\nDesign System\nSkill\n低风险\n\n沉淀颜色、间距、组件状态和文案规则，让设置页、桌宠页和能力页保持一致。\n\n可直接执行\n记录调用\n超时 默认\nWeb Research\nSkill\n低风险\n\n对需要时效性的模型、插件、依赖和工具信息进行搜索、比对和资料整理。\n\n可直接执行\n记录调用\n超时 默认\nContent Writing\nSkill\n低风险\n\n把调研结果、教程、FAQ 和版本说明写成清晰中文内容。\n\n可直接执行\n记录调用\n超时 默认\nProject Planning\nSkill\n低风险\n\n把模糊需求拆成范围、里程碑、验收标准和风险。\n\n可直接执行\n记录调用\n超时 默认\nQuality Cleanup\nSkill\n低风险\n\n清理重复抽象、冗余 UI 文案、过度包装和不一致命名，保持改动小而可验收。\n\n可直接执行\n记录调用\n超时 默认\nCreate Once Task\n命令\n低风险\n\n在本地调度器中创建一次性任务。\n\n可直接执行\n记录调用\n超时 默认\nCreate Interval Task\n命令\n低风险\n\n在本地调度器中创建按间隔重复执行的任务。\n\n可直接执行\n记录调用\n超时 默认\n内置\n打开应用\n\n按名称启动本地桌面应用。\n\n风险和权限\n低风险\n适合作为常规入口。\n类型\n内置\n归属\n内置工具\n超时\n默认\n查看内部标识\n作用范围\ndesktop:open_app\n标签\ndesktop\nlaunch\n输入结构\nname\n查看 JSON schema"
+        },
+        {
+          "label": "技能",
+          "hash": "#/w/default/tool",
+          "headings": [
+            "本地能力",
+            "能力与工具",
+            "项目技能"
+          ],
+          "tabs": [
+            {
+              "text": "状态",
+              "selected": "false"
+            },
+            {
+              "text": "直播",
+              "selected": "false"
+            },
+            {
+              "text": "能力",
+              "selected": "false"
+            },
+            {
+              "text": "技能",
+              "selected": "true"
+            },
+            {
+              "text": "记录",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "插件刷新失败：目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "Twitch 配置刷新失败：Method Not Allowed（http_405）"
+          ],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n本地能力\n当前离线\n简体中文\nDefault Companion\n能力与工具\n\n插件刷新失败：目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\nTwitch 配置刷新失败：Method Not Allowed（http_405）\n\n状态\n直播\n能力\n技能\n记录\n项目技能\n内置 34\n分类 11\n导入 Skills\n全部分类\nVoice Dialogue Chain\n桌宠与记忆\n\n把麦克风输入整理成文本，交给 LLM 生成回复，再触发 TTS 和桌宠动作。适合做免打开浏览器面板的语音桌宠入口。\n\n内置\n高适配\nLong Dialogue Summary\n桌宠与记忆\n\n把长聊天、语音转写和会话记录整理成摘要、决定、待办和风险，用于记忆写入和任务提醒。\n\n内置\n高适配\nCompanion Reflection\n桌宠与记忆\n\n分析一段对话里的情绪、沟通模式和可改进点，适合生成长期桌宠记忆和关系反馈。\n\n内置\n高适配\nMemory Capture\n桌宠与记忆\n\n把对话中的事实、偏好、项目决定和待办沉淀到可检索记忆，适合配合 Qdrant 或本地轻量记忆使用。\n\n内置\n高适配\nRealtime Screen Vision\n感知能力\n\n把桌面截图作为短时视觉帧交给桌宠理解窗口、布局和用户动作；OCR 只在需要精确读字时作为备用能力。\n\n内置\n高适配\nLocal File Organizer\n自动化\n\n识别本机文件、素材和导入资源的用途，给出整理、重命名和归档建议，用于资源管理面板。\n\n内置\n高适配\nOCR Document Organizer\n文档数据\n\n读取截图、票据或扫描文档里的关键信息，生成结构化条目并建议归档位置。\n\n内置\n高适配\nWebapp Testing\n开发工程\n\n用 Playwright 检查本地 Electron/Vite 页面，验证按钮、输入框、响应式布局、截图和控制台错误。\n\n内置\n高适配\nFrontend Design Polish\n界面体验\n\n用于继续优化桌宠面板、设置页、本地能力页和调试页的布局、文案、状态和响应式细节。\n\n内置\n高适配\nInterface Hardening\n界面体验\n\n检查空状态、错误提示、长文本溢出、中文文案、深色模式和失败降级，适合设置与工具面板使用。\n\n内置\n高适配\nCode Review\n开发工程\n\n按缺陷、回归风险、缺失测试和行为变化审查改动，适合 Yuizaki 自身开发质量门。\n\n内置\n高适配\nRepository Analysis\n开发工程\n\n只读梳理代码结构、调用关系和风险点，适合改复杂链路前先建立事实图。\n\n内置\n高适配\nBest Practice Research\n资料调研\n\n优先查官方文档和上游资料，适合接新模型、TTS、ASR、MCP、Ollama、LM Studio 或 SDK 前使用。\n\n内置\n高适配\nMCP Service Builder\nMCP 扩展\n\n把本地工具、资源读取、浏览器控制或外部服务包装成标准 MCP 工具，便于 Yuizaki 统一调度。\n\n内置\n高适配\nSkill Authoring\n技能编写\n\n把常用链路沉淀成可复用 Skill，包括触发条件、输入、流程、校验和失败兜底。\n\n内置\n高适配\nImage Generation\n图像媒体\n\n生成或编辑头像、背景、UI 参考图和透明素材，适合角色素材与界面资源生产。\n\n内置\n高适配\nImage Enhancement\n图像媒体\n\n提升截图清晰度和可读性，适合 UI 验收、反馈图和文档插图。\n\n内置\n中适配\nDocument Export\n文档数据\n\n把摘要、报告和会话结果导出为 PDF、DOCX、PPTX 或 XLSX，适合长内容整理和分享。\n\n内置\n高适配\nSpreadsheet Helper\n文档数据\n\n编写和调试 Excel/表格公式，适合导入数据、统计结果和批量整理时使用。\n\n内置\n中适配\nTask Triage\n自动化\n\n把用户反馈、长对话或问题清单拆成优先级、复现步骤、下一步动作和回复草稿。\n\n内置\n中适配\nExternal App Actions\n自动化\n\n调用邮件、笔记、代码托管、任务系统等外部动作；需要用户显式配置授权。\n\n内置\n中适配\nCI Diagnosis\n开发工程\n\n读取构建或测试失败日志，定位错误并生成修复建议，用于发布流程排障。\n\n内置\n中适配\nAgent Trace Debug\n开发工程\n\n分析 LLM、工具调用、记忆召回和插件钩子的执行轨迹，适合排查“有无输出”和耗时问题。\n\n内置\n高适配\nRelease Notes\n开发工程\n\n把技术改动整理成用户可读的更新说明，适合版本发布和变更记录。\n\n内置\n中适配\nDesign System\n界面体验\n\n沉淀颜色、间距、组件状态和文案规则，让设置页、桌宠页和能力页保持一致。\n\n内置\n高适配\nVisual Regression\n界面体验\n\n通过截图对比检查布局、文本溢出、遮挡和深浅色主题问题，适合 UI 改动后验收。\n\n内置\n中适配\nTheme Assets\n界面体验\n\n为角色、工作区或模式生成统一色彩与素材风格，适合未来扩展个性化主题。\n\n内置\n中适配\nWeb Research\n资料调研\n\n对需要时效性的模型、插件、依赖和工具信息进行搜索、比对和资料整理。\n\n内置\n中适配\nContent Writing\n资料调研\n\n把调研结果、教程、FAQ 和版本说明写成清晰中文内容，适合文档与帮助页。\n\n内置\n中适配\nNews MCP\nMCP 扩展\n\n通过 MCP 读取新闻、金融或搜索类信息源，用于扩展实时资讯能力。\n\n内置\n中适配\nMedia Download Workflow\n图像媒体\n\n作为视频和音频下载能力的候选流程；需要在 UI 中明确版权、授权和保存位置。\n\n内置\nTemplate Export\n文档数据\n\n把常见输出整理成固定模板，例如日报、纪要、角色卡、测试报告和调研摘要。\n\n内置\n中适配\nProject Planning\n质量治理\n\n把模糊需求拆成范围、里程碑、验收标准和风险，适合复杂功能开工前使用。\n\n内置\n中适配\nQuality Cleanup\n质量治理\n\n清理重复抽象、冗余 UI 文案、过度包装和不一致命名，保持改动小而可验收。\n\n内置\n中适配"
+        },
+        {
+          "label": "记录",
+          "hash": "#/w/default/tool",
+          "headings": [
+            "本地能力",
+            "能力与工具",
+            "插件工具",
+            "最近调用"
+          ],
+          "tabs": [
+            {
+              "text": "状态",
+              "selected": "false"
+            },
+            {
+              "text": "直播",
+              "selected": "false"
+            },
+            {
+              "text": "能力",
+              "selected": "false"
+            },
+            {
+              "text": "技能",
+              "selected": "false"
+            },
+            {
+              "text": "记录",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "插件刷新失败：目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "Twitch 配置刷新失败：Method Not Allowed（http_405）"
+          ],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n本地能力\n当前离线\n简体中文\nDefault Companion\n能力与工具\n\n插件刷新失败：目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\nTwitch 配置刷新失败：Method Not Allowed（http_405）\n\n状态\n直播\n能力\n技能\n记录\n插件工具\n暂无插件\n\n暂无插件工具\n\n最近调用\n1 条记录\n14:14:50\n执行中\n插件工具加载失败: 目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+        }
+      ],
+      "responsive": [
+        {
+          "label": "768",
+          "hash": "#/w/default/tool",
+          "headings": [
+            "本地能力",
+            "能力与工具",
+            "插件工具",
+            "最近调用"
+          ],
+          "tabs": [
+            {
+              "text": "状态",
+              "selected": "false"
+            },
+            {
+              "text": "直播",
+              "selected": "false"
+            },
+            {
+              "text": "能力",
+              "selected": "false"
+            },
+            {
+              "text": "技能",
+              "selected": "false"
+            },
+            {
+              "text": "记录",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "插件刷新失败：目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "Twitch 配置刷新失败：Method Not Allowed（http_405）"
+          ],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n本地能力\n当前离线\n简体中文\nDefault Companion\n能力与工具\n\n插件刷新失败：目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\nTwitch 配置刷新失败：Method Not Allowed（http_405）\n\n状态\n直播\n能力\n技能\n记录\n插件工具\n暂无插件\n\n暂无插件工具\n\n最近调用\n1 条记录\n14:14:50\n执行中\n插件工具加载失败: 目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+        },
+        {
+          "label": "390",
+          "hash": "#/w/default/tool",
+          "headings": [
+            "本地能力",
+            "能力与工具",
+            "插件工具",
+            "最近调用"
+          ],
+          "tabs": [
+            {
+              "text": "状态",
+              "selected": "false"
+            },
+            {
+              "text": "直播",
+              "selected": "false"
+            },
+            {
+              "text": "能力",
+              "selected": "false"
+            },
+            {
+              "text": "技能",
+              "selected": "false"
+            },
+            {
+              "text": "记录",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "插件刷新失败：目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "Twitch 配置刷新失败：Method Not Allowed（http_405）"
+          ],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n本地能力\n当前离线\n简体中文\nDefault Companion\n能力与工具\n\n插件刷新失败：目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\nTwitch 配置刷新失败：Method Not Allowed（http_405）\n\n状态\n直播\n能力\n技能\n记录\n插件工具\n暂无插件\n\n暂无插件工具\n\n最近调用\n1 条记录\n14:14:50\n执行中\n插件工具加载失败: 目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+        }
+      ]
+    },
+    {
+      "label": "plugins",
+      "hash": "#/w/default/plugins",
+      "headings": [
+        "插件管理",
+        "插件管理"
+      ],
+      "tabs": [],
+      "loading": 0,
+      "messages": [
+        "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+      ],
+      "overflow": 0,
+      "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n插件管理\n当前离线\n简体中文\nDefault Companion\n插件管理\n筛选异常插件\n刷新插件状态\n0 / 0 个插件\n无异常\n全部状态\n全部类型\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n选择插件查看详情\n已加载\n\n未选择插件\n\n运行中的插件\n0 条\n\n当前没有插件在运行\n\n插件能力组成\n0 类\n\n暂无插件能力摘要\n\n加载失败 / 清单错误\n0 条\n\n暂无插件加载失败记录\n\n运行记录\n最近 0 条\n\n暂无插件调用记录",
+      "entry_ms": 669,
+      "subtabs": [],
+      "responsive": [
+        {
+          "label": "768",
+          "hash": "#/w/default/plugins",
+          "headings": [
+            "插件管理",
+            "插件管理"
+          ],
+          "tabs": [],
+          "loading": 0,
+          "messages": [
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+          ],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n插件管理\n当前离线\n简体中文\nDefault Companion\n插件管理\n筛选异常插件\n刷新插件状态\n0 / 0 个插件\n无异常\n全部状态\n全部类型\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n选择插件查看详情\n已加载\n\n未选择插件\n\n运行中的插件\n0 条\n\n当前没有插件在运行\n\n插件能力组成\n0 类\n\n暂无插件能力摘要\n\n加载失败 / 清单错误\n0 条\n\n暂无插件加载失败记录\n\n运行记录\n最近 0 条\n\n暂无插件调用记录"
+        },
+        {
+          "label": "390",
+          "hash": "#/w/default/plugins",
+          "headings": [
+            "插件管理",
+            "插件管理"
+          ],
+          "tabs": [],
+          "loading": 0,
+          "messages": [
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+          ],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n插件管理\n当前离线\n简体中文\nDefault Companion\n插件管理\n筛选异常插件\n刷新插件状态\n0 / 0 个插件\n无异常\n全部状态\n全部类型\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n选择插件查看详情\n已加载\n\n未选择插件\n\n运行中的插件\n0 条\n\n当前没有插件在运行\n\n插件能力组成\n0 类\n\n暂无插件能力摘要\n\n加载失败 / 清单错误\n0 条\n\n暂无插件加载失败记录\n\n运行记录\n最近 0 条\n\n暂无插件调用记录"
+        }
+      ]
+    },
+    {
+      "label": "infrastructure",
+      "hash": "#/w/default/infrastructure",
+      "headings": [
+        "服务与资源",
+        "服务与资源"
+      ],
+      "tabs": [],
+      "loading": 0,
+      "messages": [
+        "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+        "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+        "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+        "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+        "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+      ],
+      "overflow": 0,
+      "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n服务与资源\n当前离线\n简体中文\nDefault Companion\n服务与资源\n服务与资源诊断失败，诊断失败\n刷新状态\n导出运行诊断\n服务状态\n诊断失败\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n环境依赖\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n运行时资源\n刷新采样\n清理 HTTP 缓存\n\n浏览器模式无法读取 Electron 进程资源\n\n高级诊断数据\n读取快照\n更新统计\n\n暂无接口快照\n\n导出运行数据\n导出表格\n备份与恢复 · 0 个目标\n创建备份\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n运行异常 · 诊断失败\n诊断失败\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n按需查看日志追踪\n启动与就绪\n健康检查、启动与接口\n刷新运行状态\n服务就绪: Blocked by unavailable dependency · 依赖可用性: degraded\nPython · /api/ping\n后端在线\n后端服务正常\nControl · /api/health\n待处理\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n依赖可用性 · Python /health\ndegraded\n26.838599995244294ms / 5000ms · loop lag=0ms\nllm · degraded · LLM provider unavailable · 6.971700000576675ms / 5000ms\ntts · degraded · TTS client not ready · 6.812600011471659ms / 5000ms\nasr · healthy · ASR not available (optional) · 0.0033999967854470015ms / 5000ms\nocr · healthy · OCR ready on demand · 0.01170000177808106ms / 5000ms\ndatabase · healthy · Database healthy (0 messages) · 22.643900010734797ms / 5000ms\nmemory · healthy · SQLite memory saved; index needs recovery · 23.604000016348436ms / 5000ms\n服务就绪 · /api/readiness\n后端服务尚未完全就绪\n\nBlocked by unavailable dependency\n\n启动后端\n停止后端\nAPI 文档\n运行检查项\n2 / 6\n1\nControl /api/health\n阻塞\n2\nPython /api/ping\n完成\n3\nPython /health\n阻塞\n4\n服务就绪\n阻塞\n5\n启停桥接\n等待\n6\nAPI 文档\n完成\n依赖可用性\n0/4 正常\n对话模型\n必需\ncustom\n未配置\n视觉模型\n未配置\ncustom\n未配置\n语音合成\n待处理\ngenie-tts · tts-1\nTTS client not ready\n重新检查\n语音识别\n未配置\ndisabled\n未配置\n启动命令\nWindows\n完整启动（含 MCP）\nYuizakiLauncher.exe\n复制\n轻量启动（不含 MCP）\nYuizakiLauncher.exe --no-mcp\n复制\n前端调试\nYuizakiLauncher.exe --dev-renderer\n复制",
+      "entry_ms": 655,
+      "subtabs": [],
+      "responsive": [
+        {
+          "label": "768",
+          "hash": "#/w/default/infrastructure",
+          "headings": [
+            "服务与资源",
+            "服务与资源"
+          ],
+          "tabs": [],
+          "loading": 0,
+          "messages": [
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+          ],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n服务与资源\n当前离线\n简体中文\nDefault Companion\n服务与资源\n服务与资源诊断失败，诊断失败\n刷新状态\n导出运行诊断\n服务状态\n诊断失败\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n环境依赖\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n运行时资源\n刷新采样\n清理 HTTP 缓存\n\n浏览器模式无法读取 Electron 进程资源\n\n高级诊断数据\n读取快照\n更新统计\n\n暂无接口快照\n\n导出运行数据\n导出表格\n备份与恢复 · 0 个目标\n创建备份\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n运行异常 · 诊断失败\n诊断失败\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n按需查看日志追踪\n启动与就绪\n健康检查、启动与接口\n刷新运行状态\n服务就绪: Blocked by unavailable dependency · 依赖可用性: degraded\nPython · /api/ping\n后端在线\n后端服务正常\nControl · /api/health\n待处理\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n依赖可用性 · Python /health\ndegraded\n26.838599995244294ms / 5000ms · loop lag=0ms\nllm · degraded · LLM provider unavailable · 6.971700000576675ms / 5000ms\ntts · degraded · TTS client not ready · 6.812600011471659ms / 5000ms\nasr · healthy · ASR not available (optional) · 0.0033999967854470015ms / 5000ms\nocr · healthy · OCR ready on demand · 0.01170000177808106ms / 5000ms\ndatabase · healthy · Database healthy (0 messages) · 22.643900010734797ms / 5000ms\nmemory · healthy · SQLite memory saved; index needs recovery · 23.604000016348436ms / 5000ms\n服务就绪 · /api/readiness\n后端服务尚未完全就绪\n\nBlocked by unavailable dependency\n\n启动后端\n停止后端\nAPI 文档\n运行检查项\n2 / 6\n1\nControl /api/health\n阻塞\n2\nPython /api/ping\n完成\n3\nPython /health\n阻塞\n4\n服务就绪\n阻塞\n5\n启停桥接\n等待\n6\nAPI 文档\n完成\n依赖可用性\n0/4 正常\n对话模型\n必需\ncustom\n未配置\n视觉模型\n未配置\ncustom\n未配置\n语音合成\n待处理\ngenie-tts · tts-1\nTTS client not ready\n重新检查\n语音识别\n未配置\ndisabled\n未配置\n启动命令\nWindows\n完整启动（含 MCP）\nYuizakiLauncher.exe\n复制\n轻量启动（不含 MCP）\nYuizakiLauncher.exe --no-mcp\n复制\n前端调试\nYuizakiLauncher.exe --dev-renderer\n复制"
+        },
+        {
+          "label": "390",
+          "hash": "#/w/default/infrastructure",
+          "headings": [
+            "服务与资源",
+            "服务与资源"
+          ],
+          "tabs": [],
+          "loading": 0,
+          "messages": [
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+          ],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n服务与资源\n当前离线\n简体中文\nDefault Companion\n服务与资源\n服务与资源诊断失败，诊断失败\n刷新状态\n导出运行诊断\n服务状态\n诊断失败\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n环境依赖\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n运行时资源\n刷新采样\n清理 HTTP 缓存\n\n浏览器模式无法读取 Electron 进程资源\n\n高级诊断数据\n读取快照\n更新统计\n\n暂无接口快照\n\n导出运行数据\n导出表格\n备份与恢复 · 0 个目标\n创建备份\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n运行异常 · 诊断失败\n诊断失败\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n按需查看日志追踪\n启动与就绪\n健康检查、启动与接口\n刷新运行状态\n服务就绪: Blocked by unavailable dependency · 依赖可用性: degraded\nPython · /api/ping\n后端在线\n后端服务正常\nControl · /api/health\n待处理\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n依赖可用性 · Python /health\ndegraded\n26.838599995244294ms / 5000ms · loop lag=0ms\nllm · degraded · LLM provider unavailable · 6.971700000576675ms / 5000ms\ntts · degraded · TTS client not ready · 6.812600011471659ms / 5000ms\nasr · healthy · ASR not available (optional) · 0.0033999967854470015ms / 5000ms\nocr · healthy · OCR ready on demand · 0.01170000177808106ms / 5000ms\ndatabase · healthy · Database healthy (0 messages) · 22.643900010734797ms / 5000ms\nmemory · healthy · SQLite memory saved; index needs recovery · 23.604000016348436ms / 5000ms\n服务就绪 · /api/readiness\n后端服务尚未完全就绪\n\nBlocked by unavailable dependency\n\n启动后端\n停止后端\nAPI 文档\n运行检查项\n2 / 6\n1\nControl /api/health\n阻塞\n2\nPython /api/ping\n完成\n3\nPython /health\n阻塞\n4\n服务就绪\n阻塞\n5\n启停桥接\n等待\n6\nAPI 文档\n完成\n依赖可用性\n0/4 正常\n对话模型\n必需\ncustom\n未配置\n视觉模型\n未配置\ncustom\n未配置\n语音合成\n待处理\ngenie-tts · tts-1\nTTS client not ready\n重新检查\n语音识别\n未配置\ndisabled\n未配置\n启动命令\nWindows\n完整启动（含 MCP）\nYuizakiLauncher.exe\n复制\n轻量启动（不含 MCP）\nYuizakiLauncher.exe --no-mcp\n复制\n前端调试\nYuizakiLauncher.exe --dev-renderer\n复制"
+        }
+      ]
+    },
+    {
+      "label": "agent-governance",
+      "hash": "#/w/default/agent-governance",
+      "headings": [
+        "权限审计",
+        "权限审计"
+      ],
+      "tabs": [
+        {
+          "text": "连接器",
+          "selected": "true"
+        },
+        {
+          "text": "MCP",
+          "selected": "false"
+        },
+        {
+          "text": "授权",
+          "selected": "false"
+        },
+        {
+          "text": "扩展",
+          "selected": "false"
+        },
+        {
+          "text": "Telegram",
+          "selected": "true"
+        },
+        {
+          "text": "Discord",
+          "selected": "false"
+        },
+        {
+          "text": "QQ 个人账号兼容桥",
+          "selected": "false"
+        },
+        {
+          "text": "微信个人账号兼容桥",
+          "selected": "false"
+        }
+      ],
+      "loading": 0,
+      "messages": [],
+      "overflow": 0,
+      "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n权限审计\n当前离线\n简体中文\nDefault Companion\n权限审计\n治理面稳定\n治理面稳定\n刷新治理快照\n连接器\nMCP\n授权\n扩展\n连接器状态\n2 个运行中 · 4 个未安装 · 0 个故障\n刷新连接器\nchrome_devtools\nmcp · mcp:chrome_devtools\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\ncontext7\nmcp · mcp:context7\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\ndeepwiki\nmcp · mcp:deepwiki\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nedge_devtools\nmcp · mcp:edge_devtools\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nfirecrawl\nmcp · mcp:firecrawl\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\ngithub\nmcp · mcp:github\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\ngrep_app\nmcp · mcp:grep_app\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nmemory_graph\nmcp · mcp:memory_graph\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nnotion_remote\nmcp · mcp:notion_remote\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nplaywright\nmcp · mcp:playwright\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nplaywright_mcp\nmcp · mcp:playwright_mcp\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nsimple_memory\nmcp · mcp:simple_memory\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\ntodoist_remote\nmcp · mcp:todoist_remote\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nwebsearch\nmcp · mcp:websearch\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nyuizaki_sqlite_ro\nmcp · mcp:yuizaki_sqlite_ro\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nDSH 编码任务委托\nagent_plugin · plugin:dsh-delegate\n运行中\n\n插件已加载\n\n能力：agent-hooks、agent-tools\n数据流：Agent 生命周期 -> 插件；插件 -> Agent 工具/事件\n一键停用\n时间上下文插件\nagent_plugin · plugin:time-context\n运行中\n\n插件已加载\n\n能力：agent-hooks、agent-tools\n数据流：Agent 生命周期 -> 插件；插件 -> Agent 工具/事件\n一键停用\nTelegram\nexternal_message · connector:telegram\n未安装\n\n适配器未配置 Bot token\n\n能力：message-in、message-out、webhook\n数据流：Telegram Update -> Agent 会话；Agent 回复 -> Telegram\n资格：连接器必需配置尚未完成\n实验性，默认不启用\nDiscord\nexternal_message · connector:discord\n未安装\n\n适配器未配置 Public Key\n\n能力：interaction-in、interaction-response\n数据流：Discord Interaction -> Agent 会话；Agent 终态 -> 原始 Interaction 响应\n资格：连接器必需配置尚未完成\n实验性，默认不启用\nQQ 个人账号兼容桥\nexternal_message · connector:qq\n未安装\n\n适配器未配置 QQ 个人账号兼容桥地址\n\n能力：message-in、message-out、webhook\n数据流：QQ 兼容桥事件 -> Agent 会话；Agent 回复 -> QQ 兼容桥\n资格：连接器必需配置尚未完成\n实验性，默认不启用\n微信个人账号兼容桥\nexternal_message · connector:wechat\n未安装\n\n适配器未配置微信个人账号兼容桥地址\n\n能力：message-in、message-out、callback\n数据流：微信兼容桥事件 -> Agent 会话；Agent 回复 -> 微信兼容桥\n资格：连接器必需配置尚未完成\n实验性，默认不启用\nTelegram\nDiscord\nQQ 个人账号兼容桥\n微信个人账号兼容桥\nTelegram 设置\n/api/system/connectors/telegram/webhook\n复制回调路径\nBot Token 未配置\nWebhook Secret 未配置\n重新读取\n测试连接\n保存设置\n最近事件\n恢复扫描 74 次\n检查 0 条\n恢复 0 条\n失败 0 条\n最近扫描 2026/11/11 14:14:47",
+      "entry_ms": 691,
+      "subtabs": [
+        {
+          "label": "连接器",
+          "hash": "#/w/default/agent-governance",
+          "headings": [
+            "权限审计",
+            "权限审计"
+          ],
+          "tabs": [
+            {
+              "text": "连接器",
+              "selected": "true"
+            },
+            {
+              "text": "MCP",
+              "selected": "false"
+            },
+            {
+              "text": "授权",
+              "selected": "false"
+            },
+            {
+              "text": "扩展",
+              "selected": "false"
+            },
+            {
+              "text": "Telegram",
+              "selected": "true"
+            },
+            {
+              "text": "Discord",
+              "selected": "false"
+            },
+            {
+              "text": "QQ 个人账号兼容桥",
+              "selected": "false"
+            },
+            {
+              "text": "微信个人账号兼容桥",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n权限审计\n当前离线\n简体中文\nDefault Companion\n权限审计\n治理面稳定\n治理面稳定\n刷新治理快照\n连接器\nMCP\n授权\n扩展\n连接器状态\n2 个运行中 · 4 个未安装 · 0 个故障\n刷新连接器\nchrome_devtools\nmcp · mcp:chrome_devtools\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\ncontext7\nmcp · mcp:context7\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\ndeepwiki\nmcp · mcp:deepwiki\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nedge_devtools\nmcp · mcp:edge_devtools\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nfirecrawl\nmcp · mcp:firecrawl\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\ngithub\nmcp · mcp:github\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\ngrep_app\nmcp · mcp:grep_app\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nmemory_graph\nmcp · mcp:memory_graph\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nnotion_remote\nmcp · mcp:notion_remote\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nplaywright\nmcp · mcp:playwright\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nplaywright_mcp\nmcp · mcp:playwright_mcp\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nsimple_memory\nmcp · mcp:simple_memory\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\ntodoist_remote\nmcp · mcp:todoist_remote\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nwebsearch\nmcp · mcp:websearch\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nyuizaki_sqlite_ro\nmcp · mcp:yuizaki_sqlite_ro\n已停用\n\n已停用\n\n能力：tools、resources、prompts\n数据流：Agent -> MCP 服务；MCP 服务 -> 工具/资源\nDSH 编码任务委托\nagent_plugin · plugin:dsh-delegate\n运行中\n\n插件已加载\n\n能力：agent-hooks、agent-tools\n数据流：Agent 生命周期 -> 插件；插件 -> Agent 工具/事件\n一键停用\n时间上下文插件\nagent_plugin · plugin:time-context\n运行中\n\n插件已加载\n\n能力：agent-hooks、agent-tools\n数据流：Agent 生命周期 -> 插件；插件 -> Agent 工具/事件\n一键停用\nTelegram\nexternal_message · connector:telegram\n未安装\n\n适配器未配置 Bot token\n\n能力：message-in、message-out、webhook\n数据流：Telegram Update -> Agent 会话；Agent 回复 -> Telegram\n资格：连接器必需配置尚未完成\n实验性，默认不启用\nDiscord\nexternal_message · connector:discord\n未安装\n\n适配器未配置 Public Key\n\n能力：interaction-in、interaction-response\n数据流：Discord Interaction -> Agent 会话；Agent 终态 -> 原始 Interaction 响应\n资格：连接器必需配置尚未完成\n实验性，默认不启用\nQQ 个人账号兼容桥\nexternal_message · connector:qq\n未安装\n\n适配器未配置 QQ 个人账号兼容桥地址\n\n能力：message-in、message-out、webhook\n数据流：QQ 兼容桥事件 -> Agent 会话；Agent 回复 -> QQ 兼容桥\n资格：连接器必需配置尚未完成\n实验性，默认不启用\n微信个人账号兼容桥\nexternal_message · connector:wechat\n未安装\n\n适配器未配置微信个人账号兼容桥地址\n\n能力：message-in、message-out、callback\n数据流：微信兼容桥事件 -> Agent 会话；Agent 回复 -> 微信兼容桥\n资格：连接器必需配置尚未完成\n实验性，默认不启用\nTelegram\nDiscord\nQQ 个人账号兼容桥\n微信个人账号兼容桥\nTelegram 设置\n/api/system/connectors/telegram/webhook\n复制回调路径\nBot Token 未配置\nWebhook Secret 未配置\n重新读取\n测试连接\n保存设置\n最近事件\n恢复扫描 74 次\n检查 0 条\n恢复 0 条\n失败 0 条\n最近扫描 2026/11/11 14:14:47"
+        },
+        {
+          "label": "MCP",
+          "hash": "#/w/default/agent-governance",
+          "headings": [
+            "权限审计",
+            "权限审计"
+          ],
+          "tabs": [
+            {
+              "text": "连接器",
+              "selected": "false"
+            },
+            {
+              "text": "MCP",
+              "selected": "true"
+            },
+            {
+              "text": "授权",
+              "selected": "false"
+            },
+            {
+              "text": "扩展",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n权限审计\n当前离线\n简体中文\nDefault Companion\n权限审计\n治理面稳定\n治理面稳定\n刷新治理快照\n连接器\nMCP\n授权\n扩展\nMCP 服务\n0 / 15 个连接可用\n刷新\n全部\n15\n已连接\n0\n需处理\n0\n未启用\n15\nplaywright\n已禁用\n工具 0\n资源 0\n提示模板 0\n传输：HTTP\n调用 0\n失败 0\n待处理 0\n重连\n删除\n暂无连接历史\nmemory_graph\nnpx.cmd -y @modelcontextprotocol/server-memory\n已禁用\n工具 0\n资源 0\n提示模板 0\n传输：STDIO\n调用 0\n失败 0\n待处理 0\n查看连接配置\n重连\n删除\n暂无连接历史\nsimple_memory\nnpx.cmd -y mcp-simple-memory serve\n已禁用\n工具 0\n资源 0\n提示模板 0\n传输：STDIO\n调用 0\n失败 0\n待处理 0\n查看连接配置\n重连\n删除\n暂无连接历史\nnotion_remote\nhttps://mcp.notion.com/mcp\n已禁用\n工具 0\n资源 0\n提示模板 0\n传输：Streamable HTTP\n调用 0\n失败 0\n待处理 0\n重连\n删除\n暂无连接历史\ntodoist_remote\nhttps://ai.todoist.net/mcp\n已禁用\n工具 0\n资源 0\n提示模板 0\n传输：Streamable HTTP\n调用 0\n失败 0\n待处理 0\n重连\n删除\n暂无连接历史\nyuizaki_sqlite_ro\nnpx.cmd -y @berthojoris/mcp-sqlite-server sqlite:///E:/yuizaki/artifacts/panel-audit-2026-11-11/runtime-data/chat.db list,read\n已禁用\n工具 0\n资源 0\n提示模板 0\n传输：STDIO\n调用 0\n失败 0\n待处理 0\n重连\n删除\n暂无连接历史\nchrome_devtools\nC:/Users/溪羽rivulet/AppData/Roaming/npm/chrome-devtools-mcp.cmd --headless\n已禁用\n工具 0\n资源 0\n提示模板 0\n传输：STDIO\n调用 0\n失败 0\n待处理 0\n重连\n删除\n暂无连接历史\nedge_devtools\nC:/Users/溪羽rivulet/AppData/Roaming/npm/edge-devtools-mcp.cmd\n已禁用\n工具 0\n资源 0\n提示模板 0\n传输：STDIO\n调用 0\n失败 0\n待处理 0\n查看连接配置\n重连\n删除\n暂无连接历史\nplaywright_mcp\nC:/Users/溪羽rivulet/AppData/Roaming/npm/playwright-mcp.cmd --headless\n已禁用\n工具 0\n资源 0\n提示模板 0\n传输：STDIO\n调用 0\n失败 0\n待处理 0\n重连\n删除\n暂无连接历史\ndeepwiki\nC:/Users/溪羽rivulet/AppData/Roaming/npm/mcp-instruct.cmd\n已禁用\n工具 0\n资源 0\n提示模板 0\n传输：STDIO\n调用 0\n失败 0\n待处理 0\n重连\n删除\n暂无连接历史\nfirecrawl\nC:/Users/溪羽rivulet/AppData/Roaming/npm/firecrawl-mcp.cmd\n已禁用\n工具 0\n资源 0\n提示模板 0\n传输：STDIO\n调用 0\n失败 0\n待处理 0\n查看连接配置\n重连\n删除\n暂无连接历史\ncontext7\nhttps://mcp.context7.com/mcp\n已禁用\n工具 0\n资源 0\n提示模板 0\n传输：Streamable HTTP\n调用 0\n失败 0\n待处理 0\n查看连接配置\n重连\n删除\n暂无连接历史\ngithub\nhttps://api.githubcopilot.com/mcp\n已禁用\n工具 0\n资源 0\n提示模板 0\n传输：Streamable HTTP\n调用 0\n失败 0\n待处理 0\n查看连接配置\n重连\n删除\n暂无连接历史\ngrep_app\nhttps://mcp.grep.app\n已禁用\n工具 0\n资源 0\n提示模板 0\n传输：Streamable HTTP\n调用 0\n失败 0\n待处理 0\n重连\n删除\n暂无连接历史\nwebsearch\nhttps://mcp.exa.ai/mcp?tools=%5BREDACTED%5D\n已禁用\n工具 0\n资源 0\n提示模板 0\n传输：Streamable HTTP\n调用 0\n失败 0\n待处理 0\n重连\n删除\n暂无连接历史\n新增 MCP 服务器\nHTTP\n长期桌宠记忆\n官方知识图谱记忆 MCP，适合记录用户偏好、桌宠关系、长期目标与桌宠设定。\n桌宠\nSTDIO\n1 个环境变量\n已安装\n日常任务记忆\nSQLite 轻量记忆 MCP，适合保存日程片段、会话摘要、待办与项目决策。\n日常\nSTDIO\n1 个环境变量\n已安装\nNotion 知识库\n远程 Streamable HTTP MCP，用于读写 Notion 页面、资料库与桌宠日志；需要后续完成账户授权。\n日常\nStreamable HTTP\n已安装\nTodoist 日常任务\n远程 Streamable HTTP MCP，用于创建、整理和回顾小型日常任务；需要后续完成账户授权。\n日常\nStreamable HTTP\n已安装\nYuizaki 数据库只读检查\n只读连接本项目 chat.db，用于排查会话、工作区和桌宠记忆数据，不允许写入。\n诊断\nSTDIO\n已安装\nChrome DevTools\n连接 Chrome DevTools，用于检查本地页面、控制台日志、网络请求和交互状态。\n浏览器\nSTDIO\n已安装\nEdge DevTools\n连接本机 Edge 调试端口，用于浏览器页面调试和前端问题定位。\n浏览器\nSTDIO\n3 个环境变量\n已安装\nPlaywright MCP\n提供 Playwright 浏览器自动化能力，可作为 Yuizaki 内置浏览器桥的备用入口。\n浏览器\nSTDIO\n已安装\nDeepWiki\n面向代码库和文档的问答检索入口，适合分析依赖、模块关系和实现背景。\n调研\nSTDIO\n已安装\nFirecrawl\n抓取网页正文与结构化页面内容，适合资料整理和长网页提取；需要 FIRECRAWL_API_KEY。\n网页\nSTDIO\n1 个环境变量\n已安装\nContext7\n查询当前版本的库、框架和 SDK 文档，适合实现前确认 API 用法；需要授权时填写 CONTEXT7_API_KEY。\n文档\nStreamable HTTP\n1 个请求头\n已安装\nGitHub Copilot MCP\n连接 GitHub 相关仓库、Issue 和代码上下文；启用前需要配置 GITHUB_PERSONAL_ACCESS_TOKEN。\n代码\nStreamable HTTP\n1 个请求头\n已安装\ngrep.app\n搜索公开代码片段和仓库实现，适合查找相似用法、错误模式和开源参考。\n代码\nStreamable HTTP\n已安装\nExa Web Search\n提供网页搜索能力，适合查找近期资料、工具说明和公开信息来源。\n网页\nStreamable HTTP\n已安装\nHTTP\n高级连接设置\n注册并刷新"
+        },
+        {
+          "label": "授权",
+          "hash": "#/w/default/agent-governance",
+          "headings": [
+            "权限审计",
+            "权限审计"
+          ],
+          "tabs": [
+            {
+              "text": "连接器",
+              "selected": "false"
+            },
+            {
+              "text": "MCP",
+              "selected": "false"
+            },
+            {
+              "text": "授权",
+              "selected": "true"
+            },
+            {
+              "text": "扩展",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n权限审计\n当前离线\n简体中文\nDefault Companion\n权限审计\n治理面稳定\n治理面稳定\n刷新治理快照\n连接器\nMCP\n授权\n扩展\n0 条已记住规则\n刷新\n清空\n\n暂无审批记录\n\n0 条事件\n暂无事件\n\n暂无审批审计事件"
+        },
+        {
+          "label": "扩展",
+          "hash": "#/w/default/agent-governance",
+          "headings": [
+            "权限审计",
+            "权限审计"
+          ],
+          "tabs": [
+            {
+              "text": "连接器",
+              "selected": "false"
+            },
+            {
+              "text": "MCP",
+              "selected": "false"
+            },
+            {
+              "text": "授权",
+              "selected": "false"
+            },
+            {
+              "text": "扩展",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+          ],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n权限审计\n当前离线\n简体中文\nDefault Companion\n权限审计\n治理面稳定\n治理面稳定\n刷新治理快照\n连接器\nMCP\n授权\n扩展\n扩展宿主\n智能体 / 桌面应用 / MCP\n刷新扩展\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+        }
+      ],
+      "responsive": [
+        {
+          "label": "768",
+          "hash": "#/w/default/agent-governance",
+          "headings": [
+            "权限审计",
+            "权限审计"
+          ],
+          "tabs": [
+            {
+              "text": "连接器",
+              "selected": "false"
+            },
+            {
+              "text": "MCP",
+              "selected": "false"
+            },
+            {
+              "text": "授权",
+              "selected": "false"
+            },
+            {
+              "text": "扩展",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+          ],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n权限审计\n当前离线\n简体中文\nDefault Companion\n权限审计\n治理面稳定\n治理面稳定\n刷新治理快照\n连接器\nMCP\n授权\n扩展\n扩展宿主\n智能体 / 桌面应用 / MCP\n刷新扩展\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+        },
+        {
+          "label": "390",
+          "hash": "#/w/default/agent-governance",
+          "headings": [
+            "权限审计",
+            "权限审计"
+          ],
+          "tabs": [
+            {
+              "text": "连接器",
+              "selected": "false"
+            },
+            {
+              "text": "MCP",
+              "selected": "false"
+            },
+            {
+              "text": "授权",
+              "selected": "false"
+            },
+            {
+              "text": "扩展",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+          ],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n权限审计\n当前离线\n简体中文\nDefault Companion\n权限审计\n治理面稳定\n治理面稳定\n刷新治理快照\n连接器\nMCP\n授权\n扩展\n扩展宿主\n智能体 / 桌面应用 / MCP\n刷新扩展\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+        }
+      ]
+    },
+    {
+      "label": "agent-trace",
+      "hash": "#/w/default/agent-trace",
+      "headings": [
+        "任务追踪",
+        "任务追踪",
+        "后台任务",
+        "最近执行阶段"
+      ],
+      "tabs": [
+        {
+          "text": "状态",
+          "selected": "false"
+        },
+        {
+          "text": "后台任务",
+          "selected": "true"
+        },
+        {
+          "text": "计划任务",
+          "selected": "false"
+        },
+        {
+          "text": "追踪",
+          "selected": "false"
+        }
+      ],
+      "loading": 0,
+      "messages": [],
+      "overflow": 0,
+      "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n任务追踪\n当前离线\n简体中文\nDefault Companion\n任务追踪\n导出诊断\n刷新\n状态\n后台任务\n计划任务\n追踪\n后台任务\n0 个进行中\n0 条记录\n\n暂无后台任务\n\n最近执行阶段\n观察\n理解\n回忆\n决策\n执行\n反思\n关系",
+      "entry_ms": 639,
+      "subtabs": [
+        {
+          "label": "状态",
+          "hash": "#/w/default/agent-trace",
+          "headings": [
+            "任务追踪",
+            "任务追踪",
+            "运行指标"
+          ],
+          "tabs": [
+            {
+              "text": "状态",
+              "selected": "true"
+            },
+            {
+              "text": "后台任务",
+              "selected": "false"
+            },
+            {
+              "text": "计划任务",
+              "selected": "false"
+            },
+            {
+              "text": "追踪",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n任务追踪\n当前离线\n简体中文\nDefault Companion\n任务追踪\n导出诊断\n刷新\n状态\n后台任务\n计划任务\n追踪\n运行数\n0\n步骤事件\n0\n运行循环\n0\n计划任务\n0\n运行指标\n语音识别\n待采样\n首字响应\n待采样\n首段音频\n待采样\n实际开播\n待采样\n视觉分析\n待采样\n更多指标\n语音打断 待采样\n手动中断 待采样\n工具成功 待采样\n播放恢复 待采样\n视觉调用 待采样\n视觉结论 待采样"
+        },
+        {
+          "label": "后台任务",
+          "hash": "#/w/default/agent-trace",
+          "headings": [
+            "任务追踪",
+            "任务追踪",
+            "后台任务",
+            "最近执行阶段"
+          ],
+          "tabs": [
+            {
+              "text": "状态",
+              "selected": "false"
+            },
+            {
+              "text": "后台任务",
+              "selected": "true"
+            },
+            {
+              "text": "计划任务",
+              "selected": "false"
+            },
+            {
+              "text": "追踪",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n任务追踪\n当前离线\n简体中文\nDefault Companion\n任务追踪\n导出诊断\n刷新\n状态\n后台任务\n计划任务\n追踪\n后台任务\n0 个进行中\n0 条记录\n\n暂无后台任务\n\n最近执行阶段\n观察\n理解\n回忆\n决策\n执行\n反思\n关系"
+        },
+        {
+          "label": "计划任务",
+          "hash": "#/w/default/agent-trace",
+          "headings": [
+            "任务追踪",
+            "任务追踪",
+            "计划任务"
+          ],
+          "tabs": [
+            {
+              "text": "状态",
+              "selected": "false"
+            },
+            {
+              "text": "后台任务",
+              "selected": "false"
+            },
+            {
+              "text": "计划任务",
+              "selected": "true"
+            },
+            {
+              "text": "追踪",
+              "selected": "false"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n任务追踪\n当前离线\n简体中文\nDefault Companion\n任务追踪\n导出诊断\n刷新\n状态\n后台任务\n计划任务\n追踪\n计划任务\n\n暂无计划任务\n\n任务名称\n任务内容\n单次\n循环"
+        },
+        {
+          "label": "追踪",
+          "hash": "#/w/default/agent-trace",
+          "headings": [
+            "任务追踪",
+            "任务追踪",
+            "全部运行 · 全部状态"
+          ],
+          "tabs": [
+            {
+              "text": "状态",
+              "selected": "false"
+            },
+            {
+              "text": "后台任务",
+              "selected": "false"
+            },
+            {
+              "text": "计划任务",
+              "selected": "false"
+            },
+            {
+              "text": "追踪",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n任务追踪\n当前离线\n简体中文\nDefault Companion\n任务追踪\n导出诊断\n刷新\n状态\n后台任务\n计划任务\n追踪\n全部运行 · 全部状态\n⌕\n全部事件\n全部状态\n\n暂无匹配的追踪记录\n\n未选择运行记录"
+        }
+      ],
+      "responsive": [
+        {
+          "label": "768",
+          "hash": "#/w/default/agent-trace",
+          "headings": [
+            "任务追踪",
+            "任务追踪",
+            "全部运行 · 全部状态"
+          ],
+          "tabs": [
+            {
+              "text": "状态",
+              "selected": "false"
+            },
+            {
+              "text": "后台任务",
+              "selected": "false"
+            },
+            {
+              "text": "计划任务",
+              "selected": "false"
+            },
+            {
+              "text": "追踪",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n任务追踪\n当前离线\n简体中文\nDefault Companion\n任务追踪\n导出诊断\n刷新\n状态\n后台任务\n计划任务\n追踪\n全部运行 · 全部状态\n⌕\n全部事件\n全部状态\n\n暂无匹配的追踪记录\n\n未选择运行记录"
+        },
+        {
+          "label": "390",
+          "hash": "#/w/default/agent-trace",
+          "headings": [
+            "任务追踪",
+            "任务追踪",
+            "全部运行 · 全部状态"
+          ],
+          "tabs": [
+            {
+              "text": "状态",
+              "selected": "false"
+            },
+            {
+              "text": "后台任务",
+              "selected": "false"
+            },
+            {
+              "text": "计划任务",
+              "selected": "false"
+            },
+            {
+              "text": "追踪",
+              "selected": "true"
+            }
+          ],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n任务追踪\n当前离线\n简体中文\nDefault Companion\n任务追踪\n导出诊断\n刷新\n状态\n后台任务\n计划任务\n追踪\n全部运行 · 全部状态\n⌕\n全部事件\n全部状态\n\n暂无匹配的追踪记录\n\n未选择运行记录"
+        }
+      ]
+    },
+    {
+      "label": "persona-memory",
+      "hash": "#/w/default/persona-memory",
+      "headings": [
+        "行为记录",
+        "行为记录",
+        "当前状态"
+      ],
+      "tabs": [],
+      "loading": 0,
+      "messages": [
+        "目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+      ],
+      "overflow": 0,
+      "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n行为记录\n当前离线\n简体中文\nDefault Companion\n行为记录\n当前状态\n刷新状态\n\n角色：Default Companion (default) · 角色配置模型：未知 · 当前模型：未知 / -\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n桌宠状态\n心情\tneutral\t活跃程度\t0.82\t互动熟悉度\t54%\n运行状态\t运行中\t已运行次数\t18\t自动检查间隔\t60 秒\n最新行为 · 历史记录\n\n暂无截获的行为事件\n\n最近行为\n\n暂无行为事件\n\n互动建议\n\n暂无行为建议",
+      "entry_ms": 665,
+      "subtabs": [],
+      "responsive": [
+        {
+          "label": "768",
+          "hash": "#/w/default/persona-memory",
+          "headings": [
+            "行为记录",
+            "行为记录",
+            "当前状态"
+          ],
+          "tabs": [],
+          "loading": 0,
+          "messages": [
+            "目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+          ],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n行为记录\n当前离线\n简体中文\nDefault Companion\n行为记录\n当前状态\n刷新状态\n\n角色：Default Companion (default) · 角色配置模型：未知 · 当前模型：未知 / -\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n桌宠状态\n心情\tneutral\t活跃程度\t0.82\t互动熟悉度\t54%\n运行状态\t运行中\t已运行次数\t18\t自动检查间隔\t60 秒\n最新行为 · 历史记录\n\n暂无截获的行为事件\n\n最近行为\n\n暂无行为事件\n\n互动建议\n\n暂无行为建议"
+        },
+        {
+          "label": "390",
+          "hash": "#/w/default/persona-memory",
+          "headings": [
+            "行为记录",
+            "行为记录",
+            "当前状态"
+          ],
+          "tabs": [],
+          "loading": 0,
+          "messages": [
+            "目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+          ],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n行为记录\n当前离线\n简体中文\nDefault Companion\n行为记录\n当前状态\n刷新状态\n\n角色：Default Companion (default) · 角色配置模型：未知 · 当前模型：未知 / -\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n桌宠状态\n心情\tneutral\t活跃程度\t0.82\t互动熟悉度\t54%\n运行状态\t运行中\t已运行次数\t18\t自动检查间隔\t60 秒\n最新行为 · 历史记录\n\n暂无截获的行为事件\n\n最近行为\n\n暂无行为事件\n\n互动建议\n\n暂无行为建议"
+        }
+      ]
+    },
+    {
+      "label": "i18n",
+      "hash": "#/w/default/i18n",
+      "headings": [
+        "语言管理",
+        "语言管理"
+      ],
+      "tabs": [],
+      "loading": 0,
+      "messages": [],
+      "overflow": 0,
+      "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n语言管理\n当前离线\n简体中文\nDefault Companion\n语言管理\n应用语言同步\n简体中文\n同步应用语言\n简体中文 · zh-CN\n后端当前语言: zh-CN\n后端翻译诊断\n刷新后端字典\n简体中文 · zh-CN\n仅切换后端诊断\nzh-CN\n翻译消息\n查询消息\n查询错误消息\n查看当前语言内容",
+      "entry_ms": 646,
+      "subtabs": [],
+      "responsive": [
+        {
+          "label": "768",
+          "hash": "#/w/default/i18n",
+          "headings": [
+            "语言管理",
+            "语言管理"
+          ],
+          "tabs": [],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n语言管理\n当前离线\n简体中文\nDefault Companion\n语言管理\n应用语言同步\n简体中文\n同步应用语言\n简体中文 · zh-CN\n后端当前语言: zh-CN\n后端翻译诊断\n刷新后端字典\n简体中文 · zh-CN\n仅切换后端诊断\nzh-CN\n翻译消息\n查询消息\n查询错误消息\n查看当前语言内容"
+        },
+        {
+          "label": "390",
+          "hash": "#/w/default/i18n",
+          "headings": [
+            "语言管理",
+            "语言管理"
+          ],
+          "tabs": [],
+          "loading": 0,
+          "messages": [],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n语言管理\n当前离线\n简体中文\nDefault Companion\n语言管理\n应用语言同步\n简体中文\n同步应用语言\n简体中文 · zh-CN\n后端当前语言: zh-CN\n后端翻译诊断\n刷新后端字典\n简体中文 · zh-CN\n仅切换后端诊断\nzh-CN\n翻译消息\n查询消息\n查询错误消息\n查看当前语言内容"
+        }
+      ]
+    },
+    {
+      "label": "deploy",
+      "hash": "#/w/default/infrastructure",
+      "headings": [
+        "服务与资源",
+        "服务与资源"
+      ],
+      "tabs": [],
+      "loading": 0,
+      "messages": [
+        "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+        "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+        "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+        "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+        "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+      ],
+      "overflow": 0,
+      "bodyText": "对话\n长期记忆\n系统设置\n高级\n桌宠\n人格设定\n桌宠控制\n行为记录\n工具\n本地能力\n插件管理\n审计\n任务追踪\n权限审计\n设置\n语言管理\n当前工作区\n服务与资源\n当前离线\n简体中文\nDefault Companion\n服务与资源\n服务与资源诊断失败，诊断失败\n刷新状态\n导出运行诊断\n服务状态\n诊断失败\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n环境依赖\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n运行时资源\n刷新采样\n清理 HTTP 缓存\n\n浏览器模式无法读取 Electron 进程资源\n\n高级诊断数据\n读取快照\n更新统计\n\n暂无接口快照\n\n导出运行数据\n导出表格\n备份与恢复 · 0 个目标\n创建备份\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n运行异常 · 诊断失败\n诊断失败\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n按需查看日志追踪\n启动与就绪\n健康检查、启动与接口\n刷新运行状态\n服务就绪: Blocked by unavailable dependency · 依赖可用性: degraded\nPython · /api/ping\n后端在线\n后端服务正常\nControl · /api/health\n待处理\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n依赖可用性 · Python /health\ndegraded\n26.838599995244294ms / 5000ms · loop lag=0ms\nllm · degraded · LLM provider unavailable · 6.971700000576675ms / 5000ms\ntts · degraded · TTS client not ready · 6.812600011471659ms / 5000ms\nasr · healthy · ASR not available (optional) · 0.0033999967854470015ms / 5000ms\nocr · healthy · OCR ready on demand · 0.01170000177808106ms / 5000ms\ndatabase · healthy · Database healthy (0 messages) · 22.643900010734797ms / 5000ms\nmemory · healthy · SQLite memory saved; index needs recovery · 23.604000016348436ms / 5000ms\n服务就绪 · /api/readiness\n后端服务尚未完全就绪\n\nBlocked by unavailable dependency\n\n启动后端\n停止后端\nAPI 文档\n运行检查项\n2 / 6\n1\nControl /api/health\n阻塞\n2\nPython /api/ping\n完成\n3\nPython /health\n阻塞\n4\n服务就绪\n阻塞\n5\n启停桥接\n等待\n6\nAPI 文档\n完成\n依赖可用性\n0/4 正常\n对话模型\n必需\ncustom\n未配置\n视觉模型\n未配置\ncustom\n未配置\n语音合成\n待处理\ngenie-tts · tts-1\nTTS client not ready\n重新检查\n语音识别\n未配置\ndisabled\n未配置\n启动命令\nWindows\n完整启动（含 MCP）\nYuizakiLauncher.exe\n复制\n轻量启动（不含 MCP）\nYuizakiLauncher.exe --no-mcp\n复制\n前端调试\nYuizakiLauncher.exe --dev-renderer\n复制",
+      "entry_ms": 676,
+      "subtabs": [],
+      "responsive": [
+        {
+          "label": "768",
+          "hash": "#/w/default/infrastructure",
+          "headings": [
+            "服务与资源",
+            "服务与资源"
+          ],
+          "tabs": [],
+          "loading": 0,
+          "messages": [
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+          ],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n服务与资源\n当前离线\n简体中文\nDefault Companion\n服务与资源\n服务与资源诊断失败，诊断失败\n刷新状态\n导出运行诊断\n服务状态\n诊断失败\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n环境依赖\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n运行时资源\n刷新采样\n清理 HTTP 缓存\n\n浏览器模式无法读取 Electron 进程资源\n\n高级诊断数据\n读取快照\n更新统计\n\n暂无接口快照\n\n导出运行数据\n导出表格\n备份与恢复 · 0 个目标\n创建备份\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n运行异常 · 诊断失败\n诊断失败\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n按需查看日志追踪\n启动与就绪\n健康检查、启动与接口\n刷新运行状态\n服务就绪: Blocked by unavailable dependency · 依赖可用性: degraded\nPython · /api/ping\n后端在线\n后端服务正常\nControl · /api/health\n待处理\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n依赖可用性 · Python /health\ndegraded\n26.838599995244294ms / 5000ms · loop lag=0ms\nllm · degraded · LLM provider unavailable · 6.971700000576675ms / 5000ms\ntts · degraded · TTS client not ready · 6.812600011471659ms / 5000ms\nasr · healthy · ASR not available (optional) · 0.0033999967854470015ms / 5000ms\nocr · healthy · OCR ready on demand · 0.01170000177808106ms / 5000ms\ndatabase · healthy · Database healthy (0 messages) · 22.643900010734797ms / 5000ms\nmemory · healthy · SQLite memory saved; index needs recovery · 23.604000016348436ms / 5000ms\n服务就绪 · /api/readiness\n后端服务尚未完全就绪\n\nBlocked by unavailable dependency\n\n启动后端\n停止后端\nAPI 文档\n运行检查项\n2 / 6\n1\nControl /api/health\n阻塞\n2\nPython /api/ping\n完成\n3\nPython /health\n阻塞\n4\n服务就绪\n阻塞\n5\n启停桥接\n等待\n6\nAPI 文档\n完成\n依赖可用性\n0/4 正常\n对话模型\n必需\ncustom\n未配置\n视觉模型\n未配置\ncustom\n未配置\n语音合成\n待处理\ngenie-tts · tts-1\nTTS client not ready\n重新检查\n语音识别\n未配置\ndisabled\n未配置\n启动命令\nWindows\n完整启动（含 MCP）\nYuizakiLauncher.exe\n复制\n轻量启动（不含 MCP）\nYuizakiLauncher.exe --no-mcp\n复制\n前端调试\nYuizakiLauncher.exe --dev-renderer\n复制"
+        },
+        {
+          "label": "390",
+          "hash": "#/w/default/infrastructure",
+          "headings": [
+            "服务与资源",
+            "服务与资源"
+          ],
+          "tabs": [],
+          "loading": 0,
+          "messages": [
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）",
+            "!加载失败目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）"
+          ],
+          "overflow": 0,
+          "bodyText": "桌宠\n工具\n审计\n设置\n服务与资源\n当前离线\n简体中文\nDefault Companion\n服务与资源\n服务与资源诊断失败，诊断失败\n刷新状态\n导出运行诊断\n服务状态\n诊断失败\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n环境依赖\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n运行时资源\n刷新采样\n清理 HTTP 缓存\n\n浏览器模式无法读取 Electron 进程资源\n\n高级诊断数据\n读取快照\n更新统计\n\n暂无接口快照\n\n导出运行数据\n导出表格\n备份与恢复 · 0 个目标\n创建备份\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n运行异常 · 诊断失败\n诊断失败\n!\n加载失败\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n按需查看日志追踪\n启动与就绪\n健康检查、启动与接口\n刷新运行状态\n服务就绪: Blocked by unavailable dependency · 依赖可用性: degraded\nPython · /api/ping\n后端在线\n后端服务正常\nControl · /api/health\n待处理\n\n目标不存在：刷新后重试；它可能已被删除。（后端说明：Not Found）（http_404）\n\n依赖可用性 · Python /health\ndegraded\n26.838599995244294ms / 5000ms · loop lag=0ms\nllm · degraded · LLM provider unavailable · 6.971700000576675ms / 5000ms\ntts · degraded · TTS client not ready · 6.812600011471659ms / 5000ms\nasr · healthy · ASR not available (optional) · 0.0033999967854470015ms / 5000ms\nocr · healthy · OCR ready on demand · 0.01170000177808106ms / 5000ms\ndatabase · healthy · Database healthy (0 messages) · 22.643900010734797ms / 5000ms\nmemory · healthy · SQLite memory saved; index needs recovery · 23.604000016348436ms / 5000ms\n服务就绪 · /api/readiness\n后端服务尚未完全就绪\n\nBlocked by unavailable dependency\n\n启动后端\n停止后端\nAPI 文档\n运行检查项\n2 / 6\n1\nControl /api/health\n阻塞\n2\nPython /api/ping\n完成\n3\nPython /health\n阻塞\n4\n服务就绪\n阻塞\n5\n启停桥接\n等待\n6\nAPI 文档\n完成\n依赖可用性\n0/4 正常\n对话模型\n必需\ncustom\n未配置\n视觉模型\n未配置\ncustom\n未配置\n语音合成\n待处理\ngenie-tts · tts-1\nTTS client not ready\n重新检查\n语音识别\n未配置\ndisabled\n未配置\n启动命令\nWindows\n完整启动（含 MCP）\nYuizakiLauncher.exe\n复制\n轻量启动（不含 MCP）\nYuizakiLauncher.exe --no-mcp\n复制\n前端调试\nYuizakiLauncher.exe --dev-renderer\n复制"
+        }
+      ]
+    }
+  ],
+  "page_errors": [],
+  "responses": [
+    {
+      "panel": "chat",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/behavior-state",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/state",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/system/voice-diagnostics/run",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/catalog",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/companions",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/catalog",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/avatar-capabilities",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/system/ui-capabilities",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/settings/",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/health",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/behavior-state",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/ping",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/workspaces",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/settings/",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/state",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/catalog",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/settings/tts/warmup",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/health",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/ping",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/system/active-workspace",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/system/companion-runtime",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/companion-idle-profile",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/companion-idle-profile",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/sessions",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/state",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/catalog",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "memory",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "memory",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "memory",
+      "path": "/memory/docs",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "memory",
+      "path": "/memory/docs",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "memory",
+      "path": "/memory/overview",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "memory",
+      "path": "/memory/candidates",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "memory",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "memory",
+      "path": "/memory/operations",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "memory",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "memory",
+      "path": "/memory/index/status",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "memory",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "memory",
+      "path": "/api/workspaces/default",
+      "status": 200,
+      "method": "PATCH"
+    },
+    {
+      "panel": "memory",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "memory",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "memory",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "memory",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/settings/",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/settings/runtime/status",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/settings/llm/status",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/backend-token",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/settings/runtime/status",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/settings/llm/status",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/workspaces/default",
+      "status": 200,
+      "method": "PATCH"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/settings/runtime/status",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/settings/tts/status",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/settings/tts/characters",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/settings/tts/warmup",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/settings/runtime/status",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/memory/index/status",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/health",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/ping",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/resources",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/storage",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/settings/runtime/status",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "prompt",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "prompt",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "prompt",
+      "path": "/api/sessions",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "prompt",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "prompt",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "prompt",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "prompt",
+      "path": "/api/workspaces/default",
+      "status": 200,
+      "method": "PATCH"
+    },
+    {
+      "panel": "prompt",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "prompt",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "pet",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "pet",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "pet",
+      "path": "/api/pet/state",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "pet",
+      "path": "/api/pet/catalog",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "pet",
+      "path": "/api/pet/displays",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "pet",
+      "path": "/api/pet/presets",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "pet",
+      "path": "/api/pet/avatar-capabilities",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "pet",
+      "path": "/api/system/ui-capabilities",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "pet",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "pet",
+      "path": "/api/workspaces/default",
+      "status": 200,
+      "method": "PATCH"
+    },
+    {
+      "panel": "pet",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "pet",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "pet",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "pet",
+      "path": "/api/pet/state",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "pet",
+      "path": "/api/pet/avatar-capabilities",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "svc",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "svc",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "svc",
+      "path": "/api/settings/",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "svc",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "svc",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "svc",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "svc",
+      "path": "/api/workspaces/default",
+      "status": 200,
+      "method": "PATCH"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/system/skills/imported",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/plugin/list",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/system/capabilities",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/system/agent-trace",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/system/stream",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/system/stream/twitch/config",
+      "status": 405,
+      "method": "GET"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/system/stream/events",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/system/mcp",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/system/stream/drafts",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/system/stream/actions",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/system/stream/draft-consumer",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/system/ui-capabilities",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/workspaces/default",
+      "status": 200,
+      "method": "PATCH"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "plugins",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "plugins",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "plugins",
+      "path": "/api/plugin/list",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "plugins",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "plugins",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "plugins",
+      "path": "/api/workspaces/default",
+      "status": 200,
+      "method": "PATCH"
+    },
+    {
+      "panel": "infrastructure",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "infrastructure",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "infrastructure",
+      "path": "/api/ping",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "infrastructure",
+      "path": "/api/health",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "infrastructure",
+      "path": "/api/system/diagnostics",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "infrastructure",
+      "path": "/api/system/backup/targets",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "infrastructure",
+      "path": "/api/system/providers",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "infrastructure",
+      "path": "/api/system/logs",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "infrastructure",
+      "path": "/health",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "infrastructure",
+      "path": "/api/readiness",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "infrastructure",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "infrastructure",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "infrastructure",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/permissions",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/plugin/list",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/agent-plugins",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/connectors/telegram/config",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/connectors/discord/config",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/mcp",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/connectors/qq/config",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/connectors",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/connectors/wechat/config",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/connectors/telegram/deliveries",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/connectors/discord/deliveries",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/connectors/qq/deliveries",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/connectors/wechat/deliveries",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/connectors/qq/account",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/connectors/wechat/account",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/connectors/qq/bridge",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/ui-capabilities",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/connectors/qq/account",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/connectors/wechat/account",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/workspaces/default",
+      "status": 200,
+      "method": "PATCH"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/workspaces/default",
+      "status": 200,
+      "method": "PATCH"
+    },
+    {
+      "panel": "agent-trace",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-trace",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "agent-trace",
+      "path": "/api/system/schedules",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-trace",
+      "path": "/api/system/agent-trace",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-trace",
+      "path": "/api/system/experience-metrics",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-trace",
+      "path": "/api/system/companion-runtime",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-trace",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-trace",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "agent-trace",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-trace",
+      "path": "/api/workspaces/default",
+      "status": 200,
+      "method": "PATCH"
+    },
+    {
+      "panel": "agent-trace",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "agent-trace",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "persona-memory",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "persona-memory",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "persona-memory",
+      "path": "/api/system/heartbeat",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "persona-memory",
+      "path": "/api/pet/avatar-capabilities",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "persona-memory",
+      "path": "/api/system/ui-capabilities",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "persona-memory",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "persona-memory",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "persona-memory",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "persona-memory",
+      "path": "/api/workspaces/default",
+      "status": 200,
+      "method": "PATCH"
+    },
+    {
+      "panel": "i18n",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "i18n",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "i18n",
+      "path": "/api/i18n/locales",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "i18n",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "i18n",
+      "path": "/api/i18n/messages",
+      "status": 200,
+      "method": "GET"
+    },
+    {
+      "panel": "i18n",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "i18n",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "i18n",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "i18n",
+      "path": "/api/workspaces/default",
+      "status": 200,
+      "method": "PATCH"
+    },
+    {
+      "panel": "deploy",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "deploy",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "deploy",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "deploy",
+      "path": "/api/pet/visibility",
+      "status": 409,
+      "method": "POST"
+    },
+    {
+      "panel": "deploy",
+      "path": "/api/system/env-check",
+      "status": 404,
+      "method": "GET"
+    },
+    {
+      "panel": "deploy",
+      "path": "/api/workspaces/default",
+      "status": 200,
+      "method": "PATCH"
+    }
+  ],
+  "blocked_mutations": [
+    {
+      "panel": "chat",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/behavior-state",
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/system/voice-diagnostics/run",
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/behavior-state",
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/settings/tts/warmup",
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/system/active-workspace",
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/companion-idle-profile",
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/companion-idle-profile",
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "chat",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "memory",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "memory",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "memory",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/settings/tts/warmup",
+      "method": "POST"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "settings",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "prompt",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "prompt",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "prompt",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "pet",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "pet",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "svc",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "svc",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "tool",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "plugins",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "plugins",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "infrastructure",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "infrastructure",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "agent-governance",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "agent-trace",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "agent-trace",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "agent-trace",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "persona-memory",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "persona-memory",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "i18n",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "i18n",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "deploy",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    },
+    {
+      "panel": "deploy",
+      "path": "/api/pet/visibility",
+      "method": "POST"
+    }
+  ]
+}

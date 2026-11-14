@@ -171,7 +171,7 @@ def _context_data_block(source: str, content: Any, *, guidance: str = "") -> str
 def _as_int(value: Any, default: int, minimum: int, maximum: int) -> int:
     try:
         parsed = int(float(value))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         parsed = default
     return max(minimum, min(maximum, parsed))
 
@@ -182,6 +182,28 @@ def _as_float(value: Any, default: float, minimum: float, maximum: float) -> flo
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(maximum, parsed))
+
+
+def _resolve_prompt_profile(workspace: dict[str, Any] | None, profile: PromptProfile | None) -> PromptProfile:
+    """Use only this workspace's known context fields, with request fields first.
+
+    Merge one level within each configuration section; explicit values (including
+    false, null, empty text and lists) replace the corresponding stored values.
+    """
+    saved = _as_dict(_as_dict(workspace).get("context"))
+    requested = _as_dict(profile)
+    resolved: PromptProfile = {}
+    if "promptMode" in saved:
+        resolved["mode"] = saved["promptMode"]
+    for field in ("roleCard", "worldBook", "promptEngineering"):
+        if field in saved:
+            resolved[field] = saved[field]
+        if field in requested:
+            value = requested[field]
+            resolved[field] = {**_as_dict(saved.get(field)), **value} if isinstance(value, dict) else value
+    if "mode" in requested:
+        resolved["mode"] = requested["mode"]
+    return resolved
 
 
 def _resolve_prompt_mode(workspace_id: str | None, profile: PromptProfile | None) -> str:
@@ -204,12 +226,24 @@ def _role_card_prompt(profile: PromptProfile | None) -> str:
     role_card = _as_dict(_as_dict(profile).get("roleCard"))
     if role_card.get("enabled") is False:
         return ""
+    greeting = role_card.get("firstMessage")
+    greeting_index = role_card.get("greetingIndex")
+    alternate_greetings = role_card.get("alternateGreetings")
+    if (
+        type(greeting_index) is int
+        and isinstance(alternate_greetings, list)
+        and 0 <= greeting_index < len(alternate_greetings)
+        and isinstance(alternate_greetings[greeting_index], str)
+    ):
+        greeting = alternate_greetings[greeting_index]
     fields = [
         ("角色名", _clean_text(role_card.get("name"), 240)),
+        ("角色描述", _clean_text(role_card.get("description"))),
         ("性格", _clean_text(role_card.get("personality"))),
         ("情境", _clean_text(role_card.get("scenario"))),
         ("行为规则", _clean_text(role_card.get("instructions"))),
-        ("开场语", _clean_text(role_card.get("firstMessage"), 500)),
+        ("示例对话", _clean_text(role_card.get("exampleDialogue"))),
+        ("开场语", _clean_text(greeting, 500)),
     ]
     lines = [f"{label}: {text}" for label, text in fields if text]
     if not lines:
@@ -423,6 +457,20 @@ def build_prompt_assembly(
 ) -> list[dict[str, Any]]:
     blocks: list[PromptBlock] = []
     companion: Any | None = None
+    workspace = None
+    if db_repo and workspace_id:
+        workspace = next((item for item in db_repo.list_workspaces() if item.get("id") == workspace_id), None)
+    prompt_profile = _resolve_prompt_profile(workspace, prompt_profile)
+    if db_repo and workspace_id and session_id:
+        chat_session = db_repo.get_chat_session(session_id, workspace_id=workspace_id)
+        overrides = _as_dict(_as_dict(chat_session).get("persona_overrides"))
+        role_card = prompt_profile.get("roleCard", {})
+        if overrides and isinstance(role_card, dict) and role_card.get("enabled") is not False:
+            role_card = dict(role_card)
+            for field in ("scenario", "exampleDialogue"):
+                if field in overrides:
+                    role_card[field] = overrides[field]
+            prompt_profile = {**prompt_profile, "roleCard": role_card}
     mode = _resolve_prompt_mode(workspace_id, prompt_profile)
 
     def add_block(
@@ -559,7 +607,6 @@ def build_prompt_assembly(
                 order=430,
             )
 
-        workspace = next((item for item in db_repo.list_workspaces() if item.get("id") == workspace_id), None)
         if workspace and workspace.get("system_prompt"):
             add_block(
                 "workspace_prompt",

@@ -26,6 +26,30 @@
       </SettingsSectionHeader>
     </template>
 
+    <el-alert v-if="indexStatusError" :title="indexStatusError" type="error" :closable="false" show-icon />
+    <div class="button-row" role="status">
+      <span>{{ t('settings.memory.actualBackend') }}: {{ indexStatus?.backend || t('settings.memory.unknown') }}</span>
+      <el-tag :type="indexStatusError ? 'danger' : indexStatus?.healthy === true ? 'success' : indexStatus?.healthy === false ? 'warning' : 'info'">
+        {{ t(indexStatusError ? 'settings.memory.statusFailed' : indexStatus?.healthy === true ? 'settings.memory.healthy' : indexStatus?.healthy === false ? 'settings.memory.unhealthy' : 'settings.memory.unknown') }}
+      </el-tag>
+      <span v-if="indexStatus">{{ t('settings.memory.documentCount', { count: indexStatus.count }) }}</span>
+      <el-button plain :loading="indexStatusLoading" :disabled="rebuildLoading" @click="$emit('refresh-status')">{{ t('common.refresh') }}</el-button>
+    </div>
+    <div v-if="indexStatus" class="button-row" role="status">
+      <span>{{ t('settings.memory.authorityRevision') }}: {{ indexStatus.metadata?.authority_revision ?? t('settings.memory.revisionUnavailable') }}</span>
+      <span>{{ t('settings.memory.indexGeneration') }}: {{ indexStatus.metadata?.index_generation ?? t('settings.memory.revisionUnavailable') }}</span>
+      <span>{{ t('settings.memory.indexSnapshotRevision') }}: {{ indexStatus.metadata?.index_snapshot_revision ?? t('settings.memory.revisionUnavailable') }}</span>
+    </div>
+    <p v-if="indexStatus?.message">{{ indexStatus.message }}</p>
+    <el-alert v-if="rebuildError" :title="rebuildError" type="error" :closable="false" show-icon />
+    <div v-if="rebuildJob" class="button-row" role="status">
+      <el-tag :type="rebuildJob.state === 'completed' ? 'success' : ['failed', 'interrupted'].includes(rebuildJob.state) ? 'danger' : 'info'">
+        {{ t('settings.memory.rebuildState.' + rebuildJob.state) }} · {{ rebuildJob.processed_count }} / {{ rebuildJob.total_count }}
+      </el-tag>
+      <el-button plain :loading="rebuildRefreshing" :disabled="rebuildCancelling" @click="$emit('refresh-rebuild')">{{ t('common.refresh') }}</el-button>
+      <el-button v-if="['queued', 'running', 'cancelling'].includes(rebuildJob.state)" plain :loading="rebuildCancelling" :disabled="rebuildJob.state === 'cancelling' || rebuildRefreshing" @click="$emit('cancel-rebuild')">{{ t('common.cancel') }}</el-button>
+    </div>
+
     <el-form class="memory-settings" label-position="top" @submit.prevent>
       <section class="settings-block" aria-labelledby="memory-storage-heading">
         <div class="block-heading">
@@ -95,7 +119,7 @@
             <el-input :model-value="modelValue.qdrant_url" @change="emitField('qdrant_url', $event)" />
           </el-form-item>
           <el-form-item :label="t('settings.memory.qdrantApiKey')">
-            <el-input :model-value="modelValue.qdrant_api_key" type="password" show-password @change="emitField('qdrant_api_key', $event)">
+            <el-input :model-value="modelValue.qdrant_api_key" :disabled="apiKeyDeleting" type="password" show-password @change="emitField('qdrant_api_key', $event)">
               <template #append>
               <el-button v-if="modelValue.qdrant_api_key || apiKeyStored" text type="danger" :loading="apiKeyDeleting" :disabled="apiKeyDeleting" @click="$emit('clear-api-key')">{{ t('settings.apiKeyClear') }}</el-button>
               </template>
@@ -128,6 +152,9 @@
 </template>
 
 <script setup lang="ts">
+import type { MemoryIndexRebuildJob, MemoryIndexStatus } from '@/api/clients/memory-client'
+import { ElAlert } from 'element-plus'
+import 'element-plus/es/components/alert/style/css'
 import { ElIcon } from 'element-plus'
 import 'element-plus/es/components/icon/style/css'
 import { ElButton } from 'element-plus'
@@ -177,6 +204,13 @@ const props = defineProps<{
   modelValue: MemorySettings
   discoveryLoading: boolean
   rebuildLoading: boolean
+  indexStatus?: MemoryIndexStatus | null
+  indexStatusLoading?: boolean
+  indexStatusError?: string
+  rebuildJob?: MemoryIndexRebuildJob | null
+  rebuildError?: string
+  rebuildRefreshing?: boolean
+  rebuildCancelling?: boolean
   defaultEmbeddingModel?: string
   defaultQdrantDockerImage?: string
   apiKeyStored?: boolean
@@ -195,6 +229,9 @@ const emit = defineEmits<{
   'discover-local': []
   'clear-api-key': []
   rebuild: []
+  'refresh-status': []
+  'refresh-rebuild': []
+  'cancel-rebuild': []
 }>()
 
 const emitField = (field: keyof MemorySettings, value: unknown) => {
@@ -239,9 +276,7 @@ const emitField = (field: keyof MemorySettings, value: unknown) => {
   margin-bottom: 14px;
 }
 
-.block-heading h4,
-.block-heading p,
-.field-hint {
+.block-heading h4 {
   margin: 0;
 }
 
@@ -249,18 +284,6 @@ const emitField = (field: keyof MemorySettings, value: unknown) => {
   color: var(--yui-text);
   font-size: 14px;
   font-weight: 700;
-}
-
-.block-heading p,
-.field-hint {
-  margin-top: 4px;
-  color: var(--yui-muted);
-  font-size: 12px;
-  line-height: 1.55;
-}
-
-.field-hint {
-  margin: -8px 0 14px;
 }
 
 .backend-selector {

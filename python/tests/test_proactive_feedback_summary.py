@@ -126,7 +126,7 @@ def test_activity_endpoints_and_router_expose_feedback_summary(tmp_path) -> None
         service_provider=lambda: service,
         active_workspace_id_provider=lambda: "workspace-1",
     )
-    assert endpoints["feedback_summary"]()["workspaceId"] == "workspace-1"
+    assert endpoints["feedback_summary"]("workspace-1")["workspaceId"] == "workspace-1"
 
     router = create_system_router(
         health_handler=dict,

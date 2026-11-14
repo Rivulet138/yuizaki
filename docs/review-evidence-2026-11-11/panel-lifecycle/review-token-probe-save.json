@@ -1,0 +1,96 @@
+[
+  {
+    "normalized_response": true,
+    "token_requests_started": 0,
+    "ready_before_unrelated_token": true,
+    "form_ready_from_first_read_ms": 329.8,
+    "edit_to_saved_ms": 639.1,
+    "edit_to_request_ms": 475.0,
+    "save_readbacks": 0,
+    "save_posts": 1,
+    "pageerrors": [],
+    "blocked_real_mutations": [
+      {
+        "method": "POST",
+        "path": "/api/pet/visibility"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/visibility"
+      },
+      {
+        "method": "POST",
+        "path": "/api/system/voice-diagnostics/run"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/visibility"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/workspaces/default"
+      },
+      {
+        "method": "POST",
+        "path": "/api/system/active-workspace"
+      }
+    ]
+  },
+  {
+    "normalized_response": false,
+    "token_requests_started": 0,
+    "ready_before_unrelated_token": true,
+    "form_ready_from_first_read_ms": 919.6,
+    "edit_to_saved_ms": 878.0,
+    "edit_to_request_ms": 480.6,
+    "save_readbacks": 1,
+    "save_posts": 1,
+    "pageerrors": [],
+    "blocked_real_mutations": [
+      {
+        "method": "POST",
+        "path": "/api/pet/visibility"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/behavior-state"
+      },
+      {
+        "method": "POST",
+        "path": "/api/system/voice-diagnostics/run"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/visibility"
+      },
+      {
+        "method": "POST",
+        "path": "/api/system/active-workspace"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/visibility"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/workspaces/default"
+      },
+      {
+        "method": "POST",
+        "path": "/api/pet/visibility"
+      }
+    ]
+  }
+]

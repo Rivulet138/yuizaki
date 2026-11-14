@@ -1,0 +1,27 @@
+{
+  "settingsTabs": [
+    "访问",
+    "LLM",
+    "TTS",
+    "ASR",
+    "SVC 配置",
+    "记忆",
+    "摘要",
+    "资源",
+    "系统",
+    "运行引导"
+  ],
+  "invalidJson": {
+    "blockedBeforeWrite": true,
+    "error": "JSON 格式无效；未发送请求。请修正后重试。"
+  },
+  "memory": {
+    "indexFailureVisible": true,
+    "orphanDiagnosticVisible": true,
+    "dirtyDraftPreserved": true,
+    "preflightFailureVisible": true,
+    "deletionNotSubmitted": true
+  },
+  "pageerrors": [],
+  "fixture": "synthetic memory responses; user writes intercepted"
+}

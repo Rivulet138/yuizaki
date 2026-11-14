@@ -125,6 +125,7 @@ class RuntimeHandlers:
     stream_obs_profiles: Callable[..., Any] = dict
     stream_events: Callable[..., Any] = lambda _limit=50: {}
     stream_actions: Callable[..., Any] = lambda _limit=50: {}
+    stream_action_resolve: Callable[..., Any] = lambda _payload: {}
     stream_event_enqueue: Callable[..., Any] = lambda _payload: {}
     stream_takeover: Callable[..., Any] = lambda _enabled: {}
     stream_execute: Callable[..., Any] = lambda _payload: {}
@@ -221,6 +222,7 @@ def build_runtime_handlers(
     stream_event_enqueue = getattr(stream_runtime, "enqueue_event", lambda _payload: {})
     stream_takeover = getattr(stream_runtime, "set_takeover", lambda _enabled: {})
     stream_execute = getattr(stream_runtime, "execute", lambda _payload: {})
+    stream_action_resolve = getattr(stream_runtime, "resolve_action", lambda _payload: {})
     stream_twitch_eventsub = getattr(stream_runtime, "ingest_twitch_eventsub", lambda _body, _headers: {})
     stream_twitch_irc = getattr(stream_runtime, "ingest_twitch_irc", lambda _line: {})
     stream_twitch_reconfigure = getattr(stream_runtime, "reconfigure_twitch", dict)
@@ -263,6 +265,17 @@ def build_runtime_handlers(
         if enabled:
             return await stream_draft_consumer.start()
         return await stream_draft_consumer.stop()
+
+    def stream_resolve_with_draft(payload: Mapping[str, Any]) -> Any:
+        result = stream_action_resolve(payload)
+        action = result.get("action") if isinstance(result, Mapping) else None
+        if isinstance(action, Mapping) and isinstance(action.get("draftId"), str):
+            try:
+                stream_draft_service.mark_delivery(action["draftId"], str(action["status"]))
+            except StreamDraftError as exc:
+                # The action remains resolved; expose a separate draft-sync failure.
+                result = {**result, "draftSyncError": exc.code}
+        return result
 
     def stream_execute_with_draft(payload: Mapping[str, Any] | None = None) -> Any:
         body = dict(payload or {})
@@ -423,6 +436,7 @@ def build_runtime_handlers(
         stream_obs_profiles=stream_obs_profiles,
         stream_events=stream_events,
         stream_actions=stream_actions,
+        stream_action_resolve=stream_resolve_with_draft,
         stream_event_enqueue=stream_event_enqueue,
         stream_takeover=stream_takeover,
         stream_execute=stream_execute_with_draft,
@@ -516,6 +530,7 @@ def build_system_router_from_handlers(
         stream_obs_profiles_handler=handlers.stream_obs_profiles,
         stream_events_handler=handlers.stream_events,
         stream_actions_handler=handlers.stream_actions,
+        stream_action_resolve_handler=handlers.stream_action_resolve,
         stream_event_enqueue_handler=handlers.stream_event_enqueue,
         stream_takeover_handler=handlers.stream_takeover,
         stream_execute_handler=handlers.stream_execute,

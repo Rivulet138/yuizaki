@@ -1,5 +1,5 @@
 import { logger } from '@/logger'
-import { onMounted, watch } from 'vue'
+import { onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chatStore'
 import { useCompanionStore } from '@/stores/companionStore'
@@ -52,6 +52,17 @@ export function useAppOrchestrator() {
   const companionStore = useCompanionStore()
   const chatStore = useChatStore()
   const { applyActiveCompanionRuntime, handleCompanionChange } = useCompanionRuntimeBridge()
+  let disposed = false
+  let workspacesReady = false
+  let initialized = false
+  let workspaceChange = 0
+  let loadedWorkspaceId: string | undefined
+  const ownsWorkspaceChange = (change: number) => !disposed && change === workspaceChange
+
+  onBeforeUnmount(() => {
+    disposed = true
+    workspaceChange++
+  })
 
   const runRecoverableTask = async (label: string, task: () => Promise<unknown> | unknown) => {
     try {
@@ -62,25 +73,13 @@ export function useAppOrchestrator() {
   }
 
   const changeWorkspace = async (workspaceId: string) => {
-    await switchWorkspaceAndLoadSessions(
-      workspaceId,
-      workspaceStore.setActiveWorkspaceSynced,
-      () => runRecoverableTask('load sessions after workspace change', () => sessionStore.loadSessions()),
-    )
+    const change = ++workspaceChange
+    await workspaceStore.setActiveWorkspaceSynced(workspaceId)
+    if (!ownsWorkspaceChange(change)) return
+    await runRecoverableTask('load sessions after workspace change', () => sessionStore.loadSessions())
+    if (!ownsWorkspaceChange(change)) return
+    loadedWorkspaceId = workspaceId
     const workspace = workspaceStore.activeWorkspace
-    if (workspace.context?.activeTab && isPanelKey(workspace.context.activeTab)) {
-      const tab = workspace.context.activeTab
-      const activeSession = sessionStore.activeSession
-      await runRecoverableTask('route after workspace change', () =>
-        router.push(moduleRoute(workspace.id, tab, activeSession?.id)),
-      )
-    } else {
-      const activeSession = sessionStore.activeSession
-      await runRecoverableTask('route after workspace change', () =>
-        router.push(moduleRoute(workspace.id, 'chat', activeSession?.id)),
-      )
-    }
-
     const workspaceModelId = workspace.context?.modelId
     const workspaceModelType = workspace.context?.modelType
     if (workspaceModelId) {
@@ -90,6 +89,12 @@ export function useAppOrchestrator() {
         logger.warn('Failed to restore workspace pet model context:', error)
       }
     }
+    if (!ownsWorkspaceChange(change)) return
+    const tab = workspace.context?.activeTab && isPanelKey(workspace.context.activeTab)
+      ? workspace.context.activeTab : 'chat'
+    await runRecoverableTask('route after workspace change', () =>
+      router.push(moduleRoute(workspace.id, tab, sessionStore.activeSession?.id)),
+    )
   }
 
   const resolveInitialTab = (): string => {
@@ -109,35 +114,57 @@ export function useAppOrchestrator() {
     return 'chat'
   }
 
-  onMounted(async () => {
-    const initialTab = resolveInitialTab()
-    await bootstrapAppDomains({
-      initChatStore: chatStore.initChatStore,
-      loadCompanions: companionStore.loadCompanions,
-      syncFromBackend: workspaceStore.syncFromBackend,
-      resolveActiveCompanion: () => {
-        if (workspaceStore.activeWorkspace.companion_profile_id) {
-          companionStore.setActiveCompanion(workspaceStore.activeWorkspace.companion_profile_id)
-        }
-      },
-      applyActiveCompanionRuntime,
-      loadSessions: sessionStore.loadSessions,
-      run: runRecoverableTask,
-    })
-
-    const activeSessionId = sessionStore.activeSession?.id
-    if (activeSessionId) {
-      await runRecoverableTask('load chat history', () => chatStore.loadHistory(activeSessionId, workspaceStore.activeWorkspaceId))
-    }
-
+  const synchronizeRouteWorkspace = async (change: number) => {
     if (route.path === '/') {
-      const session = sessionStore.activeSession
-      const tab = initialTab
       await runRecoverableTask('restore initial route', () =>
-        router.replace(moduleRoute(workspaceStore.activeWorkspaceId, tab, session?.id)),
+        router.replace(moduleRoute(workspaceStore.activeWorkspaceId, resolveInitialTab())),
       )
+      return
     }
+    const workspaceId = String(route.params.workspaceId || 'default')
+    if (!workspaceStore.workspaces.some(workspace => workspace.id === workspaceId)) {
+      const fallback = workspaceStore.workspaces.find(workspace => workspace.id === 'default')
+        ?? workspaceStore.workspaces[0]
+      await router.replace(moduleRoute(fallback?.id ?? 'default', 'chat'))
+      return
+    }
+    if (workspaceStore.activeWorkspaceId === workspaceId && loadedWorkspaceId === workspaceId && initialized) return
+    await workspaceStore.setActiveWorkspaceSynced(workspaceId)
+    if (!ownsWorkspaceChange(change)) return
+    if (!initialized) {
+      const companionId = workspaceStore.activeWorkspace.companion_profile_id
+      if (companionId) companionStore.setActiveCompanion(companionId)
+      await runRecoverableTask('apply active companion runtime', applyActiveCompanionRuntime)
+      if (!ownsWorkspaceChange(change)) return
+    }
+    await runRecoverableTask('load sessions from workspace route', () => sessionStore.loadSessions())
+    if (!ownsWorkspaceChange(change)) return
+    loadedWorkspaceId = workspaceId
+    if (!initialized && sessionStore.activeSession?.id) {
+      const activeSessionId = sessionStore.activeSession.id
+      await runRecoverableTask('load chat history', () => chatStore.loadHistory(activeSessionId, workspaceId))
+      if (!ownsWorkspaceChange(change)) return
+    }
+    initialized = true
     document.documentElement.dataset['yuizakiAppReady'] = 'true'
+  }
+
+  watch(() => route.fullPath, () => {
+    const change = ++workspaceChange
+    if (workspacesReady) {
+      void runRecoverableTask('synchronize workspace route', () => synchronizeRouteWorkspace(change))
+    }
+  }, { flush: 'sync' })
+
+  onMounted(async () => {
+    chatStore.initChatStore()
+    await runRecoverableTask('load companions', companionStore.loadCompanions)
+    if (disposed) return
+    await runRecoverableTask('sync workspaces', workspaceStore.syncFromBackend)
+    if (disposed) return
+    workspacesReady = true
+    const change = ++workspaceChange
+    await runRecoverableTask('synchronize initial workspace route', () => synchronizeRouteWorkspace(change))
   })
 
   watch(

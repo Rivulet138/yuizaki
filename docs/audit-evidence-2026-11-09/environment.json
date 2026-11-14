@@ -1,0 +1,56 @@
+{
+  "captured_utc": "2026-11-09T16:17:16.544486+00:00",
+  "workspace": "E:\\yuizaki",
+  "git_head": "865df8a284a3c7ea29a5c50f1c689d2c955e8680",
+  "branch": "main",
+  "source_dirty_files": [
+    {
+      "path": "electron/src/renderer/app/AppShell.vue",
+      "sha256": "8c54ec8831e476f102838d4ca961ffdec18962b57f17d4e62a72e303e7d0c3f9"
+    },
+    {
+      "path": "electron/src/renderer/app/BrowserPetStage.vue",
+      "sha256": "876280f47de5f9d187d870fe61ee90fa84d943d72388530c59720c2a09553d15"
+    },
+    {
+      "path": "electron/src/renderer/app/BrowserStageView.vue",
+      "sha256": "f1b824f3e11392bf51a8f28e72ed6f0f9a42008035c06d18ec4decf2ea98735c"
+    },
+    {
+      "path": "electron/src/renderer/domains/chat/components/ChatMessageList.css",
+      "sha256": "359ec0a7aeaca83d0067761b3f09fdf1d313c70b12542903ed06bee97549917e"
+    },
+    {
+      "path": "electron/src/renderer/domains/chat/components/ChatRuntimeSettings.vue",
+      "sha256": "8fc08e668c7f4e07d09b573d76044a18175467ede1b8f275c62bacd44692e435"
+    },
+    {
+      "path": "electron/src/renderer/domains/chat/views/ChatPanel.css",
+      "sha256": "44e13b3c2b7592124e5bd2ab01391bb78bf141af35c0f6bcb71c5e8e88154c2f"
+    },
+    {
+      "path": "electron/src/renderer/domains/chat/views/ChatPanel.global.css",
+      "sha256": "7d85bd4b65d78269a02d6605bea561fae8b76225eb9668889175974501076735"
+    },
+    {
+      "path": "electron/src/renderer/domains/chat/views/ChatPanel.vue",
+      "sha256": "9982cf4f9bc1b0ea0b7d64a36edc2509461a211d5ce612d22532e73cfdbc6fd3"
+    },
+    {
+      "path": "electron/src/renderer/i18n/chatMessages.ts",
+      "sha256": "553f2de41f22e8f9d5e1d7538605edd2f68cefba777ec0cced948e979d8a0b01"
+    },
+    {
+      "path": "electron/src/renderer/pet-renderer.ts",
+      "sha256": "b21a06aa0e7fbb9d948042416be4634bf474600bfdeb9a2da64a8caf44ede70a"
+    }
+  ],
+  "notes": [
+    "Audit created documentation and isolated probes only. Existing source edits predated this audit. Runtime browser checks use built assets served on control port38945; source analysis uses working tree. These are separate evidence surfaces.",
+    "Python global interpreter FastAPI0.128.0 differs from project venv FastAPI0.143.2; main101 tests passed in both, route-manifest reproduction fails only with project venv."
+  ],
+  "typescript": "6.0.3",
+  "vitest": "5.1.0",
+  "vite": "8.3.5",
+  "vue": "3.5.44"
+}

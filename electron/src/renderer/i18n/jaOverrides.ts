@@ -588,7 +588,7 @@ export const jaJPOverrides = {
   'settings.status.saveFailed': '設定保存に失敗しました',
   'settings.status.saving': '設定を保存中',
   'settings.status.savingShort': '保存中',
-  'settings.status.applied': '適用済み: {items}',
+  'settings.status.applied': '保存し実行環境に適用しました：{items}。リソースの準備状態は各項目で確認してください。',
   'settings.status.recent': '最終保存: {time}',
   'settings.summary.budget': '1時間あたりのモデルチェック回数',
   'settings.summary.budgetHint': 'モデルによる品質チェックだけに使われ、要約生成そのものには使いません。',

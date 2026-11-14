@@ -95,6 +95,7 @@
                 </div>
                 <el-progress v-if="companionJobProgress(job) !== null" class="job-progress" :percentage="companionJobProgress(job) || 0" :show-text="false" :status="job.status === 'failed' || job.status === 'unknown_effect' ? 'exception' : undefined" />
                 <p v-if="companionJobResultSummary(job)" class="job-result">{{ companionJobResultSummary(job) }}</p>
+                <p v-if="toolCancellations[job.jobId]" class="job-outcome" role="status">{{ t(`trace.cancel.${toolCancellations[job.jobId]?.phase}`) }}</p>
                 <p v-if="companionJobOutcome(job)" class="job-outcome">{{ companionJobOutcome(job) }}</p>
                 <ul v-if="companionJobEvidence(job).length" class="job-evidence" :aria-label="t('trace.jobs.evidenceAria')">
                   <li v-for="line in companionJobEvidence(job)" :key="line">{{ line }}</li>
@@ -388,7 +389,7 @@ import { ElInputNumber } from 'element-plus'
 import 'element-plus/es/components/input-number/style/css'
 import { ElTag } from 'element-plus'
 import 'element-plus/es/components/tag/style/css'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElForm, ElFormItem, ElMessage, ElMessageBox, ElProgress } from 'element-plus'
 import 'element-plus/es/components/progress/style/css'
 import 'element-plus/es/components/form/style/css'
@@ -396,11 +397,11 @@ import 'element-plus/es/components/form-item/style/css'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import { t } from '@/i18n'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
-import { getSocketClient } from '@/net/socketClient'
+import { getSocketClient, SocketEvents } from '@/net/socketClient'
 import { systemClient } from '@/api/client'
 import { useSystemDomain } from '../composables/useSystemDomain'
 import type { PlannerTrace, RuntimeLoopRecord, ScheduleTask, SchedulerRunRecord, StepConditionRecord, StepExecutionRecord } from '@/../shared/agent'
-import type { CompanionEventEnvelope } from '@/../shared/companion-event'
+import { isCompanionEventEnvelope, type CompanionEventEnvelope } from '@/../shared/companion-event'
 import {
   canCancelCompanionJob,
   canConfirmUnknownEffectRetry,
@@ -535,6 +536,65 @@ const togglingScheduleIds = ref(new Set<string>())
 const runningScheduleIds = ref(new Set<string>())
 const cancellingScheduleIds = ref(new Set<string>())
 const cancellingJobIds = ref(new Set<string>())
+type CancellationPhase = 'waitingAck' | 'waitingTerminal' | 'unknown' | 'offline' | 'rejected' | 'notActive' | 'cancelled' | 'completed' | 'failed' | 'unknownEffect'
+const toolCancellations = ref<Record<string, { job: CompanionEventEnvelope; phase: CancellationPhase }>>({})
+const cancellationTimers = new Map<string, ReturnType<typeof setTimeout>>()
+let cancellationPollTimer: ReturnType<typeof setTimeout> | null = null
+let cancellationPolling = false
+let traceDisposed = false
+
+const finishCancellation = (jobId: string, phase: CancellationPhase) => {
+  const pending = toolCancellations.value[jobId]
+  if (!pending) return
+  pending.phase = phase
+  const timer = cancellationTimers.get(jobId)
+  if (timer) clearTimeout(timer)
+  cancellationTimers.delete(jobId)
+  removePending(cancellingJobIds, jobId)
+}
+
+const observeCancellationTerminal = (event: CompanionEventEnvelope) => {
+  const pending = toolCancellations.value[event.jobId]
+  if (!pending || !isTerminalCompanionJob(event.status)) return
+  const original = pending.job
+  if (event.requestId !== original.requestId || event.sessionId !== original.sessionId
+    || event.workspaceId !== original.workspaceId || event.turnId !== original.turnId
+    || event.runId !== original.runId || event.revision <= original.revision) return
+  const phase = event.status === 'cancelled' || event.status === 'interrupted' ? 'cancelled'
+    : event.status === 'completed' ? 'completed' : event.status === 'unknown_effect' ? 'unknownEffect' : 'failed'
+  finishCancellation(event.jobId, phase)
+}
+
+const pollCancellationTerminals = async () => {
+  cancellationPollTimer = null
+  if (traceDisposed || cancellationPolling || !cancellationTimers.size) return
+  cancellationPolling = true
+  try {
+    await loadCompanionRuntime()
+    if (!traceDisposed) companionJobs.value.forEach(observeCancellationTerminal)
+  } finally {
+    cancellationPolling = false
+    if (!traceDisposed && cancellationTimers.size) cancellationPollTimer = setTimeout(pollCancellationTerminals, 1000)
+  }
+}
+
+const handleCancellationAck = (data: unknown) => {
+  if (!data || typeof data !== 'object') return
+  const ack = data as Record<string, unknown>
+  for (const [jobId, pending] of Object.entries(toolCancellations.value)) {
+    if (pending.phase !== 'waitingAck' || ack.request_id !== pending.job.requestId || ack.session_id !== pending.job.sessionId) continue
+    if (ack.hit_active_tool === true || ack.hit_active_generation === true) pending.phase = 'waitingTerminal'
+    else finishCancellation(jobId, 'notActive')
+  }
+}
+const handleCancellationDisconnect = () => {
+  for (const jobId of cancellationTimers.keys()) finishCancellation(jobId, 'unknown')
+}
+const handleCancellationJob = (event: Event) => {
+  const detail = (event as CustomEvent<unknown>).detail
+  if (isCompanionEventEnvelope(detail)) observeCancellationTerminal(detail)
+}
+
 const retryingJobIds = ref(new Set<string>())
 const recheckingJobIds = ref(new Set<string>())
 
@@ -818,10 +878,21 @@ const cancelCompanionJob = async (job: CompanionEventEnvelope) => {
   addPending(cancellingJobIds, job.jobId)
   try {
     if (isToolCompanionJob(job)) {
-      getSocketClient().sendInterrupt(job.sessionId, job.requestId, 'manual')
-      ElMessage.success('Tool cancellation requested')
-      await new Promise(resolve => window.setTimeout(resolve, 80))
-      await loadCompanionRuntime()
+      if (!job.requestId || !job.sessionId) {
+        toolCancellations.value[job.jobId] = { job, phase: 'rejected' }
+        return
+      }
+      toolCancellations.value[job.jobId] = { job: { ...job }, phase: 'waitingAck' }
+      const result = getSocketClient().sendInterrupt(job.sessionId, job.requestId, 'manual')
+      if (result.status !== 'accepted') {
+        finishCancellation(job.jobId, result.status)
+        ElMessage.warning(t(`trace.cancel.${result.status}`))
+        return
+      }
+      cancellationTimers.set(job.jobId, setTimeout(() => finishCancellation(job.jobId, 'unknown'), 15000))
+      if (!cancellationPollTimer && !cancellationPolling) {
+        cancellationPollTimer = setTimeout(pollCancellationTerminals, 1000)
+      }
       return
     }
     const result = job.source === 'heartbeat'
@@ -834,7 +905,7 @@ const cancelCompanionJob = async (job: CompanionEventEnvelope) => {
       await loadCompanionRuntime()
     }
   } finally {
-    removePending(cancellingJobIds, job.jobId)
+    if (!cancellationTimers.has(job.jobId)) removePending(cancellingJobIds, job.jobId)
   }
 }
 const unlinkedTraceCount = computed(() => {
@@ -1281,8 +1352,8 @@ const removeScheduleItem = async (taskId: string) => {
 
   addPending(removingScheduleIds, taskId)
   try {
-    await removeSchedule(taskId)
-    ElMessage.success(t('trace.message.scheduleDeleted'))
+    const result = await removeSchedule(taskId)
+    if (result?.ok) ElMessage.success(t('trace.message.scheduleDeleted'))
   } finally {
     removePending(removingScheduleIds, taskId)
   }
@@ -1323,11 +1394,28 @@ const cancelScheduleItem = async (taskId: string) => {
   }
 }
 
+watch(companionJobs, (jobs) => jobs.forEach(observeCancellationTerminal))
+
 onMounted(() => {
+  const socket = getSocketClient()
+  socket.on(SocketEvents.INTERRUPT_ACK, handleCancellationAck)
+  socket.on(SocketEvents.DISCONNECT, handleCancellationDisconnect)
+  window.addEventListener('companion:job', handleCancellationJob)
   void loadSchedules()
   void loadAgentTrace()
   void loadExperienceMetrics()
   void loadCompanionRuntime()
+})
+
+onBeforeUnmount(() => {
+  traceDisposed = true
+  const socket = getSocketClient()
+  socket.off(SocketEvents.INTERRUPT_ACK, handleCancellationAck)
+  socket.off(SocketEvents.DISCONNECT, handleCancellationDisconnect)
+  window.removeEventListener('companion:job', handleCancellationJob)
+  for (const timer of cancellationTimers.values()) clearTimeout(timer)
+  cancellationTimers.clear()
+  if (cancellationPollTimer) clearTimeout(cancellationPollTimer)
 })
 </script>
 

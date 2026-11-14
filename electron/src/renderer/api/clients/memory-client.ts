@@ -2,6 +2,32 @@ import { CONTROL_ORIGIN, requestJson } from './http-client'
 
 const MEMORY_MAINTENANCE_TIMEOUT_MS = 5 * 60 * 1000
 
+export type MemoryIndexCleanupStatus = 'complete' | 'pending' | 'unknown'
+
+export interface MemoryDeletionEffects {
+  index_cleanup_status: MemoryIndexCleanupStatus
+  cleared_message_references?: number
+  storage?: Record<string, unknown> | null
+}
+
+export interface MemoryDeleteResponse extends MemoryDeletionEffects {
+  status: 'deleted' | 'authority_deleted'
+  id: string
+}
+
+export interface MemoryBatchDeleteResponse extends MemoryDeletionEffects {
+  status: 'deleted' | 'authority_deleted'
+  ids: string[]
+  deleted_count: number
+  memory_role_counts?: Record<string, number>
+}
+
+export interface MemoryMaintenanceApplyResponse extends MemoryDeletionEffects {
+  status: 'purged' | 'authority_deleted'
+  changed_ids: string[]
+  changed_count: number
+}
+
 export interface MemoryDocListOptions {
   scope?: string
   workspaceId?: string
@@ -356,11 +382,11 @@ export const memoryClient = {
       timeoutMs: MEMORY_MAINTENANCE_TIMEOUT_MS,
     }),
   removeDoc: async (id: string, sessionId?: string) =>
-    requestJson(buildSessionActionUrl(`/memory/docs/${encodeURIComponent(id)}`, sessionId), {
+    requestJson<MemoryDeleteResponse>(buildSessionActionUrl(`/memory/docs/${encodeURIComponent(id)}`, sessionId), {
       method: 'DELETE',
     }),
   removeDocs: async (ids: string[], sessionId?: string) =>
-    requestJson<{ status: string; ids: string[]; deleted_count: number }>(buildSessionActionUrl('/memory/docs/batch-delete', sessionId), {
+    requestJson<MemoryBatchDeleteResponse>(buildSessionActionUrl('/memory/docs/batch-delete', sessionId), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids }),
@@ -379,7 +405,7 @@ export const memoryClient = {
       timeoutMs: MEMORY_MAINTENANCE_TIMEOUT_MS,
     }),
   applyMaintenance: async (payload: MemoryMaintenancePolicyPayload & { preview_token: string; confirmation: 'PERMANENT_DELETE' }) =>
-    requestJson<{ status: 'purged'; changed_ids: string[]; changed_count: number; storage?: Record<string, unknown> | null }>(`${CONTROL_ORIGIN}/memory/maintenance/apply`, {
+    requestJson<MemoryMaintenanceApplyResponse>(`${CONTROL_ORIGIN}/memory/maintenance/apply`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

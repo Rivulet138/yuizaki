@@ -10,7 +10,7 @@
           :closable="false"
         />
         <el-alert
-          v-if="(saveBusy || updateRequest.error || lastSavedAt) && !failedSavePatch"
+          v-if="(saveBusy || saveError || lastSavedAt) && !failedSavePatch"
           :title="saveStatusLabel"
           :description="saveStatusDetail"
           :type="saveStatusType"
@@ -19,8 +19,8 @@
         />
         <el-alert
           v-if="failedSavePatch"
-          :title="t('settings.status.saveFailed')"
-          :description="t('settings.status.retrySaveDetail')"
+          :title="t(settingsReadbackFailed ? 'settings.status.readbackFailed' : 'settings.status.saveFailed')"
+          :description="t(settingsReadbackFailed ? 'settings.messages.readbackFailed' : 'settings.status.retrySaveDetail')"
           type="error"
           show-icon
           :closable="false"
@@ -31,6 +31,15 @@
             </el-button>
           </template>
         </el-alert>
+
+        <SettingsRuntimeFeedback
+          :status="runtimeReload"
+          :status-error="runtimeStatusRequest.error || ''"
+          :retry-error="runtimeRetryRequest.error || ''"
+          :loading="runtimeStatusRequest.loading || runtimeRetryRequest.loading || saveBusy"
+          @refresh="refreshRuntimeApplication"
+          @retry="retryRuntimeApplication"
+        />
 
         <div class="settings-workspace">
           <nav
@@ -81,16 +90,11 @@
                   </div>
                   <div class="llm-toolbar">
                     <div class="llm-status-strip">
-                      <el-tag :type="hasLlmEndpoint ? 'success' : 'warning'">{{ hasLlmEndpoint ? t('common.configured') : t('settings.tts.incomplete') }}</el-tag>
                       <el-tag :type="hasLlmApiKey ? 'success' : 'info'">{{ llmApiKeyTagLabel }}</el-tag>
                       <el-tag :type="llmRuntimeTagType">{{ llmRuntimeLabel }}</el-tag>
                     </div>
                     <div class="llm-actions">
                       <div class="llm-action-group">
-                        <el-button plain :loading="localDiscoveryRequest.loading" @click="applyLocalLlmDiscovery">
-                          <el-icon><Connection /></el-icon>
-                          {{ t('settings.discovery.detectLocal') }}
-                        </el-button>
                         <el-button plain :loading="llmModelsRequest.loading" :disabled="!canRequestLlmModels" @click="discoverLlmModels({ forceAutoSelect: true, manual: true })">
                           <el-icon><Refresh /></el-icon>
                           {{ t('settings.llm.detectModels') }}
@@ -147,6 +151,7 @@
                       <el-form-item v-if="llmProviderNeedsApiKey" :label="t('settings.llm.apiKeyLabel')">
                         <el-input
                           v-model="form.llm.api_key"
+                          :disabled="isSensitiveDeleting('llm.api_key')"
                           type="password"
                           show-password
                           :placeholder="llmApiKeyPlaceholder"
@@ -177,6 +182,9 @@
                     </el-form-item>
 
                     <SettingsLlmVisionSection
+                      :api-key-stored="visionApiKeyStored"
+                      :api-key-deleting="isSensitiveDeleting('llm.vision_api_key')"
+                      @clear-api-key="clearVisionApiKey"
                       :model-value="llmVisionSettings"
                       :provider-options="llmProviderOptions"
                       @update="applyLlmVisionPatch"
@@ -184,82 +192,82 @@
 
                     <div class="inference-title-row"><div class="subsection-title">{{ t('settings.llm.sectionSampling') }}</div><el-button size="small" plain @click="applyRecommendedLlmSettings">{{ t('settings.llm.applyRecommended') }}</el-button></div>
                     <div class="inference-layout">
-                      <section class="inference-group">
+                      <section v-if="llmGenerationCapabilities.parameters.temperature || llmGenerationCapabilities.parameters.top_p" class="inference-group">
                         <h3 class="inference-group-title">{{ t('settings.llm.sectionGeneration') }}</h3>
                         <div class="inference-fields">
-                          <div class="inference-field">
+                          <div v-if="llmGenerationCapabilities.parameters.temperature" class="inference-field">
                             <div class="inference-field-head">
                               <span>{{ t('settings.llm.temperatureName') }}</span>
-                              <output>{{ form.llm.temperature.toFixed(2) }}</output>
+                              <output>{{ llmParameterValue('temperature').toFixed(2) }}</output>
                             </div>
                             <el-form-item>
-                              <el-slider v-model="form.llm.temperature" :min="0" :max="2" :step="0.1" :aria-label="t('settings.llm.temperatureName')" @change="saveLlmField('temperature', $event)" />
+                              <el-slider v-if="llmGenerationCapabilities.parameters.temperature!.min < llmGenerationCapabilities.parameters.temperature!.max" :model-value="llmParameterValue('temperature')" @update:model-value="updateLlmParameter('temperature', $event)" :min="llmGenerationCapabilities.parameters.temperature?.min" :max="llmGenerationCapabilities.parameters.temperature?.max" :step="0.1" :aria-label="t('settings.llm.temperatureName')" @change="saveLlmField('temperature', $event)" />
                             </el-form-item>
                           </div>
-                          <div class="inference-field">
+                          <div v-if="llmGenerationCapabilities.parameters.top_p" class="inference-field">
                             <div class="inference-field-head">
                               <span>{{ t('settings.llm.topPName') }}</span>
-                              <output>{{ form.llm.top_p.toFixed(2) }}</output>
+                              <output>{{ llmParameterValue('top_p').toFixed(2) }}</output>
                             </div>
                             <el-form-item>
-                              <el-slider v-model="form.llm.top_p" :min="0" :max="1" :step="0.05" :aria-label="t('settings.llm.topPName')" @change="saveLlmField('top_p', $event)" />
+                              <el-slider v-if="llmGenerationCapabilities.parameters.top_p!.min < llmGenerationCapabilities.parameters.top_p!.max" :model-value="llmParameterValue('top_p')" @update:model-value="updateLlmParameter('top_p', $event)" :min="llmGenerationCapabilities.parameters.top_p?.min" :max="llmGenerationCapabilities.parameters.top_p?.max" :step="0.05" :aria-label="t('settings.llm.topPName')" @change="saveLlmField('top_p', $event)" />
                             </el-form-item>
                           </div>
                         </div>
                       </section>
 
-                      <section class="inference-group">
+                      <section v-if="llmGenerationCapabilities.parameters.min_p || llmGenerationCapabilities.parameters.top_k" class="inference-group">
                         <h3 class="inference-group-title">{{ t('settings.llm.sectionFiltering') }}</h3>
                         <div class="inference-fields">
-                          <div class="inference-field">
+                          <div v-if="llmGenerationCapabilities.parameters.min_p" class="inference-field">
                             <div class="inference-field-head">
                               <span>{{ t('settings.llm.minPName') }}</span>
-                              <output>{{ form.llm.min_p.toFixed(2) }}</output>
+                              <output>{{ llmParameterValue('min_p').toFixed(2) }}</output>
                             </div>
                             <el-form-item>
-                              <el-slider v-model="form.llm.min_p" :min="0" :max="1" :step="0.01" :aria-label="t('settings.llm.minPName')" @change="saveLlmField('min_p', $event)" />
+                              <el-slider v-if="llmGenerationCapabilities.parameters.min_p!.min < llmGenerationCapabilities.parameters.min_p!.max" :model-value="llmParameterValue('min_p')" @update:model-value="updateLlmParameter('min_p', $event)" :min="llmGenerationCapabilities.parameters.min_p?.min" :max="llmGenerationCapabilities.parameters.min_p?.max" :step="0.01" :aria-label="t('settings.llm.minPName')" @change="saveLlmField('min_p', $event)" />
                             </el-form-item>
                           </div>
-                          <div class="inference-field">
+                          <div v-if="llmGenerationCapabilities.parameters.top_k" class="inference-field">
                             <div class="inference-field-head">
                               <span>{{ t('settings.llm.topKName') }}</span>
-                              <output>{{ form.llm.top_k }}</output>
+                              <output>{{ llmParameterValue('top_k') }}</output>
                             </div>
                             <el-form-item>
-                              <el-input-number v-model="form.llm.top_k" class="inference-number" :min="0" :max="2000" :step="50" controls-position="right" :aria-label="t('settings.llm.topKName')" @change="saveLlmField('top_k', $event)" />
+                              <el-input-number :model-value="llmParameterValue('top_k')" @update:model-value="updateLlmParameter('top_k', $event)" class="inference-number" :min="0" :max="llmGenerationCapabilities.parameters.top_k?.max" :step="1" controls-position="right" :aria-label="t('settings.llm.topKName')" @change="saveLlmField('top_k', $event)" />
                             </el-form-item>
                           </div>
                         </div>
                       </section>
 
-                      <section class="inference-group inference-group-repetition">
+                      <section v-if="llmGenerationCapabilities.parameters.frequency_penalty || llmGenerationCapabilities.parameters.presence_penalty || llmGenerationCapabilities.parameters.repetition_penalty" class="inference-group inference-group-repetition">
                         <h3 class="inference-group-title">{{ t('settings.llm.sectionRepetition') }}</h3>
                         <div class="inference-fields">
-                          <div class="inference-field">
+                          <div v-if="llmGenerationCapabilities.parameters.frequency_penalty" class="inference-field">
                             <div class="inference-field-head">
                               <span>{{ t('settings.llm.frequencyPenaltyName') }}</span>
-                              <output>{{ form.llm.frequency_penalty.toFixed(2) }}</output>
+                              <output>{{ llmParameterValue('frequency_penalty').toFixed(2) }}</output>
                             </div>
                             <el-form-item>
-                              <el-slider v-model="form.llm.frequency_penalty" :min="-2" :max="2" :step="0.05" :aria-label="t('settings.llm.frequencyPenaltyName')" @change="saveLlmField('frequency_penalty', $event)" />
+                              <el-slider v-if="llmGenerationCapabilities.parameters.frequency_penalty!.min < llmGenerationCapabilities.parameters.frequency_penalty!.max" :model-value="llmParameterValue('frequency_penalty')" @update:model-value="updateLlmParameter('frequency_penalty', $event)" :min="llmGenerationCapabilities.parameters.frequency_penalty?.min" :max="llmGenerationCapabilities.parameters.frequency_penalty?.max" :step="0.05" :aria-label="t('settings.llm.frequencyPenaltyName')" @change="saveLlmField('frequency_penalty', $event)" />
                             </el-form-item>
                           </div>
-                          <div class="inference-field">
+                          <div v-if="llmGenerationCapabilities.parameters.presence_penalty" class="inference-field">
                             <div class="inference-field-head">
                               <span>{{ t('settings.llm.presencePenaltyName') }}</span>
-                              <output>{{ form.llm.presence_penalty.toFixed(2) }}</output>
+                              <output>{{ llmParameterValue('presence_penalty').toFixed(2) }}</output>
                             </div>
                             <el-form-item>
-                              <el-slider v-model="form.llm.presence_penalty" :min="-2" :max="2" :step="0.05" :aria-label="t('settings.llm.presencePenaltyName')" @change="saveLlmField('presence_penalty', $event)" />
+                              <el-slider v-if="llmGenerationCapabilities.parameters.presence_penalty!.min < llmGenerationCapabilities.parameters.presence_penalty!.max" :model-value="llmParameterValue('presence_penalty')" @update:model-value="updateLlmParameter('presence_penalty', $event)" :min="llmGenerationCapabilities.parameters.presence_penalty?.min" :max="llmGenerationCapabilities.parameters.presence_penalty?.max" :step="0.05" :aria-label="t('settings.llm.presencePenaltyName')" @change="saveLlmField('presence_penalty', $event)" />
                             </el-form-item>
                           </div>
-                          <div class="inference-field">
+                          <div v-if="llmGenerationCapabilities.parameters.repetition_penalty" class="inference-field">
                             <div class="inference-field-head">
                               <span>{{ t('settings.llm.repetitionPenaltyName') }}</span>
-                              <output>{{ form.llm.repetition_penalty.toFixed(2) }}</output>
+                              <output>{{ llmParameterValue('repetition_penalty').toFixed(2) }}</output>
                             </div>
                             <el-form-item>
-                              <el-slider v-model="form.llm.repetition_penalty" :min="0" :max="2" :step="0.05" :aria-label="t('settings.llm.repetitionPenaltyName')" @change="saveLlmField('repetition_penalty', $event)" />
+                              <el-slider v-if="llmGenerationCapabilities.parameters.repetition_penalty!.min < llmGenerationCapabilities.parameters.repetition_penalty!.max" :model-value="llmParameterValue('repetition_penalty')" @update:model-value="updateLlmParameter('repetition_penalty', $event)" :min="llmGenerationCapabilities.parameters.repetition_penalty?.min" :max="llmGenerationCapabilities.parameters.repetition_penalty?.max" :step="0.05" :aria-label="t('settings.llm.repetitionPenaltyName')" @change="saveLlmField('repetition_penalty', $event)" />
                             </el-form-item>
                           </div>
                         </div>
@@ -380,7 +388,7 @@
                         <el-input v-model="form.tts.base_url" @input="saveTtsField('base_url', $event)" @change="flushTtsSave" />
                       </el-form-item>
                       <el-form-item :label="t('settings.tts.apiKey')">
-                        <el-input v-model="form.tts.api_key" type="password" show-password autocomplete="off" @input="saveTtsField('api_key', $event)" @change="flushTtsSave">
+                        <el-input v-model="form.tts.api_key" :disabled="isSensitiveDeleting('tts.api_key')" type="password" show-password autocomplete="off" @input="saveTtsField('api_key', $event)" @change="flushTtsSave">
                           <template #append>
                             <el-button v-if="form.tts.api_key || ttsApiKeyStored" text type="danger" :loading="isSensitiveDeleting('tts.api_key')" :disabled="isSensitiveDeleting('tts.api_key')" @click="clearTtsApiKey">{{ t('settings.apiKeyClear') }}</el-button>
                           </template>
@@ -496,7 +504,17 @@
               :api-key-stored="memoryApiKeyStored"
               :api-key-deleting="isSensitiveDeleting('memory.qdrant_api_key')"
               :discovery-loading="localDiscoveryRequest.loading"
-              :rebuild-loading="memoryRebuildRequest.loading"
+              :index-status="memoryIndexStatus"
+              :index-status-loading="memoryIndexStatusLoading"
+              :index-status-error="memoryIndexStatusError"
+              @refresh-status="refreshMemoryIndexStatus"
+              :rebuild-loading="memoryIndexWorking"
+              :rebuild-job="memoryRebuildJob"
+              :rebuild-error="memoryRebuildError"
+              :rebuild-refreshing="memoryRebuildRefreshing"
+              :rebuild-cancelling="memoryRebuildCancelling"
+              @refresh-rebuild="refreshMemoryRebuild"
+              @cancel-rebuild="cancelMemoryRebuild"
               :default-embedding-model="DEFAULT_EMBEDDING_MODEL"
               :default-qdrant-docker-image="DEFAULT_QDRANT_DOCKER_IMAGE"
               @change-backend="handleMemoryBackendChange"
@@ -607,15 +625,22 @@
                       <el-input v-model="setKey" placeholder="system.theme" />
                     </el-form-item>
                   </div>
-                  <el-form-item :label="t('settings.key.valueJson')">
-                    <el-input v-model="setValueJson" type="textarea" :rows="2" placeholder='"dark" / 42 / {"enabled":true}' />
+                  <el-form-item :label="t('settings.key.valueMode')">
+                    <el-select v-model="setValueMode">
+                      <el-option :label="t('settings.key.jsonMode')" value="json" />
+                      <el-option :label="t('settings.key.stringMode')" value="string" />
+                    </el-select>
                   </el-form-item>
+                  <el-form-item :label="t('settings.key.value')">
+                    <el-input v-model="setValueJson" type="textarea" :rows="2" :placeholder="setValueMode === 'json' ? '&quot;dark&quot; / 42 / {&quot;enabled&quot;:true}' : t('settings.key.stringPlaceholder')" />
+                  </el-form-item>
+                  <el-alert v-if="keyError" :title="keyError" type="error" show-icon :closable="false" />
                   <pre v-if="lookupResult" class="settings-json">{{ lookupResult }}</pre>
                   <div class="button-row">
-                    <el-button type="warning" plain @click="rollbackSettings">{{ t('common.rollback') }}</el-button>
-                    <el-button plain :disabled="!lookupKey.trim()" @click="readSettingKey">{{ t('common.read') }}</el-button>
-                    <el-button type="primary" plain :disabled="!setKey.trim() || !setValueJson.trim()" @click="writeSettingKey">{{ t('common.write') }}</el-button>
-                    <el-button type="danger" plain :disabled="!deleteKey.trim()" @click="resetSettingKey">{{ t('common.delete') }}</el-button>
+                    <el-button type="warning" plain :loading="keyOperation === 'rollback'" :disabled="Boolean(keyOperation)" @click="rollbackSettings">{{ t('common.rollback') }}</el-button>
+                    <el-button plain :loading="keyOperation === 'read'" :disabled="Boolean(keyOperation) || !lookupKey.trim()" @click="readSettingKey">{{ t('common.read') }}</el-button>
+                    <el-button type="primary" plain :loading="keyOperation === 'write'" :disabled="Boolean(keyOperation) || !setKey.trim() || (setValueMode === 'json' && !setValueJson.trim())" @click="writeSettingKey">{{ t('common.write') }}</el-button>
+                    <el-button type="danger" plain :loading="keyOperation === 'reset'" :disabled="Boolean(keyOperation) || !deleteKey.trim()" @click="resetSettingKey">{{ t('common.delete') }}</el-button>
                   </div>
                 </el-collapse-item>
               </el-collapse>
@@ -652,7 +677,7 @@ import { ElTag } from 'element-plus'
 import { ElCard } from 'element-plus'
 import 'element-plus/es/components/card/style/css'
 import 'element-plus/es/components/tag/style/css'
-import { computed, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, onActivated, onDeactivated, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElCollapse, ElCollapseItem, ElForm, ElFormItem, ElMessage, ElMessageBox, ElOption, ElSelect, ElTabPane, ElTable, ElTableColumn, ElTabs } from 'element-plus'
 import 'element-plus/es/components/table/style/css'
@@ -665,7 +690,7 @@ import 'element-plus/es/components/form-item/style/css'
 import 'element-plus/es/components/tab-pane/style/css'
 import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/option/style/css'
-import { Connection } from '@element-plus/icons-vue'
+import { Connection, Refresh } from '@element-plus/icons-vue'
 import { currentLocale, localeLabel, normalizeLocale, setLocale, supportedLocales, t } from '@/i18n'
 import { settingsPanelTtsTokens as TTS_CONTRACT_VALUES } from '@/i18n/settingsPanelMessages'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
@@ -685,14 +710,18 @@ import {
   DEFAULT_LLM_TIMEOUT_SECONDS,
   DEFAULT_QDRANT_DOCKER_IMAGE,
 } from '@/../shared/runtime-defaults'
+import { normalizeGenerationValue, resolveGenerationCapabilities, type GenerationParameter } from '@/../shared/llm-generation-parameters'
 import { useInputBindingsStore } from '@/state/inputBindingsStore'
-import { settingsClient, type BackendTokenMutationResponse, type BackendTokenStatusResponse, type GenieCharacterResource, type GenieCharacterResourcesResponse, type LocalRuntimeCandidate, type LocalRuntimeDiscoveryResponse, type TtsRuntimeStatusResponse } from '@/api/clients/settings-client'
+import { settingsClient, type BackendTokenMutationResponse, type BackendTokenStatusResponse, type GenieCharacterResource, type GenieCharacterResourcesResponse, type LocalRuntimeCandidate, type LocalRuntimeDiscoveryResponse, type TtsRuntimeStatusResponse, type SettingsMutationResponse, type SettingsResponse } from '@/api/clients/settings-client'
 import { resourceClient } from '@/api/clients/resource-client'
-import { memoryClient } from '@/api/clients/memory-client'
+import { parseSettingInput, restoreLaterSettingsDraft, settingValueAt, snapshotSettingsDraft, unsentSettingsDraft } from '../settingsDraft'
+import { memoryClient, type MemoryIndexRebuildJob, type MemoryIndexStatus } from '@/api/clients/memory-client'
 import type { ManagedModelResourceId, ManagedResourceMetadata, ModelResourceStatusPayload, ResumableResourceDownload, ResourceCommandResult, StorageCategoryId, StorageStatusPayload } from '@/../shared/resource-manager'
 import { DEFAULT_VAD_MIN_SILENCE_MS } from '@/../shared/runtime-defaults'
 import { findKeyboardBindingConflicts, keyboardEventToAccelerator, normalizeKeyboardAccelerator, type InputBindingSettingsPatch, type KeyboardShortcutAction, type MouseSideButton } from '@/../shared/input-bindings'
 import { useSettingsDomain } from '../composables/useSettingsDomain'
+import { settingsSaveState as saveQueue, settingsPatchFields, selectSettingsFields, acknowledgeSettingsFailures, type SettingsFieldTokens } from '../settingsSaveState'
+import SettingsRuntimeFeedback from '../components/SettingsRuntimeFeedback.vue'
 import { openOnboarding } from '@/domains/onboarding/onboardingEvents'
 import SettingsAsrSection, { type AsrSettings } from '../components/SettingsAsrSection.vue'
 import SettingsAccessSection from '../components/SettingsAccessSection.vue'
@@ -783,6 +812,13 @@ const TTS_PROVIDER: TtsProviderPreset = 'genie-tts'
 const {
   settings,
   settingsRequest,
+  settingsReadbackFailed: localSettingsReadbackFailed,
+  runtimeReload,
+  runtimeStatusRequest,
+  runtimeRetryRequest,
+  retryRuntime,
+  acceptRuntimeStatus,
+  loadRuntimeStatus,
   updateRequest,
   llmModels,
   llmModelsRequest,
@@ -956,29 +992,48 @@ const syncSectionFromRoute = () => {
 const adminCollapseNames = ref<string[]>([])
 const lastSavedAt = ref('')
 const lastApplied = ref<string[]>([])
-let saveTimeout: SaveTimeout | null = null
+const lastRuntimePending = ref<string[]>([])
+const SAVE_DEBOUNCE_MS = 350
+const SAVE_MAX_WAIT_MS = 1000
 let modelDiscoveryTimeout: SaveTimeout | null = null
 let modelDiscoveryRun = 0
 let lastLlmModelDiscoveryKey = ''
 let activeLlmModelDiscoveryKey: string | null = null
 let scheduledLlmModelDiscoveryKey: string | null = null
 let suppressModelDiscovery = false
-const pendingSavePatch = ref<SettingsPatch | null>(null)
-const failedSavePatch = ref<SettingsPatch | null>(null)
-const deletingSensitiveKeys = ref(new Set<string>())
-const saveInFlight = ref(false)
-let saveFailureCount = 0
+const saveOwner = Symbol('settings-panel')
+let saveErrorId: symbol | null = null
+const pendingSavePatch = saveQueue.pending
+const failedSavePatch = saveQueue.failed
+const settingsReadbackFailed = saveQueue.readbackFailed
+const deletingSensitiveKeys = saveQueue.deletingKeys
+const saveInFlight = saveQueue.inFlight
 let unmounted = false
-let saveIdleResolvers: Array<(value: boolean) => void> = []
 const settingsMetadata = ref<Record<string, unknown> | null>(null)
 const settingsHistory = ref<Record<string, unknown>[]>([])
 const memoryRebuildRequest = useDomainRequest<Awaited<ReturnType<typeof memoryClient.rebuildIndex>>>()
+const memoryIndexStatus = ref<MemoryIndexStatus | null>(null)
+const memoryIndexStatusLoading = ref(false)
+const memoryIndexStatusError = ref('')
+let memoryIndexStatusSequence = 0
+const memoryRebuildJob = ref<MemoryIndexRebuildJob | null>(null)
+const memoryRebuildError = ref('')
+const memoryRebuildStarting = ref(false)
+const memoryRebuildCancelling = ref(false)
+const memoryRebuildRefreshing = ref(false)
+const memoryIndexWorking = computed(() => memoryRebuildStarting.value || Boolean(memoryRebuildJob.value && ['queued', 'running', 'cancelling'].includes(memoryRebuildJob.value.state)))
+let memoryRebuildPollTimer: ReturnType<typeof window.setTimeout> | null = null
+let memoryRebuildPollStartedAt = 0
 const rollbackSteps = ref(1)
 const deleteKey = ref('')
 const lookupKey = ref('')
 const lookupResult = ref('')
 const setKey = ref('')
 const setValueJson = ref('')
+const setValueMode = ref<'json' | 'string'>('json')
+const keyOperation = ref<'read' | 'write' | 'reset' | 'rollback' | ''>('')
+const keyError = ref('')
+let keyMutationAcquired = false
 const llmModelStatus = ref('')
 const llmModelAutoSelected = ref(false)
 const backendTokenInput = ref('')
@@ -988,8 +1043,19 @@ const backendTokenMutationRequest = useDomainRequest<BackendTokenMutationRespons
 const localDiscoveryRequest = useDomainRequest<LocalRuntimeDiscoveryResponse>()
 const svcTestResult = ref<{ ok: boolean; message?: string } | null>(null)
 const llmProviderPreset = ref<LlmProviderPreset>('custom')
+const llmGenerationCapabilities = computed(() => resolveGenerationCapabilities(llmProviderPreset.value, form.llm.model))
+const llmParameterValue = (parameter: GenerationParameter) => {
+  const value = form.llm[parameter]
+  const bounds = llmGenerationCapabilities.value.parameters[parameter]
+  return bounds && !(parameter === 'top_k' && value === 0) ? normalizeGenerationValue(value, bounds) : value
+}
+const updateLlmParameter = (parameter: GenerationParameter, value: unknown) => {
+  if (typeof value === 'number' && Number.isFinite(value)) form.llm[parameter] = value
+}
+
 const llmProfiles = reactive<LlmProfiles>({})
 const llmApiKeyStored = ref(false)
+const visionApiKeyStored = ref(false)
 const ttsApiKeyStored = ref(false)
 const asrApiKeyStored = ref(false)
 const memoryApiKeyStored = ref(false)
@@ -1003,16 +1069,21 @@ const activeResourceIds = ref<ManagedModelResourceId[]>([])
 const resourceCancelLoading = ref(false)
 let resourceProgressPollTimer: ReturnType<typeof window.setInterval> | null = null
 let resourceProgressPollBusy = false
+let resourcePollFailures = 0
+let resourcePollStartedAt = 0
+let resourceStatusVersion = 0
+const cancellingResourceIds = ref<ManagedModelResourceId[]>([])
+let resourceStateUncertain = false
 const RESOURCE_PROGRESS_POLL_INTERVAL_MS = 1000
 const storageStatus = ref<StorageStatusPayload | null>(null)
 const storageLoading = ref(false)
 const storageActionKey = ref('')
 
-const invalidateLlmModelDiscovery = () => {
+const invalidateLlmModelDiscovery = (options: { preserveLast?: boolean } = {}) => {
   modelDiscoveryRun += 1
   activeLlmModelDiscoveryKey = null
   scheduledLlmModelDiscoveryKey = null
-  lastLlmModelDiscoveryKey = ''
+  if (!options.preserveLast) lastLlmModelDiscoveryKey = ''
   if (modelDiscoveryTimeout) clearTimeout(modelDiscoveryTimeout)
   modelDiscoveryTimeout = null
   llmModelsRequest.reset()
@@ -1088,14 +1159,40 @@ const setSensitiveDeleting = (key: string, deleting: boolean) => {
 
 const isSensitiveDeleting = (key: string) => deletingSensitiveKeys.value.has(key)
 
+const clearDeletedCredentialDraft = (key: string) => {
+  clearSettingValue(form, key)
+  if (key === 'llm.api_key') {
+    llmApiKeyStored.value = false
+    for (const profile of Object.values(llmProfiles)) profile.api_key = ''
+  }
+  if (key === 'llm.vision_api_key') visionApiKeyStored.value = false
+  if (key === 'tts.api_key') ttsApiKeyStored.value = false
+  if (key === 'asr.api_key') asrApiKeyStored.value = false
+  if (key === 'memory.qdrant_api_key') memoryApiKeyStored.value = false
+}
+
+const publishCredentialDeletion = (key: string) => {
+  const normalized = snapshotSettingsDraft(settings.value || settingsStore.state)
+  clearSettingValue(normalized, key)
+  if (key === 'llm.api_key') {
+    for (const profile of Object.values(normalized.llm.profiles || {})) profile.api_key = ''
+  }
+  const recoveredFailures = acknowledgeSettingsFailures([JSON.stringify(key.split('.'))])
+  saveQueue.completion.value = { status: 'ok', normalizedSettings: normalized, submitted: {}, owner: saveOwner, deletedKeys: [key], recoveredFailures }
+  finishSubmission(new Map(), recoveredFailures)
+}
+
 const clearSensitiveSetting = async (key: string, clearLocal: () => void) => {
   if (deletingSensitiveKeys.value.has(key)) return
   setSensitiveDeleting(key, true)
   pendingSavePatch.value = stripPatchPath(pendingSavePatch.value, key)
   failedSavePatch.value = stripPatchPath(failedSavePatch.value, key)
+  let acquired = false
   try {
-    if (!(await flushPendingSave())) return
+    acquired = await beginSettingsMutation()
+    if (!acquired) return
     await settingsClient.deleteSetting(key)
+    publishCredentialDeletion(key)
     clearLocal()
     clearSettingValue(settingsStore.state, key)
     clearSettingValue(settings.value, key)
@@ -1105,9 +1202,15 @@ const clearSensitiveSetting = async (key: string, clearLocal: () => void) => {
   } catch (error) {
     ElMessage.error(describeFailure(error, t('common.error.unknown')))
   } finally {
+    if (acquired) finishSettingsMutation()
     setSensitiveDeleting(key, false)
   }
 }
+
+const clearVisionApiKey = () => clearSensitiveSetting('llm.vision_api_key', () => {
+  form.llm.vision_api_key = ''
+  visionApiKeyStored.value = false
+})
 
 const clearTtsApiKey = () => clearSensitiveSetting('tts.api_key', () => {
   form.tts.api_key = ''
@@ -1148,12 +1251,25 @@ const formatTtsLatencySummary = (summary?: { samples: number; p50_ms?: number | 
   if (!summary?.samples) return ''
   return `P50 ${formatTtsDuration(summary.p50_ms)} · P95 ${formatTtsDuration(summary.p95_ms)} · n=${summary.samples}`
 }
+const serviceApplicationHint = (section: string): string => {
+  const status = runtimeReload.value?.sections[section]
+  if (!status || status.state === 'applied') return ''
+  return t(status.state === 'failed' || status.state === 'unavailable' ? 'settings.status.serviceFailed' : 'settings.status.servicePending')
+}
+const serviceApplicationTag = (section: string): TagType | null => {
+  const status = runtimeReload.value?.sections[section]
+  if (!status || status.state === 'applied') return null
+  return status.state === 'failed' || status.state === 'unavailable' ? 'danger' : 'warning'
+}
 const ttsRuntimeError = computed(() => ttsStatusRequest.error || ttsStatus.value?.last_error || '')
 const ttsRuntimeLabel = computed(() => {
+  if (serviceApplicationHint('tts')) return serviceApplicationHint('tts')
   const snapshot = ttsStatus.value
   if (ttsStatusRequest.loading) return t('settings.tts.status.refreshing')
   if (ttsStatusRequest.error) return t('settings.tts.status.unreadable')
   if (!snapshot) return t('settings.tts.status.unread')
+  if ((snapshot.provider && snapshot.provider !== form.tts.provider)
+    || (form.tts.provider === 'genie-tts' && snapshot.character && snapshot.character !== form.tts.genie_character)) return t('settings.tts.status.configChanged')
   if (snapshot.loading) return t('settings.tts.status.loading')
   if (snapshot.warmup_running || snapshot.warming_up) return t('settings.tts.status.warming')
   if (snapshot.inference_running) return t('settings.tts.status.synthesizing')
@@ -1162,9 +1278,13 @@ const ttsRuntimeLabel = computed(() => {
   return t('settings.tts.status.cold')
 })
 const ttsRuntimeTagType = computed<TagType>(() => {
+  const applicationTag = serviceApplicationTag('tts')
+  if (applicationTag) return applicationTag
   const snapshot = ttsStatus.value
   if (ttsStatusRequest.error || snapshot?.last_error) return 'danger'
   if (ttsStatusRequest.loading || snapshot?.loading || snapshot?.warmup_running || snapshot?.warming_up || snapshot?.inference_running) return 'warning'
+  if ((snapshot?.provider && snapshot.provider !== form.tts.provider)
+    || (form.tts.provider === 'genie-tts' && snapshot?.character && snapshot.character !== form.tts.genie_character)) return 'warning'
   if (snapshot?.warmup_done || snapshot?.available) return 'success'
   return 'info'
 })
@@ -1341,29 +1461,19 @@ const llmRuntimePatchFromProfile = (profile: LlmProfile): SettingsPatch => ({
   default_max_output_tokens: profile.default_max_output_tokens,
 })
 
-const cloneLlmProfilesPayload = (activeProfile?: LlmProfile): Record<string, LlmProfile> => {
-  const payload: Record<string, LlmProfile> = {}
-  if (activeProfile) {
-    llmProfiles[activeProfile.provider] = activeProfile
-  }
-  for (const [key, profile] of Object.entries(llmProfiles)) {
-    const provider = normalizeLlmProviderValue(key, profile?.base_url || '')
-    // LLM credentials have one canonical top-level owner. Profile payloads
-    // carry configuration only, so nested keys cannot diverge from the vault.
-    payload[provider] = { ...sanitizeLlmProfile(provider, profile), api_key: '' }
-  }
-  return payload
-}
-
 const saveActiveLlmPatch = (patch: SettingsPatch) => {
   const activeProfile = snapshotLlmProfile()
   llmProfiles[activeProfile.provider] = activeProfile
-  debouncedSave({ llm: { ...patch, profiles: cloneLlmProfilesPayload(activeProfile) } })
+  const profilePatch = Object.fromEntries(Object.entries(patch).filter(([field]) => field !== 'api_key'))
+  debouncedSave({ llm: {
+    ...patch,
+    ...(Object.keys(profilePatch).length ? { profiles: { [activeProfile.provider]: profilePatch } } : {}),
+  } })
 }
 
 const applyRecommendedLlmSettings = () => {
   const isGpt61Sol = isGpt61SolModel(form.llm.model)
-  const recommended = {
+  const numericDefaults: Record<GenerationParameter, number> = {
     temperature: DEFAULT_LLM_TEMPERATURE,
     top_p: DEFAULT_LLM_TOP_P,
     top_k: DEFAULT_LLM_TOP_K,
@@ -1371,9 +1481,15 @@ const applyRecommendedLlmSettings = () => {
     frequency_penalty: DEFAULT_LLM_FREQUENCY_PENALTY,
     presence_penalty: DEFAULT_LLM_PRESENCE_PENALTY,
     repetition_penalty: DEFAULT_LLM_REPETITION_PENALTY,
+  }
+  const recommended: Partial<Record<GenerationParameter, number>> & Pick<LlmProfile, 'timeout' | 'context_max_tokens' | 'default_max_output_tokens'> = {
     timeout: DEFAULT_LLM_TIMEOUT_SECONDS,
     context_max_tokens: isGpt61Sol ? 500_000 : DEFAULT_LLM_CONTEXT_MAX_TOKENS,
     default_max_output_tokens: isGpt61Sol ? 16_384 : DEFAULT_LLM_MAX_OUTPUT_TOKENS,
+  }
+  for (const parameter of Object.keys(numericDefaults) as GenerationParameter[]) {
+    const bounds = llmGenerationCapabilities.value.parameters[parameter]
+    if (bounds) recommended[parameter] = parameter === 'top_k' ? 0 : normalizeGenerationValue(numericDefaults[parameter], bounds)
   }
   Object.assign(form.llm, recommended)
   saveActiveLlmPatch(recommended)
@@ -1398,9 +1514,12 @@ const clearLlmApiKey = async () => {
   setSensitiveDeleting(key, true)
   pendingSavePatch.value = stripPatchPath(pendingSavePatch.value, key)
   failedSavePatch.value = stripPatchPath(failedSavePatch.value, key)
+  let acquired = false
   try {
-    if (!(await flushPendingSave())) return
+    acquired = await beginSettingsMutation()
+    if (!acquired) return
     await settingsClient.deleteSetting(key)
+    publishCredentialDeletion(key)
     form.llm.api_key = ''
     llmApiKeyStored.value = false
     for (const profile of Object.values(llmProfiles)) profile.api_key = ''
@@ -1411,10 +1530,12 @@ const clearLlmApiKey = async () => {
     // The DELETE endpoint removes the vault value, but the backend settings
     // document may still contain legacy nested profile keys. Persist the
     // scrubbed profile payload immediately so a later reload cannot restore it.
+    finishSettingsMutation()
+    acquired = false
     debouncedSave({
       llm: {
         api_key: '',
-        profiles: cloneLlmProfilesPayload(),
+        profiles: Object.fromEntries(Object.keys(llmProfiles).map((provider) => [provider, { api_key: '' }])),
       },
     })
     if (!(await flushPendingSave())) {
@@ -1424,6 +1545,7 @@ const clearLlmApiKey = async () => {
   } catch (error) {
     ElMessage.error(describeFailure(error, t('common.error.unknown')))
   } finally {
+    if (acquired) finishSettingsMutation()
     setSensitiveDeleting(key, false)
   }
 }
@@ -1516,7 +1638,9 @@ const ttsRuntimePatchFromProfile = (profile: TtsProfile): SettingsPatch => ({
 
 const saveActiveTtsPatch = (patch: SettingsPatch) => {
   const activeProfile = snapshotTtsProfile()
-  debouncedSave({ tts: { ...ttsRuntimePatchFromProfile(activeProfile), ...patch, save_mode: TTS_CONTRACT_VALUES.saveModeDisabled } })
+  const runtimePatch: SettingsPatch = { ...ttsRuntimePatchFromProfile(activeProfile), ...patch, save_mode: TTS_CONTRACT_VALUES.saveModeDisabled }
+  if (!Object.prototype.hasOwnProperty.call(patch, 'api_key') || activeProfile.provider !== 'openai-compatible') delete runtimePatch.api_key
+  debouncedSave({ tts: runtimePatch })
 }
 
 const selectedGenieCharacter = computed(() => genieCharacters.value.find((item) => item.id === form.tts.genie_character) || null)
@@ -1602,6 +1726,7 @@ const getLlmProviderStatus = (provider: LlmProviderPreset): { status: string; st
 }
 
 const ttsProfileHasRunnableConfig = (profile: TtsProfile): boolean => {
+  if (profile.provider === 'openai-compatible') return Boolean(profile.base_url.trim() && profile.model.trim() && profile.voice.trim())
   return Boolean(profile.genie_character.trim() || (profile.ref_audio.trim() && profile.ref_text.trim()))
 }
 
@@ -1626,6 +1751,7 @@ const llmModelSelectOptions = computed(() => {
 })
 
 const llmRuntimeLabel = computed(() => {
+  if (serviceApplicationHint('llm')) return serviceApplicationHint('llm')
   if (llmStatusRequest.loading) return t('settings.llm.runtime.reading')
   if (llmStatusRequest.error) return t('settings.llm.runtime.failed')
   const snapshot = llmStatus.value
@@ -1636,6 +1762,8 @@ const llmRuntimeLabel = computed(() => {
 })
 
 const llmRuntimeTagType = computed<TagType>(() => {
+  const applicationTag = serviceApplicationTag('llm')
+  if (applicationTag) return applicationTag
   if (llmStatusRequest.error || (llmStatus.value && !llmStatus.value.available)) return 'danger'
   if (llmStatusRequest.loading || llmStatus.value?.preconnect_running) return 'warning'
   if (llmStatus.value?.available && llmStatus.value.last_preconnect_ok !== false) return 'success'
@@ -1655,29 +1783,41 @@ const canAutoDiscoverLlmModels = computed(() => {
   )
 })
 
-const saveBusy = computed(() => updateRequest.loading || saveInFlight.value || Boolean(pendingSavePatch.value))
+const saveError = computed(() => [...saveQueue.failureScopes.value.values()].reverse()
+  .find(failure => failure.owner === saveOwner)?.error || updateRequest.error)
+const saveSending = computed(() => updateRequest.loading || saveInFlight.value)
+const saveBusy = computed(() => saveSending.value || Boolean(pendingSavePatch.value))
 
 const saveStatusType = computed<AlertType>(() => {
   if (saveBusy.value) return 'warning'
   if (failedSavePatch.value) return 'error'
-  if (updateRequest.error) return 'error'
+  if (saveError.value) return 'error'
+  if (runtimeFailedSections.value.length || runtimeStatusRequest.error) return 'error'
+  if (lastRuntimePending.value.length) return 'warning'
   if (lastSavedAt.value) return 'success'
   return 'info'
 })
 
 const saveStatusLabel = computed(() => {
-  if (saveBusy.value) return t('settings.status.saving')
+  if (saveSending.value) return t('settings.status.saving')
+  if (pendingSavePatch.value) return t('settings.status.pending')
+  if (settingsReadbackFailed.value) return t('settings.status.readbackFailed')
   if (failedSavePatch.value) return t('settings.status.saveFailed')
-  if (updateRequest.error) return t('settings.status.saveFailed')
+  if (saveError.value) return t('settings.status.saveFailed')
   if (lastSavedAt.value) return t('settings.status.saved')
   return ''
 })
 
 const saveStatusDetail = computed(() => {
-  if (saveBusy.value) return t('settings.status.savingShort')
+  if (saveSending.value) return t(pendingSavePatch.value ? 'settings.status.savingQueued' : 'settings.status.savingShort')
+  if (pendingSavePatch.value) return t('settings.status.pendingDetail')
+  if (settingsReadbackFailed.value) return t('settings.messages.readbackFailed')
   if (failedSavePatch.value) return t('settings.status.retrySaveDetail')
-  if (updateRequest.error) return updateRequest.error
-  if (lastApplied.value.length) return t('settings.status.applied', { items: lastApplied.value.join(' / ') })
+  if (saveError.value) return saveError.value
+  if (runtimeStatusRequest.error) return t('settings.status.runtimeUnknown')
+  if (runtimeFailedSections.value.length) return t('settings.status.runtimeFailed', { items: runtimeFailedSections.value.join(' / ') })
+  if (lastRuntimePending.value.length) return t('settings.status.runtimePending', { items: lastRuntimePending.value.join(' / ') })
+  if (lastApplied.value.length) return t('settings.status.serviceApplied', { items: lastApplied.value.join(' / ') })
   if (lastSavedAt.value) return t('settings.status.recent', { time: lastSavedAt.value })
   return ''
 })
@@ -1741,14 +1881,14 @@ const storageCategoryLabel = (id: StorageCategoryId): string => t(`settings.stor
 
 const notifySaveIdle = () => {
   if (saveInFlight.value || pendingSavePatch.value) return
-  const resolvers = saveIdleResolvers
-  saveIdleResolvers = []
+  const resolvers = saveQueue.idleResolvers
+  saveQueue.idleResolvers = []
   resolvers.forEach((resolve) => resolve(true))
 }
 
 const waitForSaveIdle = async () => {
   if (!saveInFlight.value && !pendingSavePatch.value) return
-  await new Promise<boolean>((resolve) => saveIdleResolvers.push(resolve))
+  await new Promise<boolean>((resolve) => saveQueue.idleResolvers.push(resolve))
 }
 
 const promoteFailedSavePatch = () => {
@@ -1756,6 +1896,8 @@ const promoteFailedSavePatch = () => {
   pendingSavePatch.value = pendingSavePatch.value
     ? mergePatch(failedSavePatch.value, pendingSavePatch.value)
     : failedSavePatch.value
+  saveQueue.pendingFields = new Map([...saveQueue.failedFields, ...saveQueue.pendingFields])
+  saveQueue.failedFields.clear()
   failedSavePatch.value = null
 }
 
@@ -1767,82 +1909,223 @@ const queueSavePatch = (patch: SettingsPatch) => {
   pendingSavePatch.value = pendingSavePatch.value
     ? mergePatch(pendingSavePatch.value, patch)
     : patch
+  for (const [path] of settingsPatchFields(patch)) {
+    const token = Symbol('settings-field')
+    saveQueue.pendingFields.set(path, token)
+    draftReceipts.set(path, { token, value: JSON.stringify(draftFieldValue(path)) })
+    laterDraftFields.delete(path)
+  }
 }
 
-const savePatch = async (patch: SettingsPatch) => {
+const captureFormDraft = () => snapshotSettingsDraft({ form, profiles: llmProfiles, provider: llmProviderPreset.value })
+const initialDraft = captureFormDraft()
+let hydratedDraft: ReturnType<typeof captureFormDraft> | null = null
+let reconcilingDraft = false
+const draftReceipts = new Map<string, { token: symbol; value: string | undefined }>()
+const laterDraftFields = new Set<string>()
+const draftFieldValue = (path: string): unknown => {
+  const parts = JSON.parse(path) as string[]
+  let value: unknown = form
+  if (parts[0] === 'llm' && parts[1] === 'profiles') {
+    value = llmProfiles
+    parts.splice(0, 2)
+  }
+  for (const part of parts) value = isPlainRecord(value) ? value[part] : undefined
+  return value
+}
+
+// Invalidate receipts synchronously: editing away and back still creates a new draft.
+watch([form, llmProfiles], () => {
+  if (reconcilingDraft) return
+  for (const [path, receipt] of draftReceipts) {
+    if (JSON.stringify(draftFieldValue(path)) === receipt.value) continue
+    draftReceipts.delete(path)
+    laterDraftFields.add(path)
+  }
+}, { deep: true, flush: 'sync' })
+
+const acknowledgedSubmission = (patch: SettingsPatch, fields: SettingsFieldTokens): SettingsPatch =>
+  selectSettingsFields(patch, (path) => {
+    const receipt = draftReceipts.get(path)
+    return Boolean(receipt && receipt.token === fields.get(path))
+  })
+
+const finishSubmission = (fields: SettingsFieldTokens, recoveries: Set<symbol>) => {
+  for (const [path, token] of fields) {
+    if (draftReceipts.get(path)?.token === token) draftReceipts.delete(path)
+  }
+  if (saveErrorId && recoveries.has(saveErrorId)) {
+    updateRequest.reset()
+    saveErrorId = null
+  }
+}
+
+// A queued patch may have been superseded by local typing before it is sent.
+// Only fields still equal to that submitted value acknowledge this view's draft.
+const acknowledgedDraftFields = (draft: SettingsPatch, submitted: SettingsPatch): SettingsPatch => {
+  const acknowledged: SettingsPatch = {}
+  for (const [key, value] of Object.entries(submitted)) {
+    if (isPlainRecord(value) && isPlainRecord(draft[key])) {
+      const nested = acknowledgedDraftFields(draft[key], value)
+      if (Object.keys(nested).length) acknowledged[key] = nested
+    } else if (JSON.stringify(draft[key]) === JSON.stringify(value)) acknowledged[key] = value
+  }
+  return acknowledged
+}
+
+const hydratePreservingDraft = (before: ReturnType<typeof captureFormDraft>, source = settings.value, submitted: SettingsPatch = {}, explicitMutation = false) => {
+  if (!source || unmounted) return
+  reconcilingDraft = true
+  try {
+    const current = captureFormDraft()
+    const hydratedBefore = hydratedDraft
+    const sharedDraft = mergePatch(saveQueue.active.value || {}, mergePatch(failedSavePatch.value || {}, pendingSavePatch.value || {}))
+    if (!hydratedBefore) {
+      // Seed a new view with the shared draft, then preserve input typed during its GET.
+      // Later acknowledgements must still normalize these inherited values.
+      hydrateForm(mergePatch(source as unknown as SettingsPatch, sharedDraft) as unknown as SettingsResponse)
+      hydratedDraft = captureFormDraft()
+      for (const [path] of settingsPatchFields(sharedDraft)) {
+        const token = saveQueue.pendingFields.get(path) || saveQueue.failedFields.get(path) || saveQueue.activeFields.get(path)
+        if (token) draftReceipts.set(path, { token, value: JSON.stringify(draftFieldValue(path)) })
+      }
+      restoreLaterSettingsDraft(form, initialDraft.form, current.form)
+      restoreLaterSettingsDraft(llmProfiles, initialDraft.profiles, current.profiles)
+      if (before.provider !== current.provider) llmProviderPreset.value = current.provider
+      return
+    }
+    const submittedDraft = { ...before.form, llm: { ...before.form.llm, profiles: before.profiles } }
+    const acknowledged = explicitMutation ? submitted : acknowledgedDraftFields(submittedDraft, submitted)
+    const unsent = unsentSettingsDraft(hydratedBefore.form, before.form, acknowledged)
+    hydrateForm(source)
+    hydratedDraft = captureFormDraft()
+    if (explicitMutation) {
+      for (const [path] of settingsPatchFields(submitted)) {
+        laterDraftFields.delete(path)
+        draftReceipts.delete(path)
+      }
+    }
+    const currentFields = { ...current.form, llm: { ...current.form.llm, profiles: current.profiles } }
+    const later = selectSettingsFields(currentFields, (path) => laterDraftFields.has(path))
+    const queued = mergePatch(mergePatch(unsent, sharedDraft), later)
+    restoreLaterSettingsDraft(form, before.form, current.form, queued)
+    const unsentProfiles = hydratedBefore ? unsentSettingsDraft(hydratedBefore.profiles, before.profiles, isPlainRecord(acknowledged.llm) && isPlainRecord(acknowledged.llm.profiles) ? acknowledged.llm.profiles : {}) : {}
+    const queuedProfiles = isPlainRecord(queued.llm) && isPlainRecord(queued.llm.profiles) ? queued.llm.profiles : {}
+    restoreLaterSettingsDraft(llmProfiles, before.profiles, current.profiles, mergePatch(unsentProfiles, queuedProfiles))
+    if (before.provider !== current.provider || (hydratedBefore && hydratedBefore.provider !== before.provider && !(isPlainRecord(submitted.llm) && 'provider' in submitted.llm)) || (isPlainRecord(queued.llm) && 'provider' in queued.llm)) {
+      llmProviderPreset.value = current.provider
+    }
+  } finally {
+    reconcilingDraft = false
+  }
+}
+
+const recordSettingsSaved = (result: Pick<SettingsMutationResponse, 'runtime_applied' | 'runtime_changed' | 'runtime_reload'>) => {
+  const applied = result.runtime_applied || []
+  lastSavedAt.value = new Date().toLocaleTimeString(undefined, { hour12: false })
+  if (result.runtime_reload) {
+    acceptRuntimeStatus(result.runtime_reload)
+    syncRuntimeReloadDisplay()
+  } else {
+    // Older backends acknowledge config only; service application is unknown.
+    lastApplied.value = []
+    lastRuntimePending.value = result.runtime_changed || []
+  }
+  scheduleRuntimeStatusPoll()
+  if (!result.runtime_reload && applied.includes('tts') && isSectionVisible('voice')) void loadTtsStatus()
+}
+
+const savePatch = async (patch: SettingsPatch, fields: SettingsFieldTokens) => {
+  const before = captureFormDraft()
   const result = await patchSettings(patch)
-  if (unmounted) return result
+  settingsReadbackFailed.value = localSettingsReadbackFailed.value
   if (result) {
-    for (const [section, values] of Object.entries(patch)) {
+    const normalized = result.normalizedSettings
+    for (const [section, values] of Object.entries(normalized)) {
       const target = settingsStore.state[section as keyof typeof settingsStore.state]
       if (target && typeof target === 'object' && values && typeof values === 'object') {
         Object.assign(target, values)
       }
     }
-    const appliedSections = result.runtime_applied || result.runtime_changed || []
-    lastSavedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
-    lastApplied.value = appliedSections
-    if (appliedSections.includes('tts')) {
-      window.setTimeout(() => {
-        void loadTtsStatus()
-      }, 500)
+    const recoveries = acknowledgeSettingsFailures(settingsPatchFields(patch).map(([path]) => path))
+    saveQueue.active.value = null
+    saveQueue.completion.value = { ...result, submitted: patch, owner: saveOwner, fields, recoveredFailures: recoveries }
+    if (!unmounted) {
+      hydratePreservingDraft(before, normalized, acknowledgedSubmission(patch, fields))
+      recordSettingsSaved(result)
+      void prepareResourcesForSettingsPatch(patch)
     }
-    void prepareResourcesForSettingsPatch(patch)
+    finishSubmission(fields, recoveries)
   } else {
-    ElMessage.error(t('settings.messages.saveFailed'))
+    saveErrorId = Symbol('settings-save-failure')
+    saveQueue.failureScopes.value = new Map([...saveQueue.failureScopes.value, [saveErrorId, { owner: saveOwner, fields: new Set(settingsPatchFields(patch).map(([path]) => path)), error: updateRequest.error || t('settings.messages.saveFailed') }]])
+    ElMessage.error(t(settingsReadbackFailed.value ? 'settings.messages.readbackFailed' : 'settings.messages.saveFailed'))
   }
   return result
 }
 
-const parkFailedSavePatch = (patch: SettingsPatch | null) => {
+const parkFailedSavePatch = (patch: SettingsPatch | null, fields: SettingsFieldTokens) => {
   if (!patch) return
   const queuedAfterFailure = pendingSavePatch.value
   pendingSavePatch.value = null
   failedSavePatch.value = queuedAfterFailure
     ? mergePatch(patch, queuedAfterFailure)
     : patch
+  saveQueue.failedFields = new Map([...fields, ...saveQueue.pendingFields])
+  saveQueue.pendingFields = new Map()
 }
 
-let flushSaveAfterUnmount = false
-
-const drainSaveQueue = async (options: { allowAfterUnmount?: boolean } = {}) => {
-  if (options.allowAfterUnmount) flushSaveAfterUnmount = true
-  if (saveInFlight.value) return
+const drainSaveQueue = async () => {
+  if (saveInFlight.value || saveQueue.adminInFlight) return
+  if (saveQueue.timeout) clearTimeout(saveQueue.timeout)
+  saveQueue.timeout = null
+  saveQueue.queuedAt = null
+  if (!pendingSavePatch.value) return
   saveInFlight.value = true
   let activePatch: SettingsPatch | null = null
+  let activeFields: SettingsFieldTokens = new Map()
   try {
-    while (pendingSavePatch.value && (!unmounted || flushSaveAfterUnmount)) {
+    while (pendingSavePatch.value) {
       activePatch = pendingSavePatch.value
+      const paths = new Set(settingsPatchFields(activePatch).map(([path]) => path))
+      activeFields = new Map([...saveQueue.pendingFields].filter(([path]) => paths.has(path)))
+      saveQueue.pendingFields = new Map()
+      saveQueue.active.value = activePatch
+      saveQueue.activeFields = activeFields
       pendingSavePatch.value = null
-      const result = await savePatch(activePatch)
+      const result = await savePatch(activePatch, activeFields)
       if (!result) {
-        saveFailureCount += 1
-        parkFailedSavePatch(activePatch)
+        saveQueue.failures += 1
+        parkFailedSavePatch(activePatch, activeFields)
         break
       }
       activePatch = null
     }
   } catch (error) {
     console.error('[Settings Save Queue]:', error)
-    saveFailureCount += 1
-    parkFailedSavePatch(activePatch)
-    if (!unmounted) ElMessage.error(t('settings.messages.saveFailed'))
+    saveQueue.failures += 1
+    parkFailedSavePatch(activePatch, activeFields)
+    ElMessage.error(t('settings.messages.saveFailed'))
   } finally {
     saveInFlight.value = false
-    if (!pendingSavePatch.value) flushSaveAfterUnmount = false
+    saveQueue.active.value = null
+    saveQueue.activeFields = new Map()
     notifySaveIdle()
   }
 }
 
 const debouncedSave = (patch: SettingsPatch) => {
   if (unmounted) return
-  if (saveTimeout) clearTimeout(saveTimeout)
+  if (saveQueue.timeout) clearTimeout(saveQueue.timeout)
+  saveQueue.timeout = null
   queueSavePatch(patch)
-
-  saveTimeout = setTimeout(() => {
-    saveTimeout = null
+  if (!pendingSavePatch.value || saveInFlight.value) return
+  saveQueue.queuedAt ??= Date.now()
+  const delay = Math.min(SAVE_DEBOUNCE_MS, Math.max(0, SAVE_MAX_WAIT_MS - (Date.now() - saveQueue.queuedAt)))
+  saveQueue.timeout = setTimeout(() => {
+    saveQueue.timeout = null
     void drainSaveQueue()
-  }, 1000)
+  }, delay)
 }
 
 const retryFailedSave = () => {
@@ -1885,15 +2168,34 @@ const applyLlmVisionPatch = (patch: LlmVisionPatch) => {
 }
 
 const flushPendingSave = async () => {
-  const failureCountBeforeFlush = saveFailureCount
-  if (saveTimeout) {
-    clearTimeout(saveTimeout)
-    saveTimeout = null
+  if (saveQueue.adminInFlight) await new Promise<void>((resolve) => saveQueue.adminResolvers.push(resolve))
+  const failureCountBeforeFlush = saveQueue.failures
+  if (saveQueue.timeout) {
+    clearTimeout(saveQueue.timeout)
+    saveQueue.timeout = null
   }
   promoteFailedSavePatch()
   void drainSaveQueue()
   await waitForSaveIdle()
-  return saveFailureCount === failureCountBeforeFlush && !failedSavePatch.value
+  return saveQueue.failures === failureCountBeforeFlush && !failedSavePatch.value
+}
+
+const beginSettingsMutation = async () => {
+  for (;;) {
+    if (!(await flushPendingSave()) || unmounted) return false
+    // Another waiter may have acquired the mutation slot during the flush.
+    if (saveQueue.adminInFlight || saveInFlight.value || pendingSavePatch.value) continue
+    saveQueue.adminInFlight = true
+    return true
+  }
+}
+
+const finishSettingsMutation = () => {
+  saveQueue.adminInFlight = false
+  const resolvers = saveQueue.adminResolvers
+  saveQueue.adminResolvers = []
+  resolvers.forEach((resolve) => resolve())
+  if (pendingSavePatch.value) void drainSaveQueue()
 }
 
 const setMemoryBackend = (backend: string) => {
@@ -1906,33 +2208,125 @@ const handleMemoryBackendChange = (value: string | number | boolean) => {
   setMemoryBackend(String(value))
 }
 
+const refreshMemoryIndexStatus = async () => {
+  const sequence = ++memoryIndexStatusSequence
+  memoryIndexStatusLoading.value = true
+  memoryIndexStatusError.value = ''
+  try {
+    const status = await memoryClient.getIndexStatus()
+    if (unmounted || sequence !== memoryIndexStatusSequence) return
+    memoryIndexStatus.value = status
+    if (status.job && !memoryRebuildJob.value) {
+      memoryRebuildPollStartedAt = Date.now()
+      applyMemoryRebuildJob(status.job, false)
+    }
+  } catch (error) {
+    if (!unmounted && sequence === memoryIndexStatusSequence) {
+      memoryIndexStatusError.value = describeFailure(error, t('settings.memory.statusFailed'))
+    }
+  } finally {
+    if (sequence === memoryIndexStatusSequence) memoryIndexStatusLoading.value = false
+  }
+}
+
 const waitForMemoryBackend = async (expectedBackend: string) => {
   for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (unmounted || form.memory.backend !== expectedBackend) return false
     const status = await memoryClient.getIndexStatus()
+    if (unmounted || form.memory.backend !== expectedBackend) return false
+    memoryIndexStatus.value = status
     if (status.backend === expectedBackend) return true
     await new Promise<void>((resolve) => window.setTimeout(resolve, 100))
   }
   return false
 }
 
+const stopMemoryRebuildPolling = () => {
+  if (memoryRebuildPollTimer !== null) window.clearTimeout(memoryRebuildPollTimer)
+  memoryRebuildPollTimer = null
+}
+
+const applyMemoryRebuildJob = (job: MemoryIndexRebuildJob, notifyCompletion = true) => {
+  const previous = memoryRebuildJob.value
+  memoryRebuildJob.value = job
+  memoryRebuildError.value = ''
+  stopMemoryRebuildPolling()
+  if (job.state === 'completed') {
+    if (notifyCompletion && (previous?.job_id !== job.job_id || previous.state !== 'completed')) {
+      ElMessage.success(t('settings.messages.memoryRebuildOk', {
+        count: Number(job.result?.indexed_count ?? job.processed_count ?? 0),
+        skipped: Number(job.result?.skipped_count ?? 0),
+      }))
+    }
+  } else if (['failed', 'interrupted'].includes(job.state)) {
+    memoryRebuildError.value = job.last_error || t('settings.messages.memoryRebuildFailed')
+  } else if (!['cancelled'].includes(job.state) && isSectionVisible('memory')) {
+    if (Date.now() - memoryRebuildPollStartedAt >= 10 * 60 * 1000) {
+      memoryRebuildError.value = t('settings.memory.rebuildPollStopped')
+    } else {
+      memoryRebuildPollTimer = window.setTimeout(() => void refreshMemoryRebuild(), 1500)
+    }
+  }
+}
+
+const refreshMemoryRebuild = async () => {
+  const jobId = memoryRebuildJob.value?.job_id
+  if (!jobId || memoryRebuildRefreshing.value || memoryRebuildCancelling.value || unmounted) return
+  stopMemoryRebuildPolling()
+  memoryRebuildRefreshing.value = true
+  try {
+    const result = await memoryClient.getIndexRebuildJob(jobId)
+    if (!unmounted && memoryRebuildJob.value?.job_id === jobId) applyMemoryRebuildJob(result.job)
+  } catch (error) {
+    if (!unmounted) memoryRebuildError.value = describeFailure(error, t('settings.messages.memoryRebuildFailed'))
+  } finally {
+    memoryRebuildRefreshing.value = false
+  }
+}
+
+const cancelMemoryRebuild = async () => {
+  const jobId = memoryRebuildJob.value?.job_id
+  if (!jobId || !memoryIndexWorking.value || memoryRebuildRefreshing.value || memoryRebuildCancelling.value || unmounted) return
+  stopMemoryRebuildPolling()
+  memoryRebuildCancelling.value = true
+  try {
+    const result = await memoryClient.cancelIndexRebuild(jobId)
+    if (!unmounted && memoryRebuildJob.value?.job_id === jobId) applyMemoryRebuildJob(result.job)
+  } catch (error) {
+    if (!unmounted) memoryRebuildError.value = describeFailure(error, t('settings.messages.memoryRebuildFailed'))
+  } finally {
+    memoryRebuildCancelling.value = false
+  }
+}
+
 const handleRebuildMemoryIndex = async () => {
+  if (memoryIndexWorking.value) return
   if (form.memory.backend === 'inmemory') {
     ElMessage.warning(t('settingsPanel.message.inMemoryNoIndex'))
     return
   }
-  if (!(await flushPendingSave())) return
-  if (!(await waitForMemoryBackend(form.memory.backend))) {
-    ElMessage.error(t('settingsPanel.message.memoryBackendSwitching'))
-    return
+  memoryRebuildStarting.value = true
+  memoryRebuildError.value = ''
+  try {
+    if (!(await flushPendingSave()) || unmounted) return
+    const backend = form.memory.backend
+    if (!(await waitForMemoryBackend(backend))) {
+      memoryRebuildError.value = t('settingsPanel.message.memoryBackendSwitching')
+      return
+    }
+    const result = await memoryRebuildRequest.execute(() => memoryClient.rebuildIndex())
+    if (unmounted) return
+    if (!result) {
+      memoryRebuildError.value = memoryRebuildRequest.error || t('settings.messages.memoryRebuildFailed')
+      return
+    }
+    memoryRebuildPollStartedAt = Date.now()
+    applyMemoryRebuildJob(result.job)
+  } catch (error) {
+    if (!unmounted) memoryRebuildError.value = describeFailure(error, t('settings.messages.memoryRebuildFailed'))
+  } finally {
+    memoryRebuildStarting.value = false
   }
-  const result = await memoryRebuildRequest.execute(() => memoryClient.rebuildIndex())
-  if (!result) {
-    ElMessage.error(memoryRebuildRequest.error || t('settings.messages.memoryRebuildFailed'))
-    return
-  }
-  const indexed = Number(result.job.result?.indexed_count ?? result.job.processed_count ?? 0)
-  const skipped = Number(result.job.result?.skipped_count ?? 0)
-  ElMessage.success(t('settings.messages.memoryRebuildOk', { count: indexed, skipped }))
 }
 
 const handleSystemThemeChange = (value: string | number | boolean) => {
@@ -2022,7 +2416,14 @@ const resetDesktopInputBindings = async () => {
 }
 
 const discoverLocalRuntime = async (): Promise<LocalRuntimeDiscoveryResponse | null> => {
+  if (!(await flushPendingSave()) || unmounted || localDiscoveryRequest.loading) return null
+  const before = JSON.stringify(captureFormDraft())
   const result = await localDiscoveryRequest.execute(() => settingsClient.discoverLocal())
+  if (unmounted) return null
+  if (result && before !== JSON.stringify(captureFormDraft())) {
+    ElMessage.info(t('settings.messages.discoveryDraftChanged'))
+    return null
+  }
   if (!result) {
     ElMessage.error(localDiscoveryRequest.error || t('settings.messages.localDetectFailed'))
     return null
@@ -2039,46 +2440,14 @@ const warnNoLocalCandidate = (service: string) => {
 }
 
 const notifyLocalCandidateApplied = (candidate: LocalRuntimeCandidate, fallback: string) => {
-  ElMessage.success(t('settings.messages.localDetectApplied', { service: candidate.label || candidate.provider || candidate.backend || fallback }))
+  ElMessage.info(t('settings.messages.localDetectDraft', { service: candidate.label || candidate.provider || candidate.backend || fallback }))
 }
 
-const applyLocalLlmDiscovery = async () => {
-  const discovery = await discoverLocalRuntime()
-  if (!discovery) return
-  const currentProvider = llmProviderPreset.value
-  const candidate = discovery.llm.find((item) => item.ok && item.provider === currentProvider)
-    ?? firstReadyCandidate(discovery.llm)
-  if (!candidate?.base_url) {
-    warnNoLocalCandidate('LLM')
-    return
-  }
-
-  const provider = normalizeLlmProviderValue(String(candidate.provider || ''), candidate.base_url)
-  const models = (candidate.models || []).map(String).filter(Boolean)
-  const nextModel = models.length
-    ? choosePreferredLlmModel(models, provider)
-    : (llmProfiles[provider]?.model || '')
-  invalidateLlmModelDiscovery()
-  const nextProfile = sanitizeLlmProfile(provider, {
-    ...form.llm,
-    provider,
-    base_url: candidate.base_url,
-    api_key: '',
-    model: nextModel,
-  })
-  llmProviderPreset.value = provider
-  llmModels.value = models
-  llmModelAutoSelected.value = Boolean(models.length && nextModel)
-  llmModelStatus.value = candidate.message || ''
-  applyLlmProfileToForm(nextProfile)
-  llmProfiles[provider] = nextProfile
-  saveActiveLlmPatch(llmRuntimePatchFromProfile(nextProfile))
-  notifyLocalCandidateApplied(candidate, 'LLM')
-}
 
 const applyLocalAsrDiscovery = async () => {
   const discovery = await discoverLocalRuntime()
-  const candidate = firstReadyCandidate(discovery?.asr)
+  if (!discovery) return
+  const candidate = firstReadyCandidate(discovery.asr)
   if (!candidate?.base_url) {
     warnNoLocalCandidate('ASR')
     return
@@ -2092,11 +2461,13 @@ const applyLocalAsrDiscovery = async () => {
 
 const applyLocalTtsDiscovery = async () => {
   const discovery = await discoverLocalRuntime()
-  const candidate = firstReadyCandidate(discovery?.tts)
+  if (!discovery) return
+  const candidate = firstReadyCandidate(discovery.tts)
   if (!candidate) {
     warnNoLocalCandidate('Genie TTS')
     return
   }
+  form.tts.provider = TTS_PROVIDER
   const patch: SettingsPatch = { provider: TTS_PROVIDER }
   const modelDir = typeof candidate.model_dir === 'string' ? candidate.model_dir : ''
   if (modelDir && candidate.model_dir_exists) {
@@ -2131,13 +2502,14 @@ const resetSvcSettings = () => {
 }
 
 const openServiceSettings = async (section: 'llm' | 'voice' | 'asr') => {
-  if (!(await flushPendingSave())) return
+  if (!(await flushPendingSave()) || unmounted) return
   activeSection.value = section
 }
 
 const applyLocalSvcDiscovery = async () => {
   const discovery = await discoverLocalRuntime()
-  const candidate = firstReadyCandidate(discovery?.svc)
+  if (!discovery) return
+  const candidate = firstReadyCandidate(discovery.svc)
   if (!candidate?.base_url) {
     warnNoLocalCandidate('SoulX SVC')
     return
@@ -2150,7 +2522,8 @@ const applyLocalSvcDiscovery = async () => {
 
 const applyLocalMemoryDiscovery = async () => {
   const discovery = await discoverLocalRuntime()
-  const candidate = firstReadyCandidate(discovery?.memory)
+  if (!discovery) return
+  const candidate = firstReadyCandidate(discovery.memory)
   if (!candidate?.qdrant_url) {
     warnNoLocalCandidate('Qdrant')
     return
@@ -2281,20 +2654,30 @@ const refreshBackendTokenStatus = async () => {
 
 const saveBackendToken = async () => {
   const token = backendTokenInput.value.trim()
+  if (backendTokenMutationRequest.loading) return
   if (!token) {
     ElMessage.warning(t('settings.messages.backendTokenRequired'))
     return
   }
 
   const result = await backendTokenMutationRequest.execute(() => settingsClient.setBackendToken(token))
-  if (!result?.ok) return
+  if (!result?.ok) {
+    ElMessage.error(backendTokenMutationRequest.error || t('common.error.unknown'))
+    return
+  }
 
-  backendTokenInput.value = ''
-  await refreshBackendTokenStatus()
+  if (backendTokenInput.value.trim() === token) backendTokenInput.value = ''
+  const status = await refreshBackendTokenStatus()
+  if (!status) {
+    ElMessage.warning(t('settings.messages.readbackFailed'))
+    return
+  }
   ElMessage.success(result.requiresRestart ? t('settings.messages.backendTokenSavedRestart') : t('settings.messages.backendTokenSaved'))
 }
 
 const resetBackendToken = async () => {
+  if (backendTokenMutationRequest.loading) return
+  const inputBefore = backendTokenInput.value
   try {
     await ElMessageBox.confirm(
       t('settings.confirm.resetBackendTokenMessage'),
@@ -2309,21 +2692,33 @@ const resetBackendToken = async () => {
     return
   }
 
+  if (backendTokenMutationRequest.loading) return
   const result = await backendTokenMutationRequest.execute(() => settingsClient.resetBackendToken())
-  if (!result?.ok) return
+  if (!result?.ok) {
+    ElMessage.error(backendTokenMutationRequest.error || t('common.error.unknown'))
+    return
+  }
 
-  backendTokenInput.value = ''
-  await refreshBackendTokenStatus()
+  if (backendTokenInput.value === inputBefore) backendTokenInput.value = ''
+  const status = await refreshBackendTokenStatus()
+  if (!status) {
+    ElMessage.warning(t('settings.messages.readbackFailed'))
+    return
+  }
   ElMessage.success(result.requiresRestart ? t('settings.messages.backendTokenResetRestart') : t('settings.messages.backendTokenReset'))
 }
 
 const handleTestLlm = async () => {
-  if (!(await flushPendingSave())) return
+  if (!(await flushPendingSave()) || unmounted) return
+  const tested = JSON.stringify(form.llm)
   const res = await testLlm()
-  if (res?.status === 'ok' || res?.ok) {
+  if (unmounted || tested !== JSON.stringify(form.llm)) return
+  if (res?.ready ?? res?.ok ?? res?.status === 'ok') {
     ElMessage.success(t('settings.messages.llmOk'))
   } else if (res) {
     ElMessage.error(t('settings.messages.llmFailed', { message: res.message || t('common.error.unknown') }))
+  } else {
+    ElMessage.error(testLlmRequest.error || t('common.error.unknown'))
   }
 }
 
@@ -2336,10 +2731,14 @@ const refreshTtsStatus = async (): Promise<TtsRuntimeStatusResponse | null> => {
 }
 
 const queueTtsWarmup = async () => {
+  if (!isSectionVisible('voice')) return
+  if (unmounted || !settings.value || !hasTtsVoice.value || !(await flushPendingSave())) return
+  if (!isSectionVisible('voice')) return
   const snapshot = ttsStatus.value
   if (warmupTtsRequest.loading || snapshot?.warmup_done || snapshot?.warmup_running || snapshot?.warming_up) return
   const result = await warmupTts()
-  if (result?.ok) {
+  if (!result && !unmounted) ElMessage.error(warmupTtsRequest.error || t('settings.messages.ttsWarmupFailed'))
+  if (result?.ok && isSectionVisible('voice')) {
     void loadTtsStatus()
   }
 }
@@ -2349,32 +2748,41 @@ const handleWarmupTts = async () => {
     ElMessage.warning(t('settings.messages.ttsWarmupNeedsConfig'))
     return
   }
-  if (!(await flushPendingSave())) return
+  if (!(await flushPendingSave()) || unmounted) return
   const result = await warmupTts()
-  await refreshTtsStatus()
+  void refreshTtsStatus()
+  if (unmounted) return
   if (result?.ok || result?.queued) {
     ElMessage.success(t('settings.messages.ttsWarmupQueued'))
   } else if (result) {
     ElMessage.error(result.message || t('settings.messages.ttsWarmupFailed'))
+  } else {
+    ElMessage.error(warmupTtsRequest.error || t('settings.messages.ttsWarmupFailed'))
   }
 }
 
 const handleTestTts = async () => {
-  if (!(await flushPendingSave())) return
+  if (!(await flushPendingSave()) || unmounted) return
+  const tested = JSON.stringify(form.tts)
   const res = await testTts()
-  await refreshTtsStatus()
-  if (res?.status === 'ok' || res?.ok) {
+  void refreshTtsStatus()
+  if (unmounted || tested !== JSON.stringify(form.tts)) return
+  if (res?.ready ?? res?.ok ?? res?.status === 'ok') {
     ElMessage.success(t('settings.messages.ttsOk'))
   } else if (res) {
     ElMessage.error(t('settings.messages.ttsFailed', { message: res.message || t('settings.messages.ttsHint') }))
+  } else {
+    ElMessage.error(testTtsRequest.error || t('common.error.unknown'))
   }
 }
 
 const handleTestSvc = async () => {
-  if (!(await flushPendingSave())) return
+  if (!(await flushPendingSave()) || unmounted) return
   svcTestResult.value = null
+  const tested = JSON.stringify(form.svc)
   const res = await testSvc()
-  if (res?.status === 'ok' || res?.ok) {
+  if (unmounted || tested !== JSON.stringify(form.svc)) return
+  if (res?.ready ?? res?.ok ?? res?.status === 'ok') {
     svcTestResult.value = { ok: true, message: res.message }
     ElMessage.success(res.message || t('settings.messages.svcOk'))
   } else if (res) {
@@ -2387,8 +2795,8 @@ const handleTestSvc = async () => {
 
 const loadSettingsAdmin = async () => {
   try {
-    settingsMetadata.value = await settingsClient.metadata()
-    const history = await settingsClient.history()
+    const [metadata, history] = await Promise.all([settingsClient.metadata(), settingsClient.history()])
+    settingsMetadata.value = metadata
     settingsHistory.value = history.history.filter(isPlainRecord)
   } catch (error) {
     settingsMetadata.value = null
@@ -2398,9 +2806,13 @@ const loadSettingsAdmin = async () => {
 }
 
 const rollbackSettings = async () => {
+  if (keyOperation.value) return
+  keyOperation.value = 'rollback'
+  keyError.value = ''
+  const steps = rollbackSteps.value
   try {
     await ElMessageBox.confirm(
-      t('settings.confirm.rollbackMessage', { steps: rollbackSteps.value }),
+      t('settings.confirm.rollbackMessage', { steps: steps }),
       t('settings.confirm.rollbackTitle'),
       {
         confirmButtonText: t('common.rollback'),
@@ -2409,18 +2821,26 @@ const rollbackSettings = async () => {
       },
     )
   } catch {
+    finishKeyOperation()
     return
   }
 
   try {
-    if (!(await flushPendingSave())) return
-    await settingsClient.rollback(rollbackSteps.value)
+    keyMutationAcquired = await beginSettingsMutation()
+    if (!keyMutationAcquired) {
+      keyError.value = t('settings.messages.saveFailed')
+      return
+    }
+    const before = captureFormDraft()
+    await settingsClient.rollback(steps)
+    await refreshSettingsPreservingDraft(before)
+    recordSettingsSaved({})
+    await refreshRuntimeApplication()
     ElMessage.success(t('settings.messages.rollbackOk'))
-    await loadSettings()
-    hydrateForm()
-    await loadSettingsAdmin()
   } catch (error) {
-    ElMessage.error(describeFailure(error, t('common.error.unknown')))
+    keyError.value = describeFailure(error, t('common.error.unknown'))
+  } finally {
+    finishKeyOperation()
   }
 }
 
@@ -2454,54 +2874,93 @@ const stopResourceProgressPolling = () => {
   resourceProgressPollTimer = null
 }
 
+const settleResourceCancellation = () => {
+  if (!cancellingResourceIds.value.length || resourceStateUncertain) return
+  const active = new Set([...activeResourceIds.value, ...activeDownloadProgress.value.map((item) => item.resourceId)])
+  if (cancellingResourceIds.value.some((id) => active.has(id))) return
+  resourceMessage.value = t('settings.resource.cancelFinished')
+  resourceMessageType.value = 'info'
+  cancellingResourceIds.value = []
+}
+
 const pollResourceStatus = async () => {
-  if (resourceProgressPollBusy) return
+  if (resourceProgressPollBusy || !isSectionVisible('resources')) return
+  if (Date.now() - resourcePollStartedAt >= 30 * 60 * 1000) {
+    stopResourceProgressPolling()
+    resourceMessage.value = t('settings.resource.pollStopped')
+    resourceMessageType.value = 'warning'
+    return
+  }
   resourceProgressPollBusy = true
+  const version = resourceStatusVersion
   try {
     const hadActiveDownloads = activeDownloadProgress.value.length > 0
     const progress = await resourceClient.progress()
-    if (hadActiveDownloads && progress.activeDownloads.length === 0 && !resourceActionKey.value) {
-      resourceStatus.value = normalizeResourceStatus(await resourceClient.status())
+    if (!isSectionVisible('resources') || version !== resourceStatusVersion) return
+    if ((hadActiveDownloads || cancellingResourceIds.value.length || resourceStateUncertain) && progress.activeDownloads.length === 0 && !resourceActionKey.value) {
+      const status = await resourceClient.status()
+      if (unmounted || version !== resourceStatusVersion) return
+      resourceStatus.value = normalizeResourceStatus(status)
+      resourceStateUncertain = false
     } else if (resourceStatus.value) {
-      resourceStatus.value = {
-        ...resourceStatus.value,
-        activeDownloads: progress.activeDownloads,
-      }
+      resourceStatus.value = { ...resourceStatus.value, activeDownloads: progress.activeDownloads }
     }
-  } catch {
-    // The foreground command reports actionable failures; polling stays silent.
+    resourcePollFailures = 0
+    settleResourceCancellation()
+  } catch (error) {
+    if (unmounted || version !== resourceStatusVersion) return
+    resourcePollFailures += 1
+    if (resourcePollFailures >= 3) {
+      stopResourceProgressPolling()
+      resourceMessage.value = describeFailure(error, t('settings.resource.pollStopped'))
+      resourceMessageType.value = 'warning'
+    }
   } finally {
     resourceProgressPollBusy = false
-    if (!resourceActionKey.value && activeDownloadProgress.value.length === 0) stopResourceProgressPolling()
+    if (!resourceActionKey.value && !resourceStateUncertain && !cancellingResourceIds.value.length && activeDownloadProgress.value.length === 0) stopResourceProgressPolling()
   }
 }
 
 const syncResourceProgressPolling = () => {
-  const shouldPoll = Boolean(resourceActionKey.value) || activeDownloadProgress.value.length > 0
-  if (!shouldPoll || document.hidden) {
+  const shouldPoll = Boolean(resourceActionKey.value) || activeDownloadProgress.value.length > 0 || resourceStateUncertain || cancellingResourceIds.value.length > 0
+  if (!shouldPoll || !isSectionVisible('resources')) {
     stopResourceProgressPolling()
     return
   }
   if (resourceProgressPollTimer !== null) return
+  resourcePollFailures = 0
+  resourcePollStartedAt = Date.now()
   resourceProgressPollTimer = window.setInterval(() => void pollResourceStatus(), RESOURCE_PROGRESS_POLL_INTERVAL_MS)
 }
 
 const handleResourceProgressVisibility = () => {
-  if (document.hidden) {
+  if (document.hidden || !settingsActive) {
+    stopRuntimeStatusPoll()
+    stopMemoryRebuildPolling()
     stopResourceProgressPolling()
+    invalidateLlmModelDiscovery({ preserveLast: true })
     return
   }
-  syncResourceProgressPolling()
-  if (resourceActionKey.value || activeDownloadProgress.value.length > 0) void pollResourceStatus()
+  void refreshActivatedSettings().then(() => {
+    void refreshRuntimeApplication()
+    return refreshActiveSection()
+  })
+  scheduleRuntimeStatusPoll()
 }
 
 const loadResourceStatus = async () => {
   resourceLoading.value = true
+  const version = ++resourceStatusVersion
   try {
-    resourceStatus.value = normalizeResourceStatus(await resourceClient.status())
+    const status = await resourceClient.status()
+    if (unmounted || version !== resourceStatusVersion) return
+    resourceStatus.value = normalizeResourceStatus(status)
+    resourceStateUncertain = false
+    settleResourceCancellation()
     selectRequiredResources(resourceStatus.value)
     syncResourceProgressPolling()
   } catch (error) {
+    if (unmounted || version !== resourceStatusVersion) return
     const message = describeFailure(error, t('settings.resource.statusFailed'))
     resourceMessage.value = message
     resourceMessageType.value = 'error'
@@ -2516,25 +2975,39 @@ const runResourceCommand = async (
   task: () => Promise<ResourceCommandResult>,
   resources: ManagedModelResourceId[] = [],
 ) => {
-  if (resourceActionKey.value || activeDownloadProgress.value.length > 0) {
+  if (resourceActionKey.value || activeDownloadProgress.value.length > 0 || resourceStateUncertain || cancellingResourceIds.value.length > 0) {
     ElMessage.warning(t('settingsPanel.message.resourceTaskBusy'))
     return
   }
+  resourceStatusVersion += 1
   resourceActionKey.value = key
   activeResourceIds.value = [...resources]
   resourceMessage.value = ''
   syncResourceProgressPolling()
   try {
     const result = await task()
+    if (unmounted) return
+    resourceStateUncertain = false
+    resourceStatusVersion += 1
     resourceStatus.value = normalizeResourceStatus(result.status)
-    resourceMessage.value = result.message
-    resourceMessageType.value = result.success ? 'success' : 'warning'
-    if (result.success) {
-      ElMessage.success(result.message)
+    const incomplete = resources.filter((id) => !resourceDownloadOptions.value.find((item) => item.id === id)?.ready)
+    const cancelled = result.errorCode === 'cancelled'
+    const complete = result.success && incomplete.length === 0
+    const message = !complete && !cancelled && incomplete.length
+      ? result.message + ' · ' + t('settings.resource.incomplete', { items: incomplete.join(' / ') })
+      : cancelled ? t('settings.resource.cancelled') : result.message
+    resourceMessage.value = message
+    resourceMessageType.value = complete ? 'success' : cancelled ? 'info' : 'warning'
+    if (!complete && !cancelled) selectedResourceIds.value = [...new Set([...selectedResourceIds.value, ...incomplete])]
+    if (cancelled) ElMessage.info(message)
+    else if (complete) {
+      ElMessage.success(message)
     } else {
-      ElMessage.warning(result.message)
+      ElMessage.warning(message)
     }
   } catch (error) {
+    if (unmounted) return
+    resourceStateUncertain = true
     const message = describeFailure(error, t('settings.resource.taskFailed'))
     resourceMessage.value = message
     resourceMessageType.value = 'error'
@@ -2542,6 +3015,7 @@ const runResourceCommand = async (
   } finally {
     resourceActionKey.value = ''
     activeResourceIds.value = []
+    settleResourceCancellation()
     syncResourceProgressPolling()
   }
 }
@@ -2550,21 +3024,26 @@ const cancelActiveResourceDownloads = async () => {
   const resources = [...cancellableResourceIds.value]
   if (resources.length === 0 || resourceCancelLoading.value) return
   resourceCancelLoading.value = true
+  const version = ++resourceStatusVersion
   try {
     const result = await resourceClient.cancel(resources)
-    resourceStatus.value = normalizeResourceStatus(result.status)
+    if (unmounted) return
+    cancellingResourceIds.value = [...new Set([...cancellingResourceIds.value, ...result.cancelled])]
+    // A command may already have finished while the cancellation ACK was in flight.
+    if (version === resourceStatusVersion) resourceStatus.value = normalizeResourceStatus(result.status)
+    resourceStateUncertain = true
     const message = result.cancelled.length > 0
-      ? t('settingsPanel.message.downloadsCancelled', { count: result.cancelled.length })
+      ? t('settings.resource.cancelPending', { count: result.cancelled.length })
       : t('settingsPanel.message.noCancellableDownloads')
     resourceMessage.value = message
-    resourceMessageType.value = result.cancelled.length > 0 ? 'success' : 'info'
-    if (result.cancelled.length > 0) {
-      ElMessage.success(message)
-    } else {
-      ElMessage.info(message)
-    }
+    resourceMessageType.value = result.cancelled.length > 0 ? 'warning' : 'info'
+    ElMessage.info(message)
+    await loadResourceStatus()
+    syncResourceProgressPolling()
   } catch (error) {
-    ElMessage.error(describeFailure(error, t('settings.resource.taskFailed')))
+    resourceMessage.value = describeFailure(error, t('settings.resource.taskFailed'))
+    resourceMessageType.value = 'error'
+    ElMessage.error(resourceMessage.value)
   } finally {
     resourceCancelLoading.value = false
   }
@@ -2600,7 +3079,7 @@ const removeModelResource = async (
   label: string,
   metadata: ManagedResourceMetadata,
 ) => {
-  if (resourceActionKey.value) {
+  if (resourceActionKey.value || activeDownloadProgress.value.length || cancellingResourceIds.value.length || resourceStateUncertain) {
     ElMessage.warning(t('settingsPanel.message.finishCurrentResourceTask'))
     return
   }
@@ -2621,11 +3100,19 @@ const removeModelResource = async (
     return
   }
 
+  if (resourceActionKey.value || activeDownloadProgress.value.length || cancellingResourceIds.value.length || resourceStateUncertain) return
+  resourceStatusVersion += 1
   resourceActionKey.value = `remove-${resourceId}`
   try {
     const result = await resourceClient.remove([resourceId])
+    resourceStatusVersion += 1
     resourceStatus.value = normalizeResourceStatus(result.status)
-    resourceMessage.value = result.message
+    const skipped = [resourceId].filter((id) => !result.removed.includes(id) && !result.failed.some((item) => item.resourceId === id))
+    resourceMessage.value = t('settings.resource.removalResult', {
+      removed: result.removed.join(' / ') || '—',
+      skipped: skipped.join(' / ') || '—',
+      failed: result.failed.map((item) => item.resourceId + ': ' + item.reason).join('; ') || '—',
+    })
     resourceMessageType.value = result.success ? 'success' : 'warning'
     if (result.success) {
       ElMessage.success(t('settingsPanel.message.removeModelOk', {
@@ -2667,14 +3154,14 @@ const resourceIdsForSettingsPatch = (patch: SettingsPatch): ManagedModelResource
   const memory = patch.memory as { embedding_model?: unknown } | undefined
   if (asr?.provider === 'sherpa-onnx-online') ids.push('sherpa_online', 'sherpa')
   if (asr?.provider === 'sherpa-onnx') ids.push('sherpa')
-  if (tts) ids.push('tts')
+  if (tts && (tts.provider ?? form.tts.provider) === TTS_PROVIDER) ids.push('tts')
   if (svc?.provider === 'soulx-service') ids.push('soulx')
   if (typeof memory?.embedding_model === 'string') ids.push('embedding')
   return [...new Set(ids)]
 }
 
 const prepareResourcesForSettingsPatch = async (patch: SettingsPatch) => {
-  const ids = resourceIdsForSettingsPatch(patch)
+  const ids = resourceIdsForSettingsPatch(patch).filter((id) => !resourceDownloadOptions.value.find((item) => item.id === id)?.ready)
   if (ids.length === 0) return
   await runResourceCommand('first-use-download', () => resourceClient.prepare(ids), ids)
 }
@@ -2743,14 +3230,18 @@ const cleanupAllStorage = async () => {
 }
 
 const discoverLlmModels = async (options?: LlmModelDiscoveryOptions) => {
+  if (!options?.manual && !isSectionVisible('llm')) return
   if (modelDiscoveryTimeout) clearTimeout(modelDiscoveryTimeout)
   modelDiscoveryTimeout = null
+  if (!(await flushPendingSave()) || unmounted) return
+  if (!options?.manual && !isSectionVisible('llm')) return
   const baseUrl = normalizeOpenAiBaseUrl(form.llm.base_url)
   const provider = llmProviderPreset.value
   const apiKey = llmProviderNeedsApiKey.value
     ? (form.llm.api_key.trim() || (llmApiKeyStored.value ? SETTINGS_SECRET_MASK : ''))
     : ''
   const timeout = form.llm.timeout
+  const modelBeforeLookup = form.llm.model
   const discoveryKey = llmModelDiscoveryKey()
   if (!options?.manual && activeLlmModelDiscoveryKey === discoveryKey && llmModelsRequest.loading) return
   const runId = ++modelDiscoveryRun
@@ -2794,7 +3285,7 @@ const discoverLlmModels = async (options?: LlmModelDiscoveryOptions) => {
 
   if (result?.ok) {
     llmModels.value = result.models
-    applyDetectedLlmModel(result.models, options)
+    if (form.llm.model === modelBeforeLookup) applyDetectedLlmModel(result.models, options)
     llmModelStatus.value = result.models.length
       ? t('settings.llm.modelsDetected', {
         count: result.models.length,
@@ -2809,7 +3300,7 @@ const discoverLlmModels = async (options?: LlmModelDiscoveryOptions) => {
 }
 
 const scheduleLlmModelDiscovery = (options?: LlmModelDiscoveryOptions) => {
-  if (suppressModelDiscovery) return
+  if (suppressModelDiscovery || (!options?.manual && !isSectionVisible('llm'))) return
   const discoveryKey = llmModelDiscoveryKey()
   if (
     !options?.manual
@@ -2881,7 +3372,6 @@ const handleLlmEndpointChange = (field: 'base_url' | 'api_key', value: string | 
     invalidateLlmModelDiscovery()
     modelDiscoveryTimeout = setTimeout(async () => {
       modelDiscoveryTimeout = null
-      await flushPendingSave()
       await discoverLlmModels({ manual: false })
     }, 700)
     return
@@ -2889,68 +3379,126 @@ const handleLlmEndpointChange = (field: 'base_url' | 'api_key', value: string | 
   scheduleLlmModelDiscovery({ manual: false })
 }
 
-const readSettingKey = async () => {
-  if (!lookupKey.value.trim()) return
-  const result = await settingsClient.getSetting(lookupKey.value.trim())
-  lookupResult.value = JSON.stringify(result, null, 2)
+const finishKeyOperation = () => {
+  if (keyMutationAcquired) finishSettingsMutation()
+  keyMutationAcquired = false
+  keyOperation.value = ''
 }
 
-const parseSettingValue = (): unknown => {
-  const raw = setValueJson.value.trim()
+const refreshSettingsPreservingDraft = async (before: ReturnType<typeof captureFormDraft>, updatedKey?: string) => {
+  const normalized = await loadSettings()
+  if (!normalized) throw new Error([t('settings.messages.readbackFailed'), settingsRequest.error].filter(Boolean).join(' '))
+  for (const [section, values] of Object.entries(normalized)) {
+    const target = settingsStore.state[section as keyof typeof settingsStore.state]
+    if (target && typeof target === 'object' && isPlainRecord(values)) Object.assign(target, values)
+  }
+  const submitted = updatedKey
+    ? updatedKey.split('.').reduceRight<unknown>((value, part) => ({ [part]: value }), settingValueAt(normalized, updatedKey)) as SettingsPatch
+    : {}
+  saveQueue.completion.value = { status: 'ok', normalizedSettings: normalized, submitted, owner: saveOwner }
+  hydratePreservingDraft(before, normalized, submitted, true)
+  await loadSettingsAdmin()
+}
+
+const readSettingKey = async () => {
+  const key = lookupKey.value.trim()
+  if (!key || keyOperation.value) return
+  keyOperation.value = 'read'
+  keyError.value = ''
+  lookupResult.value = ''
   try {
-    return JSON.parse(raw)
-  } catch {
-    return raw
+    const result = await settingsClient.getSetting(key)
+    if (key === lookupKey.value.trim()) lookupResult.value = JSON.stringify(result, null, 2)
+  } catch (error) {
+    keyError.value = describeFailure(error, t('common.error.unknown'))
+  } finally {
+    finishKeyOperation()
   }
 }
 
 const writeSettingKey = async () => {
-  if (!setKey.value.trim() || !setValueJson.value.trim()) return
-  if (!(await flushPendingSave())) return
-  await settingsClient.setSetting(setKey.value.trim(), parseSettingValue())
-  ElMessage.success(t('settings.messages.settingWritten'))
-  await loadSettings()
-  hydrateForm()
-  await loadSettingsAdmin()
+  const key = setKey.value.trim()
+  if (!key || keyOperation.value) return
+  keyError.value = ''
+  let value: unknown
+  try {
+    value = parseSettingInput(setValueJson.value, setValueMode.value, settingValueAt(settings.value, key))
+  } catch (error) {
+    keyError.value = t(error instanceof SyntaxError ? 'settings.key.invalidJson' : 'settings.key.invalidType')
+    return
+  }
+  keyOperation.value = 'write'
+  try {
+    keyMutationAcquired = await beginSettingsMutation()
+    if (!keyMutationAcquired) {
+      keyError.value = t('settings.messages.saveFailed')
+      return
+    }
+    const before = captureFormDraft()
+    const result = await settingsClient.setSetting(key, value)
+    await refreshSettingsPreservingDraft(before, key)
+    recordSettingsSaved(result)
+    ElMessage.success(t('settings.messages.settingWritten'))
+  } catch (error) {
+    keyError.value = describeFailure(error, t('common.error.unknown'))
+  } finally {
+    finishKeyOperation()
+  }
 }
 
 const resetSettingKey = async () => {
   const key = deleteKey.value.trim()
-  if (!key) return
+  if (!key || keyOperation.value) return
+  keyOperation.value = 'reset'
+  keyError.value = ''
   try {
     await ElMessageBox.confirm(
       t('settings.confirm.deleteKeyMessage', { key }),
       t('settings.confirm.deleteKeyTitle'),
-      {
-        confirmButtonText: t('common.delete'),
-        cancelButtonText: t('common.cancel'),
-        type: 'warning',
-      },
+      { confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel'), type: 'warning' },
     )
   } catch {
+    finishKeyOperation()
     return
   }
-
+  const sensitive = ['llm.api_key', 'llm.vision_api_key', 'tts.api_key', 'asr.api_key', 'memory.qdrant_api_key'].includes(key)
+  if (sensitive && isSensitiveDeleting(key)) {
+    keyError.value = t('settings.status.saving')
+    finishKeyOperation()
+    return
+  }
+  if (sensitive) {
+    setSensitiveDeleting(key, true)
+    pendingSavePatch.value = stripPatchPath(pendingSavePatch.value, key)
+    failedSavePatch.value = stripPatchPath(failedSavePatch.value, key)
+  }
   try {
-    if (!(await flushPendingSave())) return
-    await settingsClient.deleteSetting(key)
+    keyMutationAcquired = await beginSettingsMutation()
+    if (!keyMutationAcquired) {
+      keyError.value = t('settings.messages.saveFailed')
+      return
+    }
+    const before = captureFormDraft()
+    const result = await settingsClient.deleteSetting(key)
+    if (sensitive) publishCredentialDeletion(key)
+    await refreshSettingsPreservingDraft(before, key)
+    recordSettingsSaved(result)
     ElMessage.success(t('settings.messages.settingReset'))
-    deleteKey.value = ''
-    await loadSettings()
-    hydrateForm()
+    if (deleteKey.value.trim() === key) deleteKey.value = ''
   } catch (error) {
-    ElMessage.error(describeFailure(error, t('common.error.unknown')))
+    keyError.value = describeFailure(error, t('common.error.unknown'))
+  } finally {
+    finishKeyOperation()
+    if (sensitive) setSensitiveDeleting(key, false)
   }
 }
 
-const hydrateForm = () => {
-  if (!settings.value) return
-  const s = settings.value
+const hydrateForm = (s = settings.value) => {
+  if (!s) return
   suppressModelDiscovery = true
   const migrationVersionKey = 'yuizaki.llm.inference-defaults-version'
   const shouldMigrateLegacyDefaults = window.localStorage.getItem(migrationVersionKey) !== 'gpt-6.1-sol-v1'
   let migratedLegacyDefaults = false
-  let activeMigrationPatch: Partial<LlmProfile> = {}
 
   if (s.llm) {
     clearReactiveRecord(llmProfiles as Record<string, unknown>)
@@ -2982,7 +3530,7 @@ const hydrateForm = () => {
       context_max_tokens: s.llm.context_max_tokens ?? DEFAULT_LLM_CONTEXT_MAX_TOKENS,
       default_max_output_tokens: s.llm.default_max_output_tokens ?? DEFAULT_LLM_MAX_OUTPUT_TOKENS,
     })
-    activeMigrationPatch = shouldMigrateLegacyDefaults
+    const activeMigrationPatch = shouldMigrateLegacyDefaults
       ? migrateLegacyLlmDefaults(normalizedActiveProfile as unknown as Record<string, unknown>) as Partial<LlmProfile>
       : {}
     const activeProfile = { ...normalizedActiveProfile, ...activeMigrationPatch }
@@ -2993,7 +3541,9 @@ const hydrateForm = () => {
     form.llm.vision_enabled = s.llm.vision_enabled ?? false
     form.llm.vision_provider = normalizeLlmProviderValue(s.llm.vision_provider, s.llm.vision_base_url)
     form.llm.vision_base_url = s.llm.vision_base_url ?? ''
-    form.llm.vision_api_key = s.llm.vision_api_key ?? ''
+    const visionApiKey = s.llm.vision_api_key ?? ''
+    visionApiKeyStored.value = Boolean(visionApiKey)
+    form.llm.vision_api_key = visionApiKey === SETTINGS_SECRET_MASK ? '' : visionApiKey
     form.llm.vision_model = s.llm.vision_model ?? ''
     form.llm.vision_timeout = s.llm.vision_timeout ?? 30
     form.llm.vision_detail = s.llm.vision_detail ?? 'low'
@@ -3093,40 +3643,190 @@ const hydrateForm = () => {
   suppressModelDiscovery = false
 }
 
+const runtimeFailedSections = computed(() => Object.entries(runtimeReload.value?.sections || {})
+  .filter(([, status]) => status.state === 'failed' || status.state === 'unavailable').map(([section]) => section))
+let runtimeStatusTimer: ReturnType<typeof setTimeout> | null = null
+let settingsActive = true
+let initialActivation = true
+const isSectionVisible = (section: SettingSectionId) => settingsActive && !unmounted && !document.hidden && activeSection.value === section
+
+const stopRuntimeStatusPoll = () => {
+  if (runtimeStatusTimer !== null) clearTimeout(runtimeStatusTimer)
+  runtimeStatusTimer = null
+}
+const observedServiceTargets = new Map<string, number>()
+const refreshedServiceTargets = new Map<string, number>()
+const syncRuntimeReloadDisplay = () => {
+  for (const section of ['llm', 'tts']) {
+    const status = runtimeReload.value?.sections[section]
+    if (!status) continue
+    if (observedServiceTargets.get(section) !== status.target_revision) {
+      observedServiceTargets.set(section, status.target_revision)
+      if (section === 'llm') { llmStatusRequest.reset(); llmStatus.value = null }
+      else { ttsStatusRequest.reset(); ttsStatus.value = null }
+    }
+    if (isSectionVisible(section === 'llm' ? 'llm' : 'voice') && status.state === 'applied' && status.applied_revision === status.target_revision && refreshedServiceTargets.get(section) !== status.target_revision) {
+      refreshedServiceTargets.set(section, status.target_revision)
+      if (section === 'llm') void loadLlmStatus()
+      else void loadTtsStatus()
+    }
+  }
+  const entries = Object.entries(runtimeReload.value?.sections || {})
+  lastApplied.value = entries.filter(([, status]) => status.state === 'applied' && status.applied_revision === status.target_revision).map(([section]) => section)
+  lastRuntimePending.value = entries.filter(([, status]) => status.state === 'pending' || status.state === 'applying').map(([section]) => section)
+}
+const scheduleRuntimeStatusPoll = () => {
+  stopRuntimeStatusPoll()
+  if (!settingsActive || unmounted || document.hidden || !lastRuntimePending.value.length || runtimeStatusRequest.error) return
+  runtimeStatusTimer = setTimeout(() => void refreshRuntimeApplication(), 1000)
+}
+const refreshRuntimeApplication = async () => {
+  if (!settingsActive || unmounted || document.hidden || runtimeStatusRequest.loading || runtimeRetryRequest.loading) return
+  await loadRuntimeStatus()
+  if (unmounted) return
+  syncRuntimeReloadDisplay()
+  scheduleRuntimeStatusPoll()
+}
+const loadPanelSettings = async () => {
+  const completionBefore = saveQueue.completion.value
+  const loaded = await loadSettings()
+  // A write from another panel may finish while this GET is still returning an older snapshot.
+  const completion = saveQueue.completion.value
+  if (completion && completion !== completionBefore) {
+    settings.value = completion.normalizedSettings
+    return completion.normalizedSettings
+  }
+  return loaded
+}
+const refreshActivatedSettings = async () => {
+  if (!settingsActive || unmounted || document.hidden) return
+  if (saveQueue.adminInFlight) await new Promise<void>((resolve) => saveQueue.adminResolvers.push(resolve))
+  if (saveInFlight.value) await waitForSaveIdle()
+  if (!settingsActive || unmounted || document.hidden) return
+  const before = captureFormDraft()
+  const loaded = await loadPanelSettings()
+  if (!loaded || unmounted) return
+  hydratePreservingDraft(before, loaded)
+}
+
+// Only the visible subpage starts auxiliary requests. Deduplicate overlapping
+// mount/route/activation notifications without serializing unrelated subpages.
+const sectionRequests = new Map<SettingSectionId, Promise<unknown>>()
+const refreshActiveSection = (): Promise<unknown> => {
+  const section = activeSection.value
+  if (!settings.value || settingsRequest.loading || !isSectionVisible(section)) return Promise.resolve()
+  const existing = sectionRequests.get(section)
+  if (existing) return existing
+  const request = (async () => {
+    switch (section) {
+      case 'access':
+        await refreshBackendTokenStatus()
+        break
+      case 'llm':
+        scheduleLlmModelDiscovery({ manual: false })
+        await Promise.all([refreshRuntimeApplication(), loadLlmStatus()])
+        break
+      case 'voice':
+        await Promise.all([refreshRuntimeApplication(), loadTtsStatus(), loadGenieCharacters()])
+        if (isSectionVisible('voice')) await queueTtsWarmup()
+        break
+      case 'memory':
+        await Promise.all([refreshMemoryIndexStatus(), memoryIndexWorking.value ? refreshMemoryRebuild() : undefined])
+        break
+      case 'resources':
+        await refreshResourcePanel()
+        break
+      case 'system':
+        await Promise.all([inputBindingsStore.load(), adminCollapseNames.value.includes('metadata') ? loadSettingsAdmin() : undefined])
+        break
+      case 'svc':
+      case 'runtime-guide':
+        await refreshRuntimeApplication()
+        break
+    }
+  })().catch((error) => console.info('[Settings] Section refresh unavailable:', error))
+    .finally(() => { sectionRequests.delete(section) })
+  sectionRequests.set(section, request)
+  return request
+}
+
+watch(saveQueue.completion, (result) => {
+  if (!result || unmounted || result.owner === saveOwner) return
+  const before = captureFormDraft()
+  settings.value = result.normalizedSettings
+  hydratePreservingDraft(before, result.normalizedSettings, acknowledgedSubmission(result.submitted, result.fields || new Map()))
+  finishSubmission(result.fields || new Map(), result.recoveredFailures || new Set())
+  for (const key of result.deletedKeys || []) clearDeletedCredentialDraft(key)
+  recordSettingsSaved(result)
+}, { flush: 'sync' })
+
+const retryRuntimeApplication = async (targets: Record<string, number>) => {
+  // Freeze target revisions in the feedback component; the backend rejects stale retries.
+  const result = await retryRuntime({ ...targets })
+  if (!result || unmounted) return
+  syncRuntimeReloadDisplay()
+  scheduleRuntimeStatusPoll()
+}
+
+watch(runtimeReload, () => {
+  syncRuntimeReloadDisplay()
+  scheduleRuntimeStatusPoll()
+})
+onActivated(() => {
+  settingsActive = true
+  if (initialActivation) {
+    initialActivation = false
+    return
+  }
+  syncSectionFromRoute()
+  void refreshActivatedSettings().then(() => {
+    void refreshRuntimeApplication()
+    return refreshActiveSection()
+  })
+})
+onDeactivated(() => {
+  settingsActive = false
+  invalidateLlmModelDiscovery({ preserveLast: true })
+  stopRuntimeStatusPoll()
+  stopResourceProgressPolling()
+  stopMemoryRebuildPolling()
+})
+
 onMounted(async () => {
   syncSectionFromRoute()
+  const before = captureFormDraft()
   document.addEventListener('visibilitychange', handleResourceProgressVisibility)
-  await Promise.all([refreshBackendTokenStatus(), inputBindingsStore.load()])
-  await loadSettings()
-  hydrateForm()
-  if (!settingsRequest.error) {
-    await loadSettingsAdmin()
-  }
-  await Promise.all([refreshResourcePanel(), loadTtsStatus(), loadLlmStatus(), loadGenieCharacters()])
-  void queueTtsWarmup()
-  scheduleLlmModelDiscovery({ manual: false })
+  const loaded = await loadPanelSettings()
+  if (!loaded || unmounted) return
+  hydratePreservingDraft(before, loaded)
+  void refreshRuntimeApplication()
+  void refreshActiveSection()
 })
 
 onBeforeUnmount(() => {
-  if (saveTimeout) {
-    clearTimeout(saveTimeout)
-    saveTimeout = null
+  if (saveQueue.timeout) {
+    clearTimeout(saveQueue.timeout)
+    saveQueue.timeout = null
   }
   promoteFailedSavePatch()
   if (pendingSavePatch.value) {
-    void drainSaveQueue({ allowAfterUnmount: true })
+    void drainSaveQueue()
   }
 })
 
 onUnmounted(() => {
   unmounted = true
+  stopRuntimeStatusPoll()
   if (modelDiscoveryTimeout) clearTimeout(modelDiscoveryTimeout)
-  saveTimeout = null
   modelDiscoveryTimeout = null
   stopResourceProgressPolling()
+  stopMemoryRebuildPolling()
   document.removeEventListener('visibilitychange', handleResourceProgressVisibility)
   notifySaveIdle()
 })
+
+watch(lookupKey, () => { lookupResult.value = '' })
+watch([lookupKey, setKey, setValueJson, setValueMode, deleteKey], () => { keyError.value = '' })
 
 watch(currentLocale, (value) => {
   form.system.language = value
@@ -3134,11 +3834,17 @@ watch(currentLocale, (value) => {
 
 watch(() => route.query.section, syncSectionFromRoute)
 
-watch(activeSection, (value) => {
-  if (value === 'voice') {
-    void queueTtsWarmup()
-  }
+watch(activeSection, () => {
+  invalidateLlmModelDiscovery({ preserveLast: true })
+  stopResourceProgressPolling()
+  stopMemoryRebuildPolling()
+  void refreshActiveSection()
 })
+
+watch(adminCollapseNames, (names) => {
+  if (isSectionVisible('system') && names.includes('metadata')) void loadSettingsAdmin()
+})
+
 </script>
 
 <style scoped src="./SettingsPanel.css"></style>

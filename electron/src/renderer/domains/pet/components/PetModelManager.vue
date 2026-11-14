@@ -8,7 +8,8 @@
       <el-button
         type="primary"
         :loading="pendingAction === 'model-import'"
-        :disabled="loading || refreshing"
+        :disabled="loading || refreshing || pickerAvailable === false"
+        :title="pickerHint"
         @click="$emit('import-picker')"
       >
         <el-icon><Upload /></el-icon>
@@ -39,7 +40,7 @@
       <div v-else class="pet-model-manager__empty">
         <el-icon><FolderOpened /></el-icon>
         <strong>{{ t('pet.model.empty') }}</strong>
-        <el-button type="primary" :loading="pendingAction === 'model-import'" :disabled="loading || refreshing" @click="$emit('import-picker')">{{ t('pet.model.import') }}</el-button>
+        <el-button type="primary" :loading="pendingAction === 'model-import'" :disabled="loading || refreshing || pickerAvailable === false" :title="pickerHint" @click="$emit('import-picker')">{{ t('pet.model.import') }}</el-button>
       </div>
 
       <div v-if="currentModel" class="pet-model-manager__summary">
@@ -87,7 +88,7 @@
           </el-radio-group>
           <div class="pet-model-manager__path-row">
             <el-input v-model="sourcePath" :placeholder="sourcePlaceholder" clearable />
-            <el-button :loading="pendingAction === 'model-browse'" :disabled="loading || refreshing" @click="$emit('browse')">{{ t('pet.model.browse') }}</el-button>
+            <el-button :loading="pendingAction === 'model-browse'" :disabled="loading || refreshing || pickerAvailable === false" :title="pickerHint" @click="$emit('browse')">{{ t('pet.model.browse') }}</el-button>
             <el-button :loading="pendingAction === 'model-import'" :disabled="loading || refreshing || !sourcePath.trim()" @click="$emit('import-path')">{{ t('pet.model.import') }}</el-button>
           </div>
         </div>
@@ -128,6 +129,8 @@ const props = defineProps<{
   models: PetModelDefinition[]
   currentModel: PetModelDefinition | null
   sourceLabel: string
+  pickerAvailable?: boolean
+  pickerHint?: string
   capabilities: AvatarCapabilitySnapshot | null
   syncHint: string
   sourcePlaceholder: string

@@ -58,8 +58,10 @@ def test_retry_reset_does_not_clear_active_leases(tmp_path: Path) -> None:
     assert store.connector_delivery("connector:telegram:orphan-1")["status"] == "sending"
 
     clock[0] += 61
+    assert store.reset_connector_delivery_for_retry("connector:telegram:orphan-1") is False
+    assert store.connector_delivery("connector:telegram:orphan-1")["status"] == "sending"
+    assert store.resolve_connector_delivery("connector:telegram:orphan-1", "failed") is True
     assert store.reset_connector_delivery_for_retry("connector:telegram:orphan-1") is True
-    assert store.connector_delivery("connector:telegram:orphan-1")["status"] == "failed"
 
     retry = store.claim_connector_turn_retry("connector:telegram:orphan-1", "retry-owner")
     assert retry["status"] == "claimed"

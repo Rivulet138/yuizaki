@@ -1,0 +1,15 @@
+{
+  "left": 302,
+  "right": 346,
+  "top": 770,
+  "bottom": 814,
+  "uncovered": true,
+  "focused": true,
+  "width": 390,
+  "height": 844,
+  "pageerrors": [],
+  "currentScriptAssets": [
+    "./assets/main-ivhAKnTY.js",
+    "./live2d/live2dcubismcore.min.js"
+  ]
+}

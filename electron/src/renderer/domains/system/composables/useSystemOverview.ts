@@ -22,16 +22,26 @@ export function useSystemOverview() {
 	const opacityDraft = ref(DEFAULT_PET_CONTROL_STATE.opacity);
 	const selectedModelId = ref<string | null>(DEFAULT_PET_CONTROL_STATE.modelId);
 
+	// Versions only guard frontend snapshots; successful operation ACKs remain independent.
+	let syncSequence = 0;
+	let catalogSequence = 0;
+
 	const syncPetData = async (silent: boolean = true, includeCatalog = true) => {
+		const sequence = ++syncSequence;
+		const catalogVersion = includeCatalog ? ++catalogSequence : null;
 		try {
 			const [state, catalog] = await Promise.all([
 				petControl.getState(),
 				includeCatalog ? petControl.getCatalog() : Promise.resolve(null),
 			]);
-			if (catalog) {
+			// Pet edits and state-only polls do not invalidate a requested catalog.
+			if (catalog && catalogVersion === catalogSequence) {
 				petCatalog.value.activeModelId = catalog.activeModelId;
 				petCatalog.value.models = catalog.models;
+				selectedModelId.value ??=
+					petState.value.modelId ?? catalog.activeModelId ?? catalog.models[0]?.id ?? null;
 			}
+			if (sequence !== syncSequence) return;
 
 			Object.assign(petState.value, state);
 			scaleDraft.value = Number(state.scale.toFixed(2));
@@ -50,11 +60,12 @@ export function useSystemOverview() {
 
 	const applyModel = async () => {
 		if (!selectedModelId.value) return;
+		const sequence = ++syncSequence;
 		try {
 			const state = await petControl.setModel(selectedModelId.value);
-			Object.assign(petState.value, state);
+			if (sequence === syncSequence) Object.assign(petState.value, state);
 			await reloadVisiblePetLayer();
-			await syncPetData(true);
+			if (sequence === syncSequence) await syncPetData(true);
 			ElMessage.success(t("overview.modelSwitched"));
 		} catch {
 			ElMessage.error(t("overview.modelSwitchFailed"));
@@ -63,9 +74,10 @@ export function useSystemOverview() {
 
 	const applyScale = async (value: number | number[]) => {
 		const scale = Array.isArray(value) ? value[0] : value;
+		const sequence = ++syncSequence;
 		try {
 			const state = await petControl.setScale(scale);
-			Object.assign(petState.value, state);
+			if (sequence === syncSequence) Object.assign(petState.value, state);
 		} catch {
 			ElMessage.error(t("overview.scaleFailed"));
 		}
@@ -73,66 +85,77 @@ export function useSystemOverview() {
 
 	const applyOpacity = async (value: number | number[]) => {
 		const opacity = Array.isArray(value) ? value[0] : value;
+		const sequence = ++syncSequence;
 		try {
 			const state = await petControl.setOpacity(opacity);
-			Object.assign(petState.value, state);
-			opacityDraft.value = Number(state.opacity.toFixed(2));
+			if (sequence === syncSequence) {
+				Object.assign(petState.value, state);
+				opacityDraft.value = Number(state.opacity.toFixed(2));
+			}
 		} catch {
 			ElMessage.error(t("overview.opacityFailed"));
 		}
 	};
 
 	const setInteractMode = async (enabled: string | number | boolean) => {
+		const sequence = ++syncSequence;
 		try {
 			const state = await petControl.setInteractMode(Boolean(enabled));
-			Object.assign(petState.value, state);
+			if (sequence === syncSequence) Object.assign(petState.value, state);
 		} catch {
 			ElMessage.error(t("overview.dragModeFailed"));
 		}
 	};
 
 	const setClickThrough = async (enabled: string | number | boolean) => {
+		const sequence = ++syncSequence;
 		try {
 			const state = await petControl.setClickThrough(Boolean(enabled));
-			Object.assign(petState.value, state);
+			if (sequence === syncSequence) Object.assign(petState.value, state);
 		} catch {
 			ElMessage.error(t("overview.clickThroughFailed"));
 		}
 	};
 
 	const setLocked = async (enabled: string | number | boolean) => {
+		const sequence = ++syncSequence;
 		try {
 			const state = await petControl.setLocked(Boolean(enabled));
-			Object.assign(petState.value, state);
+			if (sequence === syncSequence) Object.assign(petState.value, state);
 		} catch {
 			ElMessage.error(t("overview.positionLockFailed"));
 		}
 	};
 
 	const setPetVisible = async (enabled: string | number | boolean) => {
+		const sequence = ++syncSequence;
 		try {
 			await petControl.setVisible(Boolean(enabled));
-			petState.value.visible = Boolean(enabled);
-			await syncPetData(true);
+			if (sequence === syncSequence) {
+				petState.value.visible = Boolean(enabled);
+				await syncPetData(true);
+			}
 		} catch {
 			ElMessage.error(t("overview.visibilityFailed"));
 		}
 	};
 
 	const setDoNotDisturb = async (enabled: string | number | boolean) => {
+		const sequence = ++syncSequence;
 		try {
 			const state = await petControl.setDoNotDisturb(Boolean(enabled));
-			Object.assign(petState.value, state);
+			if (sequence === syncSequence) Object.assign(petState.value, state);
 		} catch {
 			ElMessage.error(t("overview.dndFailed"));
 		}
 	};
 
 	const dockBottomRight = async () => {
+		const sequence = ++syncSequence;
 		try {
 			await petControl.setVisible(true);
 			const state = await petControl.snapBottomRight();
-			Object.assign(petState.value, state);
+			if (sequence === syncSequence) Object.assign(petState.value, state);
 		} catch {
 			ElMessage.error(t("overview.snapFailed"));
 		}

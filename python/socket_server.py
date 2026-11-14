@@ -610,6 +610,7 @@ class DesktopPetSocketServer:
         self._latest_visual_frames: dict[str, JsonDict] = {}
         self._latest_visual_observations: dict[str, JsonDict] = {}
         self._visual_analysis_tasks: dict[str, asyncio.Task[None]] = {}
+        self._visual_analysis_request_ids: dict[str, str] = {}
         self._visual_analysis_last_started: dict[str, float] = {}
         self._visual_analysis_last_completed: dict[str, float] = {}
         self._visual_analysis_attempts: dict[str, int] = {}
@@ -1634,6 +1635,7 @@ class DesktopPetSocketServer:
         self._latest_visual_frames.pop(sid, None)
         self._latest_visual_observations.pop(sid, None)
         task = self._visual_analysis_tasks.pop(sid, None)
+        self._visual_analysis_request_ids.pop(sid, None)
         if task is not None and not task.done():
             task.cancel()
         self._visual_analysis_last_started.pop(sid, None)
@@ -1654,18 +1656,23 @@ class DesktopPetSocketServer:
             reason=reason,
             request_id=request_id,
         )
-        visual_task = self._visual_analysis_tasks.pop(sid, None)
-        if visual_task is not None and not visual_task.done():
-            visual_task.cancel()
-        latest_frame = self._latest_visual_frames.pop(sid, None)
-        if latest_frame is not None:
+        if request_id is None or self._visual_analysis_request_ids.get(sid) == request_id:
+            visual_task = self._visual_analysis_tasks.pop(sid, None)
+            self._visual_analysis_request_ids.pop(sid, None)
+            if visual_task is not None and not visual_task.done():
+                visual_task.cancel()
+        latest_frame = self._latest_visual_frames.get(sid)
+        if latest_frame is not None and (request_id is None or latest_frame.get("request_id") == request_id):
+            self._latest_visual_frames.pop(sid, None)
             self._complete_visual_job(
                 latest_frame,
                 status="cancelled",
                 phase="discarded",
                 reason=reason,
             )
-        self._latest_visual_observations.pop(sid, None)
+        observation = self._latest_visual_observations.get(sid)
+        if request_id is None or (observation is not None and observation.get("request_id") == request_id):
+            self._latest_visual_observations.pop(sid, None)
 
     def _record_visual_frame(
         self,
@@ -1907,6 +1914,7 @@ class DesktopPetSocketServer:
             name=f"visual-analysis-{sid}-{_as_text(frame.get('frame_id'), 'latest')}",
         )
         self._visual_analysis_tasks[sid] = task
+        self._visual_analysis_request_ids[sid] = _as_text(frame.get("request_id"))
         return "pending"
 
     async def _analyze_visual_frame(self, sid: str, frame: JsonDict, vision_client: LLMClient) -> None:
@@ -1964,6 +1972,7 @@ class DesktopPetSocketServer:
             latest["vision_model"] = vision_client.model
             if caption:
                 self._latest_visual_observations[sid] = {
+                    "request_id": _as_text(frame.get("request_id")),
                     "caption": caption,
                     "frame_id": frame_id,
                     "analyzed_at": latest["analyzed_at"],
@@ -2017,6 +2026,7 @@ class DesktopPetSocketServer:
             current = self._visual_analysis_tasks.get(sid)
             if current is asyncio.current_task():
                 self._visual_analysis_tasks.pop(sid, None)
+                self._visual_analysis_request_ids.pop(sid, None)
 
     def _latest_visual_context_messages(
         self,

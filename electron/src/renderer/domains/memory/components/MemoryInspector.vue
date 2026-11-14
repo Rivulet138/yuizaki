@@ -2,6 +2,8 @@
   <aside class="inspector" :aria-label="t('memoryView.inspectorAria')" data-testid="memory-inspector">
     <template v-if="doc">
        <header class="inspector-header"><div class="inspector-title"><span class="eyebrow">{{ t('memoryView.inspectorAria') }}</span><strong>{{ doc.type || t('memoryView.memoryFallback') }}</strong><p>{{ docScopeLabel(doc) }} · {{ docSourceLabel(doc) }} · {{ updatedLabel(doc) }}</p><small v-if="doc.memory_role" class="role-label">{{ memoryRoleLabel(doc.memory_role) }}</small></div><el-tag size="small" :type="stateTone">{{ stateLabel }}</el-tag></header>
+      <p class="operation-status" role="status">{{ doc.storage_status === 'saved' ? memoryText('权威数据已保存', 'Authority saved') : memoryText('已读取权威记录', 'Authority record loaded') }} · {{ memoryIndexLabel(doc.index_status) }}</p>
+      <details v-if="dirty && doc.text !== draft.text"><summary>{{ memoryText('本地草稿已保留；查看当前权威正文', 'Local draft preserved; view current authority text') }}</summary><pre>{{ doc.text }}</pre></details>
       <label class="content-field"><span>{{ t('memoryView.inspectorContent') }}</span><el-input :model-value="draft.text" data-testid="memory-inspector-text" type="textarea" :rows="5" resize="none" @update:model-value="updateDraft('text', String($event))" /></label>
        <div class="fact-grid" :aria-label="t('memoryView.inspectorSummaryAria')"><div><span>{{ t('memoryView.fieldLayer') }}</span><strong>{{ layerLabel(draft.layer) }}</strong></div><div><span>{{ t('memoryView.reliability') }}</span><strong>{{ qualityPercent(doc) }}</strong></div></div>
       <div class="actions"><div class="save-state" :class="{ dirty }" role="status">{{ dirty ? t('memoryView.inspectorUnsaved') : t('memoryView.saved') }}</div><el-button data-testid="memory-inspector-save" size="small" type="primary" :loading="saving" :disabled="!dirty || !draft.text.trim()" @click="emit('save')">{{ t('memoryView.inspectorSave') }}</el-button><el-button size="small" plain :disabled="!dirty" @click="emit('reset')">{{ t('memoryView.inspectorReset') }}</el-button><el-button data-testid="memory-inspector-forget" size="small" type="warning" plain :loading="forgetting" :disabled="forgetting" @click="emit('forget', doc.id)">{{ t('memoryView.paused') }}</el-button></div>
@@ -22,6 +24,7 @@ import 'element-plus/es/components/tag/style/css'
 import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/option/style/css'
 import { computed, inject, ref } from 'vue'
+import { memoryText, memoryIndexLabel } from '../memory-feedback'
 import { ElButton, ElEmpty, ElInput, ElMessage, ElSelect, ElOption, ElSlider, ElTag } from 'element-plus'
 import 'element-plus/es/components/input/style/css'
 import { memoryInspectorActionsKey } from './memory-panel-types'

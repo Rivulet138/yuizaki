@@ -1,0 +1,2 @@
+7209a2fdb9acc6e3d7264f0b7646e10bbfcc40afbf6386d20b7f573838841985  electron/src/renderer/domains/memory/views/MemoryPanel.vue
+27bb0a51dbc74cb238f9b61dda70a7830e13d79fba35e488b99fb0df9bd78f3c  electron/src/renderer/domains/memory/views/MemoryPanel.regression.test.ts

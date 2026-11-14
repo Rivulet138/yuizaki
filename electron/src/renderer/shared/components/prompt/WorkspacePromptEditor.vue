@@ -1,6 +1,6 @@
 <template>
   <div class="workspace-prompt-editor" :class="{ 'is-dense': dense }">
-    <section v-if="showMode" class="prompt-section">
+    <section v-if="showMode" v-show="section === 'all' || section === 'behavior'" class="prompt-section">
       <header class="prompt-section-header">
         <h3>{{ t('promptPanel.mode.title') }}</h3>
       </header>
@@ -17,7 +17,7 @@
       </div>
     </section>
 
-    <section class="prompt-section">
+    <section v-show="section === 'all' || section === 'behavior'" class="prompt-section">
       <header class="prompt-section-header">
         <h3>{{ t('promptPanel.base.title') }}</h3>
         <el-button size="small" text @click="resetBasePrompts">{{ t('promptPanel.base.reset') }}</el-button>
@@ -32,32 +32,70 @@
       </el-form>
     </section>
 
-    <section class="prompt-section">
+    <section v-show="section === 'all' || section === 'role'" class="prompt-section role-section">
       <header class="prompt-section-header">
-        <h3>{{ t('promptPanel.roleCard.title') }}</h3>
+        <h3>{{ copy('工作区角色卡', 'Workspace character card') }}</h3>
         <div class="section-actions">
           <input ref="roleCardFileInput" class="hidden-file-input" type="file" accept=".json,application/json" @change="importRoleCardFile">
-          <el-button size="small" plain @click="openRoleCardFilePicker">{{ t('promptPanel.roleCard.import') }}</el-button>
-          <el-button size="small" plain :disabled="!hasRoleCardContent(roleCardModel) || Boolean(roleCardJsonError)" @click="exportRoleCardFile">{{ t('promptPanel.roleCard.export') }}</el-button>
-          <el-switch v-model="roleCardModel.enabled" size="small" inline-prompt :active-text="t('promptPanel.switch.on')" :inactive-text="t('promptPanel.switch.off')" />
+          <el-button size="small" plain :title="copy('导入 V1 / V2 / V3 角色卡 JSON', 'Import V1 / V2 / V3 character card JSON')" @click="openRoleCardFilePicker">{{ t('promptPanel.roleCard.import') }}</el-button>
+          <el-button size="small" plain :title="copy('保留导入卡的原格式与扩展字段；新卡使用 V2', 'Keep the imported JSON format and extension fields; new cards use V2')" :disabled="!hasRoleCardContent(roleCardModel)" @click="exportRoleCardFile">{{ t('promptPanel.roleCard.export') }}</el-button>
+          <el-switch v-model="roleCardModel.enabled" size="small" :aria-label="copy('启用工作区角色卡', 'Enable workspace character card')" />
         </div>
       </header>
-
-      <el-form class="prompt-form" label-position="top" @submit.prevent>
-        <el-form-item :label="t('promptPanel.roleCard.jsonLabel')">
-          <el-input
-            v-model="roleCardJson"
-            type="textarea"
-            :rows="dense ? 8 : 12"
-            resize="none"
-            :placeholder="t('promptPanel.roleCard.jsonPlaceholder')"
-          />
+      <el-form class="prompt-form role-fields" label-position="top" @submit.prevent>
+        <el-form-item class="role-field-wide" :label="copy('角色名称', 'Character name')">
+          <el-input v-model="roleCardModel.name" :maxlength="240" :placeholder="copy('角色如何称呼自己', 'How the character introduces themselves')" />
         </el-form-item>
-        <p v-if="roleCardJsonError" class="prompt-field-error">{{ roleCardJsonError }}</p>
+        <el-form-item :label="copy('身份与背景', 'Identity and background')">
+          <el-input v-model="roleCardModel.description" type="textarea" :maxlength="1600" show-word-limit :rows="4" resize="vertical" :placeholder="copy('身份、经历、兴趣与知识边界', 'Identity, experiences, interests and knowledge boundaries')" />
+        </el-form-item>
+        <el-form-item :label="copy('性格与价值观', 'Personality and values')">
+          <el-input v-model="roleCardModel.personality" type="textarea" :maxlength="1600" show-word-limit :rows="4" resize="vertical" :placeholder="copy('如何思考、做决定，以及看重什么', 'How they think, decide and what they value')" />
+        </el-form-item>
+        <el-form-item :label="copy('关系与情境', 'Relationship and scenario')">
+          <el-input v-model="roleCardModel.scenario" type="textarea" :maxlength="1600" show-word-limit :rows="4" resize="vertical" :placeholder="copy('与用户的关系、当前场景和共同目标', 'Relationship with the user, setting and shared goals')" />
+        </el-form-item>
+        <el-form-item :label="copy('表达与行为边界', 'Voice and behavior')">
+          <el-input v-model="roleCardModel.instructions" type="textarea" :maxlength="1600" show-word-limit :rows="4" resize="vertical" :placeholder="copy('称呼、语气、回应习惯，以及不该做的事', 'Address, tone, response habits and boundaries')" />
+        </el-form-item>
+        <el-form-item :label="copy('对话示例', 'Example dialogue')">
+          <el-input v-model="roleCardModel.exampleDialogue" type="textarea" :maxlength="1600" show-word-limit :rows="5" resize="vertical" :placeholder="copy('用户：今天计划全乱了。\n角色：先别急，我们挑一件最重要的事重新开始。', 'User: My plans fell apart.\nCharacter: Let’s start again with the one thing that matters most.')" />
+        </el-form-item>
+        <el-form-item :label="copy('开场白参考', 'Greeting reference')">
+          <el-input v-model="roleCardModel.firstMessage" type="textarea" :rows="5" :maxlength="500" show-word-limit resize="vertical" :placeholder="copy('用于语气参考的开场表达', 'An opening line that demonstrates the character’s voice')" />
+        </el-form-item>
       </el-form>
+      <details class="alternate-greetings">
+        <summary>{{ copy('备用开场白', 'Alternate greetings') }} <span>{{ roleCardModel.alternateGreetings?.length || 0 }}</span></summary>
+        <div class="greeting-actions">
+          <el-button size="small" plain :aria-pressed="(roleCardModel.greetingIndex ?? -1) === -1" @click="roleCardModel.greetingIndex = -1">{{ (roleCardModel.greetingIndex ?? -1) === -1 ? copy('主开场已选用', 'Main greeting selected') : copy('使用主开场', 'Use main greeting') }}</el-button>
+          <el-button size="small" plain :disabled="(roleCardModel.alternateGreetings?.length || 0) >= 20" @click="addGreeting">{{ copy('添加备用开场', 'Add greeting') }}</el-button>
+        </div>
+        <article v-for="(_, index) in roleCardModel.alternateGreetings" :key="index" class="greeting-entry">
+          <header>
+            <strong>{{ copy('备用开场', 'Greeting') }} {{ index + 1 }}</strong>
+            <div class="greeting-actions">
+              <el-button size="small" plain :aria-pressed="roleCardModel.greetingIndex === index" @click="roleCardModel.greetingIndex = index">{{ roleCardModel.greetingIndex === index ? copy('已选用', 'Selected') : copy('用作参考', 'Use as reference') }}</el-button>
+              <el-button size="small" plain :disabled="index === 0" :aria-label="copy('上移备用开场', 'Move greeting up')" @click="moveGreeting(index, -1)">↑</el-button>
+              <el-button size="small" plain :disabled="index === (roleCardModel.alternateGreetings?.length || 0) - 1" :aria-label="copy('下移备用开场', 'Move greeting down')" @click="moveGreeting(index, 1)">↓</el-button>
+              <el-button size="small" plain @click="removeGreeting(index)">{{ copy('删除', 'Remove') }}</el-button>
+            </div>
+          </header>
+          <el-input v-model="roleCardModel.alternateGreetings![index]" type="textarea" :rows="3" :maxlength="500" show-word-limit resize="vertical" :aria-label="`${copy('备用开场', 'Greeting')} ${index + 1}`" />
+        </article>
+      </details>
+      <details class="role-json-editor">
+        <summary>{{ copy('JSON 编辑', 'Edit JSON') }}</summary>
+        <el-input v-model="roleCardJson" type="textarea" :rows="10" resize="vertical" aria-label="Character card JSON" @input="roleCardJsonDirty = true" />
+        <p v-if="roleCardJsonError" class="prompt-field-error" role="alert">{{ roleCardJsonError }}</p>
+        <div class="section-actions">
+          <el-button size="small" plain @click="resetRoleCardJson">{{ copy('读取当前角色卡', 'Read current card') }}</el-button>
+          <el-button size="small" type="primary" :disabled="!roleCardJson.trim() || !roleCardJsonDirty" @click="applyRoleCardJson(roleCardJson)">{{ copy('应用 JSON', 'Apply JSON') }}</el-button>
+        </div>
+      </details>
     </section>
 
-    <section class="prompt-section">
+    <section v-show="section === 'all' || section === 'world'" class="prompt-section">
       <header class="prompt-section-header">
         <h3>{{ t('promptPanel.world.title') }}</h3>
         <el-switch v-model="worldBookModel.enabled" size="small" inline-prompt :active-text="t('promptPanel.switch.on')" :inactive-text="t('promptPanel.switch.off')" />
@@ -146,7 +184,7 @@
 
       <div v-if="worldBookModel.entries.length" class="world-preview" data-testid="world-book-preview">
         <div class="world-preview-head">
-          <span>{{ t('promptPanel.world.previewTitle') }}</span>
+          <span>{{ copy('本地近似触发预览', 'Local approximate trigger preview') }}</span>
           <span>{{ worldBookPreviewStatus }}</span>
         </div>
         <el-input
@@ -236,32 +274,53 @@ import 'element-plus/es/components/input/style/css'
 import { ElForm, ElFormItem } from 'element-plus'
 import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/form-item/style/css'
-import { computed, reactive, ref, watch } from 'vue'
-import { t } from '@/i18n'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { currentLocale, t } from '@/i18n'
+import { createEmptyRoleCard, cloneRoleCard, hasRoleCardContent, parseCharacterCard, exportCharacterCard } from '@/domains/prompt/character-card'
 import { defaultDailyPrompt, defaultWorkPrompt, isBuiltinDailyPrompt, isBuiltinWorkPrompt, useWorkspaceStore } from '@/stores/workspaceStore'
 import type { WorkspacePromptEngineering, WorkspacePromptMode, WorkspaceRoleCard, WorkspaceWorldBook, WorkspaceWorldBookEntry } from '@/../shared/workspace'
 
 withDefaults(defineProps<{
   showMode?: boolean
   dense?: boolean
+  section?: 'all' | 'role' | 'world' | 'behavior'
 }>(), {
   showMode: true,
   dense: false,
+  section: 'all',
 })
 
 const workspaceStore = useWorkspaceStore()
+const copy = (zh: string, en: string) => currentLocale.value === 'zh-CN' ? zh : en
 let syncingPromptContext = false
 
-const roleCardModel = reactive<WorkspaceRoleCard>({
-  enabled: true,
-  name: '',
-  personality: '',
-  scenario: '',
-  instructions: '',
-  firstMessage: '',
-})
+const roleCardModel = reactive<WorkspaceRoleCard>(createEmptyRoleCard())
+const addGreeting = () => {
+  if ((roleCardModel.alternateGreetings?.length || 0) >= 20) return
+  roleCardModel.alternateGreetings = [...(roleCardModel.alternateGreetings || []), '']
+}
+const removeGreeting = (index: number) => {
+  const greetings = roleCardModel.alternateGreetings || []
+  if (index < 0 || index >= greetings.length) return
+  greetings.splice(index, 1)
+  const selected = roleCardModel.greetingIndex ?? -1
+  if (selected === index) roleCardModel.greetingIndex = -1
+  else if (selected > index) roleCardModel.greetingIndex = selected - 1
+}
+const moveGreeting = (index: number, delta: number) => {
+  const greetings = roleCardModel.alternateGreetings || []
+  const target = index + delta
+  if (target < 0 || target >= greetings.length || index < 0 || index >= greetings.length) return
+  const selected = roleCardModel.greetingIndex ?? -1
+  const text = greetings[index]!
+  greetings[index] = greetings[target]!
+  greetings[target] = text
+  if (selected === index) roleCardModel.greetingIndex = target
+  else if (selected === target) roleCardModel.greetingIndex = index
+}
 const roleCardJson = ref('')
 const roleCardJsonError = ref('')
+const roleCardJsonDirty = ref(false)
 const promptEngineeringModel = reactive<WorkspacePromptEngineering>({
   workPrompt: defaultWorkPrompt(),
   dailyPrompt: defaultDailyPrompt(),
@@ -451,8 +510,8 @@ const worldBookPreviewMatches = computed(() => {
     .map((entry) => createWorldBookPreviewMatch(entry, text))
     .filter((match): match is WorldBookPreviewMatch => Boolean(match))
     .sort((a, b) =>
-      b.entry.priority - a.entry.priority ||
       a.entry.insertionOrder - b.entry.insertionOrder ||
+      b.entry.priority - a.entry.priority ||
       a.entry.title.localeCompare(b.entry.title, 'zh-Hans-CN'),
     )
   const limited: WorldBookPreviewMatch[] = []
@@ -526,15 +585,6 @@ const splitWorldKeys = (value: string) => {
 
 const createWorldEntryId = () => `world_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
 
-const createEmptyRoleCard = (enabled = true): WorkspaceRoleCard => ({
-  enabled,
-  name: '',
-  personality: '',
-  scenario: '',
-  instructions: '',
-  firstMessage: '',
-})
-
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 
 const readString = (source: Record<string, unknown>, keys: string[]) => {
@@ -585,49 +635,11 @@ const readStringList = (source: Record<string, unknown>, keys: string[]) => {
   return []
 }
 
-const normalizeRoleCardJsonObject = (source: Record<string, unknown>, currentEnabled = true): WorkspaceRoleCard => {
-  const data = isRecord(source.data) ? source.data : source
-  const description = readString(data, ['description'])
-  const explicitPersonality = readString(data, ['personality'])
-  const systemPrompt = readString(data, ['system_prompt', 'systemPrompt'])
-  const postHistoryInstructions = readString(data, ['post_history_instructions', 'postHistoryInstructions'])
-  const instructions = [
-    readString(data, ['instructions']),
-    systemPrompt,
-    postHistoryInstructions,
-    description && explicitPersonality ? description : '',
-  ].filter(Boolean).join('\n\n')
-  return {
-    enabled: typeof data.enabled === 'boolean' ? data.enabled : currentEnabled,
-    name: readString(data, ['name', 'character_name', 'characterName']),
-    personality: explicitPersonality || description,
-    scenario: readString(data, ['scenario']),
-    instructions,
-    firstMessage: readString(data, ['firstMessage', 'first_message', 'first_mes', 'firstMes']),
-  }
-}
-
-const cloneRoleCard = (source: WorkspaceRoleCard): WorkspaceRoleCard => ({
-  enabled: source.enabled !== false,
-  name: source.name || '',
-  personality: source.personality || '',
-  scenario: source.scenario || '',
-  instructions: source.instructions || '',
-  firstMessage: source.firstMessage || '',
-})
-
-const hasRoleCardContent = (roleCard: WorkspaceRoleCard) =>
-  Boolean(roleCard.name.trim() || roleCard.personality.trim() || roleCard.scenario.trim() || roleCard.instructions.trim() || roleCard.firstMessage.trim())
-
-const roleCardToJson = (roleCard: WorkspaceRoleCard) => {
-  if (!hasRoleCardContent(roleCard)) return ''
-  return JSON.stringify({
-    ...(roleCard.name ? { name: roleCard.name } : {}),
-    ...(roleCard.personality ? { personality: roleCard.personality } : {}),
-    ...(roleCard.scenario ? { scenario: roleCard.scenario } : {}),
-    ...(roleCard.instructions ? { instructions: roleCard.instructions } : {}),
-    ...(roleCard.firstMessage ? { firstMessage: roleCard.firstMessage } : {}),
-  }, null, 2)
+const roleCardToJson = (card: WorkspaceRoleCard) => hasRoleCardContent(card) ? JSON.stringify(exportCharacterCard(card), null, 2) : ''
+const resetRoleCardJson = () => {
+  roleCardJson.value = roleCardToJson(roleCardModel)
+  roleCardJsonError.value = ''
+  roleCardJsonDirty.value = false
 }
 
 const clonePromptEngineering = (source?: Partial<WorkspacePromptEngineering>): WorkspacePromptEngineering => ({
@@ -665,8 +677,7 @@ const syncPromptModelsFromWorkspace = () => {
   worldBookPreviewText.value = ''
   Object.assign(promptEngineeringModel, clonePromptEngineering(workspaceStore.activeWorkspace.context.promptEngineering))
   Object.assign(roleCardModel, cloneRoleCard(workspaceStore.activeWorkspace.context.roleCard))
-  roleCardJson.value = roleCardToJson(roleCardModel)
-  roleCardJsonError.value = ''
+  resetRoleCardJson()
   const worldBook = cloneWorldBook(workspaceStore.activeWorkspace.context.worldBook)
   worldBookModel.enabled = worldBook.enabled
   worldBookModel.scanDepth = worldBook.scanDepth
@@ -675,19 +686,11 @@ const syncPromptModelsFromWorkspace = () => {
   worldBookModel.entries = worldBook.entries
   worldBookJson.value = ''
   worldBookJsonError.value = ''
-  window.setTimeout(() => {
-    syncingPromptContext = false
-  }, 0)
+  void nextTick(() => { syncingPromptContext = false })
 }
 
-const persistPromptContext = () => {
-  if (syncingPromptContext) return
-  if (roleCardJsonError.value) return
-  workspaceStore.updateWorkspaceContext(activeWorkspaceId.value, {
-    promptEngineering: clonePromptEngineering(promptEngineeringModel),
-    roleCard: cloneRoleCard(roleCardModel),
-    worldBook: cloneWorldBook(worldBookModel),
-  })
+const persistPromptContext = (patch: Parameters<typeof workspaceStore.updateWorkspaceContext>[1]) => {
+  if (!syncingPromptContext) workspaceStore.updateWorkspaceContext(activeWorkspaceId.value, patch)
 }
 
 const resetBasePrompts = () => {
@@ -696,11 +699,9 @@ const resetBasePrompts = () => {
 }
 
 const setRoleCardJsonText = (value: string) => {
-  if (roleCardJson.value === value) {
-    applyRoleCardJson(value)
-    return
-  }
   roleCardJson.value = value
+  roleCardJsonDirty.value = true
+  applyRoleCardJson(value)
 }
 
 const openRoleCardFilePicker = () => {
@@ -711,10 +712,13 @@ const importRoleCardFile = async (event: Event) => {
   const input = event.target as HTMLInputElement | null
   const file = input?.files?.[0]
   if (!file) return
+  const workspaceId = activeWorkspaceId.value
   try {
-    setRoleCardJsonText(await file.text())
+    const text = await file.text()
+    if (workspaceId !== activeWorkspaceId.value) return
+    setRoleCardJsonText(text)
   } catch {
-    roleCardJsonError.value = t('promptPanel.common.readJsonFailed')
+    if (workspaceId === activeWorkspaceId.value) roleCardJsonError.value = t('promptPanel.common.readJsonFailed')
   } finally {
     if (input) input.value = ''
   }
@@ -733,16 +737,11 @@ const exportJsonFile = (payload: unknown, filename: string) => {
 }
 
 const exportRoleCardFile = () => {
-  if (!hasRoleCardContent(roleCardModel) || roleCardJsonError.value) return
-  const payload = {
-    ...(roleCardModel.name ? { name: roleCardModel.name } : {}),
-    ...(roleCardModel.personality ? { personality: roleCardModel.personality } : {}),
-    ...(roleCardModel.scenario ? { scenario: roleCardModel.scenario } : {}),
-    ...(roleCardModel.instructions ? { instructions: roleCardModel.instructions } : {}),
-    ...(roleCardModel.firstMessage ? { firstMessage: roleCardModel.firstMessage } : {}),
-    ...(worldBookModel.entries.length ? { character_book: cloneWorldBook(worldBookModel) } : {}),
-  }
-  exportJsonFile(payload, `${activeWorkspaceId.value || 'workspace'}-role-card.json`)
+  if (!hasRoleCardContent(roleCardModel)) return
+  const original = roleCardModel.sourceCard
+  const originalData = isRecord(original?.data) ? original.data : original
+  const includeWorldBook = worldBookModel.enabled || worldBookModel.entries.length > 0 || Boolean(originalData?.character_book)
+  exportJsonFile(exportCharacterCard(roleCardModel, includeWorldBook ? cloneWorldBook(worldBookModel) : undefined), `${activeWorkspaceId.value || 'workspace'}-role-card.json`)
 }
 
 const addWorldEntry = () => {
@@ -827,12 +826,13 @@ const resolveImportedEntries = (book: Record<string, unknown>) => {
 const normalizeImportedWorldEntry = (raw: unknown, index: number): WorkspaceWorldBookEntry | null => {
   if (!isRecord(raw)) return null
   const extensions = isRecord(raw.extensions) ? raw.extensions : {}
+  const local = isRecord(extensions.yuizaki) ? extensions.yuizaki : {}
   const content = readString(raw, ['content', 'entry', 'text', 'value', 'prompt']).trim()
   if (!content) return null
   const disabled = readBoolean(raw, ['disable', 'disabled'], false)
   const order = readNumber(raw, ['insertionOrder', 'insertion_order', 'order'], index)
   const secondaryKeys = readStringList(raw, ['secondaryKeys', 'secondary_keys', 'keysecondary', 'secondary', 'secondaryKeywords', 'secondary_keywords'])
-  const id = readIdentifier(raw, ['id', 'uid'])
+  const id = readIdentifier(raw, ['id', 'uid']) || readIdentifier(local, ['id'])
   return {
     id: id || createWorldEntryId(),
     title: readString(raw, ['title', 'comment', 'name', 'memo', 'displayName']) || id || t('promptPanel.world.entryFallbackTitle', { index: index + 1 }),
@@ -845,10 +845,10 @@ const normalizeImportedWorldEntry = (raw: unknown, index: number): WorkspaceWorl
     constant: readBoolean(raw, ['constant'], false),
     selective: readBoolean(raw, ['selective'], secondaryKeys.length > 0),
     caseSensitive: readBoolean(raw, ['caseSensitive', 'case_sensitive'], false) || readBoolean(extensions, ['case_sensitive'], false),
-    matchWholeWords: readBoolean(raw, ['matchWholeWords', 'match_whole_words'], false) || readBoolean(extensions, ['match_whole_words'], false),
+    matchWholeWords: readBoolean(raw, ['matchWholeWords', 'match_whole_words'], false) || readBoolean(extensions, ['match_whole_words'], false) || readBoolean(local, ['matchWholeWords'], false),
     probability: readBoolean(raw, ['useProbability', 'use_probability'], true) === false
       ? 100
-      : Math.max(0, Math.min(100, readNumber(raw, ['probability'], 100))),
+      : Math.max(0, Math.min(100, readNumber(raw, ['probability'], readNumber(local, ['probability'], 100)))),
   }
 }
 
@@ -927,9 +927,11 @@ const applyImportedWorldBook = (book: Record<string, unknown>, mode: 'replace' |
     .map(normalizeImportedWorldEntry)
     .filter((entry): entry is WorkspaceWorldBookEntry => Boolean(entry))
   if (!entries.length) return false
-  worldBookModel.enabled = true
+  const extensions = isRecord(book.extensions) ? book.extensions : {}
+  const local = isRecord(extensions.yuizaki) ? extensions.yuizaki : {}
+  worldBookModel.enabled = readBoolean(book, ['enabled'], readBoolean(local, ['enabled'], true))
   worldBookModel.scanDepth = Math.max(1, Math.min(32, Math.round(readNumber(book, ['scanDepth', 'scan_depth', 'depth'], worldBookModel.scanDepth))))
-  worldBookModel.maxEntries = Math.max(1, Math.min(64, Math.round(readNumber(book, ['maxEntries', 'max_entries'], Math.max(worldBookModel.maxEntries, entries.length)))))
+  worldBookModel.maxEntries = Math.max(1, Math.min(64, Math.round(readNumber(book, ['maxEntries', 'max_entries'], readNumber(local, ['maxEntries'], Math.max(worldBookModel.maxEntries, entries.length))))))
   worldBookModel.budgetTokens = Math.max(128, Math.min(32000, Math.round(readNumber(book, ['budgetTokens', 'budget_tokens', 'token_budget'], worldBookModel.budgetTokens))))
   worldBookModel.entries = mode === 'merge'
     ? mergeWorldEntries(worldBookModel.entries, entries)
@@ -971,10 +973,13 @@ const importWorldBookFile = async (event: Event) => {
   const input = event.target as HTMLInputElement | null
   const file = input?.files?.[0]
   if (!file) return
+  const workspaceId = activeWorkspaceId.value
   try {
-    importWorldBookFromText(await file.text())
+    const text = await file.text()
+    if (workspaceId !== activeWorkspaceId.value) return
+    importWorldBookFromText(text)
   } catch {
-    worldBookJsonError.value = t('promptPanel.common.readJsonFailed')
+    if (workspaceId === activeWorkspaceId.value) worldBookJsonError.value = t('promptPanel.common.readJsonFailed')
   } finally {
     if (input) input.value = ''
   }
@@ -1014,18 +1019,19 @@ const applyRoleCardJson = (value: string) => {
       return
     }
     roleCardJsonError.value = ''
-    Object.assign(roleCardModel, normalizeRoleCardJsonObject(parsed, roleCardModel.enabled))
+    Object.assign(roleCardModel, createEmptyRoleCard(roleCardModel.enabled), parseCharacterCard(parsed, roleCardModel.enabled))
     const embeddedWorldBook = resolveEmbeddedWorldBook(parsed)
     if (embeddedWorldBook) {
       applyImportedWorldBook(embeddedWorldBook, worldBookModel.entries.length ? 'merge' : 'replace')
     }
+    resetRoleCardJson()
   } catch {
     roleCardJsonError.value = t('promptPanel.roleCard.invalidJson')
   }
 }
 
 syncPromptModelsFromWorkspace()
-watch(activeWorkspaceId, syncPromptModelsFromWorkspace)
+watch(activeWorkspaceId, syncPromptModelsFromWorkspace, { flush: 'sync' })
 watch([worldBookSearch, worldBookStateFilter], () => {
   worldBookPage.value = 1
 })
@@ -1034,13 +1040,32 @@ watch(() => filteredWorldEntries.value.length, () => {
   const validIds = new Set(worldBookModel.entries.map((entry) => entry.id))
   selectedWorldEntryIds.value = selectedWorldEntryIds.value.filter((id) => validIds.has(id))
 })
-watch(promptEngineeringModel, persistPromptContext, { deep: true })
-watch(roleCardModel, persistPromptContext, { deep: true })
-watch(roleCardJson, applyRoleCardJson)
-watch(worldBookModel, persistPromptContext, { deep: true })
+watch(promptEngineeringModel, () => persistPromptContext({ promptEngineering: clonePromptEngineering(promptEngineeringModel) }), { deep: true })
+watch(roleCardModel, () => {
+  persistPromptContext({ roleCard: cloneRoleCard(roleCardModel) })
+  if (!syncingPromptContext && !roleCardJsonDirty.value) resetRoleCardJson()
+}, { deep: true })
+watch(worldBookModel, () => persistPromptContext({ worldBook: cloneWorldBook(worldBookModel) }), { deep: true })
 </script>
 
 <style scoped>
+.alternate-greetings { border-top: 1px solid var(--yui-border); padding-top: 14px; }
+.alternate-greetings > summary { cursor: pointer; font-size: 13px; font-weight: 650; color: var(--yui-text); }
+.alternate-greetings > summary span { color: var(--yui-muted); font-weight: 400; margin-left: 6px; }
+.greeting-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.alternate-greetings > .greeting-actions { margin: 14px 0; }
+.greeting-actions :deep(.el-button + .el-button) { margin-left: 0; }
+.greeting-entry { padding: 14px 0; border-top: 1px solid var(--yui-border); }
+.greeting-entry > header { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 13px; }
+
+.role-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 22px; }
+.role-field-wide { grid-column: 1 / -1; }
+.role-fields :deep(.el-form-item) { margin-bottom: 0; min-width: 0; }
+.role-json-editor { border-top: 1px solid var(--yui-border); padding-top: 12px; }
+.role-json-editor summary { cursor: pointer; color: var(--yui-text); font-size: 13px; padding: 4px 0 12px; }
+.role-json-editor .section-actions { margin-top: 10px; justify-content: flex-end; }
+@media (max-width: 1060px) { .role-fields { grid-template-columns: minmax(0, 1fr); } }
+
 .workspace-prompt-editor {
   display: flex;
   flex-direction: column;

@@ -1,5 +1,6 @@
 import { computed, reactive } from 'vue'
 import { useSettingsStore } from '@/state/settingsStore'
+import { settingsClient } from '@/api/clients/settings-client'
 import { jaJPOverrides } from './jaOverrides'
 import { onboardingMessages } from './onboardingMessages'
 import { productMetricsMessages } from './productMetricsMessages'
@@ -715,7 +716,7 @@ const messages = {
     'settings.status.retrySaveDetail': '上次保存失败，修改仍在本地队列中。',
     'settings.status.saving': '正在保存设置',
     'settings.status.savingShort': '保存中',
-    'settings.status.applied': '已应用：{items}',
+    'settings.status.applied': '已保存并应用运行时配置：{items}；资源就绪请查看对应状态。',
     'settings.status.recent': '最近保存：{time}',
     'settings.summary.budget': '每小时模型检查次数',
     'settings.summary.budgetHint': '仅用于模型质量检查，不影响摘要生成。',
@@ -875,6 +876,12 @@ const messages = {
     'settings.tts.warmup': '预热语音引擎',
   },
   'en-US': {
+    'settings.messages.backendTokenRequired': 'Enter a Backend API Token first',
+    'settings.messages.backendTokenReset': 'Backend API Token reset',
+    'settings.messages.backendTokenResetRestart': 'Backend API Token reset; restart the app to apply',
+    'settings.messages.backendTokenSaved': 'Backend API Token saved',
+    'settings.messages.backendTokenSavedRestart': 'Backend API Token saved; restart the app to apply',
+    'settings.messages.historyCleared': 'Settings history cleared',
     ...deployMessages['en-US'],
     ...keyGapMessages['en-US'],
     ...pluginPanelMessages['en-US'],
@@ -1504,7 +1511,7 @@ const messages = {
     'settings.messages.ttsHint': 'check Base URL, Ref Audio, and Ref Text',
     'settings.messages.ttsOk': 'TTS test succeeded',
     'settings.messages.svcFailed': 'SVC check failed: {message}',
-    'settings.messages.svcOk': 'SVC service is reachable',
+    'settings.messages.svcOk': 'SVC model is ready',
     'settings.messages.ttsWarmupFailed': 'Voice warmup failed',
     'settings.messages.ttsWarmupNeedsConfig': 'Enter a character, or provide both reference audio and reference text first',
     'settings.messages.ttsWarmupQueued': 'Voice warmup queued; status will update after model loading',
@@ -1549,7 +1556,7 @@ const messages = {
     'settings.status.retrySaveDetail': 'The last save failed. Your changes are still queued locally.',
     'settings.status.saving': 'Saving settings',
     'settings.status.savingShort': 'Saving',
-    'settings.status.applied': 'Applied: {items}',
+    'settings.status.applied': 'Saved and applied to runtime: {items}. Check resource status for readiness.',
     'settings.status.recent': 'Last saved: {time}',
     'settings.summary.budget': 'Model checks per hour',
     'settings.summary.budgetHint': 'Only applies to model quality checks; it does not generate the summary.',
@@ -2065,7 +2072,7 @@ const messages = {
     'settings.status.retrySaveDetail': '前回の保存に失敗しました。変更はローカルのキューに残っています。',
     'settings.status.saving': 'Saving settings',
     'settings.status.savingShort': 'Saving',
-    'settings.status.applied': 'Applied: {items}',
+    'settings.status.applied': 'Saved and applied to runtime: {items}. Check resource status for readiness.',
     'settings.status.recent': 'Last saved: {time}',
     'settings.summary.budget': 'Hourly Budget',
     'settings.summary.cooldown': 'Cooldown (s)',
@@ -2298,6 +2305,9 @@ export const syncLocaleFromSettings = (value?: string | null): Locale => {
   return locale
 }
 
+let localeSaveQueue: Promise<unknown> = Promise.resolve()
+let localeSaveSequence = 0
+
 export const setLocale = async (
   value: string,
   options: { persistSettings?: boolean } = {},
@@ -2309,12 +2319,13 @@ export const setLocale = async (
 
   if (options.persistSettings === false) return locale
 
-  await settingsStore.saveSettings({
-    system: {
-      ...settingsStore.state.system,
-      language: locale,
-    },
+  const requestId = ++localeSaveSequence
+  const saving = localeSaveQueue.then(async () => {
+    if (requestId !== localeSaveSequence) return
+    await settingsClient.save({ system: { language: locale } })
   })
+  localeSaveQueue = saving.catch(() => undefined)
+  await saving
 
   return locale
 }

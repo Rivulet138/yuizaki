@@ -1,0 +1,22 @@
+{
+  "run_label": "current-dist",
+  "started_utc": "2026-11-11T06:38:41.796894+00:00",
+  "python": "3.13.2",
+  "origin": "http://127.0.0.1:48949",
+  "cases": [],
+  "passed": false,
+  "fixture_settings_delay_ms": 150,
+  "fixture_patch_delay_ms": 150,
+  "token_delay": "explicit release gate; 20s timeout is a failure",
+  "limitations": [
+    "Synthetic HTTP fixture and Chromium; no real backend or Electron IPC",
+    "Timings include browser/UI automation and injected fixture latency; one sample per case",
+    "Evidence applies only to the captured renderer fingerprint; rerun after mainline rebuild"
+  ],
+  "fixture_pid": 22932,
+  "chromium": "151.0.7922.34",
+  "error": "Traceback (most recent call last):\n  File \"E:\\yuizaki\\docs\\fix-evidence-2026-11-11\\panel-lifecycle\\save-performance\\measure_save.py\", line 314, in main\n    case = run()\n  File \"E:\\yuizaki\\docs\\fix-evidence-2026-11-11\\panel-lifecycle\\save-performance\\measure_save.py\", line 312, in <lambda>\n    for run in (lambda: discover(browser), lambda: token_case(browser),\n                        ~~~~~~~~^^^^^^^^^\n  File \"E:\\yuizaki\\docs\\fix-evidence-2026-11-11\\panel-lifecycle\\save-performance\\measure_save.py\", line 170, in discover\n    return case.finish(purpose=\"DOM reconnaissance and direct-summary negative control\", expected_token_requests=0)\n           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"E:\\yuizaki\\docs\\fix-evidence-2026-11-11\\panel-lifecycle\\save-performance\\measure_save.py\", line 145, in finish\n    assert not self.blocked, self.blocked\n           ^^^^^^^^^^^^^^^^\nAssertionError: [{'method': 'GET', 'url': 'http://localhost:48949/api/system/env-check'}, {'method': 'POST', 'url': 'http://127.0.0.1:48949/api/pet/visibility'}, {'method': 'POST', 'url': 'http://127.0.0.1:48949/api/pet/behavior-state'}, {'method': 'POST', 'url': 'http://127.0.0.1:48949/api/pet/behavior-state'}, {'method': 'POST', 'url': 'http://localhost:48949/api/system/voice-diagnostics/run'}, {'method': 'GET', 'url': 'http://localhost:48949/api/companions'}, {'method': 'GET', 'url': 'http://localhost:48949/api/system/ui-capabilities'}, {'method': 'GET', 'url': 'http://localhost:48949/api/settings/'}, {'method': 'GET', 'url': 'http://localhost:48949/api/health'}, {'method': 'GET', 'url': 'http://localhost:48949/api/ping'}, {'method': 'GET', 'url': 'http://localhost:48949/api/system/env-check'}, {'method': 'GET', 'url': 'http://localhost:48949/api/workspaces'}, {'method': 'GET', 'url': 'http://localhost:48949/api/system/env-check'}, {'method': 'POST', 'url': 'http://127.0.0.1:48949/api/pet/visibility'}, {'method': 'GET', 'url': 'http://localhost:48949/api/settings/'}, {'method': 'GET', 'url': 'http://localhost:48949/api/system/env-check'}, {'method': 'POST', 'url': 'http://localhost:48949/api/system/active-workspace'}, {'method': 'GET', 'url': 'http://localhost:48949/api/system/env-check'}, {'method': 'GET', 'url': 'http://localhost:48949/api/sessions?scope=all'}, {'method': 'GET', 'url': 'http://localhost:48949/api/system/env-check'}, {'method': 'PATCH', 'url': 'http://localhost:48949/api/workspaces/default'}, {'method': 'POST', 'url': 'http://127.0.0.1:48949/api/pet/visibility'}, {'method': 'POST', 'url': 'http://127.0.0.1:48949/api/pet/visibility'}]\n",
+  "fixture_exit_code": 1,
+  "fixture_port_closed": true,
+  "finished_utc": "2026-11-11T06:38:52.071619+00:00"
+}

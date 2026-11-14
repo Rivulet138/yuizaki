@@ -85,7 +85,10 @@ export const isOnboardingDeviceProbeReport = (value: unknown): value is Onboardi
     Object.keys(record).every((key) => ['probeId', 'outcome', 'messageCode'].includes(key)) &&
     (ONBOARDING_DEVICE_PROBE_IDS as readonly unknown[]).includes(record['probeId']) &&
     (record['outcome'] === 'ready' || record['outcome'] === 'unavailable') &&
-    (ONBOARDING_DEVICE_MESSAGE_CODES as readonly unknown[]).includes(record['messageCode'])
+    (ONBOARDING_DEVICE_MESSAGE_CODES as readonly unknown[]).includes(record['messageCode']) &&
+    (record['outcome'] === 'ready'
+      ? record['messageCode'] === (record['probeId'] === 'host.microphone' ? 'permission_granted' : 'test_completed')
+      : ['permission_denied', 'no_device', 'test_failed'].includes(String(record['messageCode'])))
 }
 
 export interface OnboardingRepairRequest {

@@ -1,7 +1,6 @@
 
 <template>
   <PanelShell :title="t('memoryPanel.title')" tone="companion" density="compact">
-    <template #status><span class="local-status" role="status">{{ t('memoryPanel.statusAutoOrganize') }}</span></template>
     <template #actions>
       <label class="scope-control"><span>{{ t('memoryPanel.scopeLabel') }}</span><el-select :model-value="currentMemoryScope" size="small" :disabled="workspaceScopeSaving" :aria-label="t('memoryPanel.scopeAria')" @change="updateDefaultMemoryScope"><el-option v-for="scope in memoryScopeOptions" :key="scope.value" :label="scope.label" :value="scope.value" :disabled="scope.value === 'session' && !sessionStore.activeSession" /></el-select></label>
       <el-dropdown trigger="click" @command="handleAdvancedToolCommand">
@@ -15,15 +14,19 @@
         </template>
       </el-dropdown>
       <input ref="memoryImportInput" class="memory-import-input" type="file" accept="application/json,.json" :aria-label="t('memoryPanel.importFileAria')" @change="handleMemoryImportFile" />
-      <el-button data-testid="memory-refresh" circle plain :icon="Refresh" :title="t('memoryPanel.refresh')" :aria-label="t('memoryPanel.refresh')" :loading="docsRequest.loading" @click="refreshMemoryState" />
+      <el-button data-testid="memory-refresh" circle plain :icon="Refresh" :title="t('memoryPanel.refresh')" :aria-label="t('memoryPanel.refresh')" :loading="memoryRefreshing || docsRequest.loading" @click="refreshMemoryState" />
     </template>
 
     <div class="memory-panel">
+      <p v-if="docsRequest.error && hasScopedDocCache" role="alert">{{ docsRequest.error }}</p>
+      <p v-if="exportReport" role="status">{{ exportReport }}</p>
+      <p v-if="deletionReport" :role="deletionReport.warning ? 'alert' : 'status'">{{ deletionReport.message }}</p>
       <section v-if="importReport" class="memory-import-report" aria-live="polite">
         <div class="import-report-head">
           <strong>{{ t('memoryPanel.lastImportTitle') }}</strong>
           <el-button link size="small" @click="importReport = null">{{ t('memoryPanel.close') }}</el-button>
         </div>
+        <p>{{ importTargetLabel }}</p>
         <div class="import-report-grid">
           <span>{{ t('memoryPanel.importWritten') }} <strong>{{ importReport.imported_count }}</strong> {{ t('memoryPanel.unitItems') }}</span>
           <span>{{ t('memoryPanel.importSkipped') }} <strong>{{ importReport.skipped_count }}</strong> {{ t('memoryPanel.unitItems') }}</span>
@@ -43,6 +46,12 @@
           <p v-if="importReport.skipped.length > 50">{{ t('memoryPanel.importSkippedTruncated', { count: importReport.skipped.length }) }}</p>
         </details>
       </section>
+      <p v-if="deletePreflightLoading" role="status">{{ memoryText('正在预检删除影响…', 'Checking deletion effects…') }}</p>
+      <p v-if="deletePreflightError" role="alert">{{ deletePreflightError }}</p>
+      <details v-if="batchResults.length" class="memory-import-report" open>
+        <summary>{{ memoryText('最近批处理逐项结果', 'Latest batch item results') }} · {{ batchContext }}</summary>
+        <ul><li v-for="item in batchResults" :key="item.id"><code>{{ item.id }}</code> · {{ item.status }} · {{ item.detail }}</li></ul>
+      </details>
       <nav class="memory-tabs" role="tablist" :aria-label="t('memoryPanel.tabsAria')">
         <button v-for="(tab, index) in memoryTabs" :id="`memory-tab-${tab.value}`" :key="tab.value" type="button" role="tab" :tabindex="activeTab === tab.value ? 0 : -1" :aria-selected="activeTab === tab.value" :aria-controls="`memory-panel-${tab.value}`" @click="activeTab = tab.value" @keydown="onMemoryTabKeydown($event, index)">
           <el-icon aria-hidden="true"><component :is="tab.icon" /></el-icon><span class="tab-label">{{ tab.label }}</span><span v-if="tab.count !== undefined" class="tab-count">{{ tab.count }}</span>
@@ -52,9 +61,9 @@
         <MemoryLibrary
           :visible-docs="visibleDocs" :filtered-count="filteredDocs.length" :remaining-count="remainingFilteredDocCount" :selected-doc="selectedDoc"
           :view-mode="docViewMode" :sort-mode="docSortMode" :filter-layer="filterLayer" :search-text="searchText" :view-options="docViewOptions"
-          :layers="layers" :source-options="memorySourceOptions" :loading="docsRequest.loading" :error="docsRequest.error"
+          :layers="layers" :source-options="memorySourceOptions" :loading="docsRequest.loading && !hasScopedDocCache" :error="hasScopedDocCache ? null : docsRequest.error"
           :has-filters="hasDocFilters" :batch-delete-label="batchDeleteLabel"
-          :batch-action-loading="batchActionLoading" :batch-action-disabled="batchActionDisabled" :inspector-draft="inspectorDraft"
+          :batch-action-loading="batchActionLoading || deletePreflightLoading" :batch-action-disabled="batchActionDisabled" :inspector-draft="inspectorDraft"
           :inspector-draft-dirty="inspectorDraftDirty" :inspector-draft-saving="inspectorDraftSaving" :forgetting-doc-ids="forgettingDocIds" :removing-doc-ids="removingDocIds"
           :doc-view-count="docViewCount" :is-query-hit="isQueryHit" :layer-tag-type="layerTagType" :format-score="formatScore"
           :doc-updated-label="docUpdatedLabel" :doc-scope-label="docScopeLabel" :doc-source-label="docSourceLabel" :quality-percent="qualityPercent"
@@ -77,8 +86,10 @@
     </div>
 
     <el-drawer v-model="advancedToolsVisible" :title="t('memoryPanel.advancedDrawerTitle')" size="min(560px, 92vw)" append-to-body>
+      <MemoryStorageStatus :status="indexStatus" :overview="overview" :scope="currentMemoryScope" :workspace-id="activeWorkspace.id" :session-id="sessionStore.activeSession?.id" />
       <MemoryAdvancedTools
-        :index-status="indexStatus" :rebuild-job="indexStatus?.job ?? null" :index-status-label="indexStatusLabel" :index-availability-label="indexAvailabilityLabel" :index-status-tone="indexStatusTone"
+        :feedback-by-id="feedbackById" :feedback-pending-ids="feedbackPendingIds" :feedback-errors="feedbackErrors" :rebuild-monitor-error="rebuildMonitorError"
+        :index-status="indexStatus" :rebuild-job="displayedRebuildJob" :index-status-refreshing="indexStatusRefreshing" :index-status-label="indexStatusLabel" :index-availability-label="indexAvailabilityLabel" :index-status-tone="indexStatusTone"
         :doc-count="docs.length" :rebuild-index-loading="rebuildIndexLoading" :query-form="queryForm" :layers="layers"
         :effective-query-layers="effectiveQueryLayers" :query-loading="queryRequest.loading"
         :query-error="queryRequest.error" :query-result="queryResult" :query-summary="querySummary"
@@ -87,7 +98,7 @@
         :maintenance-preview-matches-policy="maintenancePreviewMatchesPolicy" :maintenance-saving="maintenanceSaving"
         :maintenance-preview-loading="maintenancePreviewLoading" :maintenance-apply-loading="maintenanceApplyLoading"
         :format-latency="formatLatency" :compact-text="compactText" :maintenance-reason-label="maintenanceReasonLabel"
-         @rebuild-index="rebuildMemoryIndex" @cancel-rebuild-index="cancelMemoryIndexRebuild" @query="submitQuery" @toggle-query-layer="toggleQueryLayer"
+         @refresh-index-status="checkMemoryIndexStatus" @rebuild-index="rebuildMemoryIndex" @cancel-rebuild-index="cancelMemoryIndexRebuild" @query="submitQuery" @toggle-query-layer="toggleQueryLayer"
          @reset-query-layers="resetQueryLayers" @select-result="selectDocFromAdvanced"
          @feedback="handleRecallFeedback"
         @save-maintenance="saveMemoryPolicy" @preview-maintenance="previewMemoryMaintenance" @apply-maintenance="applyMemoryMaintenance"
@@ -103,7 +114,7 @@
         <el-form-item :label="t('memoryPanel.editSourceLabel')"><el-select v-model="editForm.source"><el-option v-for="source in memorySourceOptions" :key="source.value" :label="source.label" :value="source.value" /></el-select></el-form-item>
         <details><summary>{{ t('memoryPanel.editMetadata') }}</summary><el-input v-model="editForm.metadataJson" type="textarea" :rows="4" /></details>
       </el-form>
-      <template #footer><el-button @click="editDialogVisible = false">{{ t('memoryPanel.cancel') }}</el-button><el-button type="primary" :loading="updateRequest.loading" :disabled="!editForm.text.trim()" @click="submitEditDoc">{{ t('memoryPanel.saveChanges') }}</el-button></template>
+      <template #footer><el-button @click="editDialogVisible = false">{{ t('memoryPanel.cancel') }}</el-button><el-button type="primary" :loading="updateRequest.loading" :disabled="!editForm.text.trim() || batchActionLoading || updateRequest.loading" @click="submitEditDoc">{{ t('memoryPanel.saveChanges') }}</el-button></template>
     </el-dialog>
   </PanelShell>
 </template>
@@ -120,7 +131,8 @@ import 'element-plus/es/components/slider/style/css'
 import { ElOption, ElSelect } from 'element-plus'
 import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/option/style/css'
-import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, provide, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElDialog, ElDrawer, ElForm, ElFormItem, ElInput, ElMessage, ElMessageBox } from 'element-plus'
 import 'element-plus/es/components/dialog/style/css'
 import 'element-plus/es/components/drawer/style/css'
@@ -130,6 +142,7 @@ import 'element-plus/es/components/input/style/css'
 import { Collection, DataAnalysis, Refresh, Tools, User } from '@element-plus/icons-vue'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import MemoryAdvancedTools from '../components/MemoryAdvancedTools.vue'
+import MemoryStorageStatus from '../components/MemoryStorageStatus.vue'
 import MemoryLibrary from '../components/MemoryLibrary.vue'
 import MemoryOverview from '../components/MemoryOverview.vue'
 import MemoryReviewQueue from '../components/MemoryReviewQueue.vue'
@@ -140,6 +153,7 @@ import { memoryClient } from '@/api/clients/memory-client'
 import type { MemoryDeletePreview, MemoryImportResult, MemoryIndexRebuildJob, MemoryIndexStatus, MemoryMaintenancePolicyPayload, MemoryMaintenancePreview } from '@/api/clients/memory-client'
 import { getMemoryIndexUiStatus } from '../memory-index-status'
 import type { MemoryDoc } from '../composables/useMemoryDomain'
+import { memoryText, memoryIndexLabel, memoryDeletionNote, memoryIndexCleanupStatus, memoryDeletionResultText } from '../memory-feedback'
 import { memoryInspectorActionsKey } from '../components/memory-panel-types'
 import { describeFailure } from '@/shared/errors/describe-error'
 import { t } from '@/i18n'
@@ -151,10 +165,11 @@ type MemoryScope = 'global' | 'workspace' | 'session'
 type MemoryTab = 'library' | 'review' | 'overview'
 
 const {
-  docs, operations, forgottenDocs, reviewCandidates, overview, queryResult,
+  invalidateReads, docs, docsScopeKey, operations, forgottenDocs, reviewCandidates, overview, queryResult,
   docsRequest, forgottenDocsRequest, overviewRequest, candidatesRequest, updateRequest, queryRequest, operationsRequest,
   loadDocs, loadForgottenDocs, loadCandidates, loadOperations, loadOverview, updateDoc, softForgetDoc, restoreDoc, reviewCandidate, queryMemory, recordRecallFeedback,
 } = useMemoryDomain()
+const route = useRoute()
 const sessionStore = useSessionStore()
 const workspaceStore = useWorkspaceStore()
 const activeWorkspace = computed(() => workspaceStore.activeWorkspace)
@@ -166,6 +181,20 @@ const currentMemoryScope = computed<MemoryScope>(() => {
   const scope = normalizeMemoryScope(activeWorkspace.value?.memory_scope)
   return scope === 'session' && !sessionStore.activeSession ? 'workspace' : scope
 })
+const memoryContextKey = () => JSON.stringify([currentMemoryScope.value, activeWorkspace.value.id, sessionStore.activeSession?.id])
+
+const scopedDocOptions = () => ({
+  scope: currentMemoryScope.value,
+  workspaceId: currentMemoryScope.value === 'global' ? undefined : activeWorkspace.value?.id,
+  sessionId: currentMemoryScope.value === 'session' ? sessionStore.activeSession?.id : undefined,
+})
+
+
+const hasScopedDocCache = computed(() => {
+  const options = scopedDocOptions()
+  return docsScopeKey.value === JSON.stringify([options.scope, options.workspaceId, options.sessionId])
+})
+
 const indexStatus = ref<MemoryIndexStatus | null>(null)
 const advancedToolsVisible = ref(false)
 const reviewProcessingId = ref('')
@@ -179,18 +208,42 @@ const selectedQueryLayers = ref<string[]>([])
 const queryForm = reactive({ query: '', scope: currentMemoryScope.value, top_k: 5, expand_relations: true, relation_limit: 20, relation_depth: 1 })
 const editDialogVisible = ref(false)
 const editForm = reactive({ id: '', text: '', type: 'fact', layer: 'semantic', importance: 0.5, confidence: 0.72, source: 'manual', metadataJson: '' })
+const editTarget = ref<MemoryDoc | null>(null)
+let editContext = ''
+let editDraftKey = ''
+let editBaseSnapshot = ''
+const editDrafts = new Map<string, { form: typeof editForm; base: string }>()
+const cacheEditDraft = () => {
+  if (!editDraftKey) return
+  if (JSON.stringify(editForm) !== editBaseSnapshot) editDrafts.set(editDraftKey, { form: { ...editForm }, base: editBaseSnapshot })
+  else editDrafts.delete(editDraftKey)
+}
+watch(editDialogVisible, visible => { if (!visible) cacheEditDraft() }, { flush: 'sync' })
 const inspectorDraft = reactive({
   id: '', text: '', type: 'fact', layer: 'semantic', importance: 0.5, confidence: 0.72, source: 'manual',
   validFrom: '', validTo: '', expiresAt: '',
 })
 const rebuildIndexLoading = ref(false)
 let activeRebuildJobId = ''
+let rebuildMonitorSequence = 0
+const lastObservedRebuildJob = ref<MemoryIndexRebuildJob | null>(null)
+const rebuildMonitorError = ref('')
+const indexStatusRefreshing = ref(false)
+const displayedRebuildJob = computed(() => indexStatus.value?.job ?? (lastObservedRebuildJob.value && ['cancelled', 'failed', 'interrupted', 'completed'].includes(lastObservedRebuildJob.value.state) ? lastObservedRebuildJob.value : null))
+let indexStatusSequence = 0
 let memoryPanelDisposed = false
+let memoryPanelActive = false
+let memoryReadsActive = false
+let memoryRefreshSequence = 0
+const memoryRefreshing = ref(false)
+const canReadMemory = () => !memoryPanelDisposed && memoryPanelActive && !document.hidden
 const batchActionLoading = ref(false)
 const workspaceScopeSaving = ref(false)
 const exportLoading = ref(false)
 const importLoading = ref(false)
 const importReport = ref<MemoryImportResult | null>(null)
+const importTargetLabel = ref('')
+const exportReport = ref('')
 const deletePreview = ref<MemoryDeletePreview | null>(null)
 const memoryImportInput = ref<HTMLInputElement | null>(null)
 const inspectorDraftSaving = ref(false)
@@ -198,6 +251,15 @@ const forgettingDocIds = ref(new Set<string>())
 const restoringDocIds = ref(new Set<string>())
 const removingDocIds = ref(new Set<string>())
 const batchDeleteProgress = reactive({ active: false, total: 0, done: 0 })
+const deletePreflightLoading = ref(false)
+const deleteConfirmationOpen = ref(false)
+const deletePreflightError = ref('')
+const batchContext = ref('')
+const batchResults = ref<Array<{ id: string; status: 'success' | 'failed' | 'skipped' | 'pending'; detail: string }>>([])
+const deletionReport = ref<{ message: string; warning: boolean } | null>(null)
+const feedbackPendingIds = ref(new Set<string>())
+const feedbackById = ref<Record<string, string>>({})
+const feedbackErrors = ref<Record<string, string>>({})
 const maintenancePreview = ref<MemoryMaintenancePreview | null>(null)
 const maintenancePreviewPolicyKey = ref('')
 const maintenancePreviewLoading = ref(false)
@@ -342,8 +404,12 @@ const previewMemoryMaintenance = async () => {
   if (maintenancePreviewLoading.value || maintenanceApplyLoading.value) return
   maintenancePreviewLoading.value = true
   try {
-    maintenancePreview.value = await memoryClient.previewMaintenance(maintenancePayload())
-    maintenancePreviewPolicyKey.value = maintenancePolicyKey()
+    const payload = maintenancePayload()
+    const key = JSON.stringify(payload)
+    const result = await memoryClient.previewMaintenance(payload)
+    if (key !== maintenancePolicyKey()) return
+    maintenancePreview.value = result
+    maintenancePreviewPolicyKey.value = key
   } catch (error) {
     ElMessage.error(describeFailure(error, t('memoryPanel.maintenancePreviewFailed')))
   } finally {
@@ -351,38 +417,68 @@ const previewMemoryMaintenance = async () => {
   }
 }
 
+const reportMemoryDeletion = (result: unknown, authorityMessage: string) => {
+  const warning = memoryIndexCleanupStatus(result) !== 'complete'
+  const message = memoryDeletionResultText(result, authorityMessage)
+  deletionReport.value = { message, warning }
+  if (warning) ElMessage.warning(message)
+  else ElMessage.success(message)
+}
+const refreshAfterDeletion = async (authorityConfirmed = true) => {
+  try { await refreshMemoryState() }
+  catch (error) {
+    ElMessage.warning((authorityConfirmed
+      ? memoryText('权威删除结果已保留；列表刷新失败：', 'Authority deletion result preserved; list refresh failed: ')
+      : memoryText('列表刷新失败：', 'List refresh failed: ')) + describeFailure(error, t('memoryPanel.docDeleteFailed')))
+  }
+}
+
 const applyMemoryMaintenance = async () => {
-  if (maintenanceApplyLoading.value) return
+  if (maintenanceApplyLoading.value || deleteConfirmationOpen.value || deletePreflightLoading.value || batchActionLoading.value || removingDocIds.value.size) return
   if (!maintenancePreviewMatchesPolicy.value) {
     ElMessage.warning(t('memoryPanel.maintenancePolicyChanged'))
     return
   }
+  const payload = maintenancePayload()
+  const policyKey = maintenancePolicyKey()
   const previewToken = maintenancePreview.value?.preview_token
   if (!previewToken) {
     ElMessage.warning(t('memoryPanel.maintenancePreviewStale'))
     return
   }
+  deleteConfirmationOpen.value = true
   try {
     await ElMessageBox.confirm(
-      t('memoryPanel.maintenanceDeleteConfirmMessage', { count: maintenancePreview.value?.summary.delete_count ?? 0 }),
+      t('memoryPanel.maintenanceDeleteConfirmMessage', { count: maintenancePreview.value?.summary.delete_count ?? 0 }) + ' · ' + memoryDeletionNote(),
       t('memoryPanel.maintenanceDeleteConfirmTitle'),
       { confirmButtonText: t('memoryPanel.permanentDelete'), cancelButtonText: t('memoryPanel.cancel'), type: 'warning' },
     )
   } catch {
     return
+  } finally {
+    deleteConfirmationOpen.value = false
   }
+  if (memoryPanelDisposed || policyKey !== maintenancePolicyKey() || previewToken !== maintenancePreview.value?.preview_token) return
   maintenanceApplyLoading.value = true
+  invalidateReads()
   try {
     const result = await memoryClient.applyMaintenance({
-      ...maintenancePayload(),
+      ...payload,
       preview_token: previewToken,
       confirmation: 'PERMANENT_DELETE',
     })
-    ElMessage.success(t('memoryPanel.maintenanceDeleted', { count: result.changed_count }))
-    await refreshMemoryState()
+    reportMemoryDeletion(result, t('memoryPanel.maintenanceDeleted', { count: result.changed_count }))
+    maintenancePreview.value = null
+    maintenancePreviewPolicyKey.value = ''
+    await refreshAfterDeletion()
     try {
-      maintenancePreview.value = await memoryClient.previewMaintenance(maintenancePayload())
-      maintenancePreviewPolicyKey.value = maintenancePolicyKey()
+      const nextPayload = maintenancePayload()
+      const nextKey = JSON.stringify(nextPayload)
+      const preview = await memoryClient.previewMaintenance(nextPayload)
+      if (nextKey === maintenancePolicyKey()) {
+        maintenancePreview.value = preview
+        maintenancePreviewPolicyKey.value = nextKey
+      }
     } catch {
       maintenancePreview.value = null
       maintenancePreviewPolicyKey.value = ''
@@ -481,6 +577,10 @@ const openLayerInLibrary = (layer: string) => {
 }
 
 const selectDocFromAdvanced = (id: string) => {
+  if (!docs.value.some(doc => doc.id === id)) {
+    ElMessage.warning(memoryText('此结果不在当前资料库范围，请先切换到结果所属范围再查看。', 'This result is outside the current library. Switch to its scope to inspect it.'))
+    return
+  }
   selectDocById(id)
   advancedToolsVisible.value = false
   activeTab.value = 'library'
@@ -494,7 +594,7 @@ const resetDocFilters = () => {
 }
 
 const docMatchesView = (doc: MemoryDoc, mode: DocViewMode) => {
-  if (mode === 'recallable') return true
+  if (mode === 'recallable') return doc.state === 'active' && doc.index_status !== 'excluded'
   if (mode === 'review') return reviewDocs.value.some(item => item.id === doc.id)
   if (mode === 'important') return Number(doc.importance ?? 0) >= 0.8
   if (mode === 'hits') return queryHitIds.value.has(doc.id)
@@ -517,6 +617,8 @@ const docSortValue = (doc: MemoryDoc, mode: DocSortMode) => {
 }
 
 const filteredDocs = computed(() => {
+  const options = scopedDocOptions()
+  if (docsScopeKey.value !== JSON.stringify([options.scope, options.workspaceId, options.sessionId])) return []
   let list: MemoryDoc[] = docs.value
   list = list.filter(d => docMatchesView(d, docViewMode.value))
   if (filterLayer.value) list = list.filter(d => d.layer === filterLayer.value)
@@ -538,17 +640,17 @@ const remainingFilteredDocCount = computed(() => Math.max(0, filteredDocs.value.
 const selectedDoc = computed(() => filteredDocs.value.find(doc => doc.id === selectedDocId.value) || filteredDocs.value[0] || null)
 watch(
   () => [
-    selectedDoc.value?.id,
+    selectedDoc.value,
     currentMemoryScope.value,
     activeWorkspace.value.id,
     sessionStore.activeSession?.id,
   ] as const,
-  ([id, scope, workspaceId, sessionId]) => {
-    if (!id) {
+  ([doc, scope, workspaceId, sessionId]) => {
+    if (!doc) {
     operationsRequest.reset()
     return
     }
-    void loadOperations(id, {
+    void loadOperations(doc.id, {
       scope,
       workspaceId: scope === 'global' ? undefined : workspaceId,
       sessionId: scope === 'session' ? sessionId : undefined,
@@ -559,7 +661,7 @@ watch(
 const hasDocFilters = computed(() => docViewMode.value !== 'all' || docSortMode.value !== 'updated' || Boolean(filterLayer.value) || Boolean(searchText.value.trim()))
 const batchTargetDocs = computed(() => hasDocFilters.value ? filteredDocs.value : [])
 const batchTargetCount = computed(() => batchTargetDocs.value.length)
-const batchActionDisabled = computed(() => batchActionLoading.value || !hasDocFilters.value || batchTargetCount.value === 0)
+const batchActionDisabled = computed(() => deletePreflightLoading.value || batchActionLoading.value || !hasDocFilters.value || batchTargetCount.value === 0)
 const batchDeleteLabel = computed(() => {
   if (batchDeleteProgress.active) return t('memoryPanel.batchDeleting', { done: batchDeleteProgress.done, total: batchDeleteProgress.total })
   if (!hasDocFilters.value) return t('memoryPanel.batchDeleteNeedFilters')
@@ -590,6 +692,7 @@ const isQueryHit = (doc: MemoryDoc) => queryHitIds.value.has(doc.id)
 const toggleQueryLayer = (layer: string) => {
   const set = new Set(effectiveQueryLayers.value)
   if (set.has(layer)) {
+    if (set.size === 1) return
     set.delete(layer)
   } else {
     set.add(layer)
@@ -629,23 +732,35 @@ const setPendingDocId = (target: typeof forgettingDocIds | typeof restoringDocId
   target.value = next
 }
 
-const scopedDocOptions = () => ({
-  scope: currentMemoryScope.value,
-  workspaceId: activeWorkspace.value?.id,
-  sessionId: currentMemoryScope.value === 'session' ? sessionStore.activeSession?.id : undefined,
-})
 
 const loadScopedDocs = () => loadDocs(scopedDocOptions())
 
 const refreshIndexStatus = async () => {
+  if (!canReadMemory()) return
+  const sequence = ++indexStatusSequence
   try {
-    indexStatus.value = await memoryClient.getIndexStatus()
+    const result = await memoryClient.getIndexStatus()
+    if (!canReadMemory() || sequence !== indexStatusSequence) return
+    indexStatus.value = result
     const job = indexStatus.value.job
-    if (job && ['queued', 'running', 'cancelling'].includes(job.state) && activeRebuildJobId !== job.job_id) {
+    if (job) {
+      lastObservedRebuildJob.value = job
+      rebuildMonitorError.value = ''
+    } else if (lastObservedRebuildJob.value && !rebuildTerminalStates.has(lastObservedRebuildJob.value.state)) {
+      rebuildMonitorError.value = memoryText('当前服务未找到此前的重建任务，终态未知。可以重新发起重建。', 'The service no longer has the previous rebuild job. Its final state is unknown. A new rebuild can be started.')
+      activeRebuildJobId = ''
+      rebuildMonitorSequence += 1
+      rebuildIndexLoading.value = false
+    }
+    if (job && !rebuildTerminalStates.has(job.state)) {
       rebuildIndexLoading.value = true
-      void monitorMemoryIndexRebuild(job.job_id, false)
+      if (activeRebuildJobId !== job.job_id) void monitorMemoryIndexRebuild(job.job_id, false)
+    } else {
+      stopRebuildMonitoring()
+      rebuildIndexLoading.value = false
     }
   } catch (error) {
+    if (!canReadMemory() || sequence !== indexStatusSequence) return
     const message = describeFailure(error, t('memoryPanel.indexStatusReadFailed'))
     indexStatus.value = {
       status: 'error',
@@ -659,18 +774,41 @@ const refreshIndexStatus = async () => {
   }
 }
 
+const checkMemoryIndexStatus = async () => {
+  if (indexStatusRefreshing.value) return
+  indexStatusRefreshing.value = true
+  try { await refreshIndexStatus() }
+  catch (error) { ElMessage.error(describeFailure(error, t('memoryPanel.indexStatusReadFailed'))) }
+  finally { indexStatusRefreshing.value = false }
+}
+
 const refreshMemoryState = async () => {
+  if (!canReadMemory()) return
+  const sequence = ++memoryRefreshSequence
+  const context = memoryContextKey()
+  const isCurrent = () => canReadMemory() && sequence === memoryRefreshSequence && context === memoryContextKey()
+  memoryRefreshing.value = true
+  // Reset request sequences, keeping the cached rows and scoped dirty drafts.
+  invalidateReads()
   const options = scopedDocOptions()
-  await Promise.all([
-    loadDocs(options),
-    loadOverview(options),
-    loadForgottenDocs(options),
-    loadCandidates(options),
-  ])
   try {
-    await refreshIndexStatus()
-  } catch (error) {
-    console.debug('[MemoryPanel] failed to refresh index status:', error)
+    await Promise.all([
+      loadDocs(options),
+      loadOverview(options),
+      loadForgottenDocs(options),
+      loadCandidates(options),
+    ])
+    if (!isCurrent()) return
+    try {
+      await refreshIndexStatus()
+    } catch (error) {
+      console.debug('[MemoryPanel] failed to refresh index status:', error)
+    }
+  } finally {
+    if (isCurrent()) {
+      memoryRefreshing.value = false
+      openRequestedMemoryDoc()
+    }
   }
 }
 
@@ -683,16 +821,18 @@ const handleAdvancedToolCommand = (command: string) => {
 const exportMemory = async () => {
   if (exportLoading.value) return
   exportLoading.value = true
+  const options = scopedDocOptions()
   try {
-    const payload = await memoryClient.exportDocs({ ...scopedDocOptions(), includeState: 'all' })
+    const payload = await memoryClient.exportDocs({ ...options, includeState: 'all' })
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `yuizaki-memory-${currentMemoryScope.value}-${new Date().toISOString().slice(0, 10)}.json`
+    link.download = `yuizaki-memory-${options.scope}-${encodeURIComponent(options.sessionId || options.workspaceId || 'global')}-${new Date().toISOString().slice(0, 10)}.json`
     link.click()
     URL.revokeObjectURL(url)
-    ElMessage.success(t('memoryPanel.exportSuccess', { count: payload.count }))
+    exportReport.value = t('memoryPanel.exportSuccess', { count: payload.count }) + ' · ' + [payload.scope, payload.workspace_id, payload.session_id].filter(Boolean).join(' / ')
+    ElMessage.success(exportReport.value)
   } catch (error) {
     ElMessage.error(describeFailure(error, t('memoryPanel.exportFailed')))
   } finally {
@@ -703,7 +843,9 @@ const exportMemory = async () => {
 const handleMemoryImportFile = async (event: Event) => {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
-  if (!file) return
+  if (!file || importLoading.value) return
+  const options = scopedDocOptions()
+  const context = memoryContextKey()
   importLoading.value = true
   importReport.value = null
   try {
@@ -721,32 +863,40 @@ const handleMemoryImportFile = async (event: Event) => {
         && (candidate.id === undefined || typeof candidate.id === 'string')
         && (candidate.metadata === undefined || (candidate.metadata !== null && typeof candidate.metadata === 'object' && !Array.isArray(candidate.metadata)))
     })
+    if (importDocs.length !== envelope.docs.length) throw new Error(memoryText('备份中包含无效记录，尚未导入。请检查正文、ID和metadata格式。', 'The backup contains invalid records. Nothing was imported. Check text, IDs and metadata.'))
     if (!importDocs.length) throw new Error(t('memoryPanel.importEmpty'))
+    if (context !== memoryContextKey() || memoryPanelDisposed) return
+    const targetLabel = [options.scope, options.workspaceId, options.sessionId].filter(Boolean).join(' / ')
     const existingIds = new Set(docs.value.map(doc => doc.id))
     const duplicateCount = importDocs.filter(doc => doc.id && existingIds.has(doc.id)).length
     await ElMessageBox.confirm(
       t('memoryPanel.importConfirmMessage', {
         count: importDocs.length,
-        scope: scopeLabel(currentMemoryScope.value),
-        note: duplicateCount ? t('memoryPanel.importConfirmNote', { count: duplicateCount }) : '',
+        scope: scopeLabel(options.scope) + ' · ' + targetLabel,
+        note: (duplicateCount ? t('memoryPanel.importConfirmNote', { count: duplicateCount }) + ' · ' : '') + memoryText('备份原范围将重新映射到此目标范围；保留软遗忘状态。', 'The backup scope will be remapped to this target scope; soft-forgotten state is preserved.'),
       }),
       t('memoryPanel.importConfirmTitle'),
       { confirmButtonText: t('memoryPanel.importStart'), cancelButtonText: t('memoryPanel.cancel'), type: 'info' },
     )
+    if (context !== memoryContextKey() || memoryPanelDisposed) return
+    invalidateReads()
     const result = await memoryClient.importDocs({
       format: 'yuizaki-memory-export',
       version: 1,
       docs: importDocs.map(doc => ({ id: doc.id, text: doc.text, metadata: doc.metadata })),
-      scope: currentMemoryScope.value,
-      workspace_id: currentMemoryScope.value === 'workspace' ? activeWorkspace.value?.id : undefined,
-      session_id: currentMemoryScope.value === 'session' ? sessionStore.activeSession?.id : undefined,
+      scope: options.scope,
+      workspace_id: options.scope === 'global' ? undefined : options.workspaceId,
+      session_id: options.sessionId,
       conflict: 'skip',
     })
-    importReport.value = result
+    if (context === memoryContextKey() && !memoryPanelDisposed) {
+      importReport.value = result
+      importTargetLabel.value = targetLabel
+    }
     ElMessage.success(t('memoryPanel.importSuccess', { imported: result.imported_count, skipped: result.skipped_count }))
     await refreshMemoryState()
   } catch (error) {
-    if (error !== 'cancel' && !(error instanceof Error && error.message === 'cancel')) {
+    if (error !== 'cancel' && error !== 'close' && !(error instanceof Error && error.message === 'cancel')) {
       ElMessage.error(describeFailure(error, t('memoryPanel.importFailed')))
     }
   } finally {
@@ -777,15 +927,41 @@ const decideReviewCandidate = async ({ doc, decision }: { doc: MemoryDoc; decisi
 }
 
 const rebuildTerminalStates = new Set<MemoryIndexRebuildJob['state']>(['cancelled', 'failed', 'interrupted', 'completed'])
-const waitForRebuildPoll = () => new Promise(resolve => window.setTimeout(resolve, 500))
+let rebuildPollTimer: ReturnType<typeof window.setTimeout> | null = null
+let finishRebuildWait: (() => void) | null = null
+const waitForRebuildPoll = () => new Promise<void>(resolve => {
+  finishRebuildWait = resolve
+  rebuildPollTimer = window.setTimeout(() => {
+    rebuildPollTimer = null
+    finishRebuildWait = null
+    resolve()
+  }, 500)
+})
+const stopRebuildMonitoring = () => {
+  rebuildMonitorSequence += 1
+  activeRebuildJobId = ''
+  rebuildIndexLoading.value = false
+  if (rebuildPollTimer !== null) window.clearTimeout(rebuildPollTimer)
+  rebuildPollTimer = null
+  finishRebuildWait?.()
+  finishRebuildWait = null
+}
 
 const projectRebuildJob = (job: MemoryIndexRebuildJob, indexState: string) => {
+  if (memoryPanelDisposed) return
+  const previous = lastObservedRebuildJob.value
+  if (previous?.job_id === job.job_id) {
+    if (rebuildTerminalStates.has(previous.state) && !rebuildTerminalStates.has(job.state)) return
+    if (Date.parse(previous.updated_at) > Date.parse(job.updated_at)) return
+  }
+  indexStatusSequence += 1
+  lastObservedRebuildJob.value = job
   const current = indexStatus.value
   indexStatus.value = {
     status: indexState,
     count: current?.count ?? docs.value.length,
     backend: current?.backend,
-    healthy: current?.healthy ?? true,
+    healthy: current?.healthy,
     message: current?.message,
     metadata: current?.metadata,
     job,
@@ -793,28 +969,39 @@ const projectRebuildJob = (job: MemoryIndexRebuildJob, indexState: string) => {
 }
 
 const monitorMemoryIndexRebuild = async (jobId: string, announceCompletion: boolean) => {
+  if (!canReadMemory() || activeRebuildJobId === jobId) return
+  stopRebuildMonitoring()
+  const monitorSequence = ++rebuildMonitorSequence
   activeRebuildJobId = jobId
+  rebuildIndexLoading.value = true
+  rebuildMonitorError.value = ''
+  let polls = 0
   try {
-    while (!memoryPanelDisposed && activeRebuildJobId === jobId) {
+    while (canReadMemory() && activeRebuildJobId === jobId && monitorSequence === rebuildMonitorSequence) {
+      if (++polls > 240) throw new Error(memoryText('已停止自动跟踪，重建终态未知；刷新状态以继续核对。', 'Automatic tracking stopped; final rebuild state unknown. Refresh status to check again.'))
       const response = await memoryClient.getIndexRebuildJob(jobId)
+      if (!canReadMemory() || activeRebuildJobId !== jobId || monitorSequence !== rebuildMonitorSequence) return
       projectRebuildJob(response.job, response.index_status)
-      if (rebuildTerminalStates.has(response.job.state)) {
-        if (response.job.state === 'completed') {
-          const indexedCount = Number(response.job.result?.indexed_count ?? response.job.processed_count)
+      const observed = lastObservedRebuildJob.value
+      const job = observed?.job_id === jobId ? observed : response.job
+      if (rebuildTerminalStates.has(job.state)) {
+        if (job.state === 'completed') {
+          const indexedCount = Number(job.result?.indexed_count ?? job.processed_count)
           if (announceCompletion) ElMessage.success(t('memoryPanel.indexRebuilt', { count: indexedCount }))
           await refreshMemoryState()
-        } else if (response.job.state === 'cancelled') {
+        } else if (job.state === 'cancelled') {
           if (announceCompletion) ElMessage.info(t('memoryPanel.indexRebuildCancelled'))
           await refreshIndexStatus()
         } else if (announceCompletion) {
-          ElMessage.error(response.job.last_error || t('memoryPanel.indexRebuildFailedRetry'))
+          ElMessage.error(job.last_error || t('memoryPanel.indexRebuildFailedRetry'))
         }
         break
       }
       await waitForRebuildPoll()
     }
   } catch (error) {
-    if (!memoryPanelDisposed) {
+    if (canReadMemory() && activeRebuildJobId === jobId && monitorSequence === rebuildMonitorSequence) {
+      rebuildMonitorError.value = describeFailure(error, t('memoryPanel.indexRebuildProgressFailed'))
       // A backend restart can discard the in-memory job; refresh once so stale
       // progress is not left looking active and the authority status is visible.
       if (error instanceof Error && /404|not found/i.test(error.message)) {
@@ -824,7 +1011,7 @@ const monitorMemoryIndexRebuild = async (jobId: string, announceCompletion: bool
       }
     }
   } finally {
-    if (activeRebuildJobId === jobId) {
+    if (activeRebuildJobId === jobId && monitorSequence === rebuildMonitorSequence) {
       activeRebuildJobId = ''
       rebuildIndexLoading.value = false
     }
@@ -839,11 +1026,13 @@ const rebuildMemoryIndex = async () => {
     const response = previousJob?.recoverable && rebuildTerminalStates.has(previousJob.state)
       ? await memoryClient.retryIndexRebuild(previousJob.job_id)
       : await memoryClient.rebuildIndex()
+    if (memoryPanelDisposed) return
     projectRebuildJob(response.job, response.index_status)
     await monitorMemoryIndexRebuild(response.job.job_id, true)
   } catch (error) {
     rebuildIndexLoading.value = false
-    ElMessage.error(describeFailure(error, t('memoryPanel.indexRebuildFailed')))
+    rebuildMonitorError.value = describeFailure(error, t('memoryPanel.indexRebuildFailed'))
+    ElMessage.error(rebuildMonitorError.value)
   }
 }
 
@@ -852,7 +1041,12 @@ const cancelMemoryIndexRebuild = async () => {
   if (!job || !['queued', 'running', 'cancelling'].includes(job.state)) return
   try {
     const response = await memoryClient.cancelIndexRebuild(job.job_id)
+    if (memoryPanelDisposed || displayedRebuildJob.value?.job_id !== job.job_id) return
     projectRebuildJob(response.job, response.index_status)
+    if (!activeRebuildJobId) {
+      rebuildIndexLoading.value = true
+      void monitorMemoryIndexRebuild(job.job_id, false)
+    }
   } catch (error) {
     ElMessage.error(describeFailure(error, t('memoryPanel.indexRebuildCancelFailed')))
   }
@@ -869,9 +1063,16 @@ const parseJsonObject = (rawValue: string, label: string) => {
 }
 
 const submitQuery = async () => {
-  if (!queryForm.query.trim()) return
+  if (!queryForm.query.trim() || queryRequest.loading) return
+  if (queryForm.scope === 'session' && !sessionStore.activeSession) {
+    ElMessage.warning(memoryText('会话范围需要当前会话。', 'Session scope requires an active session.'))
+    return
+  }
+  feedbackById.value = {}
+  feedbackErrors.value = {}
   await queryMemory({
     query: queryForm.query.trim(),
+    workspace_id: queryForm.scope === 'global' ? undefined : activeWorkspace.value.id,
     top_k: queryForm.top_k,
     session_id: queryForm.scope === 'session' ? sessionStore.activeSession?.id : undefined,
     scope: queryForm.scope,
@@ -884,31 +1085,59 @@ const submitQuery = async () => {
 
 
 const handleRecallFeedback = async (payload: { id: string; feedback: 'helpful' | 'not_helpful' | 'incorrect' | 'dismissed' }) => {
+  if (feedbackPendingIds.value.has(payload.id)) return
+  const query = queryResult.value
+  if (!query?.results.some(item => item.id === payload.id)) return
+  feedbackPendingIds.value = new Set([...feedbackPendingIds.value, payload.id])
+  delete feedbackErrors.value[payload.id]
   try {
-    const doc = queryResult.value?.results.find(item => item.id === payload.id)
-    await recordRecallFeedback(payload.id, payload.feedback, doc ? docSessionId(doc) : scopedDocOptions().sessionId)
-    ElMessage.success(payload.feedback === 'helpful' ? t('memoryPanel.feedbackHelpful') : t('memoryPanel.feedbackRecorded'))
+    const doc = query.results.find(item => item.id === payload.id)
+    const sessionId = typeof doc?.metadata?.session_id === 'string' ? doc.metadata.session_id : query.trace?.session_id
+    await recordRecallFeedback(payload.id, payload.feedback, sessionId)
+    if (queryResult.value === query) {
+      feedbackById.value[payload.id] = payload.feedback
+      ElMessage.success(payload.feedback === 'helpful' ? t('memoryPanel.feedbackHelpful') : t('memoryPanel.feedbackRecorded'))
+    }
   } catch (error) {
-    ElMessage.error(describeFailure(error, t('memoryPanel.feedbackFailed')))
+    if (queryResult.value === query) feedbackErrors.value[payload.id] = describeFailure(error, t('memoryPanel.feedbackFailed'))
+  } finally {
+    const next = new Set(feedbackPendingIds.value)
+    next.delete(payload.id)
+    feedbackPendingIds.value = next
   }
 }
 
 const openEditDoc = (doc: MemoryDoc) => {
-  editForm.id = doc.id
-  editForm.text = doc.text || ''
-  editForm.type = doc.type || 'fact'
-  editForm.layer = doc.layer || 'semantic'
-  editForm.importance = Number(doc.importance ?? 0.5)
-  editForm.confidence = Number(doc.confidence ?? 0.72)
-  editForm.source = docSourceValue(doc)
-  editForm.metadataJson = JSON.stringify(doc.metadata || {}, null, 2)
+  cacheEditDraft()
+  editContext = memoryContextKey()
+  editDraftKey = editContext + ':' + doc.id
+  editTarget.value = JSON.parse(JSON.stringify(doc)) as MemoryDoc
+  const form = {
+    id: doc.id, text: doc.text || '', type: doc.type || 'fact', layer: doc.layer || 'semantic',
+    importance: Number(doc.importance ?? 0.5), confidence: Number(doc.confidence ?? 0.72),
+    source: docSourceValue(doc), metadataJson: JSON.stringify(doc.metadata || {}, null, 2),
+  }
+  const saved = editDrafts.get(editDraftKey)
+  Object.assign(editForm, saved?.form ?? form)
+  editBaseSnapshot = saved?.base ?? JSON.stringify(form)
   editDialogVisible.value = true
 }
 
+let consumedEditRequest = ''
+const requestedMemoryDocId = () => {
+  const value = Array.isArray(route.query.edit) ? route.query.edit[0] : route.query.edit
+  return route.name === 'memory' && typeof value === 'string' ? value.trim() : ''
+}
 const openRequestedMemoryDoc = () => {
-  const query = window.location.hash.split('?')[1] || ''
-  const requestedId = new URLSearchParams(query).get('edit')?.trim() || ''
-  if (!requestedId) return
+  const requestedId = requestedMemoryDocId()
+  if (!requestedId || !canReadMemory() || memoryRefreshing.value || docsRequest.loading || docsRequest.error || !docsRequest.data) return
+  if (!hasScopedDocCache.value) return
+  // The router can advance before workspace/session stores finish switching.
+  if (typeof route.params.workspaceId === 'string' && route.params.workspaceId !== activeWorkspace.value.id) return
+  if (typeof route.params.sessionId === 'string' && route.params.sessionId !== sessionStore.activeSession?.id) return
+  const requestKey = JSON.stringify([memoryContextKey(), requestedId])
+  if (consumedEditRequest === requestKey) return
+  consumedEditRequest = requestKey
   const doc = docs.value.find(item => item.id === requestedId)
   if (!doc) {
     ElMessage.warning(t('memoryPanel.docNotFound'))
@@ -956,12 +1185,19 @@ const updateSelectedDoc = async (
   overrides: Parameters<typeof buildDocUpdatePayload>[1],
   successMessage: string,
 ) => {
+  if (updateRequest.loading || batchActionLoading.value) return null
+  const context = memoryContextKey()
+  const selection = selectedDocId.value
   const result = await updateDoc(doc.id, buildDocUpdatePayload(doc, overrides))
-  if (result?.status === 'updated') {
-    ElMessage.success(successMessage)
-    selectedDocId.value = doc.id
+  if (result?.status === 'updated' || result?.storage_status === 'saved') {
+    if (result.index_status === 'pending' || result.index_status === 'failed') ElMessage.warning(successMessage + ' · ' + memoryIndexLabel(result.index_status))
+    else ElMessage.success(successMessage)
+    if (context === memoryContextKey() && selection === selectedDocId.value) selectedDocId.value = doc.id
     await refreshMemoryState()
+  } else {
+    ElMessage.error(updateRequest.error || t('memoryPanel.docUpdateFailed'))
   }
+  return result
 }
 
 const moveDocLayer = async (doc: MemoryDoc, layer: string) => {
@@ -993,89 +1229,106 @@ const batchUpdateVisibleDocs = async (
   actionLabel: string,
   buildOverrides: (doc: MemoryDoc) => Parameters<typeof buildDocUpdatePayload>[1],
 ) => {
-  const targets = batchTargetDocs.value.slice()
-  if (batchActionLoading.value) return
-  if (!hasDocFilters.value) {
-    ElMessage.info(t('memoryPanel.batchNeedsFilters'))
-    return
-  }
+  if (batchActionLoading.value || deletePreflightLoading.value || deleteConfirmationOpen.value || updateRequest.loading) return
+  if (!hasDocFilters.value) { ElMessage.info(t('memoryPanel.batchNeedsFilters')); return }
+  const targets = batchTargetDocs.value.map(doc => ({ id: doc.id, payload: buildDocUpdatePayload(doc, buildOverrides(doc)) }))
   if (!targets.length) return
-  try {
-    await ElMessageBox.confirm(
-      t('memoryPanel.batchConfirmMessage', { count: targets.length, action: actionLabel }),
-      t('memoryPanel.batchConfirmTitle'),
-      {
-        confirmButtonText: actionLabel,
-        cancelButtonText: t('memoryPanel.cancel'),
-        type: 'warning',
-      },
-    )
-  } catch {
-    return
-  }
-
+  const context = memoryContextKey()
   batchActionLoading.value = true
   try {
-    for (const doc of targets) {
-      await updateDoc(doc.id, buildDocUpdatePayload(doc, buildOverrides(doc)))
+    try {
+      await ElMessageBox.confirm(t('memoryPanel.batchConfirmMessage', { count: targets.length, action: actionLabel }),
+        t('memoryPanel.batchConfirmTitle'), { confirmButtonText: actionLabel, cancelButtonText: t('memoryPanel.cancel'), type: 'warning' })
+    } catch { return }
+    if (context !== memoryContextKey() || memoryPanelDisposed) return
+    batchResults.value = []
+    batchContext.value = context
+    for (const target of targets) {
+      if (context !== memoryContextKey() || memoryPanelDisposed) break
+      try {
+        const result = await updateDoc(target.id, target.payload)
+        const ok = result?.status === 'updated' || result?.storage_status === 'saved'
+        batchResults.value.push({ id: target.id, status: ok ? 'success' : 'failed',
+          detail: ok ? memoryIndexLabel(result?.index_status) : updateRequest.error || t('memoryPanel.docUpdateFailed') })
+      } catch (error) {
+        batchResults.value.push({ id: target.id, status: 'failed', detail: describeFailure(error, t('memoryPanel.docUpdateFailed')) })
+      }
     }
-    ElMessage.success(t('memoryPanel.batchProcessed', { count: targets.length }))
+    const done = new Set(batchResults.value.map(item => item.id))
+    for (const target of targets) if (!done.has(target.id)) batchResults.value.push({ id: target.id, status: 'skipped', detail: memoryText('范围或面板已切换，未执行', 'Scope or panel changed; not executed') })
+    if (memoryPanelDisposed) return
+    if (batchResults.value.every(item => item.status === 'success')) ElMessage.success(t('memoryPanel.batchProcessed', { count: targets.length }))
+    else ElMessage.warning(memoryText('批处理未全部成功，请查看逐项结果。', 'Some items did not succeed. Review the item results.'))
     await refreshMemoryState()
-  } catch (error) {
-    ElMessage.error(describeFailure(error, t('memoryPanel.batchFailed')))
-  } finally {
-    batchActionLoading.value = false
-  }
+  } finally { batchActionLoading.value = false }
 }
 
 const batchBoostVisibleDocs = () => batchUpdateVisibleDocs(t('memoryPanel.batchBoostAction'), doc => ({
-  importance: Math.min(1, Math.max(Number(doc.importance ?? 0.5), 0.85)),
-  edit_reason: 'batch_boost_importance',
+  importance: Math.min(1, Math.max(Number(doc.importance ?? 0.5), 0.85)), edit_reason: 'batch_boost_importance',
 }))
 
-const batchDeleteVisibleDocs = async () => {
-  const targets = batchTargetDocs.value.slice()
-  if (batchActionLoading.value) return
-  if (!hasDocFilters.value) {
-    ElMessage.info(t('memoryPanel.batchDeleteSelectionRequired'))
-    return
-  }
-  if (!targets.length) return
-  const targetIds = new Set(targets.map(doc => doc.id))
-  const ids = [...targetIds]
-  const previousDocs = docs.value.slice()
-  const previousSelectedDocId = selectedDocId.value
-  const nextSelectedId = docs.value.find(doc => !targetIds.has(doc.id))?.id || ''
+// A failed preflight is an error; only dismissing the confirmation is cancellation.
+const confirmMemoryDeletion = async (ids: string[], sessionId: string | undefined, title: string, context: string) => {
+  if (deletePreflightLoading.value || deleteConfirmationOpen.value) return false
+  deletePreflightLoading.value = true
+  deletePreflightError.value = ''
+  let preview: MemoryDeletePreview
   try {
-    deletePreview.value = await memoryClient.previewDelete(ids, scopedDocOptions().sessionId)
-    await ElMessageBox.confirm(
-      deletePreviewMessage(deletePreview.value),
-      t('memoryPanel.batchDeleteConfirmTitle', { count: targets.length }),
-      {
-        confirmButtonText: t('memoryPanel.permanentDelete'),
-        cancelButtonText: t('memoryPanel.cancel'),
-        type: 'warning',
-      },
-    )
-  } catch {
-    return
-  }
-
-  batchActionLoading.value = true
-  batchDeleteProgress.active = true
-  batchDeleteProgress.total = ids.length
-  batchDeleteProgress.done = 0
-  try {
-    docs.value = docs.value.filter(doc => !targetIds.has(doc.id))
-    if (targetIds.has(selectedDocId.value)) selectedDocId.value = nextSelectedId
-    const result = await memoryClient.removeDocs(ids, scopedDocOptions().sessionId)
-    batchDeleteProgress.done = result.deleted_count ?? ids.length
-    ElMessage.success(t('memoryPanel.batchDeleted', { count: batchDeleteProgress.done }))
-    await refreshIndexStatus().catch(error => console.debug('[MemoryPanel] failed to refresh index status after batch delete:', error))
+    preview = await memoryClient.previewDelete(ids, sessionId)
+    if (context !== memoryContextKey()) return false
+    deletePreview.value = preview
   } catch (error) {
-    docs.value = previousDocs
-    selectedDocId.value = previousSelectedDocId
-    ElMessage.error(describeFailure(error, t('memoryPanel.batchDeleteFailed')))
+    if (context !== memoryContextKey() || memoryPanelDisposed) return false
+    deletePreflightError.value = describeFailure(error, t('memoryPanel.docDeleteFailed'))
+    ElMessage.error(deletePreflightError.value)
+    return false
+  } finally { deletePreflightLoading.value = false }
+  deleteConfirmationOpen.value = true
+  try {
+    await ElMessageBox.confirm(deletePreviewMessage(preview), title, {
+      confirmButtonText: t('memoryPanel.permanentDelete'), cancelButtonText: t('memoryPanel.cancel'), type: 'warning',
+    })
+    return context === memoryContextKey() && !memoryPanelDisposed
+  } catch { return false }
+  finally { deleteConfirmationOpen.value = false }
+}
+
+const batchDeleteVisibleDocs = async () => {
+  if (batchActionLoading.value || deletePreflightLoading.value || deleteConfirmationOpen.value || updateRequest.loading) return
+  if (!hasDocFilters.value) { ElMessage.info(t('memoryPanel.batchDeleteSelectionRequired')); return }
+  const targets = batchTargetDocs.value.map(doc => ({ id: doc.id, sessionId: docSessionId(doc) }))
+  if (!targets.length) return
+  const context = memoryContextKey()
+  const sessionId = scopedDocOptions().sessionId
+  batchActionLoading.value = true
+  try {
+    if (!await confirmMemoryDeletion(targets.map(doc => doc.id), sessionId,
+      t('memoryPanel.batchDeleteConfirmTitle', { count: targets.length }), context) || memoryPanelDisposed) return
+    batchResults.value = []
+    batchContext.value = context
+    batchDeleteProgress.active = true
+    batchDeleteProgress.total = targets.length
+    batchDeleteProgress.done = 0
+    invalidateReads()
+    for (const doc of targets) {
+      if (context !== memoryContextKey() || memoryPanelDisposed) break
+      try {
+        const result = await memoryClient.removeDoc(doc.id, doc.sessionId)
+        batchResults.value.push({ id: doc.id, status: memoryIndexCleanupStatus(result) === 'complete' ? 'success' : 'pending', detail: memoryDeletionResultText(result, t('memoryPanel.docDeleted')) })
+        batchDeleteProgress.done += 1
+      } catch (error) {
+        batchResults.value.push({ id: doc.id, status: 'failed', detail: describeFailure(error, t('memoryPanel.docDeleteFailed')) })
+      }
+    }
+    const done = new Set(batchResults.value.map(item => item.id))
+    for (const doc of targets) if (!done.has(doc.id)) batchResults.value.push({ id: doc.id, status: 'skipped', detail: memoryText('范围或面板已切换，未执行', 'Scope or panel changed; not executed') })
+    if (memoryPanelDisposed) return
+    const complete = batchResults.value.every(item => item.status === 'success')
+    const message = t('memoryPanel.batchDeleted', { count: batchDeleteProgress.done }) + (complete ? '' : ' · ' + memoryText('部分条目失败、跳过或索引清理待核对；请查看逐项结果。', 'Some items failed, were skipped or await index cleanup confirmation. Review item results.'))
+    deletionReport.value = { message, warning: !complete }
+    if (complete) ElMessage.success(message)
+    else ElMessage.warning(message)
+    await refreshAfterDeletion()
   } finally {
     batchDeleteProgress.active = false
     batchActionLoading.value = false
@@ -1083,91 +1336,87 @@ const batchDeleteVisibleDocs = async () => {
 }
 
 const submitEditDoc = async () => {
-  if (!editForm.id || !editForm.text.trim()) return
-  try {
-    const targetDoc = docs.value.find(doc => doc.id === editForm.id)
-    const metadata = {
-      ...parseJsonObject(editForm.metadataJson, 'Metadata'),
-      source: editForm.source,
-      confidence_source: editForm.source,
-    }
-    const payload = targetDoc ? buildDocUpdatePayload(targetDoc, {
-      text: editForm.text.trim(),
-      type: editForm.type || 'fact',
-      layer: editForm.layer,
-      importance: editForm.importance,
-      confidence: editForm.confidence,
-      confidence_source: editForm.source,
-      metadata,
-      edit_reason: 'manual_edit',
-    }) : {
-      text: editForm.text.trim(),
-      type: editForm.type || 'fact',
-      layer: editForm.layer,
-      importance: editForm.importance,
-      confidence: editForm.confidence,
-      confidence_source: editForm.source,
-      metadata,
-      scope: currentMemoryScope.value,
-      workspace_id: currentMemoryScope.value === 'global' ? undefined : activeWorkspace.value?.id,
-      session_id: currentMemoryScope.value === 'session' ? sessionStore.activeSession?.id : undefined,
-      edit_reason: 'manual_edit',
-    }
-    const result = await updateDoc(editForm.id, payload)
-    if (result?.status === 'updated') {
-      ElMessage.success(t('memoryPanel.docUpdated'))
-      editDialogVisible.value = false
-      selectedDocId.value = editForm.id
-      void refreshMemoryState()
-    }
-  } catch (error) {
-    ElMessage.error(describeFailure(error, t('memoryPanel.docUpdateFailed')))
+  const target = editTarget.value
+  if (!target || !editForm.text.trim() || updateRequest.loading || batchActionLoading.value) return
+  if (editContext !== memoryContextKey()) {
+    ElMessage.warning(memoryText('范围已切换；草稿已保留，请回到原范围保存。', 'Scope changed; draft preserved. Return to the original scope to save.'))
+    return
   }
+  const key = editDraftKey
+  const submitted = { ...editForm }
+  const snapshot = JSON.stringify(submitted)
+  try {
+    const metadata = {
+      ...parseJsonObject(submitted.metadataJson, 'Metadata'),
+      source: submitted.source, confidence_source: submitted.source,
+    }
+    const payload = buildDocUpdatePayload(target, {
+      text: submitted.text.trim(), type: submitted.type || 'fact', layer: submitted.layer,
+      importance: submitted.importance, confidence: submitted.confidence,
+      confidence_source: submitted.source, metadata, edit_reason: 'manual_edit',
+    })
+    const result = await updateDoc(target.id, payload)
+    if (result?.status !== 'updated' && result?.storage_status !== 'saved') {
+      ElMessage.error(updateRequest.error || t('memoryPanel.docUpdateFailed'))
+      return
+    }
+    const savedForm = { ...submitted, text: submitted.text.trim() }
+    const savedSnapshot = JSON.stringify(savedForm)
+    const cached = editDrafts.get(key)
+    if (cached && JSON.stringify(cached.form) !== snapshot) cached.base = savedSnapshot
+    else editDrafts.delete(key)
+    if (key === editDraftKey) {
+      editBaseSnapshot = savedSnapshot
+      if (JSON.stringify(editForm) === snapshot) {
+        Object.assign(editForm, savedForm)
+        editDialogVisible.value = false
+      }
+    }
+    if (result.index_status === 'pending' || result.index_status === 'failed') ElMessage.warning(t('memoryPanel.docUpdated') + ' · ' + memoryIndexLabel(result.index_status))
+    else ElMessage.success(t('memoryPanel.docUpdated'))
+    await refreshMemoryState()
+  } catch (error) { ElMessage.error(describeFailure(error, t('memoryPanel.docUpdateFailed'))) }
 }
 
 const removeDoc = async (id: string) => {
-  if (removingDocIds.value.has(id)) return
+  if (removingDocIds.value.has(id) || deletePreflightLoading.value || batchActionLoading.value || deleteConfirmationOpen.value) return
   const doc = docs.value.find(item => item.id === id)
-  try {
-    deletePreview.value = await memoryClient.previewDelete([id], doc ? docSessionId(doc) : scopedDocOptions().sessionId)
-    await ElMessageBox.confirm(
-      deletePreviewMessage(deletePreview.value),
-      t('memoryPanel.maintenanceDeleteConfirmTitle'),
-      {
-        confirmButtonText: t('memoryPanel.permanentDelete'),
-        cancelButtonText: t('memoryPanel.cancel'),
-
-        type: 'warning',
-      },
-    )
-  } catch {
-    return
-  }
-
+  if (!doc) return
+  const context = memoryContextKey()
+  const sessionId = docSessionId(doc)
   setDocRemoving(id, true)
   try {
-    const fallbackId = filteredDocs.value.find(doc => doc.id !== id)?.id || ''
-    await memoryClient.removeDoc(id, doc ? docSessionId(doc) : scopedDocOptions().sessionId)
-    ElMessage.success(t('memoryPanel.docDeleted'))
-    if (selectedDocId.value === id) selectedDocId.value = fallbackId
-    await refreshMemoryState()
-  } catch (error) {
-    ElMessage.error(describeFailure(error, t('memoryPanel.docDeleteFailed')))
-  } finally {
-    setDocRemoving(id, false)
-  }
+    if (!await confirmMemoryDeletion([id], sessionId, t('memoryPanel.maintenanceDeleteConfirmTitle'), context)) return
+    invalidateReads()
+    let result: unknown
+    try { result = await memoryClient.removeDoc(id, sessionId) }
+    catch (error) {
+      ElMessage.error(describeFailure(error, t('memoryPanel.docDeleteFailed')))
+      await refreshAfterDeletion(false)
+      return
+    }
+    reportMemoryDeletion(result, t('memoryPanel.docDeleted') + ' · ' + id)
+    await refreshAfterDeletion()
+  } finally { setDocRemoving(id, false) }
 }
 
 const deletePreviewMessage = (preview: MemoryDeletePreview) => {
   const parts = [t('memoryPanel.deletePreviewSummary', { total: preview.total_count, hard: preview.hard_delete_count })]
   if (preview.candidate_tombstone_count) parts.push(t('memoryPanel.deletePreviewCandidates', { count: preview.candidate_tombstone_count }))
   if (preview.affected_message_count) parts.push(t('memoryPanel.deletePreviewMessages', { count: preview.affected_message_count }))
-  parts.push(t('memoryPanel.deletePreviewIndexNote'))
+  parts.push(memoryDeletionNote())
+  const effects = preview.effects as MemoryDeletePreview['effects'] & { prefetch?: string }
+  if (effects.prefetch === 'invalidated') parts.push(memoryText('预取缓存将失效。', 'Prefetch cache will be invalidated.'))
   return parts.join(t('memoryPanel.clauseSeparator'))
 }
 
 const forgetDoc = async (id: string) => {
-  if (forgettingDocIds.value.has(id)) return
+  if (forgettingDocIds.value.has(id) || batchActionLoading.value || updateRequest.loading) return
+  const doc = docs.value.find(item => item.id === id)
+  if (!doc) return
+  const context = memoryContextKey()
+  const sessionId = docSessionId(doc)
+  setPendingDocId(forgettingDocIds, id, true)
   try {
     await ElMessageBox.confirm(
       t('memoryPanel.forgetConfirmMessage'),
@@ -1175,15 +1424,19 @@ const forgetDoc = async (id: string) => {
       { confirmButtonText: t('memoryPanel.forgetConfirmAction'), cancelButtonText: t('memoryPanel.cancel'), type: 'warning' },
     )
   } catch {
+    setPendingDocId(forgettingDocIds, id, false)
     return
   }
 
-  setPendingDocId(forgettingDocIds, id, true)
+  if (context !== memoryContextKey() || memoryPanelDisposed) {
+    setPendingDocId(forgettingDocIds, id, false)
+    return
+  }
   try {
+    invalidateReads()
     const fallbackId = filteredDocs.value.find(doc => doc.id !== id)?.id || ''
-    const doc = docs.value.find(item => item.id === id)
-    await softForgetDoc(id, { reason: 'user_soft_forget', session_id: doc ? docSessionId(doc) : scopedDocOptions().sessionId })
-    if (selectedDocId.value === id) selectedDocId.value = fallbackId
+    await softForgetDoc(id, { reason: 'user_soft_forget', session_id: sessionId })
+    if (context === memoryContextKey() && selectedDocId.value === id) selectedDocId.value = fallbackId
     ElMessage.success(t('memoryPanel.forgetSuccess'))
     await refreshMemoryState()
   } catch (error) {
@@ -1194,11 +1447,14 @@ const forgetDoc = async (id: string) => {
 }
 
 const restoreForgottenDoc = async (id: string) => {
-  if (restoringDocIds.value.has(id)) return
+  if (restoringDocIds.value.has(id) || batchActionLoading.value || updateRequest.loading) return
   setPendingDocId(restoringDocIds, id, true)
   try {
     const doc = forgottenDocs.value.find(item => item.id === id) || docs.value.find(item => item.id === id)
-    await restoreDoc(id, { reason: 'user_restore', session_id: doc ? docSessionId(doc) : scopedDocOptions().sessionId })
+    if (!doc) return
+    const sessionId = docSessionId(doc)
+    invalidateReads()
+    await restoreDoc(id, { reason: 'user_restore', session_id: sessionId })
     ElMessage.success(t('memoryPanel.restoreSuccess'))
     await refreshMemoryState()
   } catch (error) {
@@ -1253,43 +1509,36 @@ const preserveTemporalPrecision = (draftValue: string, originalValue: unknown) =
     ? (typeof originalValue === 'string' ? originalValue : null)
     : toIsoOrNull(draftValue)
 
-const hydrateInspectorDraft = (doc: MemoryDoc) => {
-  inspectorDraft.id = doc.id
-  inspectorDraft.text = doc.text || ''
-  inspectorDraft.type = doc.type || 'fact'
-  inspectorDraft.layer = doc.layer || 'semantic'
-  inspectorDraft.importance = Number(doc.importance ?? 0.5)
-  inspectorDraft.confidence = Number(doc.confidence ?? 0.72)
-  inspectorDraft.source = docSourceValue(doc)
-  inspectorDraft.validFrom = toDateTimeLocal(doc.valid_from ?? doc.metadata?.valid_from)
-  inspectorDraft.validTo = toDateTimeLocal(doc.valid_to ?? doc.metadata?.valid_to)
-  inspectorDraft.expiresAt = toDateTimeLocal(doc.expires_at ?? doc.metadata?.expires_at)
-}
-
-const resetInspectorDraft = () => {
-  if (selectedDoc.value) hydrateInspectorDraft(selectedDoc.value)
-}
-
-const inspectorDraftDirty = computed(() => {
-  const doc = selectedDoc.value
-  if (!doc || inspectorDraft.id !== doc.id) return false
-  return inspectorDraft.text !== (doc.text || '')
-    || inspectorDraft.type !== (doc.type || 'fact')
-    || inspectorDraft.layer !== (doc.layer || 'semantic')
-    || Number(inspectorDraft.importance.toFixed(4)) !== Number(Number(doc.importance ?? 0.5).toFixed(4))
-    || Number(inspectorDraft.confidence.toFixed(4)) !== Number(Number(doc.confidence ?? 0.72).toFixed(4))
-    || inspectorDraft.source !== docSourceValue(doc)
-    || inspectorDraft.validFrom !== toDateTimeLocal(doc.valid_from ?? doc.metadata?.valid_from)
-    || inspectorDraft.validTo !== toDateTimeLocal(doc.valid_to ?? doc.metadata?.valid_to)
-    || inspectorDraft.expiresAt !== toDateTimeLocal(doc.expires_at ?? doc.metadata?.expires_at)
+const inspectorDraftFromDoc = (doc: MemoryDoc) => ({
+  id: doc.id, text: doc.text || '', type: doc.type || 'fact', layer: doc.layer || 'semantic',
+  importance: Number(doc.importance ?? 0.5), confidence: Number(doc.confidence ?? 0.72), source: docSourceValue(doc),
+  validFrom: toDateTimeLocal(doc.valid_from ?? doc.metadata?.valid_from),
+  validTo: toDateTimeLocal(doc.valid_to ?? doc.metadata?.valid_to),
+  expiresAt: toDateTimeLocal(doc.expires_at ?? doc.metadata?.expires_at),
 })
+const inspectorDraftBase = ref('')
+let inspectorDraftKey = ''
+const inspectorDrafts = new Map<string, { draft: typeof inspectorDraft; base: string }>()
+const hydrateInspectorDraft = (doc: MemoryDoc) => {
+  Object.assign(inspectorDraft, inspectorDraftFromDoc(doc))
+  inspectorDraftBase.value = JSON.stringify(inspectorDraft)
+}
+const resetInspectorDraft = () => {
+  if (selectedDoc.value) {
+    inspectorDrafts.delete(inspectorDraftKey)
+    hydrateInspectorDraft(selectedDoc.value)
+  }
+}
+const inspectorDraftDirty = computed(() => Boolean(inspectorDraft.id) && JSON.stringify(inspectorDraft) !== inspectorDraftBase.value)
 
 const saveInspectorDraft = async () => {
   const doc = selectedDoc.value
   if (!doc || !inspectorDraft.text.trim() || inspectorDraftSaving.value) return
+  const submitted = JSON.stringify(inspectorDraft)
+  const key = inspectorDraftKey
   inspectorDraftSaving.value = true
   try {
-    await updateSelectedDoc(
+    const result = await updateSelectedDoc(
       doc,
       {
         text: inspectorDraft.text.trim(),
@@ -1311,6 +1560,17 @@ const saveInspectorDraft = async () => {
       },
       t('memoryPanel.inspectorSaved'),
     )
+    if (result?.status === 'updated' || result?.storage_status === 'saved') {
+      const savedDraft = { ...JSON.parse(submitted), text: JSON.parse(submitted).text.trim() }
+      const savedSnapshot = JSON.stringify(savedDraft)
+      const cached = inspectorDrafts.get(key)
+      if (cached && JSON.stringify(cached.draft) !== submitted) cached.base = savedSnapshot
+      else inspectorDrafts.delete(key)
+      if (key === inspectorDraftKey) {
+        if (JSON.stringify(inspectorDraft) === submitted) Object.assign(inspectorDraft, savedDraft)
+        inspectorDraftBase.value = savedSnapshot
+      }
+    }
   } catch (error) {
     ElMessage.error(describeFailure(error, t('memoryPanel.inspectorSaveFailed')))
   } finally {
@@ -1354,46 +1614,103 @@ watch(
 )
 
 watch(
-  () => selectedDoc.value ? [
-    selectedDoc.value.id,
-    selectedDoc.value.text,
-    selectedDoc.value.type,
-    selectedDoc.value.layer,
-    selectedDoc.value.importance,
-    selectedDoc.value.confidence,
-    docSourceValue(selectedDoc.value),
-    selectedDoc.value.valid_from ?? selectedDoc.value.metadata?.valid_from,
-    selectedDoc.value.valid_to ?? selectedDoc.value.metadata?.valid_to,
-    selectedDoc.value.expires_at ?? selectedDoc.value.metadata?.expires_at,
-  ] : [],
+  () => [memoryContextKey(), selectedDoc.value] as const,
   () => {
-    if (selectedDoc.value && !inspectorDraftSaving.value) hydrateInspectorDraft(selectedDoc.value)
+    const doc = selectedDoc.value
+    const nextKey = doc ? memoryContextKey() + ':' + doc.id : ''
+    if (nextKey !== inspectorDraftKey) {
+      if (inspectorDraftKey && inspectorDraftDirty.value) inspectorDrafts.set(inspectorDraftKey, { draft: { ...inspectorDraft }, base: inspectorDraftBase.value })
+      inspectorDraftKey = nextKey
+      const saved = inspectorDrafts.get(nextKey)
+      if (saved) {
+        Object.assign(inspectorDraft, saved.draft)
+        inspectorDraftBase.value = saved.base
+      } else if (doc) hydrateInspectorDraft(doc)
+      else { inspectorDraft.id = ''; inspectorDraftBase.value = JSON.stringify(inspectorDraft) }
+    } else if (doc && !inspectorDraftDirty.value && !inspectorDraftSaving.value) hydrateInspectorDraft(doc)
   },
-  { immediate: true },
+  { immediate: true, flush: 'sync' },
+)
+
+watch(
+  () => [route.name, route.params.workspaceId, route.params.sessionId, requestedMemoryDocId()] as const,
+  () => {
+    consumedEditRequest = ''
+    openRequestedMemoryDoc()
+  },
 )
 
 watch(
   () => [currentMemoryScope.value, activeWorkspace.value?.id, sessionStore.activeSession?.id] as const,
   ([scope]) => {
+    memoryRefreshSequence += 1
+    indexStatusSequence += 1
+    consumedEditRequest = ''
+    editDialogVisible.value = false
+    invalidateReads(true)
+    selectedDocId.value = ''
+    feedbackById.value = {}
+    feedbackErrors.value = {}
+    deletePreflightError.value = ''
+    importReport.value = null
     queryForm.scope = scope
     hydrateMaintenancePolicy()
     maintenancePreview.value = null
     maintenancePreviewPolicyKey.value = ''
     void refreshMemoryState()
   },
+  { flush: 'sync' },
 )
+
+watch(() => queryForm.scope, () => {
+  queryRequest.reset()
+  queryResult.value = null
+  feedbackById.value = {}
+  feedbackErrors.value = {}
+}, { flush: 'sync' })
+
+const syncMemoryActivity = () => {
+  const active = canReadMemory()
+  if (active === memoryReadsActive) return
+  memoryReadsActive = active
+  if (active) {
+    void refreshMemoryState()
+  } else {
+    memoryRefreshSequence += 1
+    indexStatusSequence += 1
+    stopRebuildMonitoring()
+    memoryRefreshing.value = false
+    invalidateReads()
+  }
+}
+
+onActivated(() => {
+  memoryPanelActive = true
+  syncMemoryActivity()
+})
+
+onDeactivated(() => {
+  memoryPanelActive = false
+  advancedToolsVisible.value = false
+  editDialogVisible.value = false
+  syncMemoryActivity()
+})
 
 onBeforeUnmount(() => {
   memoryPanelDisposed = true
-  activeRebuildJobId = ''
+  syncMemoryActivity()
+  stopRebuildMonitoring()
+  document.removeEventListener('visibilitychange', syncMemoryActivity)
+  invalidateReads(true)
 })
 
-onMounted(async () => {
-  memoryPanelDisposed = false
+onMounted(() => {
+  memoryPanelActive = true
   queryForm.scope = currentMemoryScope.value
-  await refreshMemoryState()
-  openRequestedMemoryDoc()
+  document.addEventListener('visibilitychange', syncMemoryActivity)
+  syncMemoryActivity()
 })
+
 </script>
 
 
@@ -1411,7 +1728,6 @@ onMounted(async () => {
 .import-report-details ul { display: flex; max-height: 220px; flex-direction: column; gap: 6px; margin: 8px 0 0; padding: 0; overflow: auto; list-style: none; }
 .import-report-details li { display: grid; grid-template-columns: minmax(100px, 0.6fr) minmax(120px, 0.6fr) minmax(0, 1fr); gap: 8px; align-items: start; padding: 7px 9px; border: 1px solid var(--yui-border); border-radius: var(--yui-radius-control); }
 .import-report-details li span, .import-report-details li small, .import-report-details > p { color: var(--yui-muted); font-size: 11px; overflow-wrap: anywhere; }
-.local-status { color: var(--yui-muted); font-size: 11px; }
 .scope-control { display: flex; align-items: center; gap: 7px; color: var(--yui-muted); font-size: 11px; }
 .scope-control :deep(.el-select) { width: 108px; }
 .scope-option { display: flex; min-width: 180px; flex-direction: column; gap: 2px; line-height: 1.25; }

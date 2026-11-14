@@ -1,0 +1,152 @@
+{
+  "samples": [
+    {
+      "route": "memory",
+      "visible_ms": 133.1,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/assets/MemoryPanel-CDUMAJ0F.js",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/element-plus~ChatPanel~MemoryPanel-C-YcBhLu.js",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/element-plus~ChatPanel~MemoryPanel-BeIfAqTO.css",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/MemoryPanel-DQDzWoLO.css",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/memory/docs",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/overview",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/docs",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/candidates",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 66.1,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "chat",
+      "visible_ms": 162.5,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/assets/ChatPanel-BjejLl1A.js",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/element-plus~ChatPanel-efIZ7XQm.js",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/element-plus~ChatPanel-Ciemdyvv.css",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/ChatPanel-Cx0RywKG.css",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/pet/state",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/catalog",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 69.5,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "prompt",
+      "visible_ms": 177.9,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/assets/PromptPanel-CmV2ZW9U.js",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/PromptPanel-B9c-xgg1.css",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 74.1,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        }
+      ]
+    }
+  ],
+  "pageerrors": [],
+  "settings_gets": 6
+}

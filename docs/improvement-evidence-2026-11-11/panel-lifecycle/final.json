@@ -1,0 +1,670 @@
+{
+  "warm_sample_count": 24,
+  "warm_p95_ms": 198.5,
+  "samples": [
+    {
+      "route": "memory",
+      "visible_ms": 215.6,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/assets/MemoryPanel-D8zOt_LG.js",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/element-plus~ChatPanel~MemoryPanel-C-YcBhLu.js",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/element-plus~ChatPanel~MemoryPanel-BeIfAqTO.css",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/MemoryPanel-CWPMv2cC.css",
+          "method": "GET"
+        },
+        {
+          "path": "/api/system/env-check",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/memory/docs",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/overview",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/docs",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/candidates",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 79.4,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/api/system/env-check",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "chat",
+      "visible_ms": 367.9,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/assets/ChatPanel-RG2KIiwM.js",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/element-plus~ChatPanel-efIZ7XQm.js",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/element-plus~ChatPanel-Ciemdyvv.css",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/ChatPanel-BHhsWm3A.css",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/pet/state",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/catalog",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/pixi-vendor~browserAll-CSiMg4cm.js",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/pixi-vendor~webworkerAll~browserAll-B8pzdn9Q.js",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 113.9,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/live2d/llm-live2d/yumi/yumi.model3.json",
+          "method": "GET"
+        },
+        {
+          "path": "/api/system/env-check",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "prompt",
+      "visible_ms": 210.0,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/assets/PromptPanel-LgeSXp6p.js",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/PromptPanel-DbG6i_s7.css",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/runtime/status",
+          "method": "GET"
+        },
+        {
+          "path": "/api/sessions",
+          "method": "GET"
+        },
+        {
+          "path": "/api/companions",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 72.6,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/system/env-check",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "memory",
+      "visible_ms": 72.1,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 69.8,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "chat",
+      "visible_ms": 223.6,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/pet/state",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/catalog",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/docs",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/overview",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/docs",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/candidates",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/live2d/llm-live2d/yumi/yumi.model3.json",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 119.4,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/live2d/llm-live2d/yumi/yumi.moc3",
+          "method": "GET"
+        },
+        {
+          "path": "/api/system/env-check",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "prompt",
+      "visible_ms": 63.3,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 79.1,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "memory",
+      "visible_ms": 62.0,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 83.2,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "chat",
+      "visible_ms": 162.4,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/pet/state",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/catalog",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 118.0,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/runtime/status",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/docs",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/overview",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/docs",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/candidates",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/live2d/llm-live2d/yumi/yumi.model3.json",
+          "method": "GET"
+        },
+        {
+          "path": "/api/system/env-check",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "prompt",
+      "visible_ms": 79.2,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 66.4,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "memory",
+      "visible_ms": 66.4,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 65.6,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "chat",
+      "visible_ms": 179.0,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/pet/state",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/catalog",
+          "method": "GET"
+        },
+        {
+          "path": "/live2d/llm-live2d/yumi/yumi.model3.json",
+          "method": "GET"
+        },
+        {
+          "path": "/live2d/llm-live2d/yumi/yumi.moc3",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 133.3,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/docs",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/overview",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/docs",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/candidates",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/api/system/env-check",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "prompt",
+      "visible_ms": 45.6,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 66.8,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "memory",
+      "visible_ms": 62.6,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 66.4,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "chat",
+      "visible_ms": 198.5,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/pet/state",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/catalog",
+          "method": "GET"
+        },
+        {
+          "path": "/live2d/llm-live2d/yumi/yumi.model3.json",
+          "method": "GET"
+        },
+        {
+          "path": "/live2d/llm-live2d/yumi/yumi.moc3",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 82.4,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "prompt",
+      "visible_ms": 97.5,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/settings/runtime/status",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/docs",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/overview",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/docs",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/candidates",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/api/health",
+          "method": "GET"
+        },
+        {
+          "path": "/api/ping",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 72.6,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/system/env-check",
+          "method": "GET"
+        }
+      ]
+    }
+  ],
+  "pageerrors": [],
+  "settings_gets": 20
+}

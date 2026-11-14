@@ -1,0 +1,14 @@
+{
+  "hidden_memory_rebuild_reads_in_1700ms": 0,
+  "reads_while_returning_cached_memory": 2,
+  "edit_deep_link_opened_dialog": true,
+  "pageerrors": [],
+  "polls": [
+    {
+      "hash": "/w/default/memory"
+    },
+    {
+      "hash": "/w/default/memory?edit=review-doc"
+    }
+  ]
+}

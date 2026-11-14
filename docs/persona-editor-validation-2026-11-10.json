@@ -1,0 +1,71 @@
+{
+  "date": "2026-11-10",
+  "timezone": "Asia/Shanghai",
+  "scope": "persona-editor",
+  "frontend": {
+    "command": "node node_modules/vitest/vitest.mjs run src/renderer/domains/prompt src/renderer/shared/components/prompt/WorkspacePromptEditor.test.ts src/renderer/stores/workspaceStore.regression.test.ts src/renderer/stores/chatStore.regression.test.ts src/renderer/domains/chat/views/ChatPanel.async.test.ts src/renderer/domains/chat/views/ChatPanel.drafts.test.ts src/renderer/domains/settings/views/SettingsPanel.regression.test.ts src/renderer/navigation/navigation-contract.test.ts --root .",
+    "cwd": "electron",
+    "files_passed": 9,
+    "tests_passed": 186
+  },
+  "backend": {
+    "command": ".venv/Scripts/python.exe -m pytest tests/test_prompt_assembly.py tests/test_companion_persona_api.py tests/test_workspace_context_api.py tests/test_workspace_context_repository.py tests/test_workspace_context_store.py tests/test_workspace_context_migration.py -q",
+    "cwd": "python",
+    "tests_passed": 82
+  },
+  "static": {
+    "eslint": "passed (11 changed TS/Vue files)",
+    "renderer_type_errors": 0,
+    "python_compileall": "passed",
+    "ruff_new_errors": 0,
+    "ruff_existing_findings": [
+      "prompt_assembly.py:32 BLE001",
+      "prompt_assembly.py:271 SIM103"
+    ]
+  },
+  "build": {
+    "vite": "passed",
+    "bundle_audit": "passed",
+    "existing_warnings": [
+      "live2dcubismcore.min.js classic-script cannot be bundled"
+    ]
+  },
+  "browser": {
+    "engine": "Chrome with Python Playwright",
+    "page_errors": [],
+    "viewports": [
+      [
+        1600,
+        1050
+      ],
+      [
+        1000,
+        950
+      ],
+      [
+        800,
+        950
+      ]
+    ],
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "checks": [
+      "structured fields persisted to workspace context",
+      "four sections, preview and interview clipboard",
+      "invalid JSON preserves valid card and does not block form",
+      "keyboard tab navigation",
+      "no horizontal overflow",
+      "dark theme scoped surface/text tokens",
+      "no memory or generation HTTP mutations from editor"
+    ],
+    "test_data_only": true,
+    "api_writes_intercepted": true
+  },
+  "model_personality_evaluation": "not run; no scores or effect guarantees",
+  "review": {
+    "fixed": "explicit empty core instructions override extension fallback",
+    "regression_tests_added": 7
+  }
+}

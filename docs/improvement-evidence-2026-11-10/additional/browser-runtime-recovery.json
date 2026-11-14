@@ -1,0 +1,104 @@
+{
+  "retry_payloads": [
+    {
+      "targets": {
+        "svc": 7
+      }
+    }
+  ],
+  "status_reads": 2,
+  "before": "服务应用状态\n\n配置已保存，服务应用失败：svc。可重试当前配置；资源就绪状态单独确认。\n\n刷新应用状态\n重试当前配置",
+  "after": "服务应用状态\n\n服务已应用：svc。模型和资源是否就绪，请查看各服务与资源状态。\n\n刷新应用状态",
+  "backup_provenance": "当前按本地配置解析备份路径，尚未核对运行中后端的实际路径。数据库使用 SQLite 一致性快照；内存中的记忆不包含在磁盘备份中。",
+  "pageerrors": [],
+  "blocked_real_mutations": [
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/voice-diagnostics/run"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/active-workspace"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/companion-idle-profile"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/companion-idle-profile"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "method": "POST",
+      "path": "/api/system/voice-diagnostics/run"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/llm/models"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    }
+  ],
+  "assets": [
+    "./assets/main-Bd9BWULF.js",
+    "./live2d/live2dcubismcore.min.js"
+  ]
+}

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from threading import RLock
 from typing import Any
@@ -74,6 +74,15 @@ class MemoryOperationLog:
             if len(self._items) > self.max_operations:
                 del self._items[: len(self._items) - self.max_operations]
 
+    def clear_document_payloads(self, document_id: str) -> None:
+        """Keep deletion audit identity without retaining erased free-form content."""
+        with self._lock:
+            self._items = [
+                replace(item, reason=None, evidence=None, details={})
+                if item.document_id == document_id else item
+                for item in self._items
+            ]
+
     def list(
         self,
         *,
@@ -97,6 +106,7 @@ class MemoryOperationLog:
                 # belonging to the requested workspace or session.
                 and (normalized_workspace_id is None or item.workspace_id == normalized_workspace_id)
                 and (normalized_session_id is None or item.session_id == normalized_session_id)
+                and (scope != "session" or normalized_workspace_id is not None or item.workspace_id is None)
             ]
         return selected[:bounded_limit]
 

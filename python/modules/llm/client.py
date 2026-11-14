@@ -29,6 +29,13 @@ from .context_window import (
     build_and_truncate_layered_context,
     message_content_to_text,
 )
+from .generation_parameters import (
+    clean_reasoning_effort,
+    filter_generation_parameters,
+    generation_number,
+    map_compatible_generation_parameters,
+    resolve_generation_capabilities,
+)
 from .providers import (
     LlmCredentialError,
     build_llm_auth_headers,
@@ -46,7 +53,10 @@ logger = logging.getLogger("yuizaki.llm")
 _EMPTY_REASONING_RETRY_MIN_TOKENS = 256
 _OPTIONAL_GENERATION_FIELDS = (
     "thinking",
+    "enable_thinking",
+    "output_config",
     "reasoning_effort",
+    "repeat_penalty",
     "temperature",
     "top_p",
     "top_k",
@@ -55,13 +65,6 @@ _OPTIONAL_GENERATION_FIELDS = (
     "presence_penalty",
     "repetition_penalty",
 )
-_NEUTRAL_GENERATION_VALUES = {
-    "top_k": 0.0,
-    "min_p": 0.0,
-    "frequency_penalty": 0.0,
-    "presence_penalty": 0.0,
-    "repetition_penalty": 1.0,
-}
 _GENERATION_COMPAT_MAX_RETRIES = len(_OPTIONAL_GENERATION_FIELDS) + 1
 _PRECONNECT_COOLDOWN_SECONDS = 30.0
 _PRECONNECT_TIMEOUT_SECONDS = 3.0
@@ -399,6 +402,8 @@ def _message_content_to_gemini_parts(content: Any) -> list[dict[str, Any]]:
 
 
 def _messages_to_gemini_payload(body: dict[str, Any]) -> dict[str, Any]:
+    body = dict(body)
+    caps = filter_generation_parameters(body, "gemini")
     system_parts: list[dict[str, Any]] = []
     contents: list[dict[str, Any]] = []
     for message in body.get("messages") or []:
@@ -423,10 +428,18 @@ def _messages_to_gemini_payload(body: dict[str, Any]) -> dict[str, Any]:
         ("temperature", "temperature"),
         ("top_p", "topP"),
         ("top_k", "topK"),
-        ("max_tokens", "maxOutputTokens"),
+        (caps["outputTokenField"], "maxOutputTokens"),
     ):
         if body.get(source) is not None:
             generation_config[target] = body[source]
+    effort = body.get("reasoning_effort")
+    if effort:
+        if caps["reasoningTransport"] == "gemini_thinking_level":
+            generation_config["thinkingConfig"] = {"thinkingLevel": effort}
+        elif caps["reasoningTransport"] == "gemini_thinking_budget":
+            generation_config["thinkingConfig"] = {
+                "thinkingBudget": {"none": 0, "low": 1024, "medium": 8192, "high": 24576}[effort],
+            }
     payload: dict[str, Any] = {"contents": contents or [{"role": "user", "parts": [{"text": "ping"}]}]}
     if system_parts:
         payload["systemInstruction"] = {"parts": system_parts}
@@ -482,6 +495,8 @@ async def _iter_gemini_text_deltas(resp: httpx.Response) -> AsyncIterator[str]:
 
 
 def _messages_to_claude_payload(body: dict[str, Any]) -> dict[str, Any]:
+    body = dict(body)
+    caps = filter_generation_parameters(body, "claude")
     system_parts: list[str] = []
     claude_messages: list[dict[str, Any]] = []
     for message in body.get("messages") or []:
@@ -560,6 +575,22 @@ def _messages_to_claude_payload(body: dict[str, Any]) -> dict[str, Any]:
         payload["temperature"] = body["temperature"]
     if "top_p" in body:
         payload["top_p"] = body["top_p"]
+    if "top_k" in body:
+        payload["top_k"] = body["top_k"]
+    effort = body.get("reasoning_effort")
+    transport = caps["reasoningTransport"]
+    if effort and transport == "claude_thinking_budget":
+        if effort == "none":
+            payload["thinking"] = {"type": "disabled"}
+        elif payload["max_tokens"] > 1024:
+            payload["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": min({"low": 1024, "medium": 4096, "high": 8192}[effort], payload["max_tokens"] - 1),
+            }
+    elif effort:
+        payload["output_config"] = {"effort": effort}
+        if transport == "claude_adaptive_effort":
+            payload["thinking"] = {"type": "adaptive"}
     tools: list[dict[str, Any]] = []
     for tool in body.get("tools") or []:
         if not isinstance(tool, dict):
@@ -699,6 +730,7 @@ async def _rewrite_summary_with_llm(
         "max_tokens": 320,
         "temperature": 0.2,
     }
+    _apply_generation_options(payload, provider=provider)
     claude_provider = is_claude_provider(provider)
     native_gemini = llm_protocol(provider, base_url) == "gemini-generate-content"
     resp = await http_client.post(
@@ -759,6 +791,7 @@ async def _score_summary_with_llm(
         "max_tokens": 120,
         "temperature": 0.0,
     }
+    _apply_generation_options(payload, provider=provider)
     claude_provider = is_claude_provider(provider)
     native_gemini = llm_protocol(provider, base_url) == "gemini-generate-content"
     resp = await http_client.post(
@@ -836,12 +869,7 @@ def _clean_model_override(model: str | None) -> str | None:
 
 
 def _clean_reasoning_effort(reasoning_effort: str | None) -> str | None:
-    value = str(reasoning_effort or "").strip().lower()
-    if value in {"", "default", "none"}:
-        return None
-    if value in {"minimal", "low", "medium", "high", "max", "xhigh", "auto"}:
-        return value
-    return None
+    return clean_reasoning_effort(reasoning_effort)
 
 
 def _clean_thinking_mode(thinking: str | None) -> str | None:
@@ -853,6 +881,7 @@ def _apply_generation_options(
     body: dict[str, Any],
     *,
     model: str | None = None,
+    provider: str | None = None,
     temperature: float | None = None,
     top_p: float | None = None,
     top_k: int | None = None,
@@ -866,32 +895,22 @@ def _apply_generation_options(
     model_override = _clean_model_override(model)
     if model_override:
         body["model"] = model_override
-    model_name = (model_override or config.llm.model or "").lower().removeprefix("models/")
-    reasoning_model = model_name.startswith("gpt-6.1-sol")
-    clean_reasoning = _clean_reasoning_effort(reasoning_effort)
-    if reasoning_model and clean_reasoning is None:
-        clean_reasoning = "medium"
-    if not reasoning_model:
-        if temperature is not None:
-            body["temperature"] = float(temperature)
-        if top_p is not None:
-            body["top_p"] = float(top_p)
-    else:
-        body.pop("temperature", None)
-        body.pop("top_p", None)
-        for field in ("top_k", "min_p", "frequency_penalty", "presence_penalty", "repetition_penalty"):
-            body.pop(field, None)
-    if not reasoning_model:
-        _apply_optional_generation_number(body, "top_k", top_k, integer=True)
-        _apply_optional_generation_number(body, "min_p", min_p)
-        _apply_optional_generation_number(body, "frequency_penalty", frequency_penalty)
-        _apply_optional_generation_number(body, "presence_penalty", presence_penalty)
-        _apply_optional_generation_number(body, "repetition_penalty", repetition_penalty)
-    if clean_reasoning:
-        body["reasoning_effort"] = clean_reasoning
-    clean_thinking = _clean_thinking_mode(thinking)
-    if clean_thinking:
-        body["thinking"] = {"type": clean_thinking}
+    elif not body.get("model"):
+        body["model"] = config.llm.model
+    for field, value in (
+        ("temperature", temperature), ("top_p", top_p), ("top_k", top_k),
+        ("min_p", min_p), ("frequency_penalty", frequency_penalty),
+        ("presence_penalty", presence_penalty), ("repetition_penalty", repetition_penalty),
+    ):
+        if value is not None:
+            body[field] = value
+    if reasoning_effort is not None:
+        body["reasoning_effort"] = _clean_reasoning_effort(reasoning_effort)
+    if thinking is not None:
+        body["thinking"] = {"type": _clean_thinking_mode(thinking)}
+    effective_provider = provider if provider is not None else config.llm.provider
+    filter_generation_parameters(body, effective_provider)
+    map_compatible_generation_parameters(body, effective_provider)
 
 
 def _apply_optional_generation_number(
@@ -903,17 +922,11 @@ def _apply_optional_generation_number(
 ) -> None:
     if value is None:
         return
-    if not isinstance(value, (int, float, str)):
-        return
-    try:
-        numeric = float(value)
-    except ValueError:
-        return
-    neutral = _NEUTRAL_GENERATION_VALUES.get(field)
-    if neutral is not None and numeric == neutral:
+    numeric = generation_number(field, value)
+    if numeric is None:
         body.pop(field, None)
-        return
-    body[field] = int(numeric) if integer else numeric
+    else:
+        body[field] = int(numeric) if integer else numeric
 
 
 def _apply_config_generation_defaults(body: dict[str, Any]) -> None:
@@ -1210,6 +1223,7 @@ class LLMClient:
         _apply_generation_options(
             body,
             model=model,
+            provider=self.provider,
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,
@@ -1228,7 +1242,8 @@ class LLMClient:
             "max_output_tokens",
             provider=self.provider,
         )
-        body["max_tokens"] = effective_output_tokens
+        output_token_field = resolve_generation_capabilities(self.provider, body["model"])["outputTokenField"]
+        body[output_token_field] = effective_output_tokens
         if not is_claude_provider(self.provider):
             _apply_pet_control_response_format(body, pet_control_context)
 
@@ -1594,6 +1609,7 @@ class LLMClient:
         _apply_generation_options(
             body,
             model=model,
+            provider=self.provider,
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,
@@ -1612,7 +1628,8 @@ class LLMClient:
             "max_output_tokens",
             provider=self.provider,
         )
-        body["max_tokens"] = effective_output_tokens
+        output_token_field = resolve_generation_capabilities(self.provider, body["model"])["outputTokenField"]
+        body[output_token_field] = effective_output_tokens
         if not claude_provider and not native_gemini:
             _apply_pet_control_response_format(body, pet_control_context)
         request_tools = bool(tools) and self._tool_calls_supported is not False
@@ -1733,7 +1750,8 @@ class LLMClient:
 
         if not claude_provider and _should_retry_empty_reasoning_response(data, effective_output_tokens):
             retry_body = dict(sent_body)
-            retry_body["max_tokens"] = _EMPTY_REASONING_RETRY_MIN_TOKENS
+            retry_token_field = "max_completion_tokens" if "max_completion_tokens" in retry_body else "max_tokens"
+            retry_body[retry_token_field] = _EMPTY_REASONING_RETRY_MIN_TOKENS
             logger.info(
                 "LLM returned only reasoning content with max_tokens=%s; retrying with max_tokens=%s",
                 effective_output_tokens,
@@ -1875,6 +1893,7 @@ class LLMClient:
                 "stream": False,
                 "max_tokens": 1,
             }
+            _apply_generation_options(payload, provider=self.provider)
             request_payload = (
                 _messages_to_claude_payload(payload)
                 if is_claude_provider(self.provider)

@@ -1,0 +1,91 @@
+{
+  "files": [
+    {
+      "path": "python/app.py",
+      "current": 11,
+      "head": 12,
+      "new": []
+    },
+    {
+      "path": "python/modules/system/settings_api.py",
+      "current": 3,
+      "head": 3,
+      "new": []
+    },
+    {
+      "path": "python/modules/system/settings_models.py",
+      "current": 0,
+      "head": 0,
+      "new": []
+    },
+    {
+      "path": "python/modules/system/backup_snapshot.py",
+      "current": 0,
+      "head": 0,
+      "new": []
+    },
+    {
+      "path": "python/routes/storage_api.py",
+      "current": 0,
+      "head": 0,
+      "new": []
+    },
+    {
+      "path": "python/modules/memory/routes.py",
+      "current": 4,
+      "head": 4,
+      "new": []
+    },
+    {
+      "path": "python/modules/memory/metadata.py",
+      "current": 2,
+      "head": 2,
+      "new": []
+    },
+    {
+      "path": "python/modules/memory/pipeline.py",
+      "current": 3,
+      "head": 3,
+      "new": []
+    },
+    {
+      "path": "python/modules/memory/vector_store.py",
+      "current": 2,
+      "head": 3,
+      "new": []
+    },
+    {
+      "path": "python/modules/memory/sqlite_store.py",
+      "current": 0,
+      "head": 0,
+      "new": []
+    },
+    {
+      "path": "python/modules/memory/operations.py",
+      "current": 0,
+      "head": 0,
+      "new": []
+    },
+    {
+      "path": "python/routes/connector_api.py",
+      "current": 1,
+      "head": 1,
+      "new": []
+    },
+    {
+      "path": "python/modules/agent/turn_store.py",
+      "current": 0,
+      "head": 0,
+      "new": []
+    },
+    {
+      "path": "python/modules/agent/scheduler.py",
+      "current": 0,
+      "head": 0,
+      "new": []
+    }
+  ],
+  "new": [],
+  "current_count": 26,
+  "head_count": 28
+}

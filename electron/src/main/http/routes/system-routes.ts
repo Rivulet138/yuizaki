@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { app } from 'electron'
 import { getRuntimeExceptions } from '../../runtime-diagnostics'
 import {
@@ -19,6 +20,7 @@ import type { ManagedModelResourceId } from '../../../shared/resource-manager'
 import type { HttpRouteHandler } from '../types'
 import { SETTINGS_SECRET_MASK } from '../../provider-credential-store'
 import { resolvePythonRuntime } from '../../python-runtime'
+import { parseBackupSources, resolveConfiguredBackupSources, restoreSqliteDatabase, snapshotSqliteDatabase } from '../../backup-snapshot'
 import { isPackagedRuntime, resolveRuntimeProjectRoot, resolveWritableRuntimePaths } from '../../runtime-paths'
 import { parseRequestBody, sendJson } from '../utils'
 import { resolvePythonApiOrigin } from '../python-origin'
@@ -279,6 +281,7 @@ type BackupTargetSnapshot = {
   type?: 'file' | 'directory' | 'other'
   backupPath?: string
   skippedReason?: string
+  snapshotMethod?: 'sqlite_online_backup'
 }
 
 type BackupManifest = {
@@ -474,23 +477,36 @@ const deleteImportedSkills = (ids: unknown): SkillCatalogSnapshot & { ok: boolea
   }
 }
 
-const collectBackupTargets = () => {
-  const electronRoot = resolveElectronRoot()
+const collectBackupTargets = async (ctx: Parameters<HttpRouteHandler>[4]) => {
   const projectRoot = resolveProjectRoot()
-  const userDataDir = app.getPath('userData')
-  const writable = isPackagedRuntime(projectRoot) ? resolveWritableRuntimePaths(userDataDir) : null
-  const dataDir = writable?.dataDir ?? path.join(projectRoot, 'python', 'data')
-  const settingsPath = writable?.settingsPath ?? path.join(projectRoot, 'python', 'config', 'settings.json')
-  const audioCacheDir = writable?.audioCacheDir ?? path.join(projectRoot, 'python', 'audio_cache')
-  return [
-    path.join(dataDir, 'chat.db'),
-    path.join(dataDir, 'memory.db'),
-    settingsPath,
-    path.join(dataDir, 'governance_alert_state.json'),
-    audioCacheDir,
-    path.join(userDataDir, 'pet-state.json'),
-    path.join(electronRoot, 'plugins'),
-  ]
+  const pythonDir = path.join(projectRoot, 'python')
+  let sources
+  try {
+    const response = await proxyPythonJsonRequest(
+      `${resolvePythonApiOrigin()}/api/system/storage/backup-sources`,
+      { headers: buildProxyHeaders(ctx, false, null) },
+      '/api/system/storage/backup-sources', 2500,
+    )
+    if (!response.ok && response.status !== 404) throw new Error(`backup_sources_unavailable:${response.status}`)
+    if (response.ok) sources = parseBackupSources(JSON.parse(response.text))
+  } catch (error) {
+    // A reachable backend error must not silently select a different database.
+    if (error instanceof Error && (error.message.startsWith('backup_sources_') || error.message.startsWith('invalid_') || error instanceof SyntaxError)) throw error
+  }
+  if (!sources) {
+    const writable = isPackagedRuntime(projectRoot) ? resolveWritableRuntimePaths(app.getPath('userData')) : null
+    sources = await resolveConfiguredBackupSources(pythonDir, writable ? {
+      YUIZAKI_DATA_DIR: writable.dataDir,
+      YUIZAKI_SETTINGS_PATH: writable.settingsPath,
+      AUDIO_CACHE_DIR: writable.audioCacheDir,
+    } : undefined)
+  }
+  return {
+    sources,
+    targets: [sources.database, sources.memory, sources.settings,
+      path.join(sources.data_dir, 'governance_alert_state.json'), sources.audio_cache,
+      path.join(app.getPath('userData'), 'pet-state.json'), path.join(resolveElectronRoot(), 'plugins')],
+  }
 }
 
 const comparablePath = (targetPath: string): string => {
@@ -528,6 +544,10 @@ const copyBackupEntry = (sourcePath: string, destinationPath: string): { copied:
   }
 
   if (stats.isDirectory()) {
+    const realSource = fs.realpathSync.native(sourcePath)
+    fs.mkdirSync(path.dirname(destinationPath), { recursive: true })
+    const realParent = fs.realpathSync.native(path.dirname(destinationPath))
+    if (isPathInside(realSource, path.join(realParent, path.basename(destinationPath)))) throw new Error('backup_directory_overlaps_source')
     fs.mkdirSync(destinationPath, { recursive: true })
     for (const item of fs.readdirSync(sourcePath)) {
       const childSource = path.join(sourcePath, item)
@@ -546,32 +566,29 @@ const copyBackupEntry = (sourcePath: string, destinationPath: string): { copied:
   return { copied: false, type: 'other', skippedReason: 'unsupported_file_type' }
 }
 
-const createBackupManifest = (backupDir: string): BackupManifest => {
-  const targets = collectBackupTargets().map((target, index): BackupTargetSnapshot => {
+const createBackupManifest = async (backupDir: string, selection: Awaited<ReturnType<typeof collectBackupTargets>>): Promise<BackupManifest> => {
+  const targets: BackupTargetSnapshot[] = []
+  for (const [index, target] of selection.targets.entries()) {
+    if (index === 1 && selection.sources.memory_persistence === 'memory_only') {
+      targets.push({ path: target, exists: false, skippedReason: 'memory_only' })
+      continue
+    }
     if (!fs.existsSync(target)) {
-      return { path: target, exists: false }
+      targets.push({ path: target, exists: false })
+      continue
     }
-
     const backupPath = path.join('targets', `${index}-${path.basename(target) || 'target'}`)
-    const copyResult = copyBackupEntry(target, path.join(backupDir, backupPath))
-    const snapshot: BackupTargetSnapshot = {
-      path: target,
-      exists: true,
-      type: copyResult.type,
+    const destination = path.join(backupDir, backupPath)
+    if (index < 2 && fs.lstatSync(target).isFile() && !fs.lstatSync(target).isSymbolicLink()) {
+      await snapshotSqliteDatabase(path.join(resolveProjectRoot(), 'python'), target, destination)
+      targets.push({ path: target, exists: true, type: 'file', backupPath, snapshotMethod: 'sqlite_online_backup' })
+      continue
     }
-    if (copyResult.copied) {
-      snapshot.backupPath = backupPath
-    }
-    if (copyResult.skippedReason) {
-      snapshot.skippedReason = copyResult.skippedReason
-    }
-    return snapshot
-  })
-
-  return {
-    createdAt: new Date().toISOString(),
-    targets,
+    const result = copyBackupEntry(target, destination)
+    targets.push({ path: target, exists: true, type: result.type,
+      ...(result.copied ? { backupPath } : {}), ...(result.skippedReason ? { skippedReason: result.skippedReason } : {}) })
   }
+  return { createdAt: new Date().toISOString(), targets }
 }
 
 const restoreBackupEntry = (sourcePath: string, destinationPath: string, type: BackupTargetSnapshot['type']): void => {
@@ -615,7 +632,7 @@ type RestoreSummary = {
   missingCurrentCount: number
 }
 
-const buildRestoreImpact = (restorePlan: RestorePlanItem[], dryRun: boolean): { summary: RestoreSummary; effects: RestoreEffectSummary } => {
+const buildRestoreImpact = (restorePlan: RestorePlanItem[], dryRun: boolean, backupTargets: string[]): { summary: RestoreSummary; effects: RestoreEffectSummary } => {
   const restorable = restorePlan.filter((item) => item.backedUpAtSnapshot && !item.skippedReason)
   const summary: RestoreSummary = {
     totalTargets: restorePlan.length,
@@ -625,7 +642,6 @@ const buildRestoreImpact = (restorePlan: RestorePlanItem[], dryRun: boolean): { 
     missingCurrentCount: restorable.filter((item) => !item.currentlyExists).length,
   }
 
-  const backupTargets = collectBackupTargets()
   const statusForTarget = (targetPath: string): RestoreEffectStatus => {
     const item = restorePlan.find((candidate) => comparablePath(candidate.path) === comparablePath(targetPath))
     if (!item || !item.backedUpAtSnapshot || item.skippedReason) return item ? 'skipped' : 'unchanged'
@@ -652,11 +668,12 @@ const resolveBackupRoot = (): string => {
     : path.join(projectRoot, 'backups')
 }
 
-const buildRestorePlan = (manifest: BackupManifest, realBackupDir: string, dryRun: boolean) => {
-  const allowedTargets = new Set(collectBackupTargets().map((target) => comparablePath(target)))
+const buildRestorePlan = async (manifest: BackupManifest, realBackupDir: string, dryRun: boolean, backupTargets: string[], sourcesUnchanged?: () => boolean) => {
+  const allowedTargets = new Set(backupTargets.map((target) => comparablePath(target)))
   const restorePlan: RestorePlanItem[] = []
 
   for (const target of manifest.targets ?? []) {
+    if (!dryRun && sourcesUnchanged && !sourcesUnchanged()) return { error: 'restore_plan_changed', partial: restorePlan.some(item => item.restored), restorePlan }
     if (!allowedTargets.has(comparablePath(target.path))) {
       return {
         error: 'backup manifest contains unmanaged target',
@@ -697,18 +714,22 @@ const buildRestorePlan = (manifest: BackupManifest, realBackupDir: string, dryRu
             restorePlan,
           }
         }
+        if (target.type === 'directory' && isPathInside(target.path, realBackupDir)) return { error: 'restore target contains backup directory', target: target.path, restorePlan }
+        // Validate every destination during the pure preview too, so a later
+        // invalid target cannot be discovered only after earlier files changed.
+        const destinationError = validateRestoreDestination(target.path)
+        if (destinationError) {
+          return { error: destinationError, target: target.path, restorePlan }
+        }
         if (!dryRun) {
-          const destinationError = validateRestoreDestination(target.path)
-          if (destinationError) {
-            return {
-              error: destinationError,
-              target: target.path,
-              restorePlan,
-            }
+          if (target.type === 'file' && backupTargets.slice(0, 2).some(database => comparablePath(database) === comparablePath(target.path))) {
+            await restoreSqliteDatabase(path.join(resolveProjectRoot(), 'python'), realBackupSource, target.path)
+          } else {
+            restoreBackupEntry(realBackupSource, target.path, target.type)
           }
-          restoreBackupEntry(realBackupSource, target.path, target.type)
           plan.restored = true
           plan.currentlyExists = fs.existsSync(target.path)
+          if (sourcesUnchanged && !sourcesUnchanged()) return { error: 'restore_plan_changed', partial: true, restorePlan: [...restorePlan, plan] }
         }
       }
     }
@@ -716,8 +737,46 @@ const buildRestorePlan = (manifest: BackupManifest, realBackupDir: string, dryRu
     restorePlan.push(plan)
   }
 
-  return { restorePlan, impact: buildRestoreImpact(restorePlan, dryRun) }
+  return { restorePlan, impact: buildRestoreImpact(restorePlan, dryRun, backupTargets) }
 }
+
+const restoreSourceFingerprint = (sourcePath: string): unknown => {
+  if (!fs.existsSync(sourcePath)) return { path: sourcePath, missing: true }
+  const stat = fs.lstatSync(sourcePath)
+  const fingerprint = {
+    path: comparablePath(sourcePath), size: stat.size, mtimeMs: stat.mtimeMs,
+    ctimeMs: stat.ctimeMs, ino: stat.ino, dev: stat.dev, mode: stat.mode,
+  }
+  // Copying skips nested symlinks; record the link itself without following it.
+  return stat.isDirectory() && !stat.isSymbolicLink()
+    ? { ...fingerprint, children: fs.readdirSync(sourcePath).sort().map(name => restoreSourceFingerprint(path.join(sourcePath, name))) }
+    : fingerprint
+}
+
+const restoreSourcesSignature = (realBackupDir: string, manifest: BackupManifest): string =>
+  JSON.stringify((manifest.targets ?? []).map(target => {
+    if (!target.exists || !target.backupPath || !target.type || target.skippedReason) return null
+    const source = path.resolve(realBackupDir, target.backupPath)
+    // Missing inputs are part of the frozen plan too: a late file must not turn
+    // a skipped target into an unconfirmed write after a SQLite await.
+    return restoreSourceFingerprint(fs.existsSync(source) ? fs.realpathSync.native(source) : source)
+  }))
+
+const restorePlanId = (
+  realBackupDir: string,
+  manifestContent: string,
+  manifest: BackupManifest,
+  preview: { restorePlan: RestorePlanItem[]; impact: { summary: RestoreSummary; effects: RestoreEffectSummary } },
+): string => createHash('sha256').update(JSON.stringify({
+  version: 1,
+  backupDir: comparablePath(realBackupDir),
+  manifestContent,
+  sources: (manifest.targets ?? []).map((target, index) => target.exists && target.backupPath && !preview.restorePlan[index]?.skippedReason
+    ? { path: comparablePath(path.resolve(realBackupDir, target.backupPath)), snapshot: restoreSourceFingerprint(fs.realpathSync.native(path.resolve(realBackupDir, target.backupPath))) }
+    : null),
+  restorePlan: preview.restorePlan.map(item => ({ ...item, path: comparablePath(item.path) })),
+  impact: preview.impact,
+})).digest('hex')
 
 const collectEnvironmentChecks = () => {
   const electronRoot = resolveElectronRoot()
@@ -880,9 +939,11 @@ export const isProactivePythonProxyRoute = (method: string, pathname: string): b
   || (method === 'POST' && pathname === '/api/system/activity-frames/rebuild')
   || (method === 'DELETE' && /^\/api\/system\/activity-frames\/(?!rebuild$)[^/]+$/.test(pathname))
 
+let backupRestoreInProgress = false
+
 export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, url, ctx) => {
   if (method === 'GET' && url.pathname === '/api/health') {
-    sendJson(res, 200, { status: 'ok' })
+    sendJson(res, 200, { status: 'ok', service: 'yuizaki-control', signal: 'liveness', checkedAt: new Date().toISOString() })
     return true
   }
 
@@ -943,24 +1004,25 @@ export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, ur
   }
 
   if (method === 'GET' && url.pathname === '/api/system/backup/targets') {
-    const targets = collectBackupTargets().map((target) => ({
+    const selection = await collectBackupTargets(ctx)
+    const targets = selection.targets.map((target, index) => ({
       path: target,
-      exists: fs.existsSync(target),
+      exists: !(index === 1 && selection.sources.memory_persistence === 'memory_only') && fs.existsSync(target),
       type: fs.existsSync(target) && fs.statSync(target).isDirectory() ? 'directory' : 'file',
     }))
 
-    sendJson(res, 200, { targets })
+    sendJson(res, 200, { targets, source: selection.sources.source })
     return true
   }
 
   if (method === 'POST' && url.pathname === '/api/system/backup/create') {
+    const selection = await collectBackupTargets(ctx)
     const backupRoot = resolveBackupRoot()
     fs.mkdirSync(backupRoot, { recursive: true })
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-    const backupDir = path.join(backupRoot, `backup-${timestamp}`)
-    fs.mkdirSync(backupDir, { recursive: true })
+    const backupDir = fs.mkdtempSync(path.join(backupRoot, `backup-${timestamp}-`))
 
-    const manifest = createBackupManifest(backupDir)
+    const manifest = await createBackupManifest(backupDir, selection)
 
     fs.writeFileSync(path.join(backupDir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8')
     sendJson(res, 200, { ok: true, backupDir, manifest })
@@ -968,8 +1030,8 @@ export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, ur
   }
 
   if (method === 'POST' && url.pathname === '/api/system/backup/restore') {
-    const body = await parseRequestBody<{ backupDir?: string; dryRun?: boolean }>(_req)
-    if (!body.backupDir) {
+    const body = await parseRequestBody<{ backupDir?: string; dryRun?: boolean; planId?: string }>(_req)
+    if (!body || typeof body.backupDir !== 'string' || !body.backupDir.trim()) {
       sendJson(res, 400, { error: 'backupDir is required' })
       return true
     }
@@ -1002,23 +1064,58 @@ export const handleSystemRoutes: HttpRouteHandler = async (_req, res, method, ur
       return true
     }
 
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as BackupManifest
+    const manifestContent = fs.readFileSync(manifestPath, 'utf8')
+    const manifest = JSON.parse(manifestContent) as BackupManifest
     const dryRun = body.dryRun !== false
-    const restoreResult = buildRestorePlan(manifest, realBackupDir, dryRun)
-    if ('error' in restoreResult) {
-      sendJson(res, 403, restoreResult)
+    const selection = await collectBackupTargets(ctx)
+    const preview = await buildRestorePlan(manifest, realBackupDir, true, selection.targets)
+    if ('error' in preview) {
+      sendJson(res, 403, preview)
       return true
     }
+    const planId = restorePlanId(realBackupDir, manifestContent, manifest, preview)
+    const frozenSources = restoreSourcesSignature(realBackupDir, manifest)
+    const sourcesUnchanged = () => {
+      try {
+        return fs.readFileSync(manifestPath, 'utf8') === manifestContent && restoreSourcesSignature(realBackupDir, manifest) === frozenSources
+      } catch { return false }
+    }
+    if (!dryRun && (typeof body.planId !== 'string' || body.planId !== planId)) {
+      sendJson(res, 409, { ok: false, error: 'restore_plan_changed', message: 'Backup restore plan changed or is missing. Preview again before applying.', planId })
+      return true
+    }
+    if (!dryRun && backupRestoreInProgress) {
+      sendJson(res, 409, { error: 'restore_in_progress', message: 'Another backup restore is in progress. Wait for its result before previewing again.' })
+      return true
+    }
+    if (!dryRun) backupRestoreInProgress = true
+    try {
+      // No write occurs before the plan comparison. Retain destination and
+      // realpath checks during apply; SQLite restores use its transaction protocol.
+      const restoreResult = dryRun ? preview : await buildRestorePlan(manifest, realBackupDir, false, selection.targets, sourcesUnchanged)
+      if ('error' in restoreResult) {
+        const restoredPaths = restoreResult.restorePlan.filter(item => item.restored).map(item => item.path)
+        sendJson(res, restoreResult.error === 'restore_plan_changed' ? 409 : 403, {
+          ...restoreResult,
+          ...(restoredPaths.length ? { message: `Restore stopped after ${restoredPaths.length} target(s) were restored. Remaining targets were not restored. Preview again. Restored: ${restoredPaths.join(', ')}` } : {}),
+        })
+        return true
+      }
 
-    sendJson(res, 200, {
-      ok: true,
-      dryRun,
-      backupDir: realBackupDir,
-      manifest,
-      restorePlan: restoreResult.restorePlan,
-      summary: restoreResult.impact.summary,
-      effects: restoreResult.impact.effects,
-    })
+      sendJson(res, 200, {
+        ok: true,
+        dryRun,
+        planId,
+        backupDir: realBackupDir,
+        manifest,
+        restorePlan: restoreResult.restorePlan,
+        summary: restoreResult.impact.summary,
+        effects: restoreResult.impact.effects,
+      })
+    } finally {
+      if (!dryRun) backupRestoreInProgress = false
+    }
+
     return true
   }
 

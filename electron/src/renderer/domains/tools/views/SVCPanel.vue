@@ -44,7 +44,13 @@
               :closable="false"
             />
             <el-alert v-if="conversionError" :title="conversionError" type="error" show-icon :closable="false" />
-            <el-alert v-if="resultAudioUrl" :title="t('svcPanel.conversionComplete')" type="success" show-icon :closable="false" />
+            <el-alert v-if="resultAudioUrl" :title="`${t('svcPanel.conversionComplete')} · ${conversionContext?.fileName}`" type="success" show-icon :closable="false" />
+            <small v-if="conversionContext" class="conversion-context">
+              {{ conversionContext.fileName }} · {{ conversionContext.config.provider }} ·
+              {{ conversionContext.config.base_url }} · speaker={{ conversionContext.config.speaker_id }} ·
+              pitch={{ conversionContext.config.pitch }} · {{ conversionContext.startedAt }} · {{ conversionContext.requestId }}
+            </small>
+            <el-alert v-if="svcCheckError" :title="svcCheckError" type="warning" show-icon :closable="false" />
             <audio v-if="resultAudioUrl" :src="resultAudioUrl" controls class="audio-player"></audio>
           </div>
         </el-card>
@@ -64,7 +70,7 @@ import { ElCard } from 'element-plus'
 import 'element-plus/es/components/card/style/css'
 import { ElTag } from 'element-plus'
 import 'element-plus/es/components/tag/style/css'
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, onUnmounted, reactive, ref, watch } from 'vue'
 import { UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElUpload, type UploadFile } from 'element-plus'
 import 'element-plus/es/components/upload/style/css'
@@ -74,6 +80,7 @@ import { API_ORIGIN, requestJson, resolveBackendUrl } from '@/api/clients/http-c
 import { settingsClient, type SettingsResponse } from '@/api/clients/settings-client'
 import { useSettingsStore } from '@/state/settingsStore'
 import { useRoute, useRouter } from 'vue-router'
+import { usePanelLifecycle } from '@/app/composables/usePanelLifecycle'
 import { describeFailure } from '@/shared/errors/describe-error'
 
 const props = defineProps<{
@@ -84,6 +91,8 @@ const props = defineProps<{
   testLoading?: boolean
   testResult?: {
     ok: boolean
+    ready?: boolean
+    reachable?: boolean
     message?: string
   } | null
 }>()
@@ -116,14 +125,25 @@ const svcCheckState = ref<'idle' | 'checking' | 'ready' | 'error'>('idle')
 const isConverting = ref(false)
 const resultAudioUrl = ref('')
 const conversionError = ref('')
+const svcCheckError = ref('')
+const conversionContext = ref<{
+  requestId: string; fileName: string; startedAt: string; config: SettingsResponse['svc']
+} | null>(null)
+const configSnapshot = () => ({ ...activeSvcConfig.value })
+const sameConfig = (left: SettingsResponse['svc'], right: SettingsResponse['svc']) =>
+  left.provider === right.provider && left.base_url === right.base_url &&
+  left.speaker_id === right.speaker_id && left.pitch === right.pitch && left.timeout === right.timeout
+let serviceCheckSequence = 0
 let settingsLoadSequence = 0
 let unmounted = false
 
 const activeSvcConfig = computed(() => props.config ?? voiceConfig.svc)
 const effectiveCheckState = computed<'idle' | 'checking' | 'ready' | 'error'>(() => {
   if (!embedded.value) return svcCheckState.value
+  if (svcCheckState.value !== 'idle') return svcCheckState.value
   if (props.testLoading) return 'checking'
-  if (props.testResult) return props.testResult.ok ? 'ready' : 'error'
+  // Settings projects the backend's ready-derived `ok` into this prop.
+  if (props.testResult) return props.testResult.ok && props.testResult.ready !== false && props.testResult.reachable !== false ? 'ready' : 'error'
   return 'idle'
 })
 const svcModelReady = computed(() => {
@@ -162,7 +182,8 @@ const runBeforeAction = async () => {
   if (!props.beforeAction) return true
   try {
     return await props.beforeAction()
-  } catch {
+  } catch (error) {
+    conversionError.value = describeFailure(error, t('svcPanel.saveFailed'))
     return false
   }
 }
@@ -180,24 +201,29 @@ const loadSettings = async () => {
 }
 
 const testService = async () => {
-  const svcSettings = activeSvcConfig.value
+  const svcSettings = configSnapshot()
   if (svcSettings.provider === 'disabled' || !svcSettings.base_url.trim()) {
-    ElMessage.warning(svcReadinessMessage.value || t('svcPanel.configureEndpointFirst'))
+    svcCheckError.value = svcReadinessMessage.value || t('svcPanel.configureEndpointFirst')
     return
   }
-  if (!(await runBeforeAction())) return
+  const requestId = ++serviceCheckSequence
   svcCheckState.value = 'checking'
+  svcCheckError.value = ''
   try {
+    if (!(await runBeforeAction())) throw new Error(conversionError.value || t('svcPanel.saveFailed'))
+    const saved = await settingsClient.load()
+    if (unmounted || requestId !== serviceCheckSequence) return
+    if (!sameConfig(svcSettings, saved.svc)) throw new Error(t('svcPanel.saveFailed'))
     const result = await settingsClient.testSvc()
-    svcCheckState.value = result.ok ? 'ready' : 'error'
-    if (result.ok) {
-      ElMessage.success(result.message || t('svcPanel.serviceReachable'))
-    } else {
-      ElMessage.error(result.message || t('svcPanel.serviceUnavailable'))
-    }
+    if (unmounted || requestId !== serviceCheckSequence || !sameConfig(svcSettings, activeSvcConfig.value)) return
+    const ready = result.ok === true && result.ready === true && result.reachable === true
+    svcCheckState.value = ready ? 'ready' : 'error'
+    if (ready) ElMessage.success(result.message || t('svcPanel.serviceReachable'))
+    else svcCheckError.value = result.message || t('svcPanel.serviceUnavailable')
   } catch (error) {
+    if (unmounted || requestId !== serviceCheckSequence) return
     svcCheckState.value = 'error'
-    ElMessage.error(describeFailure(error, t('svcPanel.serviceUnavailable')))
+    svcCheckError.value = describeFailure(error, t('svcPanel.serviceUnavailable'))
   }
 }
 
@@ -211,8 +237,12 @@ const openSettings = () => {
 
 const handleFileChange = (uploadFile: UploadFile) => {
   selectedFile.value = uploadFile.raw ?? null
-  resultAudioUrl.value = ''
-  conversionError.value = ''
+  // An in-flight result keeps its own file/config label when another file is selected.
+  if (!isConverting.value) {
+    resultAudioUrl.value = ''
+    conversionError.value = ''
+    conversionContext.value = null
+  }
 }
 
 const normalizeAudioUrl = async (audioUrl: string) => {
@@ -231,12 +261,14 @@ const conversionRequestTimeoutMs = (configuredSeconds: number | undefined): numb
 
 const startConversion = async () => {
   if (isConverting.value) return
-  if (!selectedFile.value) {
+  const file = selectedFile.value
+  if (!file) {
     ElMessage.warning(t('svcPanel.selectAudioFirst'))
     return
   }
-  if (!(await runBeforeAction())) return
-  const svcSettings = activeSvcConfig.value
+  // Freeze before awaiting the settings flush. File changes during save/network
+  // activity cannot relabel the submitted audio or change its request options.
+  const svcSettings = configSnapshot()
   if (svcSettings.provider === 'disabled' || !svcSettings.base_url.trim()) {
     ElMessage.warning(svcReadinessMessage.value || t('svcPanel.waitingService'))
     return
@@ -244,39 +276,49 @@ const startConversion = async () => {
   isConverting.value = true
   resultAudioUrl.value = ''
   conversionError.value = ''
+  const context = { requestId: crypto.randomUUID(), fileName: file.name, startedAt: new Date().toISOString(), config: svcSettings }
+  conversionContext.value = context
   try {
+    if (!(await runBeforeAction())) throw new Error(conversionError.value || t('svcPanel.saveFailed'))
+    const saved = await settingsClient.load()
+    if (unmounted) return
+    if (!sameConfig(svcSettings, saved.svc) || !sameConfig(svcSettings, activeSvcConfig.value)) {
+      throw new Error(t('svcPanel.saveFailed'))
+    }
     const formData = new FormData()
-    formData.append('file', selectedFile.value)
+    formData.append('file', file)
     formData.append('speaker_id', String(svcSettings.speaker_id))
     formData.append('pitch', String(svcSettings.pitch))
     const result = await requestJson<SvcConvertResponse>(`${API_ORIGIN}/svc/convert`, {
-      method: 'POST',
-      body: formData,
+      method: 'POST', body: formData, headers: { 'x-trace-id': context.requestId },
       timeoutMs: conversionRequestTimeoutMs(svcSettings.timeout),
     })
-    if (result.status === 'error') {
-      throw new Error(result.error || t('svcPanel.requestFailed', { status: 'error' }))
-    }
-    resultAudioUrl.value = await normalizeAudioUrl(result.audio_url || result.url || '')
-    if (!resultAudioUrl.value) {
-      conversionError.value = t('svcPanel.requestDoneNoAudio')
-      return
-    }
+    if (unmounted) return
+    if (result.status === 'error') throw new Error(result.error || t('svcPanel.requestFailed', { status: 'error' }))
+    const audioUrl = await normalizeAudioUrl(result.audio_url || result.url || '')
+    if (unmounted) return
+    if (!audioUrl) throw new Error(t('svcPanel.requestDoneNoAudio'))
+    resultAudioUrl.value = audioUrl
     ElMessage.success(t('svcPanel.svcComplete'))
   } catch (error) {
+    if (unmounted) return
     conversionError.value = describeFailure(error, t('svcPanel.serviceUnavailable'))
     ElMessage.error(conversionError.value)
   } finally {
-    isConverting.value = false
+    if (!unmounted) isConverting.value = false
   }
 }
 
-onMounted(() => {
+usePanelLifecycle(async () => {
   if (embedded.value) {
     Object.assign(voiceConfig.svc, settingsStore.state.svc)
     return
   }
-  void loadSettings()
+  await loadSettings()
+}, () => {
+  settingsLoadSequence += 1
+  serviceCheckSequence += 1
+  svcCheckState.value = 'idle'
 })
 
 watch(() => settingsStore.state.svc, (value) => {
@@ -295,13 +337,18 @@ watch(
     activeSvcConfig.value.timeout,
   ],
   () => {
-    if (!unmounted && embedded.value) svcCheckState.value = 'idle'
+    if (!unmounted) {
+      serviceCheckSequence += 1
+      svcCheckState.value = 'idle'
+      svcCheckError.value = ''
+    }
   },
 )
 
 onUnmounted(() => {
   unmounted = true
   settingsLoadSequence += 1
+  serviceCheckSequence += 1
 })
 </script>
 
@@ -386,6 +433,8 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 12px;
 }
+
+.conversion-context { overflow-wrap: anywhere; color: var(--yui-text-muted); }
 
 .audio-player {
   width: 100%;

@@ -9,6 +9,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
+from anyio import CancelScope, create_task_group
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from modules.agent import AgentRuntime
@@ -18,10 +19,42 @@ from modules.agent.turn_service import TurnClaimLostError, TurnIdentityConflictE
 from modules.system.api_response import error_response
 from modules.system.memory_write_pipeline import build_user_signal_event
 from pydantic import BaseModel, ConfigDict, Field
+from starlette._utils import collapse_excgroups
+from starlette.requests import ClientDisconnect
 from state.schemas import ChatCompletionRequest
 
 MAX_SVC_UPLOAD_BYTES = 25 * 1024 * 1024
 UPLOAD_READ_CHUNK_BYTES = 64 * 1024
+
+
+class _ChatStreamingResponse(StreamingResponse):
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        # Keep Starlette's disconnect listener on ASGI 2.4 too: there may be
+        # no next send while the producer is waiting for an LLM or tool.
+        with collapse_excgroups():
+            async with create_task_group() as group:
+                async def stream() -> None:
+                    try:
+                        await self.stream_response(send)
+                    except OSError as exc:
+                        raise ClientDisconnect() from exc
+                    group.cancel_scope.cancel()
+
+                group.start_soon(stream)
+                await self.listen_for_disconnect(receive)
+                group.cancel_scope.cancel()
+        if self.background is not None:
+            await self.background()
+
+    async def stream_response(self, send: Any) -> None:
+        try:
+            await super().stream_response(send)
+        finally:
+            # A failed ASGI send must close the iterator too, so its producer
+            # cannot continue running tools after the client disconnects.
+            close = getattr(self.body_iterator, "aclose", None)
+            if close is not None:
+                await close()
 
 
 class UploadTooLargeError(Exception):
@@ -398,6 +431,10 @@ def create_ai_router(
                 session_id = _resolve_chat_session_id(req.session_id)
                 request_id = req.request_id or f"agent_{uuid.uuid4().hex[:12]}"
                 turn_id = f"turn:{request_id}"
+                gen: Any = None
+                producer: asyncio.Task[Any] | None = None
+                next_event: asyncio.Task[dict[str, Any]] | None = None
+                completed = False
                 try:
                     messages = [m.model_dump() for m in req.messages]
                     gen = _bind_http_generation(generation_mgr, session_id, request_id)
@@ -438,31 +475,76 @@ def create_ai_router(
                     if req.autonomy_mode != "silent":
                         ctx = await _bind_runtime_context(ctx)
                     turn_service = _require_turn_service(runtime)
-                    commit: Any | None = None
-                    if turn_service is None:
-                        if req.autonomy_mode != "silent":
-                            await _write_user_relationship_event(
-                                messages,
-                                workspace_id=workspace_id,
-                                turn_id=ctx.turn_id,
-                            )
-                        result_obj = await pipeline.run_streaming(ctx, None, gen)
-                    else:
+                    events: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=32)
+
+                    class _HTTPStreamAdapter:
+                        async def send_json(self, event: dict[str, Any]) -> None:
+                            if gen.invalidated or gen.cancel.is_set():
+                                raise asyncio.CancelledError
+                            await events.put(event)
+
+                    adapter = _HTTPStreamAdapter()
+
+                    async def execute_stream() -> tuple[Any, Any]:
+                        if turn_service is None:
+                            if req.autonomy_mode != "silent":
+                                await _write_user_relationship_event(
+                                    messages,
+                                    workspace_id=workspace_id,
+                                    turn_id=ctx.turn_id,
+                                )
+                            return await pipeline.run_streaming(ctx, adapter, gen), None
                         executed_commit = await turn_service.execute_streaming_context(
-                            "http", ctx, None, gen,
+                            "http", ctx, adapter, gen,
                         )
-                        commit = executed_commit
-                        result_obj = executed_commit.result
-                    final_reply = result_obj.reply
+                        return executed_commit.result, executed_commit
+
+                    producer = asyncio.create_task(execute_stream(), name=f"http-stream:{request_id}")
+                    gen.llm_task = producer
+                    emitted_text = False
+                    while not producer.done() or not events.empty():
+                        next_event = asyncio.create_task(events.get())
+                        done, _ = await asyncio.wait(
+                            (producer, next_event), return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        if next_event not in done:
+                            next_event.cancel()
+                            await asyncio.gather(next_event, return_exceptions=True)
+                            next_event = None
+                            break
+                        event = next_event.result()
+                        next_event = None
+                        if gen.invalidated or gen.cancel.is_set():
+                            raise asyncio.CancelledError
+                        event_type = event.get("type")
+                        if event_type == "done":
+                            # TurnService owns commit ordering. Its return value
+                            # supplies the one authoritative terminal frame.
+                            continue
+                        if event_type == "token":
+                            content = event.get("content", "")
+                            emitted_text = emitted_text or bool(content)
+                            payload = {"choices": [{"delta": {"content": content}, "finish_reason": None}]}
+                        else:
+                            payload = serialize_permission_payload(event)
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+                    result_obj, commit = await producer
+                    if gen.invalidated or gen.cancel.is_set():
+                        raise asyncio.CancelledError
                     if result_obj.action_envelope:
                         yield f"data: {json.dumps({'action_envelope': serialize_permission_payload(result_obj.action_envelope)})}\n\n"
                     terminal: dict[str, Any] = {
-                        "choices": [{"delta": {"content": final_reply}, "finish_reason": "stop"}],
+                        "choices": [{
+                            "delta": {"content": "" if emitted_text else result_obj.reply},
+                            "finish_reason": "stop" if result_obj.outcome == "completed" else "error",
+                        }],
                         "outcome": result_obj.outcome,
                         "retryable": result_obj.retryable,
                     }
                     if commit is not None:
                         terminal["turn_commit"] = _commit_metadata(commit)
+                    completed = True
                     yield f"data: {json.dumps(terminal)}\n\n"
                 except asyncio.CancelledError:
                     raise
@@ -482,7 +564,28 @@ def create_ai_router(
                         'request_id': request_id,
                         'turn_id': turn_id,
                     })}\n\n"
-            return StreamingResponse(stream_generator(), media_type="text/event-stream")
+                finally:
+                    # Starlette's disconnect scope is already cancelled here;
+                    # let cleanup reap the producer and its Turn commit once.
+                    with CancelScope(shield=True):
+                        if gen is not None and not completed and not gen.invalidated:
+                            # A replaced generation already cancelled this task.
+                            # Repeating it can cancel TurnService's durable write.
+                            gen.invalidate()
+                        if next_event is not None:
+                            next_event.cancel()
+                            await asyncio.gather(next_event, return_exceptions=True)
+                        if producer is not None:
+                            if not producer.done() and not producer.cancelling():
+                                producer.cancel()
+                            await asyncio.gather(producer, return_exceptions=True)
+                            if gen is not None and gen.llm_task is producer:
+                                gen.llm_task = None
+            return _ChatStreamingResponse(
+                stream_generator(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
         session_id = _resolve_chat_session_id(req.session_id)
         try:
             messages = [m.model_dump() for m in req.messages]

@@ -8,6 +8,8 @@
         <el-button type="primary" plain :loading="loading" :disabled="loading" @click="loadHeartbeat">{{ t('memoryView.personaRefresh') }}</el-button>
       </div>
 
+      <p role="status">角色：{{ heartbeat?.active_companion?.name || '未知' }} ({{ heartbeat?.active_companion?.id || '-' }}) · 角色配置模型：{{ heartbeat?.active_companion?.model_id || '未知' }} · 当前模型：{{ avatarCapabilities?.modelId || '未知' }} / {{ avatarCapabilities?.modelType || '-' }}</p>
+      <el-alert v-if="avatarError" :title="avatarError" type="warning" :closable="false" />
       <el-alert v-if="loadError" :title="loadError" type="warning" show-icon :closable="false" />
 
       <el-card shadow="never">
@@ -23,9 +25,10 @@
       </el-card>
 
       <el-card shadow="never">
-        <template #header>{{ t('memoryView.personaLatestBehavior') }}</template>
+        <template #header>{{ t('memoryView.personaLatestBehavior') }} · 历史记录</template>
         <el-empty v-if="!latestBehaviorEvent" :description="t('memoryView.personaNoInterceptedEvents')" />
         <div v-else class="event-section">
+          <p>记录于 {{ formatEventTime(latestBehaviorEvent.at) }}</p>
           <el-descriptions :column="2" border>
             <el-descriptions-item :label="t('memoryView.personaType')">{{ behaviorTypeLabel(latestBehaviorEvent.type) }}</el-descriptions-item>
             <el-descriptions-item :label="t('memoryView.personaTriggerReason')">{{ latestBehaviorEvent.trigger_reason || '-' }}</el-descriptions-item>
@@ -45,8 +48,8 @@
           />
 
           <div class="button-row">
-            <el-button size="small" type="primary" plain :loading="triggeringEmotion" :disabled="triggeringEmotion || !latestBehaviorEvent.emotion_id" @click="triggerEmotion">{{ t('memoryView.personaTriggerEmotion') }}</el-button>
-            <el-button size="small" type="primary" plain :loading="triggeringMotion" :disabled="triggeringMotion || !latestBehaviorEvent.motion_group" @click="triggerMotion">{{ t('memoryView.personaTriggerMotion') }}</el-button>
+            <el-button size="small" type="primary" plain :loading="triggeringEmotion" :disabled="triggeringEmotion || !latestBehaviorEvent.emotion_id || !canTriggerEmotion" :title="canTriggerEmotion ? '向当前模型发送表情' : '能力未确认或角色与当前模型不匹配；请同步角色与模型后重试'" @click="triggerEmotion">{{ t('memoryView.personaTriggerEmotion') }}</el-button>
+            <el-button size="small" type="primary" plain :loading="triggeringMotion" :disabled="triggeringMotion || !latestBehaviorEvent.motion_group || !canTriggerMotion" :title="canTriggerMotion ? '向当前模型发送动作' : '当前模型未提供该 motion，或角色与当前模型不匹配；可改用聊天建议'" @click="triggerMotion">{{ t('memoryView.personaTriggerMotion') }}</el-button>
             <el-button size="small" type="success" plain @click="pushPromptToAdvice">{{ t('memoryView.personaPushAdvice') }}</el-button>
           </div>
         </div>
@@ -57,7 +60,7 @@
         <el-empty v-if="!heartbeat?.behavior_events?.length" :description="t('memoryView.personaNoBehaviorEvents')" />
         <div v-else class="event-table-wrap">
           <el-table :data="heartbeat.behavior_events.slice().reverse()" size="small" border>
-            <el-table-column prop="at" :label="t('memoryView.personaColumnTime')" width="180" />
+            <el-table-column :label="t('memoryView.personaColumnTime')" width="180"><template #default="scope">{{ formatEventTime(scope.row.at) }}</template></el-table-column>
             <el-table-column :label="t('memoryView.personaType')" width="160"><template #default="scope">{{ behaviorTypeLabel(scope.row.type) }}</template></el-table-column>
             <el-table-column prop="message" :label="t('memoryView.personaColumnMessage')" min-width="260" show-overflow-tooltip />
           </el-table>
@@ -77,7 +80,12 @@
 
 <script setup lang="ts">
 import 'element-plus/es/components/tag/style/css'
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
+import { usePanelLifecycle } from '@/app/composables/usePanelLifecycle'
+import { useUiCapabilities } from '@/app/composables/useUiCapabilities'
+import { petControl } from '@/utils/petControl'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { AVATAR_COMMAND_VERSION, type AvatarAction, type AvatarCapabilitySnapshot } from '@/../shared/avatar-command'
 import {
   ElAlert,
   ElButton,
@@ -95,11 +103,15 @@ import 'element-plus/es/components/descriptions/style/css'
 import 'element-plus/es/components/descriptions-item/style/css'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import { t } from '@/i18n'
-import { petControlClient, systemClient } from '@/api/client'
+import { systemClient } from '@/api/client'
 import { useChatStore } from '@/stores/chatStore'
 import type { HeartbeatSnapshot } from '@/../shared/agent'
 import { describeFailure } from '@/shared/errors/describe-error'
 
+const workspaceStore = useWorkspaceStore()
+const uiCapabilities = useUiCapabilities()
+const avatarCapabilities = ref<AvatarCapabilitySnapshot | null>(null)
+const avatarError = ref('')
 const heartbeat = ref<HeartbeatSnapshot | null>(null)
 const behaviorSuggestions = ref<string[]>([])
 const loading = ref(false)
@@ -113,6 +125,36 @@ const latestBehaviorEvent = computed(() => {
   const events = heartbeat.value?.behavior_events
   return Array.isArray(events) && events.length > 0 ? events[events.length - 1] : null
 })
+
+const avatarMatchesPersona = computed(() => {
+  const companion = heartbeat.value?.active_companion
+  const avatar = avatarCapabilities.value
+  return Boolean(avatar?.modelId && companion && companion.model_id === avatar.modelId
+    && (!companion.model_type || companion.model_type === avatar.modelType)
+    && (!heartbeat.value?.active_workspace_id || heartbeat.value.active_workspace_id === workspaceStore.activeWorkspaceId))
+})
+const canTriggerEmotion = computed(() => avatarMatchesPersona.value && avatarCapabilities.value?.actions.affect === true && uiCapabilities.capability('hostHttp').available)
+const canTriggerMotion = computed(() => avatarMatchesPersona.value && avatarCapabilities.value?.actions.motion === true
+  && avatarCapabilities.value.motions.some((motion) => motion.group === latestBehaviorEvent.value?.motion_group && motion.index === 0)
+  && uiCapabilities.capability('hostHttp').available)
+const formatEventTime = (value?: string | null) => {
+  if (!value) return '时间未知'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+const loadAvatar = async () => {
+  const requestId = heartbeatLoadSequence
+  try {
+    const result = await petControl.getAvatarCapabilities()
+    if (requestId !== heartbeatLoadSequence || !pageLifecycle.active.value) return
+    avatarCapabilities.value = result.capabilities
+    avatarError.value = ''
+  } catch (error) {
+    if (requestId !== heartbeatLoadSequence) return
+    avatarCapabilities.value = null
+    avatarError.value = describeFailure(error, '当前模型能力读取失败')
+  }
+}
 
 const formatAffinity = (value: number | undefined) => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '-'
@@ -166,7 +208,7 @@ const loadHeartbeat = async () => {
   loading.value = true
   loadError.value = ''
   try {
-    const snapshot = await systemClient.heartbeat()
+    const [snapshot] = await Promise.all([systemClient.heartbeat(), loadAvatar(), uiCapabilities.refresh()])
     if (requestId !== heartbeatLoadSequence) return
     heartbeat.value = snapshot
     const events = snapshot.behavior_events
@@ -180,36 +222,49 @@ const loadHeartbeat = async () => {
   }
 }
 
+const replayAvatarAction = async (action: AvatarAction) => {
+  const capabilities = avatarCapabilities.value
+  if (!pageLifecycle.active.value || !capabilities || !avatarMatchesPersona.value) return
+  const sequence = heartbeatLoadSequence
+  const commandId = `persona-${crypto.randomUUID()}`
+  const result = await petControl.triggerAvatarCommand({
+    version: AVATAR_COMMAND_VERSION,
+    id: commandId,
+    streamId: 'ui-persona-memory',
+    sequence: Date.now(),
+    issuedAt: Date.now(),
+    capabilityRevision: capabilities.revision,
+    priority: 60,
+    interrupt: 'replace',
+    actions: [action],
+  })
+  if (sequence !== heartbeatLoadSequence || !pageLifecycle.active.value) return
+  if (!result || result.commandId !== commandId) throw new Error('动作响应身份不匹配；结果未知，请先同步模型状态。')
+  if (result.status === 'completed') ElMessage.success('当前模型动作已完成。')
+  else if (result.status === 'accepted' || result.status === 'started') ElMessage.info('动作请求已接受；渲染完成以舞台反馈为准。')
+  else ElMessage.warning(result.message || `动作未完成：${result.status}`)
+}
+
 const triggerEmotion = async () => {
   const emotionId = latestBehaviorEvent.value?.emotion_id
-  if (triggeringEmotion.value || !emotionId) {
-    return
-  }
+  if (triggeringEmotion.value || triggeringMotion.value || !emotionId || !canTriggerEmotion.value) return
   triggeringEmotion.value = true
   try {
-    await petControlClient.triggerEmotion(emotionId)
-    ElMessage.success(t('memoryView.personaEmotionPlayed'))
-  } catch {
-    ElMessage.warning(t('memoryView.personaEmotionUnavailable'))
-  } finally {
-    triggeringEmotion.value = false
-  }
+    await replayAvatarAction({ type: 'affect', emotion: emotionId })
+  } catch (error) {
+    ElMessage.warning(describeFailure(error, t('memoryView.personaEmotionUnavailable')))
+  } finally { triggeringEmotion.value = false }
 }
 
 const triggerMotion = async () => {
   const motionGroup = latestBehaviorEvent.value?.motion_group
-  if (triggeringMotion.value || !motionGroup) {
-    return
-  }
+  if (triggeringMotion.value || triggeringEmotion.value || !motionGroup || !canTriggerMotion.value) return
   triggeringMotion.value = true
   try {
-    await petControlClient.triggerMotion(motionGroup, 0)
-    ElMessage.success(t('memoryView.personaMotionPlayed'))
-  } catch {
-    ElMessage.warning(t('memoryView.personaMotionUnavailable'))
-  } finally {
-    triggeringMotion.value = false
-  }
+    await replayAvatarAction({ type: 'motion', group: motionGroup, index: 0 })
+  } catch (error) {
+    ElMessage.warning(describeFailure(error, t('memoryView.personaMotionUnavailable')))
+  } finally { triggeringMotion.value = false }
 }
 
 const pushPromptToAdvice = () => {
@@ -220,8 +275,10 @@ const pushPromptToAdvice = () => {
   ElMessage.success(t('memoryView.personaAdviceAdded'))
 }
 
-onMounted(() => {
-  void loadHeartbeat()
+const pageLifecycle = usePanelLifecycle(loadHeartbeat, () => {
+  heartbeatLoadSequence += 1
+  loading.value = false
+  avatarCapabilities.value = null
 })
 </script>
 

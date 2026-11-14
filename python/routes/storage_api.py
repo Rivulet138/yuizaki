@@ -193,6 +193,7 @@ def create_storage_router(
     audio_cache_dir: Path,
     runtime_temp_dir: Path,
     memory_store_provider: Callable[[], Any],
+    database_provider: Callable[[], Any] | None = None,
 ) -> APIRouter:
     maintenance = StorageMaintenance(
         audio_cache_dir=audio_cache_dir,
@@ -201,12 +202,33 @@ def create_storage_router(
     )
     router = APIRouter(prefix="/api/system/storage", tags=["storage"])
 
+    async def backup_sources() -> dict[str, Any]:
+        from fastapi import HTTPException
+        from modules.core.paths import data_dir_from_env, settings_path_from_env
+
+        database = database_provider() if database_provider else None
+        database_path = getattr(database, "db_path", None)
+        authority = _resolve_memory_authority(memory_store_provider())
+        memory_path = getattr(authority, "db_path", None)
+        if not database_path:
+            raise HTTPException(409, detail="backup_requires_initialized_file_sqlite_database")
+        return {
+            "source": "running_backend",
+            "database": str(Path(database_path).resolve()),
+            "memory": str(Path(memory_path).resolve()) if memory_path else str(data_dir_from_env() / "memory.db"),
+            "memory_persistence": "disk" if memory_path else "memory_only",
+            "settings": str(settings_path_from_env()),
+            "data_dir": str(data_dir_from_env()),
+            "audio_cache": str(Path(audio_cache_dir).resolve()),
+        }
+
     async def storage_status() -> dict[str, Any]:
         return await asyncio.to_thread(maintenance.snapshot)
 
     async def cleanup_storage(payload: StorageCleanupRequest) -> dict[str, Any]:
         return await asyncio.to_thread(maintenance.cleanup, payload.targets)
 
+    router.add_api_route("/backup-sources", backup_sources, methods=["GET"])
     router.add_api_route("", storage_status, methods=["GET"])
     router.add_api_route("/cleanup", cleanup_storage, methods=["POST"])
     return router

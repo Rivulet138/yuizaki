@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "proxy_prefixes": [
+    "/api/",
+    "/memory/",
+    "/system/",
+    "/health",
+    "/v1/"
+  ],
+  "routes": [
+    {
+      "path": "/api/perception/active-application",
+      "methods": [
+        "GET"
+      ],
+      "name": "active_application",
+      "proxy": true
+    },
+    {
+      "path": "/api/ping",
+      "methods": [
+        "GET"
+      ],
+      "name": "ping",
+      "proxy": true
+    },
+    {
+      "path": "/api/system/route-manifest",
+      "methods": [
+        "GET"
+      ],
+      "name": "route_manifest",
+      "proxy": true
+    },
+    {
+      "path": "/api/system/ui-capabilities",
+      "methods": [
+        "GET"
+      ],
+      "name": "ui_capabilities",
+      "proxy": true
+    }
+  ]
+}

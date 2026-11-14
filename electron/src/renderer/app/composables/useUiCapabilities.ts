@@ -58,18 +58,23 @@ const normalizeSnapshot = (value: unknown): UiCapabilitiesSnapshot | null => {
   }
 }
 
-export const useUiCapabilities = () => {
-  const snapshot = ref<UiCapabilitiesSnapshot | null>(null)
-  const loading = ref(false)
-  const error = ref<string | null>(null)
-  let refreshGeneration = 0
+export type UiTransport = 'browserLocal' | 'hostHttp' | 'electronIpc'
+export interface UiCapability { available: boolean; transport: UiTransport; reason: string }
 
+// A single snapshot is shared by the shell and its cached panels.
+const snapshot = ref<UiCapabilitiesSnapshot | null>(null)
+const loading = ref(false)
+const error = ref<string | null>(null)
+let refreshGeneration = 0
+let pendingRefresh: Promise<void> | null = null
+
+export const useUiCapabilities = () => {
   const isElectron = computed(() => Boolean(typeof window !== 'undefined' && window.petApi?.window))
   const mode = computed<'browser' | 'electron'>(() => (isElectron.value ? 'electron' : 'browser'))
   const client = computed(() => snapshot.value?.clients[mode.value] ?? emptyClient(mode.value))
   const connected = computed(() => snapshot.value?.protocol.http === true)
 
-  const refresh = async (): Promise<void> => {
+  const load = async (): Promise<void> => {
     const generation = ++refreshGeneration
     loading.value = true
     error.value = null
@@ -86,5 +91,20 @@ export const useUiCapabilities = () => {
     }
   }
 
-  return { snapshot, loading, error, isElectron, mode, client, connected, refresh }
+  const refresh = (): Promise<void> => {
+    if (!pendingRefresh) pendingRefresh = load().finally(() => { pendingRefresh = null })
+    return pendingRefresh
+  }
+  const capability = (transport: UiTransport, key?: keyof UiClientCapabilities['hostCapabilities'], ipcPresent = false): UiCapability => {
+    if (transport === 'browserLocal') return { available: true, transport, reason: '在当前浏览器处理所选文件。' }
+    if (transport === 'hostHttp') {
+      const available = snapshot.value?.protocol.http !== false
+      return { available, transport, reason: available
+        ? '通过 HTTP 操作服务所在的宿主；文件路径属于宿主。'
+        : '宿主未提供 HTTP 能力；请连接宿主服务或使用桌面端。' }
+    }
+    const available = isElectron.value && ipcPresent && (!key || client.value.hostCapabilities[key])
+    return { available, transport, reason: available ? '通过 Electron IPC 操作本机。' : '当前环境没有此 Electron IPC 能力；请在桌面端操作，或使用宿主 HTTP 入口。' }
+  }
+  return { snapshot, loading, error, isElectron, mode, client, connected, capability, refresh }
 }

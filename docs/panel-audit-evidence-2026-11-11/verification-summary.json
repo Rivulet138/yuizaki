@@ -1,0 +1,48 @@
+{
+  "date": "2026-11-11",
+  "timezone": "Asia/Shanghai",
+  "frontend_tests": {
+    "files": 77,
+    "passed": 713,
+    "new_regressions": 52
+  },
+  "backend_contract_tests": {
+    "files": 14,
+    "passed": 169
+  },
+  "checks": {
+    "lint": "passed",
+    "electron_types": "passed",
+    "renderer_types": "passed, 0 errors",
+    "production_build": "passed",
+    "bundle_audit": "passed",
+    "diff_check": "passed"
+  },
+  "browser": {
+    "routes": 14,
+    "subtabs": 29,
+    "page_errors": 0,
+    "responsive_widths": [
+      390,
+      768,
+      1440
+    ],
+    "overflow_samples": 0,
+    "interaction_scenarios": 4,
+    "interaction_page_errors": 0,
+    "initial_transient_loading_samples": [
+      [
+        "settings",
+        1
+      ]
+    ],
+    "subtab_loading_samples": [],
+    "scope": "real isolated Python backend on 48001; actual Vite renderer; Electron host unavailable; settings failures injected"
+  },
+  "limitations": [
+    "No live Electron IPC/control host integration",
+    "No real provider LLM/TTS/ASR or model asset rendering verification",
+    "Read-only panel sweep blocks provider/host mutations; session/workspace bookkeeping uses isolated test data"
+  ],
+  "runtime_cleanup": "Isolated audit backend stopped; existing Vite process retained."
+}

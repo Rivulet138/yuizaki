@@ -86,7 +86,7 @@
           <el-input :model-value="modelValue.base_url" :placeholder="providerGuide.baseUrl" @change="emitField('base_url', $event)" />
         </el-form-item>
         <el-form-item v-if="usesService" :label="t('settings.asr.apiKey')">
-          <el-input :model-value="modelValue.api_key" type="password" show-password @change="emitField('api_key', $event)">
+          <el-input :model-value="modelValue.api_key" :disabled="apiKeyDeleting" type="password" show-password @change="emitField('api_key', $event)">
             <template #append>
               <el-button v-if="modelValue.api_key || apiKeyStored" text type="danger" :loading="apiKeyDeleting" :disabled="apiKeyDeleting" @click="$emit('clear-api-key')">{{ t('settings.apiKeyClear') }}</el-button>
             </template>
@@ -230,7 +230,6 @@ const statusType = computed(() => enabled.value ? 'success' : 'info')
 type GuideLink = { label: string; href: string }
 type ProviderGuide = {
   title: string
-  description: string
   placement: string
   model: string
   baseUrl: string
@@ -243,7 +242,6 @@ const providerGuide = computed<ProviderGuide>(() => {
   if (props.modelValue.provider === 'sherpa-onnx') {
     return {
       title: 'Sherpa ONNX',
-      description: t('settings.asr.guide.sherpa.description'),
       placement: 'python/.cache/sherpa-onnx/sensevoice/',
       model: 'iic/SenseVoiceSmall',
       baseUrl: '',
@@ -257,7 +255,6 @@ const providerGuide = computed<ProviderGuide>(() => {
   if (props.modelValue.provider === 'sherpa-onnx-online') {
     return {
       title: 'Sherpa Streaming + SenseVoice',
-      description: t('settings.asr.guide.sherpaOnline.description'),
       placement: 'python/.cache/sherpa-onnx/streaming-zipformer-small-ctc-zh/',
       model: 'iic/SenseVoiceSmall',
       baseUrl: '',
@@ -271,7 +268,6 @@ const providerGuide = computed<ProviderGuide>(() => {
   if (props.modelValue.provider === 'sensevoice-local') {
     return {
       title: 'SenseVoice Local',
-      description: t('settings.asr.guide.sensevoiceLocal.description'),
       placement: t('settings.asr.guide.sensevoiceLocal.placement'),
       model: 'iic/SenseVoiceSmall',
       baseUrl: '',
@@ -285,7 +281,6 @@ const providerGuide = computed<ProviderGuide>(() => {
   if (props.modelValue.provider === 'sensevoice-service') {
     return {
       title: 'SenseVoice Service',
-      description: t('settings.asr.guide.sensevoiceService.description'),
       placement: '',
       model: 'iic/SenseVoiceSmall',
       baseUrl: 'http://127.0.0.1:8899/v1',
@@ -298,7 +293,6 @@ const providerGuide = computed<ProviderGuide>(() => {
   if (props.modelValue.provider === 'funasr-service') {
     return {
       title: 'FunASR Service',
-      description: t('settings.asr.guide.funasrService.description'),
       placement: '',
       model: 'iic/SenseVoiceSmall',
       baseUrl: 'http://127.0.0.1:8899/v1',
@@ -311,7 +305,6 @@ const providerGuide = computed<ProviderGuide>(() => {
   if (props.modelValue.provider === 'openai-compatible') {
     return {
       title: 'OpenAI Compatible',
-      description: t('settings.asr.guide.openaiCompatible.description'),
       placement: '',
       model: t('settings.asr.guide.openaiCompatible.model'),
       baseUrl: 'https://api.openai.com/v1',
@@ -323,7 +316,6 @@ const providerGuide = computed<ProviderGuide>(() => {
   }
   return {
     title: t('common.disabled'),
-    description: t('settings.asr.guide.disabled.description'),
     placement: '',
     model: 'iic/SenseVoiceSmall',
     baseUrl: '',
@@ -342,17 +334,6 @@ const emitField = (field: keyof AsrSettings, value: unknown) => {
 <style scoped>
 .discovery-error {
   margin-bottom: 14px;
-}
-
-.asr-action-note {
-  margin: 0 0 14px;
-  padding: 8px 10px;
-  border: 1px solid var(--yui-border);
-  border-radius: 8px;
-  color: var(--yui-muted);
-  background: var(--yui-surface-muted);
-  font-size: 12px;
-  line-height: 1.5;
 }
 
 .asr-guide {
@@ -377,15 +358,6 @@ const emitField = (field: keyof AsrSettings, value: unknown) => {
 .asr-guide-provider {
   color: var(--yui-muted);
   font-weight: 400;
-}
-
-.asr-guide-copy {
-  max-width: 76ch;
-  margin: 3px 0 8px;
-}
-
-.asr-guide-copy-tight {
-  margin: 6px 0;
 }
 
 .asr-guide-line {

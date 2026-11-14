@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { useConnectorRequest } from './useConnectorRequest'
 import { systemClient } from '@/api/client'
 import { useDomainRequest } from '@/shared/composables/useDomainRequest'
 import type {
@@ -15,6 +16,7 @@ import type {
   CompanionRuntimeSnapshot,
   ExperienceMetricsSnapshot,
   BackupTarget,
+  BackupTargetsSnapshot,
   DiagnosticsSnapshot,
   MCPMutationResponse,
   MCPRefreshResponse,
@@ -32,6 +34,7 @@ export function useSystemDomain() {
   const logs = ref<{ renderer: string | null; python: string | null; electron: string | null } | null>(null)
   const backupTargets = ref<BackupTarget[]>([])
   const backupResult = ref('')
+  const backupSource = ref<BackupTargetsSnapshot['source']>()
   const permissions = ref<PermissionStateSnapshot | null>(null)
   const mcp = ref<MCPSnapshot | null>(null)
   const agentPlugins = ref<AgentPluginsSnapshot | null>(null)
@@ -48,7 +51,7 @@ export function useSystemDomain() {
 
   const diagnosticsRequest = useDomainRequest<DiagnosticsSnapshot>()
   const logsRequest = useDomainRequest<SystemLogsSnapshot>()
-  const backupTargetsRequest = useDomainRequest<{ targets: BackupTarget[] }>()
+  const backupTargetsRequest = useDomainRequest<BackupTargetsSnapshot>()
   const createBackupRequest = useDomainRequest<{ backupDir: string }>()
   const restoreBackupRequest = useDomainRequest<BackupRestoreResponse>()
   const permissionsRequest = useDomainRequest<PermissionStateSnapshot>()
@@ -77,46 +80,47 @@ export function useSystemDomain() {
   const experienceMetricsRequest = useDomainRequest<ExperienceMetricsSnapshot>()
   const connectorsRequest = useDomainRequest<ConnectorRegistrySnapshot>()
   const disableConnectorRequest = useDomainRequest<{ ok: boolean; connector?: ConnectorRegistrySnapshot['connectors'][number] | null; error?: string }>()
-  const connectorDeliveriesRequest = useDomainRequest<{ ok: boolean; connectorId: string; items: ConnectorDeliveryItem[]; recovery?: ConnectorRecoverySnapshot | null }>()
+  const connectorDeliveriesRequest = useConnectorRequest<{ ok: boolean; connectorId: string; items: ConnectorDeliveryItem[]; recovery?: ConnectorRecoverySnapshot | null }>(['telegram', 'discord', 'qq', 'wechat'])
   const retryConnectorDeliveryRequest = useDomainRequest<{ ok: boolean; alreadySent?: boolean; delivery?: ConnectorDeliveryItem }>()
   const resolveConnectorEventRequest = useDomainRequest<{ ok: boolean; alreadyResolved?: boolean; resolved?: boolean; outcome?: string; delivery?: ConnectorDeliveryItem }>()
   const cancelConnectorEventRequest = useDomainRequest<{ ok: boolean; cancelled?: boolean; outcome?: 'cancelled' | 'too_late' | 'unknown'; status?: string }>()
-  const connectorAccountRequest = useDomainRequest<{ ok: boolean; account: ConnectorAccountSnapshot }>()
-  const connectorProbeRequest = useDomainRequest<ConnectorProbeSnapshot>()
+  const connectorAccountRequest = useConnectorRequest<{ ok: boolean; account: ConnectorAccountSnapshot }>(['qq', 'wechat'])
+  const connectorProbeRequest = useConnectorRequest<ConnectorProbeSnapshot>(['telegram', 'discord', 'qq', 'wechat'])
   const qqBridgeRequest = useDomainRequest<{ ok: boolean; bridge: QqBridgeSnapshot }>()
 
   const loadDiagnostics = async () => {
     const result = await diagnosticsRequest.execute(() => systemClient.diagnostics())
-    if (result) {
+    if (result && diagnosticsRequest.isCurrent(result)) {
       diagnostics.value = result
     }
   }
 
   const loadLogs = async () => {
     const result = await logsRequest.execute(() => systemClient.logs())
-    if (result) {
+    if (result && logsRequest.isCurrent(result)) {
       logs.value = result.logs
     }
   }
 
   const loadBackupTargets = async () => {
     const result = await backupTargetsRequest.execute(() => systemClient.backupTargets())
-    if (result) {
+    if (result && backupTargetsRequest.isCurrent(result)) {
       backupTargets.value = result.targets
+      backupSource.value = result.source
     }
   }
 
   const createBackup = async () => {
     const result = await createBackupRequest.execute(() => systemClient.createBackup())
-    if (result) {
+    if (result && createBackupRequest.isCurrent(result)) {
       backupResult.value = result.backupDir
       await loadBackupTargets()
     }
   }
 
-  const restoreBackup = async (backupDir: string, dryRun = true) => {
-    const result = await restoreBackupRequest.execute(() => systemClient.restoreBackup(backupDir, dryRun))
-    if (result && !result.dryRun) {
+  const restoreBackup = async (backupDir: string, dryRun = true, planId?: string) => {
+    const result = await restoreBackupRequest.execute(() => systemClient.restoreBackup(backupDir, dryRun, planId))
+    if (result && restoreBackupRequest.isCurrent(result) && !result.dryRun) {
       await loadBackupTargets()
     }
     return result
@@ -124,14 +128,14 @@ export function useSystemDomain() {
 
   const loadPermissions = async () => {
     const result = await permissionsRequest.execute(() => systemClient.permissions())
-    if (result) {
+    if (result && permissionsRequest.isCurrent(result)) {
       permissions.value = result
     }
   }
 
   const revokePermission = async (toolName: string) => {
     const result = await revokePermissionRequest.execute(() => systemClient.revokePermission(toolName))
-    if (result) {
+    if (result && revokePermissionRequest.isCurrent(result)) {
       permissions.value = { remembered: result.remembered, audit: result.audit }
     }
     return result
@@ -139,7 +143,7 @@ export function useSystemDomain() {
 
   const clearPermissions = async () => {
     const result = await clearPermissionsRequest.execute(() => systemClient.clearPermissions())
-    if (result) {
+    if (result && clearPermissionsRequest.isCurrent(result)) {
       permissions.value = { remembered: result.remembered, audit: result.audit }
     }
     return result
@@ -147,14 +151,14 @@ export function useSystemDomain() {
 
   const loadMcp = async () => {
     const result = await mcpRequest.execute(() => systemClient.mcp())
-    if (result) {
+    if (result && mcpRequest.isCurrent(result)) {
       mcp.value = result
     }
   }
 
   const toggleMcp = async (serverName: string, enabled: boolean) => {
     const result = await toggleMcpRequest.execute(() => systemClient.toggleMcp(serverName, enabled))
-    if (result?.ok) {
+    if (result?.ok && toggleMcpRequest.isCurrent(result)) {
       await loadMcp()
     }
     return result
@@ -171,7 +175,7 @@ export function useSystemDomain() {
     headers?: Record<string, string>
   }) => {
     const result = await addMcpRequest.execute(() => systemClient.addMcp(payload))
-    if (result?.ok) {
+    if (result?.ok && addMcpRequest.isCurrent(result)) {
       await loadMcp()
     }
     return result
@@ -179,7 +183,7 @@ export function useSystemDomain() {
 
   const installMcpPreset = async (presetId: string) => {
     const result = await installMcpPresetRequest.execute(() => systemClient.installMcpPreset(presetId))
-    if (result?.ok) {
+    if (result?.ok && installMcpPresetRequest.isCurrent(result)) {
       await loadMcp()
     }
     return result
@@ -187,7 +191,7 @@ export function useSystemDomain() {
 
   const removeMcp = async (serverName: string) => {
     const result = await removeMcpRequest.execute(() => systemClient.removeMcp(serverName))
-    if (result?.ok) {
+    if (result?.ok && removeMcpRequest.isCurrent(result)) {
       await loadMcp()
     }
     return result
@@ -201,21 +205,21 @@ export function useSystemDomain() {
 
   const loadSchedules = async () => {
     const result = await schedulesRequest.execute(() => systemClient.schedules())
-    if (result) {
+    if (result && schedulesRequest.isCurrent(result)) {
       schedules.value = result.tasks || []
     }
   }
 
   const loadAgentTrace = async () => {
     const result = await agentTraceRequest.execute(() => systemClient.agentTrace())
-    if (result) {
+    if (result && agentTraceRequest.isCurrent(result)) {
       agentTrace.value = result
     }
   }
 
   const loadCompanionRuntime = async () => {
     const result = await companionRuntimeRequest.execute(() => systemClient.companionRuntime(32))
-    if (result) {
+    if (result && companionRuntimeRequest.isCurrent(result)) {
       companionRuntime.value = result
     }
     return result
@@ -227,7 +231,7 @@ export function useSystemDomain() {
     reason?: string
   }) => {
     const result = await resolveCompanionOpportunityRequest.execute(() => systemClient.resolveCompanionOpportunity(jobId, payload))
-    if (result?.ok) {
+    if (result?.ok && resolveCompanionOpportunityRequest.isCurrent(result)) {
       await loadCompanionRuntime()
     }
     return result
@@ -235,67 +239,67 @@ export function useSystemDomain() {
 
   const cancelHeartbeatGoal = async (goalId: string, reason = 'cancelled') => {
     const result = await cancelHeartbeatGoalRequest.execute(() => systemClient.cancelHeartbeatGoal(goalId, reason))
-    if (result?.ok) await loadCompanionRuntime()
+    if (result?.ok && cancelHeartbeatGoalRequest.isCurrent(result)) await loadCompanionRuntime()
     return result
   }
 
   const loadExperienceMetrics = async () => {
     const result = await experienceMetricsRequest.execute(() => systemClient.experienceMetrics())
-    if (result) {
+    if (result && experienceMetricsRequest.isCurrent(result)) {
       experienceMetrics.value = result
     }
   }
 
   const loadConnectors = async () => {
     const result = await connectorsRequest.execute(() => systemClient.connectors())
-    if (result) connectors.value = result
+    if (result && connectorsRequest.isCurrent(result)) connectors.value = result
     return result
   }
 
   const disableConnector = async (connectorId: string) => {
     const result = await disableConnectorRequest.execute(() => systemClient.disableConnector(connectorId))
-    if (result?.ok) await loadConnectors()
+    if (result?.ok && disableConnectorRequest.isCurrent(result)) await loadConnectors()
     return result
   }
 
   const loadQqBridge = async () => {
     const result = await qqBridgeRequest.execute(() => systemClient.qqBridgeStatus())
-    if (result) qqBridge.value = result.bridge
+    if (result && qqBridgeRequest.isCurrent(result)) qqBridge.value = result.bridge
   }
 
   const installQqBridge = async (acceptRisk: boolean) => {
     const result = await qqBridgeRequest.execute(() => systemClient.installQqBridge(acceptRisk))
-    if (result) qqBridge.value = result.bridge
+    if (result && qqBridgeRequest.isCurrent(result)) qqBridge.value = result.bridge
     return result
   }
 
   const setQqBridgeSignServer = async (url: string) => {
     const result = await qqBridgeRequest.execute(() => systemClient.setQqBridgeSignServer(url))
-    if (result) qqBridge.value = result.bridge
+    if (result && qqBridgeRequest.isCurrent(result)) qqBridge.value = result.bridge
     return result
   }
 
   const startQqBridge = async () => {
     const result = await qqBridgeRequest.execute(() => systemClient.startQqBridge())
-    if (result) qqBridge.value = result.bridge
+    if (result && qqBridgeRequest.isCurrent(result)) qqBridge.value = result.bridge
     return result
   }
 
   const stopQqBridge = async () => {
     const result = await qqBridgeRequest.execute(() => systemClient.stopQqBridge())
-    if (result) qqBridge.value = result.bridge
+    if (result && qqBridgeRequest.isCurrent(result)) qqBridge.value = result.bridge
     return result
   }
 
   const logoutQqBridge = async () => {
     const result = await qqBridgeRequest.execute(() => systemClient.logoutQqBridge())
-    if (result) qqBridge.value = result.bridge
+    if (result && qqBridgeRequest.isCurrent(result)) qqBridge.value = result.bridge
     return result
   }
 
   const loadConnectorDeliveries = async (connectorId: 'telegram' | 'discord' | 'qq' | 'wechat') => {
-    const result = await connectorDeliveriesRequest.execute(() => systemClient.connectorDeliveries(connectorId, 20))
-    if (result) {
+    const result = await connectorDeliveriesRequest.execute(connectorId, () => systemClient.connectorDeliveries(connectorId, 20))
+    if (result && connectorDeliveriesRequest.isCurrent(result)) {
       connectorDeliveries.value[connectorId] = result.items || []
       connectorRecovery.value[connectorId] = result.recovery || null
     }
@@ -304,13 +308,13 @@ export function useSystemDomain() {
 
   const retryConnectorDelivery = async (connectorId: 'telegram' | 'discord' | 'qq' | 'wechat', deliveryKey: string) => {
     const result = await retryConnectorDeliveryRequest.execute(() => systemClient.retryConnectorDelivery(connectorId, deliveryKey))
-    if (result?.ok) await loadConnectorDeliveries(connectorId)
+    if (result?.ok && retryConnectorDeliveryRequest.isCurrent(result)) await loadConnectorDeliveries(connectorId)
     return result
   }
 
   const resolveConnectorEvent = async (connectorId: 'telegram' | 'discord' | 'qq' | 'wechat', eventId: string, outcome: 'delivered' | 'failed') => {
     const result = await resolveConnectorEventRequest.execute(() => systemClient.resolveConnectorEvent(connectorId, eventId, outcome))
-    if (result?.ok) await loadConnectorDeliveries(connectorId)
+    if (result?.ok && resolveConnectorEventRequest.isCurrent(result)) await loadConnectorDeliveries(connectorId)
     return result
   }
 
@@ -321,45 +325,45 @@ export function useSystemDomain() {
   }
 
   const loadConnectorAccount = async (connectorId: 'qq' | 'wechat') => {
-    const result = await connectorAccountRequest.execute(() => systemClient.connectorAccount(connectorId))
-    if (result?.account) connectorAccounts.value[connectorId] = result.account
+    const result = await connectorAccountRequest.execute(connectorId, () => systemClient.connectorAccount(connectorId))
+    if (result?.account && connectorAccountRequest.isCurrent(result)) connectorAccounts.value[connectorId] = result.account
     return result?.account
   }
 
   const probeConnector = async (connectorId: 'telegram' | 'discord' | 'qq' | 'wechat') => {
-    const result = await connectorProbeRequest.execute(() => systemClient.probeConnector(connectorId))
-    if (result) connectorProbes.value[connectorId] = result
+    const result = await connectorProbeRequest.execute(connectorId, () => systemClient.probeConnector(connectorId))
+    if (result && connectorProbeRequest.isCurrent(result)) connectorProbes.value[connectorId] = result
     return result
   }
 
   const loginConnectorAccount = async (connectorId: 'qq' | 'wechat') => {
-    const result = await connectorAccountRequest.execute(() => systemClient.loginConnectorAccount(connectorId))
-    if (result?.account) connectorAccounts.value[connectorId] = result.account
+    const result = await connectorAccountRequest.execute(connectorId, () => systemClient.loginConnectorAccount(connectorId))
+    if (result?.account && connectorAccountRequest.isCurrent(result)) connectorAccounts.value[connectorId] = result.account
     return result?.account
   }
 
   const refreshConnectorAccount = async (connectorId: 'qq' | 'wechat') => {
-    const result = await connectorAccountRequest.execute(() => systemClient.refreshConnectorAccount(connectorId))
-    if (result?.account) connectorAccounts.value[connectorId] = result.account
+    const result = await connectorAccountRequest.execute(connectorId, () => systemClient.refreshConnectorAccount(connectorId))
+    if (result?.account && connectorAccountRequest.isCurrent(result)) connectorAccounts.value[connectorId] = result.account
     return result?.account
   }
 
   const logoutConnectorAccount = async (connectorId: 'qq' | 'wechat') => {
-    const result = await connectorAccountRequest.execute(() => systemClient.logoutConnectorAccount(connectorId))
-    if (result?.account) connectorAccounts.value[connectorId] = result.account
+    const result = await connectorAccountRequest.execute(connectorId, () => systemClient.logoutConnectorAccount(connectorId))
+    if (result?.account && connectorAccountRequest.isCurrent(result)) connectorAccounts.value[connectorId] = result.account
     return result?.account
   }
 
   const loadAgentPlugins = async () => {
     const result = await agentPluginsRequest.execute(() => systemClient.agentPlugins())
-    if (result) {
+    if (result && agentPluginsRequest.isCurrent(result)) {
       agentPlugins.value = result
     }
   }
 
   const toggleAgentPlugin = async (pluginId: string, enabled: boolean) => {
     const result = await toggleAgentPluginRequest.execute(() => systemClient.toggleAgentPlugin(pluginId, enabled))
-    if (result?.ok) {
+    if (result?.ok && toggleAgentPluginRequest.isCurrent(result)) {
       await loadAgentPlugins()
     }
     return result
@@ -367,7 +371,7 @@ export function useSystemDomain() {
 
   const updateAgentPluginConfig = async (pluginId: string, config: Record<string, unknown>) => {
     const result = await updateAgentPluginConfigRequest.execute(() => systemClient.updateAgentPluginConfig(pluginId, config))
-    if (result?.ok) {
+    if (result?.ok && updateAgentPluginConfigRequest.isCurrent(result)) {
       await loadAgentPlugins()
     }
     return result
@@ -375,7 +379,7 @@ export function useSystemDomain() {
 
   const createOnceSchedule = async (payload: { name: string; prompt: string; run_after_seconds: number }) => {
     const result = await createOnceScheduleRequest.execute(() => systemClient.createOnceSchedule(payload))
-    if (result?.ok) {
+    if (result?.ok && createOnceScheduleRequest.isCurrent(result)) {
       await loadSchedules()
     }
     return result
@@ -383,7 +387,7 @@ export function useSystemDomain() {
 
   const createIntervalSchedule = async (payload: { name: string; prompt: string; interval_seconds: number }) => {
     const result = await createIntervalScheduleRequest.execute(() => systemClient.createIntervalSchedule(payload))
-    if (result?.ok) {
+    if (result?.ok && createIntervalScheduleRequest.isCurrent(result)) {
       await loadSchedules()
     }
     return result
@@ -391,7 +395,7 @@ export function useSystemDomain() {
 
   const removeSchedule = async (taskId: string) => {
     const result = await removeScheduleRequest.execute(() => systemClient.removeSchedule(taskId))
-    if (result?.ok) {
+    if (result?.ok && removeScheduleRequest.isCurrent(result)) {
       await loadSchedules()
     }
     return result
@@ -399,7 +403,7 @@ export function useSystemDomain() {
 
   const toggleSchedule = async (taskId: string, enabled: boolean) => {
     const result = await toggleScheduleRequest.execute(() => systemClient.toggleSchedule(taskId, enabled))
-    if (result?.ok) {
+    if (result?.ok && toggleScheduleRequest.isCurrent(result)) {
       await loadSchedules()
     }
     return result
@@ -407,7 +411,7 @@ export function useSystemDomain() {
 
   const runScheduleNow = async (taskId: string) => {
     const result = await runScheduleNowRequest.execute(() => systemClient.runScheduleNow(taskId))
-    if (result?.ok) {
+    if (result?.ok && runScheduleNowRequest.isCurrent(result)) {
       await loadSchedules()
     }
     return result
@@ -415,7 +419,7 @@ export function useSystemDomain() {
 
   const cancelSchedule = async (taskOrJobId: string) => {
     const result = await cancelScheduleRequest.execute(() => systemClient.cancelSchedule(taskOrJobId))
-    if (result?.ok) {
+    if (result?.ok && cancelScheduleRequest.isCurrent(result)) {
       await loadSchedules()
     }
     return result
@@ -425,6 +429,7 @@ export function useSystemDomain() {
     diagnostics,
     logs,
     backupTargets,
+    backupSource,
     backupResult,
     permissions,
     mcp,

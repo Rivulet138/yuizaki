@@ -44,7 +44,6 @@
         <section v-for="group in advancedMenuGroups" :key="group.id" class="menu-group" :aria-label="group.label">
           <div class="menu-group-label">
             <span>{{ group.label }}</span>
-            <small v-if="group.hint" class="menu-group-hint">{{ group.hint }}</small>
           </div>
           <router-link
             v-for="menu in group.items"
@@ -436,7 +435,6 @@ watch(advancedOpen, (value) => {
     .admin-toggle-label,
     .admin-group-label,
     .menu-group-label,
-    .menu-group-hint,
     .menu-divider,
     .menu-item.active::after {
     display: none;
@@ -519,15 +517,6 @@ watch(advancedOpen, (value) => {
   line-height: 1;
 }
 
-.menu-group-hint {
-  overflow: hidden;
-  color: color-mix(in srgb, var(--yui-muted) 78%, transparent);
-  font-size: 10px;
-  font-weight: 500;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .sidebar > .menu {
   flex: 1 1 auto;

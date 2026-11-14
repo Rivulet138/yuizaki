@@ -17,6 +17,9 @@ import {
   refreshRuntimeApiOrigin,
 } from '../api/clients/http-client';
 
+/** Accepted means handed to the local transport; server ACK/terminal events are separate. */
+export type SocketSendResult = { status: 'accepted' | 'offline' | 'rejected' };
+
 /** Socket.IO 事件名（与 backend/socket_events.py 对齐） */
 
 /** 事件处理器类型 */
@@ -233,11 +236,17 @@ export class SocketClient {
   }
 
   /** 发送事件 */
-  emit(event: string, data?: unknown): void {
-    if (this.socket?.connected) {
-      this.socket.emit(event, data);
-    } else {
+  emit(event: string, data?: unknown): SocketSendResult {
+    if (!this.socket?.connected) {
       logger.warn('[SocketIO] Not connected, event not sent:', event);
+      return { status: 'offline' };
+    }
+    try {
+      this.socket.emit(event, data);
+      return { status: 'accepted' };
+    } catch (error) {
+      logger.warn('[SocketIO] Event rejected:', event, error);
+      return { status: 'rejected' };
     }
   }
 
@@ -287,8 +296,8 @@ export class SocketClient {
   // ─── 便捷方法 ──────────────────────────────
 
   /** 发送 LLM 请求 */
-  sendLLMRequest(messages: Array<{ role: string; content: string }>, sessionId?: string, requestId?: string, workspaceId?: string, chatOptions?: ChatOptions, generationId?: string, turnId?: string, interruptionEpoch?: number): void {
-    this.emit(SocketEvents.LLM_REQUEST, {
+  sendLLMRequest(messages: Array<{ role: string; content: string }>, sessionId?: string, requestId?: string, workspaceId?: string, chatOptions?: ChatOptions, generationId?: string, turnId?: string, interruptionEpoch?: number): SocketSendResult {
+    return this.emit(SocketEvents.LLM_REQUEST, {
       messages,
       session_id: sessionId || '',
       request_id: requestId || '',
@@ -302,8 +311,8 @@ export class SocketClient {
   }
 
   /** 发送 Agent 对话请求（规则驱动，内部可调用 RAG/工具） */
-  sendAgentChat(messages: Array<{ role: string; content: string }>, sessionId?: string, petControlContext?: unknown, requestId?: string, workspaceId?: string, chatOptions?: ChatOptions, interruptionEpoch?: number, generationId?: string, turnId?: string, runtimeIdentity?: { conversationId?: string; operationId?: string; stepIndex?: number; runId?: string }): void {
-    this.emit(SocketEvents.AGENT_CHAT, {
+  sendAgentChat(messages: Array<{ role: string; content: string }>, sessionId?: string, petControlContext?: unknown, requestId?: string, workspaceId?: string, chatOptions?: ChatOptions, interruptionEpoch?: number, generationId?: string, turnId?: string, runtimeIdentity?: { conversationId?: string; operationId?: string; stepIndex?: number; runId?: string }): SocketSendResult {
+    return this.emit(SocketEvents.AGENT_CHAT, {
       messages,
       session_id: sessionId || '',
       workspace_id: workspaceId || '',
@@ -322,8 +331,8 @@ export class SocketClient {
   }
 
   /** 发送音频块 */
-  sendAudioChunk(chunk: string, sampleRate: number = 16000, isFinal: boolean = false, envelope?: { sessionId: string; generationId: string; turnId: string; requestId: string; interruptionEpoch: number; version: 1 }): void {
-    this.emit(SocketEvents.AUDIO_CHUNK, {
+  sendAudioChunk(chunk: string, sampleRate: number = 16000, isFinal: boolean = false, envelope?: { sessionId: string; generationId: string; turnId: string; requestId: string; interruptionEpoch: number; version: 1 }): SocketSendResult {
+    return this.emit(SocketEvents.AUDIO_CHUNK, {
       chunk,
       sample_rate: sampleRate,
       is_final: isFinal,
@@ -336,7 +345,7 @@ export class SocketClient {
     });
   }
 
-  requestScreenshot(image: string, options: ScreenshotOptions = {}): void {
+  requestScreenshot(image: string, options: ScreenshotOptions = {}): SocketSendResult {
     const payload: Record<string, unknown> = {
       image,
       display_index: options.displayIndex ?? 0,
@@ -356,15 +365,15 @@ export class SocketClient {
     if (options.requestId) payload.request_id = options.requestId;
     if (options.generationId) payload.generation_id = options.generationId;
     if (options.interruptionEpoch !== undefined) payload.interruption_epoch = options.interruptionEpoch;
-    this.emit(SocketEvents.SCREENSHOT_REQUEST, payload);
+    return this.emit(SocketEvents.SCREENSHOT_REQUEST, payload);
   }
 
-  clearVisualContext(): void {
-    this.emit(SocketEvents.SCREENSHOT_REQUEST, { mode: 'clear' });
+  clearVisualContext(): SocketSendResult {
+    return this.emit(SocketEvents.SCREENSHOT_REQUEST, { mode: 'clear' });
   }
 
-  discardScreenshotRequest(request: Record<string, unknown>, reason: string): void {
-    this.emit(SocketEvents.SCREENSHOT_REQUEST, {
+  discardScreenshotRequest(request: Record<string, unknown>, reason: string): SocketSendResult {
+    return this.emit(SocketEvents.SCREENSHOT_REQUEST, {
       mode: 'discard',
       workspace_id: request['workspaceId'],
       session_id: request['sessionId'],
@@ -378,24 +387,24 @@ export class SocketClient {
   }
 
   /** 发送工具调用 */
-  sendToolCall(id: string, name: string, args: Record<string, unknown>, options: ToolCallOptions = {}): void {
+  sendToolCall(id: string, name: string, args: Record<string, unknown>, options: ToolCallOptions = {}): SocketSendResult {
     const payload: Record<string, unknown> = { id, name, args, version: options.version ?? 1 };
     if (options.requestId) payload.request_id = options.requestId;
     if (options.runId) payload.run_id = options.runId;
     if (options.jobId) payload.job_id = options.jobId;
     if (options.source) payload.source = options.source;
     if (options.retry !== undefined) payload.retry = options.retry;
-    this.emit(SocketEvents.TOOL_CALL, payload);
+    return this.emit(SocketEvents.TOOL_CALL, payload);
   }
 
   /** Probe a tool's current effect without repeating the original action. */
-  sendToolRecheck(id: string, name: string, args: Record<string, unknown>, options: ToolRecheckOptions = {}): void {
+  sendToolRecheck(id: string, name: string, args: Record<string, unknown>, options: ToolRecheckOptions = {}): SocketSendResult {
     const payload: Record<string, unknown> = { id, name, args, version: 1 };
     if (options.requestId) payload.request_id = options.requestId;
     if (options.runId) payload.run_id = options.runId;
     if (options.jobId) payload.job_id = options.jobId;
     if (options.source) payload.source = options.source;
-    this.emit(SocketEvents.TOOL_RECHECK, payload);
+    return this.emit(SocketEvents.TOOL_RECHECK, payload);
   }
 
   requestToolRecheck(
@@ -430,13 +439,18 @@ export class SocketClient {
         });
       };
       this.on(SocketEvents.TOOL_RECHECK_RESULT, handler);
-      this.sendToolRecheck(id, name, args, options);
+      const result = this.sendToolRecheck(id, name, args, options);
+      if (result.status !== 'accepted') {
+        window.clearTimeout(timer);
+        this.off(SocketEvents.TOOL_RECHECK_RESULT, handler);
+        reject(new Error(`Tool status check ${result.status}`));
+      }
     });
   }
 
   /** 发送 RAG 查询 */
-  sendRAGQuery(query: string, options?: { topK?: number; sessionId?: string; workspaceId?: string; scope?: string; layers?: string[] }): void {
-    this.emit(SocketEvents.RAG_QUERY, {
+  sendRAGQuery(query: string, options?: { topK?: number; sessionId?: string; workspaceId?: string; scope?: string; layers?: string[] }): SocketSendResult {
+    return this.emit(SocketEvents.RAG_QUERY, {
       query,
       top_k: options?.topK ?? 5,
       session_id: options?.sessionId,
@@ -446,8 +460,8 @@ export class SocketClient {
     });
   }
 
-  sendInterrupt(sessionId?: string, requestId?: string, source: 'manual' | 'voice' = 'manual'): void {
-    this.emit(SocketEvents.INTERRUPT, {
+  sendInterrupt(sessionId?: string, requestId?: string, source: 'manual' | 'voice' = 'manual'): SocketSendResult {
+    return this.emit(SocketEvents.INTERRUPT, {
       session_id: sessionId || '',
       request_id: requestId || '',
       source,
@@ -533,8 +547,8 @@ export class SocketClient {
     });
   }
 
-  sendSVCConvert(audio: string, speakerId: number = 0, transpose: number = 0): void {
-    this.emit(SocketEvents.SVC_CONVERT, {
+  sendSVCConvert(audio: string, speakerId: number = 0, transpose: number = 0): SocketSendResult {
+    return this.emit(SocketEvents.SVC_CONVERT, {
       audio,
       speaker_id: speakerId,
       transpose,

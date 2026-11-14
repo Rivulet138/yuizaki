@@ -10,6 +10,7 @@ from typing import Any
 from ..agent.models import PluginSnapshot, PluginTraceRecord
 from ..agent.tool_registry import ToolRegistry
 from ..core.paths import data_dir_from_env
+from ..system.settings_store import _atomic_write_text
 from .base import AgentPlugin
 
 
@@ -44,13 +45,12 @@ class PluginManager:
             self._trace = []
 
     def _save_store(self) -> None:
-        self._store_file.parent.mkdir(parents=True, exist_ok=True)
-        self._store_file.write_text(
+        _atomic_write_text(
+            self._store_file,
             json.dumps({"states": self._states, "trace": self._trace[-200:]}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
 
-    def _append_trace(self, plugin_id: str, hook: str, status: str, detail: str = "") -> None:
+    def _append_trace(self, plugin_id: str, hook: str, status: str, detail: str = "", *, persist: bool = False) -> None:
         self._trace.append({
             "timestamp": datetime.now().isoformat(),
             "plugin_id": plugin_id,
@@ -60,7 +60,7 @@ class PluginManager:
         })
         self._trace = self._trace[-200:]
         # 每 20 条批量写一次，避免每次 hook 都写磁盘
-        if len(self._trace) % 20 == 0:
+        if persist or len(self._trace) % 20 == 0:
             self._save_store()
 
     async def discover_and_load(self, registry: ToolRegistry) -> None:
@@ -188,7 +188,7 @@ class PluginManager:
                     self._registry.unregister(tool_name)
                 self._plugin_tools[plugin_id] = []
 
-        self._append_trace(plugin_id, "toggle", "enabled" if enabled else "disabled")
+        self._append_trace(plugin_id, "toggle", "enabled" if enabled else "disabled", persist=True)
         return state
 
     async def update_config(self, plugin_id: str, config: dict[str, Any]) -> dict[str, Any] | None:
@@ -203,7 +203,7 @@ class PluginManager:
         else:
             state["config"] = config
 
-        self._append_trace(plugin_id, "config_update", "ok")
+        self._append_trace(plugin_id, "config_update", "ok", persist=True)
         return state
 
     async def before_pipeline(self, ctx: Any) -> Any:

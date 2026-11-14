@@ -1,0 +1,214 @@
+[
+  {
+    "origin": "http://127.0.0.1:8001",
+    "path": "/api/ping",
+    "status": 200,
+    "elapsed_ms": 8.3,
+    "keys": [
+      "ok",
+      "runtime"
+    ]
+  },
+  {
+    "origin": "http://127.0.0.1:8001",
+    "path": "/health",
+    "exception": "ReadTimeout",
+    "elapsed_ms": 8014.9
+  },
+  {
+    "origin": "http://127.0.0.1:8001",
+    "path": "/api/system/ui-capabilities",
+    "status": 200,
+    "elapsed_ms": 6887.1,
+    "keys": [
+      "schemaVersion",
+      "protocol",
+      "clients",
+      "browserPlatform"
+    ],
+    "capabilities": {
+      "schemaVersion": "yuizaki.ui-capabilities.v1",
+      "protocol": {
+        "http": true,
+        "socketIo": true,
+        "openapi": "/docs"
+      },
+      "clients": {
+        "browser": {
+          "mode": "browser",
+          "coreRoutes": [
+            "chat",
+            "memory",
+            "settings"
+          ],
+          "hostCapabilities": {
+            "windowControls": false,
+            "desktopActions": false,
+            "screenCapture": false,
+            "localFilePicker": false
+          },
+          "limitations": [
+            "transparent_pet",
+            "native_desktop_actions",
+            "electron_process_controls"
+          ]
+        },
+        "electron": {
+          "mode": "electron",
+          "coreRoutes": [
+            "chat",
+            "memory",
+            "settings"
+          ],
+          "hostCapabilities": {
+            "windowControls": true,
+            "desktopActions": true,
+            "screenCapture": true,
+            "localFilePicker": true
+          },
+          "limitations": []
+        }
+      },
+      "browserPlatform": {
+        "desktop": {
+          "status": "planned",
+          "detail": "仅规划文字、记忆和配置工作区，不等价于透明桌宠",
+          "evidence": "roadmap"
+        },
+        "live2d_vrm": {
+          "status": "planned",
+          "detail": "浏览器渲染差异尚未完成验收",
+          "evidence": "roadmap"
+        },
+        "text_voice": {
+          "status": "experimental",
+          "detail": "可复用 HTTP/Socket.IO 协议，浏览器设备权限需单独验证",
+          "evidence": "declared_contract"
+        },
+        "native_actions": {
+          "status": "unsupported",
+          "detail": "浏览器不提供本地 user32/X11 桌面动作",
+          "evidence": "platform_boundary"
+        }
+      }
+    }
+  },
+  {
+    "origin": "http://127.0.0.1:8001",
+    "path": "/api/system/route-manifest",
+    "status": 200,
+    "elapsed_ms": 15.3,
+    "keys": [
+      "schema_version",
+      "proxy_prefixes",
+      "routes"
+    ],
+    "route_count": 4
+  },
+  {
+    "origin": "http://127.0.0.1:38945",
+    "path": "/api/ping",
+    "status": 200,
+    "elapsed_ms": 5.6,
+    "keys": [
+      "ok",
+      "runtime"
+    ]
+  },
+  {
+    "origin": "http://127.0.0.1:38945",
+    "path": "/health",
+    "exception": "ReadTimeout",
+    "elapsed_ms": 8002.2
+  },
+  {
+    "origin": "http://127.0.0.1:38945",
+    "path": "/api/system/ui-capabilities",
+    "status": 200,
+    "elapsed_ms": 1768.7,
+    "keys": [
+      "schemaVersion",
+      "protocol",
+      "clients",
+      "browserPlatform"
+    ],
+    "capabilities": {
+      "schemaVersion": "yuizaki.ui-capabilities.v1",
+      "protocol": {
+        "http": true,
+        "socketIo": true,
+        "openapi": "/docs"
+      },
+      "clients": {
+        "browser": {
+          "mode": "browser",
+          "coreRoutes": [
+            "chat",
+            "memory",
+            "settings"
+          ],
+          "hostCapabilities": {
+            "windowControls": false,
+            "desktopActions": false,
+            "screenCapture": false,
+            "localFilePicker": false
+          },
+          "limitations": [
+            "transparent_pet",
+            "native_desktop_actions",
+            "electron_process_controls"
+          ]
+        },
+        "electron": {
+          "mode": "electron",
+          "coreRoutes": [
+            "chat",
+            "memory",
+            "settings"
+          ],
+          "hostCapabilities": {
+            "windowControls": true,
+            "desktopActions": true,
+            "screenCapture": true,
+            "localFilePicker": true
+          },
+          "limitations": []
+        }
+      },
+      "browserPlatform": {
+        "desktop": {
+          "status": "planned",
+          "detail": "仅规划文字、记忆和配置工作区，不等价于透明桌宠",
+          "evidence": "roadmap"
+        },
+        "live2d_vrm": {
+          "status": "planned",
+          "detail": "浏览器渲染差异尚未完成验收",
+          "evidence": "roadmap"
+        },
+        "text_voice": {
+          "status": "experimental",
+          "detail": "可复用 HTTP/Socket.IO 协议，浏览器设备权限需单独验证",
+          "evidence": "declared_contract"
+        },
+        "native_actions": {
+          "status": "unsupported",
+          "detail": "浏览器不提供本地 user32/X11 桌面动作",
+          "evidence": "platform_boundary"
+        }
+      }
+    }
+  },
+  {
+    "origin": "http://127.0.0.1:38945",
+    "path": "/api/system/route-manifest",
+    "status": 200,
+    "elapsed_ms": 26.8,
+    "keys": [
+      "schema_version",
+      "proxy_prefixes",
+      "routes"
+    ],
+    "route_count": 4
+  }
+]

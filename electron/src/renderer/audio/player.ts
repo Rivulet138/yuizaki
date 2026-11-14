@@ -137,6 +137,7 @@ export class AudioPlayer {
   private isPlaying: Ref<boolean> = ref(false)
   private playbackToken = 0
   private currentPetLinkEnabled = true
+  private playbackQueueEpoch = 0
   private playbackPending = false
   private queue: QueuedAudio[] = []
   private readonly sequenceBuffers = new Map<string, Map<number, QueuedAudio>>()
@@ -154,6 +155,7 @@ export class AudioPlayer {
   private ttsStreamOpen = false
   private ttsStreamFinalReceived = false
   private activeGenerationId: string | null = null
+  private readonly closedTtsGenerations = new Set<string>()
   private activeSegmentId: number | null = null
   private activeUtteranceId: string | null = null
   private utteranceCompletedDurationMs = 0
@@ -169,10 +171,14 @@ export class AudioPlayer {
   }
 
   async play(audioUrl: string, detail: Omit<TtsPlaybackDetail, 'audio_url'> = { version: 1 }): Promise<void> {
+    if (detail.generationId && this.closedTtsGenerations.has(detail.generationId)) return
+    if (this.isPlaying.value || this.playbackPending || this.ttsStreamOpen) this.stop()
     this.clearQueuedAudio()
     this.releaseCurrentObjectUrl()
+    this.activeGenerationId = detail.generationId || null
     const token = this.nextPlaybackToken()
-    await this.startPlayback(audioUrl, detail, token)
+    const started = await this.startPlayback(audioUrl, detail, token)
+    if (!started && token === this.playbackToken) this.finishPlayback(true)
   }
 
   enqueue(audioUrl: string, detail: Omit<TtsPlaybackDetail, 'audio_url'> = { version: 1 }): void {
@@ -200,6 +206,10 @@ export class AudioPlayer {
     const { audioUrl } = item
     if (!audioUrl.trim()) return
     const generationId = item.detail.generationId
+    if (generationId && this.closedTtsGenerations.has(generationId)) {
+      if (item.ownedObjectUrl) URL.revokeObjectURL(item.ownedObjectUrl)
+      return
+    }
     if (generationId) this.openTtsStream(generationId)
     const sequence = item.detail.sequence
     if (orderBySequence && generationId && sequence !== undefined && Number.isInteger(sequence) && sequence >= 0) {
@@ -279,13 +289,13 @@ export class AudioPlayer {
       if (ownedObjectUrl) URL.revokeObjectURL(ownedObjectUrl)
       return false
     }
-    const playbackUrl = await normalizePlaybackUrl(audioUrl)
-    if (!playbackUrl || token !== this.playbackToken) {
-      if (ownedObjectUrl) URL.revokeObjectURL(ownedObjectUrl)
-      return false
-    }
-
     try {
+      const playbackUrl = await normalizePlaybackUrl(audioUrl)
+      if (!playbackUrl || token !== this.playbackToken) {
+        if (ownedObjectUrl) URL.revokeObjectURL(ownedObjectUrl)
+        return false
+      }
+
       this.detachSegmentListeners()
       const segmentId = ++this.nextSegmentId
       const utteranceId = detail.generationId || `segment:${segmentId}`
@@ -303,12 +313,10 @@ export class AudioPlayer {
       }
       const endedHandler = () => {
         if (this.segmentEndedHandler !== endedHandler || token !== this.playbackToken) return
-        this.segmentEndedHandler = null
         this.finishCurrentSegment()
       }
       const errorHandler = () => {
         if (this.segmentErrorHandler !== errorHandler || token !== this.playbackToken) return
-        this.segmentErrorHandler = null
         this.finishCurrentSegment()
       }
       const progressHandler = () => {
@@ -413,6 +421,7 @@ export class AudioPlayer {
       if (!petLinkEnabled) {
         startedDetail.petLinkEnabled = false
       }
+      if (detail.sessionId) startedDetail.sessionId = detail.sessionId
       if (detail.generationId) startedDetail.generationId = detail.generationId
       if (detail.requestId) startedDetail.requestId = detail.requestId
       if (detail.turnId) startedDetail.turnId = detail.turnId
@@ -426,6 +435,8 @@ export class AudioPlayer {
       this.emitAudioProgress()
       return true
     } catch (err) {
+      if (ownedObjectUrl && this.currentOwnedObjectUrl !== ownedObjectUrl) URL.revokeObjectURL(ownedObjectUrl)
+      if (token !== this.playbackToken) return false
       console.error('Failed to play audio:', err)
       this.detachSegmentListeners()
       this.isPlaying.value = false
@@ -437,10 +448,12 @@ export class AudioPlayer {
   }
 
   stop(options: TtsStopDetail = {}): void {
+    this.playbackQueueEpoch += 1
     this.clearQueuedAudio()
     this.playbackPending = false
     this.ttsStreamOpen = false
     this.ttsStreamFinalReceived = false
+    this.closeTtsGeneration()
     this.activeGenerationId = null
     this.nextPlaybackToken()
     if (this.audioElement) {
@@ -462,23 +475,27 @@ export class AudioPlayer {
   private async playNextQueued(): Promise<void> {
     if (this.playbackPending || this.isPlaying.value) return
     this.playbackPending = true
+    const queueEpoch = this.playbackQueueEpoch
     try {
-      while (!this.isPlaying.value && this.queue.length > 0) {
+      while (queueEpoch === this.playbackQueueEpoch && !this.isPlaying.value && this.queue.length > 0) {
         const next = this.queue.shift()
         if (!next) break
         const token = this.nextPlaybackToken()
         await this.startPlayback(next.audioUrl, next.detail, token, next.ownedObjectUrl, next.lipSyncEnvelope)
       }
-      if (!this.isPlaying.value && this.queue.length === 0) {
-        if (!this.ttsStreamOpen) window.dispatchEvent(new CustomEvent('pet:audio-ended'))
+      if (queueEpoch === this.playbackQueueEpoch && !this.isPlaying.value && this.queue.length === 0) {
+        if (!this.ttsStreamOpen) window.dispatchEvent(new CustomEvent('pet:audio-ended', { detail: { generationId: this.activeGenerationId || undefined } }))
       }
     } finally {
-      this.playbackPending = false
-      this.drainTtsStreamIfComplete()
+      if (queueEpoch === this.playbackQueueEpoch) {
+        this.playbackPending = false
+        this.drainTtsStreamIfComplete()
+      }
     }
   }
 
   private finishCurrentSegment(): void {
+    this.detachSegmentListeners()
     const actualDurationMs = this.audioElement && Number.isFinite(this.audioElement.duration) && this.audioElement.duration > 0
       ? Math.round(this.audioElement.duration * 1000)
       : undefined
@@ -498,9 +515,13 @@ export class AudioPlayer {
       void this.playNextQueued()
       return
     }
-    this.isPlaying.value = false
-    this.drainTtsStreamIfComplete()
-    if (!this.ttsStreamOpen) this.finishPlayback(false, {}, true)
+    if (this.ttsStreamOpen) {
+      this.isPlaying.value = false
+      this.drainTtsStreamIfComplete()
+    } else {
+      this.closeTtsGeneration()
+      this.finishPlayback(true)
+    }
   }
 
   private finishPlayback(force = false, options: TtsStopDetail = {}, emitEnded = true): void {
@@ -532,13 +553,24 @@ export class AudioPlayer {
     this.activeSegmentDurationMs = undefined
     this.releaseCurrentObjectUrl()
     if (emitEnded) {
-      window.dispatchEvent(new CustomEvent('pet:audio-ended'))
+      window.dispatchEvent(new CustomEvent('pet:audio-ended', { detail: { generationId: this.activeGenerationId || undefined } }))
+    }
+  }
+
+  private closeTtsGeneration(): void {
+    if (!this.activeGenerationId) return
+    this.closedTtsGenerations.add(this.activeGenerationId)
+    if (this.closedTtsGenerations.size > 64) {
+      const oldest = this.closedTtsGenerations.values().next().value
+      if (oldest) this.closedTtsGenerations.delete(oldest)
     }
   }
 
   markTtsStreamComplete(generationId?: string): void {
-    if (generationId && this.activeGenerationId && generationId !== this.activeGenerationId) return
-    if (generationId && !this.activeGenerationId) this.activeGenerationId = generationId
+    if (generationId && this.closedTtsGenerations.has(generationId)) return
+    if (generationId && this.activeGenerationId && generationId !== this.activeGenerationId
+      && !this.closedTtsGenerations.has(this.activeGenerationId)) return
+    if (generationId) this.activeGenerationId = generationId
     this.ttsStreamOpen = true
     this.ttsStreamFinalReceived = true
     this.drainTtsStreamIfComplete()
@@ -560,6 +592,7 @@ export class AudioPlayer {
     const hasBuffered = [...this.sequenceBuffers.values()].some((buffer) => buffer.size > 0)
     if (hasBuffered) return
     this.ttsStreamOpen = false
+    this.closeTtsGeneration()
     this.finishPlayback(true, {}, true)
   }
   private clearQueuedAudio(): void {
@@ -726,6 +759,7 @@ export function getAudioPlayerEventBridge(): AudioPlayerEventBridge {
       stop: (options) => getAudioPlayer().stop(options),
       enqueue: (audioUrl, detail) => getAudioPlayer().enqueue(audioUrl, detail),
       enqueuePcm: (detail) => getAudioPlayer().enqueuePcm(detail),
+      markTtsStreamComplete: (generationId) => getAudioPlayer().markTtsStreamComplete(generationId),
     })
   }
   return globalEventBridge

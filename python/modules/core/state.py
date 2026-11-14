@@ -87,7 +87,9 @@ class Generation:
         self.invalidated = True
         self.cancel.set()
         for task in (self.llm_task, self.tts_task):
-            if task is not None and not task.done():
+            # A repeated interrupt must not cancel cancellation cleanup or a
+            # TurnService durable write already completing after the first one.
+            if task is not None and not task.done() and not task.cancelling():
                 task.cancel()
 
 
@@ -522,9 +524,11 @@ class GenerationManager:
         """Return an identity-only snapshot for host cancellation."""
         return tuple(self._active)
 
-    def interrupt(self, session_id: str) -> Generation | None:
-        """Interrupt the active generation. Returns it or None."""
+    def interrupt(self, session_id: str, *, request_id: str | None = None) -> Generation | None:
+        """Interrupt the active generation only if an optional request matches."""
         gen = self._active.get(session_id)
+        if gen is not None and request_id is not None and gen.request_id != request_id:
+            return None
         if gen is not None:
             gen.invalidate()
             logger.info(

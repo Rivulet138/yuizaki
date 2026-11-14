@@ -6,11 +6,15 @@ import asyncio
 import inspect
 import os
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
+
+_ActivityWorkspaceId = Annotated[
+    str, Query(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
+]
 
 
 def _custom_stdio_mcp_enabled() -> bool:
@@ -30,13 +34,13 @@ def create_system_router(
     companion_runtime_handler: Callable[[int], Any] | None = None,
     companion_opportunity_outcome_handler: Callable[[str, dict[str, Any]], Any] | None = None,
     heartbeat_goal_cancel_handler: Callable[[str, dict[str, Any]], Any] | None = None,
-    proactive_settings_get_handler: Callable[[], Any] | None = None,
-    proactive_settings_patch_handler: Callable[[dict[str, Any]], Any] | None = None,
-    activity_frames_list_handler: Callable[[int], Any] | None = None,
-    activity_frames_rebuild_handler: Callable[[dict[str, Any]], Any] | None = None,
-    activity_frame_delete_handler: Callable[[str], Any] | None = None,
-    proactive_feedback_handler: Callable[[dict[str, Any]], Any] | None = None,
-    proactive_feedback_summary_handler: Callable[[], Any] | None = None,
+    proactive_settings_get_handler: Callable[[str], Any] | None = None,
+    proactive_settings_patch_handler: Callable[[str, dict[str, Any]], Any] | None = None,
+    activity_frames_list_handler: Callable[[str, int], Any] | None = None,
+    activity_frames_rebuild_handler: Callable[[str, dict[str, Any]], Any] | None = None,
+    activity_frame_delete_handler: Callable[[str, str], Any] | None = None,
+    proactive_feedback_handler: Callable[[str, dict[str, Any]], Any] | None = None,
+    proactive_feedback_summary_handler: Callable[[str], Any] | None = None,
     capabilities_state_handler: Callable[[], Any] | None = None,
     provider_registry_handler: Callable[[], Any] | None = None,
     connector_registry_handler: Callable[[], Any] | None = None,
@@ -83,7 +87,8 @@ def create_system_router(
     stream_obs_configure_handler: Callable[[dict[str, Any]], Any] | None = None,
     stream_obs_profiles_handler: Callable[[], Any] | None = None,
     stream_events_handler: Callable[[int], Any] | None = None,
-    stream_actions_handler: Callable[[int], Any] | None = None,
+    stream_actions_handler: Callable[..., Any] | None = None,
+    stream_action_resolve_handler: Callable[[dict[str, Any]], Any] | None = None,
     stream_event_enqueue_handler: Callable[[dict[str, Any]], Any] | None = None,
     stream_takeover_handler: Callable[[bool], Any] | None = None,
     stream_execute_handler: Callable[[dict[str, Any]], Any] | None = None,
@@ -325,14 +330,14 @@ def create_system_router(
 
     if proactive_settings_get_handler is not None:
         @router.get("/api/system/proactive/settings")
-        async def proactive_settings_get():
-            return await _call_handler(proactive_settings_get_handler, offload=True)
+        async def proactive_settings_get(workspace_id: _ActivityWorkspaceId):
+            return await _call_handler(proactive_settings_get_handler, workspace_id, offload=True)
 
     if proactive_settings_patch_handler is not None:
         @router.patch("/api/system/proactive/settings")
-        async def proactive_settings_patch(payload: dict[str, Any]):
+        async def proactive_settings_patch(payload: dict[str, Any], workspace_id: _ActivityWorkspaceId):
             try:
-                return await _call_handler(proactive_settings_patch_handler, payload, offload=True)
+                return await _call_handler(proactive_settings_patch_handler, workspace_id, payload, offload=True)
             except LookupError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
             except ValueError as exc:
@@ -340,26 +345,27 @@ def create_system_router(
 
     if activity_frames_list_handler is not None:
         @router.get("/api/system/activity-frames")
-        async def activity_frames_list(limit: int = 50):
+        async def activity_frames_list(workspace_id: _ActivityWorkspaceId, limit: int = 50):
             if not 1 <= limit <= 200:
                 raise HTTPException(status_code=422, detail="limit must be between 1 and 200")
-            return await _call_handler(activity_frames_list_handler, limit, offload=True)
+            return await _call_handler(activity_frames_list_handler, workspace_id, limit, offload=True)
 
     if activity_frames_rebuild_handler is not None:
         @router.post("/api/system/activity-frames/rebuild")
         async def activity_frames_rebuild(
+            workspace_id: _ActivityWorkspaceId,
             payload: dict[str, Any] | None = None,
         ):
             try:
-                return await _call_handler(activity_frames_rebuild_handler, payload or {}, offload=True)
+                return await _call_handler(activity_frames_rebuild_handler, workspace_id, payload or {}, offload=True)
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     if activity_frame_delete_handler is not None:
         @router.delete("/api/system/activity-frames/{frame_id:path}")
-        async def activity_frame_delete(frame_id: str):
+        async def activity_frame_delete(frame_id: str, workspace_id: _ActivityWorkspaceId):
             try:
-                return await _call_handler(activity_frame_delete_handler, frame_id, offload=True)
+                return await _call_handler(activity_frame_delete_handler, workspace_id, frame_id, offload=True)
             except LookupError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             except ValueError as exc:
@@ -367,9 +373,9 @@ def create_system_router(
 
     if proactive_feedback_handler is not None:
         @router.post("/api/system/proactive/feedback")
-        async def proactive_feedback(payload: dict[str, Any]):
+        async def proactive_feedback(payload: dict[str, Any], workspace_id: _ActivityWorkspaceId):
             try:
-                return await _call_handler(proactive_feedback_handler, payload, offload=True)
+                return await _call_handler(proactive_feedback_handler, workspace_id, payload, offload=True)
             except LookupError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             except ValueError as exc:
@@ -377,8 +383,8 @@ def create_system_router(
 
     if proactive_feedback_summary_handler is not None:
         @router.get("/api/system/proactive/feedback-summary")
-        async def proactive_feedback_summary():
-            return await _call_handler(proactive_feedback_summary_handler, offload=True)
+        async def proactive_feedback_summary(workspace_id: _ActivityWorkspaceId):
+            return await _call_handler(proactive_feedback_summary_handler, workspace_id, offload=True)
 
     if capabilities_state_handler is not None:
         @router.get("/api/system/capabilities")
@@ -698,10 +704,26 @@ def create_system_router(
 
     if stream_actions_handler is not None:
         @router.get("/api/system/stream/actions")
-        async def stream_actions(limit: int = 50):
+        async def stream_actions(limit: int = 50, request_id: str | None = None):
             if not 1 <= limit <= 100:
                 raise HTTPException(status_code=422, detail="limit must be between 1 and 100")
-            return await _call_handler(stream_actions_handler, limit, offload=True)
+            try:
+                if request_id is not None:
+                    return await _call_handler(stream_actions_handler, limit, request_id, offload=True)
+                return await _call_handler(stream_actions_handler, limit, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if stream_action_resolve_handler is not None:
+        @router.post("/api/system/stream/actions")
+        async def stream_action_resolve(payload: dict[str, Any]):
+            _strict_payload(payload, {"request_id", "action", "outcome", "confirmed"})
+            try:
+                return await _call_handler(stream_action_resolve_handler, payload, offload=True)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     if stream_event_enqueue_handler is not None:
         @router.post("/api/system/stream/events")

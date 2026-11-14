@@ -89,7 +89,8 @@ export interface ProactiveFeedbackSummary {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
-const read = (record: Record<string, unknown>, camel: string, snake: string): unknown => record[camel] ?? record[snake]
+const read = (record: Record<string, unknown>, camel: string, snake: string): unknown =>
+  record[camel] === undefined ? record[snake] : record[camel]
 const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean'
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0
 const isNonNegativeNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0

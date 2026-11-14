@@ -171,9 +171,9 @@
           <el-table v-else :data="selectedPluginState.activeExecutions" size="small" stripe>
             <el-table-column prop="routeId" :label="t('pluginPanel.columnRoute')" min-width="140" />
             <el-table-column prop="startedAt" :label="t('pluginPanel.columnStartedAt')" min-width="160" />
-            <el-table-column prop="status" :label="t('pluginPanel.columnStatus')" width="110">
+            <el-table-column prop="status" :label="t('pluginPanel.columnStatus')" min-width="210">
               <template #default="scope">
-                <el-tag size="small" type="info">{{ executionStatusLabel(scope.row.status) }}</el-tag>
+                <el-tag size="small" type="info">{{ cancellationStates[scope.row.invocationId] && scope.row.status !== 'cancelled' ? (currentLocale === 'zh-CN' ? '取消已接受，等待终态' : 'Cancellation accepted; awaiting final state') : executionStatusLabel(scope.row.status) }}</el-tag>
               </template>
             </el-table-column>
             <el-table-column :label="t('pluginPanel.columnActions')" width="100">
@@ -271,7 +271,7 @@ import 'element-plus/es/components/option/style/css'
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import PanelShell from '@/shared/components/panel/PanelShell.vue'
-import { t } from '@/i18n'
+import { currentLocale, t } from '@/i18n'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import { usePluginDomain } from '../composables/usePluginDomain'
 import { getDesktopPetEventDefinition } from '../../../../shared/plugin'
@@ -292,7 +292,7 @@ type CategoryFilter = 'all' | Exclude<PluginContributionCategory, 'ui'>
 const {
   payload,
   pluginsRequest,
-  cancelRequest,
+  cancellationErrors,
   pluginRows,
   loadFailures,
   auditLogs,
@@ -301,6 +301,7 @@ const {
   selectedPluginState,
   blockedOrErrorCount,
   cancellingInvocationIds,
+  cancellationStates,
   loadPlugins,
   cancelExecution
 } = usePluginDomain()
@@ -492,7 +493,7 @@ const handleCancel = async (pluginId: string, routeId: string, invocationId: str
   if (cancelled) {
     ElMessage.success(t('pluginPanel.cancelSent'))
   } else {
-    ElMessage.error(cancelRequest.error || t('pluginPanel.cancelFailed'))
+    ElMessage.error(cancellationErrors.value[invocationId] || t('pluginPanel.cancelFailed'))
   }
 }
 

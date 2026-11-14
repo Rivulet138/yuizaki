@@ -106,10 +106,12 @@ def resolve_reasoning_effort(
     normalized_requested = str(requested or "").strip().lower()
     if normalized_requested not in {"", "default"}:
         if normalized_requested == "none":
-            return None
+            return None if _is_deepseek(model_hint, provider_hint) else "none"
         if _is_deepseek(model_hint, provider_hint):
-            if normalized_requested in {"xhigh", "max"}:
-                return "max"
+            if normalized_requested in {"low", "high", "max"}:
+                return normalized_requested
+            if normalized_requested == "minimal":
+                return "low"
             if normalized_requested == "auto":
                 return None
             return "high"

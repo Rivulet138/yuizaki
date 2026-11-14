@@ -5,11 +5,17 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from database.repository import ContextRevisionConflict, DatabaseError, NotFoundError
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from modules.system.workspace_context_store import validate_context_payload
 from starlette.concurrency import run_in_threadpool
+
+from database.repository import (
+    ContextRevisionConflict,
+    DatabaseError,
+    NotFoundError,
+    validate_persona_overrides,
+)
+from modules.system.workspace_context_store import validate_context_payload
 
 
 def create_workspace_router(
@@ -208,7 +214,14 @@ def create_workspace_router(
         if not db_repo:
             return JSONResponse({"error": "Database not initialized"}, status_code=503)
         try:
-            return await run_in_threadpool(db_repo.create_chat_session, workspace_id, payload.get("title"))
+            updates = {}
+            if "persona_overrides" in payload:
+                updates["persona_overrides"] = validate_persona_overrides(payload["persona_overrides"])
+            return await run_in_threadpool(
+                db_repo.create_chat_session, workspace_id, payload.get("title"), **updates,
+            )
+        except (TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
         except NotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         except DatabaseError as exc:
@@ -251,15 +264,19 @@ def create_workspace_router(
         try:
             updates = {
                 key: payload[key]
-                for key in ("summary", "pinned", "title", "archived")
+                for key in ("summary", "pinned", "title", "archived", "persona_overrides")
                 if key in payload
             }
+            if "persona_overrides" in updates:
+                updates["persona_overrides"] = validate_persona_overrides(updates["persona_overrides"])
             return await run_in_threadpool(
                 db_repo.update_chat_session,
                 session_id,
                 workspace_id=workspace_id or _active_workspace_id(),
                 **updates,
             )
+        except (TypeError, ValueError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
         except NotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         except DatabaseError as exc:

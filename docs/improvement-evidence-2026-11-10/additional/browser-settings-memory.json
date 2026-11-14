@@ -1,0 +1,31 @@
+{
+  "settingsTabs": [
+    "访问",
+    "LLM",
+    "TTS",
+    "ASR",
+    "SVC 配置",
+    "记忆",
+    "摘要",
+    "资源",
+    "系统",
+    "运行引导"
+  ],
+  "invalidJson": {
+    "blockedBeforeWrite": true,
+    "error": "JSON 格式无效；未发送请求。请修正后重试。"
+  },
+  "memory": {
+    "indexFailureVisible": true,
+    "orphanDiagnosticVisible": true,
+    "dirtyDraftPreserved": true,
+    "preflightFailureVisible": true,
+    "preflightFailureDidNotSubmit": true,
+    "pendingDeletionNotReportedComplete": true,
+    "pendingDeletionNotice": "已永久删除这条记忆 · acceptance-doc · 权威记录已删除；远端索引清理待恢复。请核对索引状态，无需重复删除。",
+    "fixtureDeleteRequests": 1,
+    "revisionFieldsVisible": true
+  },
+  "pageerrors": [],
+  "fixture": "synthetic memory responses; user writes intercepted"
+}

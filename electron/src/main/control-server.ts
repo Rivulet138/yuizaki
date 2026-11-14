@@ -301,12 +301,11 @@ export class ControlServer {
           res.setHeader('Access-Control-Allow-Methods', CONTROL_CORS_METHODS)
           res.setHeader('Vary', 'Origin')
         }
-        // The control token is no longer required: this server binds to loopback
-        // and the Origin allow-list above still rejects pages from other sites, so
-        // the extra Bearer check only broke the UI when a tab outlived a restart
-        // (its token had been rotated while the page kept the old one). Callers
-        // that still send a token are unaffected; `isControlRequestAuthorized` is
-        // kept for that path and for the tests that document the old contract.
+        // Product contract: ordinary control APIs trust local callers. No-Origin
+        // clients and HTTP(S) loopback Origins (any port) need no token; wrong or
+        // stale tokens do not change that policy. The backend token is used by
+        // the server's Python proxy, not enforced as local API access control.
+        // Vault, perception and desktop capabilities retain their own checks.
         await this.handleApiRequest(req, res, method, url)
         return
       }

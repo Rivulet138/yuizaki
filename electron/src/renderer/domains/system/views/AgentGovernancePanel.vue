@@ -1,5 +1,20 @@
 <template>
   <PanelShell :title="t('governance.title')" tone="admin">
+    <p v-if="deliveryNotice" role="status">{{ deliveryNotice }}</p>
+    <section v-if="deliveryRecoveryRows.length" aria-label="原投递恢复" style="overflow-wrap: anywhere">
+      <div v-for="row in deliveryRecoveryRows" :key="row.operationKey">
+        <p>{{ row.connectorId }} · {{ row.deliveryKey }} · {{ row.snapshot?.found ? connectorDeliveryStatusLabel(row.snapshot.status) : 'unknown：原投递状态未确认，禁止自动重发' }}</p>
+        <el-button size="small" plain :loading="queryingDeliveryKeys.has(row.operationKey)" @click="queryUnknownDelivery(row.connectorId, row.deliveryKey)">精确查询原投递</el-button>
+        <el-button v-if="row.snapshot?.delivery?.retryable && !uncertainDeliveries[row.operationKey]" size="small" plain :loading="retryingDeliveryKeys.has(row.deliveryKey)" @click="retryDeliveryItem(row.connectorId, row.deliveryKey)">手动重试原投递</el-button>
+        <template v-if="row.snapshot?.delivery?.resolvable">
+          <el-button size="small" plain :disabled="resolvingEventIds.has(row.eventId)" @click="resolveConnectorEventItem(row.connectorId, row.eventId, 'delivered', row.deliveryKey)">人工确认已投递</el-button>
+          <el-button size="small" plain :disabled="resolvingEventIds.has(row.eventId)" @click="resolveConnectorEventItem(row.connectorId, row.eventId, 'failed', row.deliveryKey)">人工确认失败</el-button>
+        </template>
+      </div>
+    </section>
+    <p v-if="credentialNotice" role="status">{{ credentialNotice }}</p>
+    <p v-if="bridgePollingError" role="status">{{ bridgePollingError }}</p>
+    <p v-if="pageLifecycle.refreshError.value" role="alert">{{ pageLifecycle.refreshError.value }}</p>
     <div class="governance-console">
       <section class="governance-toolbar" :aria-label="t('governance.actionsAria')">
         <div>
@@ -7,7 +22,7 @@
         </div>
         <div class="toolbar-actions">
           <el-tag :type="governancePostureTagType">{{ governancePosture }}</el-tag>
-          <el-button type="primary" :loading="refreshing" @click="refreshGovernance">{{ t('governance.refreshSnapshot') }}</el-button>
+          <el-button type="primary" :loading="refreshing" @click="pageLifecycle.reload">{{ t('governance.refreshSnapshot') }}</el-button>
         </div>
       </section>
 
@@ -399,7 +414,7 @@ import { ElTag } from 'element-plus'
 import { ElCard } from 'element-plus'
 import 'element-plus/es/components/card/style/css'
 import 'element-plus/es/components/tag/style/css'
-import { onBeforeUnmount, onMounted, reactive, computed, ref, watch } from 'vue'
+import { reactive, computed, ref, watch } from 'vue'
 import { describeError } from '@/shared/errors/describe-error'
 import { ElMessage, ElMessageBox, ElTabPane, ElTabs } from 'element-plus'
 import 'element-plus/es/components/tabs/style/css'
@@ -408,12 +423,14 @@ import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import AsyncState from '@/shared/components/feedback/AsyncState.vue'
 import { t } from '@/i18n'
 import { systemClient } from '@/api/client'
+import { usePanelLifecycle } from '@/app/composables/usePanelLifecycle'
+import { useUiCapabilities } from '@/app/composables/useUiCapabilities'
 import { useSystemDomain } from '../composables/useSystemDomain'
 import ConnectorConfigPane from '../components/ConnectorConfigPane.vue'
 import { messageConnectorIds } from '../components/connector-pane'
 import type { ConnectorDraft, ConnectorPaneApi, MessageConnectorId } from '../components/connector-pane'
 import { usePluginDomain } from '../../plugin/composables/usePluginDomain'
-import type { ConnectorProbeSnapshot, ConnectorState, ConnectorStatus, MCPHistoryEntry, MCPInventoryItem, MCPServerConfigSnapshot, MCPServerPresetSnapshot, MCPServerStatusSnapshot, MessageConnectorConfigSnapshot, MessageConnectorConfigUpdate, PermissionAuditRecord, RuntimeContributionSummary } from '@/../shared/agent'
+import type { ConnectorDeliveryLookup, ConnectorProbeSnapshot, ConnectorState, ConnectorStatus, MCPHistoryEntry, MCPInventoryItem, MCPServerConfigSnapshot, MCPServerPresetSnapshot, MCPServerStatusSnapshot, MessageConnectorConfigSnapshot, MessageConnectorConfigUpdate, PermissionAuditRecord, RuntimeContributionSummary } from '@/../shared/agent'
 import type { PluginContributionSummary } from '@/../shared/plugin'
 import { countEnabledPlugins } from '../pluginStatus'
 
@@ -470,9 +487,6 @@ const {
   cancelConnectorEventRequest,
   resolveConnectorEventRequest,
   loadConnectorDeliveries,
-  retryConnectorDelivery,
-  cancelConnectorEvent,
-  resolveConnectorEvent,
   probeConnector,
   qqBridge,
   loadQqBridge,
@@ -516,6 +530,35 @@ const retryingDeliveryKeys = ref(new Set<string>())
 const accountBusyIds = ref(new Set<string>())
 const probingConnectorIds = ref(new Set<string>())
 const activeConnectorId = ref<MessageConnectorId>('telegram')
+const credentialNotice = ref('')
+const connectorDraftBaselines = new Map<MessageConnectorId, string>()
+const connectorDraftEpochs = new Map<MessageConnectorId, number>()
+const deliveryOperations = new Set<string>()
+const completedDeliveries = new Set<string>()
+const deliveryNotice = ref('')
+const uncertainDeliveryKey = 'yuizaki.connector.unknown-deliveries'
+const readUncertainDeliveries = (): Record<string, { eventId: string; attemptCount: number }> => {
+  try {
+    const value: unknown = JSON.parse(window.sessionStorage.getItem(uncertainDeliveryKey) || '{}')
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+    return Object.fromEntries(Object.entries(value).filter(([, item]) => item && typeof item.eventId === 'string' && Number.isFinite(item.attemptCount)))
+  } catch { return {} }
+}
+const uncertainDeliveries = reactive(readUncertainDeliveries())
+const deliveryLookups = ref<Record<string, ConnectorDeliveryLookup>>({})
+const queryingDeliveryKeys = ref(new Set<string>())
+const deliveryRecoveryRows = computed(() => [...new Set([...Object.keys(uncertainDeliveries), ...Object.keys(deliveryLookups.value)])].flatMap((operationKey) => {
+  const separator = operationKey.indexOf(':')
+  const connectorId = operationKey.slice(0, separator) as MessageConnectorId
+  if (!messageConnectorIds.includes(connectorId)) return []
+  const snapshot = deliveryLookups.value[operationKey]
+  return [{ operationKey, connectorId, deliveryKey: operationKey.slice(separator + 1), eventId: uncertainDeliveries[operationKey]?.eventId || snapshot?.delivery?.eventId || '', snapshot }]
+}))
+if (Object.keys(uncertainDeliveries).length) deliveryNotice.value = '存在尚未确认的原投递；查询原 event/delivery 或人工确认后再操作。'
+const persistUncertainDeliveries = () => {
+  try { window.sessionStorage.setItem(uncertainDeliveryKey, JSON.stringify(uncertainDeliveries)) } catch { /* Keep the in-memory lock. */ }
+}
+const uiCapabilities = useUiCapabilities()
 const connectorConfigs = reactive<Partial<Record<MessageConnectorId, MessageConnectorConfigSnapshot>>>({})
 const newConnectorDraft = (): ConnectorDraft => ({ enabled: false, botToken: '', webhookSecret: '', publicKey: '', accountMode: 'personal_bridge', bridgeUrl: '', bridgeProtocol: 'generic', bridgeToken: '', clearBotToken: false, clearWebhookSecret: false, clearPublicKey: false, clearBridgeUrl: false, clearBridgeProtocol: false, clearBridgeToken: false })
 const connectorDrafts = reactive<Record<MessageConnectorId, ConnectorDraft>>({
@@ -736,9 +779,10 @@ const cancellingEventIds = ref(new Set<string>())
 const resolvingEventIds = ref(new Set<string>())
 
 const cancelConnectorEventItem = async (connectorId: MessageConnectorId, eventId: string) => {
+  if (cancellingEventIds.value.has(eventId)) return
   addPending(cancellingEventIds, eventId)
   try {
-    const result = await cancelConnectorEvent(connectorId, eventId)
+    const result = await systemClient.cancelConnectorEvent(connectorId, eventId)
     if (result?.cancelled) ElMessage.success(t('governance.toast.eventCancelled'))
     else ElMessage.warning(cancelConnectorEventRequest.error || t('governance.toast.tooLateToCancel'))
   } catch (error) {
@@ -749,15 +793,91 @@ const cancelConnectorEventItem = async (connectorId: MessageConnectorId, eventId
   }
 }
 
+const lookupOriginalDelivery = async (connectorId: MessageConnectorId, deliveryKey: string, eventId?: string) => {
+  const snapshot = await systemClient.connectorDelivery(connectorId, deliveryKey)
+  const operationKey = `${connectorId}:${deliveryKey}`
+  const expectedEventId = eventId || uncertainDeliveries[operationKey]?.eventId
+  if (snapshot.delivery && expectedEventId && snapshot.delivery.eventId !== expectedEventId) throw new Error('原 delivery/event 身份不一致；保持未知')
+  deliveryLookups.value[operationKey] = snapshot
+  const uncertain = uncertainDeliveries[operationKey]
+  if (snapshot.delivery?.status === 'delivered' || (snapshot.delivery?.status === 'failed' && uncertain && snapshot.delivery.attemptCount > uncertain.attemptCount)) {
+    delete uncertainDeliveries[operationKey]
+    persistUncertainDeliveries()
+  }
+  return snapshot
+}
+const queryUnknownDelivery = async (connectorId: MessageConnectorId, deliveryKey: string) => {
+  const operationKey = `${connectorId}:${deliveryKey}`
+  if (queryingDeliveryKeys.value.has(operationKey)) return
+  addPending(queryingDeliveryKeys, operationKey)
+  try {
+    const result = await lookupOriginalDelivery(connectorId, deliveryKey)
+    deliveryNotice.value = result.found
+      ? `原投递 ${deliveryKey}：${connectorDeliveryStatusLabel(result.status)}；查询没有执行投递。`
+      : `原投递 ${deliveryKey} 无保留记录，副作用仍为 unknown；禁止自动重发。`
+  } catch (error) {
+    delete deliveryLookups.value[operationKey]
+    deliveryNotice.value = `原投递查询失败，保持未知：${describeError(error)}`
+  } finally { removePending(queryingDeliveryKeys, operationKey) }
+}
+const refreshUnknownDeliveries = async () => {
+  await Promise.allSettled(Object.keys(uncertainDeliveries).map((operationKey) => {
+    const separator = operationKey.indexOf(':')
+    const connectorId = operationKey.slice(0, separator) as MessageConnectorId
+    if (messageConnectorIds.includes(connectorId)) return queryUnknownDelivery(connectorId, operationKey.slice(separator + 1))
+  }))
+}
+
 const retryDeliveryItem = async (connectorId: MessageConnectorId, deliveryKey: string) => {
+  const operationKey = `${connectorId}:${deliveryKey}`
+  if (deliveryOperations.has(operationKey)) return
+  deliveryOperations.add(operationKey)
   addPending(retryingDeliveryKeys, deliveryKey)
   try {
-    const result = await retryConnectorDelivery(connectorId, deliveryKey)
-    if (result?.ok) ElMessage.success(result.alreadySent ? t('governance.toast.alreadySent') : t('governance.toast.resentDelivery'))
+    // Read the terminal state first; never resend a completed or uncertain effect.
+    const latest = await lookupOriginalDelivery(connectorId, deliveryKey)
+    const delivery = latest.delivery
+    if (completedDeliveries.has(operationKey) || delivery?.status === 'delivered') {
+      delete uncertainDeliveries[operationKey]
+      persistUncertainDeliveries()
+      deliveryNotice.value = ''
+      ElMessage.info(t('governance.toast.alreadySent'))
+      return
+    }
+    const uncertain = uncertainDeliveries[operationKey]
+    if (uncertain && (!delivery || delivery.eventId !== uncertain.eventId || delivery.status !== 'failed' || delivery.attemptCount <= uncertain.attemptCount)) {
+      deliveryNotice.value = `原投递 ${deliveryKey} 结果尚未确认；请查询原 event/delivery 或使用人工结果确认，禁止重复发送。`
+      ElMessage.warning(deliveryNotice.value)
+      return
+    }
+    if (!delivery?.eventId || !delivery.idempotencyKey || delivery.status !== 'failed' || !delivery.retryable) {
+      ElMessage.warning('投递状态尚未确认，或不允许重试；请刷新并核对原 event/delivery。')
+      return
+    }
+    if (!pageLifecycle.active.value) return
+    uncertainDeliveries[operationKey] = { eventId: delivery.eventId, attemptCount: delivery.attemptCount }
+    persistUncertainDeliveries()
+    const result = await systemClient.retryConnectorDelivery(connectorId, delivery.deliveryKey)
+    if (result.delivery && (result.delivery.deliveryKey !== deliveryKey || result.delivery.eventId !== delivery.eventId)) {
+      deliveryNotice.value = '返回投递身份与原请求不一致；保持未知，请核对原 delivery。'
+      ElMessage.warning(deliveryNotice.value)
+      return
+    }
+    if (result.ok) {
+      if (result.alreadySent || result.delivery?.status === 'delivered') {
+        completedDeliveries.add(operationKey)
+        delete uncertainDeliveries[operationKey]
+        persistUncertainDeliveries()
+        deliveryNotice.value = ''
+      }
+      ElMessage.success(result.alreadySent ? t('governance.toast.alreadySent') : '已接受原投递重试；请核对最终投递状态。')
+    } else ElMessage.warning(t('governance.toast.redeliverFailed'))
   } catch (error) {
-    ElMessage.error(error instanceof Error ? describeError(error) : t('governance.toast.redeliverFailed'))
+    deliveryNotice.value = `投递结果未知，请查询原 delivery 后再操作：${describeError(error)}`
+    ElMessage.warning(deliveryNotice.value)
   } finally {
     removePending(retryingDeliveryKeys, deliveryKey)
+    deliveryOperations.delete(operationKey)
     await refreshConnectorState(connectorId).catch(() => undefined)
   }
 }
@@ -766,7 +886,10 @@ const resolveConnectorEventItem = async (
   connectorId: MessageConnectorId,
   eventId: string,
   outcome: 'delivered' | 'failed',
+  deliveryKey = `connector:${connectorId}:${eventId}`,
 ) => {
+  if (resolvingEventIds.value.has(eventId)) return
+  addPending(resolvingEventIds, eventId)
   try {
     await ElMessageBox.confirm(
       outcome === 'delivered'
@@ -780,12 +903,23 @@ const resolveConnectorEventItem = async (
       },
     )
   } catch {
+    removePending(resolvingEventIds, eventId)
     return
   }
-  addPending(resolvingEventIds, eventId)
   try {
-    const result = await resolveConnectorEvent(connectorId, eventId, outcome)
+    const latest = await lookupOriginalDelivery(connectorId, deliveryKey, eventId)
+    const delivery = latest.delivery
+    if (!delivery || delivery.status === 'delivered' || !delivery.resolvable) {
+      ElMessage.info(delivery?.status === 'delivered' ? t('governance.toast.alreadySent') : t('governance.toast.stateNotConverged'))
+      return
+    }
+    const result = await systemClient.resolveConnectorEvent(connectorId, eventId, outcome)
     if (result?.ok) {
+      if (!result.delivery || result.delivery.deliveryKey !== deliveryKey || result.delivery.eventId !== eventId || result.delivery.connectorId !== connectorId || result.delivery.status !== outcome) throw new Error('人工结论响应与原投递不一致；保持未知')
+      await lookupOriginalDelivery(connectorId, deliveryKey, eventId)
+      delete uncertainDeliveries[`${connectorId}:${delivery.deliveryKey}`]
+      persistUncertainDeliveries()
+      deliveryNotice.value = ''
       ElMessage.success(result.alreadyResolved ? t('governance.toast.stateConverged') : outcome === 'delivered' ? t('governance.toast.markedDelivered') : t('governance.toast.markedFailed'))
     } else {
       ElMessage.warning(resolveConnectorEventRequest.error || t('governance.toast.stateNotConverged'))
@@ -990,9 +1124,7 @@ const refreshExtensions = async () => {
   await Promise.all([loadAgentPlugins(), loadElectronPlugins(), loadMcp(), loadConnectors()])
 }
 
-onMounted(() => {
-  void refreshGovernance()
-})
+
 
 const revokePermissionItem = async (toolName: string) => {
   addPending(revokingPermissionKeys, toolName)
@@ -1163,10 +1295,16 @@ const disableConnectorItem = async (connectorId: string) => {
 }
 
 const loadConnectorConfig = async (connectorId: MessageConnectorId) => {
+  if (loadingConnectorConfigIds.value.has(connectorId) || savingConnectorIds.value.has(connectorId)) return null
+  const before = JSON.stringify(connectorDrafts[connectorId])
+  const epoch = connectorDraftEpochs.get(connectorId) || 0
+  const clean = before === (connectorDraftBaselines.get(connectorId) || JSON.stringify(newConnectorDraft()))
   addPending(loadingConnectorConfigIds, connectorId)
   try {
     const result = await systemClient.connectorConfig(connectorId)
+    if (epoch !== (connectorDraftEpochs.get(connectorId) || 0)) return result
     connectorConfigs[connectorId] = result
+    if (!clean || before !== JSON.stringify(connectorDrafts[connectorId])) return result
     connectorDrafts[connectorId].enabled = result.enabled
     connectorDrafts[connectorId].botToken = ''
     connectorDrafts[connectorId].webhookSecret = ''
@@ -1181,6 +1319,7 @@ const loadConnectorConfig = async (connectorId: MessageConnectorId) => {
     connectorDrafts[connectorId].clearBridgeUrl = false
     connectorDrafts[connectorId].clearBridgeProtocol = false
     connectorDrafts[connectorId].clearBridgeToken = false
+    connectorDraftBaselines.set(connectorId, JSON.stringify(connectorDrafts[connectorId]))
     if (connectorId === 'qq' || connectorId === 'wechat') await loadConnectorAccount(connectorId)
     return result
   } catch (error) {
@@ -1193,6 +1332,8 @@ const loadConnectorConfig = async (connectorId: MessageConnectorId) => {
 
 const clearConnectorSecret = (connectorId: MessageConnectorId, field: 'botToken' | 'webhookSecret' | 'publicKey' | 'bridgeUrl' | 'bridgeProtocol' | 'bridgeToken') => {
   const draft = connectorDrafts[connectorId]
+  connectorDraftEpochs.set(connectorId, (connectorDraftEpochs.get(connectorId) || 0) + 1)
+  credentialNotice.value = '凭据已从当前草稿清除；保存后才会更新宿主配置。'
   draft[field] = ''
   const clearFields = { botToken: 'clearBotToken', webhookSecret: 'clearWebhookSecret', publicKey: 'clearPublicKey', bridgeUrl: 'clearBridgeUrl', bridgeProtocol: 'clearBridgeProtocol', bridgeToken: 'clearBridgeToken' } as const
   draft[clearFields[field]] = true
@@ -1203,6 +1344,9 @@ const loadConnectorConfigs = async () => {
 }
 
 const saveConnectorConfig = async (connectorId: MessageConnectorId) => {
+  if (savingConnectorIds.value.has(connectorId) || accountBusyIds.value.has(connectorId)) return
+  const before = JSON.stringify(connectorDrafts[connectorId])
+  const epoch = connectorDraftEpochs.get(connectorId) || 0
   const draft = connectorDrafts[connectorId]
   if (connectorId === 'discord' && draft.publicKey && !/^[0-9a-fA-F]{64}$/.test(draft.publicKey)) {
     ElMessage.warning(t('governance.toast.discordPublicKeyInvalid'))
@@ -1231,27 +1375,39 @@ const saveConnectorConfig = async (connectorId: MessageConnectorId) => {
   addPending(savingConnectorIds, connectorId)
   try {
     const result = await systemClient.updateConnectorConfig(connectorId, payload)
-    connectorConfigs[connectorId] = result.config
-    draft.enabled = result.config.enabled
-    draft.botToken = ''
-    draft.webhookSecret = ''
-    draft.publicKey = ''
-    draft.bridgeUrl = result.config.bridgeUrl || ''
-    draft.bridgeProtocol = result.config.bridgeProtocol || 'generic'
-    draft.bridgeToken = ''
-    draft.clearBotToken = false
-    draft.clearWebhookSecret = false
-    draft.clearPublicKey = false
-    draft.clearBridgeUrl = false
-    draft.clearBridgeProtocol = false
-    draft.clearBridgeToken = false
-    await loadConnectors()
+    if (epoch === (connectorDraftEpochs.get(connectorId) || 0) && before === JSON.stringify(draft)) {
+      connectorConfigs[connectorId] = result.config
+      draft.enabled = result.config.enabled
+      draft.botToken = ''
+      draft.webhookSecret = ''
+      draft.publicKey = ''
+      draft.bridgeUrl = result.config.bridgeUrl || ''
+      draft.bridgeProtocol = result.config.bridgeProtocol || 'generic'
+      draft.bridgeToken = ''
+      draft.clearBotToken = false
+      draft.clearWebhookSecret = false
+      draft.clearPublicKey = false
+      draft.clearBridgeUrl = false
+      draft.clearBridgeProtocol = false
+      draft.clearBridgeToken = false
+      connectorDraftBaselines.set(connectorId, JSON.stringify(draft))
+      credentialNotice.value = ''
+    } else credentialNotice.value = '提交内容已保存；请求期间新增的输入或清除标记仍在草稿中，请再次保存。'
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? describeError(error) : t('governance.toast.connectorSaveFailed'))
+    removePending(savingConnectorIds, connectorId)
+    return
+  }
+  // Persistence and readiness are separate outcomes. A probe cannot undo a save.
+  try {
     const probe = await probeConnectorItem(connectorId, false)
     if (probe?.ok) ElMessage.success(t('governance.toast.connectorSaved', { name: connectorDisplayName(connectorId), status: connectorProbeStatusLabel(probe) }))
     else if (probe) ElMessage.warning(t('governance.toast.connectorSavedBut', { name: connectorDisplayName(connectorId), status: connectorProbeStatusLabel(probe) }))
-    else ElMessage.success(t('governance.toast.connectorSavedPending', { name: connectorDisplayName(connectorId) }))
+    else ElMessage.warning(t('governance.toast.connectorSavedPending', { name: connectorDisplayName(connectorId) }))
+    await loadConnectors()
   } catch (error) {
-    ElMessage.error(error instanceof Error ? describeError(error) : t('governance.toast.connectorSaveFailed'))
+    ElMessage.warning(`${t('governance.toast.connectorSavedPending', { name: connectorDisplayName(connectorId) })} · ${describeError(error)}`)
+
   } finally {
     removePending(savingConnectorIds, connectorId)
   }
@@ -1323,29 +1479,40 @@ const saveSignServer = () => withBridgeBusy(async () => {
 const stopManagedBridge = () => withBridgeBusy(() => stopQqBridge(), t('governance.bridge.stopped'))
 const logoutManagedBridge = () => withBridgeBusy(() => logoutQqBridge(), t('governance.toast.bridgeLoggedOut'))
 
-onMounted(() => {
-  void loadQqBridge().catch(() => undefined)
-})
+
 
 // While the bridge waits for a QR scan the state only changes on the backend,
 // so poll gently instead of making the user press the refresh button.
-let bridgePollTimer: ReturnType<typeof setInterval> | null = null
+let bridgePollTimer: ReturnType<typeof setTimeout> | null = null
+let bridgePollInFlight = false
+let bridgePollAttempts = 0
+const bridgePollingError = ref('')
 const stopBridgePolling = () => {
-  if (bridgePollTimer) {
-    clearInterval(bridgePollTimer)
+  if (bridgePollTimer !== null) clearTimeout(bridgePollTimer)
+  bridgePollTimer = null
+}
+const syncBridgePolling = () => {
+  stopBridgePolling()
+  const pending = ['awaiting_scan', 'starting'].includes(qqBridge.value?.state || '')
+  if (!pageLifecycle.active.value || !pending || bridgePollInFlight) return
+  if (bridgePollAttempts >= 60) { bridgePollingError.value = '扫码等待已达轮询上限；请手动刷新状态。'; return }
+  bridgePollTimer = setTimeout(async () => {
     bridgePollTimer = null
-  }
+    if (!pageLifecycle.active.value) return
+    bridgePollInFlight = true
+    bridgePollAttempts += 1
+    try { await loadQqBridge() } catch { /* request state carries the error */ }
+    finally { bridgePollInFlight = false; syncBridgePolling() }
+  }, 5000)
 }
-const syncBridgePolling = (state: string | undefined) => {
-  const pending = state === 'awaiting_scan' || state === 'starting'
-  if (pending && !bridgePollTimer) {
-    bridgePollTimer = setInterval(() => { void loadQqBridge().catch(() => undefined) }, 5000)
-  } else if (!pending) {
-    stopBridgePolling()
-  }
-}
-watch(() => qqBridge.value?.state, (state) => syncBridgePolling(state), { immediate: true })
-onBeforeUnmount(stopBridgePolling)
+const pageLifecycle = usePanelLifecycle(async () => {
+  bridgePollAttempts = 0
+  bridgePollingError.value = ''
+  await Promise.all([refreshGovernance(), loadQqBridge(), uiCapabilities.refresh()])
+  if (pageLifecycle.active.value) await refreshUnknownDeliveries()
+  syncBridgePolling()
+}, stopBridgePolling)
+watch(() => qqBridge.value?.state, syncBridgePolling)
 
 const loginPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
   addPending(accountBusyIds, connectorId)
@@ -1361,6 +1528,7 @@ const logoutPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
 }
 
 const unbindPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
+  if (savingConnectorIds.value.has(connectorId) || accountBusyIds.value.has(connectorId)) return
   try {
     await ElMessageBox.confirm(t('governance.confirm.unbindMessage'), t('governance.confirm.unbindTitle'), {
       type: 'warning',
@@ -1370,8 +1538,10 @@ const unbindPersonalAccount = async (connectorId: 'qq' | 'wechat') => {
   } catch {
     return
   }
+  if (savingConnectorIds.value.has(connectorId) || accountBusyIds.value.has(connectorId)) return
   addPending(accountBusyIds, connectorId)
   try {
+    connectorDraftEpochs.set(connectorId, (connectorDraftEpochs.get(connectorId) || 0) + 1)
     const result = await systemClient.unbindConnectorAccount(connectorId)
     connectorConfigs[connectorId] = result.config
     connectorAccounts.value[connectorId] = result.account

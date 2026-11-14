@@ -237,6 +237,16 @@ export interface ConnectorDeliverySnapshot {
   recovery?: ConnectorRecoverySnapshot | null
 }
 
+export interface ConnectorDeliveryLookup {
+  ok: boolean
+  connectorId: string
+  deliveryKey: string
+  found: boolean
+  status: string
+  delivery: ConnectorDeliveryItem | null
+  externalSideEffects: false
+}
+
 export interface ConnectorRecoverySnapshot {
   schemaVersion: 'yuizaki.connector-recovery.v1' | string
   runs: number
@@ -709,6 +719,7 @@ export interface BackupTarget {
 }
 
 export interface BackupTargetsSnapshot {
+  source?: 'running_backend' | 'configured_offline'
   targets: BackupTarget[]
 }
 
@@ -741,6 +752,7 @@ export interface BackupRestoreEffects {
 }
 
 export interface BackupRestoreResponse {
+  planId?: string
   ok: boolean
   dryRun: boolean
   backupDir: string

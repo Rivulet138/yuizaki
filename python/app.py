@@ -232,7 +232,7 @@ async def _reload_memory_runtime() -> None:
     global _retrieval_pipeline
     async with _memory_reload_lock:
         if _memory_state is None:
-            return
+            raise RuntimeError("memory_store_not_initialized")
         previous_store = _memory_state.store
         previous_docs = await asyncio.to_thread(previous_store.list_documents)
         new_store = create_memory_backend(config.memory)
@@ -243,7 +243,7 @@ async def _reload_memory_runtime() -> None:
             new_pipeline = RetrievalPipeline(new_store)
         except Exception:
             logger.exception("Memory backend reload failed; retaining current authority")
-            return
+            raise
 
         _memory_state.store = new_store
         _retrieval_pipeline = new_pipeline
@@ -259,7 +259,7 @@ async def _reload_memory_runtime() -> None:
 sio_server = DesktopPetSocketServer()
 runtime_container.set("socket", sio_server)
 
-async def _init_llm():
+async def _init_llm(*, propagate_vision_failure: bool = False):
     """Initialize LLM service."""
     global _llm_client, _vision_llm_client
     _llm_client = await _runtime_services().initialize_llm(config, logger)
@@ -269,7 +269,13 @@ async def _init_llm():
         runtime_container.set("vision_llm", _vision_llm_client)
     except Exception as exc:
         _vision_llm_client = None
+        runtime_container.remove("vision_llm")
         logger.warning("Vision LLM initialization failed; realtime visual analysis is unavailable: %s", exc)
+        if propagate_vision_failure:
+            raise
+
+async def _init_llm_for_settings():
+    await _init_llm(propagate_vision_failure=True)
 
 async def _cleanup_llm():
     """Cleanup LLM service."""
@@ -383,7 +389,7 @@ async def app_lifespan(fastapi_app: FastAPI) -> AsyncIterator[None]:
             _llm_client,
             _tts_client,
             _asr_manager,
-            _init_llm,
+            _init_llm_for_settings,
             _cleanup_llm,
             _init_tts,
             _cleanup_tts,
@@ -715,6 +721,7 @@ router_registry.include(
         audio_cache_dir=config.tts.audio_cache_dir,
         runtime_temp_dir=DEFAULT_RUNTIME_TEMP_DIR,
         memory_store_provider=_get_memory_store,
+        database_provider=lambda: db_repo,
     )
 )
 router_registry.include(create_database_router(lambda: db_repo, get_active_workspace_id=_get_active_workspace_id), name="database")

@@ -98,8 +98,8 @@
                 <strong>{{ t('infrastructure.advanced') }}</strong>
               </div>
               <div class="action-row">
-                <el-button plain size="small" :loading="apiGapLoading" @click="loadApiGaps">{{ t('infrastructure.readSnapshot') }}</el-button>
-                <el-button plain size="small" :loading="apiGapLoading" @click="updateStats">{{ t('infrastructure.updateStats') }}</el-button>
+                <el-button plain size="small" :loading="apiGapLoading" :disabled="statsUpdating" @click="loadApiGaps">{{ t('infrastructure.readSnapshot') }}</el-button>
+                <el-button plain size="small" :loading="statsUpdating" :disabled="apiGapLoading" @click="updateStats">{{ t('infrastructure.updateStats') }}</el-button>
               </div>
             </div>
           </template>
@@ -159,6 +159,7 @@
             show-icon
             :closable="false"
           />
+          <el-alert v-if="backupSource === 'configured_offline'" :title="t('infrastructure.backupOfflineSources')" type="warning" show-icon :closable="false" />
           <AsyncState :loading="backupTargetsRequest.loading" :error="backupTargetsRequest.error" :show-retry="false">
             <div v-if="backupResult" class="backup-success">
               <strong>{{ t('infrastructure.backupCreated') }}</strong>
@@ -166,9 +167,9 @@
             </div>
             <div class="restore-panel">
               <div class="restore-fields">
-                <el-input v-model="restoreBackupDir" size="small" :placeholder="t('infrastructure.backupPathPlaceholder')" />
-                <el-button size="small" plain :disabled="!restoreBackupDir.trim() || restoreMode === 'apply'" :loading="restoreMode === 'preview'" @click="previewRestore">{{ t('infrastructure.previewRestore') }}</el-button>
-                <el-button size="small" type="danger" plain :disabled="!canConfirmRestore || restoreMode === 'preview'" :loading="restoreMode === 'apply'" @click="confirmRestore">{{ t('infrastructure.confirmRestore') }}</el-button>
+                <el-input v-model="restoreBackupDir" size="small" :placeholder="t('infrastructure.backupPathPlaceholder')" :disabled="restoreMode === 'apply' || restoreMode === 'confirm'" />
+                <el-button size="small" plain :disabled="!restoreBackupDir.trim() || restoreMode !== null" :loading="restoreMode === 'preview'" @click="previewRestore">{{ t('infrastructure.previewRestore') }}</el-button>
+                <el-button size="small" type="danger" plain :disabled="!canConfirmRestore || restoreMode !== null" :loading="restoreMode === 'apply'" @click="confirmRestore">{{ t('infrastructure.confirmRestore') }}</el-button>
               </div>
               <el-alert
                 class="restore-warning"
@@ -183,6 +184,8 @@
                   <strong>{{ restorePreview.dryRun ? t('infrastructure.restorePreview') : t('infrastructure.restoreResult') }}</strong>
                   <el-tag size="small" :type="restorePreview.dryRun ? 'warning' : 'success'">{{ restorePreview.dryRun ? t('infrastructure.notWritten') : t('infrastructure.executed') }}</el-tag>
                 </div>
+                <p v-if="restorePreview.dryRun && !restorePreview.planId" role="status">{{ currentLocale === 'zh-CN' ? '此预览暂不支持执行核对，请更新服务后重新预览。' : 'This preview cannot be verified for execution. Update the service and preview again.' }}</p>
+                <p><code>{{ restorePreview.backupDir }}</code><br /><small>Plan: {{ restorePreview.planId }}</small></p>
                 <div v-if="restorePreview.summary" class="restore-impact-grid">
                   <div><span>{{ t('infrastructure.targets') }}</span><strong>{{ restorePreview.summary.totalTargets }}</strong></div>
                   <div><span>{{ restorePreview.dryRun ? t('infrastructure.willRestore') : t('infrastructure.restored') }}</span><strong>{{ restorePreview.summary.restoreCount }}</strong></div>
@@ -265,7 +268,6 @@
                 <div class="log-head">
                   <div>
                     <strong>{{ channel.label }}</strong>
-                    <span>{{ channel.description }}</span>
                   </div>
                   <el-tag size="small" :type="channel.content ? 'success' : 'info'">{{ channel.content ? t('infrastructure.hasLogs') : t('infrastructure.none') }}</el-tag>
                 </div>
@@ -301,7 +303,8 @@ import { ElCard } from 'element-plus'
 import 'element-plus/es/components/card/style/css'
 import { ElTag } from 'element-plus'
 import 'element-plus/es/components/tag/style/css'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, onActivated, onDeactivated, ref, watch } from 'vue'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { ElCollapse, ElCollapseItem, ElMessage, ElMessageBox, ElSkeleton } from 'element-plus'
 import 'element-plus/es/components/collapse/style/css'
 import 'element-plus/es/components/collapse-item/style/css'
@@ -317,7 +320,7 @@ import {
   serializeRedactedDiagnosticBundle,
 } from '@/app/runtime/companionDiagnosticExport'
 import { createRuntimeDiagnosticReport } from '@/app/runtime/runtimeDiagnosticReport'
-import { t } from '@/i18n'
+import { currentLocale, t } from '@/i18n'
 import { useSystemDomain } from '../composables/useSystemDomain'
 import type { BackupRestoreEffectStatus, BackupRestorePlanItem, BackupRestoreResponse, BackupTarget } from '../../../../shared/agent'
 import DeployPanel from '@/domains/deploy/views/DeployPanel.vue'
@@ -340,6 +343,7 @@ const {
   diagnostics,
   logs,
   backupTargets,
+  backupSource,
   backupResult,
   diagnosticsRequest,
   logsRequest,
@@ -362,13 +366,28 @@ const models = ref<Record<string, unknown> | null>(null)
 const effectivePreset = ref<Record<string, unknown> | null>(null)
 const apiGapError = ref('')
 const apiGapLoading = ref(false)
+const statsUpdating = ref(false)
 const apiGapLoaded = ref(false)
 const apiCollapseNames = ref<string[]>([])
 const exportingKind = ref<'json' | 'csv' | null>(null)
 const restoreBackupDir = ref('')
 const restorePreview = ref<BackupRestoreResponse | null>(null)
+const restorePreviewInput = ref('')
+const workspaceStore = useWorkspaceStore()
+let panelActive = true
+let activationSequence = 0
+let apiSnapshotRequested = false
+let apiSnapshotSequence = 0
+let restoreSequence = 0
+const invalidateRestorePreview = () => {
+  restoreSequence += 1
+  restorePreview.value = null
+  restorePreviewInput.value = ''
+  restoreBackupRequest.reset()
+}
+watch(restoreBackupDir, invalidateRestorePreview, { flush: 'sync' })
 const logsLoaded = ref(false)
-const restoreMode = ref<'preview' | 'apply' | null>(null)
+const restoreMode = ref<'preview' | 'confirm' | 'apply' | null>(null)
 const runtimeSnapshot = ref<RuntimeResourceSnapshot | null>(null)
 const runtimeLoading = ref(false)
 const runtimeClearing = ref(false)
@@ -457,7 +476,7 @@ const downloadRuntimeDiagnostic = async () => {
 const runtimeProcesses = computed(() => [...(runtimeSnapshot.value?.processes ?? [])]
   .sort((left, right) => right.privateKb - left.privateKb)
   .slice(0, 8))
-const canConfirmRestore = computed(() => Boolean(restoreBackupDir.value.trim() && restorePreview.value?.dryRun && restorePreview.value.restorePlan.some((item) => !item.skippedReason && item.backedUpAtSnapshot)))
+const canConfirmRestore = computed(() => Boolean(restoreBackupDir.value.trim() === restorePreviewInput.value && restorePreview.value?.planId && restorePreview.value.ok && restorePreview.value.dryRun && restorePreview.value.restorePlan.some((item) => !item.skippedReason && item.backedUpAtSnapshot)))
 const restoreEffectEntries = computed(() => {
   const effects = restorePreview.value?.effects
   if (!effects) return []
@@ -618,52 +637,52 @@ const logChannels = computed(() => [
   {
     key: 'renderer',
     label: t('infrastructure.rendererLogs'),
-    description: t('infrastructure.rendererLogsDesc'),
     content: logs.value?.renderer ?? '',
     tone: 'green',
   },
   {
     key: 'python',
     label: t('infrastructure.pythonLogs'),
-    description: t('infrastructure.pythonLogsDesc'),
     content: logs.value?.python ?? '',
     tone: 'blue',
   },
   {
     key: 'electron',
     label: t('infrastructure.electronLogs'),
-    description: t('infrastructure.electronLogsDesc'),
     content: logs.value?.electron ?? '',
     tone: 'amber',
   },
 ])
 
 const loadApiGaps = async () => {
+  if (!panelActive) return
+  apiSnapshotRequested = true
+  const sequence = ++apiSnapshotSequence
+  const workspaceId = workspaceStore.activeWorkspace.id
   apiGapError.value = ''
   apiGapLoading.value = true
-  try {
-    const [status, db, stats, modelList] = await Promise.all([
-      systemClient.systemStatus(),
-      systemClient.databaseStats(),
-      systemClient.statistics(),
-      systemClient.models(),
-    ])
-    systemStatus.value = status
-    databaseStats.value = db
-    statistics.value = stats
-    models.value = modelList
-    try {
-      effectivePreset.value = await systemClient.effectivePreset('default')
-    } catch {
-      effectivePreset.value = null
-    }
-    apiGapLoaded.value = true
-  } catch (error) {
-    apiGapError.value = describeFailure(error, t('infrastructure.apiSnapshotFailed'))
-  } finally {
-    apiGapLoading.value = false
-  }
+  effectivePreset.value = null
+  const results = await Promise.allSettled([
+    systemClient.systemStatus(), systemClient.databaseStats(),
+    systemClient.statistics(), systemClient.models(), systemClient.effectivePreset(workspaceId),
+  ])
+  if (!panelActive || sequence !== apiSnapshotSequence || workspaceId !== workspaceStore.activeWorkspace.id) return
+  const targets = [systemStatus, databaseStats, statistics, models, effectivePreset]
+  const labels = ['system/status', 'database/stats', 'statistics', 'models', 'effective preset']
+  const errors: string[] = []
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') targets[index].value = result.value
+    else errors.push(labels[index] + ': ' + describeFailure(result.reason, t('infrastructure.apiSnapshotFailed')))
+  })
+  apiGapError.value = errors.join(' · ')
+  apiGapLoaded.value = true
+  apiGapLoading.value = false
 }
+
+watch(() => workspaceStore.activeWorkspace.id, () => {
+  effectivePreset.value = null
+  if (panelActive && apiSnapshotRequested) void loadApiGaps()
+})
 
 const downloadExport = async (kind: 'json' | 'csv') => {
   apiGapError.value = ''
@@ -686,18 +705,24 @@ const downloadExport = async (kind: 'json' | 'csv') => {
 }
 
 const updateStats = async () => {
-  if (apiGapLoading.value) return
+  if (!panelActive || apiGapLoading.value || statsUpdating.value) return
+  const activation = activationSequence
+  const workspaceId = workspaceStore.activeWorkspace.id
+  const isCurrent = () => panelActive && activation === activationSequence && workspaceId === workspaceStore.activeWorkspace.id
   apiGapError.value = ''
-  apiGapLoading.value = true
+  statsUpdating.value = true
   try {
     await systemClient.updateStatistics()
+    if (!isCurrent()) return
     await loadApiGaps()
+    if (!isCurrent()) return
     ElMessage.success(t('infrastructure.statsUpdated'))
   } catch (error) {
+    if (!isCurrent()) return
     apiGapError.value = describeFailure(error, t('infrastructure.statsUpdateFailed'))
     ElMessage.error(apiGapError.value)
   } finally {
-    apiGapLoading.value = false
+    if (activation === activationSequence) statsUpdating.value = false
   }
 }
 
@@ -728,10 +753,13 @@ const createAndSelectBackup = async () => {
 const previewRestore = async () => {
   const backupDir = restoreBackupDir.value.trim()
   if (!backupDir || restoreMode.value) return
+  invalidateRestorePreview()
+  const sequence = restoreSequence
   restoreMode.value = 'preview'
   try {
     const result = await restoreBackup(backupDir, true)
-    if (result) {
+    if (result?.ok && result.dryRun && sequence === restoreSequence && backupDir === restoreBackupDir.value.trim()) {
+      restorePreviewInput.value = backupDir
       restorePreview.value = result
       ElMessage.success(t('infrastructure.restorePreviewCreated'))
     }
@@ -741,8 +769,10 @@ const previewRestore = async () => {
 }
 
 const confirmRestore = async () => {
-  const backupDir = restoreBackupDir.value.trim()
-  if (!backupDir || !canConfirmRestore.value || restoreMode.value) return
+  const plan = restorePreview.value
+  if (!plan || !canConfirmRestore.value || restoreMode.value) return
+  const sequence = restoreSequence
+  restoreMode.value = 'confirm'
   try {
     await ElMessageBox.confirm(t('infrastructure.restoreConfirmText'), t('infrastructure.restoreConfirmTitle'), {
       confirmButtonText: t('infrastructure.restoreBackup'),
@@ -750,14 +780,23 @@ const confirmRestore = async () => {
       type: 'warning',
     })
   } catch {
+    restoreMode.value = null
+    return
+  }
+  if (sequence !== restoreSequence || restorePreview.value !== plan || !canConfirmRestore.value) {
+    restoreMode.value = null
     return
   }
   restoreMode.value = 'apply'
   try {
-    const result = await restoreBackup(backupDir, false)
-    if (result) {
+    const result = await restoreBackup(plan.backupDir, false, plan.planId)
+    if (result?.ok && !result.dryRun && result.planId === plan.planId && result.backupDir === plan.backupDir) {
       restorePreview.value = result
       ElMessage.success(t('infrastructure.backupRestored'))
+    } else {
+      restoreSequence += 1
+      restorePreview.value = null
+      restorePreviewInput.value = ''
     }
   } finally {
     restoreMode.value = null
@@ -801,6 +840,26 @@ const restoreEffectTagType = (status: BackupRestoreEffectStatus): 'success' | 'w
   if (status === 'will_restore' || status === 'rebuild_required') return 'warning'
   return 'info'
 }
+
+const invalidateApiSnapshot = () => {
+  panelActive = false
+  activationSequence += 1
+  apiSnapshotSequence += 1
+  apiGapLoading.value = false
+  statsUpdating.value = false
+}
+
+onDeactivated(invalidateApiSnapshot)
+onActivated(() => {
+  if (panelActive) return
+  panelActive = true
+  if (apiSnapshotRequested) void loadApiGaps()
+})
+
+onBeforeUnmount(() => {
+  invalidateApiSnapshot()
+  invalidateRestorePreview()
+})
 
 onMounted(() => {
   void refreshAll()
@@ -1326,10 +1385,6 @@ onMounted(() => {
   gap: 2px;
 }
 
-.log-head span {
-  color: #94a3b8;
-  font-size: 12px;
-}
 
 .log-panel pre {
   min-height: 260px;

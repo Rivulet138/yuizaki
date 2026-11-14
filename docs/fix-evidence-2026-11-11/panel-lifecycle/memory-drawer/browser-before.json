@@ -1,0 +1,57 @@
+{
+  "edit_open": {
+    "route": "memory",
+    "memoryInBody": true,
+    "visibleDialogs": 1,
+    "visibleDrawers": 0,
+    "bodyClass": "el-popup-parent--hidden",
+    "bodyOverflow": "hidden",
+    "activeTag": "TEXTAREA",
+    "activeText": "",
+    "atOtherButton": null
+  },
+  "edit_deactivated": {
+    "route": "other",
+    "memoryInBody": false,
+    "visibleDialogs": 0,
+    "visibleDrawers": 0,
+    "bodyClass": "el-popup-parent--hidden",
+    "bodyOverflow": "hidden",
+    "activeTag": "BODY",
+    "activeText": "OTHER PANEL ACTIONmemoryPanel.scopeGlobalmemoryPanel.scopeWorkspacememoryPanel.s",
+    "atOtherButton": {
+      "hit": "",
+      "covered": false
+    }
+  },
+  "edit_other_click": "success",
+  "edit_return_draft": "UNSAVED DIALOG DRAFT",
+  "advanced_open": {
+    "route": "memory",
+    "memoryInBody": true,
+    "visibleDialogs": 0,
+    "visibleDrawers": 1,
+    "bodyClass": "el-popup-parent--hidden",
+    "bodyOverflow": "hidden",
+    "activeTag": "BUTTON",
+    "activeText": "memoryPanel.advancedToolsLabel",
+    "atOtherButton": null
+  },
+  "advanced_deactivated": {
+    "route": "other",
+    "memoryInBody": false,
+    "visibleDialogs": 0,
+    "visibleDrawers": 1,
+    "bodyClass": "el-popup-parent--hidden",
+    "bodyOverflow": "hidden",
+    "activeTag": "BODY",
+    "activeText": "OTHER PANEL ACTIONmemoryPanel.scopeGlobalmemoryPanel.scopeWorkspacememoryPanel.s",
+    "atOtherButton": {
+      "hit": "el-overlay is-drawer el-modal-drawer",
+      "covered": true
+    }
+  },
+  "advanced_other_click": "intercepted: ng into view if needed\n      - done scrolling\n      - <div class=\"el-overlay is-drawer el-modal-drawer\">\u2026</div> intercepts pointer events\n    - retrying click action\n      - waiting 100ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is visible, enabled and stable\n      - scrolling into view if needed\n      - done scrolling\n      - <div class=\"el-overlay is-drawer el-modal-drawer\">\u2026</div> intercepts pointer events\n    - retrying click action\n      - waiting 500ms\n",
+  "screenshot": "E:\\yuizaki\\docs\\fix-evidence-2026-11-11\\panel-lifecycle\\memory-drawer\\before-memory-deactivated-drawer.png",
+  "pageerrors": []
+}

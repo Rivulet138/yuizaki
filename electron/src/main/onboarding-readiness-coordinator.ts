@@ -134,10 +134,10 @@ const hostProbe = (
   status,
   requiredForText,
   dependencies: [],
-  timeoutMs: 0,
-  durationMs: null,
+  timeoutMs: id === 'backend.service' || id === 'host.avatar' ? 2000 : 0,
+  durationMs: typeof evidence['durationMs'] === 'number' ? evidence['durationMs'] : null,
   message,
-  evidence,
+  evidence: { source: 'electron.host', checkedAt: new Date().toISOString(), ...evidence },
   repairActionId,
 })
 
@@ -165,7 +165,7 @@ const normalizePythonProbe = (value: unknown): OnboardingProbeResult | null => {
     durationMs: Number.isFinite(probe['durationMs']) ? Math.max(0, Number(probe['durationMs'])) : null,
     message: typeof probe['message'] === 'string' ? probe['message'].slice(0, 500) : '',
     ...(isOnboardingProbeMessageKey(probe['messageKey']) ? { messageKey: probe['messageKey'] } : {}),
-    evidence: (redactEvidence(probe['evidence']) as Record<string, unknown>) ?? {},
+    evidence: { source: 'python.onboarding', receivedAt: new Date().toISOString(), ...((redactEvidence(probe['evidence']) as Record<string, unknown>) ?? {}) },
     repairActionId,
   }
 }
@@ -304,7 +304,7 @@ export class OnboardingReadinessCoordinator {
       })
     }
     const existing = this.snapshot().probes.filter((probe) => !hostProbes.some((host) => host.id === probe.id))
-    const selectedPythonIds = request.probeIds?.filter((id) => PYTHON_PROBE_IDS.includes(id)) ?? PYTHON_PROBE_IDS
+    const selectedPythonIds = request.probeIds?.length ? request.probeIds.filter((id) => PYTHON_PROBE_IDS.includes(id)) : PYTHON_PROBE_IDS
     const pythonProbes = pythonSnapshot?.probes.map(normalizePythonProbe).filter((probe): probe is OnboardingProbeResult => probe !== null) ?? []
     const returnedPythonIds = new Set(pythonProbes.map((probe) => probe.id))
     const unavailablePythonProbes = selectedPythonIds
@@ -389,56 +389,70 @@ export class OnboardingReadinessCoordinator {
       ))
     }
     if (include('backend.service')) {
+      const startedAt = new Date().toISOString()
+      const started = performance.now()
       try {
         const healthy = await this.awaitHostProbe(this.pythonService.health(), signal)
+        const measurement = this.pythonService.getHealthProbe?.()
         probes.push(hostProbe('backend.service', 'Backend service', healthy ? 'ready' : 'failed', true,
-          healthy ? 'Backend is available' : this.pythonService.getStatus().error || 'Backend is unavailable', 'backend.retry'))
-      } catch {
+          healthy ? 'Backend is available' : measurement?.error || this.pythonService.getStatus().error || 'Backend is unavailable', 'backend.retry', { ...measurement }))
+      } catch (cause) {
         probes.push(hostProbe('backend.service', 'Backend service', 'unavailable', true,
-          'Backend health probe timed out', 'backend.retry', { category: 'timeout' }))
+          this.safeError(cause), 'backend.retry', { category: 'timeout', source: 'python:/api/ping', startedAt, durationMs: Math.round(performance.now() - started) }))
       }
     }
     if (include('host.avatar')) {
+      const startedAt = new Date().toISOString()
+      const started = performance.now()
       try {
         const avatar = await this.awaitHostProbe(this.hostPorts.avatar(), signal)
         probes.push(hostProbe('host.avatar', 'Avatar', avatar.visible ? 'ready' : 'failed', false,
           avatar.message || (avatar.visible ? 'Avatar is visible' : 'Avatar is not visible'), 'avatar.reload', {
+            startedAt, durationMs: Math.round(performance.now() - started),
             visible: avatar.visible,
             fallback: avatar.fallback,
           }))
       } catch {
         probes.push(hostProbe('host.avatar', 'Avatar', 'unavailable', false,
-          'Avatar visibility probe timed out', 'avatar.reload', { category: 'timeout' }))
+          'Avatar visibility probe timed out', 'avatar.reload', { category: 'timeout', startedAt, durationMs: Math.round(performance.now() - started) }))
       }
     }
     if (include('host.microphone')) probes.push(hostProbe('host.microphone', 'Microphone', 'needs_user', false,
       'Microphone check requires a user gesture', 'navigate:settings'))
     if (include('host.speaker')) probes.push(hostProbe('host.speaker', 'Speaker', 'needs_user', false,
       'Speaker check requires a user gesture', 'navigate:settings'))
-    return probes
+    return probes.map((probe) => ({
+      ...probe,
+      timeoutMs: probe.id === 'backend.service' || probe.id === 'host.avatar' ? Math.min(2_000, this.scanTimeoutMs) : 0,
+      durationMs: typeof probe.evidence['durationMs'] === 'number' ? probe.evidence['durationMs'] : probe.durationMs ?? null,
+      evidence: probe.evidence,
+    }))
   }
 
   private async awaitHostProbe<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
     signal.throwIfAborted()
     return new Promise<T>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Host probe timed out')), Math.min(2_000, this.scanTimeoutMs))
-      const abort = () => reject(new Error('Host probe cancelled'))
-      signal.addEventListener('abort', abort, { once: true })
-      operation.then(resolve, reject).finally(() => {
+      const finish = (error: Error | null, value?: T) => {
         clearTimeout(timeout)
         signal.removeEventListener('abort', abort)
-      })
+        if (error) reject(error)
+        else resolve(value as T)
+      }
+      const timeout = setTimeout(() => finish(new Error(`Host probe timed out after ${Math.min(2_000, this.scanTimeoutMs)}ms`)), Math.min(2_000, this.scanTimeoutMs))
+      const abort = () => finish(new Error('Host probe cancelled'))
+      signal.addEventListener('abort', abort, { once: true })
+      operation.then(value => finish(null, value), error => finish(error instanceof Error ? error : new Error(String(error))))
     })
   }
 
   private async collectPythonSnapshot(request: OnboardingProbeRequest, signal: AbortSignal): Promise<{ runId: string; probes: unknown[] } | null> {
+    const pythonProbeIds = request.probeIds?.length ? request.probeIds.filter((id) => !id.startsWith('host.')) : undefined
+    if (pythonProbeIds?.length === 0) return null
     try {
       if (!(await this.awaitHostProbe(this.pythonService.health(), signal))) return null
     } catch {
       return null
     }
-    const pythonProbeIds = request.probeIds?.filter((id) => !id.startsWith('host.'))
-    if (request.probeIds && pythonProbeIds?.length === 0) return null
     const path = '/api/system/onboarding/readiness/run'
     try {
       const response = await this.fetchImpl(`${this.backendOrigin}${path}`, {
@@ -462,11 +476,14 @@ export class OnboardingReadinessCoordinator {
       this.store.set({ ...current, runId: pythonRunId, revision: current.revision + 1 })
       while (payload.state === 'running' && !signal.aborted) {
         await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, 250)
-          signal.addEventListener('abort', () => {
+          const finish = () => {
             clearTimeout(timer)
+            signal.removeEventListener('abort', finish)
             resolve()
-          }, { once: true })
+          }
+          const timer = setTimeout(finish, 250)
+          signal.addEventListener('abort', finish, { once: true })
+          if (signal.aborted) finish()
         })
         if (signal.aborted) return null
         const poll = await this.fetchImpl(`${this.backendOrigin}/api/system/onboarding/readiness`, {
@@ -491,18 +508,23 @@ export class OnboardingReadinessCoordinator {
   }
 
   private async cancelPythonRun(runId: string): Promise<void> {
-    if (!(await this.pythonService.health())) return
+    const controller = new AbortController()
+    const deadline = setTimeout(() => controller.abort(), Math.min(2_000, this.scanTimeoutMs))
     try {
-      await this.fetchImpl(`${this.backendOrigin}/api/system/onboarding/readiness/cancel`, {
+      if (!(await this.awaitHostProbe(this.pythonService.health(), controller.signal))) return
+      await this.awaitHostProbe(this.fetchImpl(`${this.backendOrigin}/api/system/onboarding/readiness/cancel`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
           'x-yuizaki-backend-token': this.backendApiToken,
         },
         body: JSON.stringify({ runId }),
-      })
+        signal: controller.signal,
+      }), controller.signal)
     } catch {
       // Local abort is authoritative even if the backend disappeared.
+    } finally {
+      clearTimeout(deadline)
     }
   }
 

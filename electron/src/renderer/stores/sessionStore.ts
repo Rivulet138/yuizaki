@@ -1,7 +1,12 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { requestJson, CONTROL_ORIGIN } from '@/api/clients/http-client'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+
+export interface SessionPersonaOverrides {
+  scenario?: string
+  exampleDialogue?: string
+}
 
 export interface SessionRecord {
   id: string
@@ -16,6 +21,7 @@ export interface SessionRecord {
   updated_at: string | null
   message_count: number
   total_tokens: number
+  persona_overrides?: SessionPersonaOverrides | null
 }
 
 const normalizeWorkspaceId = (workspaceId?: string | null) => (workspaceId || 'default').trim() || 'default'
@@ -29,6 +35,13 @@ export const useSessionStore = defineStore('session', () => {
   const sessions = ref<SessionRecord[]>([])
   const activeSessionId = ref<string>('default')
   const loading = ref(false)
+  const workspaceStore = useWorkspaceStore()
+  let loadEpoch = 0
+
+  watch(() => workspaceStore.activeWorkspace?.id, () => {
+    loadEpoch += 1
+    loading.value = false
+  }, { flush: 'sync' })
 
   const activeSession = computed(() => {
     const current = sessions.value.find((item) => item.id === activeSessionId.value)
@@ -40,6 +53,7 @@ export const useSessionStore = defineStore('session', () => {
   })
 
   const loadSessions = async () => {
+    const epoch = ++loadEpoch
     loading.value = true
     try {
       const workspaceStore = useWorkspaceStore()
@@ -47,6 +61,7 @@ export const useSessionStore = defineStore('session', () => {
       if (!workspaceId) return
 
       const payload = await requestJson<{ sessions: SessionRecord[] }>(`${CONTROL_ORIGIN}/api/sessions?scope=all`)
+      if (epoch !== loadEpoch || workspaceId !== workspaceStore.activeWorkspace?.id) return
       sessions.value = Array.isArray(payload.sessions)
         ? payload.sessions.map((session) => ({
             ...session,
@@ -60,7 +75,7 @@ export const useSessionStore = defineStore('session', () => {
         activeSessionId.value = workspaceSession?.id || 'default'
       }
     } finally {
-      loading.value = false
+      if (epoch === loadEpoch) loading.value = false
     }
   }
 
@@ -75,7 +90,6 @@ export const useSessionStore = defineStore('session', () => {
       body: JSON.stringify({ title }),
     })
     sessions.value.unshift(session)
-    activeSessionId.value = session.id
     return session
   }
 
@@ -101,7 +115,6 @@ export const useSessionStore = defineStore('session', () => {
       workspace_id: normalizeWorkspaceId(session.workspace_id),
     }
     sessions.value.unshift(normalizedSession)
-    activeSessionId.value = normalizedSession.id
     return normalizedSession
   }
 

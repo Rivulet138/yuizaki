@@ -60,6 +60,7 @@ class ChatSession(Base):
     summary: Mapped[str | None] = mapped_column(Text)
     pinned: Mapped[bool | None] = mapped_column(Boolean, default=False)
     archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    persona_overrides: Mapped[dict[str, str] | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     parent_session_id: Mapped[str | None] = mapped_column(String(50))
     branched_from_message_id: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)

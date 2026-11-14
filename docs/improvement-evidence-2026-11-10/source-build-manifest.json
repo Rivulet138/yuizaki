@@ -1,0 +1,16 @@
+{
+  "date": "2026-11-10",
+  "numberedItems": 30,
+  "missing": [],
+  "sha256": {
+    "docs\\improvement-2026-11-10.md": "7b22a79f68270d09907838c0828347eae5d08240c97133d7deb8941c7393c707",
+    "electron\\dist\\renderer\\index.html": "8f3dde1839831eaa477c53ae723b6995e927f772e0d9d9c19f117827c0d81f9d",
+    "electron\\dist\\renderer\\assets\\main-ivhAKnTY.js": "320e29872f10199f86ed787fa64174badf2c9e807402a9c2958e9863bc35bcc2",
+    "python\\modules\\memory\\routes.py": "fd03edfc767e2ec38e11f2eb595dc5d24a7a890cc899d7285bdcd6c22445c7ae",
+    "python\\modules\\memory\\sqlite_store.py": "e9469b6103c73a50509632d53402b3ae7c4b5655024102b4e9b3c6fa3f66fe95",
+    "python\\routes\\ai_api.py": "d19a77fa24cb66b468a8c3c1d2c70277dfb588f6036792ec51cf046fe1080827",
+    "python\\modules\\system\\stream_runtime.py": "d66908536e7c4d84ef8ea8aa5cf655567c6acf241ac56bdf529a9fb76451c891",
+    "python\\socket_handlers\\interrupt.py": "7190fd0c070b0d62e42db0b95eac2587580d9ba6b7c7c370fc2a54e5d333f106"
+  },
+  "evidenceBoundary": "Latest browser smoke uses current renderer build served by existing control process; existing main/Python processes were not restarted. See report for synthetic vs live evidence."
+}

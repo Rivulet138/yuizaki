@@ -63,6 +63,32 @@ export class PythonService {
   private startPromise: Promise<void> | null = null
   private state: PythonServiceState = 'idle'
   private lastError: string | null = null
+  private lastHealthProbe: {
+    source: string; startedAt: string; checkedAt: string; durationMs: number; budgetMs: number; error: string | null
+  } | null = null
+
+  getHealthProbe() {
+    return this.lastHealthProbe ? { ...this.lastHealthProbe } : null
+  }
+
+  private async measureHealth(operation: () => Promise<boolean>): Promise<boolean> {
+    const startedAt = new Date().toISOString()
+    const started = performance.now()
+    let error: string | null = null
+    try {
+      const healthy = await operation()
+      if (!healthy) error = 'Python ping returned an invalid status, runtime identity, or challenge proof'
+      return healthy
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause)
+      return false
+    } finally {
+      this.lastHealthProbe = {
+        source: 'python:/api/ping', startedAt, checkedAt: new Date().toISOString(),
+        durationMs: Math.round(performance.now() - started), budgetMs: 2000, error,
+      }
+    }
+  }
   private recoveryAllowed = false
   private recoveryAttempts = 0
   private recoveryTimer: ReturnType<typeof setTimeout> | null = null
@@ -137,24 +163,22 @@ export class PythonService {
 
   async health(expectedIdentity: PythonRuntimeIdentity | null = this.runtimeIdentity): Promise<boolean> {
     if (this.managedExternally) return this.probeExternalHealth()
-    try {
+    return this.measureHealth(async () => {
       const response = await axios.get(this.livenessCheckUrl, { timeout: 2000 })
       const status = response.data?.status
       const healthy = status === 'healthy' || status === 'ok' || response.data?.healthy === true || response.data?.ok === true
-      if (!healthy) return false
-      if (expectedIdentity === null) return false
+      if (!healthy) throw new Error('Python ping returned an unhealthy status')
+      if (expectedIdentity === null) throw new Error('Python ping has no expected managed runtime identity')
       const runtime = response.data?.runtime
-      return Boolean(
-        runtime
+      const matches = runtime
         && runtime.service === expectedIdentity.service
         && runtime.version === expectedIdentity.version
         && runtime.instance_id === expectedIdentity.instanceId
         && Number(runtime.generation) === expectedIdentity.generation
         && runtime.startup_nonce === expectedIdentity.startupNonce
-      )
-    } catch {
-      return false
-    }
+      if (!matches) throw new Error('Python ping runtime identity does not match the managed instance/generation')
+      return true
+    })
   }
 
   isRunning(): boolean {
@@ -254,9 +278,9 @@ export class PythonService {
   }
 
   private async probeExternalHealth(): Promise<boolean> {
-    if (!this.backendApiToken) return false
-    const challenge = randomBytes(32).toString('hex')
-    try {
+    return this.measureHealth(async () => {
+      if (!this.backendApiToken) throw new Error('External Python identity proof requires a backend token')
+      const challenge = randomBytes(32).toString('hex')
       const response = await axios.get(`${this.livenessCheckUrl}?challenge=${challenge}`, { timeout: 2000 })
       const runtime = response.data?.runtime
       const proof = response.data?.runtime_proof
@@ -265,18 +289,20 @@ export class PythonService {
         .digest('hex')
       const proofBytes = typeof proof === 'string' && /^[0-9a-f]{64}$/.test(proof) ? Buffer.from(proof, 'hex') : Buffer.alloc(0)
       const expectedBytes = Buffer.from(expected, 'hex')
-      return Boolean(
-        (response.data?.status === 'healthy' || response.data?.status === 'ok' || response.data?.ok === true) &&
-        runtime && runtime.service === PYTHON_RUNTIME_SERVICE &&
+      const validIdentity = runtime && runtime.service === PYTHON_RUNTIME_SERVICE &&
         typeof runtime.version === 'string' && runtime.version.length > 0 &&
         typeof runtime.instance_id === 'string' && runtime.instance_id.length > 0 &&
         (typeof runtime.generation === 'string' || typeof runtime.generation === 'number') &&
-        typeof runtime.startup_nonce === 'string' && runtime.startup_nonce.length > 0 &&
-        proofBytes.length === expectedBytes.length && timingSafeEqual(proofBytes, expectedBytes)
-      )
-    } catch {
-      return false
-    }
+        typeof runtime.startup_nonce === 'string' && runtime.startup_nonce.length > 0
+      if (!validIdentity) throw new Error('External Python ping runtime identity is missing or invalid')
+      if (proofBytes.length !== expectedBytes.length || !timingSafeEqual(proofBytes, expectedBytes)) {
+        throw new Error('External Python ping challenge proof is invalid')
+      }
+      if (!(response.data?.status === 'healthy' || response.data?.status === 'ok' || response.data?.ok === true)) {
+        throw new Error('External Python ping returned an unhealthy status')
+      }
+      return true
+    })
   }
 
   getStatus(): {

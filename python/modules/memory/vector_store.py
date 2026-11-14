@@ -21,16 +21,15 @@ import numpy as np
 
 from ..core.config import DEFAULT_EMBEDDING_MODEL
 from .backend import MemoryBackendStatus
-from .metadata import is_metadata_recallable
+from .metadata import (
+  candidate_tombstone_metadata,
+  is_metadata_recallable,
+  memory_scope_rejection_reason,
+)
 from .reranker import LearnedReranker, lexical_overlap_score, normalize_scores
 from .schema import MemorySearchFilters
 
 logger = logging.getLogger(__name__)
-
-
-def _normalize_scope_id(value: Any) -> str | None:
-  normalized = str(value or '').strip()
-  return normalized or None
 
 
 def memory_recency_score(metadata: dict[str, Any], *, now: datetime | None = None) -> float:
@@ -289,24 +288,9 @@ def is_memory_recallable(
     return False
   if filters.memory_role and str(metadata.get("memory_role") or "") != filters.memory_role:
     return False
-  doc_scope = str(metadata.get("scope") or "workspace")
-  document_session_id = _normalize_scope_id(metadata.get("session_id"))
-  requested_session_id = _normalize_scope_id(filters.session_id)
-  document_workspace_id = _normalize_scope_id(metadata.get("workspace_id"))
-  requested_workspace_id = _normalize_scope_id(filters.workspace_id)
-  if filters.scope == "global":
-    return doc_scope == "global"
-  if filters.scope == "session":
-    return doc_scope == "session" and bool(requested_session_id) and document_session_id == requested_session_id
-  if filters.scope == "workspace":
-    if doc_scope != "workspace":
-      return False
-    return not requested_workspace_id or document_workspace_id in (requested_workspace_id, None)
-  if requested_session_id is not None and document_session_id not in (None, requested_session_id):
-    return False
-  if requested_workspace_id is not None and document_workspace_id not in (None, requested_workspace_id):
-    return False
-  return True
+  return memory_scope_rejection_reason(
+    metadata, scope=filters.scope, workspace_id=filters.workspace_id, session_id=filters.session_id,
+  ) is None
 
 
 class EmbeddingProvider(Protocol):
@@ -445,6 +429,8 @@ class VectorStore:
     self._index_lock = threading.RLock()
     self._index_generation = 0
     self._score_context = threading.local()
+    self._last_index_error: str | None = None
+    self._index_errors: dict[str, str] = {}
 
   def _score_component_cache(self) -> dict[tuple[str, str, float, float], dict[str, float]]:
     context = getattr(self, "_score_context", None)
@@ -468,27 +454,97 @@ class VectorStore:
     return dict(components) if components is not None else None
 
   def add_document(self, doc: Document) -> None:
+    with self._index_lock:
+      existing = self._docs.get(doc.id)
+      if existing is not None and existing.metadata.get("candidate_deleted"):
+        doc.text = ""
+        doc.metadata = candidate_tombstone_metadata(existing.metadata)
+      if doc.metadata.get("candidate_deleted"):
+        self.add_metadata_document(doc)
+        return
+      previous_text = existing.text if existing is not None else None
+      previous_metadata = dict(existing.metadata) if existing is not None else None
     vec = _embed_document(self._embedding_service, doc.text)
     with self._index_lock:
+      current = self._docs.get(doc.id)
+      if current is not existing or (current is not None and (
+        current.text != previous_text or current.metadata != previous_metadata
+      )):
+        # Do not publish an embedding over a deletion or a newer write.
+        return
       self._docs[doc.id] = doc
       self._vectors[doc.id] = vec.astype(np.float32)
       self._index_generation += 1
+      self._index_errors.pop(doc.id, None)
+      self._last_index_error = next(iter(self._index_errors.values()), None)
 
   def add_metadata_document(self, doc: Document) -> None:
-    self._docs[doc.id] = doc
+    with self._index_lock:
+      previous = self._docs.get(doc.id)
+      if previous is not None and previous.metadata.get("candidate_deleted"):
+        doc.text = ""
+        doc.metadata = candidate_tombstone_metadata(previous.metadata)
+      if doc.metadata.get("candidate_deleted"):
+        doc.text = ""
+        doc.metadata = candidate_tombstone_metadata(doc.metadata)
+      self._docs[doc.id] = doc
+      self._index_errors.pop(doc.id, None)
+      self._last_index_error = next(iter(self._index_errors.values()), None)
+      if previous is None or previous.text != doc.text or not is_metadata_recallable(doc.metadata):
+        self._vectors.pop(doc.id, None)
+      self._index_generation += 1
+
+  def get_index_cleanup_status(self) -> str:
+    # Local deletion clears vectors synchronously; late embeddings are guarded
+    # by document identity. SQLite inherits the same local index lifecycle.
+    return "complete"
+
+  def get_document_index_status(self, doc_id: str) -> str:
+    with self._index_lock:
+      doc = self._docs.get(doc_id)
+      if doc is None or not is_metadata_recallable(doc.metadata):
+        return "excluded"
+      if doc_id in self._vectors:
+        return "indexed"
+      return "failed" if doc_id in self._index_errors else "pending"
+
+  def _ensure_document_vectors(self) -> None:
+    with self._index_lock:
+      pending = [doc for doc in self._docs.values()
+                 if doc.id not in self._vectors and is_metadata_recallable(doc.metadata)]
+    for doc in pending:
+      text = doc.text
+      try:
+        vector = _embed_document(self._embedding_service, text).astype(np.float32)
+      except Exception as exc:
+        self._last_index_error = str(exc)
+        self._index_errors[doc.id] = str(exc)
+        raise
+      with self._index_lock:
+        current = self._docs.get(doc.id)
+        if current is not None and current is doc and current.text == text and is_metadata_recallable(current.metadata):
+          self._vectors[doc.id] = vector
+          self._index_errors.pop(doc.id, None)
+    self._last_index_error = next(iter(self._index_errors.values()), None)
 
   def update_metadata(self, doc_id: str, metadata: dict[str, Any]) -> None:
     with self._index_lock:
       document = self._docs.get(doc_id)
       if document is None:
         raise KeyError(doc_id)
+      if document.metadata.get("candidate_deleted"):
+        metadata = candidate_tombstone_metadata(document.metadata)
       document.metadata = dict(metadata)
+      if not is_metadata_recallable(document.metadata):
+        self._vectors.pop(doc_id, None)
       self._index_generation += 1
 
   def delete_document(self, doc_id: str) -> None:
     with self._index_lock:
       self._docs.pop(doc_id, None)
       self._vectors.pop(doc_id, None)
+      self._index_errors.pop(doc_id, None)
+      self._last_index_error = next(iter(self._index_errors.values()), None)
       self._index_generation += 1
 
   def list_documents(self) -> list[Document]:
@@ -501,6 +557,7 @@ class VectorStore:
   ) -> dict[str, Any]:
     with self._index_lock:
       docs = list(self._docs.values())
+      snapshot_texts = {doc.id: doc.text for doc in docs}
       generation = self._index_generation
     total = len(docs)
     rebuilt_vectors: dict[str, np.ndarray] = {}
@@ -508,11 +565,14 @@ class VectorStore:
     skipped = 0
     _raise_if_rebuild_cancelled(should_cancel, processed=0, total=total, phase="indexing")
     for doc in docs:
-      rebuilt_vectors[doc.id] = _embed_document(self._embedding_service, doc.text).astype(np.float32)
-      indexed += 1
+      if doc.metadata.get("candidate_deleted"):
+        skipped += 1
+      else:
+        rebuilt_vectors[doc.id] = _embed_document(self._embedding_service, snapshot_texts[doc.id]).astype(np.float32)
+        indexed += 1
       if progress_callback is not None:
-        progress_callback(indexed, total, "indexing")
-      _raise_if_rebuild_cancelled(should_cancel, processed=indexed, total=total, phase="indexing")
+        progress_callback(indexed + skipped, total, "indexing")
+      _raise_if_rebuild_cancelled(should_cancel, processed=indexed + skipped, total=total, phase="indexing")
     with self._index_lock:
       if generation != self._index_generation:
         # Writes that completed while embeddings were computed already have a
@@ -522,6 +582,7 @@ class VectorStore:
           doc_id: current_vectors.get(doc_id, vector)
           for doc_id, vector in rebuilt_vectors.items()
           if doc_id in self._docs
+          and (doc_id in current_vectors or self._docs[doc_id].text == snapshot_texts[doc_id])
         }
         rebuilt_vectors.update({
           doc_id: vector
@@ -529,8 +590,11 @@ class VectorStore:
           if doc_id in self._docs and doc_id not in rebuilt_vectors
         })
       self._vectors = rebuilt_vectors
+      for doc_id in rebuilt_vectors:
+        self._index_errors.pop(doc_id, None)
+      self._last_index_error = next(iter(self._index_errors.values()), None)
     if progress_callback is not None:
-      progress_callback(indexed, total, "complete")
+      progress_callback(indexed + skipped, total, "complete")
     return {
       "status": "rebuilt",
       "backend": self.backend_name,
@@ -555,6 +619,7 @@ class VectorStore:
   ) -> list[tuple[Document, float]]:
     if not self._docs:
       return []
+    self._ensure_document_vectors()
     active_ids = [doc_id for doc_id, doc in self._docs.items() if self._doc_matches_filters(doc, filters=filters)]
     if not active_ids:
       return []
@@ -596,6 +661,7 @@ class VectorStore:
     """
     if not self._docs:
       return []
+    self._ensure_document_vectors()
 
     filtered_ids = []
     for doc_id, doc in self._docs.items():
@@ -675,7 +741,13 @@ class VectorStore:
     return [(doc, final_score) for final_score, doc, _ in scored[:top_k]]
 
   def get_status(self) -> MemoryBackendStatus:
-    metadata: dict[str, Any] = {}
+    pending_count = sum(1 for doc in self._docs.values()
+                        if self.get_document_index_status(doc.id) in {"pending", "failed"})
+    metadata: dict[str, Any] = {
+      "index_ready": pending_count == 0,
+      "pending_index_count": pending_count,
+      "last_index_error": getattr(self, "_last_index_error", None),
+    }
     is_loaded = getattr(self._embedding_service, "is_loaded", None)
     if isinstance(is_loaded, bool):
       metadata["embedding_model_loaded"] = is_loaded

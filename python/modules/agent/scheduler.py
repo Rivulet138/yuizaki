@@ -157,26 +157,23 @@ class AgentScheduler:
 
     async def stop(self) -> None:
         self._running = False
-        if self._task:
-            self._task.cancel()
+        loop_task = self._task
+        if loop_task is not None:
+            loop_task.cancel()
+        runs = list(self._runs_by_task.values())
+        # Cancel the entire batch before yielding, including unstarted tasks.
+        for run in runs:
+            background = run.background_task
+            if background is not None and not background.done() and not background.cancelling():
+                background.cancel()
+        if loop_task is not None:
             try:
-                await self._task
+                await loop_task
             except asyncio.CancelledError:
                 pass
             self._task = None
-        background_runs = list(self._background_runs)
-        self._background_runs.clear()
-        for task in background_runs:
-            if task.done():
-                continue
-            task.cancel()
-        for task in background_runs:
-            if task.done():
-                continue
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        for run in runs:
+            await self._cancel_run(run)
         self._wake_event.set()
 
     async def add_once(self, name: str, prompt: str, run_after_seconds: int, source: str = "schedule") -> ScheduledTask:
@@ -487,14 +484,56 @@ class AgentScheduler:
 
     async def cancel(self, task_or_job_id: str) -> bool:
         run = self._resolve_run(task_or_job_id)
-        if run is None or run.background_task is None or run.background_task.done():
+        if run is None or run.background_task is None:
             return False
-        run.background_task.cancel()
+        was_running = not run.background_task.done()
+        await self._cancel_run(run)
+        return was_running
+
+    async def _cancel_run(self, run: _ScheduledRun) -> None:
+        background = run.background_task
+        if background is None:
+            return
+        task = self.store.tasks.get(run.task_id)
+        if not background.done() and not background.cancelling():
+            background.cancel()
         try:
-            await run.background_task
+            await background
         except asyncio.CancelledError:
             pass
-        return True
+        # A task cancelled before its first step never enters _run_task's finally.
+        if task is not None:
+            await self._finalize_run(task, run, cancelled=background.cancelled())
+        self._background_runs.discard(background)
+
+    async def _finalize_run(
+        self, task: ScheduledTask, run: _ScheduledRun, *, cancelled: bool = False,
+    ) -> None:
+        async with self._store_lock:
+            # Repeated or delayed cleanup belongs only to this exact run.
+            if self._runs_by_task.get(task.id) is not run:
+                return
+            if run.status not in _TERMINAL_RUN_STATUSES:
+                if cancelled:
+                    task.last_status = "cancelled"
+                    task.last_request_id = run.request_id
+                    task.last_run_summary = "cancelled"
+                    self._emit_event(run, task, "cancelled", reason="cancelled")
+                else:
+                    self._emit_event(run, task, "failed", error="run terminated without a terminal status")
+            now = time.time()
+            task.last_run_at = now
+            if task.mode == "once":
+                task.enabled = False
+                task.next_run_at = None
+            elif task.interval_seconds:
+                task.next_run_at = now + task.interval_seconds
+            if self.store.tasks.get(task.id) is task:
+                await asyncio.to_thread(self.store.upsert, task)
+            # Keep admission blocked until the terminal projection is on disk.
+            self._runs_by_task.pop(task.id, None)
+            self._active_task_ids.discard(task.id)
+            self._trim_run_history()
 
     async def _loop(self) -> None:
         while self._running:
@@ -520,7 +559,6 @@ class AgentScheduler:
 
     async def _run_task(self, task: ScheduledTask, run: _ScheduledRun) -> None:
         ctx: AgentRequestContext | None = None
-        terminal_emitted = False
         uses_turn_authority = self.turn_service is not None
         try:
             task.last_status = "running"
@@ -615,7 +653,6 @@ class AgentScheduler:
                 )
             else:
                 self._apply_authoritative_result(run, task, result)
-            terminal_emitted = True
         except asyncio.CancelledError:
             task.last_status = "cancelled"
             task.last_request_id = run.request_id
@@ -625,7 +662,6 @@ class AgentScheduler:
                 self._reconcile_durable_commit(run, task, durable_commit)
             else:
                 self._emit_event(run, task, "cancelled", reason="cancelled")
-            terminal_emitted = True
             raise
         except Exception:  # noqa: BLE001 - scheduler must persist a safe terminal projection
             task.last_status = "error:scheduled_task_exception"
@@ -652,18 +688,5 @@ class AgentScheduler:
                 self._reconcile_durable_commit(run, task, durable_commit)
             else:
                 self._emit_event(run, task, "failed", error="scheduled_task_exception")
-            terminal_emitted = True
         finally:
-            self._active_task_ids.discard(task.id)
-            self._runs_by_task.pop(task.id, None)
-            task.last_run_at = time.time()
-            if task.mode == "once":
-                task.enabled = False
-                task.next_run_at = None
-            elif task.interval_seconds:
-                task.next_run_at = time.time() + task.interval_seconds
-            if task.id in self.store.tasks:
-                await self._upsert_task(task)
-            if not terminal_emitted:
-                self._emit_event(run, task, "failed", error="run terminated without a terminal status")
-            self._trim_run_history()
+            await self._finalize_run(task, run)

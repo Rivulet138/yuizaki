@@ -56,17 +56,6 @@
             <el-tooltip :content="showSessionRail ? t('chat.session.hide') : t('chat.session.show')" placement="bottom">
               <button class="top-icon-button" type="button" :aria-label="showSessionRail ? t('chat.session.hide') : t('chat.session.show')" @click="toggleSessionRail"><el-icon><Fold v-if="showSessionRail" /><Expand v-else /></el-icon></button>
             </el-tooltip>
-            <el-tooltip :content="resolvedTheme === 'dark' ? t('chat.theme.light') : t('chat.theme.dark')" placement="bottom">
-              <button class="top-icon-button" type="button" :aria-label="resolvedTheme === 'dark' ? t('chat.theme.light') : t('chat.theme.dark')" @click="toggleTheme"><el-icon><Sunny v-if="resolvedTheme === 'dark'" /><Moon v-else /></el-icon></button>
-            </el-tooltip>
-          </div>
-          <div class="chat-top-group chat-top-group--settings" :aria-label="t('chatPanel.panel.settingsAria')">
-            <el-tooltip :content="t('chat.petSettings')" placement="bottom">
-              <button class="top-icon-button" type="button" :aria-label="t('chat.petSettings')" data-testid="chat-pet-settings" @click="openPetSettings"><el-icon><StarFilled /></el-icon></button>
-            </el-tooltip>
-            <el-tooltip :content="t('chat.settings')" placement="bottom">
-              <button class="top-icon-button" type="button" :aria-label="t('chat.settings')" @click="openSettings"><el-icon><Setting /></el-icon></button>
-            </el-tooltip>
           </div>
         </div>
 
@@ -131,7 +120,7 @@
         </div>
 
         <div class="composer-panel shrink-0" :class="{ 'composer-panel--tools-open': toolsExpanded }">
-          <input ref="fileInput" class="hidden-file-input" type="file" multiple @change="handleFileInputChange" />
+          <input ref="fileInput" class="hidden-file-input" type="file" :accept="attachmentAccept" multiple @change="handleFileInputChange" />
 
           <div class="chat-auxiliary-row">
             <ChatPlaybackBar
@@ -232,11 +221,9 @@
                     </button>
                   </el-tooltip>
                 </span>
-              </div>
-
-              <div class="composer-tools-right">
                 <ChatRuntimeSettings
-                  :model-value="chatOptions"
+                  :model-value="runtimeChatOptions"
+                  :capabilities="generationCapabilities"
                   :model-options="modelOptions"
                   :models-loading="modelsLoading"
                   :reasoning-options="reasoningOptions"
@@ -252,27 +239,39 @@
                   @refresh-models="refreshModelOptions"
                   @refresh-audio-devices="refreshAudioInputDevices"
                 />
+              </div>
+
+              <div class="composer-tools-right">
                 <el-dropdown trigger="click" @command="handleTopMoreCommand">
                   <button class="tool-button" type="button" :aria-label="t('chat.more')">
                     <el-icon><MoreFilled /></el-icon>
                   </button>
                   <template #dropdown>
-                    <el-dropdown-menu>
+                    <el-dropdown-menu @click.stop>
                       <el-dropdown-item command="copy-transcript" :disabled="!chatState.messages.length">{{ t('chat.more.copyTranscript') }}</el-dropdown-item>
                       <el-dropdown-item command="copy-last" :disabled="!lastAssistantMessage">{{ t('chat.more.copyLast') }}</el-dropdown-item>
-                      <el-dropdown-item command="open-expanded-composer">{{ t('chat.more.expand') }}</el-dropdown-item>
                       <el-dropdown-item command="quick-phrases">{{ t('chat.more.quickPhrases') }}</el-dropdown-item>
                       <el-dropdown-item command="clear-context" :disabled="!hasConversationContent">{{ t('chat.more.clearContext') }}</el-dropdown-item>
                       <el-dropdown-item command="reset-context" :disabled="chatState.contextStartIndex <= 0">{{ t('chat.more.resetContext') }}</el-dropdown-item>
+                      <el-dropdown-item divided command="toggle-theme">
+                        <el-icon><Sunny v-if="resolvedTheme === 'dark'" /><Moon v-else /></el-icon>
+                        <span>{{ resolvedTheme === 'dark' ? t('chat.theme.light') : t('chat.theme.dark') }}</span>
+                      </el-dropdown-item>
+                      <el-dropdown-item command="pet-settings" data-testid="chat-pet-settings">
+                        <el-icon><StarFilled /></el-icon><span>{{ t('chat.petSettings') }}</span>
+                      </el-dropdown-item>
+                      <el-dropdown-item command="settings">
+                        <el-icon><Setting /></el-icon><span>{{ t('chat.settings') }}</span>
+                      </el-dropdown-item>
                       <el-dropdown-item divided command="clear-conversation" :disabled="!hasConversationContent">{{ t('chat.more.clearConversation') }}</el-dropdown-item>
                       <el-dropdown-item command="interrupt" :disabled="!(chatState.isGenerating || chatState.isTTSPlaying)">{{ t('chat.more.interrupt') }}</el-dropdown-item>
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
-                <button v-if="chatState.isGenerating" class="send-button is-warning" type="button" @click="handleInterrupt">
+                <button v-if="chatState.isGenerating" class="send-button is-warning" type="button" :aria-label="t('chat.more.interrupt')" @click="handleInterrupt">
                   <el-icon><CircleClose /></el-icon>
                 </button>
-                <button v-else class="send-button" type="button" :disabled="!canSendComposer" @click="handleSendComposer">
+                <button v-else class="send-button" type="button" :aria-label="t('chat.action.send')" :disabled="!canSendComposer" @click="handleSendComposer">
                   <el-icon><Promotion /></el-icon>
                 </button>
               </div>
@@ -386,6 +385,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { isBuiltinDailyPrompt, isBuiltinWorkPrompt, useWorkspaceStore } from '@/stores/workspaceStore'
 import { useSettingsStore } from '@/state/settingsStore'
 import { DEFAULT_LLM_MAX_OUTPUT_TOKENS } from '@/../shared/runtime-defaults'
+import { normalizeGenerationValue, resolveGenerationCapabilities, type GenerationParameter } from '@/../shared/llm-generation-parameters'
 import { useInputBindingsStore } from '@/state/inputBindingsStore'
 import { useI18n } from '@/i18n'
 import { settingsClient } from '@/api/client'
@@ -460,7 +460,6 @@ type RequiredChatOptions = ChatOptions & {
 const {
   socketDomain,
   chatState,
-  inputText,
   isRecording,
   startMic,
   stopMic,
@@ -468,15 +467,19 @@ const {
   handleInterrupt,
 } = useChatDomain()
 const chatStore = useChatStore()
-const sessionDrafts = useSessionDrafts()
 const sessionViewState = useSessionViewState()
-const { draftSessionIds } = sessionDrafts
 const sessionStore = useSessionStore()
 const settingsStore = useSettingsStore()
 const inputBindingsStore = useInputBindingsStore()
 const { t } = useI18n()
 const pushToTalkShortcutTitle = computed(() => `${inputBindingsStore.pushToTalkLabel.value} ${t('chat.tool.voiceInput')}`)
 const workspaceStore = useWorkspaceStore()
+const sessionDrafts = useSessionDrafts(() => workspaceStore.activeWorkspaceId)
+const { draftSessionIds } = sessionDrafts
+const inputText = computed({
+  get: () => sessionDrafts.getDraft(sessionStore.activeSessionId),
+  set: (value: string) => sessionDrafts.setDraft(sessionStore.activeSessionId, value),
+})
 const chatOptions = chatStore.chatOptions as RequiredChatOptions
 const route = useRoute()
 const router = useRouter()
@@ -499,6 +502,14 @@ const modelsLoading = ref(false)
 const audioInputDevices = ref<AudioInputDevice[]>([])
 const audioDevicesLoading = ref(false)
 const modelOptionsProviderKey = ref('')
+let modelOptionsRequestRevision = 0
+const modelDiscoveryKey = computed(() => [
+  settingsStore.state.llm.provider,
+  settingsStore.state.llm.base_url,
+  settingsStore.state.llm.api_key,
+  settingsStore.state.llm.timeout,
+].join('\u0000'))
+
 let warmupTimer: number | null = null
 const attachments = ref<ChatAttachment[]>([])
 const isCreatingSession = ref(false)
@@ -580,6 +591,28 @@ const defaultQuickPhrases = computed<QuickPhrase[]>(() => [
 const QUICK_PHRASES_STORAGE_KEY = 'yuizaki.chat.quickPhrases'
 const TEXT_ATTACHMENT_EXTENSIONS = new Set(['txt', 'md', 'markdown', 'json', 'jsonl', 'csv', 'tsv', 'log', 'yaml', 'yml', 'xml', 'html', 'css', 'js', 'ts', 'tsx', 'jsx', 'vue', 'py', 'bat', 'ps1', 'sh'])
 const MAX_ATTACHMENT_TEXT_CHARS = 16000
+const MAX_ATTACHMENT_BYTES = 1024 * 1024
+const attachmentAccept = `text/*,${[...TEXT_ATTACHMENT_EXTENSIONS].map((extension) => `.${extension}`).join(',')}`
+let composerRevision = 0
+let composerTranslationEpoch = 0
+let messageTranslationEpoch = 0
+let panelDisposed = false
+let sessionSelectionEpoch = 0
+let attachmentReadEpoch = 0
+const attachmentReads = ref(0)
+const attachmentReaders = new Set<FileReader>()
+const cancelAttachmentReads = () => {
+  attachmentReadEpoch += 1
+  for (const reader of attachmentReaders) reader.abort()
+  attachmentReaders.clear()
+}
+const translationSource = ref<{ message: ChatMessage; content: string; sessionId: string; workspaceId: string; target: string } | null>(null)
+const translationSourceIsCurrent = () => {
+  const source = translationSource.value
+  return Boolean(source && !panelDisposed && source.sessionId === chatState.currentSessionId
+    && source.workspaceId === chatState.currentWorkspaceId && source.target === chatOptions.translation_target
+    && chatState.messages.includes(source.message) && source.message.content === source.content)
+}
 
 const loadQuickPhrases = (): QuickPhrase[] => {
   if (typeof window === 'undefined') return defaultQuickPhrases.value.map((item) => ({ ...item }))
@@ -609,16 +642,43 @@ const loadQuickPhrases = (): QuickPhrase[] => {
 
 const quickPhrases = ref<QuickPhrase[]>(loadQuickPhrases())
 
+const generationCapabilities = computed(() => resolveGenerationCapabilities(
+  settingsStore.state.llm.provider,
+  chatOptions.model || settingsStore.state.llm.model,
+  chatOptions.reasoning_effort,
+))
 const reasoningOptions = computed<Array<{ label: string; value: ReasoningOption }>>(() => [
   { label: t('chat.reasoning.default'), value: 'default' },
-  { label: t('chat.reasoning.none'), value: 'none' },
-  { label: 'Minimal', value: 'minimal' },
-  { label: 'Low', value: 'low' },
-  { label: 'Medium', value: 'medium' },
-  { label: 'High', value: 'high' },
-  { label: 'XHigh', value: 'xhigh' },
-  { label: 'Auto', value: 'auto' },
+  ...generationCapabilities.value.reasoningEfforts.map((value) => ({
+    label: value === 'none' ? t('chat.reasoning.none') : value.charAt(0).toUpperCase() + value.slice(1),
+    value: value as ReasoningOption,
+  })),
 ])
+const runtimeChatOptions = computed(() => {
+  const options = { ...chatOptions }
+  for (const [field, range] of Object.entries(generationCapabilities.value.parameters)) {
+    const parameter = field as GenerationParameter
+    // Zero keeps the model's default top-k; the request adapter omits it.
+    if (parameter !== 'top_k' || options.top_k !== 0) options[parameter] = normalizeGenerationValue(options[parameter], range)
+  }
+  if (!reasoningOptions.value.some((option) => option.value === options.reasoning_effort)) options.reasoning_effort = 'default'
+  return options
+})
+watch(modelDiscoveryKey, (_, previous) => {
+  if (!previous) return
+  modelOptionsRequestRevision += 1
+  modelsLoading.value = false
+  modelOptions.value = []
+  modelOptionsProviderKey.value = ''
+})
+watch(() => [settingsStore.state.llm.provider, settingsStore.state.llm.base_url], () => {
+  chatStore.setChatOptions({ model: '', reasoning_effort: 'default' })
+})
+watch(() => [settingsStore.state.llm.provider, chatOptions.model || settingsStore.state.llm.model], () => {
+  if (!reasoningOptions.value.some((option) => option.value === chatOptions.reasoning_effort)) {
+    chatStore.setChatOptions({ reasoning_effort: 'default' })
+  }
+}, { immediate: true })
 
 const responseModeOptions = computed<Array<{ label: string; value: ResponseModeOption }>>(() => [
   { label: t('chat.response.instant'), value: 'instant' },
@@ -655,11 +715,14 @@ const roleCardHasContent = computed(() => {
   const roleCard = workspaceStore.activeWorkspace.context.roleCard
   return roleCard.enabled !== false && [
     roleCard.name,
+    roleCard.description,
     roleCard.personality,
     roleCard.scenario,
     roleCard.instructions,
     roleCard.firstMessage,
-  ].some((value) => value.trim())
+    roleCard.exampleDialogue,
+    ...(roleCard.alternateGreetings || []),
+  ].some((value) => value?.trim())
 })
 const basePromptCustomized = computed(() => {
   const promptEngineering = workspaceStore.activeWorkspace.context.promptEngineering
@@ -694,7 +757,7 @@ const refreshAudioInputDevices = async () => {
 const togglePetLink = (enabled: boolean) => {
   chatStore.setChatOptions({ pet_link_enabled: enabled })
 }
-const canSendComposer = computed(() => Boolean(inputText.value.trim() || attachments.value.length))
+const canSendComposer = computed(() => attachmentReads.value === 0 && Boolean(inputText.value.trim() || attachments.value.length))
 const resolvedTheme = computed(() => {
   const preferred = settingsStore.state.system.theme || 'light'
   if (preferred !== 'system') return preferred
@@ -709,6 +772,7 @@ const composerToolRegistry = computed<Record<ComposerToolId, ComposerToolDefinit
   attach: {
     id: 'attach',
     label: t('chat.tool.attach'),
+    title: t('chat.attachment.supported'),
     icon: FolderOpened,
     run: triggerFilePicker,
   },
@@ -1067,6 +1131,9 @@ const messageRegenerationIndex = (idx: number) => {
 const canRegenerateFromIndex = (idx: number) => !chatState.isGenerating && messageRegenerationIndex(idx) >= 0
 
 const handleDeleteMsg = async (idx: number) => {
+  const selectionEpoch = sessionSelectionEpoch
+  const sessionId = chatState.currentSessionId
+  const workspaceId = chatState.currentWorkspaceId
   const message = chatState.messages[idx]
   if (!message) return
   try {
@@ -1076,9 +1143,13 @@ const handleDeleteMsg = async (idx: number) => {
       type: 'warning',
       confirmButtonClass: 'el-button--danger',
     })
-    await chatStore.deleteMessage(idx, chatState.currentWorkspaceId)
+    if (panelDisposed || selectionEpoch !== sessionSelectionEpoch) return
+    const currentIndex = chatState.messages.indexOf(message)
+    if (currentIndex < 0) return
+    const deleted = await chatStore.deleteMessage(currentIndex, workspaceId)
+    if (!deleted) return
     if (message.id !== undefined) {
-      sessionStore.noteMessageDeleted(chatState.currentSessionId)
+      sessionStore.noteMessageDeleted(sessionId)
     }
     ElMessage.success(message.id === undefined ? t('chat.feedback.deletedUnsynced') : t('chat.feedback.deletedMessage'))
   } catch (error) {
@@ -1110,22 +1181,28 @@ const saveMessageEdit = async (resend: boolean | Event = false) => {
   const message = chatState.messages[index]
   const content = editingMessage.content.trim()
   const shouldResendRequested = resend === true
+  const selectionEpoch = sessionSelectionEpoch
+  const sessionId = chatState.currentSessionId
+  const workspaceId = chatState.currentWorkspaceId
   if (!message || !content || editingMessage.saving) return
   editingMessage.saving = true
   try {
-    await chatStore.updateMessage(index, content, chatState.currentWorkspaceId)
+    const updated = await chatStore.updateMessage(index, content, workspaceId)
+    if (panelDisposed || selectionEpoch !== sessionSelectionEpoch) return
+    if (!updated) { editingMessage.saving = false; return }
     const shouldResend = shouldResendRequested && message.role === 'user'
     cancelMessageEdit()
     if (shouldResend) {
-      const removed = await chatStore.regenerateFromMessage(index, chatState.currentWorkspaceId)
+      const removed = await chatStore.regenerateFromMessage(index, workspaceId)
       if (removed > 0) {
-        sessionStore.noteMessagesDeleted(chatState.currentSessionId, removed)
+        sessionStore.noteMessagesDeleted(sessionId, removed)
       }
       ElMessage.success(t('chat.feedback.savedResent'))
       return
     }
     ElMessage.success(t('chat.feedback.updated'))
   } catch (error) {
+    if (panelDisposed || selectionEpoch !== sessionSelectionEpoch) return
     console.warn('[ChatPanel] failed to update message:', error)
     ElMessage.error(t('chat.feedback.updateFailed'))
     editingMessage.saving = false
@@ -1133,6 +1210,7 @@ const saveMessageEdit = async (resend: boolean | Event = false) => {
 }
 
 const handleRegenerate = async (idx: number) => {
+  const sessionId = chatState.currentSessionId
   const sourceIndex = messageRegenerationIndex(idx)
   if (sourceIndex < 0) {
     ElMessage.info(t('chat.feedback.noRegenerate'))
@@ -1141,7 +1219,7 @@ const handleRegenerate = async (idx: number) => {
   try {
     const removed = await chatStore.regenerateFromMessage(sourceIndex, chatState.currentWorkspaceId)
     if (removed > 0) {
-      sessionStore.noteMessagesDeleted(chatState.currentSessionId, removed)
+      sessionStore.noteMessagesDeleted(sessionId, removed)
     }
   } catch (error) {
     console.warn('[ChatPanel] failed to regenerate message:', error)
@@ -1151,6 +1229,15 @@ const handleRegenerate = async (idx: number) => {
 }
 const handleTopMoreCommand = (command: string) => {
   switch (command) {
+    case 'toggle-theme':
+      void toggleTheme()
+      break
+    case 'pet-settings':
+      openPetSettings()
+      break
+    case 'settings':
+      openSettings()
+      break
     case 'copy-transcript':
       void chatStore.copyTranscript()
       break
@@ -1248,12 +1335,14 @@ const syncActiveWorkspaceForSessionView = async (workspaceId: string) => {
 }
 
 const handleClearContext = async () => {
+  const selectionEpoch = sessionSelectionEpoch
   try {
     await ElMessageBox.confirm(t('chat.feedback.clearContextHint'), t('chat.feedback.clearContextTitle'), {
       confirmButtonText: t('common.clear'),
       cancelButtonText: t('common.cancel'),
       type: 'warning',
     })
+    if (panelDisposed || selectionEpoch !== sessionSelectionEpoch) return
     chatStore.clearContext()
     ElMessage.success(t('chat.feedback.contextStarted'))
   } catch {
@@ -1261,6 +1350,9 @@ const handleClearContext = async () => {
   }
 }
 const handleClearConversation = async () => {
+  const selectionEpoch = sessionSelectionEpoch
+  const sessionId = chatState.currentSessionId
+  const workspaceId = chatState.currentWorkspaceId
   try {
     await ElMessageBox.confirm(t('chat.feedback.clearMessagesHint'), t('chat.feedback.clearMessagesTitle'), {
       confirmButtonText: t('chat.feedback.clearMessagesTitle'),
@@ -1268,9 +1360,10 @@ const handleClearConversation = async () => {
       type: 'warning',
       confirmButtonClass: 'el-button--danger',
     })
-    const clearedPersistedMessages = await chatStore.clearConversationMessages(chatState.currentWorkspaceId)
+    if (panelDisposed || selectionEpoch !== sessionSelectionEpoch) return
+    const clearedPersistedMessages = await chatStore.clearConversationMessages(workspaceId)
     if (clearedPersistedMessages) {
-      sessionStore.noteSessionMessagesCleared(chatState.currentSessionId)
+      sessionStore.noteSessionMessagesCleared(sessionId)
     }
     ElMessage.success(t('chat.feedback.cleared'))
   } catch (error) {
@@ -1283,12 +1376,15 @@ const handleClearConversation = async () => {
 const handleCreateSession = async () => {
   if (isCreatingSession.value) return
   isCreatingSession.value = true
+  let selectionEpoch = ++sessionSelectionEpoch
   try {
     const workspaceId = workspaceStore.activeWorkspaceId || chatState.currentWorkspaceId || 'default'
     const session = await sessionStore.createSession(t('chat.feedback.newSession', {
       time: new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),
     }))
+    if (panelDisposed || selectionEpoch !== sessionSelectionEpoch) return
     sessionStore.setActiveSession(session.id)
+    selectionEpoch = sessionSelectionEpoch
     chatStore.clearLocalMessages()
     chatStore.setWorkspaceContext(workspaceId, session.id)
     inputText.value = ''
@@ -1300,11 +1396,14 @@ const handleCreateSession = async () => {
     try {
       await chatStore.loadHistory(session.id, workspaceId)
     } catch (historyError) {
+      if (panelDisposed || selectionEpoch !== sessionSelectionEpoch) return
       console.debug('[ChatPanel] new session history is not ready yet:', historyError)
       chatStore.clearLocalMessages()
       chatStore.setWorkspaceContext(workspaceId, session.id)
     }
+    if (panelDisposed || selectionEpoch !== sessionSelectionEpoch) return
     await router.replace(chatRouteForSession(session.id))
+    if (panelDisposed || selectionEpoch !== sessionSelectionEpoch) return
     restoreSessionScroll(session.id)
     ElMessage.success(t('chat.feedback.sessionCreated'))
   } catch (error) {
@@ -1321,17 +1420,21 @@ const handleSelectSession = async (sessionId: string) => {
   const selectedSession = sessionStore.sessions.find((session) => session.id === sessionId)
   const targetWorkspaceId = selectedSession?.workspace_id || chatState.currentWorkspaceId || 'default'
   sessionStore.setActiveSession(sessionId)
+  const selectionEpoch = sessionSelectionEpoch
   chatStore.clearLocalMessages()
   chatStore.setWorkspaceContext(targetWorkspaceId, sessionId)
   await syncActiveWorkspaceForSessionView(targetWorkspaceId)
+  if (panelDisposed || selectionEpoch !== sessionSelectionEpoch) return
   await router.replace(chatRouteForSession(sessionId, targetWorkspaceId))
+  if (panelDisposed || selectionEpoch !== sessionSelectionEpoch) return
   try {
     await chatStore.loadHistory(sessionId, targetWorkspaceId)
   } catch (error) {
+    if (panelDisposed || selectionEpoch !== sessionSelectionEpoch) return
     console.warn('[ChatPanel] failed to load session history:', error)
     ElMessage.error(t('chat.feedback.loadSessionFailed'))
   }
-  restoreSessionScroll(sessionId)
+  if (!panelDisposed && selectionEpoch === sessionSelectionEpoch) restoreSessionScroll(sessionId)
 }
 
 const handleTogglePin = async (sessionId: string, pinned: boolean) => {
@@ -1379,6 +1482,9 @@ const handleCreateBranch = async (_index: number, message: ChatMessage) => {
   const sourceSession = sessionStore.activeSession
   const sourceSessionId = sourceSession?.id || chatState.currentSessionId
   const workspaceId = sourceSession?.workspace_id || chatState.currentWorkspaceId || 'default'
+  let selectionEpoch = ++sessionSelectionEpoch
+  const isCurrentSelection = () => !panelDisposed && selectionEpoch === sessionSelectionEpoch
+    && workspaceId === (workspaceStore.activeWorkspaceId || chatState.currentWorkspaceId || 'default')
   try {
     const branch = await sessionStore.branchSession(
       sourceSessionId,
@@ -1386,13 +1492,19 @@ const handleCreateBranch = async (_index: number, message: ChatMessage) => {
       `${sourceSession?.title || t('chat.feedback.currentSession')} · ${t('chat.feedback.branch')}`,
       workspaceId,
     )
+    if (!isCurrentSelection()) return
+    sessionStore.setActiveSession(branch.id)
+    selectionEpoch = sessionSelectionEpoch
     chatStore.clearLocalMessages()
     chatStore.setWorkspaceContext(workspaceId, branch.id)
     await router.replace(chatRouteForSession(branch.id, workspaceId))
+    if (!isCurrentSelection()) return
     await chatStore.loadHistory(branch.id, workspaceId)
+    if (!isCurrentSelection()) return
     restoreSessionScroll(branch.id)
     ElMessage.success(t('chat.feedback.branchCreated'))
   } catch (error) {
+    if (!isCurrentSelection()) return
     console.warn('[ChatPanel] failed to create session branch:', error)
     ElMessage.error(t('chat.feedback.branchFailed'))
   }
@@ -1528,28 +1640,44 @@ const isTextLikeFile = (file: File) => file.type.startsWith('text/') || TEXT_ATT
 
 const readFileText = (file: File) => new Promise<string>((resolve, reject) => {
   const reader = new FileReader()
-  reader.onload = () => resolve(String(reader.result || ''))
-  reader.onerror = () => reject(reader.error)
-  reader.readAsText(file)
+  const finish = () => attachmentReaders.delete(reader)
+  reader.onload = () => { finish(); resolve(String(reader.result || '')) }
+  reader.onerror = () => { finish(); reject(reader.error) }
+  reader.onabort = () => { finish(); reject(new Error('Attachment read cancelled')) }
+  attachmentReaders.add(reader)
+  try {
+    reader.readAsText(file)
+  } catch (error) {
+    finish()
+    reject(error)
+  }
 })
 
 const addFiles = async (files: FileList | File[]) => {
-  const incoming = Array.from(files)
-  for (const file of incoming) {
-    if (file.type.startsWith('image/')) {
-      attachments.value.push({
-        id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        name: file.name,
-        type: file.type || 'image',
-        size: file.size,
-        kind: 'image',
-      })
-      continue
-    }
-
-    if (isTextLikeFile(file)) {
+  const sessionId = sessionStore.activeSessionId
+  const workspaceId = chatState.currentWorkspaceId
+  const epoch = attachmentReadEpoch
+  const isCurrent = () => !panelDisposed && epoch === attachmentReadEpoch
+    && sessionStore.activeSessionId === sessionId && chatState.currentWorkspaceId === workspaceId
+  attachmentReads.value += 1
+  try {
+    for (const file of Array.from(files)) {
+      if (!isCurrent()) return
+      if (!isTextLikeFile(file) || file.type.startsWith('image/')) {
+        ElMessage.warning(t('chat.attachment.unsupported', { name: file.name }))
+        continue
+      }
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        ElMessage.warning(t('chat.attachment.tooLarge', { name: file.name }))
+        continue
+      }
       try {
         const content = await readFileText(file)
+        if (!isCurrent()) return
+        if (content.includes('\0')) {
+          ElMessage.warning(t('chat.attachment.unsupported', { name: file.name }))
+          continue
+        }
         attachments.value.push({
           id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           name: file.name,
@@ -1559,18 +1687,12 @@ const addFiles = async (files: FileList | File[]) => {
           content: content.slice(0, MAX_ATTACHMENT_TEXT_CHARS),
         })
       } catch {
+        if (!isCurrent()) return
         ElMessage.warning(t('chat.attachment.readFailed', { name: file.name }))
       }
-      continue
     }
-
-    attachments.value.push({
-      id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      name: file.name,
-      type: file.type || 'application/octet-stream',
-      size: file.size,
-      kind: 'binary',
-    })
+  } finally {
+    attachmentReads.value -= 1
   }
 }
 
@@ -1596,10 +1718,7 @@ const attachmentPromptBlock = (attachment: ChatAttachment) => {
     const truncated = attachment.content && attachment.content.length >= MAX_ATTACHMENT_TEXT_CHARS ? t('chatPanel.panel.attachmentTruncated') : ''
     return `${header}\n${attachment.content || ''}${truncated}`
   }
-  if (attachment.kind === 'image') {
-    return `${header}\n${t('chatPanel.panel.attachmentImage')}`
-  }
-  return `${header}\n${t('chatPanel.panel.attachmentBinary')}`
+  return ''
 }
 
 const buildComposerMessage = () => {
@@ -1610,11 +1729,33 @@ const buildComposerMessage = () => {
 }
 
 const handleSendComposer = () => {
-  if (chatState.isGenerating) return
+  if (chatState.isGenerating || attachmentReads.value > 0) return
+  if (attachments.value.some((attachment) => attachment.kind !== 'text')) {
+    ElMessage.warning(t('chat.attachment.supported'))
+    return
+  }
   const text = buildComposerMessage().trim()
   if (!text) return
-  if (chatStore.sendChat(text, { chatOptions })) {
-    sessionDrafts.clearDraft(sessionStore.activeSessionId)
+  const sessionId = sessionStore.activeSessionId
+  const workspaceId = chatState.currentWorkspaceId
+  const sentDraft = inputText.value
+  const sentAttachments = attachments.value.map((attachment) => ({ ...attachment }))
+  const restoreFailedDraft = () => {
+    const active = !panelDisposed && sessionStore.activeSessionId === sessionId && chatState.currentWorkspaceId === workspaceId
+    const currentDraft = active ? inputText.value : sessionDrafts.getDraft(sessionId, workspaceId)
+    const restoredDraft = currentDraft === sentDraft ? currentDraft : [sentDraft, currentDraft].filter(Boolean).join('\n\n')
+    const currentAttachments = active ? attachments.value : sessionViewState.getAttachments(sessionId)
+    const restoredAttachments = [...new Map([...sentAttachments, ...currentAttachments].map((attachment) => [attachment.id, attachment])).values()]
+    sessionDrafts.setDraft(sessionId, restoredDraft, workspaceId)
+    sessionViewState.setAttachments(sessionId, restoredAttachments)
+    if (active) {
+      inputText.value = restoredDraft
+      attachments.value = restoredAttachments
+    }
+    sessionDrafts.flushDrafts()
+  }
+  if (chatStore.sendChat(text, { chatOptions, onFailure: restoreFailedDraft })) {
+    sessionDrafts.clearDraft(sessionId, workspaceId)
     sessionViewState.setAttachments(sessionStore.activeSessionId, [])
     inputText.value = ''
     attachments.value = []
@@ -1624,39 +1765,54 @@ const handleSendComposer = () => {
 const translateComposerInput = async () => {
   const text = inputText.value.trim()
   if (!text) return
+  const epoch = ++composerTranslationEpoch
+  const revision = composerRevision
+  const sessionId = chatState.currentSessionId
+  const workspaceId = chatState.currentWorkspaceId
+  const target = chatOptions.translation_target
+  const isCurrent = () => !panelDisposed && epoch === composerTranslationEpoch && revision === composerRevision
+    && sessionId === chatState.currentSessionId && workspaceId === chatState.currentWorkspaceId && target === chatOptions.translation_target
   composerTranslating.value = true
   try {
-    const translated = await chatStore.translateText(text, chatOptions.translation_target)
-    if (translated) {
+    const translated = await chatStore.translateText(text, target)
+    if (translated && isCurrent()) {
       inputText.value = translated
       ElMessage.success(t('chat.translation.done'))
     }
   } catch (error) {
-    console.warn('[ChatPanel] failed to translate composer:', error)
-    ElMessage.error(t('chat.translation.failed'))
+    if (isCurrent()) {
+      console.warn('[ChatPanel] failed to translate composer:', error)
+      ElMessage.error(t('chat.translation.failed'))
+    }
   } finally {
-    composerTranslating.value = false
+    if (epoch === composerTranslationEpoch) composerTranslating.value = false
   }
 }
 
 const handleTranslateMessage = async (msg: ChatMessage, idx: number) => {
   if (!msg.content.trim() || messageTranslatingIndex.value !== null) return
+  const epoch = ++messageTranslationEpoch
+  translationSource.value = { message: msg, content: msg.content, sessionId: chatState.currentSessionId, workspaceId: chatState.currentWorkspaceId, target: chatOptions.translation_target }
   messageTranslatingIndex.value = idx
   translationDialogTitle.value = `${t('chat.dialog.translationTitle')} · ${chatOptions.translation_target || 'zh-CN'}`
   translationResult.value = ''
   try {
-    translationResult.value = await chatStore.translateText(msg.content, chatOptions.translation_target)
+    const translated = await chatStore.translateText(msg.content, chatOptions.translation_target)
+    if (epoch !== messageTranslationEpoch || !translationSourceIsCurrent()) return
+    translationResult.value = translated
     translationDialogVisible.value = true
   } catch (error) {
-    console.warn('[ChatPanel] failed to translate message:', error)
-    ElMessage.error(t('chat.translation.failed'))
+    if (epoch === messageTranslationEpoch && translationSourceIsCurrent()) {
+      console.warn('[ChatPanel] failed to translate message:', error)
+      ElMessage.error(t('chat.translation.failed'))
+    }
   } finally {
-    messageTranslatingIndex.value = null
+    if (epoch === messageTranslationEpoch) messageTranslatingIndex.value = null
   }
 }
 
 const applyTranslationToInput = () => {
-  if (!translationResult.value) return
+  if (!translationResult.value || !translationSourceIsCurrent()) return
   inputText.value = inputText.value.trim()
     ? `${inputText.value.trim()}\n${translationResult.value}`
     : translationResult.value
@@ -1665,11 +1821,7 @@ const applyTranslationToInput = () => {
 
 const refreshModelOptions = async (force = false) => {
   if (modelsLoading.value) return
-  const providerKey = [
-    settingsStore.state.llm.base_url,
-    settingsStore.state.llm.api_key,
-    settingsStore.state.llm.timeout,
-  ].join('\u0000')
+  const providerKey = modelDiscoveryKey.value
   if (!force && modelOptionsProviderKey.value === providerKey && modelOptions.value.length) {
     modelOptions.value = Array.from(new Set([
       ...modelOptions.value,
@@ -1678,6 +1830,7 @@ const refreshModelOptions = async (force = false) => {
     ].filter(Boolean)))
     return
   }
+  const requestRevision = ++modelOptionsRequestRevision
   modelsLoading.value = true
   let loaded = false
   try {
@@ -1695,15 +1848,19 @@ const refreshModelOptions = async (force = false) => {
       api_key: settingsStore.state.llm.api_key,
       timeout: settingsStore.state.llm.timeout,
     })
+    if (requestRevision !== modelOptionsRequestRevision || providerKey !== modelDiscoveryKey.value) return
     const merged = new Set([settingsStore.state.llm.model, chatOptions.model, ...(result.models || [])].filter(Boolean) as string[])
     modelOptions.value = Array.from(merged)
     loaded = true
   } catch (error) {
+    if (requestRevision !== modelOptionsRequestRevision || providerKey !== modelDiscoveryKey.value) return
     console.warn('[ChatPanel] failed to load LLM models:', error)
     modelOptions.value = [settingsStore.state.llm.model, chatOptions.model].filter((item): item is string => Boolean(item))
   } finally {
-    if (loaded) modelOptionsProviderKey.value = providerKey
-    modelsLoading.value = false
+    if (requestRevision === modelOptionsRequestRevision) {
+      if (loaded) modelOptionsProviderKey.value = providerKey
+      modelsLoading.value = false
+    }
   }
 }
 
@@ -1765,24 +1922,47 @@ const restoreSessionScroll = (sessionId = sessionStore.activeSessionId) => nextT
   showScrollBtn.value = container.scrollHeight - container.scrollTop - container.clientHeight > 200
 })
 
+watch(inputText, () => { composerRevision += 1 }, { flush: 'sync' })
+watch(() => [chatState.currentSessionId, chatState.currentWorkspaceId], cancelAttachmentReads, { flush: 'sync' })
+watch(() => [chatState.currentSessionId, chatState.currentWorkspaceId, chatOptions.translation_target], () => {
+  composerTranslationEpoch += 1
+  messageTranslationEpoch += 1
+  composerTranslating.value = false
+  messageTranslatingIndex.value = null
+  translationSource.value = null
+  translationResult.value = ''
+  translationDialogVisible.value = false
+}, { flush: 'sync' })
+watch(() => chatState.messages.map((message) => [message, message.content]), () => {
+  if (translationSource.value && !translationSourceIsCurrent()) {
+    messageTranslationEpoch += 1
+    messageTranslatingIndex.value = null
+    translationSource.value = null
+    translationResult.value = ''
+    translationDialogVisible.value = false
+  }
+}, { flush: 'sync' })
 watch(() => chatState.messages.length, scrollToBottom)
 watch(() => chatState.currentText, scrollToBottom)
 watch(() => chatState.asrPartialText, scrollToBottom)
 watch(quickPhrases, persistQuickPhrases, { deep: true })
-watch(() => sessionStore.activeSessionId, (sessionId, previousSessionId) => {
+watch(() => [sessionStore.activeSessionId, workspaceStore.activeWorkspaceId] as const, ([sessionId], previous) => {
+  const previousSessionId = previous?.[0]
+  sessionSelectionEpoch += 1
+  cancelAttachmentReads()
+  expandedComposerVisible.value = false
+  expandedComposerText.value = ''
+  cancelMessageEdit()
   if (previousSessionId) {
-    sessionDrafts.setDraft(previousSessionId, inputText.value)
     sessionViewState.setAttachments(previousSessionId, attachments.value)
     if (messagesContainer.value) {
       sessionViewState.setScrollPosition(previousSessionId, messagesContainer.value.scrollTop)
     }
   }
-  inputText.value = sessionDrafts.getDraft(sessionId)
   attachments.value = sessionViewState.getAttachments(sessionId)
   restoreSessionScroll(sessionId)
 }, { immediate: true, flush: 'sync' })
 watch(inputText, () => {
-  sessionDrafts.setDraft(sessionStore.activeSessionId, inputText.value)
   if (isComposing.value) return
   syncQuickPanelFromInput()
 })
@@ -1820,6 +2000,11 @@ onMounted(() => {
   warmupTimer = window.setTimeout(warmupTts, 4000)
 })
 onUnmounted(() => {
+  panelDisposed = true
+  sessionSelectionEpoch += 1
+  cancelAttachmentReads()
+  composerTranslationEpoch += 1
+  messageTranslationEpoch += 1
   window.removeEventListener('click', closeContextMenu)
   window.removeEventListener('click', closeQuickPanel)
   window.removeEventListener('keydown', handleGlobalKeydown)

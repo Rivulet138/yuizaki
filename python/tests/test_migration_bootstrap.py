@@ -5,12 +5,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-import migration_bootstrap
-from alembic import command
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from database.models import ChatMessage
 from sqlalchemy import create_engine, inspect
+
+import migration_bootstrap
+from alembic import command
+from database.models import ChatMessage
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
 
@@ -118,7 +119,7 @@ def test_bootstrap_upgrades_the_previous_revision_index(tmp_path, monkeypatch) -
     head = script.get_current_head()
     assert head is not None
     command.upgrade(cfg, "head")
-    command.downgrade(cfg, "-1")
+    command.downgrade(cfg, "20261020_00")
     index_name, current_columns, previous_columns = _idempotency_index_contract()
     table_name = ChatMessage.__tablename__
 

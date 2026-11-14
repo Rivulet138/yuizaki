@@ -1,0 +1,41 @@
+{
+  "date": "2026-11-11",
+  "scope": "persona follow-up implementation",
+  "frontend": {
+    "files": 8,
+    "tests_passed": 175
+  },
+  "backend": {
+    "files": 8,
+    "tests_passed": 158,
+    "session_persona_tests_passed": 35
+  },
+  "static": {
+    "renderer_types": 0,
+    "eslint": "passed changed persona TS/Vue",
+    "python_compileall": "passed",
+    "ruff_existing_findings": 25
+  },
+  "browser": {
+    "checks": 6,
+    "page_errors": 0,
+    "viewports": [
+      1600,
+      1000,
+      800
+    ],
+    "api_writes_intercepted": true,
+    "model_calls": false
+  },
+  "build": {
+    "vite": "passed",
+    "bundle_audit": "passed"
+  },
+  "unrelated_test_gap": {
+    "file": "SettingsPanel.regression.test.ts",
+    "tests_failed": 3,
+    "scope": "connection/warmup error immediate feedback"
+  },
+  "migration": "20261111_00",
+  "model_personality_evaluation": "not run"
+}

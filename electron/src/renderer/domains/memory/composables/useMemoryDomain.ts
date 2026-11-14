@@ -14,8 +14,17 @@ import type {
 	MemoryQueryPayload,
 } from "@/api/clients/memory-client";
 
+export interface MemoryOverviewSnapshot extends MemoryOverview {
+  by_index_status?: Record<string, number>;
+  recall_policy?: { scope: string; inherited_scopes: string[] };
+  integrity?: { orphan_session_ids: string[]; orphan_resolution: string };
+  deletion_scope?: { authority?: string; derived_indexes?: string; chat_history?: string; summaries?: string; backups?: string };
+}
+
 export interface MemoryDoc {
 	id: string;
+	index_status?: string;
+	storage_status?: string;
 	text: string;
 	type?: string;
 	memory_role?: string;
@@ -101,6 +110,7 @@ export interface MemoryRetrievalTrace {
 }
 
 export interface MemoryQueryResult {
+	request?: MemoryQueryPayload;
 	query: string;
 	results: Array<{
 		id: string;
@@ -117,6 +127,8 @@ export interface MemoryQueryResult {
 }
 
 interface BackendDocument {
+	storage_status?: string;
+	index_status?: string;
 	id?: unknown;
 	text?: unknown;
 	metadata?: Record<string, unknown>;
@@ -198,6 +210,8 @@ const normalizeDoc = (raw: unknown): MemoryDoc => {
 	const metadata = doc.metadata || {};
 	return {
 		id: String(doc.id ?? ""),
+		index_status: stringOrUndefined(doc.index_status ?? metadata.index_status),
+		storage_status: stringOrUndefined(doc.storage_status),
 		text: String(doc.text ?? ""),
 		type: typeof metadata.type === "string" ? metadata.type : undefined,
 		layer: typeof metadata.layer === "string" ? metadata.layer : undefined,
@@ -325,9 +339,11 @@ export function useMemoryDomain() {
 	const workspaceStore = useWorkspaceStore();
 	const activeWorkspace = computed(() => workspaceStore.activeWorkspace);
 	const docs = ref<MemoryDoc[]>([]);
+	const docsScopeKey = ref("");
+	let contextRevision = 0;
 	const forgottenDocs = ref<MemoryDoc[]>([]);
 	const reviewCandidates = ref<MemoryDoc[]>([]);
-	const overview = ref<MemoryOverview | null>(null);
+	const overview = ref<MemoryOverviewSnapshot | null>(null);
 	const queryResult = ref<MemoryQueryResult | null>(null);
 
 	const workspaceDefaultScope = () =>
@@ -346,7 +362,7 @@ export function useMemoryDomain() {
 
 	const docsRequest = useDomainRequest<{ docs: unknown[] }>();
 	const forgottenDocsRequest = useDomainRequest<{ docs: unknown[] }>();
-	const overviewRequest = useDomainRequest<MemoryOverview>();
+	const overviewRequest = useDomainRequest<MemoryOverviewSnapshot>();
 	const candidatesRequest = useDomainRequest<{ status: string; candidates: unknown[]; count: number }>();
 	const addRequest = useDomainRequest<{
 		status?: string;
@@ -361,29 +377,47 @@ export function useMemoryDomain() {
 		layer?: string;
 		scope?: string;
 		importance?: number;
+		storage_status?: string;
+		index_status?: string;
 	}>();
 	const queryRequest = useDomainRequest<unknown>();
 	const operationsRequest = useDomainRequest<{ status: string; operations: MemoryOperation[]; count: number }>();
 	const operations = computed<MemoryOperation[]>(() => operationsRequest.data?.operations ?? []);
 
+	const invalidateReads = (clear = false) => {
+		for (const request of [docsRequest, forgottenDocsRequest, overviewRequest, candidatesRequest, queryRequest]) request.reset();
+		queryResult.value = null;
+		if (clear) {
+			contextRevision += 1;
+			operationsRequest.reset();
+			docsScopeKey.value = "";
+			docs.value = [];
+			forgottenDocs.value = [];
+			reviewCandidates.value = [];
+			overview.value = null;
+		}
+	};
+
 	const loadDocs = async (options?: MemoryDocListOptions) => {
+		const scopeKey = JSON.stringify([options?.scope, options?.workspaceId, options?.sessionId]);
 		const result = await docsRequest.execute(() => memoryClient.getDocs(options));
-		if (result) {
+		if (result && docsRequest.isCurrent(result)) {
 			docs.value = Array.isArray(result.docs)
 				? result.docs.map(normalizeDoc)
 				: [];
+			docsScopeKey.value = scopeKey;
 		}
 	};
 
 	const loadOverview = async (options?: MemoryDocListOptions) => {
 		const result = await overviewRequest.execute(() => memoryClient.getOverview(options));
-		if (result) overview.value = result;
+		if (result && overviewRequest.isCurrent(result)) overview.value = result;
 		return result;
 	};
 
 	const loadCandidates = async (options?: MemoryDocListOptions) => {
 		const result = await candidatesRequest.execute(() => memoryClient.getCandidates({ ...options, status: "pending" }));
-		if (result) {
+		if (result && candidatesRequest.isCurrent(result)) {
 			reviewCandidates.value = Array.isArray(result.candidates)
 				? result.candidates.map(normalizeDoc)
 				: [];
@@ -400,8 +434,12 @@ export function useMemoryDomain() {
 	};
 
 	const reviewCandidate = async (id: string, decision: "approve" | "reject", reason?: string, sessionId?: string) => {
+		const revision = contextRevision;
+		invalidateReads();
+		const candidates = reviewCandidates.value;
 		const result = await memoryClient.reviewCandidate(id, { decision, reason, session_id: sessionId });
-		if (result) reviewCandidates.value = reviewCandidates.value.filter((item) => item.id !== id);
+		if (revision === contextRevision) invalidateReads();
+		if (result && candidates === reviewCandidates.value) reviewCandidates.value = reviewCandidates.value.filter((item) => item.id !== id);
 		return result;
 	};
 
@@ -410,7 +448,7 @@ export function useMemoryDomain() {
 			...options,
 			includeState: "forgotten",
 		}));
-		if (result) {
+		if (result && forgottenDocsRequest.isCurrent(result)) {
 			forgottenDocs.value = Array.isArray(result.docs)
 				? result.docs.map(normalizeDoc)
 				: [];
@@ -445,13 +483,17 @@ export function useMemoryDomain() {
 			scope?: string;
 		},
 	) => {
-		return updateRequest.execute(() =>
+		const revision = contextRevision;
+		invalidateReads();
+		const result = await updateRequest.execute(() =>
 			memoryClient.updateDoc(id, {
 				...payload,
 				scope: resolveScope(payload),
 				workspace_id: resolveScopedWorkspaceId(payload),
 			}),
 		);
+		if (revision === contextRevision) invalidateReads();
+		return result;
 	};
 	const correctDoc = (id: string, payload: { text: string; reason?: string; turn_id?: string; session_id?: string; evidence?: unknown }) =>
 		memoryClient.correctDoc(id, payload);
@@ -463,6 +505,8 @@ export function useMemoryDomain() {
 	const queryMemory = async (payload: MemoryQueryPayload) => {
 		const resolvedScope = resolveScope(payload);
 		const resolvedWorkspaceId = resolveScopedWorkspaceId(payload);
+		queryResult.value = null;
+		const request = { ...payload, scope: resolvedScope, workspace_id: resolvedWorkspaceId };
 		const result = await queryRequest.execute(() => memoryClient.query({
 			query: payload.query,
 			top_k: payload.top_k ?? 5,
@@ -475,14 +519,15 @@ export function useMemoryDomain() {
 			relation_limit: payload.relation_limit,
 			relation_depth: payload.relation_depth,
 		}));
-		if (result) {
-			queryResult.value = normalizeQueryResult(result);
+		if (result && queryRequest.isCurrent(result)) {
+			queryResult.value = { ...normalizeQueryResult(result), request };
 		}
 	};
 
 	const recordRecallFeedback = async (id: string, feedback: MemoryRecallFeedback, sessionId?: string) => {
+		const query = queryResult.value;
 		const result = await memoryClient.recordRecallFeedback(id, feedback, sessionId);
-		const item = queryResult.value?.results.find((candidate) => candidate.id === id);
+		const item = queryResult.value === query ? query?.results.find((candidate) => candidate.id === id) : undefined;
 		if (item) {
 			item.metadata = {
 				...(item.metadata || {}),
@@ -494,6 +539,8 @@ export function useMemoryDomain() {
 
 	return {
 		docs,
+		docsScopeKey,
+		invalidateReads,
 		operations,
 		forgottenDocs,
 		reviewCandidates,

@@ -1,0 +1,34 @@
+{
+  "date": "2026-11-10",
+  "node": {
+    "system": "22.14.0",
+    "acceptance": "24.22.1",
+    "acceptanceExecutable": "C:\\Users\\溪羽rivulet\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe"
+  },
+  "go": {
+    "command": "GOTOOLCHAIN=auto go test -count=1 ./...",
+    "toolchain": "go1.27.0 windows/amd64",
+    "result": "ok yuizaki-launcher 1.807s",
+    "cached": false
+  },
+  "types": {
+    "command": "vue-tsc --noEmit -p tsconfig.renderer.json",
+    "exitCode": 0,
+    "baselineAfterUpdate": 0,
+    "changedRendererFiles": 75,
+    "changedRendererErrors": 0
+  },
+  "pythonVerificationInterpreter": {
+    "executable": "E:\\yuizaki\\python\\.venv\\Scripts\\python.exe",
+    "prefix": "E:\\yuizaki\\python\\.venv",
+    "basePrefix": "C:\\Python313"
+  },
+  "runningPython": {
+    "pid": 21792,
+    "parentPid": 14048,
+    "executable": "C:\\Python313\\python.exe",
+    "commandInterpreter": "E:\\yuizaki\\python\\.venv\\Scripts\\python.exe",
+    "parentExecutable": "E:\\yuizaki\\python\\.venv\\Scripts\\python.exe",
+    "inference": "ExecutablePath alone does not determine venv; command and parent indicate the venv redirector."
+  }
+}

@@ -5,10 +5,18 @@ export type WorkspacePromptMode = 'auto' | 'work' | 'daily'
 export interface WorkspaceRoleCard {
   enabled: boolean
   name: string
+  description?: string
   personality: string
   scenario: string
   instructions: string
   firstMessage: string
+  exampleDialogue?: string
+  /** Greeting references only; never inserted into conversation history automatically. */
+  alternateGreetings?: string[]
+  /** -1 selects the primary greeting; otherwise an index into alternateGreetings. */
+  greetingIndex?: number
+  /** Inert imported JSON for lossless export; never include in LLM requests. */
+  sourceCard?: Record<string, unknown>
 }
 
 export interface WorkspacePromptEngineering {

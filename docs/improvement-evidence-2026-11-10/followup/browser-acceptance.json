@@ -1,0 +1,907 @@
+{
+  "source": "current dist/renderer served by existing control host",
+  "routes": [
+    {
+      "route": "chat",
+      "hash": "#/w/default/chat",
+      "headings": [],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "memory",
+      "hash": "#/w/default/memory",
+      "headings": [
+        "长期记忆",
+        "长期记忆",
+        "记忆库"
+      ],
+      "overflow": 0,
+      "loading": 2
+    },
+    {
+      "route": "settings",
+      "hash": "#/w/default/settings",
+      "headings": [
+        "系统设置",
+        "系统设置",
+        "生成风格",
+        "候选筛选",
+        "重复控制",
+        "上下文与限制"
+      ],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "prompt",
+      "hash": "#/w/default/prompt",
+      "headings": [
+        "人格设定",
+        "人格设定",
+        "工作区系统提示词",
+        "桌宠人格提示词",
+        "提示词模式",
+        "基础提示词",
+        "人格角色卡",
+        "世界书"
+      ],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "pet",
+      "hash": "#/w/default/pet",
+      "headings": [
+        "桌宠控制",
+        "桌宠控制",
+        "角色模型",
+        "桌面驻留"
+      ],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "svc",
+      "hash": "#/w/default/svc",
+      "headings": [
+        "結崎 · 本地桌宠 Agent",
+        "歌声转换"
+      ],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "tool",
+      "hash": "#/w/default/tool",
+      "headings": [
+        "本地能力",
+        "能力与工具"
+      ],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "plugins",
+      "hash": "#/w/default/plugins",
+      "headings": [
+        "插件管理",
+        "插件管理"
+      ],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "infrastructure",
+      "hash": "#/w/default/infrastructure",
+      "headings": [
+        "服务与资源",
+        "服务与资源"
+      ],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "agent-governance",
+      "hash": "#/w/default/agent-governance",
+      "headings": [
+        "权限审计",
+        "权限审计"
+      ],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "agent-trace",
+      "hash": "#/w/default/agent-trace",
+      "headings": [
+        "任务追踪",
+        "任务追踪",
+        "后台任务",
+        "最近执行阶段"
+      ],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "persona-memory",
+      "hash": "#/w/default/persona-memory",
+      "headings": [
+        "行为记录",
+        "行为记录",
+        "当前状态"
+      ],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "i18n",
+      "hash": "#/w/default/i18n",
+      "headings": [
+        "语言管理",
+        "语言管理"
+      ],
+      "overflow": 0,
+      "loading": 0
+    },
+    {
+      "route": "deploy",
+      "hash": "#/w/default/infrastructure",
+      "headings": [
+        "服务与资源",
+        "服务与资源"
+      ],
+      "overflow": 0,
+      "loading": 0
+    }
+  ],
+  "tabs": [
+    {
+      "route": "memory",
+      "tab": "记忆库0"
+    },
+    {
+      "route": "memory",
+      "tab": "需要检查0"
+    },
+    {
+      "route": "memory",
+      "tab": "使用情况"
+    },
+    {
+      "route": "settings",
+      "tab": "访问"
+    },
+    {
+      "route": "settings",
+      "tab": "LLM"
+    },
+    {
+      "route": "settings",
+      "tab": "TTS"
+    },
+    {
+      "route": "settings",
+      "tab": "ASR"
+    },
+    {
+      "route": "settings",
+      "tab": "SVC 配置"
+    },
+    {
+      "route": "settings",
+      "tab": "记忆"
+    },
+    {
+      "route": "settings",
+      "tab": "摘要"
+    },
+    {
+      "route": "settings",
+      "tab": "资源"
+    },
+    {
+      "route": "settings",
+      "tab": "系统"
+    },
+    {
+      "route": "settings",
+      "tab": "运行引导"
+    },
+    {
+      "route": "tool",
+      "tab": "状态"
+    },
+    {
+      "route": "tool",
+      "tab": "直播"
+    },
+    {
+      "route": "tool",
+      "tab": "能力"
+    },
+    {
+      "route": "tool",
+      "tab": "技能"
+    },
+    {
+      "route": "tool",
+      "tab": "记录"
+    },
+    {
+      "route": "agent-governance",
+      "tab": "连接器"
+    },
+    {
+      "route": "agent-governance",
+      "tab": "MCP"
+    },
+    {
+      "route": "agent-governance",
+      "tab": "授权"
+    },
+    {
+      "route": "agent-governance",
+      "tab": "扩展"
+    },
+    {
+      "route": "agent-trace",
+      "tab": "状态"
+    },
+    {
+      "route": "agent-trace",
+      "tab": "后台任务"
+    },
+    {
+      "route": "agent-trace",
+      "tab": "计划任务"
+    },
+    {
+      "route": "agent-trace",
+      "tab": "追踪"
+    }
+  ],
+  "responsive": [
+    {
+      "route": "chat",
+      "width": 768,
+      "overflow": 0,
+      "controls": [
+        {
+          "class": "el-select el-select--small runtime-model-select",
+          "left": 464,
+          "right": 618,
+          "top": 668,
+          "bottom": 712,
+          "uncovered": true
+        },
+        {
+          "class": "el-select el-select--small runtime-response-select",
+          "left": 464,
+          "right": 546,
+          "top": 718,
+          "bottom": 762,
+          "uncovered": true
+        },
+        {
+          "class": "send-button",
+          "left": 680,
+          "right": 724,
+          "top": 718,
+          "bottom": 762,
+          "uncovered": true
+        }
+      ]
+    },
+    {
+      "route": "memory",
+      "width": 768,
+      "overflow": 0,
+      "controls": []
+    },
+    {
+      "route": "settings",
+      "width": 768,
+      "overflow": 0,
+      "controls": []
+    },
+    {
+      "route": "chat",
+      "width": 390,
+      "overflow": 0,
+      "controls": [
+        {
+          "class": "el-select el-select--small runtime-model-select",
+          "left": 102,
+          "right": 256,
+          "top": 666,
+          "bottom": 710,
+          "uncovered": true
+        },
+        {
+          "class": "el-select el-select--small runtime-response-select",
+          "left": 262,
+          "right": 344,
+          "top": 666,
+          "bottom": 710,
+          "uncovered": true
+        },
+        {
+          "class": "send-button",
+          "left": 302,
+          "right": 346,
+          "top": 770,
+          "bottom": 814,
+          "uncovered": true
+        }
+      ]
+    },
+    {
+      "route": "memory",
+      "width": 390,
+      "overflow": 0,
+      "controls": []
+    },
+    {
+      "route": "settings",
+      "width": 390,
+      "overflow": 0,
+      "controls": []
+    }
+  ],
+  "pageerrors": [],
+  "httpFailures": [
+    {
+      "route": "bootstrap",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "bootstrap",
+      "path": "/api/pet/behavior-state",
+      "status": 409
+    },
+    {
+      "route": "bootstrap",
+      "path": "/api/pet/behavior-state",
+      "status": 409
+    },
+    {
+      "route": "bootstrap",
+      "path": "/api/system/voice-diagnostics/run",
+      "status": 409
+    },
+    {
+      "route": "chat",
+      "path": "/api/pet/behavior-state",
+      "status": 409
+    },
+    {
+      "route": "chat",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "chat",
+      "path": "/api/system/active-workspace",
+      "status": 409
+    },
+    {
+      "route": "chat",
+      "path": "/api/settings/llm/models",
+      "status": 409
+    },
+    {
+      "route": "chat",
+      "path": "/api/pet/companion-idle-profile",
+      "status": 409
+    },
+    {
+      "route": "chat",
+      "path": "/api/pet/companion-idle-profile",
+      "status": 409
+    },
+    {
+      "route": "memory",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "memory",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "memory",
+      "path": "/api/workspaces/default",
+      "status": 409
+    },
+    {
+      "route": "memory",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "settings",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "settings",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "settings",
+      "path": "/api/workspaces/default",
+      "status": 409
+    },
+    {
+      "route": "settings",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "settings",
+      "path": "/api/pet/behavior-state",
+      "status": 409
+    },
+    {
+      "route": "settings",
+      "path": "/api/pet/behavior-state",
+      "status": 409
+    },
+    {
+      "route": "settings",
+      "path": "/api/pet/behavior-state",
+      "status": 409
+    },
+    {
+      "route": "settings",
+      "path": "/api/pet/behavior-state",
+      "status": 409
+    },
+    {
+      "route": "settings",
+      "path": "/api/pet/behavior-state",
+      "status": 409
+    },
+    {
+      "route": "settings",
+      "path": "/api/pet/behavior-state",
+      "status": 409
+    },
+    {
+      "route": "settings",
+      "path": "/api/system/voice-diagnostics/run",
+      "status": 409
+    },
+    {
+      "route": "settings",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "settings",
+      "path": "/api/settings/llm/models",
+      "status": 409
+    },
+    {
+      "route": "prompt",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "pet",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "svc",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "tool",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "tool",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "tool",
+      "path": "/api/workspaces/default",
+      "status": 409
+    },
+    {
+      "route": "tool",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "plugins",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "infrastructure",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "agent-governance",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "agent-governance",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "agent-governance",
+      "path": "/api/workspaces/default",
+      "status": 409
+    },
+    {
+      "route": "agent-governance",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "agent-trace",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "agent-trace",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "agent-trace",
+      "path": "/api/workspaces/default",
+      "status": 409
+    },
+    {
+      "route": "agent-trace",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "persona-memory",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "i18n",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "deploy",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "chat",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "chat",
+      "path": "/api/settings/llm/models",
+      "status": 409
+    },
+    {
+      "route": "memory",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "settings",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "chat",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "chat",
+      "path": "/api/settings/llm/models",
+      "status": 409
+    },
+    {
+      "route": "memory",
+      "path": "/api/pet/visibility",
+      "status": 409
+    },
+    {
+      "route": "settings",
+      "path": "/api/pet/visibility",
+      "status": 409
+    }
+  ],
+  "blockedMutations": [
+    {
+      "route": "bootstrap",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "bootstrap",
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "route": "bootstrap",
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "route": "bootstrap",
+      "method": "POST",
+      "path": "/api/system/voice-diagnostics/run"
+    },
+    {
+      "route": "chat",
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "route": "chat",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "chat",
+      "method": "POST",
+      "path": "/api/system/active-workspace"
+    },
+    {
+      "route": "chat",
+      "method": "POST",
+      "path": "/api/settings/llm/models"
+    },
+    {
+      "route": "chat",
+      "method": "POST",
+      "path": "/api/pet/companion-idle-profile"
+    },
+    {
+      "route": "chat",
+      "method": "POST",
+      "path": "/api/pet/companion-idle-profile"
+    },
+    {
+      "route": "memory",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "memory",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "memory",
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "memory",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "settings",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "settings",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "settings",
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "settings",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "settings",
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "route": "settings",
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "route": "settings",
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "route": "settings",
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "route": "settings",
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "route": "settings",
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "route": "settings",
+      "method": "POST",
+      "path": "/api/system/voice-diagnostics/run"
+    },
+    {
+      "route": "settings",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "settings",
+      "method": "POST",
+      "path": "/api/settings/llm/models"
+    },
+    {
+      "route": "prompt",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "pet",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "svc",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "tool",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "tool",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "tool",
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "tool",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "plugins",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "infrastructure",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "agent-governance",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "agent-governance",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "agent-governance",
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "agent-governance",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "agent-trace",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "agent-trace",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "agent-trace",
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "agent-trace",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "persona-memory",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "i18n",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "deploy",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "chat",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "chat",
+      "method": "POST",
+      "path": "/api/settings/llm/models"
+    },
+    {
+      "route": "memory",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "settings",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "chat",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "chat",
+      "method": "POST",
+      "path": "/api/settings/llm/models"
+    },
+    {
+      "route": "memory",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "settings",
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    }
+  ]
+}

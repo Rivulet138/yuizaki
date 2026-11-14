@@ -4,6 +4,19 @@
     tone="tool"
   >
     <div class="tool-panel">
+      <p v-if="actionResult" role="status" aria-live="polite">{{ actionResult }}</p>
+      <div v-if="uncertainStreamRequest" role="alert">
+        <p>原请求 {{ uncertainStreamRequest }} 的副作用待确认，暂停执行新动作。</p>
+        <el-button size="small" plain :loading="queryingStreamAction" @click="reconcileStreamExecution">查询原请求权威状态</el-button>
+        <template v-if="uncertainStreamAction?.requestId === uncertainStreamRequest && uncertainStreamAction.recovery.canResolve">
+          <el-button v-if="!uncertainStreamAction.recovery.humanTakeover" size="small" plain :loading="resolvingStreamAction" @click="takeOverStreamRecovery">开启人工接管以核对结果</el-button>
+          <template v-else>
+            <el-button size="small" type="warning" plain :disabled="resolvingStreamAction || queryingStreamAction" @click="resolveUnknownStreamAction('known_success')">人工确认已成功</el-button>
+            <el-button size="small" type="danger" plain :disabled="resolvingStreamAction || queryingStreamAction" @click="resolveUnknownStreamAction('failed')">人工确认未完成/失败</el-button>
+          </template>
+        </template>
+      </div>
+      <p v-for="(status, source) in listStatus" v-show="status.error" :key="`error:${source}`" role="alert">{{ listLabels[source] || source }}刷新失败：{{ status.error }}</p>
       <nav class="tool-view-nav" :aria-label="t('tools.viewNavAria')" role="tablist">
         <button
           v-for="view in toolViews"
@@ -37,7 +50,7 @@
 
       </div>
 
-      <section v-show="activeToolView === 'stream'" class="stream-summary panel-card" :aria-label="t('tools.stream.sectionAria')">
+      <section v-show="activeToolView === 'stream'" class="stream-summary panel-card" :inert="!uiCapabilities.capability('hostHttp').available" :aria-label="t('tools.stream.sectionAria')">
         <div class="section-heading">
           <div>
             <h3>{{ t('tools.stream.title') }}</h3>
@@ -206,14 +219,14 @@
             type="primary"
             plain
             :loading="loadingStreamExecute"
-            :disabled="!streamSnapshot.preview.requestId || Boolean(streamExecution?.ok) || !streamPreviewExecutionReady"
+            :disabled="!streamActionsLoaded || loadingStreamExecute || Boolean(uncertainStreamRequest) || !streamPendingExecution || !streamSnapshot.preview.requestId || Boolean(streamExecution?.ok) || !streamPreviewExecutionReady"
             @click="confirmStreamExecution"
           >{{ streamPreviewExecutionReady ? t('tools.stream.confirmExecute') : t('tools.stream.capabilityNeedsObs') }}</el-button>
         </div>
         <div v-if="streamExecution" class="stream-execution-note" :class="{ failed: !streamExecution.ok }">
-          <strong>{{ streamExecution.ok ? t('tools.stream.executionDone') : t('tools.stream.executionFailed') }}</strong>
-           <span v-if="!streamExecution.ok">{{ t('tools.stream.executionRetryHint') }}</span>
-          <el-button v-if="!streamExecution.ok" size="small" plain :loading="loadingStreamExecute" @click="confirmStreamExecution">{{ t('tools.stream.manualRetry') }}</el-button>
+          <strong>{{ uncertainStreamRequest || streamExecution.outcome === 'unknown_effect' ? '结果未知' : streamExecution.ok ? t('tools.stream.executionDone') : t('tools.stream.executionFailed') }}</strong>
+          <span>{{ actionResult }}</span>
+          <el-button v-if="uncertainStreamRequest" size="small" plain @click="reconcileStreamExecution">查询原请求状态</el-button>
         </div>
         <div class="stream-actions-heading">
           <strong>{{ t('tools.stream.auditTitle') }}</strong>
@@ -578,7 +591,9 @@ import { ElInputNumber } from 'element-plus'
 import 'element-plus/es/components/input-number/style/css'
 import { ElTag } from 'element-plus'
 import 'element-plus/es/components/tag/style/css'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { usePanelLifecycle } from '@/app/composables/usePanelLifecycle'
+import { useUiCapabilities } from '@/app/composables/useUiCapabilities'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Check, Close, Delete, Refresh, Search, Upload } from '@element-plus/icons-vue'
@@ -587,7 +602,7 @@ import { t } from '@/i18n'
 import { pluginClient, systemClient } from '@/api/client'
 import { curatedSkillRecommendations } from '../skillRecommendations'
 import type { PluginLoadFailure, PluginRuntimeState, PluginToolCapabilityContribution } from '../../../../shared/plugin'
-import type { CapabilityDescriptor, CapabilityKind, CapabilityRiskLevel, SkillCatalogItem, StreamActionRecord, StreamActionsSnapshot, StreamCapabilityDescriptor, StreamDraftConsumerSnapshot, StreamDraftsSnapshot, StreamExecuteResponse, StreamLocalEvent, StreamObsProfile, StreamReplyDraft, StreamRuntimeSnapshot } from '../../../../shared/capability'
+import type { CapabilityDescriptor, CapabilityKind, CapabilityRiskLevel, SkillCatalogItem, StreamActionLookup, StreamActionRecord, StreamActionsSnapshot, StreamCapabilityDescriptor, StreamDraftConsumerSnapshot, StreamDraftsSnapshot, StreamExecuteResponse, StreamLocalEvent, StreamObsProfile, StreamReplyDraft, StreamRuntimeSnapshot } from '../../../../shared/capability'
 import type { AgentTraceSnapshot, MCPSnapshot, MCPServerConfigSnapshot, MCPServerStatusSnapshot, RuntimeLoopRecord, StepExecutionRecord } from '../../../../shared/agent'
 import { projectToolActionStatus, toolActionStatusLabel, toolEvidenceFromRecord, type ToolActionStatus } from '../toolActionProjection'
 import { describeFailure } from '@/shared/errors/describe-error'
@@ -653,6 +668,39 @@ type MCPRow = MCPServerConfigSnapshot & MCPServerStatusSnapshot & {
   prompts_count: number
 }
 
+const uiCapabilities = useUiCapabilities()
+const listStatus = ref<Record<string, { error: string; updatedAt: string }>>({})
+const listLabels: Record<string, string> = { plugins: '插件', capabilities: '能力', history: '调用历史', mcp: 'MCP', stream: '直播状态', events: '直播事件', drafts: '回复草稿', actions: '动作审计', consumer: '草稿消费', obs: 'OBS 场景列表', twitch: 'Twitch 配置', skills: '技能目录' }
+const actionResult = ref('')
+const uncertainRequestKey = `yuizaki.stream.unknown:${String(route.params.workspaceId || 'default')}`
+const readUncertainRequest = () => {
+  try { return window.sessionStorage.getItem(uncertainRequestKey) || '' } catch { return '' }
+}
+const uncertainStreamRequest = ref(readUncertainRequest())
+watch(uncertainStreamRequest, (requestId) => {
+  try {
+    if (requestId) window.sessionStorage.setItem(uncertainRequestKey, requestId)
+    else window.sessionStorage.removeItem(uncertainRequestKey)
+  } catch { /* The in-memory lock and server audit remain available. */ }
+}, { flush: 'sync' })
+const streamActionsLoaded = ref(false)
+const uncertainStreamAction = ref<StreamActionLookup | null>(null)
+const resolvingStreamAction = ref(false)
+const queryingStreamAction = ref(false)
+let streamDraftsInitialized = false
+let pageGeneration = 0
+const listSequences = new Map<string, number>()
+const beginListRead = (key: string) => {
+  const sequence = (listSequences.get(key) || 0) + 1
+  listSequences.set(key, sequence)
+  const generation = pageGeneration
+  listStatus.value[key] = { error: '', updatedAt: listStatus.value[key]?.updatedAt || '' }
+  return () => generation === pageGeneration && listSequences.get(key) === sequence
+}
+const listSucceeded = (key: string) => { listStatus.value[key] = { error: '', updatedAt: new Date().toLocaleString() } }
+const listFailed = (key: string, error: unknown) => {
+  listStatus.value[key] = { error: describeFailure(error, '刷新失败'), updatedAt: listStatus.value[key]?.updatedAt || '' }
+}
 const logs = ref<ToolLogItem[]>([])
 const pluginTools = ref<PluginToolCapabilityContribution[]>([])
 const pluginStates = ref<PluginRuntimeState[]>([])
@@ -1464,6 +1512,7 @@ function stringField(value: unknown) {
 }
 
 async function mergeImportedSkills(skills: ImportedSkillCatalogItem[]) {
+  if (savingImportedSkills.value || loadingImportedSkills.value) return
   importedSkillItems.value = mergeSkillItems(importedSkillItems.value, skills)
   await persistImportedSkills()
 }
@@ -1473,28 +1522,34 @@ async function removeImportedSkill(skillId: string) {
 }
 
 async function loadImportedSkills() {
-  if (typeof window === 'undefined') return
+  if (typeof window === 'undefined' || savingImportedSkills.value || loadingImportedSkills.value) return
+  const isCurrent = beginListRead('skills')
   loadingImportedSkills.value = true
   const localItems = readImportedSkillsFromLocalStorage()
   importedSkillItems.value = localItems
   try {
     const snapshot = await systemClient.importedSkills()
+    if (!isCurrent()) return
     let backendItems = normalizeImportedSkillList(snapshot.items || [])
     if (localItems.length && (!hasMigratedImportedSkills() || hasDirtyImportedSkills())) {
       backendItems = await saveImportedSkillsToBackend(mergeSkillItems(backendItems, localItems))
     }
+    if (!isCurrent()) return
     importedSkillItems.value = backendItems
+    listSucceeded('skills')
     importedSkillBackendReady.value = true
     importedSkillStorageError.value = ''
     markImportedSkillsMigrated()
     markImportedSkillsDirty(false)
     persistImportedSkillsToLocalStorage()
   } catch (error) {
+    if (!isCurrent()) return
+    listFailed('skills', error)
     importedSkillBackendReady.value = false
     importedSkillStorageError.value = describeFailure(error, t('tools.skills.backendUnavailable'))
     importedSkillItems.value = localItems
   } finally {
-    loadingImportedSkills.value = false
+    if (isCurrent()) loadingImportedSkills.value = false
   }
 }
 
@@ -1646,58 +1701,36 @@ async function deleteFilteredImportedSkills() {
 }
 
 async function deleteImportedSkills(skillIds: string[], options: { confirm?: boolean; title?: string; successMessage?: string } = {}) {
+  if (savingImportedSkills.value || loadingImportedSkills.value) return
   const uniqueIds = [...new Set(skillIds.filter(Boolean))]
   if (!uniqueIds.length) return
-  if (options.confirm !== false) {
-    try {
-      await ElMessageBox.confirm(
-        t('tools.skills.deleteConfirm', { count: uniqueIds.length }),
-        options.title || t('tools.skills.deleteTitle'),
-        {
-          confirmButtonText: t('tools.action.delete'),
-          cancelButtonText: t('tools.action.cancel'),
-          type: 'warning',
-        },
-      )
-    } catch {
-      return
+  // Freeze selection before the dialog; do not reinterpret filters after await.
+  savingImportedSkills.value = true
+  try {
+    if (options.confirm !== false) {
+      try {
+        await ElMessageBox.confirm(t('tools.skills.deleteConfirm', { count: uniqueIds.length }), options.title || t('tools.skills.deleteTitle'), {
+          confirmButtonText: t('tools.action.delete'), cancelButtonText: t('tools.action.cancel'), type: 'warning',
+        })
+      } catch { return }
     }
-  }
-
-  const nextItems = importedSkillItems.value.filter(skill => !uniqueIds.includes(skill.id))
-  importedSkillItems.value = nextItems
-  pruneSelectedSkillIds()
-  persistImportedSkillsToLocalStorage()
-  if (!importedSkillBackendReady.value) markImportedSkillsDirty(true)
-
-  if (importedSkillBackendReady.value) {
-    savingImportedSkills.value = true
-    try {
+    if (importedSkillBackendReady.value) {
       const snapshot = await systemClient.removeImportedSkills(uniqueIds)
       importedSkillItems.value = normalizeImportedSkillList(snapshot.items || [])
-      persistImportedSkillsToLocalStorage()
-      importedSkillStorageError.value = ''
       markImportedSkillsDirty(false)
-    } catch {
-      try {
-        const savedItems = await saveImportedSkillsToBackend(nextItems)
-        importedSkillItems.value = savedItems
-        persistImportedSkillsToLocalStorage()
-        importedSkillStorageError.value = ''
-        markImportedSkillsDirty(false)
-      } catch (error) {
-        importedSkillBackendReady.value = false
-        importedSkillStorageError.value = describeFailure(error, t('tools.skills.backendDeleteFailed'))
-        markImportedSkillsDirty(true)
-        ElMessage.warning(t('tools.skills.backendDeleteWarning'))
-      }
-    } finally {
-      savingImportedSkills.value = false
-      pruneSelectedSkillIds()
+    } else {
+      importedSkillItems.value = importedSkillItems.value.filter(skill => !uniqueIds.includes(skill.id))
+      markImportedSkillsDirty(true)
     }
-  }
-
-  ElMessage.success(options.successMessage || t('tools.skills.deleted'))
+    persistImportedSkillsToLocalStorage()
+    pruneSelectedSkillIds()
+    importedSkillStorageError.value = ''
+    ElMessage.success(importedSkillBackendReady.value ? options.successMessage || t('tools.skills.deleted') : '已从当前浏览器删除；宿主目录未修改。')
+  } catch (error) {
+    // A timeout may have applied the delete. Never fall back to replacing the whole catalog.
+    importedSkillStorageError.value = `${describeFailure(error, t('tools.skills.backendDeleteFailed'))}；删除结果未确认，请刷新目录核对，选择已保留。`
+    ElMessage.warning(importedSkillStorageError.value)
+  } finally { savingImportedSkills.value = false }
 }
 
 function pruneSelectedSkillIds() {
@@ -1768,15 +1801,20 @@ function toolLogFromRuntimeLoop(loop: RuntimeLoopRecord): ToolLogItem | null {
 }
 
 async function loadPlugins() {
+  const isCurrent = beginListRead('plugins')
   const requestId = ++pluginLoadSequence
   loadingPlugins.value = true
   try {
     const payload = await pluginClient.list()
+    if (!isCurrent()) return
     if (requestId !== pluginLoadSequence) return
     pluginTools.value = payload.toolCapabilities ?? []
     pluginStates.value = payload.pluginStates ?? []
     pluginLoadFailures.value = payload.loadFailures ?? []
+    listSucceeded('plugins')
   } catch (error) {
+    if (!isCurrent()) return
+    listFailed('plugins', error)
     if (requestId !== pluginLoadSequence) return
     const message = describeFailure(error, t('tools.log.unknownError'))
     pushLog(t('tools.log.pluginLoadFailed', { message }))
@@ -1786,17 +1824,22 @@ async function loadPlugins() {
 }
 
 async function loadCapabilities() {
+  const isCurrent = beginListRead('capabilities')
   const requestId = ++capabilityLoadSequence
   loadingCapabilities.value = true
   capabilityLoadError.value = ''
   try {
     const snapshot = await systemClient.capabilities()
+    if (!isCurrent()) return
     if (requestId !== capabilityLoadSequence) return
     capabilities.value = snapshot.capabilities ?? []
     if (!capabilities.value.some(item => item.id === selectedCapabilityId.value) && capabilities.value[0]) {
       selectedCapabilityId.value = capabilities.value[0].id
     }
+    listSucceeded('capabilities')
   } catch (error) {
+    if (!isCurrent()) return
+    listFailed('capabilities', error)
     if (requestId !== capabilityLoadSequence) return
     const message = describeFailure(error, t('tools.log.unknownError'))
     capabilityLoadError.value = t('tools.log.capabilityLoadFailed', { message })
@@ -1806,12 +1849,17 @@ async function loadCapabilities() {
 }
 
 async function loadToolTrace() {
+  const isCurrent = beginListRead('history')
   const requestId = ++toolTraceLoadSequence
   try {
     const snapshot = await systemClient.agentTrace()
+    if (!isCurrent()) return
     if (requestId !== toolTraceLoadSequence) return
     agentTrace.value = snapshot
+    listSucceeded('history')
   } catch (error) {
+    if (!isCurrent()) return
+    listFailed('history', error)
     if (requestId !== toolTraceLoadSequence) return
     const message = describeFailure(error, t('tools.log.unknownError'))
     pushLog(t('tools.log.traceLoadFailed', { message }))
@@ -1819,14 +1867,19 @@ async function loadToolTrace() {
 }
 
 async function loadMcpServers() {
+  const isCurrent = beginListRead('mcp')
   const requestId = ++mcpLoadSequence
   loadingMcp.value = true
   mcpLoadError.value = ''
   try {
     const snapshot = await systemClient.mcp()
+    if (!isCurrent()) return
     if (requestId !== mcpLoadSequence) return
     mcpSnapshot.value = snapshot
+    listSucceeded('mcp')
   } catch (error) {
+    if (!isCurrent()) return
+    listFailed('mcp', error)
     if (requestId !== mcpLoadSequence) return
     const message = describeFailure(error, t('tools.log.unknownError'))
     mcpLoadError.value = t('tools.log.mcpLoadFailed', { message })
@@ -1836,10 +1889,18 @@ async function loadMcpServers() {
 }
 
 async function loadStream() {
+  const isCurrent = beginListRead('stream')
   loadingStream.value = true
   streamLoadError.value = ''
   try {
-    streamSnapshot.value = await systemClient.stream()
+    const next = await systemClient.stream()
+    if (!isCurrent()) return
+    streamSnapshot.value = next
+    if (!loadingStreamTakeover.value && !resolvingStreamAction.value) {
+      streamTakeoverEnabled.value = next.policy?.humanTakeover !== false
+    }
+    if (streamDraftsInitialized) { listSucceeded('stream'); return }
+    streamDraftsInitialized = true
     obsEndpointDraft.value = streamSnapshot.value.adapter?.endpoint || ''
     obsAllowRemote.value = streamSnapshot.value.adapter?.remoteAllowed === true
     streamTakeoverEnabled.value = streamSnapshot.value.policy?.humanTakeover !== false
@@ -1849,26 +1910,34 @@ async function loadStream() {
     streamModerationSlowModeSeconds.value = Number(moderation?.slowModeSeconds || 0)
     streamModerationMaxMessagesPerMinute.value = Number(moderation?.maxMessagesPerMinute || 30)
     twitchSubscriptionDraft.value = [...(streamSnapshot.value.platforms?.twitch?.subscriptionPlan?.desired || [])]
+    listSucceeded('stream')
   } catch (error) {
+    if (!isCurrent()) return
+    listFailed('stream', error)
     const message = describeFailure(error, t('tools.log.unknownError'))
     streamLoadError.value = t('tools.log.streamLoadFailed', { message })
   } finally {
-    loadingStream.value = false
+    if (isCurrent()) loadingStream.value = false
   }
 }
 
 async function loadTwitchConfigStatus() {
+  const isCurrent = beginListRead('twitch')
+  const providerBefore = twitchSubscriptionProviderDraft.value
   try {
     const result = await systemClient.twitchConfig()
+    if (!isCurrent()) return
+    listSucceeded('twitch')
     twitchConfigStatus.value = result
-    twitchSubscriptionProviderDraft.value = result.subscriptionProvider === 'twitch-helix'
+    if (providerBefore === 'none' && twitchSubscriptionProviderDraft.value === providerBefore) twitchSubscriptionProviderDraft.value = result.subscriptionProvider === 'twitch-helix'
       ? 'helix'
       : result.subscriptionProvider || 'none'
     if (!result.secureStorageAvailable) {
       ElMessage.warning(t('tools.stream.secureStoreUnavailable'))
     }
-  } catch {
-    twitchConfigStatus.value = null
+  } catch (error) {
+    if (!isCurrent()) return
+    listFailed('twitch', error)
   }
 }
 
@@ -1916,30 +1985,29 @@ function twitchConfigPayload() {
   return Object.fromEntries(Object.entries(fields).filter(([, value]) => value.trim()))
 }
 
+const twitchDraftFields = () => ({
+  clientId: twitchClientIdDraft, eventsubSecret: twitchEventsubSecretDraft, eventsubToken: twitchEventsubTokenDraft,
+  chatToken: twitchChatTokenDraft, broadcasterId: twitchBroadcasterIdDraft, senderId: twitchSenderIdDraft,
+  moderatorId: twitchModeratorIdDraft, channel: twitchChannelDraft, username: twitchUsernameDraft,
+  eventsubCallbackUrl: twitchEventsubCallbackUrlDraft,
+})
 async function saveTwitchConfig() {
+  if (savingTwitchConfig.value) return
+  const submitted = twitchConfigPayload()
   savingTwitchConfig.value = true
   try {
-    const result = await systemClient.updateTwitchConfig(twitchConfigPayload())
+    const result = await systemClient.updateTwitchConfig(submitted)
     if (result.ok !== true) {
       ElMessage.warning(String(result.error || t('tools.stream.twitchSaveNotApplied')))
       return
     }
-    twitchEventsubSecretDraft.value = ''
-    twitchEventsubTokenDraft.value = ''
-    twitchChatTokenDraft.value = ''
-    twitchClientIdDraft.value = ''
-    twitchBroadcasterIdDraft.value = ''
-    twitchSenderIdDraft.value = ''
-    twitchModeratorIdDraft.value = ''
-    twitchChannelDraft.value = ''
-    twitchUsernameDraft.value = ''
-    twitchEventsubCallbackUrlDraft.value = ''
-    await Promise.all([loadStream(), loadTwitchConfigStatus()])
-    const probe = await systemClient.probeTwitch()
-    const ready = probe.configured && typeof probe.configured === 'object'
-      ? Object.values(probe.configured as Record<string, unknown>).filter(Boolean).length
-      : 0
-    ElMessage.success(t('tools.stream.twitchSaved', { count: ready }))
+    for (const [key, field] of Object.entries(twitchDraftFields())) {
+      if (field.value.trim() === submitted[key]) field.value = ''
+    }
+    actionResult.value = 'Twitch 配置已保存；连接可用性待探测。'
+    ElMessage.success(actionResult.value)
+    await Promise.allSettled([loadStream(), loadTwitchConfigStatus()])
+    await probeTwitchConfig()
   } catch (error) {
     const message = describeFailure(error, t('tools.log.unknownError'))
     ElMessage.error(t('tools.stream.twitchSaveError', { message }))
@@ -1949,6 +2017,7 @@ async function saveTwitchConfig() {
 }
 
 async function clearTwitchConfig() {
+  if (savingTwitchConfig.value) return
   savingTwitchConfig.value = true
   try {
     const fields = ['ClientId', 'EventsubSecret', 'EventsubToken', 'ChatToken', 'BroadcasterId', 'SenderId', 'ModeratorId', 'Channel', 'Username', 'EventsubCallbackUrl', 'SubscriptionProvider']
@@ -1968,6 +2037,8 @@ async function clearTwitchConfig() {
 }
 
 async function configureObs() {
+  if (configuringObs.value) return
+  const submittedPassword = obsPasswordDraft.value
   configuringObs.value = true
   streamLoadError.value = ''
   try {
@@ -1976,12 +2047,11 @@ async function configureObs() {
       ...(obsPasswordDraft.value ? { password: obsPasswordDraft.value } : {}),
       allowRemote: obsAllowRemote.value,
     })
-    obsPasswordDraft.value = ''
-    await loadStream()
-    const probe = await systemClient.probeStream()
-    streamProbe.value = probe.probe ?? null
-    if (probe.probe?.status === 'reachable') ElMessage.success(t('tools.stream.obsConfigured'))
-    else ElMessage.warning(t('tools.stream.obsSavedWithStatus', { status: String(probe.probe?.status || 'unknown') }))
+    if (obsPasswordDraft.value === submittedPassword) obsPasswordDraft.value = ''
+    actionResult.value = 'OBS 配置已保存；连接可用性待探测。'
+    ElMessage.success(actionResult.value)
+    await Promise.allSettled([loadStream()])
+    await probeStream()
   } catch (error) {
     const message = describeFailure(error, t('tools.log.unknownError'))
     ElMessage.error(t('tools.stream.obsConfigureError', { message }))
@@ -1991,6 +2061,7 @@ async function configureObs() {
 }
 
 async function clearObsPassword() {
+  if (configuringObs.value) return
   configuringObs.value = true
   try {
     await systemClient.configureObs({
@@ -2017,6 +2088,7 @@ const streamModerationSummary = computed(() => {
 })
 
 async function saveStreamModeration() {
+  if (loadingStreamModeration.value) return
   loadingStreamModeration.value = true
   try {
     const blockedTerms = streamModerationTermsInput.value
@@ -2044,41 +2116,58 @@ async function saveStreamModeration() {
 }
 
 async function loadStreamEvents() {
+  const isCurrent = beginListRead('events')
   loadingStreamEvents.value = true
   try {
     const result = await systemClient.streamEvents(20)
+    if (!isCurrent()) return
     streamEvents.value = result.events ?? result.items ?? []
+    listSucceeded('events')
   } catch (error) {
+    if (!isCurrent()) return
+    listFailed('events', error)
     const message = describeFailure(error, t('tools.log.unknownError'))
     ElMessage.warning(t('tools.stream.eventsLoadFailed', { message }))
   } finally {
-    loadingStreamEvents.value = false
+    if (isCurrent()) loadingStreamEvents.value = false
   }
 }
 
 async function loadStreamDrafts() {
+  const isCurrent = beginListRead('drafts')
   loadingStreamDrafts.value = true
   try {
     const result: StreamDraftsSnapshot = await systemClient.streamDrafts(20)
+    if (!isCurrent()) return
     streamDrafts.value = result.drafts ?? []
+    listSucceeded('drafts')
   } catch (error) {
+    if (!isCurrent()) return
+    listFailed('drafts', error)
     const message = describeFailure(error, t('tools.log.unknownError'))
     ElMessage.warning(t('tools.stream.draftsLoadFailed', { message }))
   } finally {
-    loadingStreamDrafts.value = false
+    if (isCurrent()) loadingStreamDrafts.value = false
   }
 }
 
 async function loadStreamDraftConsumer() {
+  const isCurrent = beginListRead('consumer')
   try {
-    streamDraftConsumer.value = await systemClient.streamDraftConsumer()
+    const next = await systemClient.streamDraftConsumer()
+    if (!isCurrent()) return
+    streamDraftConsumer.value = next
+    listSucceeded('consumer')
   } catch (error) {
+    if (!isCurrent()) return
+    listFailed('consumer', error)
     const message = describeFailure(error, t('tools.log.unknownError'))
     ElMessage.warning(t('tools.stream.draftConsumerLoadFailed', { message }))
   }
 }
 
 async function toggleStreamDraftConsumer() {
+  if (loadingStreamDraftConsumer.value) return
   loadingStreamDraftConsumer.value = true
   try {
     streamDraftConsumer.value = await systemClient.setStreamDraftConsumer(!streamDraftConsumer.value?.enabled)
@@ -2093,6 +2182,7 @@ async function toggleStreamDraftConsumer() {
 }
 
 async function consumeStreamDrafts() {
+  if (consumingStreamDrafts.value) return
   consumingStreamDrafts.value = true
   try {
     const result = await systemClient.consumeStreamDrafts({ limit: 3 })
@@ -2111,19 +2201,31 @@ async function consumeStreamDrafts() {
 }
 
 async function loadStreamActions() {
+  streamActionsLoaded.value = false
+  const isCurrent = beginListRead('actions')
   loadingStreamActions.value = true
   try {
-    const result: StreamActionsSnapshot = await systemClient.streamActions(50)
+    const result: StreamActionsSnapshot = await systemClient.streamActions(100)
+    if (!isCurrent()) return
+    if (result.ok !== true || !Array.isArray(result.unresolvedRequestIds)) throw new Error(result.error || '宿主未提供权威未决动作列表；暂停执行新动作')
     streamActions.value = result.actions ?? []
+    streamActionsLoaded.value = true
+    if (!uncertainStreamRequest.value && result.unresolvedRequestIds?.length) {
+      uncertainStreamRequest.value = result.unresolvedRequestIds[0] || ''
+    }
+    listSucceeded('actions')
   } catch (error) {
+    if (!isCurrent()) return
+    listFailed('actions', error)
     const message = describeFailure(error, t('tools.log.unknownError'))
     ElMessage.warning(t('tools.stream.auditLoadFailed', { message }))
   } finally {
-    loadingStreamActions.value = false
+    if (isCurrent()) loadingStreamActions.value = false
   }
 }
 
 async function reconfigureTwitch() {
+  if (reconfiguringTwitch.value) return
   reconfiguringTwitch.value = true
   try {
     const result = await systemClient.reconfigureTwitch()
@@ -2142,6 +2244,7 @@ async function reconfigureTwitch() {
 }
 
 async function saveTwitchSubscriptions() {
+  if (loadingTwitchSubscriptions.value) return
   loadingTwitchSubscriptions.value = true
   try {
     const result = await systemClient.configureTwitchSubscriptions(twitchSubscriptionDraft.value)
@@ -2174,6 +2277,7 @@ const twitchIrcStatusLabel = computed(() => {
 })
 
 async function connectTwitch() {
+  if (connectingTwitch.value) return
   connectingTwitch.value = true
   try {
     const result = await systemClient.connectTwitch()
@@ -2189,6 +2293,7 @@ async function connectTwitch() {
 }
 
 async function disconnectTwitch() {
+  if (disconnectingTwitch.value) return
   disconnectingTwitch.value = true
   try {
     await systemClient.disconnectTwitch()
@@ -2207,6 +2312,7 @@ function streamEventId(event: StreamLocalEvent) {
 }
 
 async function generateStreamDraft(event: StreamLocalEvent) {
+  if (generatingStreamDraft.value) return
   const eventId = streamEventId(event)
   if (!eventId) {
     ElMessage.warning(t('tools.stream.eventMissingId'))
@@ -2232,6 +2338,7 @@ async function generateStreamDraft(event: StreamLocalEvent) {
 }
 
 async function retryStreamDraft(draft: StreamReplyDraft) {
+  if (generatingStreamDraft.value) return
   const eventId = String(draft.eventId || '').trim()
   if (!eventId) {
     ElMessage.warning(t('tools.stream.draftMissingId'))
@@ -2330,20 +2437,25 @@ async function probeStream() {
 }
 
 async function loadObsProfiles() {
+  const isCurrent = beginListRead('obs')
   loadingObsProfiles.value = true
   streamLoadError.value = ''
   try {
     const result = await systemClient.obsProfiles()
+    if (!isCurrent()) return
+    listSucceeded('obs')
     obsProfiles.value = (result.profiles || []).filter((profile) => typeof profile?.profileName === 'string' && profile.profileName.trim())
     obsCurrentProfile.value = typeof result.currentProfileName === 'string' ? result.currentProfileName : ''
     if (!obsProfileDraft.value && obsCurrentProfile.value) obsProfileDraft.value = obsCurrentProfile.value
     if (result.ok) ElMessage.success(t('tools.stream.obsProfilesLoaded', { count: obsProfiles.value.length }))
     else ElMessage.warning(result.error || t('tools.stream.obsProfilesFailed'))
   } catch (error) {
+    if (!isCurrent()) return
+    listFailed('obs', error)
     const message = describeFailure(error, t('tools.log.unknownError'))
     ElMessage.error(t('tools.stream.obsProfilesError', { message }))
   } finally {
-    loadingObsProfiles.value = false
+    if (isCurrent()) loadingObsProfiles.value = false
   }
 }
 
@@ -2354,16 +2466,20 @@ async function previewObsProfileSwitch() {
 }
 
 async function previewStream(kind: string, params: Record<string, unknown> = {}, loadingKey = kind) {
+  if (loadingStreamExecute.value || previewingStreamCapability.value || uncertainStreamRequest.value) return
   previewingStreamCapability.value = loadingKey
+  streamPendingExecution.value = null
+  const generation = pageGeneration
   try {
     const result = await systemClient.previewStream(kind, params)
-    if (result.preview) {
+    if (generation !== pageGeneration || !pageLifecycle.active.value) return
+    if (result.ok && result.preview?.requestId) {
       streamSnapshot.value = { ...(streamSnapshot.value || { state: 'disconnected' }), state: 'preview', preview: result.preview }
       streamExecution.value = null
       streamPendingExecution.value = {
         requestId: String(result.preview.requestId || ''),
         action: String(result.preview.action || result.preview.kind || kind),
-        params: result.preview.params || {},
+        params: JSON.parse(JSON.stringify(result.preview.params || {})),
       }
     }
     if (!result.ok) ElMessage.warning(result.error || t('tools.stream.previewUnavailable'))
@@ -2377,7 +2493,7 @@ async function previewStream(kind: string, params: Record<string, unknown> = {},
 }
 
 async function previewDraftSend(draft: StreamReplyDraft) {
-  if (!draft.reply) return
+  if (!draft.reply || draft.sent || ['known_success', 'unknown_effect', 'sending'].includes(draft.sendStatus || '')) return
   await previewStream('stream.chat_send', { text: draft.reply, draftId: draft.draftId }, `stream.chat_send:${draft.draftId}`)
 }
 
@@ -2386,45 +2502,119 @@ function streamRiskLabel(risk: string | undefined) {
   return labels[risk || ''] || risk || t('tools.risk.undeclared')
 }
 
+async function reconcileStreamExecution() {
+  const generation = pageGeneration
+  const requestId = uncertainStreamRequest.value
+  if (!requestId || queryingStreamAction.value) return
+  queryingStreamAction.value = true
+  try {
+    const snapshot = await systemClient.streamAction(requestId)
+    if (generation !== pageGeneration || requestId !== uncertainStreamRequest.value) return
+    if (!snapshot.ok || snapshot.requestId !== requestId || typeof snapshot.terminal !== 'boolean') throw new Error('宿主未返回原请求的权威状态；保持未知。')
+    uncertainStreamAction.value = snapshot
+    if (snapshot.terminal && snapshot.status === 'known_success') {
+      streamExecution.value = { ok: true, requestId, outcome: 'known_success', verificationStatus: snapshot.action?.verificationStatus }
+      uncertainStreamRequest.value = ''
+      streamPendingExecution.value = null
+      actionResult.value = `原请求 ${requestId} 已确认成功。`
+    } else if (snapshot.terminal && snapshot.status === 'failed') {
+      uncertainStreamRequest.value = ''
+      streamPendingExecution.value = null
+      actionResult.value = `原请求 ${requestId} 已确认失败；再次执行需要人工重新预览和确认。`
+    } else if (!snapshot.found) {
+      actionResult.value = `原请求 ${requestId} 的记录未保留或未执行，无法证明副作用状态；保持未知并禁止自动重试。`
+    } else actionResult.value = `原请求 ${requestId} ${snapshot.reason === 'in_flight' ? '仍在执行' : '副作用尚未确认'}；请核对外部平台，暂停再次执行。`
+    listSucceeded('actions')
+  } catch (error) { if (generation === pageGeneration) listFailed('actions', error) }
+  finally { if (generation === pageGeneration) queryingStreamAction.value = false }
+}
+
+async function takeOverStreamRecovery() {
+  if (resolvingStreamAction.value) return
+  resolvingStreamAction.value = true
+  try {
+    const result = await systemClient.setStreamTakeover(true)
+    if (!result.ok) throw new Error(result.error || '人工接管未生效')
+    streamTakeoverEnabled.value = true
+    await Promise.allSettled([loadStream(), reconcileStreamExecution()])
+  } catch (error) { listFailed('actions', error) }
+  finally { resolvingStreamAction.value = false }
+}
+
+async function resolveUnknownStreamAction(outcome: 'known_success' | 'failed') {
+  const snapshot = uncertainStreamAction.value
+  if (resolvingStreamAction.value || !snapshot?.action || !snapshot.recovery.canResolve || !snapshot.recovery.humanTakeover) return
+  const requestId = uncertainStreamRequest.value
+  if (snapshot.requestId !== requestId) return
+  const action = snapshot.action.action
+  resolvingStreamAction.value = true
+  try {
+    try {
+      await ElMessageBox.confirm(
+        `仅在已核对外部平台后确认：请求 ${requestId}（${action}）${outcome === 'known_success' ? '已产生预期效果' : '未完成预期效果/已失败'}。此操作只登记人工结论，不发送或重放动作；再次执行仍需新预览。`,
+        '人工确认原动作结果',
+        { type: 'warning', confirmButtonText: '确认并登记', cancelButtonText: t('tools.action.cancel') },
+      )
+    } catch { return }
+    if (requestId !== uncertainStreamRequest.value) return
+    const result = await systemClient.resolveStreamAction({ request_id: requestId, action, outcome, confirmed: true })
+    if (!result.ok || result.requestId !== requestId || !result.terminal || result.status !== outcome) throw new Error('人工结论尚未确认；请查询原请求。')
+    await reconcileStreamExecution()
+    await Promise.allSettled([loadStreamActions(), loadStreamDrafts()])
+    if (result.draftSyncError) listFailed('drafts', new Error(`动作结论已保存，但草稿投递状态同步失败：${result.draftSyncError}`))
+  } catch (error) {
+    listFailed('actions', error)
+    await reconcileStreamExecution()
+  } finally { resolvingStreamAction.value = false }
+}
+
 async function confirmStreamExecution() {
+  if (loadingStreamExecute.value || uncertainStreamRequest.value) return
+  if (!streamActionsLoaded.value) { ElMessage.warning('请先成功读取动作审计，再执行新动作。'); return }
   const pending = streamPendingExecution.value
-  if (!pending?.requestId) {
+  if (!pending?.requestId || !uiCapabilities.capability('hostHttp').available) {
     ElMessage.warning(t('tools.stream.previewExpired'))
     return
   }
-  try {
-    await ElMessageBox.confirm(
-        t('tools.stream.confirmExecuteMessage', { action: streamActionLabel(pending.action), risk: streamRiskLabel(streamSnapshot.value?.preview?.riskLevel) }),
-      t('tools.stream.confirmTitle'),
-      { type: 'warning', confirmButtonText: t('tools.stream.confirmExecute'), cancelButtonText: t('tools.action.cancel') },
-    )
-  } catch {
-    return
-  }
+  const frozen = JSON.parse(JSON.stringify(pending)) as typeof pending
   loadingStreamExecute.value = true
   try {
-    const result = await systemClient.executeStream({ ...pending, confirmed: true })
-    streamExecution.value = result
-    if (result.state && streamSnapshot.value) streamSnapshot.value = { ...streamSnapshot.value, state: result.state }
-    await Promise.all([loadStream(), loadStreamEvents(), loadStreamActions(), loadStreamDraftConsumer()])
-    if (result.ok) ElMessage.success(t('tools.stream.executionDoneWith', { status: result.verificationStatus || result.outcome || t('tools.stream.submitted') }))
-    else ElMessage.error(result.message || result.error || t('tools.stream.executionFailedHint'))
-  } catch (error) {
-    const message = describeFailure(error, t('tools.log.unknownError'))
-    streamExecution.value = { ok: false, outcome: 'failed', message }
-    // Provider state can change while the confirmation dialog is open (for
-    // example, Twitch EventSub may be revoked). Refresh the read-only
-    // snapshot so stale capabilities or previews cannot remain actionable.
     try {
-      await loadStream()
-    } catch {
-      // Keep the original execution error visible when the status refresh is
-      // unavailable; the next explicit refresh can reconcile the snapshot.
+      await ElMessageBox.confirm(
+        t('tools.stream.confirmExecuteMessage', { action: streamActionLabel(frozen.action), risk: streamRiskLabel(streamSnapshot.value?.preview?.riskLevel) }),
+        t('tools.stream.confirmTitle'),
+        { type: 'warning', confirmButtonText: t('tools.stream.confirmExecute'), cancelButtonText: t('tools.action.cancel') },
+      )
+    } catch { return }
+    // Refresh authority after the confirmation dialog: another cached workspace may have acted.
+    await loadStreamActions()
+    if (!pageLifecycle.active.value || !streamActionsLoaded.value || uncertainStreamRequest.value) return
+    // Persist the original identity before dispatch, including navigation/reload during the request.
+    uncertainStreamRequest.value = frozen.requestId
+    try {
+      const result = await systemClient.executeStream({ ...frozen, confirmed: true })
+      if (result.requestId !== frozen.requestId) throw new Error('动作响应 requestId 不一致；保持原请求未知')
+      streamExecution.value = result
+      if (result.state && streamSnapshot.value) streamSnapshot.value = { ...streamSnapshot.value, state: result.state }
+      const terminal = result.outcome === 'known_success' || result.outcome === 'failed' || (!result.ok && result.externalSideEffects === false)
+      if (terminal && !['unknown_effect', 'sending'].includes(result.verificationStatus || '')) {
+        uncertainStreamRequest.value = ''
+        streamPendingExecution.value = null
+      }
+      actionResult.value = uncertainStreamRequest.value
+        ? `请求 ${frozen.requestId} 结果未知；请查询原请求状态，暂停再次执行。`
+        : result.ok
+        ? t('tools.stream.executionDoneWith', { status: result.verificationStatus || result.outcome || t('tools.stream.submitted') })
+        : result.message || result.error || t('tools.stream.executionFailedHint')
+    } catch (error) {
+      uncertainStreamRequest.value = frozen.requestId
+      streamExecution.value = { ok: false, requestId: frozen.requestId, outcome: 'unknown_effect', externalSideEffects: true, message: describeFailure(error, '请求结果未知') }
+      actionResult.value = `请求 ${frozen.requestId} 结果未知；请查询原请求状态，暂停再次执行。`
     }
-    ElMessage.error(t('tools.stream.executionError', { message }))
-  } finally {
-    loadingStreamExecute.value = false
-  }
+    // A refresh failure is displayed by its list; it never replaces the action result.
+    await Promise.allSettled([loadStream(), loadStreamEvents(), loadStreamActions(), loadStreamDraftConsumer()])
+    if (uncertainStreamRequest.value) await reconcileStreamExecution()
+  } finally { loadingStreamExecute.value = false }
 }
 
 async function refreshSnapshots() {
@@ -2433,9 +2623,26 @@ async function refreshSnapshots() {
 
 watch(importedSkillItems, pruneSelectedSkillIds)
 
-onMounted(async () => {
-  await loadImportedSkills()
-  await refreshSnapshots()
+const pageLifecycle = usePanelLifecycle(async () => {
+  await Promise.all([loadImportedSkills(), refreshSnapshots(), uiCapabilities.refresh()])
+  if (uncertainStreamRequest.value) await reconcileStreamExecution()
+}, () => {
+  pageGeneration += 1
+  pluginLoadSequence += 1
+  capabilityLoadSequence += 1
+  toolTraceLoadSequence += 1
+  mcpLoadSequence += 1
+  streamActionsLoaded.value = false
+  queryingStreamAction.value = false
+  loadingPlugins.value = false
+  loadingCapabilities.value = false
+  loadingMcp.value = false
+  loadingImportedSkills.value = false
+  loadingStream.value = false
+  loadingStreamEvents.value = false
+  loadingStreamDrafts.value = false
+  loadingStreamActions.value = false
+  loadingObsProfiles.value = false
 })
 </script>
 

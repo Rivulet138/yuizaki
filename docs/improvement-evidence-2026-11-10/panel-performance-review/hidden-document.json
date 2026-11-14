@@ -1,0 +1,5 @@
+{
+  "document_hidden": true,
+  "catalog_reads_while_document_hidden_3100ms": 1,
+  "simulation": "document.hidden getter plus visibilitychange; verifies handler behavior, not OS minimization"
+}

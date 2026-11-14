@@ -1,0 +1,35 @@
+{
+  "http_status": 200,
+  "sections": {
+    "summary": {
+      "state": "applied",
+      "target_revision": 1,
+      "applied_revision": 1
+    },
+    "svc": {
+      "state": "applied",
+      "target_revision": 1,
+      "applied_revision": 1
+    },
+    "memory": {
+      "state": "applied",
+      "target_revision": 1,
+      "applied_revision": 1
+    },
+    "llm": {
+      "state": "applied",
+      "target_revision": 1,
+      "applied_revision": 1
+    },
+    "asr": {
+      "state": "applied",
+      "target_revision": 1,
+      "applied_revision": 1
+    },
+    "tts": {
+      "state": "applied",
+      "target_revision": 1,
+      "applied_revision": 1
+    }
+  }
+}

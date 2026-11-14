@@ -1,0 +1,2558 @@
+{
+  "browser": "Playwright bundled Chromium headless",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "results": [
+    {
+      "route": "chat",
+      "actual": "#/w/default/chat",
+      "headings": [],
+      "tabs": [],
+      "actions": [
+        {
+          "text": "高级",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "当前工作区",
+          "aria": "当前工作区",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "缩小模型",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "恢复模型大小",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "放大模型",
+          "disabled": false
+        },
+        {
+          "text": "语音模式",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "搜索消息",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "显示会话列表",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "上传文件",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "快捷短语",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "展开输入框",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "语音输入",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "网络搜索",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "翻译输入",
+          "disabled": true
+        },
+        {
+          "text": "",
+          "aria": "语音状态",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "语音回复",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "对话运行设置",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "更多",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "发送",
+          "disabled": true
+        }
+      ],
+      "canvas": 1,
+      "overflow": 0,
+      "routeHost": null,
+      "loading": 0,
+      "errors": []
+    },
+    {
+      "route": "memory",
+      "actual": "#/w/default/memory",
+      "headings": [
+        "长期记忆",
+        "长期记忆",
+        "记忆库"
+      ],
+      "tabs": [
+        {
+          "text": "记忆库0",
+          "selected": "true"
+        },
+        {
+          "text": "需要检查0",
+          "selected": "false"
+        },
+        {
+          "text": "使用情况",
+          "selected": "false"
+        }
+      ],
+      "actions": [
+        {
+          "text": "高级",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "当前工作区",
+          "aria": "当前工作区",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "切换深色",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "通知",
+          "disabled": false
+        },
+        {
+          "text": "高级工具",
+          "aria": "打开高级工具",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "刷新记忆",
+          "disabled": false
+        },
+        {
+          "text": "记忆库\n0",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "需要检查\n0",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "使用情况",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        }
+      ],
+      "canvas": 0,
+      "overflow": 0,
+      "routeHost": "memory",
+      "loading": 0,
+      "errors": []
+    },
+    {
+      "route": "settings",
+      "actual": "#/w/default/settings",
+      "headings": [
+        "系统设置",
+        "系统设置",
+        "生成风格",
+        "候选筛选",
+        "重复控制",
+        "上下文与限制"
+      ],
+      "tabs": [
+        {
+          "text": "访问",
+          "selected": "false"
+        },
+        {
+          "text": "LLM",
+          "selected": "true"
+        },
+        {
+          "text": "TTS",
+          "selected": "false"
+        },
+        {
+          "text": "ASR",
+          "selected": "false"
+        },
+        {
+          "text": "SVC 配置",
+          "selected": "false"
+        },
+        {
+          "text": "记忆",
+          "selected": "false"
+        },
+        {
+          "text": "摘要",
+          "selected": "false"
+        },
+        {
+          "text": "资源",
+          "selected": "false"
+        },
+        {
+          "text": "系统",
+          "selected": "false"
+        },
+        {
+          "text": "运行引导",
+          "selected": "false"
+        }
+      ],
+      "actions": [
+        {
+          "text": "高级",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "当前工作区",
+          "aria": "当前工作区",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "切换深色",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "通知",
+          "disabled": false
+        },
+        {
+          "text": "访问",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "LLM",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "TTS",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "ASR",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "SVC 配置",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "记忆",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "摘要",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "资源",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "系统",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "运行引导",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "自动检测并填入",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "检测模型",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "读取运行状态",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "测试 LLM",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "DeepSeek\n缺少 Key",
+          "aria": "DeepSeek: 缺少 Key",
+          "disabled": false
+        },
+        {
+          "text": "Qwen\n缺少 Key",
+          "aria": "Qwen: 缺少 Key",
+          "disabled": false
+        },
+        {
+          "text": "Gemini\n缺少 Key",
+          "aria": "Gemini: 缺少 Key",
+          "disabled": false
+        },
+        {
+          "text": "ChatGPT\n缺少 Key",
+          "aria": "ChatGPT: 缺少 Key",
+          "disabled": false
+        },
+        {
+          "text": "Claude\n缺少 Key",
+          "aria": "Claude: 缺少 Key",
+          "disabled": false
+        },
+        {
+          "text": "Grok\n缺少 Key",
+          "aria": "Grok: 缺少 Key",
+          "disabled": false
+        },
+        {
+          "text": "Ollama\n待选模型",
+          "aria": "Ollama: 待选模型",
+          "disabled": false
+        },
+        {
+          "text": "LM Studio\n待选模型",
+          "aria": "LM Studio: 待选模型",
+          "disabled": false
+        },
+        {
+          "text": "自定义\n可用",
+          "aria": "自定义: 可用",
+          "disabled": false
+        },
+        {
+          "text": "重置当前提供商",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "清除",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "应用推荐值",
+          "aria": null,
+          "disabled": false
+        }
+      ],
+      "canvas": 0,
+      "overflow": 0,
+      "routeHost": "settings",
+      "loading": 0,
+      "errors": []
+    },
+    {
+      "route": "prompt",
+      "actual": "#/w/default/prompt",
+      "headings": [
+        "人格设定",
+        "人格设定",
+        "工作区系统提示词",
+        "桌宠人格提示词",
+        "提示词模式",
+        "基础提示词",
+        "人格角色卡",
+        "世界书"
+      ],
+      "tabs": [],
+      "actions": [
+        {
+          "text": "高级",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "当前工作区",
+          "aria": "当前工作区",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "切换深色",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "通知",
+          "disabled": false
+        },
+        {
+          "text": "保存工作区提示词",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "刷新桌宠档案",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "保存人格提示词",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": true
+        }
+      ],
+      "canvas": 0,
+      "overflow": 0,
+      "routeHost": "prompt",
+      "loading": 0,
+      "errors": []
+    },
+    {
+      "route": "pet",
+      "actual": "#/w/default/pet",
+      "headings": [
+        "桌宠控制",
+        "桌宠控制",
+        "角色模型",
+        "桌面驻留"
+      ],
+      "tabs": [],
+      "actions": [
+        {
+          "text": "高级",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "当前工作区",
+          "aria": "当前工作区",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "切换深色",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "通知",
+          "disabled": false
+        },
+        {
+          "text": "关系历史",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "导入",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "切换模型",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "刷新模型清单",
+          "disabled": false
+        },
+        {
+          "text": "浏览",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "导入",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "全屏调整位置",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "恢复右下常驻",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "S",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "M",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "L",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "XL",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "注视中心",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "停止当前动作",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "同步能力",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "播放",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "保存锚点",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "刷新桌宠状态",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "应用停靠",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        }
+      ],
+      "canvas": 0,
+      "overflow": 0,
+      "routeHost": "pet",
+      "loading": 0,
+      "errors": []
+    },
+    {
+      "route": "svc",
+      "actual": "#/w/default/svc",
+      "headings": [
+        "結崎 · 本地桌宠 Agent",
+        "歌声转换"
+      ],
+      "tabs": [],
+      "actions": [
+        {
+          "text": "高级",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "当前工作区",
+          "aria": "当前工作区",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "切换深色",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "通知",
+          "disabled": false
+        },
+        {
+          "text": "打开 SVC 配置",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "开始 SVC 转换",
+          "aria": null,
+          "disabled": true
+        }
+      ],
+      "canvas": 0,
+      "overflow": 0,
+      "routeHost": "svc",
+      "loading": 0,
+      "errors": []
+    },
+    {
+      "route": "tool",
+      "actual": "#/w/default/tool",
+      "headings": [
+        "本地能力",
+        "能力与工具"
+      ],
+      "tabs": [
+        {
+          "text": "状态",
+          "selected": "true"
+        },
+        {
+          "text": "直播",
+          "selected": "false"
+        },
+        {
+          "text": "能力",
+          "selected": "false"
+        },
+        {
+          "text": "技能",
+          "selected": "false"
+        },
+        {
+          "text": "记录",
+          "selected": "false"
+        }
+      ],
+      "actions": [
+        {
+          "text": "高级",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "当前工作区",
+          "aria": "当前工作区",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "切换深色",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "通知",
+          "disabled": false
+        },
+        {
+          "text": "状态",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "直播",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "能力",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "技能",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "记录",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "可执行\n0\n低风险",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "需确认\n0\n执行前确认",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "MCP 异常\n0\n连接/清单",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "插件异常\n0\n加载/阻断",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "调用记录\n0\n最近链路",
+          "aria": null,
+          "disabled": false
+        }
+      ],
+      "canvas": 0,
+      "overflow": 0,
+      "routeHost": "tool",
+      "loading": 0,
+      "errors": []
+    },
+    {
+      "route": "plugins",
+      "actual": "#/w/default/plugins",
+      "headings": [
+        "插件管理",
+        "插件管理"
+      ],
+      "tabs": [],
+      "actions": [
+        {
+          "text": "高级",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "当前工作区",
+          "aria": "当前工作区",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "切换深色",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "通知",
+          "disabled": false
+        },
+        {
+          "text": "筛选异常插件",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "刷新插件状态",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "E\nExample Manifest Plugin\n\n演示插件工具能力已被主进程扫描\n\n已加载\n入口 1\n能力 1\n执行 0",
+          "aria": null,
+          "disabled": false
+        }
+      ],
+      "canvas": 0,
+      "overflow": 0,
+      "routeHost": "plugins",
+      "loading": 0,
+      "errors": []
+    },
+    {
+      "route": "infrastructure",
+      "actual": "#/w/default/infrastructure",
+      "headings": [
+        "服务与资源",
+        "服务与资源"
+      ],
+      "tabs": [],
+      "actions": [
+        {
+          "text": "高级",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "当前工作区",
+          "aria": "当前工作区",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "切换深色",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "通知",
+          "disabled": false
+        },
+        {
+          "text": "刷新状态",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "导出运行诊断",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "刷新采样",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "清理 HTTP 缓存",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "读取快照",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "更新统计",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "导出运行数据",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "导出表格",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "创建备份",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "预览恢复",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "确认恢复",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "刷新运行状态",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "启动后端",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "停止后端",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "API 文档",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "复制",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "复制",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "复制",
+          "aria": null,
+          "disabled": false
+        }
+      ],
+      "canvas": 0,
+      "overflow": 0,
+      "routeHost": "infrastructure",
+      "loading": 0,
+      "errors": []
+    },
+    {
+      "route": "agent-governance",
+      "actual": "#/w/default/agent-governance",
+      "headings": [
+        "权限审计",
+        "权限审计"
+      ],
+      "tabs": [
+        {
+          "text": "连接器",
+          "selected": "true"
+        },
+        {
+          "text": "MCP",
+          "selected": "false"
+        },
+        {
+          "text": "授权",
+          "selected": "false"
+        },
+        {
+          "text": "扩展",
+          "selected": "false"
+        },
+        {
+          "text": "Telegram",
+          "selected": "true"
+        },
+        {
+          "text": "Discord",
+          "selected": "false"
+        },
+        {
+          "text": "QQ 个人账号兼容桥",
+          "selected": "false"
+        },
+        {
+          "text": "微信个人账号兼容桥",
+          "selected": "false"
+        }
+      ],
+      "actions": [
+        {
+          "text": "高级",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "当前工作区",
+          "aria": "当前工作区",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "切换深色",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "通知",
+          "disabled": false
+        },
+        {
+          "text": "刷新治理快照",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "连接器",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "MCP",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "授权",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "扩展",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "刷新连接器",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "一键停用",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "一键停用",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "复制回调路径",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "重新读取",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "测试连接",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "保存设置",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "最近事件",
+          "aria": null,
+          "disabled": false
+        }
+      ],
+      "canvas": 0,
+      "overflow": 0,
+      "routeHost": "agent-governance",
+      "loading": 0,
+      "errors": []
+    },
+    {
+      "route": "agent-trace",
+      "actual": "#/w/default/agent-trace",
+      "headings": [
+        "任务追踪",
+        "任务追踪",
+        "后台任务",
+        "最近执行阶段"
+      ],
+      "tabs": [
+        {
+          "text": "状态",
+          "selected": "false"
+        },
+        {
+          "text": "后台任务",
+          "selected": "true"
+        },
+        {
+          "text": "计划任务",
+          "selected": "false"
+        },
+        {
+          "text": "追踪",
+          "selected": "false"
+        }
+      ],
+      "actions": [
+        {
+          "text": "高级",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "当前工作区",
+          "aria": "当前工作区",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "切换深色",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "通知",
+          "disabled": false
+        },
+        {
+          "text": "导出诊断",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "刷新",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "状态",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "后台任务",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "计划任务",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "追踪",
+          "aria": null,
+          "disabled": false
+        }
+      ],
+      "canvas": 0,
+      "overflow": 0,
+      "routeHost": "agent-trace",
+      "loading": 0,
+      "errors": []
+    },
+    {
+      "route": "persona-memory",
+      "actual": "#/w/default/persona-memory",
+      "headings": [
+        "行为记录",
+        "行为记录",
+        "当前状态"
+      ],
+      "tabs": [],
+      "actions": [
+        {
+          "text": "高级",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "当前工作区",
+          "aria": "当前工作区",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "切换深色",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "通知",
+          "disabled": false
+        },
+        {
+          "text": "刷新状态",
+          "aria": null,
+          "disabled": false
+        }
+      ],
+      "canvas": 0,
+      "overflow": 0,
+      "routeHost": "persona-memory",
+      "loading": 0,
+      "errors": []
+    },
+    {
+      "route": "i18n",
+      "actual": "#/w/default/i18n",
+      "headings": [
+        "语言管理",
+        "语言管理"
+      ],
+      "tabs": [],
+      "actions": [
+        {
+          "text": "高级",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "当前工作区",
+          "aria": "当前工作区",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "切换深色",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "通知",
+          "disabled": false
+        },
+        {
+          "text": "同步应用语言",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "刷新后端字典",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "仅切换后端诊断",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "查询消息",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "查询错误消息",
+          "aria": null,
+          "disabled": false
+        }
+      ],
+      "canvas": 0,
+      "overflow": 0,
+      "routeHost": "i18n",
+      "loading": 0,
+      "errors": []
+    },
+    {
+      "route": "deploy",
+      "actual": "#/w/default/infrastructure",
+      "headings": [
+        "服务与资源",
+        "服务与资源"
+      ],
+      "tabs": [],
+      "actions": [
+        {
+          "text": "高级",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "当前工作区",
+          "aria": "当前工作区",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "切换深色",
+          "disabled": false
+        },
+        {
+          "text": "",
+          "aria": "通知",
+          "disabled": false
+        },
+        {
+          "text": "刷新状态",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "导出运行诊断",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "刷新采样",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "清理 HTTP 缓存",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "读取快照",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "更新统计",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "导出运行数据",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "导出表格",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "创建备份",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "预览恢复",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "确认恢复",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "刷新运行状态",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "启动后端",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "停止后端",
+          "aria": null,
+          "disabled": true
+        },
+        {
+          "text": "API 文档",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "复制",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "复制",
+          "aria": null,
+          "disabled": false
+        },
+        {
+          "text": "复制",
+          "aria": null,
+          "disabled": false
+        }
+      ],
+      "canvas": 0,
+      "overflow": 0,
+      "routeHost": "infrastructure",
+      "loading": 0,
+      "errors": []
+    }
+  ],
+  "pageerrors": [],
+  "failedResponses": [
+    {
+      "route": "bootstrap",
+      "status": 504,
+      "method": "GET",
+      "path": "/api/workspaces"
+    },
+    {
+      "route": "memory",
+      "status": 409,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "plugins",
+      "status": 409,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "plugins",
+      "status": 409,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "plugins",
+      "status": 409,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "plugins",
+      "status": 409,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    }
+  ],
+  "requests": [
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/live2dcubismcore.min.js"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/onboarding/snapshot"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/catalog"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/state"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/avatar-capabilities"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/yumi-stage.png"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/catalog"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/env-check"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/settings/"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/system/voice-diagnostics/run"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/health"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/ping"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/companions"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/yumi.model3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/yumi.moc3"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/%E4%BF%AF%E8%BA%AB%E6%8C%89%E9%94%AE.exp3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/%E6%8A%AC%E6%89%8B%E5%8F%B3.exp3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/%E6%8A%AC%E6%89%8B%E5%B7%A6.exp3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/%E6%8B%BF%E8%AF%9D%E7%AD%92.exp3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/%E6%98%9F%E6%98%9F%E7%9C%BC.exp3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/%E6%AD%AA%E5%98%B4.exp3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/%E6%B3%AA%E6%B1%AA%E6%B1%AA.exp3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/%E6%BC%82%E6%B5%AE%E5%B0%8F%E7%8B%97.exp3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/%E7%88%B1%E5%BF%83%E7%9C%BC.exp3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/%E7%8C%AB%E7%8C%AB%E5%98%B4.exp3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/%E7%9C%BC%E6%B3%AA.exp3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/%E7%9C%BC%E7%BD%A9.exp3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/%E7%9F%AD%E5%8F%911.exp3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/%E7%9F%AD%E5%8F%912.exp3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/%E8%88%8C%E5%A4%B4%E4%BC%B8%E5%87%BA.exp3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/%E8%9A%8A%E9%A6%99%E7%9C%BC.exp3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/%E9%BB%91%E8%84%B8.exp3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/yumi.physics3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/wave.motion3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/tear.motion3.json"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/live2d/llm-live2d/yumi/yumi.8192/texture_00.webp"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/catalog"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/state"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/catalog"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/state"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/catalog"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/state"
+    },
+    {
+      "route": "bootstrap",
+      "status": 504,
+      "method": "GET",
+      "path": "/api/workspaces"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/catalog"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/state"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/settings/tts/warmup"
+    },
+    {
+      "route": "bootstrap",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/system/active-workspace"
+    },
+    {
+      "route": "chat",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/catalog"
+    },
+    {
+      "route": "chat",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/state"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/catalog"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/state"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "GET",
+      "path": "/memory/docs"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "GET",
+      "path": "/memory/docs"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "GET",
+      "path": "/memory/candidates"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "GET",
+      "path": "/memory/overview"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/companion-runtime"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/companion-idle-profile"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "GET",
+      "path": "/memory/index/status"
+    },
+    {
+      "route": "memory",
+      "status": 409,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/sessions"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/behavior-state"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "GET",
+      "path": "/memory/docs"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "GET",
+      "path": "/memory/candidates"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "GET",
+      "path": "/memory/overview"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "GET",
+      "path": "/memory/docs"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/system/voice-diagnostics/run"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/history/sess_d85dd96bef504311bf3d"
+    },
+    {
+      "route": "memory",
+      "status": 200,
+      "method": "GET",
+      "path": "/memory/index/status"
+    },
+    {
+      "route": "settings",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "settings",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/backend-token"
+    },
+    {
+      "route": "settings",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/settings/"
+    },
+    {
+      "route": "settings",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/settings/metadata"
+    },
+    {
+      "route": "settings",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/settings/history"
+    },
+    {
+      "route": "settings",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/resources"
+    },
+    {
+      "route": "settings",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/settings/tts/status"
+    },
+    {
+      "route": "settings",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/settings/tts/characters"
+    },
+    {
+      "route": "settings",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/storage"
+    },
+    {
+      "route": "settings",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/settings/llm/status"
+    },
+    {
+      "route": "settings",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/settings/llm/models"
+    },
+    {
+      "route": "settings",
+      "status": 200,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "prompt",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "pet",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "pet",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/displays"
+    },
+    {
+      "route": "pet",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/state"
+    },
+    {
+      "route": "pet",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/presets"
+    },
+    {
+      "route": "pet",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/avatar-capabilities"
+    },
+    {
+      "route": "pet",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/pet/catalog"
+    },
+    {
+      "route": "svc",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "tool",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "tool",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/skills/imported"
+    },
+    {
+      "route": "tool",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/plugin/list"
+    },
+    {
+      "route": "plugins",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "plugins",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/capabilities"
+    },
+    {
+      "route": "plugins",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/settings/"
+    },
+    {
+      "route": "plugins",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/agent-trace"
+    },
+    {
+      "route": "plugins",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/mcp"
+    },
+    {
+      "route": "plugins",
+      "status": 200,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "plugins",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/stream/twitch/config"
+    },
+    {
+      "route": "plugins",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/stream"
+    },
+    {
+      "route": "plugins",
+      "status": 409,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "plugins",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/stream/events"
+    },
+    {
+      "route": "plugins",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/stream/drafts"
+    },
+    {
+      "route": "plugins",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/stream/actions"
+    },
+    {
+      "route": "plugins",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/health"
+    },
+    {
+      "route": "plugins",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/plugin/list"
+    },
+    {
+      "route": "plugins",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/stream/draft-consumer"
+    },
+    {
+      "route": "plugins",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/ping"
+    },
+    {
+      "route": "plugins",
+      "status": 409,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "plugins",
+      "status": 409,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "plugins",
+      "status": 409,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "infrastructure",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "infrastructure",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/logs"
+    },
+    {
+      "route": "infrastructure",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/ping"
+    },
+    {
+      "route": "infrastructure",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/backup/targets"
+    },
+    {
+      "route": "infrastructure",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/diagnostics"
+    },
+    {
+      "route": "infrastructure",
+      "status": 200,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "infrastructure",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/settings/llm/models"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/plugin/list"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/permissions"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/agent-plugins"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/mcp"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/connectors/telegram/config"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/connectors"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/connectors/discord/config"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/connectors/qq/config"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/connectors/wechat/config"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/connectors/telegram/deliveries"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/connectors/discord/deliveries"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/connectors/qq/deliveries"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/connectors/wechat/deliveries"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/connectors/qq/account"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/connectors/wechat/account"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/connectors/qq/bridge"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/connectors/qq/account"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/connectors/wechat/account"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/providers"
+    },
+    {
+      "route": "agent-governance",
+      "status": 200,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "agent-trace",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "agent-trace",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/schedules"
+    },
+    {
+      "route": "agent-trace",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/experience-metrics"
+    },
+    {
+      "route": "agent-trace",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/agent-trace"
+    },
+    {
+      "route": "agent-trace",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/companion-runtime"
+    },
+    {
+      "route": "agent-trace",
+      "status": 200,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "persona-memory",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "persona-memory",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/system/heartbeat"
+    },
+    {
+      "route": "persona-memory",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/readiness"
+    },
+    {
+      "route": "persona-memory",
+      "status": 200,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "i18n",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    },
+    {
+      "route": "i18n",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/i18n/locales"
+    },
+    {
+      "route": "i18n",
+      "status": 200,
+      "method": "GET",
+      "path": "/api/i18n/messages"
+    },
+    {
+      "route": "i18n",
+      "status": 200,
+      "method": "PATCH",
+      "path": "/api/workspaces/default"
+    },
+    {
+      "route": "deploy",
+      "status": 200,
+      "method": "POST",
+      "path": "/api/pet/visibility"
+    }
+  ]
+}

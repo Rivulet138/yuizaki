@@ -6,15 +6,10 @@ from time import perf_counter
 from typing import Any, cast
 
 from .backend import MemoryBackend, MemorySearchIncompleteError
-from .metadata import recall_rejection_reason
+from .metadata import memory_scope_rejection_reason, recall_rejection_reason
 from .relation_projection import MemoryRelationProjection, build_relation_projection
 from .schema import MemorySearchFilters, RetrievalRequest, RetrievalTrace
 from .vector_store import Document, memory_score_weights
-
-
-def _normalize_scope_id(value: Any) -> str | None:
-    normalized = str(value or '').strip()
-    return normalized or None
 
 
 class RetrievalPipeline:
@@ -157,8 +152,6 @@ class RetrievalPipeline:
 
         eligible: list[tuple[Document, float]] = []
         filter_reasons: dict[str, int] = {}
-        requested_session_id = _normalize_scope_id(request.session_id)
-        requested_workspace_id = _normalize_scope_id(request.workspace_id)
 
         def _reject_reason(doc: Document) -> str | None:
             metadata = doc.metadata or {}
@@ -166,39 +159,13 @@ class RetrievalPipeline:
             if state_reason is not None:
                 return state_reason
             layer = str(metadata.get('layer', 'semantic'))
-            scope = str(metadata.get('scope', 'workspace'))
             if layer not in request.layers:
                 return 'layer'
             if request.memory_role and str(metadata.get('memory_role') or '') != request.memory_role:
                 return 'memory_role'
-            if request.scope == 'global':
-                if scope != 'global':
-                    return 'scope'
-                document_session_id = _normalize_scope_id(metadata.get('session_id'))
-                if requested_session_id is not None and document_session_id not in (None, requested_session_id):
-                    return 'session'
-                return None
-            if request.scope and scope != request.scope:
-                return 'scope'
-            if request.scope == 'session':
-                document_session_id = _normalize_scope_id(metadata.get('session_id'))
-                if requested_session_id is None or document_session_id not in (requested_session_id,):
-                    return 'session'
-            elif request.scope == 'workspace':
-                document_workspace_id = _normalize_scope_id(metadata.get('workspace_id'))
-                if requested_workspace_id is None:
-                    if document_workspace_id is not None:
-                        return 'workspace'
-                elif document_workspace_id not in (requested_workspace_id, None):
-                    return 'workspace'
-            else:
-                document_session_id = _normalize_scope_id(metadata.get('session_id'))
-                if requested_session_id is not None and document_session_id not in (None, requested_session_id):
-                    return 'session'
-                document_workspace_id = _normalize_scope_id(metadata.get('workspace_id'))
-                if requested_workspace_id is not None and document_workspace_id not in (None, requested_workspace_id):
-                    return 'workspace'
-            return None
+            return memory_scope_rejection_reason(
+                metadata, scope=request.scope, workspace_id=request.workspace_id, session_id=request.session_id,
+            )
 
         for doc, score in raw_results:
             reason = _reject_reason(doc)
@@ -231,6 +198,9 @@ class RetrievalPipeline:
                 if depth >= request.relation_depth:
                     continue
                 for edge in relation_projection.neighbors(anchor.id):
+                    if len(expanded) >= request.relation_limit:
+                        expansion_truncated = True
+                        break
                     related_id = edge.target_id
                     if related_id in seen_refs:
                         continue

@@ -224,12 +224,14 @@ class PetRenderer {
 	private live2dVisualLocalBounds: VisualBounds | null = null;
 	private live2dVisualScaleCorrection = 1;
 	private live2dBaseScale: number | null = null;
+	private embeddedFitScale = 1;
 	private viewportOverride: { width: number; height: number } | null = null;
 	private visualCalibrationFrame: number | null = null;
 	private visualCalibrationGeneration = 0;
 	private readonly container: HTMLElement;
 	private config: PetConfig;
 	private destroyed = false;
+	private embeddedActive = true;
 	private interactMode = false;
 
 	private noticeEl: HTMLDivElement | null = null;
@@ -325,7 +327,7 @@ class PetRenderer {
 		Live2DConfig.MotionGroupIdle = "Idle";
 		Live2DConfig.MouseFollow = false;
 
-		this.app = await createPixiApp({
+		const initializedApp = await createPixiApp({
 			width: window.innerWidth,
 			height: window.innerHeight,
 			backgroundAlpha: 0,
@@ -341,9 +343,14 @@ class PetRenderer {
 				wheel: false,
 			},
 		});
+		if (this.destroyed) {
+			initializedApp.destroy(true);
+			return;
+		}
+		this.app = initializedApp;
 		this.performanceController = new PetPerformanceController({
 			ticker: this.app.ticker,
-			isHidden: () => document.hidden,
+			isHidden: () => this.isHidden(),
 			onTierChange: (tier, reason) => this.applyFpsTier(tier, reason),
 			idleThresholdMs: IDLE_THRESHOLD_MS,
 		});
@@ -392,7 +399,7 @@ class PetRenderer {
 		this.canvas.style.cursor = "default";
 		this.container.appendChild(this.canvas);
 
-		this.setupGlobalListeners();
+		this.setupGlobalListeners(this.embeddedActive);
 		this.setupModelInteractivity();
 		this.setupAdjustmentControls();
 		this.setupIPCListeners();
@@ -400,13 +407,14 @@ class PetRenderer {
 		// Live2D resolves its ready promise from a render frame. Keep the Pixi
 		// ticker alive while the initial model is loading, even if this window
 		// is still hidden; the visibility policy is restored after load settles.
-		this.app.ticker.start();
+		if (this.embeddedActive) this.app.ticker.start();
+		else this.app.ticker.stop();
 		window.live2dApi?.pet.rendererReady();
 		this.reportRendererMetrics("init");
 	}
 
-	async loadModel(modelPath: string): Promise<void> {
-		if (!this.app) {
+	async loadModel(modelPath: string, propagateFailure = false): Promise<void> {
+		if (!this.app || this.destroyed || !this.embeddedActive) {
 			return;
 		}
 		// A hidden Electron window may have its ticker paused by the performance
@@ -441,6 +449,7 @@ class PetRenderer {
 					}),
 				);
 				this.reportState(true);
+				if (propagateFailure) throw error;
 			}
 			this.startPerformanceController();
 			return;
@@ -462,6 +471,7 @@ class PetRenderer {
 		if (this.config.modelType !== "live2d") {
 			try {
 				const { VrmRuntimeAdapter } = await import("./runtime/vrm-runtime-adapter");
+				if (this.destroyed || loadGeneration !== this.modelLoadGeneration) return;
 				this.vrmRuntime = new VrmRuntimeAdapter({
 					container: this.container,
 					config: this.config,
@@ -470,6 +480,7 @@ class PetRenderer {
 					reportState: (force) => this.reportState(force),
 					markActivity: (reason) => this.markActivity(reason),
 				});
+				this.applyRuntimePerformancePolicy();
 				const runtime = this.vrmRuntime;
 				await this.loadRuntimeWithRecovery(
 					() => runtime.loadModel({ modelPath, animationPaths: this.resolveAnimationPaths() }),
@@ -494,6 +505,7 @@ class PetRenderer {
 				);
 				console.error("[PetRenderer] failed to load VRM model:", error);
 				this.reportState(true);
+				if (propagateFailure) throw error;
 			}
 			this.startPerformanceController();
 			return;
@@ -552,6 +564,7 @@ class PetRenderer {
 			}
 			this.reportModelLoadTerminal("live2d", modelPath, error);
 			this.showNotice(getReadableError(error));
+			if (propagateFailure) throw error;
 			console.error("[PetRenderer] failed to load model:", error);
 			this.reportState(true);
 		}
@@ -1402,6 +1415,27 @@ class PetRenderer {
 		}
 	}
 
+	/** Pause an embedded stage without unloading its model. Standalone windows stay active by default. */
+	setEmbeddedActive(active: boolean): void {
+		if (this.destroyed || this.embeddedActive === active) return;
+		this.embeddedActive = active;
+		if (this.app) this.setupGlobalListeners(active);
+		if (!active) {
+			this.visualCalibrationGeneration += 1;
+			if (this.visualCalibrationFrame !== null) {
+				window.cancelAnimationFrame(this.visualCalibrationFrame);
+				this.visualCalibrationFrame = null;
+			}
+			this.hoverMoveCoalescer.cancel();
+			this.clearLongPressTimer();
+		}
+		this.syncVisibilityPerformance();
+	}
+
+	private isHidden(): boolean {
+		return document.hidden || !this.embeddedActive;
+	}
+
 	/** Apply and load a renderer configuration from the browser scene without Electron IPC. */
 	async applyBrowserConfig(patch: PetControlConfigPatch): Promise<void> {
 		this.browserMode = true;
@@ -1415,7 +1449,7 @@ class PetRenderer {
 				? modelPath
 				: resolveRendererAsset(modelPath);
 		this.config.modelPath = resolvedModelPath;
-		await this.loadModel(resolvedModelPath);
+		await this.loadModel(resolvedModelPath, true);
 	}
 
 	private applyModelTransform(): void {
@@ -1460,7 +1494,7 @@ class PetRenderer {
 			defaultScale: DEFAULT_SCALE,
 			minScale: MIN_SCALE,
 			maxScale: this.browserMode ? BROWSER_MAX_SCALE : MAX_SCALE,
-			baseScale: baseScaleResult.baseScale,
+			baseScale: baseScaleResult.baseScale * this.embeddedFitScale,
 			modelCalibrationScale: (
 				this.config.modelManifest?.modelTransform?.scale
 					?? this.config.modelManifest?.transformDefaults?.scale
@@ -1589,6 +1623,7 @@ class PetRenderer {
 	}
 
 	private invalidateLive2DVisualCalibration(): void {
+		this.embeddedFitScale = 1;
 		this.visualCalibrationGeneration += 1;
 		this.live2dVisualLocalBounds = null;
 		this.live2dVisualScaleCorrection = 1;
@@ -1599,7 +1634,7 @@ class PetRenderer {
 	}
 
 	private scheduleLive2DVisualCalibration(): void {
-		if (!this.app || !this.model || !this.live2dViewport || this.destroyed) {
+		if (!this.app || !this.model || !this.live2dViewport || this.destroyed || !this.embeddedActive) {
 			return;
 		}
 
@@ -1799,8 +1834,9 @@ class PetRenderer {
 		window.live2dApi?.pet.reportState(this.buildStatePayload());
 	}
 
-	private setupGlobalListeners(): void {
-		attachWindowListeners({
+	private setupGlobalListeners(active = true): void {
+		const updateListeners = active ? attachWindowListeners : detachWindowListeners;
+		updateListeners({
 			handleWindowMouseDown: this.handleWindowMouseDown,
 			handleWindowMouseMove: this.handleWindowMouseMove,
 			handleWindowMouseUp: this.handleWindowMouseUp,
@@ -1813,7 +1849,13 @@ class PetRenderer {
 			handleWindowError: this.handleWindowError,
 			handleUnhandledRejection: this.handleUnhandledRejection,
 		});
-		document.addEventListener('visibilitychange', this.handleVisibilityChange);
+		if (active) {
+			document.addEventListener('visibilitychange', this.handleVisibilityChange);
+			window.addEventListener("keydown", this.handleAdjustmentKeyDown);
+		} else {
+			document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+			window.removeEventListener("keydown", this.handleAdjustmentKeyDown);
+		}
 	}
 
 	private installEasyLive2DInteractivity(): void {
@@ -2194,6 +2236,7 @@ class PetRenderer {
 	}
 
 	private startPerformanceController(): void {
+		if (this.destroyed) return;
 		this.performanceController?.start();
 	}
 
@@ -2202,7 +2245,9 @@ class PetRenderer {
 	}
 
 	private syncVisibilityPerformance(): void {
+		if (this.destroyed) return;
 		this.performanceController?.syncVisibility();
+		if (this.isHidden()) this.app?.ticker.stop();
 		this.applyRuntimePerformancePolicy();
 	}
 
@@ -2234,7 +2279,7 @@ class PetRenderer {
 	private applyRuntimePerformancePolicy(): void {
 		this.vrmRuntime?.setRenderPolicy({
 			targetFps: this.currentFpsTier === "active" ? ACTIVE_FPS : IDLE_FPS,
-			paused: document.hidden,
+			paused: this.isHidden(),
 		});
 	}
 
@@ -2363,7 +2408,6 @@ class PetRenderer {
 		this.adjustmentCancelButton = document.getElementById("pet-adjustment-cancel") as HTMLButtonElement | null;
 		this.adjustmentSaveButton?.addEventListener("click", this.handleAdjustmentSave);
 		this.adjustmentCancelButton?.addEventListener("click", this.handleAdjustmentCancel);
-		window.addEventListener("keydown", this.handleAdjustmentKeyDown);
 		this.syncAdjustmentControls();
 	}
 
@@ -2402,7 +2446,7 @@ class PetRenderer {
 	};
 
 	private readonly handleAdjustmentKeyDown = (event: KeyboardEvent): void => {
-		if (!this.interactMode || this.adjustmentActionPending) return;
+		if (!this.embeddedActive || !this.interactMode || this.adjustmentActionPending) return;
 		if (event.key === "Escape") {
 			event.preventDefault();
 			this.runAdjustmentAction("cancel");
@@ -2762,6 +2806,23 @@ class PetRenderer {
 		this.markActivity("wheel-scale");
 	};
 
+	/** Fit calibrated visible bounds inside an embedded stage at native canvas resolution. */
+	fitEmbeddedModelToViewport(): number | null {
+		if (!this.browserMode || this.config.modelType !== "live2d" || !this.live2dVisualLocalBounds) return null;
+		const bounds = this.getLive2DVisualBounds();
+		const viewport = this.getViewportSize();
+		if (bounds.width <= 0 || bounds.height <= 0) return null;
+		const nextFit = this.embeddedFitScale * Math.min(
+			viewport.width * 0.84 / bounds.width,
+			viewport.height * 0.8 / bounds.height,
+		);
+		if (Math.abs(nextFit - this.embeddedFitScale) > 0.001) {
+			this.embeddedFitScale = nextFit;
+			this.applyModelTransform();
+		}
+		return this.embeddedFitScale;
+	}
+
 	/** Resize the renderer to an embedded viewport, used by the browser stage. */
 	resizeTo(width: number, height: number): void {
 		const safeWidth = Math.max(1, Math.round(width));
@@ -2780,6 +2841,7 @@ class PetRenderer {
 		this.invalidateLive2DVisualCalibration();
 		this.vrmRuntime?.resize(width, height);
 		this.applyModelTransform();
+		if (this.browserMode) this.scheduleLive2DVisualCalibration();
 		this.reportRendererMetrics("resize");
 
 		this.syncMouseCaptureFromLastPoint("resize", true);
@@ -2993,6 +3055,7 @@ class PetRenderer {
 	}
 
 	destroy(): void {
+		if (this.destroyed) return;
 		this.destroyed = true;
 		this.invalidateLive2DVisualCalibration();
 		this.modelLoadGeneration += 1;
@@ -3029,20 +3092,7 @@ class PetRenderer {
 
 		this.stopPerformanceController();
 		this.performanceController = null;
-		document.removeEventListener('visibilitychange', this.handleVisibilityChange);
-		detachWindowListeners({
-			handleWindowMouseDown: this.handleWindowMouseDown,
-			handleWindowMouseMove: this.handleWindowMouseMove,
-			handleWindowMouseUp: this.handleWindowMouseUp,
-			handleWindowPointerCancel: this.handleWindowPointerCancel,
-			handleWindowMouseLeave: this.handleWindowMouseLeave,
-			handleWindowBlur: this.handleWindowBlur,
-			handleWindowWheel: this.handleWindowWheel,
-			handleResize: this.handleResize,
-			handleWindowContextMenu: this.handleWindowContextMenu,
-			handleWindowError: this.handleWindowError,
-			handleUnhandledRejection: this.handleUnhandledRejection,
-		});
+		this.setupGlobalListeners(false);
 
 		if (this.model) {
 			this.model = destroyCurrentModel(this.app, this.model);

@@ -1,14 +1,8 @@
 {
   "version": 2,
-  "generatedAt": "2026-11-03T05:05:18.854Z",
+  "generatedAt": "2026-11-10T06:27:55.239Z",
   "note": "Known vue-tsc errors in the renderer program. Regenerate with: node scripts/check-renderer-types.mjs --update",
-  "total": 3,
-  "errors": [
-    "src/renderer/runtime/vrm-runtime-adapter.ts:TS7006:Parameter 'parser' implicitly has an 'any' type.",
-    "src/renderer/runtime/vrm-runtime-adapter.ts:TS7016:Could not find a declaration file for module 'three'. 'E:/yuizaki/electron/node_modules/three/build/three.module.js' implicitly has an 'any' type.",
-    "src/renderer/runtime/vrm-runtime-adapter.ts:TS7016:Could not find a declaration file for module 'three/examples/jsm/loaders/GLTFLoader.js'. 'E:/yuizaki/electron/node_modules/three/examples/jsm/loaders/GLTFLoader.js' implicitly has an 'any' type."
-  ],
-  "fileCounts": {
-    "src/renderer/runtime/vrm-runtime-adapter.ts": 3
-  }
+  "total": 0,
+  "errors": [],
+  "fileCounts": {}
 }

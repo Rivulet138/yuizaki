@@ -670,7 +670,7 @@ class TurnCommitStore:
         with self._lock, self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                """SELECT status, connector_id, attempt_count, claimed_by, claim_expires_at,
+                """SELECT status, attempt_count, claimed_by, claim_expires_at,
                           delivered_at FROM connector_deliveries
                    WHERE delivery_key = ?""",
                 (key,),
@@ -690,7 +690,7 @@ class TurnCommitStore:
                 }
             # Expiry releases ownership, not evidence that the provider did
             # not receive a send. Only explicit resolution may unlock it.
-            if row is not None and row["status"] == "sending" and row["connector_id"] == "qq":
+            if row is not None and row["status"] == "sending":
                 return {"status": "unknown"}
             attempts = int(row["attempt_count"] or 0) + 1 if row is not None else 1
             message_json = json.dumps(dict(message), ensure_ascii=False) if message is not None else None
@@ -873,7 +873,7 @@ class TurnCommitStore:
         return [dict(row) for row in rows]
 
     def reset_connector_delivery_for_retry(self, delivery_key: str) -> bool:
-        """Release a failed delivery; QQ unknown sends require explicit resolution."""
+        """Release a failed delivery; unknown sends need explicit resolution."""
         key = str(delivery_key or "").strip()
         if not key:
             return False
@@ -881,16 +881,11 @@ class TurnCommitStore:
         with self._lock, self._connect() as conn:
             cursor = conn.execute(
                 """UPDATE connector_deliveries
-                   SET status = CASE WHEN status = 'sending' THEN 'failed' ELSE status END,
-                       claimed_by = NULL, claim_expires_at = NULL, updated_at = ?
-                   WHERE delivery_key = ?
-                     AND ((status = 'failed' AND
-                           (claimed_by IS NULL OR
-                            (typeof(claim_expires_at) IN ('integer', 'real') AND claim_expires_at <= ?)))
-                       OR (status = 'sending' AND connector_id != 'qq'
-                           AND typeof(claim_expires_at) IN ('integer', 'real')
-                           AND claim_expires_at <= ?))""",
-                (now, key, now, now),
+                   SET claimed_by = NULL, claim_expires_at = NULL, updated_at = ?
+                   WHERE delivery_key = ? AND status = 'failed'
+                     AND (claimed_by IS NULL OR
+                          (typeof(claim_expires_at) IN ('integer', 'real') AND claim_expires_at <= ?))""",
+                (now, key, now),
             )
             return cursor.rowcount == 1
 

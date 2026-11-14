@@ -1,0 +1,288 @@
+{
+  "samples": [
+    {
+      "route": "memory",
+      "visible_ms": 129.7,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/assets/MemoryPanel-bWM2S-MP.js",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/element-plus~ChatPanel~MemoryPanel-C-YcBhLu.js",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/element-plus~ChatPanel~MemoryPanel-BeIfAqTO.css",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/MemoryPanel-DQDzWoLO.css",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/memory/docs",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/overview",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/docs",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/candidates",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 67.3,
+      "same_settings_instance": true,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "chat",
+      "visible_ms": 147.0,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/assets/ChatPanel-DjLnIzxd.js",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/element-plus~ChatPanel-efIZ7XQm.js",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/element-plus~ChatPanel-Ciemdyvv.css",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/ChatPanel-Cx0RywKG.css",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/pet/state",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/catalog",
+          "method": "GET"
+        },
+        {
+          "path": "/live2d/llm-live2d/yumi/yumi-stage.png",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 5549.3,
+      "same_settings_instance": false,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/system/backend-token",
+          "method": "GET"
+        },
+        {
+          "path": "/api/workspaces/default",
+          "method": "PATCH"
+        },
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/settings/runtime/status",
+          "method": "GET"
+        },
+        {
+          "path": "/api/system/resources",
+          "method": "GET"
+        },
+        {
+          "path": "/api/system/storage",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/tts/status",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/llm/status",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/tts/characters",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/runtime/status",
+          "method": "GET"
+        },
+        {
+          "path": "/api/system/resources",
+          "method": "GET"
+        },
+        {
+          "path": "/api/system/storage",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/tts/status",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/llm/status",
+          "method": "GET"
+        },
+        {
+          "path": "/memory/index/status",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/llm/models",
+          "method": "POST"
+        },
+        {
+          "path": "/api/settings/metadata",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/history",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/runtime/status",
+          "method": "GET"
+        },
+        {
+          "path": "/api/system/resources",
+          "method": "GET"
+        },
+        {
+          "path": "/api/system/storage",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/tts/status",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/llm/status",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/tts/characters",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/llm/status",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/tts/status",
+          "method": "GET"
+        }
+      ]
+    },
+    {
+      "route": "prompt",
+      "visible_ms": 189.5,
+      "same_settings_instance": null,
+      "requests": [
+        {
+          "path": "/assets/PromptPanel-BtkIuMlZ.js",
+          "method": "GET"
+        },
+        {
+          "path": "/assets/PromptPanel-DczGSIXx.css",
+          "method": "GET"
+        },
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        }
+      ]
+    },
+    {
+      "route": "settings",
+      "visible_ms": 60.9,
+      "same_settings_instance": false,
+      "requests": [
+        {
+          "path": "/api/pet/visibility",
+          "method": "POST"
+        },
+        {
+          "path": "/api/settings/",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/runtime/status",
+          "method": "GET"
+        },
+        {
+          "path": "/api/system/resources",
+          "method": "GET"
+        },
+        {
+          "path": "/api/system/storage",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/tts/status",
+          "method": "GET"
+        },
+        {
+          "path": "/api/settings/llm/status",
+          "method": "GET"
+        }
+      ]
+    }
+  ],
+  "pageerrors": [],
+  "settings_gets": 6
+}

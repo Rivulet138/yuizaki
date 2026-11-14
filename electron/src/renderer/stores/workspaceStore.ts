@@ -59,10 +59,15 @@ export const isBuiltinDailyPrompt = (value?: string | null): boolean =>
 const createDefaultRoleCard = (): WorkspaceRoleCard => ({
   enabled: true,
   name: '',
+  description: '',
   personality: '',
   scenario: '',
   instructions: '',
   firstMessage: '',
+  exampleDialogue: '',
+  alternateGreetings: [],
+  greetingIndex: -1,
+  sourceCard: undefined,
 })
 
 const createDefaultWorldBook = (): WorkspaceWorldBook => ({
@@ -156,16 +161,30 @@ const normalizeMemoryPolicy = (value: Partial<WorkspaceMemoryPolicy> | undefined
   includeExactDuplicates: value?.includeExactDuplicates !== false,
 })
 
-const normalizeRoleCard = (value: Partial<WorkspaceRoleCard> | undefined): WorkspaceRoleCard => ({
-  ...createDefaultRoleCard(),
-  ...(value ?? {}),
-  enabled: value?.enabled !== false,
-  name: typeof value?.name === 'string' ? value.name : '',
-  personality: typeof value?.personality === 'string' ? value.personality : '',
-  scenario: typeof value?.scenario === 'string' ? value.scenario : '',
-  instructions: typeof value?.instructions === 'string' ? value.instructions : '',
-  firstMessage: typeof value?.firstMessage === 'string' ? value.firstMessage : '',
-})
+const normalizeRoleCard = (value: Partial<WorkspaceRoleCard> | undefined): WorkspaceRoleCard => {
+  const alternateGreetings = Array.isArray(value?.alternateGreetings)
+    ? value.alternateGreetings.filter((greeting): greeting is string => typeof greeting === 'string')
+    : []
+  const greetingIndex = value?.greetingIndex ?? -1
+  const sourceCard = value?.sourceCard
+  return {
+    ...createDefaultRoleCard(),
+    ...(value ?? {}),
+    enabled: value?.enabled !== false,
+    name: typeof value?.name === 'string' ? value.name : '',
+    description: typeof value?.description === 'string' ? value.description : '',
+    personality: typeof value?.personality === 'string' ? value.personality : '',
+    scenario: typeof value?.scenario === 'string' ? value.scenario : '',
+    instructions: typeof value?.instructions === 'string' ? value.instructions : '',
+    firstMessage: typeof value?.firstMessage === 'string' ? value.firstMessage : '',
+    exampleDialogue: typeof value?.exampleDialogue === 'string' ? value.exampleDialogue : '',
+    alternateGreetings,
+    greetingIndex: Number.isInteger(greetingIndex) && greetingIndex >= -1 && greetingIndex < alternateGreetings.length
+      ? greetingIndex : -1,
+    sourceCard: sourceCard && typeof sourceCard === 'object' && !Array.isArray(sourceCard)
+      ? JSON.parse(JSON.stringify(sourceCard)) as Record<string, unknown> : undefined,
+  }
+}
 
 const normalizeWorldBookEntry = (entry: Partial<WorkspaceWorldBookEntry>, index: number): WorkspaceWorldBookEntry => ({
   id: typeof entry.id === 'string' && entry.id.trim() ? entry.id : `world_${Date.now()}_${index}`,
@@ -326,56 +345,92 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     window.localStorage.setItem(ACTIVE_KEY, state.value.activeWorkspaceId)
   }
 
+  type SaveStatus = 'saving' | 'saved' | 'conflict' | 'failed'
+  const contextSaveStatus = ref<Record<string, SaveStatus>>({})
+  const contextSaveError = ref<Record<string, string>>({})
+  const syncError = ref('')
   const contextSaveTimers = new Map<string, number>()
-  const queueContextSave = (
-    workspaceId: string,
-    patch?: Partial<WorkspaceContext>,
-    retried = false,
-  ) => {
+  const contextEdits = new Map<string, { patch: Partial<WorkspaceContext>; running: boolean }>()
+  const flushContextSave = async (workspaceId: string) => {
+    const edit = contextEdits.get(workspaceId)
+    if (!edit || edit.running || Object.keys(edit.patch).length === 0) return
+    edit.running = true
+    contextSaveStatus.value[workspaceId] = 'saving'
+    contextSaveError.value[workspaceId] = ''
+    try {
+      // One writer per workspace; at most one rebase retry per save attempt.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const workspace = state.value.workspaces.find((item) => item.id === workspaceId)
+        if (!workspace || contextEdits.get(workspaceId) !== edit) return
+        const sentPatch = JSON.parse(JSON.stringify(edit.patch)) as Partial<WorkspaceContext>
+        const sentContext = JSON.parse(JSON.stringify(workspace.context)) as Record<string, unknown>
+        try {
+          const updated = await workspaceClient.update(workspaceId, {
+            context: sentContext,
+            contextRevision: workspace.contextRevision ?? 0,
+          })
+          const current = state.value.workspaces.find((item) => item.id === workspaceId)
+          if (!current || contextEdits.get(workspaceId) !== edit) return
+          if (typeof updated.contextRevision === 'number') current.contextRevision = updated.contextRevision
+          for (const key of Object.keys(sentPatch) as (keyof WorkspaceContext)[]) {
+            if (JSON.stringify(edit.patch[key]) === JSON.stringify(sentPatch[key])) delete edit.patch[key]
+          }
+          // A newer input always wins over a late normalized response.
+          if (asContextRecord(updated.context)) {
+            current.context = mergeWorkspaceContext(normalizeWorkspaceContext(asContextRecord(updated.context)), edit.patch)
+          }
+          contextSaveStatus.value[workspaceId] = Object.keys(edit.patch).length ? 'saving' : 'saved'
+          persist()
+          return
+        } catch (error) {
+          const conflict = error as { status?: number; payload?: { context?: unknown; contextRevision?: unknown } }
+          const current = state.value.workspaces.find((item) => item.id === workspaceId)
+          if (!current || contextEdits.get(workspaceId) !== edit) return
+          if (conflict.status !== 409) throw error
+          const base = asContextRecord(conflict.payload?.context)
+          const revision = conflict.payload?.contextRevision
+          if (base && typeof revision === 'number') {
+            current.context = mergeWorkspaceContext(normalizeWorkspaceContext(base), edit.patch)
+            current.contextRevision = revision
+            persist()
+            if (attempt === 0) continue
+          }
+          contextSaveStatus.value[workspaceId] = 'conflict'
+          contextSaveError.value[workspaceId] = '工作区版本冲突；输入已保留，请重试保存。'
+          return
+        }
+      }
+    } catch (error) {
+      if (contextEdits.get(workspaceId) !== edit) return
+      contextSaveStatus.value[workspaceId] = 'failed'
+      contextSaveError.value[workspaceId] = error instanceof Error ? error.message : '工作区保存失败；输入已保留。'
+    } finally {
+      edit.running = false
+      if (contextEdits.get(workspaceId) === edit && contextSaveStatus.value[workspaceId] === 'saving') queueContextSave(workspaceId)
+    }
+  }
+
+  const queueContextSave = (workspaceId: string, patch?: Partial<WorkspaceContext>) => {
     if (typeof window === 'undefined') return
+    const workspace = state.value.workspaces.find((item) => item.id === workspaceId)
+    if (!workspace) return
+    let edit = contextEdits.get(workspaceId)
+    if (!edit) {
+      edit = { patch: patch ? {} : { ...workspace.context }, running: false }
+      contextEdits.set(workspaceId, edit)
+    }
+    if (patch) edit.patch = { ...edit.patch, ...patch }
+    contextSaveStatus.value[workspaceId] = 'saving'
     const pending = contextSaveTimers.get(workspaceId)
     if (pending !== undefined) window.clearTimeout(pending)
-    const timer = window.setTimeout(() => {
+    contextSaveTimers.set(workspaceId, window.setTimeout(() => {
       contextSaveTimers.delete(workspaceId)
-      const workspace = state.value.workspaces.find((item) => item.id === workspaceId)
-      if (!workspace) return
-      void workspaceClient.update(workspaceId, {
-        context: workspace.context as unknown as Record<string, unknown>,
-        contextRevision: workspace.contextRevision ?? 0,
-      }).then((updated) => {
-        const current = state.value.workspaces.find((item) => item.id === workspaceId)
-        if (!current || typeof updated.contextRevision !== 'number') return
-        current.contextRevision = updated.contextRevision
-        persist()
-      }).catch((error: unknown) => {
-        // A stale revision means another client wrote first. Rebase this edit
-        // on the server value instead of discarding it, then retry once.
-        const conflict = error as {
-          status?: number
-          payload?: { context?: unknown; contextRevision?: unknown }
-        }
-        if (conflict?.status === 409 && conflict.payload) {
-          const current = state.value.workspaces.find((item) => item.id === workspaceId)
-          const serverContext = asContextRecord(conflict.payload.context)
-          if (current) {
-            const base = serverContext
-              ? normalizeWorkspaceContext(serverContext)
-              : createDefaultWorkspaceContext()
-            current.context = patch ? mergeWorkspaceContext(base, patch) : base
-            if (typeof conflict.payload.contextRevision === 'number') {
-              current.contextRevision = conflict.payload.contextRevision
-            }
-            persist()
-            if (patch && !retried) {
-              queueContextSave(workspaceId, patch, true)
-              return
-            }
-          }
-        }
-        console.debug('[WorkspaceStore] failed to persist workspace context:', error)
-      })
-    }, 600)
-    contextSaveTimers.set(workspaceId, timer)
+      void flushContextSave(workspaceId)
+    }, 600))
+  }
+
+  const retryContextSave = (workspaceId: string) => {
+    if (contextEdits.has(workspaceId)) queueContextSave(workspaceId)
   }
 
   const activeWorkspace = computed(() => {
@@ -430,11 +485,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const syncFromBackend = async () => {
+    syncError.value = ''
     try {
       const payload = await workspaceClient.list()
       const localContextMap = readStoredContexts()
       const contextsToBackfill: string[] = []
       const backendWorkspaces = payload.workspaces.map((workspace) => {
+        const pendingEdit = contextEdits.get(workspace.id)
+        const current = state.value.workspaces.find((item) => item.id === workspace.id)
         const local = localContextMap.get(workspace.id)
         const serverContext = asContextRecord(workspace.context)
         const serverRevision = typeof workspace.contextRevision === 'number' ? workspace.contextRevision : 0
@@ -462,8 +520,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           mcp_preset_id: workspace.mcp_preset_id,
           createdAt: workspace.created_at || new Date().toISOString(),
           updatedAt: workspace.updated_at || new Date().toISOString(),
-          context: normalizeWorkspaceContext(useLocal ? local!.context : serverContext),
-          contextRevision: serverRevision,
+          context: pendingEdit && current
+            ? (pendingEdit.running ? current.context : mergeWorkspaceContext(normalizeWorkspaceContext(serverContext), pendingEdit.patch))
+            : normalizeWorkspaceContext(useLocal ? local!.context : serverContext),
+          contextRevision: pendingEdit?.running && current ? current.contextRevision : serverRevision,
         }
       })
 
@@ -478,8 +538,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           queueContextSave(workspaceId)
         }
       }
-    } catch {
-      // fallback to local-only state
+    } catch (error) {
+      syncError.value = error instanceof Error ? error.message : '工作区同步失败，正在显示本地数据。'
     }
     await syncActiveWorkspaceToBackend(state.value.activeWorkspaceId)
   }
@@ -564,6 +624,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       window.clearTimeout(pendingContextSave)
       contextSaveTimers.delete(workspaceId)
     }
+    contextEdits.delete(workspaceId)
+    delete contextSaveStatus.value[workspaceId]
+    delete contextSaveError.value[workspaceId]
     state.value.workspaces = state.value.workspaces.filter((workspace) => workspace.id !== workspaceId)
     if (state.value.activeWorkspaceId === workspaceId) {
       state.value.activeWorkspaceId = state.value.workspaces[0]?.id || 'default'
@@ -618,6 +681,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     updateWorkspaceRemote,
     deleteWorkspaceRemote,
     updateWorkspaceContext,
+    contextSaveStatus,
+    contextSaveError,
+    syncError,
+    retryContextSave,
     persist,
   }
 })

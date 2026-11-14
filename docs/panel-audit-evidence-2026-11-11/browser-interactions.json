@@ -1,0 +1,41 @@
+{
+  "results": [
+    {
+      "scenario": "settings save failure and retry",
+      "passed": true,
+      "patch_count": 3,
+      "draft_preserved": true,
+      "response": "synthetic 503; no settings persisted"
+    },
+    {
+      "scenario": "memory advanced drawer opens",
+      "passed": true,
+      "buttons": [
+        "",
+        "重新核对索引与任务状态",
+        "重建搜索索引",
+        "",
+        "",
+        "",
+        "",
+        "偏好与称呼",
+        "当前事项",
+        "发生过的事",
+        "相处方式",
+        "经验总结",
+        "稳定事实",
+        "测试检索",
+        "使用全部类别"
+      ]
+    },
+    {
+      "scenario": "workspace drawer proactive controls finish loading",
+      "passed": true
+    },
+    {
+      "scenario": "onboarding skip remains usable when Electron host unavailable",
+      "passed": true
+    }
+  ],
+  "page_errors": []
+}

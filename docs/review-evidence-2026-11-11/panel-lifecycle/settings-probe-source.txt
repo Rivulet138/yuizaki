@@ -1,0 +1,67 @@
+describe('review evidence 2026-11-11', () => {
+  it('confirms a failed runtime retry remains visible after a successful applied status read', async () => {
+    const domain = useSettingsDomain()
+    domain.acceptRuntimeStatus({ sections: { svc: { state: 'failed', target_revision: 7, applied_revision: null } } })
+    vi.mocked(settingsClient.retryRuntime).mockRejectedValueOnce(new Error('synthetic retry failure'))
+    await domain.retryRuntime({ svc: 7 })
+    expect(domain.runtimeRetryRequest.error).toBeTruthy()
+    vi.mocked(settingsClient.runtimeStatus).mockResolvedValueOnce({ sections: { svc: { state: 'applied', target_revision: 7, applied_revision: 7 } } })
+    await domain.loadRuntimeStatus()
+    expect(domain.runtimeReload.value?.sections.svc.state).toBe('applied')
+    expect(domain.runtimeRetryRequest.error).toBeTruthy()
+    console.log('REVIEW_EVIDENCE runtime', JSON.stringify({ phase: domain.runtimeReload.value?.sections.svc.state, retryError: domain.runtimeRetryRequest.error }))
+  })
+
+  it('confirms an original panel retains its failure and raw draft after a second panel retries successfully', async () => {
+    state.hydratePreservingDraft(state.captureFormDraft(), saved)
+    state.form.summary.trigger_messages = 999
+    vi.mocked(settingsClient.save).mockRejectedValueOnce(new Error('synthetic save failure'))
+    state.debouncedSave({ summary: { trigger_messages: 999 } })
+    expect(await state.flushPendingSave()).toBe(false)
+    const secondScope = effectScope()
+    try {
+      const second: any = secondScope.run(() => (SettingsPanel as any).setup({}, { expose: vi.fn() }))
+      second.settings.value = structuredClone(saved)
+      second.hydratePreservingDraft(second.captureFormDraft(), saved)
+      expect(second.form.summary.trigger_messages).toBe(999)
+      const normalized = { ...saved, summary: { ...saved.summary, trigger_messages: 100 } }
+      vi.mocked(settingsClient.save).mockResolvedValueOnce({ status: 'ok', normalized_settings: normalized })
+      second.retryFailedSave()
+      await second.waitForSaveIdle()
+      await nextTick()
+      expect(second.form.summary.trigger_messages).toBe(100)
+      expect(state.failedSavePatch.value).toBeNull()
+      expect(state.settings.value.summary.trigger_messages).toBe(100)
+      expect(state.updateRequest.error).toBeTruthy()
+      expect(state.saveStatusLabel.value).toBe(t('settings.status.saveFailed'))
+      expect(state.form.summary.trigger_messages).toBe(999)
+      console.log('REVIEW_EVIDENCE cross-panel', JSON.stringify({ canonical: state.settings.value.summary.trigger_messages, oldPanelDraft: state.form.summary.trigger_messages, newPanelDraft: second.form.summary.trigger_messages, oldPanelError: state.updateRequest.error, sharedFailure: state.failedSavePatch.value, label: state.saveStatusLabel.value }))
+    } finally { secondScope.stop() }
+  })
+  it('confirms a queued edit from a second panel is not normalized when another panel drains the queue', async () => {
+    state.hydratePreservingDraft(state.captureFormDraft(), saved)
+    const first = deferred<any>()
+    const normalizedFirst = { ...saved, summary: { ...saved.summary, trigger_messages: 30 } }
+    const normalizedSecond = { ...saved, summary: { ...saved.summary, trigger_messages: 100 } }
+    vi.mocked(settingsClient.save).mockReturnValueOnce(first.promise).mockResolvedValueOnce({ status: 'ok', normalized_settings: normalizedSecond })
+    state.form.summary.trigger_messages = 30
+    state.debouncedSave({ summary: { trigger_messages: 30 } })
+    const flushing = state.flushPendingSave()
+    const secondScope = effectScope()
+    try {
+      const second: any = secondScope.run(() => (SettingsPanel as any).setup({}, { expose: vi.fn() }))
+      second.settings.value = structuredClone(saved)
+      second.hydratePreservingDraft(second.captureFormDraft(), saved)
+      second.form.summary.trigger_messages = 999
+      second.debouncedSave({ summary: { trigger_messages: 999 } })
+      first.resolve({ status: 'ok', normalized_settings: normalizedFirst })
+      await flushing
+      await nextTick()
+      expect(settingsClient.save).toHaveBeenCalledTimes(2)
+      expect(second.pendingSavePatch.value).toBeNull()
+      expect(second.settings.value.summary.trigger_messages).toBe(100)
+      expect(second.form.summary.trigger_messages).toBe(999)
+    } finally { secondScope.stop() }
+  })
+
+})

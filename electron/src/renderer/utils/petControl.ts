@@ -17,7 +17,7 @@ import type {
   PetModelImportMode,
 } from '../../shared/resource-manager'
 import type { AvatarCapabilitySnapshot, AvatarCommand, AvatarCommandResult } from '../../shared/avatar-command'
-import { CONTROL_ORIGIN } from '../api/clients/http-client'
+import { CONTROL_ORIGIN, requestJson as requestHostJson, type LocalRequestInit } from '../api/clients/http-client'
 import { t } from '@/i18n'
 
 type PetControlAutomationOptions = PetControlTriggerOptions & {
@@ -38,42 +38,16 @@ const getControlOrigin = (): string => {
   return configuredOrigin
 }
 
-const createControlConnectionError = (error: unknown): Error => {
-  const detail = error instanceof Error && error.message ? error.message : ''
-  return new Error(detail ? t('misc.petControlUnavailableWithDetail', { detail }) : t('misc.petControlUnavailable'), { cause: error })
-}
+const MODEL_FILE_OPERATION_TIMEOUT_MS = 30 * 60 * 1000
 
-const requestJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
-  let response: Response
-  try {
-    response = await fetch(`${getControlOrigin()}${path}`, {
-      ...init,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(init?.headers ?? {}),
-      },
-    })
-  } catch (error) {
-    throw createControlConnectionError(error)
-  }
-
-  if (!response.ok) {
-    let detail = ''
-    try {
-      const payload = await response.json() as { error?: unknown; message?: unknown }
-      detail = typeof payload.error === 'string'
-        ? payload.error
-        : typeof payload.message === 'string'
-          ? payload.message
-          : ''
-    } catch {
-      // keep the status-only fallback for non-JSON errors
-    }
-    throw new Error(detail || `Pet control request failed: ${response.status}`)
-  }
-
-  return response.json() as Promise<T>
-}
+const requestJson = <T>(path: string, init?: LocalRequestInit): Promise<T> =>
+  requestHostJson<T>(`${getControlOrigin()}${path}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+  })
 
 export type PetBehaviorState =
   | 'idle'
@@ -433,6 +407,7 @@ export const petControl = {
 
     return requestJson<LocalModelPickerResponse>('/api/pet/model/pick', {
       method: 'POST',
+      timeoutMs: MODEL_FILE_OPERATION_TIMEOUT_MS,
       body: JSON.stringify({ modelType }),
     })
   },
@@ -444,6 +419,7 @@ export const petControl = {
 
     return requestJson<LocalModelImportResponse>('/api/pet/model/import', {
       method: 'POST',
+      timeoutMs: MODEL_FILE_OPERATION_TIMEOUT_MS,
       body: JSON.stringify({ sourcePath, modelType }),
     })
   },
@@ -455,6 +431,7 @@ export const petControl = {
 
     return requestJson<LocalModelPickerImportResponse>('/api/pet/model/import-from-picker', {
       method: 'POST',
+      timeoutMs: MODEL_FILE_OPERATION_TIMEOUT_MS,
       body: JSON.stringify({ modelType }),
     })
   },

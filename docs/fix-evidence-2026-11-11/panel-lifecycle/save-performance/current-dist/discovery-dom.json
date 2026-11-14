@@ -1,0 +1,72 @@
+{
+  "url": "http://127.0.0.1:48949/#/w/default/settings?section=summary",
+  "tabs": [
+    {
+      "text": "访问",
+      "controls": "pane-access"
+    },
+    {
+      "text": "LLM",
+      "controls": "pane-llm"
+    },
+    {
+      "text": "TTS",
+      "controls": "pane-voice"
+    },
+    {
+      "text": "ASR",
+      "controls": "pane-asr"
+    },
+    {
+      "text": "SVC 配置",
+      "controls": "pane-svc"
+    },
+    {
+      "text": "记忆",
+      "controls": "pane-memory"
+    },
+    {
+      "text": "摘要",
+      "controls": "pane-summary"
+    },
+    {
+      "text": "资源",
+      "controls": "pane-resources"
+    },
+    {
+      "text": "系统",
+      "controls": "pane-system"
+    },
+    {
+      "text": "运行引导",
+      "controls": "pane-runtime-guide"
+    }
+  ],
+  "summaryInputs": [
+    {
+      "role": "spinbutton",
+      "value": "24",
+      "disabled": false
+    },
+    {
+      "role": "spinbutton",
+      "value": "8",
+      "disabled": false
+    },
+    {
+      "role": "spinbutton",
+      "value": "140",
+      "disabled": false
+    },
+    {
+      "role": "spinbutton",
+      "value": "6",
+      "disabled": false
+    },
+    {
+      "role": "combobox",
+      "value": "",
+      "disabled": false
+    }
+  ]
+}

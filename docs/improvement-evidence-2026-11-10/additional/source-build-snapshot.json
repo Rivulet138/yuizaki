@@ -1,0 +1,436 @@
+{
+  "captured_at": "2026-11-10T22:48:49.012115+08:00",
+  "workspace": "E:\\yuizaki",
+  "files": [
+    {
+      "path": "python/app.py",
+      "size": 37268,
+      "sha256": "7ffd003b82fd9d40dc2e6099680b88550409054367af6f6e46d296250ef298ad"
+    },
+    {
+      "path": "python/modules/memory/routes.py",
+      "size": 108338,
+      "sha256": "d801833bf36906ff0d3af5a38d7f0cc88f65e4e47ed8d9c63d953722699224fb"
+    },
+    {
+      "path": "python/modules/memory/metadata.py",
+      "size": 12397,
+      "sha256": "fb340039a29ac1911f08cddc8d72eee422994e04c66e004b9987cd0bc835c648"
+    },
+    {
+      "path": "python/modules/memory/pipeline.py",
+      "size": 17154,
+      "sha256": "64e6052c640951699815adcc3e17a5a186c034e22f9f9fd27e476e1ffa9bade9"
+    },
+    {
+      "path": "python/modules/memory/vector_store.py",
+      "size": 28797,
+      "sha256": "89f686910639d546a3966d2fcd68b3faedd825a7891b03c2492ac4dbc18e1984"
+    },
+    {
+      "path": "python/modules/memory/sqlite_store.py",
+      "size": 33928,
+      "sha256": "f4d155835a55d59f144618f6c3f0aea9c77d5b9245707e3262e8e841677c585d"
+    },
+    {
+      "path": "python/modules/memory/operations.py",
+      "size": 5015,
+      "sha256": "a76ee37a21cc3b912b94eacd66804f7abf1ea8b48cf50e526a094d77ba3140e7"
+    },
+    {
+      "path": "python/modules/system/settings_api.py",
+      "size": 52668,
+      "sha256": "c97d30d38de1062f1e391139e370cdbdd6f83f0b2716a4940b856b42e702b5b5"
+    },
+    {
+      "path": "python/modules/system/settings_models.py",
+      "size": 1525,
+      "sha256": "09a3ada5440e9ab5b1fc300654e1e192ce13feb82c3b7600f8e6df3f6b61c0de"
+    },
+    {
+      "path": "python/modules/system/backup_snapshot.py",
+      "size": 4067,
+      "sha256": "7ac89ebcb38f1beb47a0d5a159ff4f02ea0b9868046913b1c40d725dc740028b"
+    },
+    {
+      "path": "python/routes/storage_api.py",
+      "size": 8688,
+      "sha256": "7bac86d51eb6cdba5f2f1a916cd48245d9b3d0f97d3bee53a7a2c0ef94095b98"
+    },
+    {
+      "path": "python/routes/connector_api.py",
+      "size": 73945,
+      "sha256": "697a5040b42e372660c8c36a93eb1d92d2b68f13e39ddc0111135f75cb65a1c4"
+    },
+    {
+      "path": "python/modules/agent/turn_store.py",
+      "size": 51683,
+      "sha256": "280d03b6655c521404c438a58d554f69fb0e0db2c3dcf1ecc5e8f311cc7fcb03"
+    },
+    {
+      "path": "python/modules/agent/scheduler.py",
+      "size": 29950,
+      "sha256": "c6ee843928629d49d218a13942e81907f585cb989204907066701b27794e8a12"
+    },
+    {
+      "path": "python/tests/test_memory_workspace_sessions.py",
+      "size": 16575,
+      "sha256": "d8d0ba85477ad8850cb91e2f70bc99078d3ebf21947ae7eeef090263bf258fa2"
+    },
+    {
+      "path": "python/tests/test_settings_transactions.py",
+      "size": 11224,
+      "sha256": "57d4e404b37db50f659f2518374aa847f95ea8d6e5c0430a62f9a6d10912d8fa"
+    },
+    {
+      "path": "python/tests/test_settings_runtime_hooks.py",
+      "size": 4556,
+      "sha256": "fc602dcf38275c67c5b6a8c9e93fa964ab202c363cf8870d262a9dbd66321553"
+    },
+    {
+      "path": "python/tests/test_backup_snapshot.py",
+      "size": 6832,
+      "sha256": "e8e7985d12cd8a839a04e5040c50030f67fafe451d6c2039b4bfcfdb44f06e2a"
+    },
+    {
+      "path": "python/tests/test_connector_delivery_safety.py",
+      "size": 19152,
+      "sha256": "4a30e4547325453fe2099ad177046081caae9b4b2a966b63f0c632eb2b63bc0b"
+    },
+    {
+      "path": "python/tests/test_connector_e2e.py",
+      "size": 10120,
+      "sha256": "c448f1152481632bbe1f89c780571508c61f8323be0f0a028968febf8be8b7d6"
+    },
+    {
+      "path": "python/tests/test_connector_resolution.py",
+      "size": 6924,
+      "sha256": "2e091dc099e6c82b2b83c3b36497afb28394b2bcaf1992dc6b1e3e1135f43b16"
+    },
+    {
+      "path": "python/tests/test_scheduler_outcome_contract.py",
+      "size": 14173,
+      "sha256": "674fe6558c8d664424eb149f709c4795e5c8fe7394a2db1fdb865503d4190344"
+    },
+    {
+      "path": "electron/src/main/backup-snapshot.ts",
+      "size": 2582,
+      "sha256": "dd05dd92eb82ec50cbc5a9da18efb573a09c7788abb4d4eee257d72ccc348596"
+    },
+    {
+      "path": "electron/src/main/http/routes/system-routes.ts",
+      "size": 53919,
+      "sha256": "561137d4afc4a03d2ce6831f2aa761e65e3eb93807b0baa56b78f7043e361530"
+    },
+    {
+      "path": "electron/src/main/onboarding/backup-plan.test.ts",
+      "size": 15146,
+      "sha256": "b79bd8f9ae4d6292777adea0ac065988248c96d185639b24dfc249e86ef6fecc"
+    },
+    {
+      "path": "electron/src/renderer/stores/sessionStore.ts",
+      "size": 6749,
+      "sha256": "c3c553bb5ba4ec3092bc4bfa1697618f00a7cdd93d202ad8f99e0684e50d0804"
+    },
+    {
+      "path": "electron/src/renderer/stores/sessionStore.regression.test.ts",
+      "size": 5439,
+      "sha256": "df31162db3349b1317943dd22713a2efb2d481e93171f7024491140d4ec74793"
+    },
+    {
+      "path": "electron/src/renderer/domains/chat/composables/useSessionDrafts.ts",
+      "size": 4178,
+      "sha256": "49db0c3115d16bc3f8b1fc53f18a53844b5cd6f12aba7a99da41220436560ae3"
+    },
+    {
+      "path": "electron/src/renderer/domains/chat/composables/useSessionDrafts.test.ts",
+      "size": 5112,
+      "sha256": "bd9f9f055ee963f1094a0f5d744286eef58c09a29cfb623cc44b6df1343865bb"
+    },
+    {
+      "path": "electron/src/renderer/domains/chat/views/ChatPanel.vue",
+      "size": 80771,
+      "sha256": "cb87513e0f690ba2f1dcdc6752e6b70ce01c39c6315ee1095224a7954bb54520"
+    },
+    {
+      "path": "electron/src/renderer/domains/chat/views/ChatPanel.drafts.test.ts",
+      "size": 8565,
+      "sha256": "e5f15fb49acbe01847c5b26155315629248834fb905108941ae8ec8ab4d2ed6c"
+    },
+    {
+      "path": "electron/src/renderer/domains/chat/views/ChatPanel.async.test.ts",
+      "size": 12687,
+      "sha256": "3226a6a0b34de5bb9ba78c5ea857e31148c14c10e67c0cf4f56c3558e2eed5ee"
+    },
+    {
+      "path": "electron/src/renderer/api/clients/settings-client.ts",
+      "size": 13290,
+      "sha256": "2827909534b4331397541703cc11fb2bc3ab6e3d7d2f8203f392a5899d721601"
+    },
+    {
+      "path": "electron/src/renderer/domains/settings/composables/useSettingsDomain.ts",
+      "size": 6172,
+      "sha256": "65b9161cfcebc12a891cef4c862cadac10d405dc7ac63ad39df7ee50d396a29c"
+    },
+    {
+      "path": "electron/src/renderer/domains/settings/composables/useSettingsDomain.test.ts",
+      "size": 5897,
+      "sha256": "6c94ec6d42fba9c8c665b338a8396e5221c5edcbc277f666aaf78bbe7bc753d5"
+    },
+    {
+      "path": "electron/src/renderer/domains/settings/views/SettingsPanel.vue",
+      "size": 165541,
+      "sha256": "23bd9600677e81ccc53e864c2dc52cbceabfa2c2ce7b6a14df2d75bf52e22f86"
+    },
+    {
+      "path": "electron/src/renderer/domains/settings/views/SettingsPanel.regression.test.ts",
+      "size": 18743,
+      "sha256": "3fe056117077a4ea4c1b256e34f5b882af61ccce911393f9e47c076ad799e54e"
+    },
+    {
+      "path": "electron/src/renderer/i18n/settingsPanelMessages.ts",
+      "size": 21418,
+      "sha256": "4315f825489ed23d1a023bf532dac056e28c60cf435ee7a692113108b10a3364"
+    },
+    {
+      "path": "electron/src/renderer/domains/memory/views/MemoryPanel.vue",
+      "size": 85519,
+      "sha256": "f0fdac019d01ba0c0205ae169439153381f66c42632a86e195c600bce691b2f9"
+    },
+    {
+      "path": "electron/src/shared/agent.ts",
+      "size": 25823,
+      "sha256": "eb429923d0d49e0e8ef2937f47c53c3ef591e9b820bff18edab9c8bf33af93dd"
+    },
+    {
+      "path": "electron/src/shared/llm-generation-parameters.ts",
+      "size": 2426,
+      "sha256": "949391fee00a3278c7ce41630f3560b06fb9d59ebd871a63097f070e885cea59"
+    },
+    {
+      "path": "electron/src/renderer/domains/system/composables/useSystemDomain.ts",
+      "size": 21682,
+      "sha256": "b4677e618c5a8d2cdf529c65b769d83509d4938573a93f8f274ec537920defcc"
+    },
+    {
+      "path": "electron/src/renderer/domains/system/views/InfrastructurePanel.vue",
+      "size": 50320,
+      "sha256": "7cd50cc9a5bf68b0f2f07b9805c3631052b7654bb908944e7f705953d20c930d"
+    },
+    {
+      "path": "electron/src/renderer/i18n/infrastructureMessages.ts",
+      "size": 21695,
+      "sha256": "ef4eeaf413dfc38807ae2b62cf98d5e4497e4343b5dc2ccbf46f66657bc4cdff"
+    },
+    {
+      "path": "docs/improvement-additional-2026-11-10.md",
+      "size": 9919,
+      "sha256": "38fb57ee4fad76391ac8b35ead0eaafced45714fd2d547f1b8a7acbb2198f79a"
+    },
+    {
+      "path": "electron/dist/renderer/index.html",
+      "size": 7850,
+      "sha256": "b440d7ebe2a223e618ee595ba4f458fd7ece597a4a35b92a6bedadcdeb108f28"
+    },
+    {
+      "path": "electron/dist/main/http/routes/system-routes.js",
+      "size": 56623,
+      "sha256": "2fd7eee61eae9c6f07dc30151d6ad38d3e98dbec56bcc29738b6499f7a030376"
+    },
+    {
+      "path": "electron/dist/main/backup-snapshot.js",
+      "size": 2890,
+      "sha256": "2cbf8f0f5b51002a91766a9fcb0a59d350a6f5576fd55d87392ec3b6c5f4f162"
+    },
+    {
+      "path": "electron/dist/renderer/assets/main-Bd9BWULF.js",
+      "size": 263053,
+      "sha256": "5bf4a4d6ac0c7eef474cfbe2869a681da7958d58a2c2bc649865a0a5e46933e7"
+    },
+    {
+      "path": "electron/dist/renderer/assets/rolldown-runtime-XKyaHtl9.js",
+      "size": 726,
+      "sha256": "548d1dbf321e7d2ae804fcc158b588706a7c52f8ca175de1490c6ccb4dbe55b7"
+    },
+    {
+      "path": "electron/dist/renderer/assets/vue-vendor~main~pet-DnF2n8b0.js",
+      "size": 71664,
+      "sha256": "1c74bd93a0b2516570572e7709576409235d1b08a71f9daead31d75c487a1f62"
+    },
+    {
+      "path": "electron/dist/renderer/assets/vendor~main~pet-B15zdzFB.js",
+      "size": 29146,
+      "sha256": "bf2e316d9be196e269df53e97ff92a6fce00f8849a4d427fa0ab8a43158ec745"
+    },
+    {
+      "path": "electron/dist/renderer/assets/transport-vendor~main~pet-BYMdO4gC.js",
+      "size": 12148,
+      "sha256": "e037da9ce79a87643f584e4b3ec71a32eee46bbb3a177a52420d860719025db0"
+    },
+    {
+      "path": "electron/dist/renderer/assets/preload-helper-D83jfaNV.js",
+      "size": 817804,
+      "sha256": "bbfeffe07e673eb519c7f334bd2c48937d07e2fe714040663a2957696a183886"
+    },
+    {
+      "path": "electron/dist/renderer/assets/vue-vendor~main~ChatPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~PromptPanel~Infras~en9ul8ap-CFeNlzlJ.js",
+      "size": 6030,
+      "sha256": "136c3e4cc5a6515feb3cf4485551f8486baa33359ff5a7bdcca5a443a8fb39bd"
+    },
+    {
+      "path": "electron/dist/renderer/assets/vue-vendor~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControlPa~5m0qdmke-C0b4-2zM.js",
+      "size": 15418,
+      "sha256": "b9be202865cacad3b39517709aeef7855798530e67c07f1f74c478fe996d5ce6"
+    },
+    {
+      "path": "electron/dist/renderer/assets/vendor~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~~kdqof5ka-BsqHuujB.js",
+      "size": 38209,
+      "sha256": "e7b4af87362cf7412698b25dcfc92da96852d2f9bf6ca24236e5c61280cf0c72"
+    },
+    {
+      "path": "electron/dist/renderer/assets/element-icons~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetContro~e8dkzn6i-BtvMrHX9.js",
+      "size": 36531,
+      "sha256": "df998080729ac18955db5311529f605456ec7ba8afaa97a0989430e4c8c7c8c0"
+    },
+    {
+      "path": "electron/dist/renderer/assets/element-plus~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControl~c82lkcp2-D2UH2yeL.js",
+      "size": 27709,
+      "sha256": "7018a939f1212a5a05c24d1bd723ace87e8a4881a0862cbc76530e4c15d98332"
+    },
+    {
+      "path": "electron/dist/renderer/assets/vendor~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~~jfhs9cx4-kT8zvrs2.js",
+      "size": 635,
+      "sha256": "2c1bdc46313933722af9f92d290b028987574e551f02c4413e7c03de4c10be4f"
+    },
+    {
+      "path": "electron/dist/renderer/assets/vendor~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~~gp2r08i9-Da2e7s38.js",
+      "size": 1536,
+      "sha256": "05d91b732365e42cb3653e6049fee46b5e2ac97652016647c6811787040abc9e"
+    },
+    {
+      "path": "electron/dist/renderer/assets/vendor~main-CJIdMKlc.js",
+      "size": 62003,
+      "sha256": "46c7dc0ebbb39b7faeaa6ebe8a26066852edc13ec0349df48334a3fe268b0d56"
+    },
+    {
+      "path": "electron/dist/renderer/assets/companionDiagnosticExport-BN3RKWzb.js",
+      "size": 6084,
+      "sha256": "15abe77818a37e2a18856342df8dd757bcfdc2bf19ca5ce6688b6639de9dac05"
+    },
+    {
+      "path": "electron/dist/renderer/assets/companionJobProjection-DKXIBKM4.js",
+      "size": 9585,
+      "sha256": "11914df2f1e425ed0f23854914719ca1a7d883b839f20bbc1207bb08921efdff"
+    },
+    {
+      "path": "electron/dist/renderer/assets/describe-error-M0ekEErt.js",
+      "size": 9917,
+      "sha256": "1874aefc9011c57b1427619154ecc6b9107fc2db9de4ea2806b98d7f584f20dd"
+    },
+    {
+      "path": "electron/dist/renderer/assets/companionStore-DcnSfY09.js",
+      "size": 1008,
+      "sha256": "912656856160e848a1a77625d92aa366e2de36f56239cef4788d0edbc618a91b"
+    },
+    {
+      "path": "electron/dist/renderer/assets/element-plus~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControl~jbikrlxr-Bac_-Vi1.js",
+      "size": 733,
+      "sha256": "184f1824f768dc4ef50bf2b87f6c4889423d838e8ab9e607529322e70799b8c5"
+    },
+    {
+      "path": "electron/dist/renderer/assets/vendor~main~ChatPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~PluginManagementPanel~~hie4e87e-DcQRwhPj.js",
+      "size": 4738,
+      "sha256": "fc25b971bcdf2d2f6015beeab894765491b9b4d7b98fee027a9ad2703e19e5e6"
+    },
+    {
+      "path": "electron/dist/renderer/assets/vendor~main~ChatPanel~PersonaMemoryPanel~PetControlPanel~PluginManagementPanel~PromptPanel~~mwzxcjvr-Dyt46IEe.js",
+      "size": 1232,
+      "sha256": "1d4a892c83857d041ab2fc64cee4922761527716ce87b71cdf4a377643877ce4"
+    },
+    {
+      "path": "electron/dist/renderer/assets/vendor~main~ChatPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControlPanel~PluginManage~j5gjnhwd-DnK8ny5-.js",
+      "size": 226,
+      "sha256": "529f8f80bae099e2d686681e1e90238a532b46138dd594f46a8f8493d110e925"
+    },
+    {
+      "path": "electron/dist/renderer/assets/vendor~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PetControlPanel~PluginManagementPan~fz3njrh9-DEtt3q6Y.js",
+      "size": 366,
+      "sha256": "3b62e4db733b47e7e6901cd6255573624796149f29e913db121e964f8d5349e1"
+    },
+    {
+      "path": "electron/dist/renderer/assets/vendor~main~MemoryPanel~PromptPanel~SettingsPanel~AgentTracePanel~SVCPanel-36_vbueH.js",
+      "size": 192,
+      "sha256": "6573fcf603f95d0e6b971889bb8774e25ee2b5437d516c4d4989157b520f907a"
+    },
+    {
+      "path": "electron/dist/renderer/assets/element-plus~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PetControlPanel~PluginManagem~onwvw4ll-gVf7G00E.js",
+      "size": 896,
+      "sha256": "c862fa95a8699641e8a6793a67d5bfd82e7e75e874db967e1ccb3119fce86f00"
+    },
+    {
+      "path": "electron/dist/renderer/assets/element-plus~main~ChatPanel~DeployPanel~MemoryPanel~PetControlPanel~SettingsPanel~AgentGove~mrbinph2-TeC89SvR.js",
+      "size": 3322,
+      "sha256": "b3fb05377561e02b430b3f0a536eb527a7b2062d55363d593757cc8719ee9827"
+    },
+    {
+      "path": "electron/dist/renderer/assets/element-plus~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControl~m9dxcfcs-DWZIxVTi.js",
+      "size": 5495,
+      "sha256": "a4e208e0a0757779e1e1fbbc2ed530bb7b0a2ed6a2c5cca191241b7fc91e690a"
+    },
+    {
+      "path": "electron/dist/renderer/assets/element-plus~main~ChatPanel~MemoryPanel~PetControlPanel-CsRa1IXK.js",
+      "size": 4807,
+      "sha256": "f689c4650cea701dd527f55659625836a97a3f48d574090418ed56fecd9302b9"
+    },
+    {
+      "path": "electron/dist/renderer/assets/element-plus~main-BST1P3wT.js",
+      "size": 102492,
+      "sha256": "b2f9b38899ab0161ba1fd80a89ffb71360b0403fee63a2e17872c74725840183"
+    },
+    {
+      "path": "electron/dist/renderer/assets/element-plus~main~MemoryPanel~PersonaMemoryPanel~PetControlPanel~PluginManagementPanel~Prom~hv4plx48-DLJmx3tF.js",
+      "size": 4516,
+      "sha256": "fa4c0f536e8a0ac1d5917ce2615635ad10d12f789f387b87c41a0314af42f64e"
+    },
+    {
+      "path": "electron/dist/renderer/assets/element-plus~main~MemoryPanel~PetControlPanel~PluginManagementPanel~PromptPanel~SettingsPan~bgkiqfly-GynY9Tg7.js",
+      "size": 123,
+      "sha256": "55697904ecf214bc3253084efeb5ca3b288f022a8fb3d21a00421b515d7fd453"
+    },
+    {
+      "path": "electron/dist/renderer/assets/element-plus~main~ChatPanel~DeployPanel~I18nPanel~MemoryPanel~PersonaMemoryPanel~PetControl~c82lkcp2-cyJZB4WD.css",
+      "size": 7857,
+      "sha256": "703f6ef2a0026000f6f7c5375cca6f7383175d7c398aa74b368c7c5d1b2920bb"
+    },
+    {
+      "path": "electron/dist/renderer/assets/element-plus~main~ChatPanel~MemoryPanel~PetControlPanel-Wv38huFO.css",
+      "size": 162,
+      "sha256": "85e23358c649b8feb68c49bcfb0ad85133f64160292e879d72fcb61370e0320c"
+    },
+    {
+      "path": "electron/dist/renderer/assets/element-plus~main-C8_oi_vx.css",
+      "size": 78636,
+      "sha256": "aba92d9eb78c26d468963a64e2dc959da5852ff4c9e8381d6480170383c69822"
+    },
+    {
+      "path": "electron/dist/renderer/assets/element-plus~main~MemoryPanel~PetControlPanel~PluginManagementPanel~PromptPanel~SettingsPan~bgkiqfly-S7fQQ3B8.css",
+      "size": 1156,
+      "sha256": "691fbbed21e9c4279f70c333db58305fa2fb0f6aa36b070c21f85b7b2d316dc0"
+    },
+    {
+      "path": "electron/dist/renderer/assets/main-R4Y5jfMB.css",
+      "size": 67168,
+      "sha256": "fec5e7cbbe5995227fe8fff12144e0be19d42d107b65312a553898fa663ba73d"
+    },
+    {
+      "path": "electron/dist/renderer/assets/SettingsPanel-C56oYSoe.js",
+      "size": 155990,
+      "sha256": "35858de7bbe2f59c7c8092488244d2601c5af79b3b3065b75db3caedc063e1d5"
+    },
+    {
+      "path": "electron/dist/renderer/assets/MemoryPanel-Cghj9i3v.js",
+      "size": 104531,
+      "sha256": "c4bc96af9fe5b7ff2a861986d4da948df1f241d507dfd904fde10e02eae6841e"
+    }
+  ]
+}

@@ -220,6 +220,7 @@ export interface StreamEventsSnapshot {
 export type StreamActionStatus = 'sending' | 'known_success' | 'unknown_effect' | 'failed' | string
 
 export interface StreamActionRecord {
+  draftId?: string
   action: string
   requestId: string
   at: string
@@ -237,8 +238,30 @@ export interface StreamActionsSnapshot {
   count?: number
   limit?: number
   actions?: StreamActionRecord[]
+  unresolvedRequestIds?: string[]
   externalSideEffects?: boolean
   error?: string
+}
+
+/** Exact request lookup from the runtime journal; absence is explicitly unknown. */
+export interface StreamActionLookup {
+  ok: boolean
+  requestId: string
+  found: boolean
+  status: 'unknown' | 'sending' | 'unknown_effect' | 'known_success' | 'failed'
+  terminal: boolean
+  reason?: string | null
+  action: StreamActionRecord | null
+  recovery: {
+    canResolve: boolean
+    humanTakeover: boolean
+    requiresHumanTakeover: boolean
+    retryAllowed: false
+    requiresNewPreview: boolean
+  }
+  alreadyResolved?: boolean
+  draftSyncError?: string
+  externalSideEffects: false
 }
 
 export type StreamDraftStatus = 'generated' | 'failed' | string

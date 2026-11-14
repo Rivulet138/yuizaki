@@ -1,0 +1,32 @@
+[
+  {
+    "path": "electron/src/renderer/domains/settings/views/SettingsPanel.vue",
+    "sha256": "5f4e4b9a9372e4b04a467edc7fca6937a95c960f2f1e66bb4b9e8d85f8114df4",
+    "matches_previous_evidence": true
+  },
+  {
+    "path": "electron/src/renderer/domains/settings/settingsSaveState.ts",
+    "sha256": "700079b4a4f95a0693757320914073c9d5522ea7936008e4c74724d649536f3b",
+    "matches_previous_evidence": true
+  },
+  {
+    "path": "electron/src/renderer/domains/settings/components/SettingsRuntimeFeedback.vue",
+    "sha256": "426c1da394cebc469be3a81c9c2a4b921cb89fd6a137b2ca4d8fda38e63d714c",
+    "matches_previous_evidence": true
+  },
+  {
+    "path": "electron/src/renderer/domains/settings/composables/useSettingsDomain.ts",
+    "sha256": "1df856c6cc6f2fcc512f33bc21b4740be09344b4bdf8630b1746e9d62259cd29",
+    "matches_previous_evidence": true
+  },
+  {
+    "path": "electron/src/renderer/domains/memory/views/MemoryPanel.vue",
+    "sha256": "2d3825b80752f5b392734562b0251b08f0c561f75cda0c3cae99e19dcb0a9132",
+    "matches_previous_evidence": true
+  },
+  {
+    "path": "electron/src/renderer/app/BrowserPetStage.vue",
+    "sha256": "086059a9808f3885001e86c4e610be722b4da3f0d1d4d3304957887d7459dae7",
+    "matches_previous_evidence": true
+  }
+]

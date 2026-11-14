@@ -142,6 +142,7 @@ def test_gpt_6_models_use_reasoning_defaults_without_sampling_parameters() -> No
     llm_client_module._apply_generation_options(
         body,
         model="gpt-6.1-sol",
+        provider="chatgpt",
         temperature=1.0,
         top_p=1.0,
         top_k=40,
@@ -151,7 +152,7 @@ def test_gpt_6_models_use_reasoning_defaults_without_sampling_parameters() -> No
         repetition_penalty=1.1,
     )
 
-    assert body["reasoning_effort"] == "medium"
+    assert "reasoning_effort" not in body
     assert "temperature" not in body
     assert "top_p" not in body
     assert not {"top_k", "min_p", "frequency_penalty", "presence_penalty", "repetition_penalty"}.intersection(body)

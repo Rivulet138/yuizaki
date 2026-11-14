@@ -13,20 +13,39 @@
           <template #header>
             <div class="card-head">
               <div>
-                <strong>{{ t('deploy.backendStatus') }}</strong>
+                <strong>Python · /api/ping</strong>
               </div>
               <el-tag :type="healthTone">{{ healthTagText }}</el-tag>
             </div>
           </template>
           <div class="status-row">
             <div class="status-orb" :class="healthOrbClass"></div>
-            <div>
-              <strong>{{ health.message }}</strong>
-              <span>{{ lastCheckedAt ? t('deploy.lastChecked', { value: lastCheckedAt }) : t('deploy.noHealthCheck') }}</span>
-            </div>
+            <strong>{{ health.message }}</strong>
+          </div>
+          <div class="signal-row">
+            <strong>Control · /api/health</strong>
+            <el-tag :type="control.healthy ? 'success' : 'warning'">{{ control.healthy ? t('deploy.normal') : t('deploy.pending') }}</el-tag>
+            <p>{{ control.message }}</p>
+          </div>
+          <div class="signal-row">
+            <strong>{{ t('deploy.dependencies') }} · Python /health</strong>
+            <el-tag :type="dependencyHealth.status === 'healthy' ? 'success' : 'warning'">{{ dependencyHealth.status }}</el-tag>
+            <p v-if="dependencyHealth.error" role="alert">{{ dependencyHealth.error }}</p>
+            <small>{{ dependencyHealth.durationMs ?? '—' }}ms / {{ dependencyHealth.budgetMs ?? '—' }}ms · loop lag={{ dependencyHealth.loopLagMs ?? '—' }}ms</small>
+            <ul v-if="dependencyHealth.components.length">
+              <li v-for="component in dependencyHealth.components" :key="component.name">
+                {{ component.name }} · {{ component.status }} · {{ component.message }} ·
+                {{ component.response_time_ms ?? '—' }}ms / {{ component.budget_ms ?? '—' }}ms
+              </li>
+            </ul>
+          </div>
+          <div class="signal-row">
+            <strong>{{ t('deploy.serviceReady') }} · /api/readiness</strong>
+            <el-tag :type="readiness.ready ? 'success' : 'warning'">{{ readiness.ready ? t('deploy.ready') : t('deploy.notReady') }}</el-tag>
+            <p>{{ readiness.message }}</p>
           </div>
           <div class="actions">
-            <el-button :loading="startLoading" :disabled="!hasElectronPythonControls || startLoading || stopLoading" @click="startPython">{{ t('deploy.startBackend') }}</el-button>
+            <el-button :loading="startLoading" :disabled="!canStartPython || startLoading || stopLoading" @click="startPython">{{ t('deploy.startBackend') }}</el-button>
             <el-button :loading="stopLoading" :disabled="!hasElectronPythonControls || startLoading || stopLoading" @click="stopPython">{{ t('deploy.stopBackend') }}</el-button>
             <el-button
               type="success"
@@ -37,7 +56,7 @@
               {{ t('deploy.apiDocs') }}
             </el-button>
           </div>
-          <el-alert v-if="actionError" class="panel-alert" :title="actionError" type="error" show-icon :closable="false" />
+          <el-alert v-if="actionError || healthError" class="panel-alert" :title="actionError || healthError" type="error" show-icon :closable="false" />
         </el-card>
 
         <el-card class="panel-card runway-card" shadow="never">
@@ -137,7 +156,8 @@ import PanelShell from '@/shared/components/panel/PanelShell.vue'
 import { t } from '@/i18n'
 import { systemClient, summaryClient } from '@/api/client'
 import type { ProviderStatus } from '@/../shared/agent'
-import { resolveBackendUrl } from '@/api/clients/http-client'
+import { CONTROL_ORIGIN, requestJson, resolveBackendUrl } from '@/api/clients/http-client'
+import type { OnboardingReadinessSnapshot } from '@/../shared/onboarding-readiness'
 import { buildDeployPlatformCommands, resolveDeployPlatform } from '../platform-commands'
 import { describeFailure } from '@/shared/errors/describe-error'
 
@@ -160,12 +180,21 @@ const readiness = reactive({
   message: t('deploy.waitingReadiness'),
 })
 
+const control = reactive({ healthy: false, message: t('deploy.waitingHealth') })
+interface HealthComponent {
+  name: string; status: string; message: string; response_time_ms?: number; budget_ms?: number
+}
+const dependencyHealth = reactive({
+  status: 'unknown', error: '', durationMs: null as number | null,
+  budgetMs: null as number | null, loopLagMs: null as number | null, components: [] as HealthComponent[],
+})
+const signalsLoading = ref(false)
 const healthLoading = ref(false)
 const readinessLoading = ref(false)
 const startLoading = ref(false)
 const stopLoading = ref(false)
 const actionError = ref('')
-const lastCheckedAt = ref('')
+const healthError = ref('')
 const providers = ref<ProviderStatus[]>([])
 const providerSummary = reactive({ total: 0, healthy: 0, requiredHealthy: false })
 const providersLoading = ref(false)
@@ -189,23 +218,22 @@ const normalizeHealthStatus = (payload: unknown) => {
 const checkHealthByHttp = async () => {
   const gen = refreshGeneration
   healthLoading.value = true
-  actionError.value = ''
+  healthError.value = ''
   try {
-    const data = await systemClient.pythonHealth()
+    const data = await requestJson(`${CONTROL_ORIGIN}/api/ping`, { timeoutMs: 2500 })
     if (gen !== refreshGeneration) return
     const normalized = normalizeHealthStatus(data)
     health.healthy = normalized.healthy
     health.status = normalized.status
-    health.message = normalized.healthy ? t('deploy.backendHealthy') : normalized.message
+    health.message = normalized.message
   } catch (error) {
     if (gen !== refreshGeneration) return
     health.healthy = false
     health.status = 'offline'
     health.message = t('deploy.backendOffline')
-    actionError.value = describeFailure(error, t('deploy.healthCheckFailed'))
+    healthError.value = describeFailure(error, t('deploy.healthCheckFailed'))
   } finally {
     if (gen === refreshGeneration) {
-      lastCheckedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false })
       healthLoading.value = false
     }
   }
@@ -232,28 +260,72 @@ const checkReadiness = async () => {
     readiness.ready = false
     readiness.message = describeFailure(error, t('deploy.readinessFailed'))
   } finally {
-    if (gen === refreshGeneration) readinessLoading.value = false
+    if (gen === refreshGeneration) {
+      readinessLoading.value = false
+    }
   }
 }
 
 const checkProviders = async () => {
+  const gen = refreshGeneration
   providersLoading.value = true
   providersError.value = ''
   try {
     const data = await systemClient.providers()
+    if (gen !== refreshGeneration) return
     providers.value = Array.isArray(data.providers) ? data.providers : []
     providerSummary.total = Number(data.summary?.total || providers.value.length)
     providerSummary.healthy = Number(data.summary?.healthy || 0)
     providerSummary.requiredHealthy = data.summary?.requiredHealthy === true
   } catch (error) {
+    if (gen !== refreshGeneration) return
+    providers.value = []
+    providerSummary.requiredHealthy = false
     providersError.value = describeFailure(error, t('deploy.providersFailed'))
   } finally {
-    providersLoading.value = false
+    if (gen === refreshGeneration) providersLoading.value = false
   }
 }
 
+const checkSignals = async () => {
+  const gen = refreshGeneration
+  signalsLoading.value = true
+  await Promise.all([
+    (async () => {
+      try {
+        const data = await requestJson<{ status?: string }>(`${CONTROL_ORIGIN}/api/health`, { timeoutMs: 2000 })
+        if (gen !== refreshGeneration) return
+        control.healthy = data.status === 'ok'
+        control.message = control.healthy ? t('deploy.normal') : t('deploy.checkFailed')
+      } catch (error) {
+        if (gen !== refreshGeneration) return
+        control.healthy = false
+        control.message = describeFailure(error, t('deploy.healthCheckFailed'))
+      }
+    })(),
+    (async () => {
+      try {
+        const data = await requestJson<{
+          status: string; duration_ms?: number; budget_ms?: number; loop_lag_ms?: number; components?: HealthComponent[]
+        }>(`${CONTROL_ORIGIN}/health`, { timeoutMs: 6500 })
+        if (gen !== refreshGeneration) return
+        Object.assign(dependencyHealth, {
+          status: data.status, error: '',
+          durationMs: data.duration_ms ?? null, budgetMs: data.budget_ms ?? null, loopLagMs: data.loop_lag_ms ?? null,
+          components: Array.isArray(data.components) ? data.components : [],
+        })
+      } catch (error) {
+        if (gen !== refreshGeneration) return
+        Object.assign(dependencyHealth, { status: 'unavailable', error: describeFailure(error, t('deploy.healthCheckFailed')),
+          components: [], durationMs: null, budgetMs: null, loopLagMs: null })
+      }
+    })(),
+  ])
+  if (gen === refreshGeneration) signalsLoading.value = false
+}
+
 const checkHealth = async () => {
-  await Promise.all([checkHealthByHttp(), checkReadiness(), checkProviders()])
+  await Promise.all([checkHealthByHttp(), checkSignals(), checkReadiness(), checkProviders()])
 }
 
 const startPython = async () => {
@@ -261,12 +333,15 @@ const startPython = async () => {
   startLoading.value = true
   actionError.value = ''
   try {
-    const res = await systemClient.startPython()
-    if (!res) {
-      ElMessage.info(t('deploy.browserStart'))
-      return
-    }
-
+    const res = hasElectronPythonControls.value
+      ? await systemClient.startPython()
+      : await requestJson<OnboardingReadinessSnapshot>(`${CONTROL_ORIGIN}/api/onboarding/backend/start`, {
+        method: 'POST', body: '{}', timeoutMs: 180_000,
+      }).then(snapshot => ({
+        success: snapshot.probes.some(probe => probe.id === 'backend.service' && probe.status === 'ready'),
+        error: snapshot.probes.find(probe => probe.id === 'backend.service')?.message,
+      }))
+    if (!res) throw new Error(t('deploy.startError'))
     if (res.success) {
       ElMessage.success(t('deploy.started'))
     } else {
@@ -327,8 +402,9 @@ const stopPython = async () => {
 }
 
 const openDocs = async () => {
-  const docsUrl = await resolveBackendUrl('/docs')
+  let docsUrl = `${CONTROL_ORIGIN}/docs`
   try {
+    docsUrl = await resolveBackendUrl('/docs')
     await systemClient.openExternal(docsUrl)
   } catch {
     ElMessage.info(t('deploy.openDocsBrowser', { url: docsUrl }))
@@ -344,9 +420,9 @@ const copyCommand = async (command: string) => {
   }
 }
 
-const hasElectronBridge = computed(() => Boolean(window.petApi?.python?.health))
 const hasElectronPythonControls = computed(() => Boolean(window.petApi?.python?.start && window.petApi?.python?.stop))
-const refreshing = computed(() => healthLoading.value || readinessLoading.value)
+const canStartPython = computed(() => hasElectronPythonControls.value || control.healthy)
+const refreshing = computed(() => healthLoading.value || readinessLoading.value || providersLoading.value || signalsLoading.value)
 const healthIsError = computed(() => !health.healthy && ['error', 'failed', 'unhealthy'].includes(health.status))
 const healthTone = computed<'success' | 'warning' | 'danger' | 'info'>(() => {
   if (health.healthy) return 'success'
@@ -362,16 +438,19 @@ const healthOrbClass = computed(() => health.healthy ? 'online' : healthIsError.
 
 const overallStatusText = computed(() => {
   if (refreshing.value) return t('deploy.refreshing')
-  if (health.healthy && readiness.ready) return t('deploy.corePassed')
+  if (health.healthy && readiness.ready && dependencyHealth.status === 'healthy' && providerSummary.requiredHealthy && !providersError.value) return t('deploy.corePassed')
+  if (health.healthy) return `${t('deploy.serviceReady')}: ${readiness.message} · ${t('deploy.dependencies')}: ${dependencyHealth.status}`
   if (healthIsError.value) return t('deploy.runFailed')
   return t('deploy.waitingBackend')
 })
 
 const deploySteps = computed(() => {
   const steps = [
-    { id: 'backend', title: t('deploy.backendHealth'), status: health.healthy ? 'done' : healthLoading.value ? 'active' : healthIsError.value ? 'blocked' : 'pending' as StepStatus },
-    { id: 'readiness', title: t('deploy.serviceReady'), status: readiness.ready ? 'done' : health.healthy ? 'active' : 'pending' as StepStatus },
-    { id: 'electron', title: t('deploy.bridge'), status: hasElectronBridge.value ? 'done' : 'pending' as StepStatus },
+    { id: 'control', title: 'Control /api/health', status: control.healthy ? 'done' : signalsLoading.value ? 'active' : 'blocked' as StepStatus },
+    { id: 'backend', title: 'Python /api/ping', status: health.healthy ? 'done' : healthLoading.value ? 'active' : healthIsError.value ? 'blocked' : 'pending' as StepStatus },
+    { id: 'dependencies', title: 'Python /health', status: dependencyHealth.status === 'healthy' ? 'done' : signalsLoading.value ? 'active' : 'blocked' as StepStatus },
+    { id: 'readiness', title: t('deploy.serviceReady'), status: readiness.ready ? 'done' : readinessLoading.value ? 'active' : readiness.checked ? 'blocked' : 'pending' as StepStatus },
+    { id: 'electron', title: t('deploy.bridge'), status: canStartPython.value ? 'done' : 'pending' as StepStatus },
     { id: 'docs', title: t('deploy.apiDocs'), status: health.healthy ? 'done' : healthIsError.value ? 'blocked' : 'pending' as StepStatus },
   ]
   return steps.map((step, index) => ({ ...step, index: index + 1 }))
@@ -410,6 +489,10 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.signal-row { margin-block: 12px; overflow-wrap: anywhere; }
+.signal-row strong { margin-right: 10px; }
+.signal-row p { margin-block: 6px; }
+.signal-row small { color: var(--yui-text-muted); }
 .deploy-console {
   display: flex;
   flex-direction: column;
@@ -490,7 +573,6 @@ onMounted(() => {
 }
 
 .card-head > div:first-child,
-.status-row > div:last-child,
 .runway-step > div:nth-child(2),
 .command-item > div {
   display: flex;
@@ -535,7 +617,6 @@ onMounted(() => {
   color: var(--yui-text);
 }
 
-.status-row span,
 .runway-step span,
 .command-item span {
   color: var(--yui-muted);

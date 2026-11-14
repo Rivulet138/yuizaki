@@ -1,0 +1,12 @@
+{
+  "captured_at": "2026-11-11T06:54:10.084229+00:00",
+  "files": {
+    "electron/src/renderer/domains/settings/settingsSaveState.ts": "4645889650e05b341f05e054dd5df8f2c480f17506f0413d17bef192052491c0",
+    "electron/src/renderer/domains/settings/views/SettingsPanel.vue": "d9b1a51427b1ba629be51616da2c9cadc376b1d3b6a79562d1cbd125626496aa",
+    "electron/src/renderer/domains/settings/views/SettingsPanel.regression.test.ts": "78460ad0d92fec72d0617662c443aa64fb6504704514585312e466ab75d60dc7",
+    "electron/src/renderer/domains/settings/composables/useSettingsDomain.ts": "02132c56813650bbcb3f00b7e27541f1e74c920631b37db8c0c0915f01736321",
+    "electron/src/renderer/domains/settings/composables/useSettingsDomain.test.ts": "9fd54ece8ddc9d2caea91417e1930d4f2246872b61c285e7aac7b76da9853925",
+    "electron/src/renderer/domains/memory/views/MemoryPanel.vue": "7209a2fdb9acc6e3d7264f0b7646e10bbfcc40afbf6386d20b7f573838841985",
+    "electron/src/renderer/domains/memory/views/MemoryPanel.regression.test.ts": "27bb0a51dbc74cb238f9b61dda70a7830e13d79fba35e488b99fb0df9bd78f3c"
+  }
+}

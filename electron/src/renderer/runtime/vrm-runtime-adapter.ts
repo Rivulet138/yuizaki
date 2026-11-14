@@ -519,7 +519,7 @@ export class VrmRuntimeAdapter implements PetRuntimeAdapter {
     const scene = this.scene
 
     const loader = new GLTFLoader()
-    loader.register((parser) => new VRMLoaderPlugin(parser))
+    loader.register((parser: ConstructorParameters<typeof VRMLoaderPlugin>[0]) => new VRMLoaderPlugin(parser))
 
     const gltf = await loader.loadAsync(modelPath)
     const vrm = gltf.userData.vrm as VRM | undefined
