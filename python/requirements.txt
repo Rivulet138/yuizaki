@@ -31,5 +31,5 @@ huggingface-hub>=2.2.0,<3
 
 # Vector database and embeddings
 qdrant-client>=1.19.1,<2
-sentence-transformers>=5.6.1,<6
+sentence-transformers>=6.3.0,<7
 tiktoken>=0.14.0,<1
